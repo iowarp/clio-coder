@@ -80,1099 +80,1109 @@ function pendingPolicy(name: string, args = "test task") {
 	};
 }
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
-describe("contracts/skills loader normalization", () => {
-	it("loads a valid skill with stable hash and captured metadata", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "review-tests", [
-			'name: "review-tests"',
-			'description: "Use when reviewing test coverage."',
-			'license: "MIT"',
-			'version: "1.2.0"',
-			"allowed-tools:",
-			"  - Read",
-			"  - Grep",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 1);
-		const skill = list.items[0];
-		ok(skill);
-		strictEqual(skill.name, "review-tests");
-		strictEqual(skill.description, "Use when reviewing test coverage.");
-		strictEqual(skill.scope, "project");
-		strictEqual(skill.source, "clio");
-		strictEqual(skill.trusted, true);
-		match(skill.hash, /^[0-9a-f]{64}$/);
-		strictEqual(skill.metadata.license, "MIT");
-		strictEqual(skill.metadata.version, "1.2.0");
-		// Resolved to the tools Clio has: `Read` and `read` are one tool named by
-		// two harnesses, and narrowing enforces the name Clio dispatches on.
-		deepStrictEqual(skill.allowedTools, ["read", "grep"]);
-		strictEqual("allowed-tools" in skill.metadata, false);
-	});
-
-	it("reads a comma-separated tool declaration as the same declaration as a sequence", () => {
-		const root = scratchDir();
-		// The spelling every skill under a .claude or .agents compatibility root
-		// uses. Reading only the YAML sequence dropped it silently, so a skill
-		// that asked to be confined to three tools ran with the whole surface.
-		writeSkillDir(root, "compat", [
-			'name: "compat"',
-			'description: "A skill authored for another harness."',
-			"allowed-tools: Bash, Read, Grep",
-			"disallowed-tools: Write, Edit",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const skill = list.items[0];
-		ok(skill);
-		deepStrictEqual(skill.allowedTools, ["bash", "read", "grep"]);
-		deepStrictEqual(skill.disallowedTools, ["write", "edit"]);
-	});
-
-	it("says so when a declared tool surface names tools Clio does not have", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "foreign", [
-			'name: "foreign"',
-			'description: "Names another harness tools."',
-			"allowed-tools: Read, Glob, WebSearch",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const skill = list.items[0];
-		ok(skill);
-		// The recognized part still narrows; the rest is reported rather than
-		// silently treated as a tool that exists.
-		deepStrictEqual(skill.allowedTools, ["read"]);
-		ok(
-			list.diagnostics.some((d) => d.message.includes("Glob") && d.message.includes("WebSearch")),
-			`expected an unrecognized-tool diagnostic, got ${JSON.stringify(list.diagnostics.map((d) => d.message))}`,
-		);
-	});
-
-	it("narrows nothing when an allow-list names no tool Clio has", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "unenforceable", [
-			'name: "unenforceable"',
-			'description: "Declares only foreign tools."',
-			"allowed-tools: Glob, WebSearch, Agent",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const skill = list.items[0];
-		ok(skill);
-		// allowed-tools is workflow scoping, not the security boundary. Honoring
-		// an unenforceable list literally would block every call for a reason the
-		// operator never chose, so it narrows nothing and says why.
-		strictEqual(skill.allowedTools, undefined);
-		ok(list.diagnostics.some((d) => d.message.includes("narrows nothing")));
-	});
-
-	it("refuses a project skill whose symlink resolves outside the workspace", () => {
-		const scratch = scratchDir();
-		const workspace = join(scratch, "repo");
-		const outside = join(scratch, "outside", "secrets");
-		mkdirSync(join(workspace, ".clio-coder", "skills"), { recursive: true });
-		mkdirSync(outside, { recursive: true });
-		writeFileSync(join(outside, "credentials.txt"), "AWS_SECRET=hunter2\n", "utf8");
-		writeFileSync(
-			join(outside, "SKILL.md"),
-			["---", 'name: "escaped"', 'description: "Base dir outside the repo."', "---", "", "body", ""].join("\n"),
-			"utf8",
-		);
-		symlinkSync(outside, join(workspace, ".clio-coder", "skills", "escaped"));
-
-		const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
-
-		// The escape is invisible in every path the operator is later shown:
-		// filePath and baseDir both keep the symlink's own repository-local
-		// location while the body and the resource tree come from outside.
-		strictEqual(
-			list.items.find((skill) => skill.name === "escaped"),
-			undefined,
-		);
-		const diagnostic = list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink"));
-		ok(diagnostic, `expected a containment diagnostic, got ${JSON.stringify(list.diagnostics.map((d) => d.message))}`);
-		ok(diagnostic.message.includes(outside), "diagnostic must name the resolved path");
-	});
-
-	it("still loads a project skill symlinked from elsewhere inside the workspace", () => {
-		const scratch = scratchDir();
-		const workspace = join(scratch, "repo");
-		const shared = join(workspace, "shared", "skills", "inside");
-		mkdirSync(join(workspace, ".clio-coder", "skills"), { recursive: true });
-		mkdirSync(shared, { recursive: true });
-		writeFileSync(
-			join(shared, "SKILL.md"),
-			["---", 'name: "inside"', 'description: "Shared across checkouts."', "---", "", "body", ""].join("\n"),
-			"utf8",
-		);
-		symlinkSync(shared, join(workspace, ".clio-coder", "skills", "inside"));
-
-		const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
-
-		// A monorepo may share one skills tree across checkouts; the boundary is
-		// the workspace, not the skills directory.
-		ok(list.items.some((skill) => skill.name === "inside"));
-		strictEqual(
-			list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink")),
-			undefined,
-		);
-	});
-
-	it("refuses a SKILL.md that is not valid UTF-8 text", () => {
-		const root = scratchDir();
-		const dir = join(root, "binary");
-		mkdirSync(dir, { recursive: true });
-		// utf8 decoding never throws: it substitutes U+FFFD, so without the
-		// round-trip check this loads as a document of replacement characters
-		// and becomes model-visible instructions.
-		writeFileSync(
-			join(dir, "SKILL.md"),
-			Buffer.concat([
-				Buffer.from(["---", 'name: "binary"', 'description: "Looks like a skill."', "---", "", ""].join("\n"), "utf8"),
-				Buffer.from([0x00, 0xff, 0xfe, 0x00]),
-			]),
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 0);
-		ok(list.diagnostics.some((d) => d.message.includes("not valid UTF-8 text")));
-	});
-
-	it("refuses a SKILL.md over the byte limit", () => {
-		const root = scratchDir();
-		const dir = join(root, "huge");
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			join(dir, "SKILL.md"),
-			["---", 'name: "huge"', 'description: "Too large to be a document."', "---", "", "x".repeat(1024 * 1024), ""].join(
-				"\n",
-			),
-			"utf8",
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 0);
-		ok(list.diagnostics.some((d) => d.message.includes("over the")));
-	});
-
-	it("says so when a skill is larger than activation can deliver", () => {
-		const root = scratchDir();
-		const dir = join(root, "truncated");
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			join(dir, "SKILL.md"),
-			[
-				"---",
-				'name: "truncated"',
-				'description: "Larger than the activation cap."',
-				"---",
-				"",
-				"x".repeat(SKILL_ACTIVATION_BODY_CAP_BYTES + 1),
-				"",
-			].join("\n"),
-			"utf8",
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		// It still loads; truncation is the activation path's job. But an author
-		// whose workflow is silently cut in half at runtime has no other way to
-		// find out that the model never saw the rest.
-		strictEqual(list.items.length, 1);
-		ok(list.diagnostics.some((d) => d.message.includes("the model will not be shown the rest")));
-	});
-
-	it("keeps the activation cap mirror in step with the tool substrate", () => {
-		// The cap lives in the tool substrate, which a domain must not import.
-		// The mirror is only safe while this holds.
-		strictEqual(SKILL_ACTIVATION_BODY_CAP_BYTES, OBSERVE_SELF_CAPS.contextSkills);
-	});
-
-	it("rejects a skill that is missing a description", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "no-desc", ['name: "no-desc"']);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 0);
-		ok(list.diagnostics.some((d) => d.message.includes("description is required")));
-	});
-
-	it("warns but loads on name/path mismatch and uses the frontmatter name", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "folder-name", ['name: "canonical-name"', 'description: "Mismatch case."']);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 1);
-		const skill = list.items[0];
-		ok(skill);
-		strictEqual(skill.name, "canonical-name");
-		strictEqual(skill.pathSubject, "folder-name");
-		ok(skill.diagnostics.some((d) => d.message.includes("differs from path subject")));
-	});
-
-	it("warns but loads on invalid name format", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "Bad_Name", ['name: "Bad_Name"', 'description: "Invalid name format."']);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 1);
-		ok(list.diagnostics.some((d) => d.message.includes("invalid characters")));
-	});
-
-	it("keeps disable-model-invocation skills listed but out of the model catalog", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "manual-only", [
-			'name: "manual-only"',
-			'description: "Only via slash command."',
-			"disable-model-invocation: true",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 1);
-		strictEqual(modelVisibleSkills(list.items).length, 0);
-	});
-
-	it("resolves collisions by precedence: clio project overrides clio user", () => {
-		const userDir = scratchDir();
-		const projectDir = scratchDir();
-		writeSkillDir(userDir, "dup", ['name: "dup"', 'description: "User version."'], "USER BODY");
-		writeSkillDir(projectDir, "dup", ['name: "dup"', 'description: "Project version."'], "PROJECT BODY");
-		const list = loadSkills({ roots: [userRoot(userDir), projectRoot(projectDir)] });
-		strictEqual(list.items.length, 1);
-		const skill = list.items[0];
-		ok(skill);
-		strictEqual(skill.content, "PROJECT BODY");
-		ok(list.diagnostics.some((d) => d.type === "collision"));
-	});
-
-	it("resolves collisions by precedence: clio project overrides project compat", () => {
-		const compatDir = scratchDir();
-		const clioDir = scratchDir();
-		writeSkillDir(compatDir, "dup", ['name: "dup"', 'description: "Compat version."'], "COMPAT BODY");
-		writeSkillDir(clioDir, "dup", ['name: "dup"', 'description: "Clio version."'], "CLIO BODY");
-		const compatRoot: SkillRoot = {
-			path: compatDir,
-			scope: "project",
-			source: "codex",
-			origin: "codex-project",
-			precedence: 40,
-			trusted: false,
-		};
-		const list = loadSkills({ roots: [compatRoot, projectRoot(clioDir)] });
-		strictEqual(list.items.length, 1);
-		const skill = list.items[0];
-		ok(skill);
-		strictEqual(skill.content, "CLIO BODY");
-	});
-
-	it("dedups skills whose symlinked paths resolve to the same SKILL.md", () => {
-		const realRoot = scratchDir();
-		const aliasRoot = scratchDir();
-		writeSkillDir(realRoot, "linked-skill", ['name: "linked-skill"', 'description: "Canonical skill."'], "REAL BODY");
-		symlinkSync(join(realRoot, "linked-skill"), join(aliasRoot, "linked-skill"), "dir");
-		const list = loadSkills({ roots: [userRoot(realRoot), projectRoot(aliasRoot)] });
-		strictEqual(list.items.length, 1);
-		const skill = list.items[0];
-		ok(skill);
-		strictEqual(skill.name, "linked-skill");
-		strictEqual(skill.content, "REAL BODY");
-		ok(list.diagnostics.some((diag) => diag.message.includes("same canonical skill file")));
-	});
-
-	it("names the winning path in the symlink dedupe diagnostic", () => {
-		const realRoot = scratchDir();
-		const aliasRoot = scratchDir();
-		writeSkillDir(realRoot, "linked-skill", ['name: "linked-skill"', 'description: "Canonical skill."']);
-		symlinkSync(join(realRoot, "linked-skill"), join(aliasRoot, "linked-skill"), "dir");
-		const list = loadSkills({ roots: [userRoot(realRoot), projectRoot(aliasRoot)] });
-		const winner = list.items[0];
-		ok(winner);
-		const diagnostic = list.diagnostics.find((diag) => diag.message.includes("same canonical skill file"));
-		ok(diagnostic);
-		ok(diagnostic.message.includes(`${winner.filePath}, which is the entry in use`), diagnostic.message);
-		ok(diagnostic.path !== winner.filePath, "the diagnostic points at the discarded copy");
-	});
-
-	it("hashes are stable across loads and change with content", () => {
-		const root = scratchDir();
-		const file = writeSkillDir(root, "hashing", ['name: "hashing"', 'description: "Hash stability."'], "ONE");
-		const first = loadSkills({ roots: [projectRoot(root)] }).items[0];
-		const second = loadSkills({ roots: [projectRoot(root)] }).items[0];
-		ok(first && second);
-		strictEqual(first.hash, second.hash);
-		writeFileSync(file, ["---", 'name: "hashing"', 'description: "Hash stability."', "---", "", "TWO", ""].join("\n"));
-		const third = loadSkills({ roots: [projectRoot(root)] }).items[0];
-		ok(third);
-		ok(third.hash !== first.hash);
-	});
-});
-
-describe("contracts/skills compatibility roots", () => {
-	it("discovers shared user Agent Skills, Claude, Codex, OpenCode, and Copilot roots", () => {
-		const home = scratchDir("clio-home-");
-		const project = scratchDir("clio-proj-");
-		const config = scratchDir("clio-cfg-");
-		writeSkillDir(join(home, ".agents", "skills"), "agents-skill", [
-			'name: "agents-skill"',
-			'description: "From agents root."',
-		]);
-		writeSkillDir(join(home, ".codex", "skills"), "codex-skill", [
-			'name: "codex-skill"',
-			'description: "From codex root."',
-		]);
-		writeSkillDir(join(home, ".claude", "skills"), "claude-skill", [
-			'name: "claude-skill"',
-			'description: "From claude root."',
-		]);
-		writeSkillDir(join(home, ".config", "opencode", "skills"), "opencode-skill", [
-			'name: "opencode-skill"',
-			'description: "From opencode root."',
-		]);
-		writeSkillDir(join(home, ".copilot", "skills"), "copilot-skill", [
-			'name: "copilot-skill"',
-			'description: "From copilot root."',
-		]);
-		const list = loadSkills({ cwd: project, home, configDir: config });
-		const names = list.items.map((s) => s.name);
-		ok(names.includes("agents-skill"));
-		ok(names.includes("codex-skill"));
-		ok(names.includes("claude-skill"));
-		ok(names.includes("opencode-skill"));
-		ok(names.includes("copilot-skill"));
-		const agents = list.items.find((s) => s.name === "agents-skill");
-		ok(agents);
-		strictEqual(agents.source, "agents");
-		strictEqual(agents.scope, "user");
-		strictEqual(agents.trusted, true);
-		const claude = list.items.find((s) => s.name === "claude-skill");
-		ok(claude);
-		strictEqual(claude.source, "claude");
-		const opencode = list.items.find((s) => s.name === "opencode-skill");
-		ok(opencode);
-		strictEqual(opencode.source, "opencode");
-		const copilot = list.items.find((s) => s.name === "copilot-skill");
-		ok(copilot);
-		strictEqual(copilot.source, "copilot");
-	});
-
-	it("breaks an equal-precedence compat tie by registry order rather than path spelling", () => {
-		const home = scratchDir("clio-home-");
-		const project = scratchDir("clio-proj-");
-		const config = scratchDir("clio-cfg-");
-		// Alphabetically .github sorts after .claude, so the old path tiebreak
-		// handed the name to Copilot; the registry ranks Claude Code first.
-		writeSkillDir(
-			join(project, ".claude", "skills"),
-			"shared",
-			['name: "shared"', 'description: "Claude copy."'],
-			"CLAUDE BODY",
-		);
-		writeSkillDir(
-			join(project, ".github", "skills"),
-			"shared",
-			['name: "shared"', 'description: "Copilot copy."'],
-			"COPILOT BODY",
-		);
-		const list = loadSkills({ cwd: project, home, configDir: config, trustProjectCompatRoots: true });
-		const skill = list.items.find((entry) => entry.name === "shared");
-		ok(skill);
-		strictEqual(skill.source, "claude");
-		strictEqual(skill.content, "CLAUDE BODY");
-	});
-
-	it("treats project compat roots as untrusted by default", () => {
-		const home = scratchDir("clio-home-");
-		const project = scratchDir("clio-proj-");
-		const config = scratchDir("clio-cfg-");
-		writeSkillDir(join(project, ".codex", "skills"), "proj-compat", [
-			'name: "proj-compat"',
-			'description: "Project compat skill."',
-		]);
-		writeSkillDir(join(project, ".claude", "skills"), "proj-claude", [
-			'name: "proj-claude"',
-			'description: "Project Claude skill."',
-		]);
-		writeSkillDir(join(project, ".opencode", "skills"), "proj-opencode", [
-			'name: "proj-opencode"',
-			'description: "Project OpenCode skill."',
-		]);
-		writeSkillDir(join(project, ".github", "skills"), "proj-copilot", [
-			'name: "proj-copilot"',
-			'description: "Project Copilot skill."',
-		]);
-		const list = loadSkills({ cwd: project, home, configDir: config });
-		const skill = list.items.find((s) => s.name === "proj-compat");
-		ok(skill);
-		strictEqual(skill.trusted, false);
-		for (const name of ["proj-claude", "proj-opencode", "proj-copilot"]) {
-			const projectSkill = list.items.find((s) => s.name === name);
-			ok(projectSkill);
-			strictEqual(projectSkill.trusted, false);
-		}
-		strictEqual(
-			modelVisibleSkills(list.items).some((s) => s.name === "proj-compat"),
-			false,
-		);
-	});
-
-	it("trusts project compat roots when opted in", () => {
-		const home = scratchDir("clio-home-");
-		const project = scratchDir("clio-proj-");
-		const config = scratchDir("clio-cfg-");
-		writeSkillDir(join(project, ".agents", "skills"), "proj-optin", [
-			'name: "proj-optin"',
-			'description: "Opted-in compat skill."',
-		]);
-		const list = loadSkills({ cwd: project, home, configDir: config, trustProjectCompatRoots: true });
-		const skill = list.items.find((s) => s.name === "proj-optin");
-		ok(skill);
-		strictEqual(skill.trusted, true);
-		ok(modelVisibleSkills(list.items).some((s) => s.name === "proj-optin"));
-	});
-
-	it("threads project compat trust through createResourcesLoader", () => {
-		const project = scratchDir("clio-proj-");
-		writeSkillDir(join(project, ".codex", "skills"), "proj-loader", [
-			'name: "proj-loader"',
-			'description: "Project compat through resources loader."',
-		]);
-		const loader = createResourcesLoader({
-			cwd: project,
-			skills: () => ({ trustProjectCompatRoots: true }),
-		});
-		const skill = loader.skills(project).items.find((entry) => entry.name === "proj-loader");
-		ok(skill);
-		strictEqual(skill.trusted, true);
-	});
-});
-
-describe("contracts/skills on-demand listing", () => {
-	it("context scope=skills with no name lists model-visible skills without a pending request", async () => {
-		const project = scratchDir("clio-proj-");
-		writeSkillDir(join(project, ".clio-coder", "skills"), "visible", [
-			'name: "visible"',
-			'description: "Catalog entry."',
-		]);
-		const tool = createContextTool({ getCwd: () => project });
-		const result = await tool.run({ scope: "skills" }, undefined);
-		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") {
-			ok(result.output.includes("- visible (project): Catalog entry."));
-			ok(result.output.includes("/skill:<name>"));
-			// The listing invites matching and composition but keeps the operator gate.
-			ok(result.output.includes("Match the current task"));
-			ok(result.output.includes("suggest the sequence in order"));
-			ok(result.output.includes("never load one without it"));
-			// Footer anchor: exact reply shape after the entries, with a
-			// no-match guard so routine tasks stay suggestion-free.
-			ok(result.output.includes("Suggested skill: /skill:<name>"));
-			ok(result.output.includes("wait for the operator to run it"));
-			ok(result.output.includes("If none match, do not mention skills."));
-		}
-	});
-
-	it("context scope=workspace carries a skills pointer only when skills are installed", async () => {
-		const snapshot = { cwd: "/tmp/x", isGit: false } as never;
-		const workspaceDeps = {
-			hasSession: () => true,
-			getSnapshot: () => snapshot,
-			probeWorkspace: () => snapshot,
-			saveSnapshot: () => {},
-		};
-
-		const withSkills = scratchDir("clio-proj-");
-		writeSkillDir(join(withSkills, ".clio-coder", "skills"), "pointer", ['name: "pointer"', 'description: "Pointer."']);
-		const tool = createContextTool({ getCwd: () => withSkills, workspace: workspaceDeps });
-		const result = await tool.run({ scope: "workspace" }, undefined);
-		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") {
-			// Pointer only: an at-a-glance count and the suggest protocol, no catalog.
-			ok(result.output.includes('"skills"'));
-			ok(result.output.includes("suggest /skill:<name> to the operator"));
-			strictEqual(result.output.includes("Pointer."), false);
-		}
-
-		const bare = scratchDir("clio-proj-");
-		const bareTool = createContextTool({
-			getCwd: () => bare,
-			// Suppress discovery so the zero-skill branch is exercised regardless
-			// of skills installed on the host running the tests.
-			getSkillLoaderOptions: () => ({ disableDiscovery: true }),
-			workspace: workspaceDeps,
-		});
-		const bareResult = await bareTool.run({ scope: "workspace" }, undefined);
-		strictEqual(bareResult.kind, "ok");
-		if (bareResult.kind === "ok") {
-			strictEqual(bareResult.output.includes('"skills"'), false);
-		}
-	});
-
-	it("context scope=skills listing excludes disable-model-invocation skills", async () => {
-		const project = scratchDir("clio-proj-");
-		writeSkillDir(join(project, ".clio-coder", "skills"), "manual-only", [
-			'name: "manual-only"',
-			'description: "Only via slash command."',
-			"disable-model-invocation: true",
-		]);
-		const tool = createContextTool({ getCwd: () => project });
-		const result = await tool.run({ scope: "skills" }, undefined);
-		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") {
-			strictEqual(result.output.includes("manual-only"), false);
-		}
-	});
-});
-
-describe("contracts/skills slash-command parity", () => {
-	it("expands /skill:name with trailing args from the loaded list", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("/skill:expandable do the thing", list);
-		strictEqual(expansion.expanded, true);
-		strictEqual(expansion.text, "do the thing");
-		strictEqual(expansion.text.includes("FOLLOW STEPS"), false);
-		if (expansion.expanded) {
-			strictEqual(expansion.skill.name, "expandable");
-			strictEqual(expansion.triggeredBy, "slash-command");
-		}
-	});
-
-	it("expands /skills:name as the interactive plural alias", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("/skills:grill-me about adding science skills", list);
-		strictEqual(expansion.expanded, true);
-		strictEqual(expansion.text, "about adding science skills");
-		strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
-		if (expansion.expanded) {
-			strictEqual(expansion.skill.name, "grill-me");
-			strictEqual(expansion.triggeredBy, "slash-command");
-		}
-	});
-
-	it("ignores quoted trigger phrases in explicit invocation mode", () => {
-		const root = scratchDir();
-		writeSkillDir(
-			root,
-			"grill-me",
-			['name: "grill-me"', 'description: \'Use when interviewing. Triggers on "grill me", "interview me".\''],
-			"ASK ONE QUESTION",
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("grill me about adding science skills", list);
-		strictEqual(expansion.expanded, false);
-		strictEqual(expansion.text, "grill me about adding science skills");
-		strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
-	});
-
-	it("does not expand quoted trigger phrases from plain text", () => {
-		const root = scratchDir();
-		writeSkillDir(
-			root,
-			"grill-me",
-			['name: "grill-me"', "description: 'Use when interviewing. Triggers on \"grill me\".'"],
-			"ASK ONE QUESTION",
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("grill me about adding science skills", list);
-		strictEqual(expansion.expanded, false);
-		strictEqual(expansion.text, "grill me about adding science skills");
-	});
-
-	it("does not trigger hidden model-invocation skills from plain text", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "hidden", [
-			'name: "hidden"',
-			"description: 'Use when hidden. Triggers on \"grill me\".'",
-			"disable-model-invocation: true",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("grill me about hidden things", list);
-		strictEqual(expansion.expanded, false);
-		strictEqual(expansion.text, "grill me about hidden things");
-	});
-
-	it("parses explicit slash skill requests into clean pending request state", () => {
-		const root = scratchDir();
-		const filePath = writeSkillDir(
-			root,
-			"grill-me",
-			['name: "grill-me"', 'description: "Interview skill."'],
-			"ASK ONE QUESTION",
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const parsed = parsePendingSkillRequests("/skill:grill-me adding more science skills", list);
-		strictEqual(parsed.text, "adding more science skills");
-		strictEqual(parsed.pendingSkillRequests.length, 1);
-		const pending = parsed.pendingSkillRequests[0];
-		ok(pending);
-		strictEqual(pending.name, "grill-me");
-		strictEqual(pending.args, "adding more science skills");
-		strictEqual(pending.source, "slash-command");
-		strictEqual(pending.installed, true);
-		strictEqual(pending.filePath, filePath);
-	});
-
-	it("does not parse plain skill-management text into pending request state", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const parsed = parsePendingSkillRequests("adding more science skills to clio coder", list);
-		strictEqual(parsed.text, "adding more science skills to clio coder");
-		strictEqual(parsed.pendingSkillRequests.length, 0);
-	});
-
-	it("interactive submit asks the model to load slash-command skills without preloading the body", async () => {
-		const root = scratchDir();
-		writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const resources: ResourcesContract = {
-			skills: () => list,
-			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
-			parsePendingSkillRequests: (text, _cwd, options) => {
-				const expansion = expandSkillInvocationInput(text, list, options);
-				return {
-					text: expansion.text,
-					pendingSkillRequests: expansion.expanded
-						? [
-								{
-									name: expansion.skill.name,
-									args: expansion.args,
-									source: "slash-command" as const,
-									installed: true,
-								},
-							]
-						: [],
-				};
-			},
-			expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
-			prompts: () => ({ items: [], diagnostics: [] }),
-			themes: () => ({ items: [], diagnostics: [] }),
-			resolvePath: (value: string) => value,
-			reload: async () => undefined,
-		};
-		const expanded = await expandInteractiveSubmitAsync("/skill:expandable do the thing", resources);
-		strictEqual(expanded.pendingSkillRequests.length, 1);
-		strictEqual(expanded.text, "do the thing");
-		strictEqual(expanded.text.includes("FOLLOW STEPS"), false);
-	});
-
-	it("interactive submit does not auto-activate prompt-triggered skills from plain text", async () => {
-		const root = scratchDir();
-		writeSkillDir(
-			root,
-			"grill-me",
-			['name: "grill-me"', "description: 'Use when interviewing. Triggers on \"grill me\".'"],
-			"ASK ONE QUESTION",
-		);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		const resources: ResourcesContract = {
-			skills: () => list,
-			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
-			parsePendingSkillRequests: (text, _cwd, options) => {
-				const expansion = expandSkillInvocationInput(text, list, options);
-				return {
-					text: expansion.text,
-					pendingSkillRequests: expansion.expanded
-						? [
-								{
-									name: expansion.skill.name,
-									args: expansion.args,
-									source: "slash-command" as const,
-									installed: true,
-								},
-							]
-						: [],
-				};
-			},
-			expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
-			prompts: () => ({ items: [], diagnostics: [] }),
-			themes: () => ({ items: [], diagnostics: [] }),
-			resolvePath: (value: string) => value,
-			reload: async () => undefined,
-		};
-		const expanded = await expandInteractiveSubmitAsync("grill me about science skills", resources);
-		strictEqual(expanded.pendingSkillRequests.length, 0);
-		strictEqual(expanded.text, "grill me about science skills");
-		strictEqual(expanded.text.includes("ASK ONE QUESTION"), false);
-	});
-
-	it("leaves non-skill input untouched", () => {
-		const list = loadSkills({ roots: [] });
-		const expansion = expandSkillInvocationInput("just a normal message", list);
-		strictEqual(expansion.expanded, false);
-		strictEqual(expansion.text, "just a normal message");
-	});
-});
-
-describe("contracts/skills tools", () => {
-	const ORIGINAL_ENV = { ...process.env };
-	let scratch: string;
-
-	beforeEach(() => {
-		scratch = mkdtempSync(join(tmpdir(), "clio-skill-tools-"));
-		process.env.HOME = scratch;
-		process.env.CLIO_CODER_HOME = scratch;
-		process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_CODER_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
-		resetXdgCache();
-	});
-
+// Wrapped in its own describe so the top-level beforeEach/afterEach below
+// scope to this file's suites, not the whole process, under
+// --experimental-test-isolation=none (every file shares one root test
+// context there, so an unscoped top-level hook runs around every test in
+// every file).
+describe("contracts/skills", () => {
 	afterEach(() => {
-		for (const k of Object.keys(process.env)) {
-			if (!(k in ORIGINAL_ENV)) Reflect.deleteProperty(process.env, k);
-		}
-		for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
-			if (v !== undefined) process.env[k] = v;
-		}
-		rmSync(scratch, { recursive: true, force: true });
-		resetXdgCache();
-	});
-
-	it("context scope=skills returns structured metadata, hash, base_dir, and body", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"readable",
-			['name: "readable"', 'description: "Readable skill."', 'license: "MIT"'],
-			"READ ME BODY",
-		);
-		const tool = createContextTool({ getCwd: () => cwd });
-		const result = await tool.run(
-			{ scope: "skills", name: "readable" },
-			{ pendingSkillPolicy: pendingPolicy("readable") },
-		);
-		strictEqual(result.kind, "ok");
-		if (result.kind !== "ok") return;
-		ok(result.output.includes("READ ME BODY"));
-		const details = result.details as Record<string, unknown>;
-		strictEqual(details.name, "readable");
-		match(String(details.hash), /^[0-9a-f]{64}$/);
-		strictEqual(details.scope, "project");
-		strictEqual(details.sourceOrigin, "project");
-		ok(String(details.baseDir).includes(".clio-coder"));
-	});
-
-	it("frames every loaded skill with the workspace root and the foreign-vocabulary rule", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"portable",
-			['name: "portable"', 'description: "A skill written for another harness."'],
-			"Send a single message with two Agent tool calls using general-purpose.",
-		);
-		const tool = createContextTool({ getCwd: () => cwd });
-		const result = await tool.run(
-			{ scope: "skills", name: "portable" },
-			{ pendingSkillPolicy: pendingPolicy("portable") },
-		);
-		strictEqual(result.kind, "ok");
-		if (result.kind !== "ok") return;
-		// The frame precedes the skill's own prose, so the workspace root and the
-		// substitution rule are read before any instruction that could violate them.
-		const frameIndex = result.output.indexOf("How to read this skill:");
-		ok(frameIndex >= 0);
-		ok(frameIndex < result.output.indexOf("Send a single message"));
-		ok(result.output.includes(`Workspace root: ${cwd}`));
-		ok(result.output.includes("never the working directory"));
-		ok(result.output.includes("Use Clio's equivalent from your own tool list"));
-		ok(result.output.includes("Never invent one"));
-	});
-
-	it("context skill loads honor the pending policy for non-requested and repeated loads", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"grill-me",
-			['name: "grill-me"', 'description: "Interview skill."'],
-			"ASK ONE QUESTION",
-		);
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"context-prime",
-			['name: "context-prime"', 'description: "Context skill."'],
-			"PRIME CONTEXT",
-		);
-		const policy = pendingPolicy("grill-me", "about adding science skills");
-		const tool = createContextTool({ getCwd: () => cwd });
-
-		const wrong = await tool.run({ scope: "skills", name: "context-prime" }, { pendingSkillPolicy: policy });
-		strictEqual(wrong.kind, "error");
-		if (wrong.kind === "error") {
-			strictEqual(
-				wrong.message,
-				"context: this turn has pending skill request(s): grill-me. Load only those before doing anything else.",
-			);
-		}
-
-		const first = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: policy });
-		strictEqual(first.kind, "ok");
-		ok(policy.loadedSkillNames.has("grill-me"));
-		ok(policy.loadedSkillPolicies.has("grill-me"));
-
-		const repeated = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: policy });
-		strictEqual(repeated.kind, "error");
-		if (repeated.kind === "error") {
-			strictEqual(
-				repeated.message,
-				"context: pending skill grill-me already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.",
-			);
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 
-	it("context skill load denial without a pending request names the compliant next move", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"grill-me",
-			['name: "grill-me"', 'description: "Interview skill."'],
-			"ASK ONE QUESTION",
-		);
-		const tool = createContextTool({ getCwd: () => cwd });
-
-		// No pending policy at all: the operator has not requested any skill.
-		const denied = await tool.run({ scope: "skills", name: "grill-me" }, undefined);
-		strictEqual(denied.kind, "error");
-		if (denied.kind === "error") {
-			ok(denied.message.includes("no pending skill request is active this turn"));
-			// The gate names the model's move: suggest-and-wait, never retry.
-			ok(denied.message.includes("only the operator can activate a skill"));
-			ok(denied.message.includes("do not retry this load"));
-			ok(denied.message.includes("Suggested skill: /skill:<name>"));
-			ok(denied.message.includes("wait for the operator"));
-			ok(denied.message.includes("otherwise continue without skills"));
-		}
-
-		// An empty pending policy behaves identically to an absent one.
-		const emptyPolicy = {
-			allowedSkillNames: [],
-			requests: [],
-			loadedSkillNames: new Set<string>(),
-			loadedSkillPolicies: new Map(),
-		};
-		const deniedEmpty = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: emptyPolicy });
-		strictEqual(deniedEmpty.kind, "error");
-		if (deniedEmpty.kind === "error" && denied.kind === "error") {
-			strictEqual(deniedEmpty.message, denied.message);
-		}
-	});
-
-	it("context skill activation reaches the observer registration with turn metadata", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"readable",
-			['name: "readable"', 'description: "Readable skill."'],
-			"READ ME BODY",
-		);
-		const activations: Array<{
-			name: string;
-			filePath: string;
-			hash: string;
-			source: string;
-			sourceOrigin?: string;
-			triggeredBy: string;
-			turnId?: string;
-		}> = [];
-		const bundle = createMiddlewareBundle({
-			registrations: [createSkillActivationObserver((activation) => activations.push(activation))],
-		});
-		const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
-		registry.register(createContextTool({ getCwd: () => cwd }));
-
-		const missing = await registry.invoke(
-			{ tool: ToolNames.Context, args: { scope: "skills", name: "missing" } },
-			{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("missing") },
-		);
-		strictEqual(missing.kind, "ok");
-		if (missing.kind === "ok") strictEqual(missing.result.kind, "error");
-		strictEqual(activations.length, 0);
-
-		const result = await registry.invoke(
-			{ tool: ToolNames.Context, args: { scope: "skills", name: "readable" } },
-			{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("readable") },
-		);
-		strictEqual(result.kind, "ok");
-		strictEqual(activations.length, 1);
-		const activation = activations[0];
-		ok(activation);
-		strictEqual(activation.name, "readable");
-		strictEqual(activation.triggeredBy, "tool");
-		strictEqual(activation.turnId, "turn-1");
-		match(activation.hash, /^[0-9a-f]{64}$/);
-		strictEqual(activation.sourceOrigin, "project");
-		ok(activation.filePath.endsWith("SKILL.md"));
-	});
-
-	it("context skill loads annotate marketplace provenance drift without blocking", async () => {
-		const cwd = join(scratch, "project");
-		const skillPath = writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"pinned",
-			['name: "pinned"', 'description: "Pinned skill."', 'registry-id: "pinned"'],
-			"PINNED BODY",
-		);
-		const manifestDir = join(cwd, "skills");
-		mkdirSync(manifestDir, { recursive: true });
-		const tool = createContextTool({ getCwd: () => cwd });
-		const skillHash = sha256(readFileSync(skillPath, "utf8"));
-
-		writeFileSync(
-			join(manifestDir, "registry.yaml"),
-			["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${skillHash}`, ""].join("\n"),
-			"utf8",
-		);
-		const matchResult = await tool.run(
-			{ scope: "skills", name: "pinned" },
-			{ pendingSkillPolicy: pendingPolicy("pinned") },
-		);
-		strictEqual(matchResult.kind, "ok");
-		if (matchResult.kind !== "ok") return;
-		strictEqual((matchResult.details as Record<string, unknown>).drift, "match");
-		strictEqual(matchResult.output.includes("skill_drift"), false);
-
-		writeFileSync(
-			join(manifestDir, "registry.yaml"),
-			["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${"b".repeat(64)}`, ""].join("\n"),
-			"utf8",
-		);
-		const mismatchResult = await tool.run(
-			{ scope: "skills", name: "pinned" },
-			{ pendingSkillPolicy: pendingPolicy("pinned") },
-		);
-		strictEqual(mismatchResult.kind, "ok");
-		if (mismatchResult.kind !== "ok") return;
-		strictEqual((mismatchResult.details as Record<string, unknown>).drift, "mismatch");
-		ok(mismatchResult.output.includes("WARNING skill_drift"));
-
-		rmSync(join(manifestDir, "registry.yaml"), { force: true });
-		const absentResult = await tool.run(
-			{ scope: "skills", name: "pinned" },
-			{ pendingSkillPolicy: pendingPolicy("pinned") },
-		);
-		strictEqual(absentResult.kind, "ok");
-		if (absentResult.kind !== "ok") return;
-		strictEqual((absentResult.details as Record<string, unknown>).drift, undefined);
-	});
-
-	it("context skill include_tree lists sibling resources without executing them", async () => {
-		const cwd = join(scratch, "project");
-		const dir = join(cwd, ".clio-coder", "skills", "with-tree");
-		mkdirSync(join(dir, "scripts"), { recursive: true });
-		mkdirSync(join(dir, "references"), { recursive: true });
-		writeFileSync(
-			join(dir, "SKILL.md"),
-			["---", 'name: "with-tree"', 'description: "Has resources."', "---", "", "Body.", ""].join("\n"),
-		);
-		writeFileSync(join(dir, "scripts", "run.sh"), "echo hi\n");
-		writeFileSync(join(dir, "references", "doc.md"), "# Doc\n");
-		const tool = createContextTool({ getCwd: () => cwd });
-		const result = await tool.run(
-			{ scope: "skills", name: "with-tree", include_tree: true },
-			{ pendingSkillPolicy: pendingPolicy("with-tree") },
-		);
-		strictEqual(result.kind, "ok");
-		if (result.kind !== "ok") return;
-		ok(result.output.includes("resources:"));
-		ok(result.output.includes("scripts/run.sh"));
-		ok(result.output.includes("references/doc.md"));
-	});
-
-	it("context skill loads refuse skills hidden from model invocation", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(join(cwd, ".clio-coder", "skills"), "hidden", [
-			'name: "hidden"',
-			'description: "Hidden skill."',
-			"disable-model-invocation: true",
-		]);
-		const tool = createContextTool({ getCwd: () => cwd });
-		const result = await tool.run({ scope: "skills", name: "hidden" }, { pendingSkillPolicy: pendingPolicy("hidden") });
-		strictEqual(result.kind, "error");
-	});
-
-	it("artifact rejects kind=skill; skills are written as SKILL.md files directly", async () => {
-		const cwd = join(scratch, "project");
-		mkdirSync(cwd, { recursive: true });
-		const tool = createArtifactTool({ getCwd: () => cwd });
-		const result = await tool.run({ kind: "skill", title: "made-skill", content: "Body." });
-		strictEqual(result.kind, "error");
-		if (result.kind === "error") ok(result.message.includes("kind must be plan, review, or report"));
-	});
-
-	it("context skill loads with a recipe-bound policy admit exactly the declared skills", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"cut-it",
-			['name: "cut-it"', 'description: "Slice plans."'],
-			"SLICE",
-		);
-		writeSkillDir(join(cwd, ".clio-coder", "skills"), "other", ['name: "other"', 'description: "Other skill."'], "OTHER");
-		const policy = agentSkillToolPolicy(["cut-it"]);
-		ok(policy);
-		const tool = createContextTool({ getCwd: () => cwd });
-
-		const denied = await tool.run({ scope: "skills", name: "other" }, { pendingSkillPolicy: policy });
-		strictEqual(denied.kind, "error");
-		if (denied.kind === "error") {
-			strictEqual(denied.message, "context: this agent run may load only its declared skill(s): cut-it.");
-		}
-
-		const loaded = await tool.run({ scope: "skills", name: "cut-it" }, { pendingSkillPolicy: policy });
-		strictEqual(loaded.kind, "ok");
-		if (loaded.kind === "ok") {
-			ok(loaded.output.includes("SLICE"));
-			strictEqual(loaded.output.includes("Pending skill request"), false);
-		}
-
-		const repeated = await tool.run({ scope: "skills", name: "cut-it" }, { pendingSkillPolicy: policy });
-		strictEqual(repeated.kind, "error");
-		if (repeated.kind === "error") {
-			strictEqual(repeated.message, "context: skill cut-it is already loaded in this run; continue with its workflow.");
-		}
-	});
-
-	it("context skill loads record the skill's declared tool policy on the pending policy", async () => {
-		const cwd = join(scratch, "project");
-		writeSkillDir(
-			join(cwd, ".clio-coder", "skills"),
-			"narrow",
-			[
-				'name: "narrow"',
-				'description: "Narrow tool surface."',
+	describe("contracts/skills loader normalization", () => {
+		it("loads a valid skill with stable hash and captured metadata", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "review-tests", [
+				'name: "review-tests"',
+				'description: "Use when reviewing test coverage."',
+				'license: "MIT"',
+				'version: "1.2.0"',
 				"allowed-tools:",
-				"  - read",
-				"  - grep",
-				"disallowed-tools:",
-				"  - bash",
-			],
-			"NARROW BODY",
-		);
-		const policy = pendingPolicy("narrow");
-		const tool = createContextTool({ getCwd: () => cwd });
-		const result = await tool.run({ scope: "skills", name: "narrow" }, { pendingSkillPolicy: policy });
-		strictEqual(result.kind, "ok");
-		if (result.kind !== "ok") return;
-		const details = result.details as Record<string, unknown>;
-		deepStrictEqual(details.allowedTools, ["read", "grep"]);
-		deepStrictEqual(details.disallowedTools, ["bash"]);
-		deepStrictEqual(policy.loadedSkillPolicies.get("narrow"), {
-			allowedTools: ["read", "grep"],
-			disallowedTools: ["bash"],
+				"  - Read",
+				"  - Grep",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 1);
+			const skill = list.items[0];
+			ok(skill);
+			strictEqual(skill.name, "review-tests");
+			strictEqual(skill.description, "Use when reviewing test coverage.");
+			strictEqual(skill.scope, "project");
+			strictEqual(skill.source, "clio");
+			strictEqual(skill.trusted, true);
+			match(skill.hash, /^[0-9a-f]{64}$/);
+			strictEqual(skill.metadata.license, "MIT");
+			strictEqual(skill.metadata.version, "1.2.0");
+			// Resolved to the tools Clio has: `Read` and `read` are one tool named by
+			// two harnesses, and narrowing enforces the name Clio dispatches on.
+			deepStrictEqual(skill.allowedTools, ["read", "grep"]);
+			strictEqual("allowed-tools" in skill.metadata, false);
+		});
+
+		it("reads a comma-separated tool declaration as the same declaration as a sequence", () => {
+			const root = scratchDir();
+			// The spelling every skill under a .claude or .agents compatibility root
+			// uses. Reading only the YAML sequence dropped it silently, so a skill
+			// that asked to be confined to three tools ran with the whole surface.
+			writeSkillDir(root, "compat", [
+				'name: "compat"',
+				'description: "A skill authored for another harness."',
+				"allowed-tools: Bash, Read, Grep",
+				"disallowed-tools: Write, Edit",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const skill = list.items[0];
+			ok(skill);
+			deepStrictEqual(skill.allowedTools, ["bash", "read", "grep"]);
+			deepStrictEqual(skill.disallowedTools, ["write", "edit"]);
+		});
+
+		it("says so when a declared tool surface names tools Clio does not have", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "foreign", [
+				'name: "foreign"',
+				'description: "Names another harness tools."',
+				"allowed-tools: Read, Glob, WebSearch",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const skill = list.items[0];
+			ok(skill);
+			// The recognized part still narrows; the rest is reported rather than
+			// silently treated as a tool that exists.
+			deepStrictEqual(skill.allowedTools, ["read"]);
+			ok(
+				list.diagnostics.some((d) => d.message.includes("Glob") && d.message.includes("WebSearch")),
+				`expected an unrecognized-tool diagnostic, got ${JSON.stringify(list.diagnostics.map((d) => d.message))}`,
+			);
+		});
+
+		it("narrows nothing when an allow-list names no tool Clio has", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "unenforceable", [
+				'name: "unenforceable"',
+				'description: "Declares only foreign tools."',
+				"allowed-tools: Glob, WebSearch, Agent",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const skill = list.items[0];
+			ok(skill);
+			// allowed-tools is workflow scoping, not the security boundary. Honoring
+			// an unenforceable list literally would block every call for a reason the
+			// operator never chose, so it narrows nothing and says why.
+			strictEqual(skill.allowedTools, undefined);
+			ok(list.diagnostics.some((d) => d.message.includes("narrows nothing")));
+		});
+
+		it("refuses a project skill whose symlink resolves outside the workspace", () => {
+			const scratch = scratchDir();
+			const workspace = join(scratch, "repo");
+			const outside = join(scratch, "outside", "secrets");
+			mkdirSync(join(workspace, ".clio-coder", "skills"), { recursive: true });
+			mkdirSync(outside, { recursive: true });
+			writeFileSync(join(outside, "credentials.txt"), "AWS_SECRET=hunter2\n", "utf8");
+			writeFileSync(
+				join(outside, "SKILL.md"),
+				["---", 'name: "escaped"', 'description: "Base dir outside the repo."', "---", "", "body", ""].join("\n"),
+				"utf8",
+			);
+			symlinkSync(outside, join(workspace, ".clio-coder", "skills", "escaped"));
+
+			const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
+
+			// The escape is invisible in every path the operator is later shown:
+			// filePath and baseDir both keep the symlink's own repository-local
+			// location while the body and the resource tree come from outside.
+			strictEqual(
+				list.items.find((skill) => skill.name === "escaped"),
+				undefined,
+			);
+			const diagnostic = list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink"));
+			ok(diagnostic, `expected a containment diagnostic, got ${JSON.stringify(list.diagnostics.map((d) => d.message))}`);
+			ok(diagnostic.message.includes(outside), "diagnostic must name the resolved path");
+		});
+
+		it("still loads a project skill symlinked from elsewhere inside the workspace", () => {
+			const scratch = scratchDir();
+			const workspace = join(scratch, "repo");
+			const shared = join(workspace, "shared", "skills", "inside");
+			mkdirSync(join(workspace, ".clio-coder", "skills"), { recursive: true });
+			mkdirSync(shared, { recursive: true });
+			writeFileSync(
+				join(shared, "SKILL.md"),
+				["---", 'name: "inside"', 'description: "Shared across checkouts."', "---", "", "body", ""].join("\n"),
+				"utf8",
+			);
+			symlinkSync(shared, join(workspace, ".clio-coder", "skills", "inside"));
+
+			const list = loadSkills({ cwd: workspace, home: join(scratch, "nohome"), configDir: join(scratch, "noconfig") });
+
+			// A monorepo may share one skills tree across checkouts; the boundary is
+			// the workspace, not the skills directory.
+			ok(list.items.some((skill) => skill.name === "inside"));
+			strictEqual(
+				list.diagnostics.find((d) => d.message.includes("may not leave its scope through a symlink")),
+				undefined,
+			);
+		});
+
+		it("refuses a SKILL.md that is not valid UTF-8 text", () => {
+			const root = scratchDir();
+			const dir = join(root, "binary");
+			mkdirSync(dir, { recursive: true });
+			// utf8 decoding never throws: it substitutes U+FFFD, so without the
+			// round-trip check this loads as a document of replacement characters
+			// and becomes model-visible instructions.
+			writeFileSync(
+				join(dir, "SKILL.md"),
+				Buffer.concat([
+					Buffer.from(["---", 'name: "binary"', 'description: "Looks like a skill."', "---", "", ""].join("\n"), "utf8"),
+					Buffer.from([0x00, 0xff, 0xfe, 0x00]),
+				]),
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 0);
+			ok(list.diagnostics.some((d) => d.message.includes("not valid UTF-8 text")));
+		});
+
+		it("refuses a SKILL.md over the byte limit", () => {
+			const root = scratchDir();
+			const dir = join(root, "huge");
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(
+				join(dir, "SKILL.md"),
+				["---", 'name: "huge"', 'description: "Too large to be a document."', "---", "", "x".repeat(1024 * 1024), ""].join(
+					"\n",
+				),
+				"utf8",
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 0);
+			ok(list.diagnostics.some((d) => d.message.includes("over the")));
+		});
+
+		it("says so when a skill is larger than activation can deliver", () => {
+			const root = scratchDir();
+			const dir = join(root, "truncated");
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(
+				join(dir, "SKILL.md"),
+				[
+					"---",
+					'name: "truncated"',
+					'description: "Larger than the activation cap."',
+					"---",
+					"",
+					"x".repeat(SKILL_ACTIVATION_BODY_CAP_BYTES + 1),
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			// It still loads; truncation is the activation path's job. But an author
+			// whose workflow is silently cut in half at runtime has no other way to
+			// find out that the model never saw the rest.
+			strictEqual(list.items.length, 1);
+			ok(list.diagnostics.some((d) => d.message.includes("the model will not be shown the rest")));
+		});
+
+		it("keeps the activation cap mirror in step with the tool substrate", () => {
+			// The cap lives in the tool substrate, which a domain must not import.
+			// The mirror is only safe while this holds.
+			strictEqual(SKILL_ACTIVATION_BODY_CAP_BYTES, OBSERVE_SELF_CAPS.contextSkills);
+		});
+
+		it("rejects a skill that is missing a description", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "no-desc", ['name: "no-desc"']);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 0);
+			ok(list.diagnostics.some((d) => d.message.includes("description is required")));
+		});
+
+		it("warns but loads on name/path mismatch and uses the frontmatter name", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "folder-name", ['name: "canonical-name"', 'description: "Mismatch case."']);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 1);
+			const skill = list.items[0];
+			ok(skill);
+			strictEqual(skill.name, "canonical-name");
+			strictEqual(skill.pathSubject, "folder-name");
+			ok(skill.diagnostics.some((d) => d.message.includes("differs from path subject")));
+		});
+
+		it("warns but loads on invalid name format", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "Bad_Name", ['name: "Bad_Name"', 'description: "Invalid name format."']);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 1);
+			ok(list.diagnostics.some((d) => d.message.includes("invalid characters")));
+		});
+
+		it("keeps disable-model-invocation skills listed but out of the model catalog", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "manual-only", [
+				'name: "manual-only"',
+				'description: "Only via slash command."',
+				"disable-model-invocation: true",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 1);
+			strictEqual(modelVisibleSkills(list.items).length, 0);
+		});
+
+		it("resolves collisions by precedence: clio project overrides clio user", () => {
+			const userDir = scratchDir();
+			const projectDir = scratchDir();
+			writeSkillDir(userDir, "dup", ['name: "dup"', 'description: "User version."'], "USER BODY");
+			writeSkillDir(projectDir, "dup", ['name: "dup"', 'description: "Project version."'], "PROJECT BODY");
+			const list = loadSkills({ roots: [userRoot(userDir), projectRoot(projectDir)] });
+			strictEqual(list.items.length, 1);
+			const skill = list.items[0];
+			ok(skill);
+			strictEqual(skill.content, "PROJECT BODY");
+			ok(list.diagnostics.some((d) => d.type === "collision"));
+		});
+
+		it("resolves collisions by precedence: clio project overrides project compat", () => {
+			const compatDir = scratchDir();
+			const clioDir = scratchDir();
+			writeSkillDir(compatDir, "dup", ['name: "dup"', 'description: "Compat version."'], "COMPAT BODY");
+			writeSkillDir(clioDir, "dup", ['name: "dup"', 'description: "Clio version."'], "CLIO BODY");
+			const compatRoot: SkillRoot = {
+				path: compatDir,
+				scope: "project",
+				source: "codex",
+				origin: "codex-project",
+				precedence: 40,
+				trusted: false,
+			};
+			const list = loadSkills({ roots: [compatRoot, projectRoot(clioDir)] });
+			strictEqual(list.items.length, 1);
+			const skill = list.items[0];
+			ok(skill);
+			strictEqual(skill.content, "CLIO BODY");
+		});
+
+		it("dedups skills whose symlinked paths resolve to the same SKILL.md", () => {
+			const realRoot = scratchDir();
+			const aliasRoot = scratchDir();
+			writeSkillDir(realRoot, "linked-skill", ['name: "linked-skill"', 'description: "Canonical skill."'], "REAL BODY");
+			symlinkSync(join(realRoot, "linked-skill"), join(aliasRoot, "linked-skill"), "dir");
+			const list = loadSkills({ roots: [userRoot(realRoot), projectRoot(aliasRoot)] });
+			strictEqual(list.items.length, 1);
+			const skill = list.items[0];
+			ok(skill);
+			strictEqual(skill.name, "linked-skill");
+			strictEqual(skill.content, "REAL BODY");
+			ok(list.diagnostics.some((diag) => diag.message.includes("same canonical skill file")));
+		});
+
+		it("names the winning path in the symlink dedupe diagnostic", () => {
+			const realRoot = scratchDir();
+			const aliasRoot = scratchDir();
+			writeSkillDir(realRoot, "linked-skill", ['name: "linked-skill"', 'description: "Canonical skill."']);
+			symlinkSync(join(realRoot, "linked-skill"), join(aliasRoot, "linked-skill"), "dir");
+			const list = loadSkills({ roots: [userRoot(realRoot), projectRoot(aliasRoot)] });
+			const winner = list.items[0];
+			ok(winner);
+			const diagnostic = list.diagnostics.find((diag) => diag.message.includes("same canonical skill file"));
+			ok(diagnostic);
+			ok(diagnostic.message.includes(`${winner.filePath}, which is the entry in use`), diagnostic.message);
+			ok(diagnostic.path !== winner.filePath, "the diagnostic points at the discarded copy");
+		});
+
+		it("hashes are stable across loads and change with content", () => {
+			const root = scratchDir();
+			const file = writeSkillDir(root, "hashing", ['name: "hashing"', 'description: "Hash stability."'], "ONE");
+			const first = loadSkills({ roots: [projectRoot(root)] }).items[0];
+			const second = loadSkills({ roots: [projectRoot(root)] }).items[0];
+			ok(first && second);
+			strictEqual(first.hash, second.hash);
+			writeFileSync(file, ["---", 'name: "hashing"', 'description: "Hash stability."', "---", "", "TWO", ""].join("\n"));
+			const third = loadSkills({ roots: [projectRoot(root)] }).items[0];
+			ok(third);
+			ok(third.hash !== first.hash);
 		});
 	});
 
-	it("diagnostics warn about missing skill requirements", () => {
-		const root = scratchDir();
-		writeSkillDir(root, "dep-skill", [
-			'name: "dep-skill"',
-			'description: "Dependent skill."',
-			"requires:",
-			"  - skill:non-existent-skill",
-		]);
-		const list = loadSkills({ roots: [projectRoot(root)] });
-		strictEqual(list.items.length, 1);
-		const warnings = list.diagnostics.map((d) => d.message);
-		ok(warnings.some((w) => w.includes('requires skill "non-existent-skill"')));
+	describe("contracts/skills compatibility roots", () => {
+		it("discovers shared user Agent Skills, Claude, Codex, OpenCode, and Copilot roots", () => {
+			const home = scratchDir("clio-home-");
+			const project = scratchDir("clio-proj-");
+			const config = scratchDir("clio-cfg-");
+			writeSkillDir(join(home, ".agents", "skills"), "agents-skill", [
+				'name: "agents-skill"',
+				'description: "From agents root."',
+			]);
+			writeSkillDir(join(home, ".codex", "skills"), "codex-skill", [
+				'name: "codex-skill"',
+				'description: "From codex root."',
+			]);
+			writeSkillDir(join(home, ".claude", "skills"), "claude-skill", [
+				'name: "claude-skill"',
+				'description: "From claude root."',
+			]);
+			writeSkillDir(join(home, ".config", "opencode", "skills"), "opencode-skill", [
+				'name: "opencode-skill"',
+				'description: "From opencode root."',
+			]);
+			writeSkillDir(join(home, ".copilot", "skills"), "copilot-skill", [
+				'name: "copilot-skill"',
+				'description: "From copilot root."',
+			]);
+			const list = loadSkills({ cwd: project, home, configDir: config });
+			const names = list.items.map((s) => s.name);
+			ok(names.includes("agents-skill"));
+			ok(names.includes("codex-skill"));
+			ok(names.includes("claude-skill"));
+			ok(names.includes("opencode-skill"));
+			ok(names.includes("copilot-skill"));
+			const agents = list.items.find((s) => s.name === "agents-skill");
+			ok(agents);
+			strictEqual(agents.source, "agents");
+			strictEqual(agents.scope, "user");
+			strictEqual(agents.trusted, true);
+			const claude = list.items.find((s) => s.name === "claude-skill");
+			ok(claude);
+			strictEqual(claude.source, "claude");
+			const opencode = list.items.find((s) => s.name === "opencode-skill");
+			ok(opencode);
+			strictEqual(opencode.source, "opencode");
+			const copilot = list.items.find((s) => s.name === "copilot-skill");
+			ok(copilot);
+			strictEqual(copilot.source, "copilot");
+		});
+
+		it("breaks an equal-precedence compat tie by registry order rather than path spelling", () => {
+			const home = scratchDir("clio-home-");
+			const project = scratchDir("clio-proj-");
+			const config = scratchDir("clio-cfg-");
+			// Alphabetically .github sorts after .claude, so the old path tiebreak
+			// handed the name to Copilot; the registry ranks Claude Code first.
+			writeSkillDir(
+				join(project, ".claude", "skills"),
+				"shared",
+				['name: "shared"', 'description: "Claude copy."'],
+				"CLAUDE BODY",
+			);
+			writeSkillDir(
+				join(project, ".github", "skills"),
+				"shared",
+				['name: "shared"', 'description: "Copilot copy."'],
+				"COPILOT BODY",
+			);
+			const list = loadSkills({ cwd: project, home, configDir: config, trustProjectCompatRoots: true });
+			const skill = list.items.find((entry) => entry.name === "shared");
+			ok(skill);
+			strictEqual(skill.source, "claude");
+			strictEqual(skill.content, "CLAUDE BODY");
+		});
+
+		it("treats project compat roots as untrusted by default", () => {
+			const home = scratchDir("clio-home-");
+			const project = scratchDir("clio-proj-");
+			const config = scratchDir("clio-cfg-");
+			writeSkillDir(join(project, ".codex", "skills"), "proj-compat", [
+				'name: "proj-compat"',
+				'description: "Project compat skill."',
+			]);
+			writeSkillDir(join(project, ".claude", "skills"), "proj-claude", [
+				'name: "proj-claude"',
+				'description: "Project Claude skill."',
+			]);
+			writeSkillDir(join(project, ".opencode", "skills"), "proj-opencode", [
+				'name: "proj-opencode"',
+				'description: "Project OpenCode skill."',
+			]);
+			writeSkillDir(join(project, ".github", "skills"), "proj-copilot", [
+				'name: "proj-copilot"',
+				'description: "Project Copilot skill."',
+			]);
+			const list = loadSkills({ cwd: project, home, configDir: config });
+			const skill = list.items.find((s) => s.name === "proj-compat");
+			ok(skill);
+			strictEqual(skill.trusted, false);
+			for (const name of ["proj-claude", "proj-opencode", "proj-copilot"]) {
+				const projectSkill = list.items.find((s) => s.name === name);
+				ok(projectSkill);
+				strictEqual(projectSkill.trusted, false);
+			}
+			strictEqual(
+				modelVisibleSkills(list.items).some((s) => s.name === "proj-compat"),
+				false,
+			);
+		});
+
+		it("trusts project compat roots when opted in", () => {
+			const home = scratchDir("clio-home-");
+			const project = scratchDir("clio-proj-");
+			const config = scratchDir("clio-cfg-");
+			writeSkillDir(join(project, ".agents", "skills"), "proj-optin", [
+				'name: "proj-optin"',
+				'description: "Opted-in compat skill."',
+			]);
+			const list = loadSkills({ cwd: project, home, configDir: config, trustProjectCompatRoots: true });
+			const skill = list.items.find((s) => s.name === "proj-optin");
+			ok(skill);
+			strictEqual(skill.trusted, true);
+			ok(modelVisibleSkills(list.items).some((s) => s.name === "proj-optin"));
+		});
+
+		it("threads project compat trust through createResourcesLoader", () => {
+			const project = scratchDir("clio-proj-");
+			writeSkillDir(join(project, ".codex", "skills"), "proj-loader", [
+				'name: "proj-loader"',
+				'description: "Project compat through resources loader."',
+			]);
+			const loader = createResourcesLoader({
+				cwd: project,
+				skills: () => ({ trustProjectCompatRoots: true }),
+			});
+			const skill = loader.skills(project).items.find((entry) => entry.name === "proj-loader");
+			ok(skill);
+			strictEqual(skill.trusted, true);
+		});
+	});
+
+	describe("contracts/skills on-demand listing", () => {
+		it("context scope=skills with no name lists model-visible skills without a pending request", async () => {
+			const project = scratchDir("clio-proj-");
+			writeSkillDir(join(project, ".clio-coder", "skills"), "visible", [
+				'name: "visible"',
+				'description: "Catalog entry."',
+			]);
+			const tool = createContextTool({ getCwd: () => project });
+			const result = await tool.run({ scope: "skills" }, undefined);
+			strictEqual(result.kind, "ok");
+			if (result.kind === "ok") {
+				ok(result.output.includes("- visible (project): Catalog entry."));
+				ok(result.output.includes("/skill <name>"));
+				// The listing invites matching and composition but keeps the operator gate.
+				ok(result.output.includes("Match the current task"));
+				ok(result.output.includes("suggest the sequence in order"));
+				ok(result.output.includes("never load one without it"));
+				// Footer anchor: exact reply shape after the entries, with a
+				// no-match guard so routine tasks stay suggestion-free.
+				ok(result.output.includes("Suggested skill: /skill <name>"));
+				ok(result.output.includes("wait for the operator to run it"));
+				ok(result.output.includes("If none match, do not mention skills."));
+			}
+		});
+
+		it("context scope=workspace carries a skills pointer only when skills are installed", async () => {
+			const snapshot = { cwd: "/tmp/x", isGit: false } as never;
+			const workspaceDeps = {
+				hasSession: () => true,
+				getSnapshot: () => snapshot,
+				probeWorkspace: () => snapshot,
+				saveSnapshot: () => {},
+			};
+
+			const withSkills = scratchDir("clio-proj-");
+			writeSkillDir(join(withSkills, ".clio-coder", "skills"), "pointer", ['name: "pointer"', 'description: "Pointer."']);
+			const tool = createContextTool({ getCwd: () => withSkills, workspace: workspaceDeps });
+			const result = await tool.run({ scope: "workspace" }, undefined);
+			strictEqual(result.kind, "ok");
+			if (result.kind === "ok") {
+				// Pointer only: an at-a-glance count and the suggest protocol, no catalog.
+				ok(result.output.includes('"skills"'));
+				ok(result.output.includes("suggest /skill <name> to the operator"));
+				strictEqual(result.output.includes("Pointer."), false);
+			}
+
+			const bare = scratchDir("clio-proj-");
+			const bareTool = createContextTool({
+				getCwd: () => bare,
+				// Suppress discovery so the zero-skill branch is exercised regardless
+				// of skills installed on the host running the tests.
+				getSkillLoaderOptions: () => ({ disableDiscovery: true }),
+				workspace: workspaceDeps,
+			});
+			const bareResult = await bareTool.run({ scope: "workspace" }, undefined);
+			strictEqual(bareResult.kind, "ok");
+			if (bareResult.kind === "ok") {
+				strictEqual(bareResult.output.includes('"skills"'), false);
+			}
+		});
+
+		it("context scope=skills listing excludes disable-model-invocation skills", async () => {
+			const project = scratchDir("clio-proj-");
+			writeSkillDir(join(project, ".clio-coder", "skills"), "manual-only", [
+				'name: "manual-only"',
+				'description: "Only via slash command."',
+				"disable-model-invocation: true",
+			]);
+			const tool = createContextTool({ getCwd: () => project });
+			const result = await tool.run({ scope: "skills" }, undefined);
+			strictEqual(result.kind, "ok");
+			if (result.kind === "ok") {
+				strictEqual(result.output.includes("manual-only"), false);
+			}
+		});
+	});
+
+	describe("contracts/skills slash-command parity", () => {
+		it("expands /skill name with trailing args from the loaded list", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const expansion = expandSkillInvocationInput("/skill expandable do the thing", list);
+			strictEqual(expansion.expanded, true);
+			strictEqual(expansion.text, "do the thing");
+			strictEqual(expansion.text.includes("FOLLOW STEPS"), false);
+			if (expansion.expanded) {
+				strictEqual(expansion.skill.name, "expandable");
+				strictEqual(expansion.triggeredBy, "slash-command");
+			}
+		});
+
+		it("does not expand retired colon or plural skill aliases", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			for (const input of [
+				"/skill:grill-me about adding science skills",
+				"/skills:grill-me about adding science skills",
+			]) {
+				const expansion = expandSkillInvocationInput(input, list);
+				strictEqual(expansion.expanded, false);
+				strictEqual(expansion.text, input);
+			}
+		});
+
+		it("ignores quoted trigger phrases in explicit invocation mode", () => {
+			const root = scratchDir();
+			writeSkillDir(
+				root,
+				"grill-me",
+				['name: "grill-me"', 'description: \'Use when interviewing. Triggers on "grill me", "interview me".\''],
+				"ASK ONE QUESTION",
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const expansion = expandSkillInvocationInput("grill me about adding science skills", list);
+			strictEqual(expansion.expanded, false);
+			strictEqual(expansion.text, "grill me about adding science skills");
+			strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
+		});
+
+		it("does not expand quoted trigger phrases from plain text", () => {
+			const root = scratchDir();
+			writeSkillDir(
+				root,
+				"grill-me",
+				['name: "grill-me"', "description: 'Use when interviewing. Triggers on \"grill me\".'"],
+				"ASK ONE QUESTION",
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const expansion = expandSkillInvocationInput("grill me about adding science skills", list);
+			strictEqual(expansion.expanded, false);
+			strictEqual(expansion.text, "grill me about adding science skills");
+		});
+
+		it("does not trigger hidden model-invocation skills from plain text", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "hidden", [
+				'name: "hidden"',
+				"description: 'Use when hidden. Triggers on \"grill me\".'",
+				"disable-model-invocation: true",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const expansion = expandSkillInvocationInput("grill me about hidden things", list);
+			strictEqual(expansion.expanded, false);
+			strictEqual(expansion.text, "grill me about hidden things");
+		});
+
+		it("parses explicit slash skill requests into clean pending request state", () => {
+			const root = scratchDir();
+			const filePath = writeSkillDir(
+				root,
+				"grill-me",
+				['name: "grill-me"', 'description: "Interview skill."'],
+				"ASK ONE QUESTION",
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const parsed = parsePendingSkillRequests("/skill grill-me adding more science skills", list);
+			strictEqual(parsed.text, "adding more science skills");
+			strictEqual(parsed.pendingSkillRequests.length, 1);
+			const pending = parsed.pendingSkillRequests[0];
+			ok(pending);
+			strictEqual(pending.name, "grill-me");
+			strictEqual(pending.args, "adding more science skills");
+			strictEqual(pending.source, "slash-command");
+			strictEqual(pending.installed, true);
+			strictEqual(pending.filePath, filePath);
+		});
+
+		it("does not parse plain skill-management text into pending request state", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const parsed = parsePendingSkillRequests("adding more science skills to clio coder", list);
+			strictEqual(parsed.text, "adding more science skills to clio coder");
+			strictEqual(parsed.pendingSkillRequests.length, 0);
+		});
+
+		it("interactive submit asks the model to load slash-command skills without preloading the body", async () => {
+			const root = scratchDir();
+			writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const resources: ResourcesContract = {
+				skills: () => list,
+				expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
+				parsePendingSkillRequests: (text, _cwd, options) => {
+					const expansion = expandSkillInvocationInput(text, list, options);
+					return {
+						text: expansion.text,
+						pendingSkillRequests: expansion.expanded
+							? [
+									{
+										name: expansion.skill.name,
+										args: expansion.args,
+										source: "slash-command" as const,
+										installed: true,
+									},
+								]
+							: [],
+					};
+				},
+				expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
+				prompts: () => ({ items: [], diagnostics: [] }),
+				resolvePath: (value: string) => value,
+				reload: async () => undefined,
+			};
+			const expanded = await expandInteractiveSubmitAsync("/skill expandable do the thing", resources);
+			strictEqual(expanded.pendingSkillRequests.length, 1);
+			strictEqual(expanded.text, "do the thing");
+			strictEqual(expanded.text.includes("FOLLOW STEPS"), false);
+		});
+
+		it("interactive submit does not auto-activate prompt-triggered skills from plain text", async () => {
+			const root = scratchDir();
+			writeSkillDir(
+				root,
+				"grill-me",
+				['name: "grill-me"', "description: 'Use when interviewing. Triggers on \"grill me\".'"],
+				"ASK ONE QUESTION",
+			);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			const resources: ResourcesContract = {
+				skills: () => list,
+				expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
+				parsePendingSkillRequests: (text, _cwd, options) => {
+					const expansion = expandSkillInvocationInput(text, list, options);
+					return {
+						text: expansion.text,
+						pendingSkillRequests: expansion.expanded
+							? [
+									{
+										name: expansion.skill.name,
+										args: expansion.args,
+										source: "slash-command" as const,
+										installed: true,
+									},
+								]
+							: [],
+					};
+				},
+				expandPromptTemplate: (text: string) => ({ expanded: false as const, text, args: [], diagnostics: [] }),
+				prompts: () => ({ items: [], diagnostics: [] }),
+				resolvePath: (value: string) => value,
+				reload: async () => undefined,
+			};
+			const expanded = await expandInteractiveSubmitAsync("grill me about science skills", resources);
+			strictEqual(expanded.pendingSkillRequests.length, 0);
+			strictEqual(expanded.text, "grill me about science skills");
+			strictEqual(expanded.text.includes("ASK ONE QUESTION"), false);
+		});
+
+		it("leaves non-skill input untouched", () => {
+			const list = loadSkills({ roots: [] });
+			const expansion = expandSkillInvocationInput("just a normal message", list);
+			strictEqual(expansion.expanded, false);
+			strictEqual(expansion.text, "just a normal message");
+		});
+	});
+
+	describe("contracts/skills tools", () => {
+		const ORIGINAL_ENV = { ...process.env };
+		let scratch: string;
+
+		beforeEach(() => {
+			scratch = mkdtempSync(join(tmpdir(), "clio-skill-tools-"));
+			process.env.HOME = scratch;
+			process.env.CLIO_CODER_HOME = scratch;
+			process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+			process.env.CLIO_CODER_CONFIG_DIR = join(scratch, "config");
+			process.env.CLIO_CODER_STATE_DIR = join(scratch, "state");
+			process.env.CLIO_CODER_CACHE_DIR = join(scratch, "cache");
+			resetXdgCache();
+		});
+
+		afterEach(() => {
+			for (const k of Object.keys(process.env)) {
+				if (!(k in ORIGINAL_ENV)) Reflect.deleteProperty(process.env, k);
+			}
+			for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
+				if (v !== undefined) process.env[k] = v;
+			}
+			rmSync(scratch, { recursive: true, force: true });
+			resetXdgCache();
+		});
+
+		it("context scope=skills returns structured metadata, hash, base_dir, and body", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"readable",
+				['name: "readable"', 'description: "Readable skill."', 'license: "MIT"'],
+				"READ ME BODY",
+			);
+			const tool = createContextTool({ getCwd: () => cwd });
+			const result = await tool.run(
+				{ scope: "skills", name: "readable" },
+				{ pendingSkillPolicy: pendingPolicy("readable") },
+			);
+			strictEqual(result.kind, "ok");
+			if (result.kind !== "ok") return;
+			ok(result.output.includes("READ ME BODY"));
+			const details = result.details as Record<string, unknown>;
+			strictEqual(details.name, "readable");
+			match(String(details.hash), /^[0-9a-f]{64}$/);
+			strictEqual(details.scope, "project");
+			strictEqual(details.sourceOrigin, "project");
+			ok(String(details.baseDir).includes(".clio-coder"));
+		});
+
+		it("frames every loaded skill with the workspace root and the foreign-vocabulary rule", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"portable",
+				['name: "portable"', 'description: "A skill written for another harness."'],
+				"Send a single message with two Agent tool calls using general-purpose.",
+			);
+			const tool = createContextTool({ getCwd: () => cwd });
+			const result = await tool.run(
+				{ scope: "skills", name: "portable" },
+				{ pendingSkillPolicy: pendingPolicy("portable") },
+			);
+			strictEqual(result.kind, "ok");
+			if (result.kind !== "ok") return;
+			// The frame precedes the skill's own prose, so the workspace root and the
+			// substitution rule are read before any instruction that could violate them.
+			const frameIndex = result.output.indexOf("How to read this skill:");
+			ok(frameIndex >= 0);
+			ok(frameIndex < result.output.indexOf("Send a single message"));
+			ok(result.output.includes(`Workspace root: ${cwd}`));
+			ok(result.output.includes("never the working directory"));
+			ok(result.output.includes("Use Clio's equivalent from your own tool list"));
+			ok(result.output.includes("Never invent one"));
+		});
+
+		it("context skill loads honor the pending policy for non-requested and repeated loads", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"grill-me",
+				['name: "grill-me"', 'description: "Interview skill."'],
+				"ASK ONE QUESTION",
+			);
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"context-prime",
+				['name: "context-prime"', 'description: "Context skill."'],
+				"PRIME CONTEXT",
+			);
+			const policy = pendingPolicy("grill-me", "about adding science skills");
+			const tool = createContextTool({ getCwd: () => cwd });
+
+			const wrong = await tool.run({ scope: "skills", name: "context-prime" }, { pendingSkillPolicy: policy });
+			strictEqual(wrong.kind, "error");
+			if (wrong.kind === "error") {
+				strictEqual(
+					wrong.message,
+					"context: this turn has pending skill request(s): grill-me. Load only those before doing anything else.",
+				);
+			}
+
+			const first = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: policy });
+			strictEqual(first.kind, "ok");
+			ok(policy.loadedSkillNames.has("grill-me"));
+			ok(policy.loadedSkillPolicies.has("grill-me"));
+
+			const repeated = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: policy });
+			strictEqual(repeated.kind, "error");
+			if (repeated.kind === "error") {
+				strictEqual(
+					repeated.message,
+					"context: pending skill grill-me already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.",
+				);
+			}
+		});
+
+		it("context skill load denial without a pending request names the compliant next move", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"grill-me",
+				['name: "grill-me"', 'description: "Interview skill."'],
+				"ASK ONE QUESTION",
+			);
+			const tool = createContextTool({ getCwd: () => cwd });
+
+			// No pending policy at all: the operator has not requested any skill.
+			const denied = await tool.run({ scope: "skills", name: "grill-me" }, undefined);
+			strictEqual(denied.kind, "error");
+			if (denied.kind === "error") {
+				ok(denied.message.includes("no pending skill request is active this turn"));
+				// The gate names the model's move: suggest-and-wait, never retry.
+				ok(denied.message.includes("only the operator can activate a skill"));
+				ok(denied.message.includes("do not retry this load"));
+				ok(denied.message.includes("Suggested skill: /skill <name>"));
+				ok(denied.message.includes("wait for the operator"));
+				ok(denied.message.includes("otherwise continue without skills"));
+			}
+
+			// An empty pending policy behaves identically to an absent one.
+			const emptyPolicy = {
+				allowedSkillNames: [],
+				requests: [],
+				loadedSkillNames: new Set<string>(),
+				loadedSkillPolicies: new Map(),
+			};
+			const deniedEmpty = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: emptyPolicy });
+			strictEqual(deniedEmpty.kind, "error");
+			if (deniedEmpty.kind === "error" && denied.kind === "error") {
+				strictEqual(deniedEmpty.message, denied.message);
+			}
+		});
+
+		it("context skill activation reaches the observer registration with turn metadata", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"readable",
+				['name: "readable"', 'description: "Readable skill."'],
+				"READ ME BODY",
+			);
+			const activations: Array<{
+				name: string;
+				filePath: string;
+				hash: string;
+				source: string;
+				sourceOrigin?: string;
+				triggeredBy: string;
+				turnId?: string;
+			}> = [];
+			const bundle = createMiddlewareBundle({
+				registrations: [createSkillActivationObserver((activation) => activations.push(activation))],
+			});
+			const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
+			registry.register(createContextTool({ getCwd: () => cwd }));
+
+			const missing = await registry.invoke(
+				{ tool: ToolNames.Context, args: { scope: "skills", name: "missing" } },
+				{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("missing") },
+			);
+			strictEqual(missing.kind, "ok");
+			if (missing.kind === "ok") strictEqual(missing.result.kind, "error");
+			strictEqual(activations.length, 0);
+
+			const result = await registry.invoke(
+				{ tool: ToolNames.Context, args: { scope: "skills", name: "readable" } },
+				{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("readable") },
+			);
+			strictEqual(result.kind, "ok");
+			strictEqual(activations.length, 1);
+			const activation = activations[0];
+			ok(activation);
+			strictEqual(activation.name, "readable");
+			strictEqual(activation.triggeredBy, "tool");
+			strictEqual(activation.turnId, "turn-1");
+			match(activation.hash, /^[0-9a-f]{64}$/);
+			strictEqual(activation.sourceOrigin, "project");
+			ok(activation.filePath.endsWith("SKILL.md"));
+		});
+
+		it("context skill loads annotate marketplace provenance drift without blocking", async () => {
+			const cwd = join(scratch, "project");
+			const skillPath = writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"pinned",
+				['name: "pinned"', 'description: "Pinned skill."', 'registry-id: "pinned"'],
+				"PINNED BODY",
+			);
+			const manifestDir = join(cwd, "skills");
+			mkdirSync(manifestDir, { recursive: true });
+			const tool = createContextTool({ getCwd: () => cwd });
+			const skillHash = sha256(readFileSync(skillPath, "utf8"));
+
+			writeFileSync(
+				join(manifestDir, "registry.yaml"),
+				["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${skillHash}`, ""].join("\n"),
+				"utf8",
+			);
+			const matchResult = await tool.run(
+				{ scope: "skills", name: "pinned" },
+				{ pendingSkillPolicy: pendingPolicy("pinned") },
+			);
+			strictEqual(matchResult.kind, "ok");
+			if (matchResult.kind !== "ok") return;
+			strictEqual((matchResult.details as Record<string, unknown>).drift, "match");
+			strictEqual(matchResult.output.includes("skill_drift"), false);
+
+			writeFileSync(
+				join(manifestDir, "registry.yaml"),
+				["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${"b".repeat(64)}`, ""].join("\n"),
+				"utf8",
+			);
+			const mismatchResult = await tool.run(
+				{ scope: "skills", name: "pinned" },
+				{ pendingSkillPolicy: pendingPolicy("pinned") },
+			);
+			strictEqual(mismatchResult.kind, "ok");
+			if (mismatchResult.kind !== "ok") return;
+			strictEqual((mismatchResult.details as Record<string, unknown>).drift, "mismatch");
+			ok(mismatchResult.output.includes("WARNING skill_drift"));
+
+			rmSync(join(manifestDir, "registry.yaml"), { force: true });
+			const absentResult = await tool.run(
+				{ scope: "skills", name: "pinned" },
+				{ pendingSkillPolicy: pendingPolicy("pinned") },
+			);
+			strictEqual(absentResult.kind, "ok");
+			if (absentResult.kind !== "ok") return;
+			strictEqual((absentResult.details as Record<string, unknown>).drift, undefined);
+		});
+
+		it("context skill include_tree lists sibling resources without executing them", async () => {
+			const cwd = join(scratch, "project");
+			const dir = join(cwd, ".clio-coder", "skills", "with-tree");
+			mkdirSync(join(dir, "scripts"), { recursive: true });
+			mkdirSync(join(dir, "references"), { recursive: true });
+			writeFileSync(
+				join(dir, "SKILL.md"),
+				["---", 'name: "with-tree"', 'description: "Has resources."', "---", "", "Body.", ""].join("\n"),
+			);
+			writeFileSync(join(dir, "scripts", "run.sh"), "echo hi\n");
+			writeFileSync(join(dir, "references", "doc.md"), "# Doc\n");
+			const tool = createContextTool({ getCwd: () => cwd });
+			const result = await tool.run(
+				{ scope: "skills", name: "with-tree", include_tree: true },
+				{ pendingSkillPolicy: pendingPolicy("with-tree") },
+			);
+			strictEqual(result.kind, "ok");
+			if (result.kind !== "ok") return;
+			ok(result.output.includes("resources:"));
+			ok(result.output.includes("scripts/run.sh"));
+			ok(result.output.includes("references/doc.md"));
+		});
+
+		it("context skill loads refuse skills hidden from model invocation", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(join(cwd, ".clio-coder", "skills"), "hidden", [
+				'name: "hidden"',
+				'description: "Hidden skill."',
+				"disable-model-invocation: true",
+			]);
+			const tool = createContextTool({ getCwd: () => cwd });
+			const result = await tool.run({ scope: "skills", name: "hidden" }, { pendingSkillPolicy: pendingPolicy("hidden") });
+			strictEqual(result.kind, "error");
+		});
+
+		it("artifact rejects kind=skill; skills are written as SKILL.md files directly", async () => {
+			const cwd = join(scratch, "project");
+			mkdirSync(cwd, { recursive: true });
+			const tool = createArtifactTool({ getCwd: () => cwd });
+			const result = await tool.run({ kind: "skill", title: "made-skill", content: "Body." });
+			strictEqual(result.kind, "error");
+			if (result.kind === "error") ok(result.message.includes("kind must be plan, review, or report"));
+		});
+
+		it("context skill loads with a recipe-bound policy admit exactly the declared skills", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"cut-it",
+				['name: "cut-it"', 'description: "Slice plans."'],
+				"SLICE",
+			);
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"other",
+				['name: "other"', 'description: "Other skill."'],
+				"OTHER",
+			);
+			const policy = agentSkillToolPolicy(["cut-it"]);
+			ok(policy);
+			const tool = createContextTool({ getCwd: () => cwd });
+
+			const denied = await tool.run({ scope: "skills", name: "other" }, { pendingSkillPolicy: policy });
+			strictEqual(denied.kind, "error");
+			if (denied.kind === "error") {
+				strictEqual(denied.message, "context: this agent run may load only its declared skill(s): cut-it.");
+			}
+
+			const loaded = await tool.run({ scope: "skills", name: "cut-it" }, { pendingSkillPolicy: policy });
+			strictEqual(loaded.kind, "ok");
+			if (loaded.kind === "ok") {
+				ok(loaded.output.includes("SLICE"));
+				strictEqual(loaded.output.includes("Pending skill request"), false);
+			}
+
+			const repeated = await tool.run({ scope: "skills", name: "cut-it" }, { pendingSkillPolicy: policy });
+			strictEqual(repeated.kind, "error");
+			if (repeated.kind === "error") {
+				strictEqual(repeated.message, "context: skill cut-it is already loaded in this run; continue with its workflow.");
+			}
+		});
+
+		it("context skill loads record the skill's declared tool policy on the pending policy", async () => {
+			const cwd = join(scratch, "project");
+			writeSkillDir(
+				join(cwd, ".clio-coder", "skills"),
+				"narrow",
+				[
+					'name: "narrow"',
+					'description: "Narrow tool surface."',
+					"allowed-tools:",
+					"  - read",
+					"  - grep",
+					"disallowed-tools:",
+					"  - bash",
+				],
+				"NARROW BODY",
+			);
+			const policy = pendingPolicy("narrow");
+			const tool = createContextTool({ getCwd: () => cwd });
+			const result = await tool.run({ scope: "skills", name: "narrow" }, { pendingSkillPolicy: policy });
+			strictEqual(result.kind, "ok");
+			if (result.kind !== "ok") return;
+			const details = result.details as Record<string, unknown>;
+			deepStrictEqual(details.allowedTools, ["read", "grep"]);
+			deepStrictEqual(details.disallowedTools, ["bash"]);
+			deepStrictEqual(policy.loadedSkillPolicies.get("narrow"), {
+				allowedTools: ["read", "grep"],
+				disallowedTools: ["bash"],
+			});
+		});
+
+		it("diagnostics warn about missing skill requirements", () => {
+			const root = scratchDir();
+			writeSkillDir(root, "dep-skill", [
+				'name: "dep-skill"',
+				'description: "Dependent skill."',
+				"requires:",
+				"  - skill:non-existent-skill",
+			]);
+			const list = loadSkills({ roots: [projectRoot(root)] });
+			strictEqual(list.items.length, 1);
+			const warnings = list.diagnostics.map((d) => d.message);
+			ok(warnings.some((w) => w.includes('requires skill "non-existent-skill"')));
+		});
 	});
 });

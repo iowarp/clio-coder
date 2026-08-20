@@ -1,8 +1,8 @@
 /**
  * Coalescing wrapper around chat events (slice 12.5d).
  *
- * Streaming responses fire `text_delta` / `thinking_delta` events at very
- * high frequency. The TUI's per-event `requestRender()` call rebuilt the
+ * Streaming responses fire text, thinking, and cumulative tool-result updates
+ * at very high frequency. The TUI's per-event `requestRender()` call rebuilt the
  * entire transcript on every delta, which scaled linearly with response
  * length and made long answers visibly lag. This wrapper applies every
  * event to the panel synchronously (so internal state stays consistent)
@@ -26,6 +26,14 @@ import type {
 	WorkerRunEntry,
 } from "../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import {
+	type BashExecutionMessage,
+	BRANCH_SUMMARY_PREFIX,
+	BRANCH_SUMMARY_SUFFIX,
+	bashExecutionToText,
+	COMPACTION_SUMMARY_PREFIX,
+	COMPACTION_SUMMARY_SUFFIX,
+} from "../engine/messages.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
@@ -35,8 +43,8 @@ import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
-import { renderToolResultOnly } from "./renderers/tool-execution.js";
-import { readWorkerReceiptFacts } from "./worker-receipts.js";
+import { renderBashTranscriptExecution, renderToolResultOnly } from "./renderers/tool-execution.js";
+import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
 import { workerEntriesFromRunEntries } from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
 
@@ -47,7 +55,11 @@ const MAX_REPLAY_TEXT_CHARS = 20_000;
  * Event kinds whose render is deferred into a coalesce window. All other
  * `ChatLoopEvent` kinds render synchronously and cancel any pending timer.
  */
-const DELTA_TYPES: ReadonlySet<ChatLoopEvent["type"]> = new Set(["text_delta", "thinking_delta"]);
+const DELTA_TYPES: ReadonlySet<ChatLoopEvent["type"]> = new Set([
+	"text_delta",
+	"thinking_delta",
+	"tool_execution_update",
+]);
 
 export interface CreateCoalescingChatRendererDeps {
 	chatPanel: ChatPanel;
@@ -499,30 +511,20 @@ function appendReplayLine(chatPanel: ChatPanel, text: string): void {
 	chatPanel.appendReplayBlock((width) => renderReplayLine(truncateReplayText(text), width));
 }
 
-const BASH_REPLAY_MAX_LINES = 12;
-
-export function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
-	const lines: string[] = [];
-	lines.push(...wrapTextWithAnsi(`bash: $ ${entry.command}`, width));
-	const output = truncateReplayText(entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, ""));
-	if (output.length > 0) {
-		const outputLines = output.split("\n");
-		const hidden = Math.max(0, outputLines.length - BASH_REPLAY_MAX_LINES);
-		const visible = outputLines.slice(-BASH_REPLAY_MAX_LINES);
-		if (hidden > 0) lines.push(...wrapTextWithAnsi(`  ... ${hidden} earlier lines`, width));
-		for (const line of visible) {
-			lines.push(...wrapTextWithAnsi(`  ${line}`, width));
-		}
-	} else {
-		lines.push(...wrapTextWithAnsi("  (no output)", width));
-	}
-	const status: string[] = [];
-	if (entry.cancelled) status.push("cancelled");
-	if (entry.exitCode !== null && entry.exitCode !== 0) status.push(`exit ${entry.exitCode}`);
-	if (entry.truncated) status.push(entry.fullOutputPath ? `truncated: ${entry.fullOutputPath}` : "truncated");
-	if (entry.excludeFromContext) status.push("excluded from context");
-	if (status.length > 0) lines.push(...wrapTextWithAnsi(`  (${status.join(", ")})`, width));
-	return lines;
+function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
+	return renderBashTranscriptExecution(
+		{
+			command: entry.command,
+			output: truncateReplayText(entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "")),
+			running: false,
+			exitCode: entry.exitCode,
+			cancelled: entry.cancelled,
+			truncated: entry.truncated,
+			fullOutputPath: entry.fullOutputPath,
+			excludeFromContext: entry.excludeFromContext,
+		},
+		width,
+	);
 }
 
 function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
@@ -746,33 +748,26 @@ function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionE
 }
 
 function compactionContextText(entry: CompactionSummaryEntry): string {
-	return [
-		"The conversation history before this point was compacted into the following summary:",
-		"",
-		"<summary>",
-		entry.summary,
-		"</summary>",
-	].join("\n");
+	return `${COMPACTION_SUMMARY_PREFIX}${entry.summary}${COMPACTION_SUMMARY_SUFFIX}`;
 }
 
 function branchContextText(entry: BranchSummaryEntry): string {
-	return [
-		"The following is a summary of a branch that this conversation came back from:",
-		"",
-		"<summary>",
-		entry.summary,
-		"</summary>",
-	].join("\n");
+	return `${BRANCH_SUMMARY_PREFIX}${entry.summary}${BRANCH_SUMMARY_SUFFIX}`;
 }
 
+/** Project Clio's ledger entry onto pi's bash message so pi owns the replay wording. */
 function bashContextText(entry: BashExecutionEntry): string {
-	let text = `Ran \`${entry.command}\`\n`;
-	const output = truncateReplayText(entry.output);
-	text += output.length > 0 ? `\`\`\`\n${output}\n\`\`\`` : "(no output)";
-	if (entry.cancelled) text += "\n\n(command cancelled)";
-	else if (entry.exitCode !== null && entry.exitCode !== 0) text += `\n\nCommand exited with code ${entry.exitCode}`;
-	if (entry.truncated && entry.fullOutputPath) text += `\n\n[Output truncated. Full output: ${entry.fullOutputPath}]`;
-	return text;
+	const message: BashExecutionMessage = {
+		role: "bashExecution",
+		command: entry.command,
+		output: truncateReplayText(entry.output),
+		exitCode: entry.exitCode ?? undefined,
+		cancelled: entry.cancelled,
+		truncated: entry.truncated,
+		...(entry.fullOutputPath !== undefined ? { fullOutputPath: entry.fullOutputPath } : {}),
+		timestamp: Date.parse(entry.timestamp) || 0,
+	};
+	return bashExecutionToText(message);
 }
 
 function appendContextMessage(out: AgentMessage[], role: "user" | "assistant", text: string, timestamp: string): void {
@@ -838,6 +833,7 @@ export function buildReplayAgentMessagesFromTurns(
 			case "label":
 			case "protectedArtifact":
 			case "taskLedger":
+			case "decisionLedger":
 			// A worker's answer is not the operator's words and not the model's.
 			// It reaches the model only when an operator shares it, and a share
 			// is already a user message by the time it lands in the ledger.
@@ -883,7 +879,7 @@ export function rehydrateChatPanelFromTurns(
 	// a failover replays as the one run it was rather than as two.
 	const workerStates = workerEntriesFromRunEntries(
 		selected.filter((entry): entry is WorkerRunEntry => entry.kind === "workerRun"),
-		options.readWorkerReceipt ?? readWorkerReceiptFacts,
+		options.readWorkerReceipt ?? readWorkerReceiptFactsForReplay,
 	);
 	const placedAssignments = new Set<string>();
 	for (const entry of selected) {
@@ -918,6 +914,7 @@ export function rehydrateChatPanelFromTurns(
 						toolName: call.name,
 						args: call.args,
 					});
+					chatPanel.markToolReplayed?.(call.id);
 					break;
 				}
 				if (entry.role === "tool_result") {
@@ -1017,6 +1014,7 @@ export function rehydrateChatPanelFromTurns(
 			}
 			case "label":
 			case "taskLedger":
+			case "decisionLedger":
 				break;
 		}
 	}
@@ -1029,10 +1027,9 @@ export function rehydrateChatPanelFromTurns(
 			isError: true,
 		});
 	}
-	// Replay reproduces the settled view: tools collapse to their one-line
-	// ledger summary. The live path collapses tools because they fire while the
-	// assistant is streaming (pending), a state replay cannot reconstruct
-	// per-tool, so collapse them explicitly here. /export re-expands afterward
-	// via toggleAllToolsExpanded; /resume and /fork keep the collapsed form.
+	// Replay favors a compact historical ledger even though fresh non-resource
+	// calls auto-expand for live arguments and output. Collapse reconstructed
+	// tools explicitly; /export re-expands them afterward via
+	// toggleAllToolsExpanded, while /resume and /fork retain the compact form.
 	chatPanel.collapseAllTools();
 }

@@ -20,7 +20,7 @@
 </p>
 
 > [!WARNING]
-> **Experimental v0.3.1 release.** Clio Coder's behavior and interfaces may
+> **Experimental v0.3.2 release.** Clio Coder's behavior and interfaces may
 > break or change without notice. Use version control, review proposed changes,
 > and keep backups when operating on important repositories.
 
@@ -133,7 +133,7 @@ dist-tag instead.
 From source, pinned to this release:
 
 ```bash
-git clone --branch v0.3.1 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.3.2 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
@@ -170,7 +170,7 @@ cd /path/to/your/repo
 
 clio-coder configure \
   --id local-lmstudio \
-  --runtime lmstudio-native \
+  --runtime lmstudio \
   --url http://localhost:1234 \
   --model your-model-id \
   --set-orchestrator \
@@ -192,7 +192,10 @@ clio-coder                   # interactive terminal UI
 Inside the TUI, `/settings` shows the target, fleet, and routing the session
 uses (`/targets` and `/fleet` open straight into their sections), `/agents` and
 `/skill` list what it can dispatch and run, and `/help` opens the interactive
-help center.
+help center. `/export` writes a self-contained HTML transcript of the active
+session branch (an explicit `.md` path keeps the Markdown export), and
+Settings → Terminal offers an opt-in fullscreen mode with a sticky composer
+above a scrollable transcript.
 
 ## Bring your own model
 
@@ -205,11 +208,34 @@ fleet dispatch through different targets independently.
 | Runtime id | Server |
 | --- | --- |
 | `llamacpp`, `llamacpp-anthropic`, `llamacpp-completion` | llama.cpp and llama-swap routers |
-| `lmstudio-native` | LM Studio |
+| `lmstudio` | LM Studio |
 | `ollama-native` | Ollama |
 | `vllm`, `sglang` | vLLM and SGLang |
 | `lemonade`, `lemonade-anthropic` | Lemonade |
 | `openai-compat`, `anthropic-compat` | Any OpenAI- or Anthropic-shaped endpoint |
+
+### Recommended local model
+
+If you have one GPU with 24 GB or more, serve **Qwen3.8-27B** (the
+`unsloth/Qwen3.8-27B-GGUF` quantizations) and point both the chat and fleet
+targets at it. It is the model the 0.3.2 cut was hardened against on llama.cpp
+(ROCm) and LM Studio (CUDA and Vulkan), and its catalog entry
+(`src/domains/providers/models/local-models/clio-local-coding-targets.yaml`,
+family `qwen3.8-27b`) carries the verified wire shape:
+
+- IQ4_NL or UD-Q4_K_XL at 131072 context fits in 24 GB with q8_0 KV cache;
+  Q6_K fits in 32 GB at 131072. The full 262144 context is a unified-memory
+  or multi-GPU configuration.
+- Tool calls and `reasoning_content` parse correctly on the OpenAI-compatible
+  endpoint of both runtimes. Start llama.cpp with `--jinja --reasoning on
+  --reasoning-effort medium`; LM Studio needs nothing beyond loading the model.
+- Thinking is driven per request by Clio's `thinkingLevel`. `off` disables
+  reasoning on the wire; `minimal` and `low` send low effort, `medium` sends
+  medium, and `high`, `xhigh`, and `max` all send the template's top effort
+  (`xhigh` on llama.cpp, `high` on LM Studio). No level produces a request the
+  model's chat template rejects.
+- Vulkan backends process long prompts far more slowly than ROCm or CUDA on this
+  family. Prefer the ROCm runtime where the hardware offers both.
 
 ### Cloud APIs
 
@@ -264,7 +290,7 @@ muscle, or the reverse.
 ```bash
 clio-coder configure --id chatgpt-orch --runtime openai-codex --model gpt-5.4 --set-orchestrator
 clio-coder configure --id claude-worker --runtime claude-sdk --model sonnet
-clio-coder configure --id local-fleet --runtime lmstudio-native --url http://localhost:1234 \
+clio-coder configure --id local-fleet --runtime lmstudio --url http://localhost:1234 \
   --model qwen-7b --set-fleet-default
 
 clio-coder targets profile claude-sdk claude-worker --model sonnet
@@ -387,7 +413,10 @@ Clio loads a local `CLIO-CODER.md` as generated project context on every session
 existing handbook until an explicit replacement action, and can adopt existing
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
 provenance and conflict reporting. `CLIO-CODER.md` is a gitignored runtime artifact,
-not canonical repository documentation.
+not canonical repository documentation. A `CLIO-CODER.override.md` in a
+subdirectory starts a replacement boundary: it supersedes inherited handbooks
+for that directory and its descendants, and deeper `CLIO-CODER.md` files can
+still add narrower guidance beneath it.
 
 Alongside it, `clio-coder context index` builds a structural codewiki that the
 `code_nav` tool navigates, so a model can find a symbol without reading half
@@ -402,19 +431,27 @@ skill's `allowed-tools` declaration is enforced at tool admission, and a skill
 can ship executable RED-GREEN evals that `clio-coder skills eval <name>` runs
 instead of trusting the prose.
 
-This repository ships a curated catalog under [skills/](skills/README.md) with
+The package ships a curated catalog under [skills/](skills/README.md) with
 provenance frontmatter, evals, and content hashes pinned in
 `skills/registry.yaml`, so an installed copy verifies against its audited
-source at activation. Nothing auto-loads.
+source at activation. The catalog is a marketplace, not a discovery root:
+nothing auto-loads, and a skill reaches your session only when you install
+it. Bare names resolve through the shipped catalog with no setup, and the
+copy is local, so installing needs no network.
 
 ```bash
+clio-coder skills search debug              # installed matches, then marketplace ones
 clio-coder skills install context-handoff   # copy into .clio-coder/skills
 clio-coder skills list                      # confirm Clio sees it
 ```
 
-The catalog includes [`find-skills`](skills/meta/find-skills/), which routes
-discovery through `clio-coder skills search` and `clio-coder skills install`. Install it
-with `clio-coder skills install find-skills --user` so it outranks the community
+In a session, `/skill <name>` on a catalog skill offers the install first, and
+`context(scope="skills")` shows the model both what is installed and what the
+marketplace can install, so asking Clio about a skill by name works before it
+is installed. The catalog includes [`find-skills`](skills/meta/find-skills/),
+which routes discovery through `clio-coder skills search` and
+`clio-coder skills install`. Install it with
+`clio-coder skills install find-skills --user` so it outranks the community
 skill of the same name that other installers drop into compat roots.
 
 ## Memory that survives long tasks
@@ -434,8 +471,8 @@ list|propose|approve|reject|prune`. Design notes:
 
 ## Status
 
-Clio Coder is experimental software in a soft beta. The current release is
-**v0.3.1**, installable from npm as
+Clio Coder is an experimental alpha. The current release is
+**v0.3.2**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Interfaces may still move between minor versions, and
 model-specific behavior varies by target.
@@ -469,7 +506,8 @@ tool, this section is the orientation you need.
 
 ## Orienting in this repository
 
-Do not read broadly. Start from the codewiki, which indexes 927 source files.
+Do not read broadly. Start from the codewiki, which `clio-coder context index`
+builds over the roughly 1,200 source and test files in this repository.
 Use `code_nav` in `entries`, `path`, or `symbol` mode before any wide read.
 The indexed entry points are `src/cli/index.ts`, `src/domains/agents/index.ts`,
 `src/domains/components/index.ts`, `src/domains/config/index.ts`,
@@ -614,9 +652,9 @@ flowchart TB
   DISP --> WORK["src/worker<br/>bounded worker runtime"]
 ```
 
-The largest indexed areas are `src/domains` (392 files), `tests/contracts`
-(236), `src/interactive` (83), `src/cli` (48), `src/tools` (42), `src/engine`
-(40), and `src/core` (35). Compile-time boundaries between domains are
+The largest indexed areas are `src/domains` (430 files), `tests/contracts`
+(370), `src/interactive` (120), `src/cli` (56), `src/tools` (47), `src/engine`
+(42), and `src/core` (42). Compile-time boundaries between domains are
 enforced by a test suite, not by convention. Read
 [docs/architecture.md](docs/architecture.md) before adding a cross-domain
 import.
@@ -635,9 +673,9 @@ Targeted checks when the risk is narrower:
 | --- | --- |
 | Types | `npm run typecheck` |
 | Style | `npm run lint` |
-| Contracts | `npm run test:contracts` |
-| Smoke flows | `npm run test:smoke` |
-| Domain boundaries | `npm run check:boundaries` |
+| Contracts | `npm run test:file -- 'tests/contracts/**/*.test.ts'` |
+| Smoke flows | `npm run test:file -- 'tests/smoke/**/*.test.ts'` |
+| Domain boundaries | `npm run lint` (the boundary checker runs inside the hygiene lint) |
 | Everything | `npm run test` |
 
 Conventions worth knowing before your first PR: local imports end in `.js`,
@@ -649,9 +687,10 @@ tests use `node:test`, and `any` needs a tracking issue.
 npm run ci:release
 ```
 
-That runs typecheck, Biome, the skills pin check, the production build, the
-contract, smoke, and boundary suites, and the `check-release` dist and package
-audit. Live model validation is separate, manual, and opt-in, because no
+That runs typecheck, Biome and the hygiene checks (which include the
+domain-boundary rules), the skills pin check, the production build, the
+contract and smoke suites, the trace-viewer suite, and the `check-release`
+dist and package audit. Live model validation is separate, manual, and opt-in, because no
 deterministic suite can promise that every local model behaves identically:
 
 ```bash
@@ -695,6 +734,10 @@ locally with interactive blueprints.
 | Topic | Guide |
 | --- | --- |
 | Commands, slash commands, operating posture, keybindings, dispatch, verification, troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
+| Exit code taxonomy, `--help` standard, `--json` event frames, headless output contracts | [exit-codes-and-output.md](docs/exit-codes-and-output.md) |
+| Session lifecycle, ledger format, `/tree`, `/fork`, `/resume`, checkpoints, recovery | [session-lifecycle.md](docs/session-lifecycle.md) |
+| ACP v1 server over stdio: session binding, tool mediation, permissions, error taxonomy | [acp.md](docs/acp.md) |
+| Error remediation and diagnostics keyed by exact user-facing messages | [troubleshooting.md](docs/troubleshooting.md) |
 | Multi-node fleet dispatch: SSH transport, doctor preflight, placement, topologies, receipts | [fleet-dispatch.md](docs/fleet-dispatch.md) |
 | Executable multi-node demo with a reviewer gate and receipt provenance walkthrough | [fleet-demo-runbook.md](docs/fleet-demo-runbook.md) |
 | NDJSON parent-child protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](docs/worker-dispatch-mechanics.md) |

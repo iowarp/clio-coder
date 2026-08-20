@@ -11,6 +11,12 @@
  * resources the CLI resolves from the installed package root, and enforces
  * size budgets. Runs in `ci:release`, so a publish cannot ship an unaudited
  * tarball.
+ *
+ * Version coherence: the version in package.json must be the version the top
+ * of CHANGELOG.md describes. `prepublishOnly` runs this gate, so without the
+ * check a publish could ship with the release notes still sitting under an
+ * `## Unreleased` heading, which is what the tree looked like when this was
+ * added.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -32,10 +38,22 @@ const MAX_TARBALL_BYTES = 15_000_000;
 const MAX_UNPACKED_BYTES = 40_000_000;
 
 const FORBIDDEN = [
-	{ test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"), reason: "python bytecode cache" },
-	{ test: (f) => f.endsWith(".map"), reason: "source map (excluded by release policy)" },
-	{ test: (f) => f.startsWith("benchmarks/"), reason: "benchmarks are not part of the package" },
-	{ test: (f) => f.startsWith("scripts/"), reason: "repo scripts operate on a source checkout only" },
+	{
+		test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"),
+		reason: "python bytecode cache",
+	},
+	{
+		test: (f) => f.endsWith(".map"),
+		reason: "source map (excluded by release policy)",
+	},
+	{
+		test: (f) => f.startsWith("benchmarks/"),
+		reason: "benchmarks are not part of the package",
+	},
+	{
+		test: (f) => f.startsWith("scripts/"),
+		reason: "repo scripts operate on a source checkout only",
+	},
 	{ test: (f) => f.endsWith(".tsbuildinfo"), reason: "typescript build cache" },
 	{ test: (f) => /(^|\/)\.env(\.|$)/.test(f), reason: "environment file" },
 	{ test: (f) => f.includes("node_modules/"), reason: "vendored node_modules" },
@@ -65,13 +83,75 @@ for (const rel of ENTRIES) {
 	else if (head !== SHEBANG) errors.push(`bad shebang in ${rel}`);
 }
 
+checkVersionCoherence();
+
+/**
+ * The published version and the release notes for it must name the same number.
+ *
+ * `prepublishOnly` runs this gate, and until now nothing in it read
+ * package.json's version at all: the tree could be published with every note
+ * for the release still under `## Unreleased`, or with the version bumped and
+ * the changelog never touched. Both are silent at publish time and permanent
+ * afterwards, because a published version cannot be replaced.
+ *
+ * The rule is deliberately narrow. The first `##` heading in CHANGELOG.md is
+ * the release being cut, so it must read `## <version>` and may carry a date
+ * after it. `## Unreleased` is the pre-cut state and fails by name, since it is
+ * the one wrong heading a release is actually likely to have.
+ */
+function checkVersionCoherence() {
+	let version;
+	try {
+		version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+	} catch (error) {
+		errors.push(`unable to read package.json version: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+	if (typeof version !== "string" || version.length === 0) {
+		errors.push("package.json has no version");
+		return;
+	}
+
+	let changelog;
+	try {
+		changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+	} catch (error) {
+		errors.push(`unable to read CHANGELOG.md: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+
+	const heading = changelog.split(/\r?\n/).find((line) => line.startsWith("## "));
+	if (heading === undefined) {
+		errors.push("CHANGELOG.md has no '## <version>' heading");
+		return;
+	}
+	// Everything before an optional " - <date>" is the version the section is for.
+	const named = heading.slice(3).split(" - ")[0].trim();
+	if (named === "Unreleased") {
+		errors.push(
+			`CHANGELOG.md still opens with '## Unreleased'; retitle that section '## ${version} - <date>' before publishing`,
+		);
+		return;
+	}
+	if (named !== version) {
+		errors.push(
+			`package.json version ${version} does not match the top CHANGELOG.md heading '${heading.trim()}'; the release notes and the published version must name the same release`,
+		);
+	}
+}
+
 const entrySet = new Set(ENTRIES);
-for (const dirent of readdirSync(join(root, "dist"), { recursive: true, withFileTypes: true })) {
+for (const dirent of readdirSync(join(root, "dist"), {
+	recursive: true,
+	withFileTypes: true,
+})) {
 	if (!dirent.isFile() || !dirent.name.endsWith(".js")) continue;
 	const abs = join(dirent.parentPath, dirent.name);
 	const rel = abs.slice(root.length).replaceAll("\\", "/");
 	if (entrySet.has(rel)) continue;
-	if (firstLine(abs) === SHEBANG) errors.push(`unexpected shebang on non-entry chunk: ${rel}`);
+	if (firstLine(abs) === SHEBANG) {
+		errors.push(`unexpected shebang on non-entry chunk: ${rel}`);
+	}
 }
 
 let report;
@@ -95,7 +175,9 @@ const fileSet = new Set(files);
 
 for (const file of files) {
 	for (const rule of FORBIDDEN) {
-		if (rule.test(file)) errors.push(`forbidden file in package: ${file} (${rule.reason})`);
+		if (rule.test(file)) {
+			errors.push(`forbidden file in package: ${file} (${rule.reason})`);
+		}
 	}
 }
 
@@ -104,7 +186,9 @@ for (const required of REQUIRED_FILES) {
 }
 
 for (const prefix of REQUIRED_PREFIXES) {
-	if (!files.some((f) => f.startsWith(prefix))) errors.push(`no files under required tree: ${prefix}`);
+	if (!files.some((f) => f.startsWith(prefix))) {
+		errors.push(`no files under required tree: ${prefix}`);
+	}
 }
 
 const requiredRecipeKeys = new Set([
@@ -172,6 +256,8 @@ if (errors.length > 0) {
 }
 
 process.stdout.write(
-	`check-release: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(2)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
+	`check-release: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(
+		2,
+	)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
 );
 process.exit(0);

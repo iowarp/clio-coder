@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tool Usage Reference Blueprint (v0.3.1)</title>
+  <title>Tool Usage Reference Blueprint (v0.3.2)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Custom calculator styling */
@@ -76,7 +76,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.1</span>
+        <span class="version-badge">Clio Coder v0.3.2</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -202,7 +202,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Tool Usage Blueprint &bull; Version 0.3.1 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Tool Usage Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -224,14 +224,14 @@
       2: {
         title: "Mutate Plane (2 Tools)",
         tools: [
-          { name: "write", params: "path, content", desc: "Atomically writes or overwrites entire file contents under write boundary governance." },
-          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: "Surgical matching/patching edits in files. Uses exact, whitespace-relaxed, and fuzzy match strategies." }
+          { name: "write", params: "path, content", desc: "Atomically writes or overwrites entire file contents under write boundary governance. Returns numbered diff with word-level changes." },
+          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: "Surgical matching/patching edits in files. Returns numbered word-level diff with theme color highlighting." }
         ]
       },
       3: {
         title: "Execute Plane (3 Tools)",
         tools: [
-          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes shell commands within workspace boundaries and timeout limits (default 300,000 ms)." },
+          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes shell commands within workspace boundaries (default 300,000 ms timeout). Sets AI_AGENT=clio-coder in child environment and streams live output tail." },
           { name: "git", params: "op, path, cached, stat, name_only, limit, cwd", desc: "Runs safe git status, diff, and log inspections." },
           { name: "verify", params: "check, focus", desc: "Runs declared project verification suites (tests, lints, typechecks, builds)." }
         ]

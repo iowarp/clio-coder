@@ -10,6 +10,7 @@ export type OverlayState =
 	| "context-view"
 	| "context-reset"
 	| "tasks"
+	| "decisions"
 	| "memory"
 	| "view"
 	| "model"
@@ -158,6 +159,7 @@ export function routeOverlayKey(
 	if (overlayState === "closed") return false;
 	if (
 		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
+		(overlayState === "tasks" && matches(data, "clio.tasks.open")) ||
 		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
 		(overlayState === "model" && matches(data, "clio.model.select")) ||
 		(overlayState === "help" && matches(data, "clio.leader"))
@@ -180,6 +182,7 @@ export function routeOverlayKey(
 	}
 	if (overlayState === "context-reset") return false;
 	if (overlayState === "tasks") return false;
+	if (overlayState === "decisions") return false;
 	if (overlayState === "memory") return false;
 	if (overlayState === "view") return false;
 	if (overlayState === "model") return routeModelOverlayKey(data, deps);

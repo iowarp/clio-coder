@@ -101,6 +101,7 @@ describe("contracts/view-overlay", () => {
 				"receipt",
 				"dispatch",
 				"task-ledger",
+				"workspace",
 				"tool-output",
 				"protected-artifact",
 				"compaction",
@@ -113,6 +114,7 @@ describe("contracts/view-overlay", () => {
 			["new", "old"],
 		);
 		ok(rows.some((row) => row.type === "empty" && row.category === "tool-output"));
+		ok(rows.some((row) => row.type === "empty" && row.category === "workspace"));
 	});
 
 	it("uses the rendered category order for selection without losing the newest initial artifact", () => {
@@ -149,6 +151,12 @@ describe("contracts/view-overlay", () => {
 			kind: "category",
 			category: "prompt-manifest",
 			value: "",
+		});
+		deepStrictEqual(parseViewFilterQuery("workspace"), { kind: "category", category: "workspace", value: "" });
+		deepStrictEqual(parseViewFilterQuery("workspace:reports/out.md"), {
+			kind: "category",
+			category: "workspace",
+			value: "reports/out.md",
 		});
 		deepStrictEqual(parseViewFilterQuery("audit:session-1"), {
 			kind: "category",
@@ -209,6 +217,15 @@ describe("contracts/view-overlay", () => {
 				searchText: ["npm test"],
 			}),
 			artifact({
+				id: "workspace:/workspace/reports/out.md",
+				category: "workspace",
+				title: "reports/out.md · artifact · report",
+				timestamp: 3.5,
+				path: "/workspace/reports/out.md",
+				toolName: "artifact",
+				searchText: ["reports/out.md", "report", "0 overwrites"],
+			}),
+			artifact({
 				id: "protected:turn-1",
 				category: "protected-artifact",
 				title: "Protected · locked.ts",
@@ -266,6 +283,15 @@ describe("contracts/view-overlay", () => {
 			filterViewArtifacts(artifacts, "tool-output:run-444").map((item) => item.id),
 			["tool:turn-1"],
 		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "workspace").map((item) => item.id),
+			["workspace:/workspace/reports/out.md"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "workspace:reports/out.md").map((item) => item.id),
+			["workspace:/workspace/reports/out.md"],
+		);
+		strictEqual(initialViewSelection(artifacts, "workspace:reports/out.md"), 0);
 		deepStrictEqual(
 			filterViewArtifacts(artifacts, "protected-artifact").map((item) => item.id),
 			["protected:turn-1"],

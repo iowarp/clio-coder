@@ -34,6 +34,7 @@ export const BusChannels = {
 	SessionEnd: "session.end",
 	SessionParked: "session.parked",
 	SessionResumed: "session.resumed",
+	SessionTurnSwitched: "session.turn_switched",
 	DomainLoaded: "domain.loaded",
 	DomainFailed: "domain.failed",
 	ConfigHotReload: "config.hotReload",
@@ -300,6 +301,20 @@ export interface SessionResumedPayload {
 	at: number;
 }
 
+/**
+ * Published on {@link BusChannels.SessionTurnSwitched} when `/tree` moves the
+ * active append point inside the current session without changing which
+ * session is open. Nothing else observes that move: unlike resume/fork, the
+ * session id in `getSessionId()` callbacks stays the same, so anything keyed
+ * on session id alone (the task board cache among them) needs this signal to
+ * know its fold is stale.
+ */
+export interface SessionTurnSwitchedPayload {
+	sessionId: string;
+	turnId: string;
+	at: number;
+}
+
 /** Published on {@link BusChannels.DomainLoaded} per successfully started domain. */
 export interface DomainLoadedPayload {
 	name: string;
@@ -395,12 +410,12 @@ export interface PermissionRequestedPayload {
 
 /**
  * Published on {@link BusChannels.PermissionResolved} when a parked call is
- * granted or denied (operator decision, headless auto-deny, or a delegated
- * agent's denial relayed by dispatch). Only `status` is guaranteed; emitters
- * attach whatever provenance they have.
+ * granted, denied, or expires internally (operator decision, headless
+ * auto-deny, delegated-agent denial, or internal expiry). Only `status` is
+ * guaranteed; emitters attach whatever provenance they have.
  */
 export interface PermissionResolvedPayload {
-	status: "granted" | "denied";
+	status: "granted" | "denied" | "expired";
 	requestId?: string | undefined;
 	origin?: string | undefined;
 	decidedBy?: string | undefined;
@@ -685,6 +700,7 @@ export type BusPayloadMap = {
 	[BusChannels.SessionEnd]: SessionEndPayload;
 	[BusChannels.SessionParked]: SessionParkedPayload;
 	[BusChannels.SessionResumed]: SessionResumedPayload;
+	[BusChannels.SessionTurnSwitched]: SessionTurnSwitchedPayload;
 	[BusChannels.DomainLoaded]: DomainLoadedPayload;
 	[BusChannels.DomainFailed]: DomainFailedPayload;
 	[BusChannels.ConfigHotReload]: ConfigChangePayload;

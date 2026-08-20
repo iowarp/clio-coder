@@ -106,13 +106,23 @@ function cloneEnvelope(envelope: RunEnvelope): RunEnvelope {
 	return structuredClone(envelope);
 }
 
-function mergeRunsById(disk: RunEnvelope[], memory: RunEnvelope[]): RunEnvelope[] {
-	// In-memory writes represent newer state (we just updated them in this process),
-	// so they win on id conflict. Disk-only entries are preserved so sibling
-	// processes' runs survive this process's persist().
+/**
+ * Only a row this process actually wrote is newer than disk. The mirror also
+ * holds rows read at open time that belong to sibling processes, and letting
+ * those win reverted a sibling's settled run to the snapshot this process
+ * happened to read: a dispatch that finished `completed`/0 reappeared as
+ * `running` with a null receiptPath, and the next recovery pass then sealed it
+ * `dead`/1. So memory wins only for `dirty` ids; every other id takes the disk
+ * copy. A non-dirty mirror row absent from disk was evicted by a sibling's ring
+ * cap and stays evicted rather than being resurrected on every persist.
+ */
+function mergeRunsById(disk: RunEnvelope[], memory: RunEnvelope[], dirty: ReadonlySet<string>): RunEnvelope[] {
 	const merged = new Map<string, RunEnvelope>();
 	for (const r of disk) merged.set(r.id, r);
-	for (const r of memory) merged.set(r.id, r);
+	for (const r of memory) {
+		if (!dirty.has(r.id)) continue;
+		merged.set(r.id, r);
+	}
 	const all = Array.from(merged.values());
 	all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
 	return all;
@@ -147,6 +157,10 @@ function capRuns(all: RunEnvelope[], maxRuns: number): RunEnvelope[] {
 export function openLedger(opts?: LedgerOptions): Ledger {
 	const maxRuns = resolveMaxRuns(opts?.maxRuns);
 	let runs: RunEnvelope[] = readRuns();
+	// Ids this process has written since the last successful persist. See
+	// mergeRunsById: this is what separates our writes from a sibling's rows we
+	// merely read at open time.
+	const dirty = new Set<string>();
 
 	function findIndex(id: string): number {
 		return runs.findIndex((r) => r.id === id);
@@ -187,6 +201,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				costUsd: 0,
 			};
 			runs.unshift(envelope);
+			dirty.add(envelope.id);
 			return cloneEnvelope(envelope);
 		},
 
@@ -197,6 +212,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			if (!current) return null;
 			const next = applyPatch(current, patch);
 			runs[idx] = next;
+			dirty.add(id);
 			return cloneEnvelope(next);
 		},
 
@@ -244,6 +260,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			if (stateRootRemoved()) return receiptWithIntegrity;
 			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
 			runs[idx] = { ...current, receiptPath: target };
+			dirty.add(id);
 			return receiptWithIntegrity;
 		},
 
@@ -251,6 +268,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			if (findIndex(envelope.id) !== -1) return false;
 			runs.push(cloneEnvelope(envelope));
 			runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
+			dirty.add(envelope.id);
 			return true;
 		},
 
@@ -263,15 +281,22 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			await withStateFileLock(target, () => {
 				if (stateRootRemoved()) return;
 				const diskRuns = readRuns();
-				const merged = mergeRunsById(diskRuns, runs);
+				const merged = mergeRunsById(diskRuns, runs, dirty);
 				const capped = capRuns(merged, maxRuns);
 				runs = capped;
 				atomicWrite(target, JSON.stringify(capped, null, 2));
+				// Everything this process claimed is now on disk, so the mirror holds
+				// no newer state until the next write. Clearing here is what stops a
+				// long-lived process from re-asserting an old snapshot of its own rows
+				// over a sibling's later update to them.
+				dirty.clear();
 			});
 		},
 
 		reload(): void {
 			runs = readRuns();
+			// The mirror was just replaced wholesale, so any unpersisted claim is gone.
+			dirty.clear();
 		},
 	};
 }

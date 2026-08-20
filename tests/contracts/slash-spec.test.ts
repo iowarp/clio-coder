@@ -40,7 +40,6 @@ function splitMarkdownTableRow(line: string): string[] {
 
 interface CommandDocsRow {
 	command: string;
-	aliases: ReadonlyArray<string>;
 	usage: string;
 	description: string;
 }
@@ -48,21 +47,16 @@ interface CommandDocsRow {
 function commandDocsRows(): CommandDocsRow[] {
 	const doc = readFileSync("docs/commands-and-modes.md", "utf8");
 	const lines = doc.split(/\r?\n/);
-	const headerIndex = lines.indexOf("| Command | Aliases | Usage | Purpose |");
+	const headerIndex = lines.indexOf("| Command | Usage | Purpose |");
 	ok(headerIndex >= 0, "commands table header exists");
 	const rows: CommandDocsRow[] = [];
 	for (const line of lines.slice(headerIndex + 2)) {
 		if (!line.startsWith("|")) break;
-		const [command, aliases, usage, description] = splitMarkdownTableRow(line);
-		if (command === undefined || aliases === undefined || usage === undefined || description === undefined) {
+		const [command, usage, description] = splitMarkdownTableRow(line);
+		if (command === undefined || usage === undefined || description === undefined) {
 			throw new Error(`Malformed command docs row: ${line}`);
 		}
-		rows.push({
-			command,
-			aliases: aliases === "-" ? [] : aliases.split(", "),
-			usage,
-			description,
-		});
+		rows.push({ command, usage, description });
 	}
 	return rows;
 }
@@ -88,6 +82,7 @@ describe("contracts/slash-spec", () => {
 			openCost: () => opened.push("cost"),
 			openContextView: () => opened.push("context"),
 			openTasks: () => opened.push("tasks"),
+			openDecisions: () => opened.push("decisions"),
 			openMemory: () => opened.push("memory"),
 			seedTaskMemory: () => ({ status: "seeded", seeded: 2, skipped: 1, source: "handoff-latest.md" }),
 			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
@@ -121,8 +116,8 @@ describe("contracts/slash-spec", () => {
 			"/thinking",
 			"/output",
 			"/model",
-			"/models",
 			"/memory",
+			"/decisions",
 			"/view run-123",
 		]) {
 			dispatchSlashCommand(parseSlashCommand(input), ctx);
@@ -141,8 +136,8 @@ describe("contracts/slash-spec", () => {
 			"settings:orchestrator:orchestrator.thinkingLevel",
 			"settings:terminal:terminal.outputVerbosity",
 			"model",
-			"model",
 			"memory",
+			"decisions",
 			"view:run-123",
 		]);
 		deepStrictEqual(submitted, ["/not/a/command"]);
@@ -207,16 +202,71 @@ describe("contracts/slash-spec", () => {
 		);
 	});
 
+	it("parses and executes project operator task subcommands without implicit agent submission", () => {
+		const submitted: string[] = [];
+		const notices: string[] = [];
+		const statusById = new Map<string, "open" | "handed" | "done" | "dropped">();
+		let nextId = 1;
+		const task = (id: string, title: string, status: "open" | "handed" | "done" | "dropped") => ({
+			id,
+			title,
+			status,
+			createdAt: "2026-08-19T12:00:00.000Z",
+			updatedAt: "2026-08-19T12:00:00.000Z",
+		});
+		const ctx = {
+			notice: (_level: string, text: string) => notices.push(text),
+			submitChat: (text: string) => submitted.push(text),
+			openTasks: () => undefined,
+			userTasks: {
+				add: (title: string) => {
+					const id = `u${nextId++}`;
+					statusById.set(id, "open");
+					return task(id, title, "open");
+				},
+				hand: (id: string) => {
+					statusById.set(id, "handed");
+					return task(id, "write release notes", "handed");
+				},
+				done: (id: string) => {
+					statusById.set(id, "done");
+					return task(id, "write release notes", "done");
+				},
+				drop: (id: string) => {
+					statusById.set(id, "dropped");
+					return task(id, "discard draft", "dropped");
+				},
+			},
+		} as unknown as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/tasks add write release notes"), ctx);
+		strictEqual(submitted.length, 0, "logging an inbox task never submits a turn");
+		dispatchSlashCommand(parseSlashCommand("/tasks hand u1"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/tasks done u1"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/tasks drop u2"), ctx);
+
+		deepStrictEqual(
+			[...statusById],
+			[
+				["u1", "done"],
+				["u2", "dropped"],
+			],
+		);
+		deepStrictEqual(submitted, [
+			'Operator task u1: write release notes. Pick it up with tasks action="pick" id="u1" and work it when appropriate.',
+		]);
+		ok(notices.some((notice) => notice.includes("logged operator task u1")));
+	});
+
 	/**
-	 * The same defect one layer out. `/compact` matched nothing, fell through to
-	 * `unknown`, and was submitted to the model, which answered "/compact
+	 * The same defect one layer out. A removed command matched nothing, fell
+	 * through to `unknown`, and was submitted to the model, which answered
 	 * (completed)" in six output tokens. Context was unchanged, no compaction
 	 * summary was written, and no hook fired, but the transcript read like it had
 	 * worked. Only active commands run: anything command-shaped that names no
 	 * registered command fails and never reaches the model. A leading slash is
 	 * also how a path starts, so path-shaped and prose input still belongs to the
-	 * model. (`/compact` itself is now an alias of `/context compact`, so it is
-	 * covered by the alias case rather than this one.)
+	 * model. Retired aliases follow this same closed failure path.
 	 */
 	it("fails a command-shaped spelling that names no command, and never sends it to the model", () => {
 		const submitted: string[] = [];
@@ -227,13 +277,13 @@ describe("contracts/slash-spec", () => {
 			render: () => undefined,
 		} as unknown as SlashCommandContext;
 
-		// Three spellings that were retired, plus two that never existed.
-		for (const absent of ["/context-init", "/context-clear", "/context-view", "/skills", "/thnking"]) {
+		// Retired spellings and typos all fail closed.
+		for (const absent of ["/context-init", "/context-clear", "/context-view", "/compact", "/skills", "/thnking"]) {
 			dispatchSlashCommand(parseSlashCommand(absent), ctx);
 		}
 
 		strictEqual(submitted.length, 0, `nothing command-shaped reaches the model, got: ${submitted.join(" | ")}`);
-		strictEqual(notices.length, 5, notices.join(" | "));
+		strictEqual(notices.length, 6, notices.join(" | "));
 		ok(
 			notices.every((notice) => notice.includes("not a command") && notice.includes("/help")),
 			notices.join(" | "),
@@ -326,11 +376,18 @@ describe("contracts/slash-spec", () => {
 
 			// skill selector and invocation forms
 			["/skill", { kind: "skill-selector" }],
-			["/skill:", { kind: "skill-selector" }],
-			["/skills:", { kind: "skill-selector" }],
-			["/skill:writer draft release notes", { kind: "skill-invocation", text: "/skill:writer draft release notes" }],
-			["/skills:writer draft release notes", { kind: "skill-invocation", text: "/skills:writer draft release notes" }],
+			["/skill ", { kind: "skill-selector" }],
 			["/skill writer draft release notes", { kind: "skill-invocation", text: "/skill writer draft release notes" }],
+			["/skill:", { kind: "unknown-command", token: "skill:", text: "/skill:" }],
+			["/skills:", { kind: "unknown-command", token: "skills:", text: "/skills:" }],
+			[
+				"/skill:writer draft release notes",
+				{ kind: "unknown-command", token: "skill:writer", text: "/skill:writer draft release notes" },
+			],
+			[
+				"/skills:writer draft release notes",
+				{ kind: "unknown-command", token: "skills:writer", text: "/skills:writer draft release notes" },
+			],
 
 			// /skills was absorbed into the /skill hub in v0.2.3 and now fails as absent
 			["/skills", { kind: "unknown-command", token: "skills", text: "/skills" }],
@@ -339,30 +396,18 @@ describe("contracts/slash-spec", () => {
 			// run
 			["/run scout task text", { kind: "run", agentId: "scout", task: "task text", options: {} }],
 			["/run --share scout task text", { kind: "run", agentId: "scout", task: "task text", options: { share: true } }],
-			[
-				"/run --worker-profile custom scout task text",
-				{ kind: "run", agentId: "scout", task: "task text", options: { workerProfile: "custom" } },
-			],
+			["/run --worker-profile custom scout task text", { kind: "run-usage" }],
 			[
 				"/run --agent-profile custom scout task text",
 				{ kind: "run", agentId: "scout", task: "task text", options: { workerProfile: "custom" } },
 			],
-			[
-				"/run --worker custom scout task text",
-				{ kind: "run", agentId: "scout", task: "task text", options: { workerProfile: "custom" } },
-			],
+			["/run --worker custom scout task text", { kind: "run-usage" }],
 			[
 				"/run --runtime node scout task",
 				{ kind: "run", agentId: "scout", task: "task", options: { workerRuntime: "node" } },
 			],
-			[
-				"/run --worker-runtime node scout task",
-				{ kind: "run", agentId: "scout", task: "task", options: { workerRuntime: "node" } },
-			],
-			[
-				"/run --agent-runtime node scout task",
-				{ kind: "run", agentId: "scout", task: "task", options: { workerRuntime: "node" } },
-			],
+			["/run --worker-runtime node scout task", { kind: "run-usage" }],
+			["/run --agent-runtime node scout task", { kind: "run-usage" }],
 			[
 				"/run --target myTarget scout task",
 				{ kind: "run", agentId: "scout", task: "task", options: { target: "myTarget" } },
@@ -383,10 +428,7 @@ describe("contracts/slash-spec", () => {
 				{ kind: "run", agentId: "scout", task: "task", options: { requiredCapabilities: ["a", "b"] } },
 			],
 			["/run --target a --target b scout task", { kind: "run", agentId: "scout", task: "task", options: { target: "b" } }],
-			[
-				"/run --agent-profile a --worker-profile b --worker c scout task",
-				{ kind: "run", agentId: "scout", task: "task", options: { workerProfile: "c" } },
-			],
+			["/run --agent-profile a --worker-profile b --worker c scout task", { kind: "run-usage" }],
 			["/run scout --target target task", { kind: "run", agentId: "scout", task: "task", options: { target: "target" } }],
 			[
 				"/run verifier --target dynamo inspect the project",
@@ -499,28 +541,26 @@ describe("contracts/slash-spec", () => {
 
 			// model
 			["/model", { kind: "model" }],
-			["/models", { kind: "model" }],
+			["/models", { kind: "unknown-command", token: "models", text: "/models" }],
 			["/model pattern:thinking", { kind: "model-set", pattern: "pattern:thinking" }],
 			["/model provider/model:high:extra", { kind: "model-set", pattern: "provider/model:high:extra" }],
-			["/models pattern:thinking", { kind: "model-set", pattern: "pattern:thinking" }],
+			["/models pattern:thinking", { kind: "unknown-command", token: "models", text: "/models pattern:thinking" }],
 
 			// context compact alone keeps its optional free-form instructions
 			["/context compact", { kind: "compact", instructions: undefined }],
 			["/context compact   ", { kind: "compact", instructions: undefined }],
 			["/context compact my instructions", { kind: "compact", instructions: "my instructions" }],
-			// /compact is an alias for the subcommand, so it parses to the same
-			// command with the same tail rather than to the /context hub.
-			["/compact", { kind: "compact", instructions: undefined }],
-			["/compact my instructions", { kind: "compact", instructions: "my instructions" }],
+			["/compact", { kind: "unknown-command", token: "compact", text: "/compact" }],
+			["/compact my instructions", { kind: "unknown-command", token: "compact", text: "/compact my instructions" }],
 
 			// context overlay (hub, no args); the retired spelling no longer parses
 			["/context", { kind: "context-view" }],
-			["/ctx", { kind: "context-view" }],
+			["/ctx", { kind: "unknown-command", token: "ctx", text: "/ctx" }],
 			["/context-view", { kind: "unknown-command", token: "context-view", text: "/context-view" }],
 
-			// spellings from other tools that name something Clio really has
-			["/exit", { kind: "quit" }],
-			["/config", { kind: "settings" }],
+			// retired aliases fail closed
+			["/exit", { kind: "unknown-command", token: "exit", text: "/exit" }],
+			["/config", { kind: "unknown-command", token: "config", text: "/config" }],
 
 			// status (deleted) -> falls through to unknown
 			["/status", { kind: "unknown-command", token: "status", text: "/status" }],
@@ -544,6 +584,14 @@ describe("contracts/slash-spec", () => {
 			["/context query", { kind: "usage-error", command: "context", reason: "Unexpected argument: query" }],
 			["/fleet query", { kind: "usage-error", command: "fleet", reason: "Unexpected argument: query" }],
 			["/tasks query", { kind: "usage-error", command: "tasks", reason: "Unexpected argument: query" }],
+			["/tasks", { kind: "tasks" }],
+			["/decisions", { kind: "decisions" }],
+			["/decisions extra", { kind: "usage-error", command: "decisions", reason: "Unexpected argument: extra" }],
+			["/tasks add write release notes", { kind: "tasks-add", text: "write release notes" }],
+			["/tasks hand u3", { kind: "tasks-hand", id: "u3" }],
+			["/tasks done u3", { kind: "tasks-done", id: "u3" }],
+			["/tasks drop u3", { kind: "tasks-drop", id: "u3" }],
+			["/tasks add", { kind: "usage-error", command: "tasks", reason: "Missing required argument: text" }],
 			["/memory", { kind: "memory" }],
 			["/memory seed", { kind: "memory-seed" }],
 			["/memory query", { kind: "usage-error", command: "memory", reason: "Unexpected argument: query" }],
@@ -559,7 +607,8 @@ describe("contracts/slash-spec", () => {
 			["/thinking off extra", { kind: "usage-error", command: "thinking", reason: "Unexpected argument: extra" }],
 			["/scoped-models query", { kind: "usage-error", command: "scoped-models", reason: "Unexpected argument: query" }],
 			["/settings fleet", { kind: "settings", section: "fleet" }],
-			["/config retry", { kind: "settings", section: "retry" }],
+			["/settings terminal", { kind: "settings", section: "terminal" }],
+			["/config retry", { kind: "unknown-command", token: "config", text: "/config retry" }],
 			[
 				"/settings query",
 				{
@@ -574,6 +623,8 @@ describe("contracts/slash-spec", () => {
 			["/new query", { kind: "usage-error", command: "new", reason: "Unexpected argument: query" }],
 			["/tree query", { kind: "usage-error", command: "tree", reason: "Unexpected argument: query" }],
 			["/fork query", { kind: "usage-error", command: "fork", reason: "Unexpected argument: query" }],
+			["/export --json", { kind: "usage-error", command: "export", reason: "Unknown flag: --json" }],
+			["/export a.md b.md", { kind: "usage-error", command: "export", reason: "Unexpected argument: b.md" }],
 			["/hotkeys query", { kind: "unknown-command", token: "hotkeys", text: "/hotkeys query" }],
 		];
 
@@ -614,16 +665,13 @@ describe("contracts/slash-spec", () => {
 		strictEqual(usageLine(shareEntry, "import"), "\nusage: /share import [--dry-run] [--force] <path>\n");
 	});
 
-	it("enforces registry integrity (no duplicate names, aliases, or kind owners)", () => {
-		const terms = new Map<string, string>();
+	it("enforces registry integrity with one unique canonical name and one owner per kind", () => {
+		const names = new Set<string>();
 		const kinds = new Set<string>();
 
 		for (const entry of BUILTIN_SLASH_COMMANDS) {
-			for (const term of [entry.name, ...(entry.aliases ?? [])]) {
-				const owner = terms.get(term);
-				ok(!owner, `Command term "${term}" is owned by both "${owner}" and "${entry.name}"`);
-				terms.set(term, entry.name);
-			}
+			ok(!names.has(entry.name), `Command name "${entry.name}" is registered more than once`);
+			names.add(entry.name);
 
 			for (const kind of entry.kinds) {
 				ok(!kinds.has(kind), `Kind "${kind}" is owned by multiple registry entries`);
@@ -648,6 +696,7 @@ describe("contracts/slash-spec", () => {
 			"cost",
 			"context",
 			"fleet",
+			"decisions",
 			"tasks",
 			"memory",
 			"view",
@@ -674,6 +723,11 @@ describe("contracts/slash-spec", () => {
 		// renamed. The registry does not carry either kind, so neither is aliased to
 		// a replacement and neither is answered by the model.
 		for (const absent of [
+			"exit",
+			"ctx",
+			"compact",
+			"models",
+			"config",
 			"status",
 			"hotkeys",
 			"skills",
@@ -685,6 +739,10 @@ describe("contracts/slash-spec", () => {
 			"context-view",
 		]) {
 			deepStrictEqual(parseSlashCommand(`/${absent}`), { kind: "unknown-command", token: absent, text: `/${absent}` });
+		}
+		for (const retired of ["/skill:writer", "/skills:writer"]) {
+			const token = retired.slice(1);
+			deepStrictEqual(parseSlashCommand(retired), { kind: "unknown-command", token, text: retired });
 		}
 	});
 
@@ -710,15 +768,7 @@ describe("contracts/slash-spec", () => {
 		strictEqual(routed.at(-1), "context-view", "the surviving spelling still works");
 	});
 
-	/**
-	 * A spelling every other tool in this class ships was answered with a flat
-	 * "is not a command" while the command it names was one keystroke away and
-	 * the alias mechanism that would have connected them was already carrying
-	 * /models to /model. Aliases are wired only where a real counterpart exists,
-	 * so a spelling that names nothing Clio has still fails, and it fails naming
-	 * /help rather than guessing.
-	 */
-	it("routes the spellings other tools use to the commands Clio really has", () => {
+	it("rejects retired aliases while canonical spellings keep their unique routes", () => {
 		const routed: string[] = [];
 		const ctx = {
 			shutdown: () => routed.push("quit"),
@@ -730,13 +780,22 @@ describe("contracts/slash-spec", () => {
 			render: () => undefined,
 		} as unknown as SlashCommandContext;
 
-		dispatchSlashCommand(parseSlashCommand("/exit"), ctx);
-		dispatchSlashCommand(parseSlashCommand("/config"), ctx);
-		dispatchSlashCommand(parseSlashCommand("/settings fleet"), ctx);
-		dispatchSlashCommand(parseSlashCommand("/compact"), ctx);
-		dispatchSlashCommand(parseSlashCommand("/compact drop the old turns"), ctx);
+		for (const retired of ["/exit", "/config", "/compact", "/compact drop the old turns", "/ctx", "/models"]) {
+			dispatchSlashCommand(parseSlashCommand(retired), ctx);
+		}
+		ok(
+			routed.every((entry) => entry.startsWith("notice:")),
+			routed.join(" | "),
+		);
+		ok(!routed.some((entry) => entry.startsWith("chat:")), routed.join(" | "));
 
-		deepStrictEqual(routed, ["quit", "settings", "settings:fleet", "compact:", "compact:drop the old turns"]);
+		routed.length = 0;
+		dispatchSlashCommand(parseSlashCommand("/quit"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/settings fleet"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/context"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/context compact drop the old turns"), ctx);
+
+		deepStrictEqual(routed, ["quit", "settings:fleet", "context-view", "compact:drop the old turns"]);
 
 		// /clear names nothing here: session reset is /new and context reset is
 		// /context reset, and neither is what an operator typing /clear means.
@@ -754,10 +813,9 @@ describe("contracts/slash-spec", () => {
 		for (const removedName of ["context-init", "context-clear", "context-view"]) {
 			ok(!byName.has(removedName), `removed /${removedName} is not suggested`);
 		}
-		// Aliases are surfaced by the provider only when the typed stem matches;
-		// the static palette is the grouped canonical command reference.
-		strictEqual(byName.has("compact"), false);
-		strictEqual(byName.has("ctx"), false);
+		for (const retired of ["exit", "ctx", "compact", "models", "config"]) {
+			strictEqual(byName.has(retired), false, `/${retired} is not suggested`);
+		}
 		strictEqual(byName.get("context")?.argumentHint, "compact | init | refresh | reset");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
 		strictEqual(byName.get("help")?.argumentHint, "[query]");
@@ -898,21 +956,13 @@ describe("contracts/slash-spec", () => {
 		strictEqual(await run?.getArgumentCompletions?.("--target "), null, "an open flag value never completes");
 	});
 
-	it("completes actions for /ctx and preserves the typed alias on accept", async () => {
+	it("does not complete arguments for a retired command alias", async () => {
 		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
 		const line = "/ctx in";
 		const suggestions = await provider.getSuggestions([line], 0, line.length, {
 			signal: new AbortController().signal,
 		});
-		deepStrictEqual(
-			suggestions?.items.map((item) => item.value),
-			["init"],
-			"/ctx completes exactly like /context",
-		);
-		const first = suggestions?.items[0];
-		ok(first, "the alias invocation yields a completion to accept");
-		const applied = provider.applyCompletion([line], 0, line.length, first, suggestions?.prefix ?? "");
-		strictEqual(applied.lines[0], "/ctx init", "accepting keeps the user's alias spelling");
+		strictEqual(suggestions, null);
 	});
 
 	it("never completes inside free rest text", async () => {
@@ -928,7 +978,6 @@ describe("contracts/slash-spec", () => {
 	it("keeps docs/commands-and-modes.md command table aligned with commandReference", () => {
 		const expected = commandReference().map((ref) => ({
 			command: `/${ref.name}`,
-			aliases: ref.aliases.map((alias) => `/${alias}`),
 			usage: ref.usage,
 			description: ref.description,
 		}));

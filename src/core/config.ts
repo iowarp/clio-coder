@@ -433,6 +433,75 @@ function validatePricing(
 	return out;
 }
 
+function validateLmStudioSettings(
+	issues: Issues,
+	path: string,
+	value: unknown,
+): ClioSettings["targets"][number]["lmstudio"] | undefined {
+	if (!isPlainObject(value)) {
+		issues.add(path, `expected a map, got ${describe(value)}`);
+		return undefined;
+	}
+	issues.unknownKeys(path, value, ["load", "request"]);
+	const out: NonNullable<ClioSettings["targets"][number]["lmstudio"]> = {};
+	if ("load" in value) {
+		if (!isPlainObject(value.load)) {
+			issues.add(`${path}.load`, `expected a map, got ${describe(value.load)}`);
+		} else {
+			issues.unknownKeys(`${path}.load`, value.load, [
+				"contextLength",
+				"flashAttention",
+				"evalBatchSize",
+				"numExperts",
+				"offloadKvCacheToGpu",
+			]);
+			const load: NonNullable<typeof out.load> = {};
+			for (const key of ["contextLength", "evalBatchSize", "numExperts"] as const) {
+				if (key in value.load) {
+					const parsed = expectInteger(issues, `${path}.load.${key}`, value.load[key], { min: 1 });
+					if (parsed !== undefined) load[key] = parsed;
+				}
+			}
+			for (const key of ["flashAttention", "offloadKvCacheToGpu"] as const) {
+				if (key in value.load) {
+					const parsed = expectBoolean(issues, `${path}.load.${key}`, value.load[key]);
+					if (parsed !== undefined) load[key] = parsed;
+				}
+			}
+			if (Object.keys(load).length > 0) out.load = load;
+		}
+	}
+	if ("request" in value) {
+		if (!isPlainObject(value.request)) {
+			issues.add(`${path}.request`, `expected a map, got ${describe(value.request)}`);
+		} else {
+			issues.unknownKeys(`${path}.request`, value.request, ["ttlSeconds", "draftModel", "reasoning"]);
+			const request: NonNullable<typeof out.request> = {};
+			if ("ttlSeconds" in value.request) {
+				const parsed = expectInteger(issues, `${path}.request.ttlSeconds`, value.request.ttlSeconds, { min: 1 });
+				if (parsed !== undefined) request.ttlSeconds = parsed;
+			}
+			if ("draftModel" in value.request) {
+				const parsed = expectString(issues, `${path}.request.draftModel`, value.request.draftModel);
+				if (parsed !== undefined) request.draftModel = parsed;
+			}
+			if ("reasoning" in value.request) {
+				const parsed = expectEnum(issues, `${path}.request.reasoning`, value.request.reasoning, [
+					"auto",
+					"off",
+					"on",
+					"low",
+					"medium",
+					"high",
+				] as const);
+				if (parsed !== undefined) request.reasoning = parsed;
+			}
+			if (Object.keys(request).length > 0) out.request = request;
+		}
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function validateTarget(issues: Issues, path: string, value: unknown): ClioSettings["targets"][number] | null {
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
@@ -449,6 +518,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"lifecycle",
 		"gateway",
 		"pricing",
+		"lmstudio",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
 	const runtime = "runtime" in value ? expectString(issues, `${path}.runtime`, value.runtime) : undefined;
@@ -489,6 +559,10 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("pricing" in value) {
 		const v = validatePricing(issues, `${path}.pricing`, value.pricing);
 		if (v !== undefined) target.pricing = v;
+	}
+	if ("lmstudio" in value) {
+		const v = validateLmStudioSettings(issues, `${path}.lmstudio`, value.lmstudio);
+		if (v !== undefined) target.lmstudio = v;
 	}
 	return target;
 }
@@ -1236,7 +1310,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.terminal)) {
 			issues.add("terminal", `expected a map, got ${describe(raw.terminal)}`);
 		} else {
-			issues.unknownKeys("terminal", raw.terminal, ["showTerminalProgress", "outputVerbosity"]);
+			issues.unknownKeys("terminal", raw.terminal, [
+				"showTerminalProgress",
+				"outputVerbosity",
+				"tuiMode",
+				"fullscreenScrollbar",
+			]);
 			if ("showTerminalProgress" in raw.terminal) {
 				const v = expectBoolean(issues, "terminal.showTerminalProgress", raw.terminal.showTerminalProgress);
 				if (v !== undefined) settings.terminal.showTerminalProgress = v;
@@ -1245,6 +1324,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const v = expectString(issues, "terminal.outputVerbosity", raw.terminal.outputVerbosity);
 				if (v === "minimal" || v === "default" || v === "verbose") settings.terminal.outputVerbosity = v;
 				else if (v !== undefined) issues.add("terminal.outputVerbosity", "expected minimal, default, or verbose");
+			}
+			if ("tuiMode" in raw.terminal) {
+				const v = expectString(issues, "terminal.tuiMode", raw.terminal.tuiMode);
+				if (v === "regular" || v === "fullscreen") settings.terminal.tuiMode = v;
+				else if (v !== undefined) issues.add("terminal.tuiMode", "expected regular or fullscreen");
+			}
+			if ("fullscreenScrollbar" in raw.terminal) {
+				const v = expectString(issues, "terminal.fullscreenScrollbar", raw.terminal.fullscreenScrollbar);
+				if (v === "hidden" || v === "auto" || v === "always") settings.terminal.fullscreenScrollbar = v;
+				else if (v !== undefined) issues.add("terminal.fullscreenScrollbar", "expected hidden, auto, or always");
 			}
 		}
 	}
@@ -1413,7 +1502,7 @@ function readSavedDocument(): unknown {
  * (or stay absent), so materialized defaults such as `workers.profiles: {}`
  * never leak into a file that never had them.
  */
-function applySettingsDelta(saved: unknown, before: unknown, after: unknown): unknown {
+export function applySettingsDelta(saved: unknown, before: unknown, after: unknown): unknown {
 	if (!isPlainObject(before) || !isPlainObject(after)) return cloneValue(after);
 	const out: Record<string, unknown> = isPlainObject(saved) ? { ...saved } : {};
 	for (const [key, next] of Object.entries(after)) {
@@ -1450,6 +1539,27 @@ export type SettingsMutator = (settings: ClioSettings) => ClioSettings | undefin
 export interface SettingsUpdateOptions {
 	/** Total time to wait for the lock before giving up. Default 10s. */
 	timeoutMs?: number;
+}
+
+/**
+ * Replace the raw user settings document under the same cross-process lock as
+ * `updateSettings`. Workspace-aware layering owns the only current caller: it
+ * computes and validates the candidate against the project layers before this
+ * helper commits the raw user-layer delta.
+ */
+export function updateSavedSettingsDocument(
+	mutate: (saved: unknown) => unknown,
+	options: SettingsUpdateOptions = {},
+): void {
+	withSettingsLock(() => {
+		// Keep the strict gate updateSettings has always used. readSavedDocument
+		// deliberately degrades parse/read failures to `{}` for recovery callers;
+		// writing through that degraded value would erase a malformed, null, or
+		// transiently unreadable operator document.
+		readSettings();
+		const saved = readSavedDocument();
+		persistSettings(mutate(cloneValue(saved)));
+	}, options);
 }
 
 export function settingsLockPath(): string {

@@ -1,0 +1,59 @@
+{
+	"name": "@iowarp/clio-workbench",
+	"version": "0.0.1",
+	"exports": "./main.ts",
+	"nodeModulesDir": "auto",
+	"tasks": {
+		"build": "deno run -A npm:vite@8.2.1 build",
+		"start": "deno run --no-prompt --allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_WORKBENCH_STATE_DIR --allow-net=127.0.0.1 --allow-read --allow-write --allow-run=clio-coder,kill main.ts",
+		"browser": "deno task build && deno task start",
+		"smoke:browser": "deno task build && deno run -A scripts/browser-smoke.ts",
+		"format": "deno fmt --check .",
+		"format:write": "deno fmt .",
+		"lint": "deno lint acp-client.ts clio-host.ts main.ts project-store.ts workbench-state.ts scripts src tests vite.config.ts",
+		"check": "deno check acp-client.ts clio-host.ts main.ts project-store.ts workbench-state.ts scripts src/main.tsx tests",
+		"test": "deno test --no-prompt --allow-env=NODE_ENV --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=deno,kill tests",
+		"test:clio-real": "deno test --no-prompt --allow-env=CLIO_WORKBENCH_CLI_ENTRY --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=node,kill,git tests/clio-real-integration.ts",
+		"verify": "deno task format && deno task lint && deno task check && deno task test && deno task build",
+		"desktop:windows": "deno task build && deno desktop --backend webview --target x86_64-pc-windows-msvc --allow-env=DENO_SERVE_ADDRESS,HOME,XDG_STATE_HOME,CLIO_WORKBENCH_STATE_DIR --allow-net=127.0.0.1 --allow-read --allow-write --allow-run=clio-coder,kill --include dist --output .desktop/ClioWorkbench main.ts"
+	},
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"jsxImportSource": "react",
+		"lib": ["dom", "dom.iterable", "deno.ns"],
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"useUnknownInCatchVariables": true
+	},
+	"fmt": {
+		"useTabs": true,
+		"lineWidth": 120,
+		"semiColons": true,
+		"singleQuote": false,
+		"exclude": ["dist", "node_modules", ".workbench-data", ".desktop"]
+	},
+	"lint": {
+		"include": [
+			"acp-client.ts",
+			"clio-host.ts",
+			"main.ts",
+			"project-store.ts",
+			"workbench-state.ts",
+			"scripts",
+			"src",
+			"tests",
+			"vite.config.ts"
+		],
+		"exclude": ["dist", "node_modules", ".workbench-data", ".desktop"]
+	},
+	"desktop": {
+		"app": {
+			"name": "Clio Workbench",
+			"identifier": "ai.iowarp.clio.workbench"
+		},
+		"backend": "webview",
+		"output": {
+			"windows": "./.desktop/ClioWorkbench"
+		}
+	}
+}

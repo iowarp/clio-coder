@@ -1,11 +1,11 @@
 # Clio Coder Architecture and Boundaries
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.3.2).
 
 Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
 
-This page is source-code aligned for the current `v0.3.1` development line.
+This page is source-code aligned for the current `v0.3.2` development line.
 
 ---
 
@@ -31,7 +31,7 @@ Registered domain modules include:
 | agents | `src/domains/agents/**` | Built-in, user, and project agent recipes. |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
-| context | `src/domains/context/**` | `CLIO-CODER.md`, codewiki indexer, repository context. |
+| context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codewiki indexer, repository context. |
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning, route policies. |
 | eval | `src/domains/eval/**` | Local evaluation harness, suites, JUnit/SWE-bench reports. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
@@ -104,7 +104,11 @@ Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
 
 ## Boundary invariants
 
-`npm run check:boundaries` executes the boundary check suite (`tests/boundaries/check-boundaries.ts`). Treat these checks as executable specifications.
+`npm run lint` executes the boundary checker (`tests/boundaries/check-boundaries.ts`, imported by `scripts/check-hygiene.ts`). Treat these checks as executable specifications.
+
+The enforced import rules below are complemented by the maintained
+[Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
+each overlapping helper and the Clio deltas that must survive an SDK upgrade.
 
 These five enforced boundary rules constrain dependency **direction**, never import **form** (whether static vs dynamic, default vs named):
 
@@ -112,7 +116,7 @@ These five enforced boundary rules constrain dependency **direction**, never imp
 
 Only files under `src/engine/**` may import `@earendil-works/*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import `@earendil-works/*` at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from `src/engine/types.ts`.
 
-Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations.
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 16 KiB per-observation default and its exported line-count helper. Tool string enums come from pi-ai's `StringEnum` (`src/engine/ai.ts`), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core's `bashExecutionToText` and summary prefixes (`src/engine/messages.ts`), and Anthropic thinking payloads are assembled by pi-ai's `streamSimple` with no Clio rewrite.
 
 ### Rule 2: Workers do not value-import domains except runtime rehydration
 
@@ -177,14 +181,14 @@ Clio uses in-process event buses for status and audit surfaces, but safety is no
 
 ## Command spec
 
-Interactive slash commands in Clio Coder are governed by a unified declarative command specification registry. This declarative system replaces hand-rolled parsing logic with structured specifications that define the names, aliases, flags, positionals, and subcommands for each entry. The central registry acts as the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser processes user input strings using these declarative specifications to generate structured argument objects and canonical command representations. By deriving all command-related behavior from these specifications, the system ensures consistency across usage help messages and autocomplete overlays.
+Interactive slash commands in Clio Coder are governed by a unified declarative command specification registry. This declarative system replaces hand-rolled parsing logic with structured specifications that define the names, flags, positionals, and subcommands for each entry. The central registry acts as the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser processes user input strings using these declarative specifications to generate structured argument objects and canonical command representations. By deriving all command-related behavior from these specifications, the system ensures consistency across usage help messages and autocomplete overlays.
 
 ---
 
 ## Verification commands
 
 ```bash
-npm run check:boundaries
+npm run lint
 npm run typecheck
 npm run test
 npm run build

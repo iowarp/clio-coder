@@ -21,7 +21,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { type ClioSettings, settingsPath, validateSettings } from "./config.js";
+import {
+	applySettingsDelta,
+	type ClioSettings,
+	type SettingsMutator,
+	SettingsValidationError,
+	settingsPath,
+	updateSavedSettingsDocument,
+	validateSettings,
+} from "./config.js";
 
 export type SettingsOrigin = "built-in" | "user" | "project" | "project.local" | "cli";
 
@@ -52,6 +60,18 @@ const CREDENTIAL_KEYS: ReadonlySet<string> = new Set(["auth", "apikey", "api_key
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepEquals(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (Array.isArray(a) || Array.isArray(b)) {
+		if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+		return a.every((entry, index) => deepEquals(entry, b[index]));
+	}
+	if (!isRecord(a) || !isRecord(b)) return false;
+	const keys = Object.keys(a);
+	if (keys.length !== Object.keys(b).length) return false;
+	return keys.every((key) => key in b && deepEquals(a[key], b[key]));
 }
 
 interface RawLayer {
@@ -146,22 +166,20 @@ export interface ReadLayeredSettingsOptions {
 	userPath?: string;
 }
 
-/**
- * Read and layer settings for `cwd`, returning the validated effective settings
- * plus per-leaf source attribution. Never throws: validation issues and layer
- * problems are returned, and the effective settings always validate (invalid
- * merges fall back to the schema defaults for the offending keys).
- */
-export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
-	const issues: SettingsLayerIssue[] = [];
-	const userFile = options.userPath ?? settingsPath();
+interface PreparedLayers {
+	projectFile: string;
+	localFile: string;
+	projectRaw: RawLayer;
+	localRaw: RawLayer;
+	project: RawLayer;
+	local: RawLayer;
+}
+
+function prepareProjectLayers(cwd: string, issues: SettingsLayerIssue[]): PreparedLayers {
 	const projectFile = join(cwd, ".clio-coder", "settings.yaml");
 	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
-
-	const user = readRawLayer("user", userFile, issues);
 	const projectRaw = readRawLayer("project", projectFile, issues);
 	const localRaw = readRawLayer("project.local", localFile, issues);
-
 	const project: RawLayer = {
 		...projectRaw,
 		blob:
@@ -176,24 +194,88 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 				? undefined
 				: (stripCredentials(localRaw.blob, "project.local", "", issues) as Record<string, unknown>),
 	};
+	return { projectFile, localFile, projectRaw, localRaw, project, local };
+}
 
-	const { merged, sources } = mergeLayersWithSources([user, project, local]);
+function validateLayerStack(
+	user: RawLayer,
+	prepared: PreparedLayers,
+	issues: SettingsLayerIssue[],
+): { settings: ClioSettings; sources: Record<string, SettingsOrigin> } {
+	const { merged, sources } = mergeLayersWithSources([user, prepared.project, prepared.local]);
 	const validation = validateSettings(merged);
 	for (const issue of validation.issues) {
 		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
 	}
+	return { settings: validation.settings, sources };
+}
+
+/**
+ * Read and layer settings for `cwd`, returning the validated effective settings
+ * plus per-leaf source attribution. Never throws: validation issues and layer
+ * problems are returned, and the effective settings always validate (invalid
+ * merges fall back to the schema defaults for the offending keys).
+ */
+export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOptions = {}): LayeredSettings {
+	const issues: SettingsLayerIssue[] = [];
+	const userFile = options.userPath ?? settingsPath();
+	const user = readRawLayer("user", userFile, issues);
+	const prepared = prepareProjectLayers(cwd, issues);
+	const { settings, sources } = validateLayerStack(user, prepared, issues);
 
 	return {
-		settings: validation.settings,
+		settings,
 		sources,
 		issues,
 		layers: [
 			{ origin: "built-in", path: "(defaults)", present: true },
 			{ origin: "user", path: userFile, present: user.blob !== undefined },
-			{ origin: "project", path: projectFile, present: projectRaw.blob !== undefined },
-			{ origin: "project.local", path: localFile, present: localRaw.blob !== undefined },
+			{ origin: "project", path: prepared.projectFile, present: prepared.projectRaw.blob !== undefined },
+			{ origin: "project.local", path: prepared.localFile, present: prepared.localRaw.blob !== undefined },
 		],
 	};
+}
+
+/**
+ * Atomically persist a mutation of the effective workspace settings into the
+ * user layer. The candidate user document is re-layered with the same project
+ * files before it is written. This preserves references to project-only
+ * targets while refusing a mutation that a higher-precedence project leaf
+ * would silently override.
+ */
+export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
+	let committed: ClioSettings | null = null;
+	updateSavedSettingsDocument((saved) => {
+		const userValidation = validateSettings(saved);
+		if (userValidation.issues.length > 0) throw new SettingsValidationError(userValidation.issues);
+		const issues: SettingsLayerIssue[] = [];
+		const prepared = prepareProjectLayers(cwd, issues);
+		const user: RawLayer = {
+			origin: "user",
+			path: settingsPath(),
+			blob: isRecord(saved) ? saved : {},
+		};
+		const before = validateLayerStack(user, prepared, issues).settings;
+		const candidate = structuredClone(before);
+		const next = mutate(candidate) ?? candidate;
+		const candidateValidation = validateSettings(JSON.parse(JSON.stringify(next)));
+		if (candidateValidation.issues.length > 0) throw new SettingsValidationError(candidateValidation.issues);
+
+		const nextSaved = applySettingsDelta(saved, before, candidateValidation.settings);
+		const finalIssues: SettingsLayerIssue[] = [];
+		const final = validateLayerStack(
+			{ origin: "user", path: settingsPath(), blob: isRecord(nextSaved) ? nextSaved : {} },
+			prepared,
+			finalIssues,
+		).settings;
+		if (!deepEquals(final, candidateValidation.settings)) {
+			throw new Error("a higher-precedence project setting prevents this settings update");
+		}
+		committed = final;
+		return nextSaved;
+	});
+	if (committed === null) throw new Error("layered settings update did not commit");
+	return committed;
 }
 
 /**

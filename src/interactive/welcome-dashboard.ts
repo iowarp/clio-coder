@@ -5,6 +5,7 @@ import { readClioVersion } from "../core/package-root.js";
 import { EXPERIMENTAL_RELEASE_WARNING } from "../core/release.js";
 import {
 	listWikiPages,
+	loadProjectClioMd,
 	readCodewiki,
 	readCodewikiAsync,
 	renderCodewikiDigest,
@@ -172,7 +173,9 @@ function entryPointExcerpt(codewikiDigest: string): string[] {
 const NO_WIKI_STATUS = "no wiki; run clio-coder context wiki";
 
 function clioMdStatusFor(cwd: string): string {
-	return existsSync(join(cwd, "CLIO-CODER.md")) ? "ok" : "none";
+	const loaded = loadProjectClioMd(cwd);
+	if (loaded.errors.length > 0) return "malformed";
+	return loaded.files.length > 0 ? "ok" : "none";
 }
 
 /** Shape the wiki rows from a staleness verdict the caller already paid for. */

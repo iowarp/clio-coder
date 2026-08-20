@@ -14,7 +14,7 @@
  *      about one tool's wall time, not N times it.
  */
 
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import type { ClioSettings } from "../../src/core/config.js";
@@ -57,6 +57,42 @@ function registryWith(autonomy: () => ClioSettings["autonomy"], specs: ToolSpec[
 }
 
 describe("contracts/tool admission cost and concurrency", () => {
+	it("forwards tool progress through pi's cumulative update callback", async () => {
+		const spec = readToolSpec(ToolNames.Read, 0);
+		spec.run = async (_args, options) => {
+			options?.onUpdate?.({
+				kind: "ok",
+				output: "first snapshot",
+				details: { observation: { shownCount: 1, totalCount: 2, unit: "lines" } },
+			});
+			options?.onUpdate?.({
+				kind: "ok",
+				output: "first snapshot\nsecond snapshot",
+				details: { observation: { shownCount: 2, totalCount: 2, unit: "lines" } },
+			});
+			return { kind: "ok", output: "terminal result" };
+		};
+		const registry = registryWith(() => "full-auto", [spec]);
+		const tool = resolveAgentTools({ registry })[0];
+		ok(tool, "the test tool should be exposed to pi");
+		const updates: Array<{ text: string; shownCount: unknown }> = [];
+
+		const terminal = await tool.execute("call-progress", {}, undefined, (partial) => {
+			const first = partial.content[0];
+			updates.push({
+				text: first?.type === "text" ? first.text : "",
+				shownCount: (partial.details as { observation?: { shownCount?: unknown } }).observation?.shownCount,
+			});
+		});
+
+		deepStrictEqual(updates, [
+			{ text: "first snapshot", shownCount: 1 },
+			{ text: "first snapshot\nsecond snapshot", shownCount: 2 },
+		]);
+		strictEqual(terminal.content[0]?.type, "text");
+		strictEqual(terminal.content[0]?.type === "text" ? terminal.content[0].text : "", "terminal result");
+	});
+
 	it("resolves effective autonomy without re-deriving settings per call", async () => {
 		// Stand in for the orchestrator's effective-settings view: the saved
 		// snapshot is stable, the session routing/override state is unchanged, so

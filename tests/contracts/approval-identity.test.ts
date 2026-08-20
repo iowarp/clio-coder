@@ -258,6 +258,44 @@ describe("contracts/approval identity", () => {
 		);
 	});
 
+	it("durably audits an internal permission expiry as expired rather than denied", async () => {
+		const expired: PermissionResolvedPayload = {
+			status: "expired",
+			requestId: "internal-expiry",
+			origin: "internal",
+			decidedBy: "permission-timeout",
+			tool: "bash",
+			actionClass: "execute",
+			reason: "permission request expired",
+			requestedBy: "worker:run-expired",
+		};
+		const { permissionRows, resolutions } = await withApprovalHarness("auto-edit", async ({ bus }) => {
+			bus.emit(BusChannels.PermissionResolved, expired);
+			return {};
+		});
+
+		deepStrictEqual(resolutions, [expired]);
+		const persisted = permissionRows.filter((row) => row.requestId === expired.requestId);
+		strictEqual(persisted.length, 1);
+		deepStrictEqual(
+			persisted.map(({ status, requestId, origin, decidedBy, tool, actionClass, reason, requestedBy }) => ({
+				status,
+				requestId,
+				origin,
+				decidedBy,
+				tool,
+				actionClass,
+				reason,
+				requestedBy,
+			})),
+			[expired],
+		);
+		strictEqual(
+			persisted.some((row) => row.status === "denied"),
+			false,
+		);
+	});
+
 	it("interactive grant joins request, resolution, and tool-call audit by requestId", async () => {
 		const { requests, resolutions, rows } = await withApprovalHarness(
 			"auto-edit",

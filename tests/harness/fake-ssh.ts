@@ -221,6 +221,7 @@ rl.on("line", (line) => {
 		if (scenario === "hang-hard") {
 			eofExit = false;
 			process.on("SIGTERM", () => {});
+			if (process.env.FAKE_SSH_READY_LOG) fs.appendFileSync(process.env.FAKE_SSH_READY_LOG, "ready\\n");
 			setInterval(() => {}, 1000);
 		}
 		if (scenario === "group-descendant") {
@@ -276,6 +277,7 @@ export interface FakeSsh {
 	binary: string;
 	argvLog: string;
 	descendantLog: string;
+	readyLog: string;
 	dir: string;
 }
 
@@ -284,9 +286,11 @@ export function installFakeSsh(): FakeSsh {
 	const binary = join(dir, "fake-ssh.js");
 	const argvLog = join(dir, "argv.log");
 	const descendantLog = join(dir, "descendants.log");
+	const readyLog = join(dir, "ready.log");
 	writeFileSync(binary, SHIM_SOURCE, "utf8");
 	chmodSync(binary, 0o755);
 	writeFileSync(argvLog, "", "utf8");
 	writeFileSync(descendantLog, "", "utf8");
-	return { binary, argvLog, descendantLog, dir };
+	writeFileSync(readyLog, "", "utf8");
+	return { binary, argvLog, descendantLog, readyLog, dir };
 }

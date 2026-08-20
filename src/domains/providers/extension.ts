@@ -157,6 +157,7 @@ export interface ProbeMerge {
 	probeModelCapabilities: NonNullable<TargetStatus["probeModelCapabilities"]> | null;
 	probeModelId: NonNullable<TargetStatus["probeModelId"]> | null;
 	probeNotes?: ReadonlyArray<string>;
+	probeSurfaces?: NonNullable<TargetStatus["probeSurfaces"]>;
 }
 
 /**
@@ -185,6 +186,7 @@ export function mergeProbeResult(
 			: ((preservePrevious ? previous.probeModelId : null) ?? null);
 	const probeNotes =
 		probe?.notes && probe.notes.length > 0 ? probe.notes : preservePrevious ? previous.probeNotes : undefined;
+	const probeSurfaces = probe?.surfaces ?? (preservePrevious ? previous.probeSurfaces : undefined);
 	const discoveredModels = uniqueModels(
 		probe?.models ?? (preservePrevious ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
 	);
@@ -198,6 +200,7 @@ export function mergeProbeResult(
 		probeModelId,
 	};
 	if (probeNotes && probeNotes.length > 0) merge.probeNotes = probeNotes;
+	if (probeSurfaces && Object.keys(probeSurfaces).length > 0) merge.probeSurfaces = probeSurfaces;
 	return merge;
 }
 
@@ -282,6 +285,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				discoveredModelStates: previous?.discoveredModelStates ?? null,
 			};
 			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
+			if (previous?.probeSurfaces) out.probeSurfaces = previous.probeSurfaces;
 			return out;
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
@@ -315,10 +319,15 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			discoveredModelStates: merge.discoveredModelStates,
 		};
 		if (merge.probeNotes && merge.probeNotes.length > 0) out.probeNotes = merge.probeNotes;
+		if (merge.probeSurfaces) out.probeSurfaces = merge.probeSurfaces;
 		return out;
 	}
 
-	async function probeTargetInternal(target: TargetDescriptor, live: boolean): Promise<TargetStatus> {
+	async function probeTargetInternal(
+		target: TargetDescriptor,
+		live: boolean,
+		options?: { reasoning?: boolean },
+	): Promise<TargetStatus> {
 		const previous = statuses.get(target.id);
 		const desc = registry.get(target.runtime);
 		if (!desc) {
@@ -347,7 +356,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				// model discovery is best-effort; keep probe as-is.
 			}
 		}
-		if (probeResult.ok && typeof desc.probeReasoning === "function") {
+		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
 			const orchestratorTarget = settings.orchestrator.target === target.id ? settings.orchestrator.model : null;
 			const candidateModelId = orchestratorTarget ?? target.defaultModel ?? null;
@@ -460,11 +469,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		probeAll,
 		probeAllLive,
-		async probeTarget(id) {
+		async probeTarget(id, options) {
 			const settings = readConfig();
 			const target = settings.targets.find((ep) => ep.id === id);
 			if (!target) return null;
-			return probeTargetInternal(target, true);
+			return probeTargetInternal(target, true, options);
 		},
 		disconnectTarget(id) {
 			const settings = readConfig();
@@ -492,11 +501,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				}
 				return authStore.statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
 			},
-			resolveForTarget(target, runtime) {
+			resolveForTarget(target, runtime, options) {
 				if (!targetRequiresAuth(target, runtime)) {
 					return Promise.resolve(authNotRequiredStatus(resolveAuthTarget(target, runtime).providerId));
 				}
-				return authStore.resolveForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
+				return authStore.resolveForTarget(resolveAuthTarget(target, runtime), {
+					includeFallback: false,
+					...(options?.signal ? { signal: options.signal } : {}),
+				});
 			},
 			getStored(providerId) {
 				return authStore.get(providerId) ?? null;

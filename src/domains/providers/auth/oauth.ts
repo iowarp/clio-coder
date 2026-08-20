@@ -27,8 +27,9 @@ export async function loginWithOAuthProvider(
 export async function refreshOAuthCredentials(
 	providerId: string,
 	credentials: OAuthCredentials,
+	signal: AbortSignal,
 ): Promise<OAuthCredentials> {
-	return refreshEngineOAuthCredentials(providerId, credentials);
+	return refreshEngineOAuthCredentials(providerId, credentials, signal);
 }
 
 export function getOAuthApiKey(providerId: string, credentials: OAuthCredentials): Promise<string> {

@@ -3,7 +3,7 @@
  *
  * Two output shapes live here:
  *   1. `renderCompactionSummaryLine` is the inline one-liner chat-loop
- *      emits after an auto-compaction or `/compact` run. It uses the same
+ *      emits after an auto-compaction or `/context compact` run. It uses the same
  *      `[context engine] <stage>:` shape as the observation-mask notice.
  *   2. `renderCompactionSummaryEntry` renders a persisted
  *      `CompactionSummaryEntry` as a framed, indented block the chat panel
@@ -39,7 +39,7 @@ export interface CompactionSummaryLineInput {
 }
 
 /**
- * One-line notice the `/compact` handler writes to stdout. Example:
+ * One-line notice the `/context compact` handler writes to stdout. Example:
  *   [context engine] llm_summary: 42 messages summarized to 1823 chars; ~31420 tokens before
  * Split-turn runs carry a `(split turn)` suffix so the user knows the cut
  * landed mid-turn and upstream context may need a re-read.

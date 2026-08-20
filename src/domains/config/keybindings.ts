@@ -23,6 +23,8 @@ export interface ClioAppKeybindings {
 	"clio.status.toggle": true;
 	"clio.session.tree": true;
 	"clio.dispatchBoard.toggle": true;
+	"clio.tasks.open": true;
+	"clio.decisions.open": true;
 	"clio.dispatch.background": true;
 	"clio.model.select": true;
 	"clio.model.cycleForward": true;
@@ -34,6 +36,7 @@ export interface ClioAppKeybindings {
 	"clio.thinking.expandAll": true;
 	"clio.editor.external": true;
 	"clio.message.followUp": true;
+	"clio.message.interrupt": true;
 	"clio.message.dequeue": true;
 	"clio.notifications.dismiss": true;
 	"clio.leader": true;
@@ -59,10 +62,11 @@ declare module "@earendil-works/pi-tui" {
  * `ctrl+d`, and the portable `ctrl+g` leader retained because every terminal
  * already transmits them). `Alt + <letter>` decodes from the legacy
  * `ESC <letter>` sequence on meta-capable terminals. The chosen letters avoid
- * pi-tui's editor reserves (`alt+b/f/d/y`, and the `ESC n`/`ESC p` aliases for
- * `alt+down`/`alt+up`) and the readline/terminal line-editing reserves the
- * router relies on for editor behavior. The CSI-u/reserved-key detector in
- * `keybinding-manager.ts` stays as a safety net for user rebinds.
+ * pi-tui's editor reserves except for the approved `Alt+B` and `Alt+D`
+ * application-boundary overrides. They open the task and decision boards
+ * before the editor can interpret those chords as word-back or word-delete.
+ * The CSI-u/reserved-key detector in `keybinding-manager.ts` stays as a safety
+ * net for user rebinds.
  */
 export const CLIO_APP_KEYBINDINGS = {
 	"clio.thinking.cycle": {
@@ -84,6 +88,16 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
 		description: "Toggle the dispatch (workers) board overlay",
+	},
+	"clio.tasks.open": {
+		// Approved application-boundary override of pi-tui editor word-back.
+		defaultKeys: "alt+b",
+		description: "Open the composite session and operator task board",
+	},
+	"clio.decisions.open": {
+		// Approved application-boundary override of pi-tui editor word-delete.
+		defaultKeys: "alt+d",
+		description: "Open the settled interview decision board",
 	},
 	"clio.dispatch.background": {
 		// Ctrl+B alone is pi-tui's editor cursor-left, so the Claude Code chord
@@ -139,7 +153,16 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio.message.followUp": {
 		defaultKeys: "alt+enter",
-		description: "Queue the current input as a follow-up delivered after the active run (Enter steers the run live)",
+		description:
+			"End of turn: queue the current input for delivery when the active run settles (Enter delivers it at the next slot, between tool batches)",
+	},
+	"clio.message.interrupt": {
+		// Alt+I keeps the app scheme and earns the Ctrl+G leader fallback. A
+		// Ctrl+Enter chord was rejected because legacy terminals send it as a
+		// plain Enter, which would turn every send into a cancel.
+		defaultKeys: "alt+i",
+		description:
+			"Interrupt: cancel the active run and deliver the current input now (refused while an attached dispatch runs or a permission ask is parked; the input then queues for the next slot)",
 	},
 	"clio.message.dequeue": {
 		defaultKeys: "alt+up",
@@ -155,9 +178,22 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 } as const satisfies KeybindingDefinitions;
 
-/** Full definition table = pi-tui editor/select defaults + Clio app ids. */
+/**
+ * Full definition table = pi-tui editor/select defaults + Clio app ids.
+ * pi-tui 0.84 supplies dedicated prompt-history actions but leaves them
+ * unbound for applications to place. Clio uses the readline-style Ctrl+P and
+ * Ctrl+N pair because its model cycling already lives on Alt+J and Alt+K.
+ */
 export const CLIO_KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
+	"tui.editor.historyPrevious": {
+		...TUI_KEYBINDINGS["tui.editor.historyPrevious"],
+		defaultKeys: "ctrl+p",
+	},
+	"tui.editor.historyNext": {
+		...TUI_KEYBINDINGS["tui.editor.historyNext"],
+		defaultKeys: "ctrl+n",
+	},
 	...CLIO_APP_KEYBINDINGS,
 } as const satisfies KeybindingDefinitions;
 

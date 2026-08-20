@@ -47,6 +47,14 @@ export type ClioSessionMetaExtension = {
 	workspace?: WorkspaceSnapshot;
 	/** Ordered record of skills activated in this session. */
 	skillActivations?: SkillActivation[];
+	/**
+	 * The turn `/tree` last switched the append point to, persisted so it
+	 * survives quit + resume. `resume()`/`switchBranch()` prefer this over
+	 * inferring the leaf from timestamps (`computeLeafId`) when it still
+	 * names a real turn; a plain append clears it, since once the tree grows
+	 * past it the inferred newest-node leaf is correct again.
+	 */
+	pinnedLeafTurnId?: string | null;
 };
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;
@@ -130,6 +138,13 @@ export interface SessionContract {
 	 * otherwise the helper appends directly to that session's transcript.
 	 */
 	editLabel(turnId: string, label: string, sessionId?: string): void;
+	/**
+	 * Persist the session's display name as a session-wide SessionInfoEntry.
+	 * Empty or whitespace-only names clear the name when history is rebuilt.
+	 * If the target session is current, writes flow through the live writer;
+	 * otherwise the entry is durably appended directly to its transcript.
+	 */
+	setName(name: string, sessionId?: string): void;
 	/**
 	 * Remove the given session. By default, wipes the session directory.
 	 * `opts.keepFiles` preserves the transcript and only tombstones meta.json.

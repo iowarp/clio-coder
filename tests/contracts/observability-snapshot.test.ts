@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
@@ -7,7 +7,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
-import { newScratchClioHome } from "../harness/scratch-env.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 /**
  * Drive the wired observability bundle (telemetry + cost + projection) through
@@ -23,8 +23,8 @@ interface Scratch {
 	stateDir: string;
 }
 
-function makeScratch(): Scratch {
-	const dir = newScratchClioHome("clio-observability-snapshot-");
+async function makeScratch(): Promise<Scratch> {
+	const dir = await newScratchClioHome("clio-observability-snapshot-");
 	const dataDir = join(dir, "data");
 	const stateDir = join(dir, "state");
 	mkdirSync(dataDir, { recursive: true });
@@ -98,14 +98,18 @@ describe("contracts/observability-snapshot wiring", { concurrency: false }, () =
 	let scratch: Scratch;
 	const savedEnv = { ...process.env };
 
-	beforeEach(() => {
-		scratch = makeScratch();
+	beforeEach(async () => {
+		scratch = await makeScratch();
 	});
 
 	afterEach(() => {
+		// clearScratchClioHome() releases the process-wide env lock that
+		// newScratchClioHome() (in beforeEach) queued behind; the manual
+		// full-env restore below is additional (newScratchClioHome doesn't
+		// restore process.env on its own), not a substitute for it.
+		clearScratchClioHome(scratch.dir);
 		resetXdgCache();
 		process.env = { ...savedEnv };
-		rmSync(scratch.dir, { recursive: true, force: true });
 	});
 
 	it("folds a completed dispatch into cost, tokens, metrics, and a run summary", async () => {

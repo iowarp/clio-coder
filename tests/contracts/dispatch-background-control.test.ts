@@ -63,8 +63,8 @@ function gatedWorker(): { worker: SpawnedWorker; finish: (exitCode: number) => v
 }
 
 describe("operator-initiated dispatch backgrounding", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();

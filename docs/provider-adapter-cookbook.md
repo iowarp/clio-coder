@@ -1,7 +1,7 @@
 # Provider Adapter Cookbook
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located at [docs/html/provider_adapter_blueprint.html](html/provider_adapter_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive runtime adapter descriptor builder and probe sequence capability checklist is located at [docs/html/provider_adapter_blueprint.html](html/provider_adapter_blueprint.html) (Version: 0.3.2).
 
 This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.
 
@@ -72,12 +72,12 @@ export const myCustomRuntime: RuntimeDescriptor = {
 
 ## 2. Probing Mechanisms
 
-Probes discover the current state of a target inference server when Clio starts or when `/targets` / `/models` are refreshed.
+Probes discover the current state of a target inference server when Clio starts or when `/targets` or `/model` are refreshed.
 
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method validates endpoint reachability and collects loaded models:
 
-* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `apiKey`, and connection metadata) and `ProbeContext` (which provides timeout signals and credentials).
+* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `apiKey`, and connection metadata) and `ProbeContext` (which provides timeout signals and credentials). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi 0.84's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
 * **Return Value:** A `ProbeResult` indicating:
   * `ok`: True if reachable.
   * `serverVersion`: String identifier of the backend (e.g. `"Ollama/0.1.48"`).
@@ -91,6 +91,23 @@ Clio caches this result under the session's provider cache, preventing redundant
 
 ### 2.3 Exact-ID Capability Selection (`probeCapabilitiesForModel`)
 `probeCapabilitiesForModel` is the one exact-id selector during capability resolution. When a router target serves several models, `probeCapabilitiesForModel` matches `probeModelCapabilities` keyed strictly to the requested wire model ID. A router serving multiple models thus answers only from the `/v1/models` row keyed to its own wire model, preventing capability flags or token limits from bleeding across different models on the same target.
+
+### 2.4 LM Studio as a reference adapter
+
+The built-in `lmstudio` adapter is an example of one canonical descriptor with a compatibility
+alias. Its descriptor declares `aliases: ["lmstudio-native"]`, while registry listing and persisted
+configuration use only `lmstudio`. The probe first requires the exact `/lmstudio-greeting` body for
+a directly configured target. It lists keys, loaded instance ids, capabilities, and echoed load
+configuration through `GET /api/v1/models` (<https://lmstudio.ai/docs/developer/rest/list>), falls
+back to `/api/v0/models` for older servers, and uses `/v1/models` only when neither native model
+shape is available.
+
+Chat synthesis stays on the ordinary `openai-completions` family and joins the target URL to
+`/v1/chat/completions` (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). Native
+REST is reserved for model management through the documented load and unload operations
+(<https://lmstudio.ai/docs/developer/rest/load> and
+<https://lmstudio.ai/docs/developer/rest/unload>). This split avoids a second streaming parser while
+still exposing runtime-specific residency and capability data.
 
 ---
 
@@ -111,6 +128,42 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
   2. Instantiate the adapter client (e.g., building a `pi-ai` OpenAI or Anthropic provider instance).
   3. Bind custom prompt templates and FIM (Fill-in-the-Middle) properties where supported.
 
+
+### 3.1 Stream Filters and Sentinel Stripping
+
+When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters during model synthesis. For example, if the resolved model family is `gemma-4`, a dedicated `createGemmaChannelFilter` is applied to intercept and reclassify `<|channel>thought` markers directly from the `text_delta` stream into `thinking_delta` events, dropping orphan channel closers and own-thought labels seamlessly.
+
+### 3.2 OpenAI-compatible sampling and vLLM budgets
+
+Catalog entries keep Clio's family knowledge in `quirks.sampling`, using the typed names
+`temperature`, `topP`, `topK`, `minP`, `presencePenalty`, `frequencyPenalty`, and
+`repeatPenalty`. The OpenAI-completions engine adapter translates those names once and passes the
+result through Pi's `StreamOptions.samplingParams`; it does not patch sampler fields into the final
+JSON body. Request-level `samplingParams` win per key, matching Pi's merge contract, while an
+explicit request temperature still wins over the catalog temperature.
+
+For a `vllm` target, model synthesis opts into Pi's
+`OpenAICompletionsCompat.supportsThinkingTokenBudget`. Clio supplies the selected family's
+`quirks.thinking.budgetByLevel` as Pi `thinkingBudgets`, and Pi emits the top-level
+`thinking_token_budget` while retaining at least 1,024 tokens beneath `max_tokens` for the final
+answer. llama.cpp and LM Studio do not receive that vLLM-only field. Their remaining payload hooks
+are limited to runtime deltas such as `chat_template_kwargs`, prompt-cache flags, LM Studio TTL and
+draft-model settings, and the exact reasoning-effort spelling their servers accept.
+
+Local OpenAI-compatible model synthesis also declares
+`OpenAICompletionsCompat.supportsFinishReason: false`. Pi then infers `stop` or `toolUse` at the end
+of a complete stream when a local server omits `finish_reason`, instead of turning an otherwise
+valid answer into a provider error. Explicit finish reasons remain authoritative when supplied.
+
+Anthropic thinking is assembled by Pi, not by Clio. Pi's `streamSimple` maps the agent's thinking
+level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from the model's
+`thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
+budget-based models. Clio's `onPayload` hook no longer rewrites those fields; it only sets the
+OpenAI Responses `reasoning.summary` verbosity, which the agent loop cannot express as an option.
+`tests/contracts/thinking-runtime.test.ts` captures the wire payload Pi builds and proves Clio
+leaves it untouched.
+
+
 ---
 
 ## 4. Configuring Reasoning & Thinking Formats
@@ -121,7 +174,7 @@ Clio supports diverse thinking mechanisms. If your model family uses a custom fo
 | --- | --- |
 | `none` | **Reasoning-Never:** Clio strips thinking request fields (e.g., effort levels), avoids replaying thinking blocks in history, emits no TUI thinking events, and records no reasoning token usage metrics. |
 | `ollama-native` | Standard Ollama native thinking streams. |
-| `lmstudio-native` | Assistant thinking is prepended to output payloads wrapped in `<think>` and `</think>` tags. |
+| `lmstudio` | Uses OpenAI-compatible chat and consumes streamed `reasoning`; thinking control uses only `reasoning_effort`. |
 | `openai-completions` | Replays thinking blocks via `reasoning_content` message parameters. |
 | `anthropic-max` | Anthropic extended thinking block protocol. |
 

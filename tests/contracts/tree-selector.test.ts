@@ -57,6 +57,7 @@ function session(): SessionContract {
 		switchBranch: () => ({ id: "session-1" }) as SessionMeta,
 		switchTurn: () => ({ id: "session-1" }) as SessionMeta,
 		editLabel: () => {},
+		setName: () => {},
 		deleteSession: () => {},
 		history: () => [],
 		close: async () => {},
@@ -215,6 +216,80 @@ describe("contracts/tree-selector", () => {
 		strictEqual(view.getHint(), "[↑↓] move · [Enter] switch · [e] label · [Shift+T] ts:off · [Esc] close");
 		view.handleInput("d");
 		strictEqual(view.getHint(), "[↑↓] move · [Enter] switch · [e] label · [Shift+T] ts:off · [Esc] close");
+	});
+
+	// issue #94, finding 5: every childless node drew the same glyph, so a
+	// branched session showed two live tips with nothing marking which one the
+	// next message would actually extend.
+	it("marks the active tip and only the active tip", () => {
+		const view = new TreeOverlayView({ session: session(), onSwitchTurn: () => {}, onClose: () => {} }, snapshot);
+		const lines = view.render(88);
+		strictEqual(lines[0]?.includes(GLYPH.active), false, "turn-1 is not the active tip");
+		ok(lines[1]?.includes(GLYPH.active), "turn-2 is snapshot.leafId, the active tip");
+	});
+
+	// issue #94, finding 5: switchTurn only validates message-tree nodes, so
+	// Enter on a compaction/branch row threw "turn not found" while looking
+	// exactly like every switchable row.
+	it("Enter on a compaction row is inert instead of throwing turn not found", () => {
+		const compacted: TreeSnapshot = {
+			...snapshot,
+			nodesById: {
+				...snapshot.nodesById,
+				"turn-2": { ...snapshot.nodesById["turn-2"], children: ["c-1"] } as never,
+				"c-1": {
+					id: "c-1",
+					parentId: "turn-2",
+					at: "2026-06-11T00:00:02.000Z",
+					kind: "compaction",
+					preview: "6 entries summarized",
+					children: [],
+				},
+			},
+		};
+		const switched: string[] = [];
+		let closed = false;
+		const view = new TreeOverlayView(
+			{
+				session: session(),
+				onSwitchTurn: (turnId) => switched.push(turnId),
+				onClose: () => {
+					closed = true;
+				},
+			},
+			compacted,
+		);
+		// Rows: turn-1, turn-2, c-1. Move down twice to reach the compaction row.
+		view.handleInput("[B");
+		view.handleInput("[B");
+		view.handleInput("\n");
+
+		deepStrictEqual(switched, [], "Enter on a structural row must not call onSwitchTurn");
+		strictEqual(closed, false, "the overlay stays open so the operator sees why nothing happened");
+		const rendered = stripAnsi(view.render(88).join("\n"));
+		ok(rendered.includes("not a place to switch to"), rendered);
+	});
+
+	it("renders the (fixed) marker on structural rows and not on switchable ones", () => {
+		const compacted: TreeSnapshot = {
+			...snapshot,
+			nodesById: {
+				...snapshot.nodesById,
+				"turn-2": { ...snapshot.nodesById["turn-2"], children: ["c-1"] } as never,
+				"c-1": {
+					id: "c-1",
+					parentId: "turn-2",
+					at: "2026-06-11T00:00:02.000Z",
+					kind: "compaction",
+					preview: "6 entries summarized",
+					children: [],
+				},
+			},
+		};
+		const view = new TreeOverlayView({ session: session(), onSwitchTurn: () => {}, onClose: () => {} }, compacted);
+		const lines = stripAnsi(view.render(88).join("\n")).split("\n");
+		ok(lines.some((line) => line.includes("compaction") && line.includes("(fixed)")));
+		ok(!(lines[0] ?? "").includes("(fixed)"), "a switchable message row carries no (fixed) marker");
 	});
 });
 

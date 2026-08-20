@@ -1,7 +1,7 @@
 # Clio TUI Design System
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive color/glyph token laboratory and terminal transcript preview renderer is located at [docs/html/tui_design_blueprint.html](html/tui_design_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive color/glyph token laboratory and terminal transcript preview renderer is located at [docs/html/tui_design_blueprint.html](html/tui_design_blueprint.html) (Version: 0.3.2).
 
 This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under [src/interactive/](../src/interactive/).
 
@@ -148,7 +148,9 @@ All TUI overlays and cards support compact widths down to 40 columns:
 
 ## 5. Screen Surfaces & State Choreography
 
-The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer.
+The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. `terminal.tuiMode` chooses the renderer at startup. The default `regular` mode uses terminal scrollback. Opt-in `fullscreen` mode uses the alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.
+
+In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Home` and `End` jump to its bounds, `Ctrl+Shift+Up` and `Ctrl+Shift+Down` jump between semantic prompts, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `terminal.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
 
 ### 5.1 Welcome Launchpad & Session Header
 
@@ -210,11 +212,23 @@ State is signaled through the status pill in the footer and matches the followin
 Drawn as a folded dim marker (`Thinking (N tokens)…` or `Thinking…`), which expands into a body using the `reason` color vertical `│` rail. Cap of 12 lines.
 
 ### 6.3 Tool Ledger
-Tool lines wrap as a single composed block:
+Every tool call owns one stable transcript block for its complete lifecycle. Streamed
+`toolcall_*` message updates first expose the call as `forming call`, the completed argument block
+becomes `ready`, `tool_execution_start` changes the same row to `running`, and cumulative
+`tool_execution_update` results replace the live body until `tool_execution_end` settles it. Rapid
+tool updates are coalesced to terminal frame rate; settlement always renders immediately.
+
+The collapsed form is one composed ledger line:
 ```
-▸ verb object · resource · facts · size ✓ · 230ms · full: path (ctrl+o)
+▸ verb(object) · resource · facts · size ✓ · 230ms · full: path (Alt+O)
 ```
 - Verb is bold `accent`, tail details are `dim`, status glyph is semantic (`✓`/`✗`), and the keyboard shortcut hint is appended at the end. Tool ledgers maintain full terminal width and bypass the prose hanging indent.
+- Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.
+- Running calls label `live output` and replace the cumulative partial result in place. Settled calls label `output` and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its `decision` and does not claim that the tool ran.
+- A call parked for one-shot approval replaces its running timer with `awaiting approval` and shows the already-sanitized action class, asking safety axis, and target below the row. These facts are transient UI state: approval, denial, abort, or settlement clears them, and they are never reconstructed from the session ledger.
+- Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.
+- Successful `edit` and `write` calls render the bounded diff produced by the tool result. Live regular-screen and fullscreen rows color removed and added lines with the `error` and `success` tokens and emphasize changed words; `/resume` replay and `/export` keep the same numbered diff as plain text.
+- Operator `!` and `!!` bash commands use the same running and settled block as model-initiated bash. The block appears before the process starts, streams the throttled cumulative stdout/stderr tail, and settles in place while the existing `bashExecution` session entry remains the durable record. `!!` continues to exclude that record from model context and says so in the block.
 
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
@@ -239,6 +253,20 @@ Syntax highlighting within code blocks is handled by [src/interactive/renderers/
 
 All other code elements (identifiers, types, function names, punctuation) remain plain. Diff blocks highlight added lines with `success` green and removed lines with `error` red.
 
+### 6.8 Mermaid and LaTeX
+
+Finalized assistant Markdown renders inline and display LaTeX as terminal-friendly Unicode through
+the Markdown renderer. For example, `$x^2$` becomes `x²` without requiring an image-capable
+terminal.
+
+Top-level fenced `mermaid` blocks pass through the width-aware Markdown `transform` hook and the
+engine's Unicode-diagram strategy. Supported flowcharts, state diagrams,
+class diagrams, entity-relationship diagrams, and sequence diagrams render with quiet `frame`
+borders, plain labels, and `accent` connectors. If a diagram is invalid, unsupported, or wider than
+the transcript content width, Clio leaves the original Mermaid fence visible instead of clipping or
+silently dropping it. Mermaid transformation runs only after an assistant text segment is finalized,
+so partial fences never flicker into incomplete diagrams while streaming.
+
 ---
 
 ## 7. Settings Center & Command Overlays
@@ -255,16 +283,22 @@ The `/settings` overlay is a full-screen transactional control center:
   - `Apply this session` (for live-capable settings)
   - `Apply and save globally`
   - `Cancel` (or `Esc`)
-  - Restart-required settings (`budget.concurrency`, `runtimePlugins`) offer only global save and announce `Saved to settings.yaml · restart Clio to apply`.
+  - Restart-required settings (`budget.concurrency`, `runtimePlugins`, `terminal.tuiMode`, and `terminal.fullscreenScrollbar`) offer only global save and announce `Saved to settings.yaml · restart Clio to apply`.
   - Destructive actions (target/profile removal) execute preflight analysis showing affected chat, fleet, and memory routes before confirmation.
 - **Fleet Workbench**: Organizes fleet settings with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Profiles render as one-row summaries with `◆ Edit` affordance; pressing `Enter` drills into profile fields (target, model, thinking level, placement) or destructive removal.
 - **Targets Console Table**: Displays configured targets in an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer (URL, default model, last probe, failure reason). Actions include `Use`, `Connect`, `Probe`, and `Remove`. Active connect/probe operations show the single orange activity indicator.
 - **Scoped Models Checklist**: Settings → `Models` provides a provider-backed checklist subview with target-level and target/model items, checked current selections, `Space` to toggle, and capability details in the inspector. Unresolved model references are preserved under an `Unavailable` group.
 - **Narrow Terminal Drill-Down Navigation**: Below 72 columns, Settings transitions from a split view to a modal drill-down stack (section list → section rows → detail drawer) with a breadcrumb and `Esc` moving up one level before closing. Includes `/` filtering across label, path, and description. Below 60 columns, side margins are removed for full-width presentation.
 
-### 7.2 Slash Autocomplete Command Palette
+### 7.2 Task and Decision Boards
+
+- **Composite Tasks Board (`/tasks`, `Alt+B`)**: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered `/view` path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.
+- **Settled Decisions Board (`/decisions`, `Alt+D`)**: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.
+- **Approved editor overrides**: `Alt+B` and `Alt+D` are deliberate application-input boundary overrides of Pi's editor word-back and word-delete chords. Clio routes them before the editor so the two global boards remain one chord away. They are explicit exceptions to the general rule that Clio app bindings avoid Pi editor reserves, and users may rebind the Clio actions in `settings.yaml`.
+
+### 7.3 Slash Autocomplete Command Palette
 - **Grouped Palette**: Typing `/` opens a grouped command palette (ordered by `Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints and formatted descriptions.
-- **Stem-Gated Aliases**: Aliases (e.g. `/exit`, `/ctx`, `/compact`, `/models`, `/config`) are hidden by default and only surface when the typed stem matches the alias spelling.
+- **One Canonical Spelling**: Autocomplete, help, and parsing expose the same unique slash-command names; no alias rows compete with canonical commands.
 
 ---
 
@@ -292,4 +326,3 @@ Two shapes, both ending at something the user can act on.
 ### 8.2 Memory Step Rows
 
 `/memory` activity rows read `<trigger> <decision> <reason>`, followed by `<N>w` when the step wrote to the bank and `<N> cited` when it cited entries, then the tier and latency. `describeTaskMemoryActivity` is the one place that builds this string.
-

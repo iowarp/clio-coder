@@ -94,7 +94,10 @@ const settings = {
 		},
 	],
 	orchestrator: { target: targetId, model, thinkingLevel: "off" },
-	workers: { default: { target: targetId, model, thinkingLevel: "off" }, profiles: {} },
+	workers: {
+		default: { target: targetId, model, thinkingLevel: "off" },
+		profiles: {},
+	},
 };
 writeFileSync(join(clioConfigDir, "settings.yaml"), stringify(settings), "utf8");
 
@@ -129,7 +132,11 @@ function seedStaleWikiWorkspace() {
 	git(["add", "-A"]);
 	git(["commit", "--quiet", "-m", "seed: old answer"]);
 	// Index the codewiki at the OLD state (offline, no model).
-	execFileSync(process.execPath, [CLI_ENTRY, "context", "refresh"], { cwd: dir, env: childEnv, stdio: "pipe" });
+	execFileSync(process.execPath, [CLI_ENTRY, "context", "refresh"], {
+		cwd: dir,
+		env: childEnv,
+		stdio: "pipe",
+	});
 	// Move the truth past the wiki.
 	writeFileSync(
 		join(dir, "src", "answer.js"),
@@ -163,9 +170,17 @@ const suite = {
 					"Orient with code_nav mode=wiki first, then answer: what exact string does currentAnswer() in src/answer.js return?",
 			},
 			verify: {
-				assertions: [{ metric: "wiki.staleAcknowledged", op: "eq", value: true }],
+				assertions: [
+					{
+						metric: "wiki.staleAcknowledged",
+						op: "eq",
+						value: true,
+					},
+				],
 			},
-			metrics: { collect: ["wiki.staleAcknowledged", "tools.totalCalls", "tokens.total", "cost.usd"] },
+			metrics: {
+				collect: ["wiki.staleAcknowledged", "tools.totalCalls", "tokens.total", "cost.usd"],
+			},
 			timeoutMs: 120000,
 		},
 		{
@@ -200,7 +215,10 @@ writeFileSync(suitePath, stringify(suite), "utf8");
 
 function runCli(args, timeoutMs) {
 	return new Promise((resolvePromise) => {
-		const child = spawn(process.execPath, [CLI_ENTRY, ...args], { env: childEnv, cwd: REPO_ROOT });
+		const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
+			env: childEnv,
+			cwd: REPO_ROOT,
+		});
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (data) => {
@@ -254,5 +272,7 @@ if (evalIdMatch) {
 rmSync(staleWikiDir, { recursive: true, force: true });
 // Keep scratchDir when the run failed so the artifact and ledgers are inspectable.
 if (run.code === 0) rmSync(scratchDir, { recursive: true, force: true });
-else console.error(`[recon-live] failed (exit ${run.code}); artifacts kept under ${scratchDir}`);
+else {
+	console.error(`[recon-live] failed (exit ${run.code}); artifacts kept under ${scratchDir}`);
+}
 process.exit(run.code ?? 1);

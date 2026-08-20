@@ -142,8 +142,8 @@ function intersectionTranscriptLines(directory: string): string[] {
 }
 
 describe("contracts/evidence-overlapping-runs", () => {
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-evidence-overlap-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-evidence-overlap-");
 	});
 
 	afterEach(() => {

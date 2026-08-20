@@ -66,11 +66,15 @@ function catalogFrontmatter(name: string, description: string, version: string):
 	];
 }
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 describe("contracts/pin-skills script", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("fails loudly with the file path and YAML error on malformed frontmatter", async () => {
 		const catalog = scratchCatalog();
 		writeSkill(catalog, "good", catalogFrontmatter("good", "A fine skill.", "0.1.0"));

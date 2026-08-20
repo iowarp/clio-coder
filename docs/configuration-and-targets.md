@@ -1,11 +1,11 @@
 # Configuration, Targets, Runtimes, and Auth
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.3.2).
 
-Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP/native/pi-ai-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
+Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 
-Clio is built on top of pi-ai. Broad provider/model support comes from pi-ai-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every pi-ai provider.
+Clio's engine is built on the pi SDK (see [docs/pi-boundary.md](pi-boundary.md)). Broad provider/model support comes from engine-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.
 
 Source of truth: `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, and `src/cli/auth.ts`.
 
@@ -56,7 +56,7 @@ clio-coder configure --list
 ```
 
 Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
-- **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio-native`.
+- **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio`.
 - **[Ollama](https://ollama.com):** A lightweight, extensible framework for building and running LLMs locally. Target runtime ID: `ollama-native`.
 - **[llama.cpp](https://github.com/ggerganov/llama.cpp):** A minimal C/C++ implementation for local LLM inference. Target runtime ID: `llamacpp`.
 - **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
@@ -66,7 +66,7 @@ Common local runtime IDs and default URLs are:
 
 | Runtime | Target runtime id | Example local URL |
 | --- | --- | --- |
-| LM Studio | `lmstudio-native` | `http://127.0.0.1:1234` |
+| LM Studio | `lmstudio` | `http://127.0.0.1:1234` |
 | Ollama | `ollama-native` | `http://127.0.0.1:11434` |
 | llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
 | vLLM | `vllm` | `http://127.0.0.1:8000` |
@@ -78,7 +78,7 @@ Example registration:
 ```bash
 clio-coder configure \
   --id local-lmstudio \
-  --runtime lmstudio-native \
+  --runtime lmstudio \
   --url http://127.0.0.1:1234 \
   --model your-model-id \
   --set-orchestrator \
@@ -119,9 +119,9 @@ Terminology used in code and receipts:
 | `RuntimeDescriptor` | Executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, `llamacpp`, `claude-sdk`, or `claude-code`. |
 | Target / `TargetDescriptor` | Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
-| Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
+| Orchestrator target | Main chat/print target. HTTP/native engine-backed. |
 | Background target | Optional proactive-memory model target. Unset means deterministic rules-only memory. |
-| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
+| Worker target | Fleet dispatch target. HTTP/native engine-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
 
 ```yaml
 version: 1
@@ -129,11 +129,23 @@ autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto (enfor
 
 targets:
   - id: local-lmstudio
-    runtime: lmstudio-native
+    runtime: lmstudio
     url: http://127.0.0.1:1234
     defaultModel: your-model-id
     capabilities:
       reasoning: true       # optional; only if your model/runtime supports it
+    lmstudio:
+      # Omit load entirely to use LM Studio's just-in-time load defaults.
+      load:
+        contextLength: 131072
+        flashAttention: true
+        evalBatchSize: 512
+        numExperts: 8
+        offloadKvCacheToGpu: true
+      request:
+        ttlSeconds: 600
+        draftModel: your-draft-model-id
+        reasoning: auto      # auto | off | on | low | medium | high
 
 runtimePlugins: []
 
@@ -193,6 +205,8 @@ theme: default
 terminal:
   showTerminalProgress: false
   outputVerbosity: default
+  tuiMode: regular              # regular terminal scrollback or fullscreen sticky layout
+  fullscreenScrollbar: auto    # hidden, auto, or always in fullscreen mode
 skills:
   trustProjectCompatRoots: false
 delegation:
@@ -225,6 +239,71 @@ guardrails:
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
+
+### LM Studio transport and settings
+
+The canonical runtime id is `lmstudio`. The former `lmstudio-native` id remains an accepted alias,
+and `clio-coder upgrade` rewrites persisted targets to the canonical id. It also converts `ws:` URLs
+to `http:` and `wss:` URLs to `https:` because this adapter is entirely HTTP. Chat uses LM Studio's
+OpenAI-compatible `POST /v1/chat/completions` endpoint
+(<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). Model discovery and residency
+use the native REST API, with `GET /api/v1/models` as the preferred catalog
+(<https://lmstudio.ai/docs/developer/rest/list>), `GET /api/v0/models` for older servers, and
+`GET /v1/models` as the final listing fallback.
+
+Leave `lmstudio.load` absent to preserve LM Studio's just-in-time loading behavior. Clio then observes
+residency but sends no explicit load request. When `lmstudio.load` is present and the selected model
+is unloaded, Clio calls `POST /api/v1/models/load` with `echo_load_config: true`; LM Studio documents
+the load operation at <https://lmstudio.ai/docs/developer/rest/load>. Clio sends only fields that the
+target explicitly configured:
+
+| Settings key | REST load field |
+| --- | --- |
+| `contextLength` | `context_length` |
+| `flashAttention` | `flash_attention` |
+| `evalBatchSize` | `eval_batch_size` |
+| `numExperts` | `num_experts` |
+| `offloadKvCacheToGpu` | `offload_kv_cache_to_gpu` |
+
+Loaded instances are addressed by their instance ids when Clio calls
+`POST /api/v1/models/unload` (<https://lmstudio.ai/docs/developer/rest/unload>). Clio records the
+instance id returned by each successful load in this process and refuses to unload every other
+instance. Models that were already resident and instances reported through LM Link remain
+observe-only. Model selection remains permissive: `defaultModel` and `wireModels` may name either
+the model key or one of its loaded instance ids. The probe reports both forms and exposes each
+instance's echoed load configuration from the native model listing
+(<https://lmstudio.ai/docs/developer/rest/list>).
+
+The request settings map as follows:
+
+| Settings key | Chat request behavior |
+| --- | --- |
+| `ttlSeconds` | Sends `ttl`, using LM Studio's auto-eviction TTL (<https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict>). |
+| `draftModel` | Sends `draft_model` on the OpenAI-compatible chat request (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). |
+| `reasoning` | `off` sends `reasoning_effort: none`; `on` sends `low`; a literal `low`, `medium`, or `high` outranks the thinking dial but is still clamped to the efforts the model advertises (a model reporting only `[off, on]` receives `low`); `auto` maps the active Clio thinking level. |
+
+Clio maps the active thinking level through the model family's runtime resolver map. If the model family specifies an explicit effort map (such as mapping `max` to `xhigh`), Clio sends that exact effort; otherwise it falls back to the default `off` to `none`, `minimal`/`low` to `low`, `medium` to `medium`, and `high`/`xhigh`/`max` to `high`. For model families that declare a `none` or `always-on` reasoning mechanism, the `reasoning_effort` field is omitted. A model reporting only `[off,on]` clamps every
+non-off level to `low`. Clio uses only `reasoning_effort` on LM Studio's documented chat surface
+(<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>) and never sends
+`chat_template_kwargs` to LM Studio.
+
+LM Studio can require bearer authentication for its HTTP APIs
+(<https://lmstudio.ai/docs/developer/core/authentication>). Clio sends the resolved target API key as
+`Authorization: Bearer ...` on chat, listing, load, and unload calls. Configure validates the exact
+`/lmstudio-greeting` response before saving a direct `lmstudio` target.
+
+### Loaded instances and LM Link peers
+
+A model id on an LM Studio target is resolved against that host's loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. When a bare model key is requested and multiple instances of it are loaded, Clio selects an instance in this order: the target's configured `defaultModel`, then an instance not cross-listed by another configured LM Studio target, and finally the first loaded instance. This behavior tracks issue #113.
+
+
+Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
+context checkpoints, and speculative-decoding variants are not writable through this Clio settings
+block. Set them in LM Studio's My Models load settings or with `lms load`; the CLI is documented at
+<https://lmstudio.ai/docs/cli>, and the broader load-config vocabulary is documented at
+<https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config>. Clio reads back the load
+configuration that `GET /api/v1/models` exposes instead of pretending it applied settings the REST
+load endpoint did not accept (<https://lmstudio.ai/docs/developer/rest/list>).
 
 `defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
 
@@ -262,7 +341,7 @@ slower even though the target still responds.
 For llama.cpp router targets, Clio observes `/v1/models` and `/props`. It can
 tell which models are loaded and whether the resident count is within the
 router's `max_instances`, so an allowed two-model setup is reported as an
-informational co-residency notice. The router response does not expose free
+informational co-residency notice. A model reporting a `sleeping` state counts as resident, because the router wakes it on the next inference request. Clio's residency manager never evicts a resident model when the requested replacement model is not in the router's catalog. The router response does not expose free
 VRAM or per-model loaded footprint, so Clio cannot prove the loaded set fits.
 Use host tools such as `nvidia-smi`, `rocm-smi`, Vulkan memory telemetry, or
 the runtime's own dashboard to confirm headroom after loading the main coding
@@ -284,16 +363,21 @@ at CPU speed instead of failing.
   warning naming the co-resident models. Raise or disable the ceiling with
   `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT`. A target serving one model alone is
   never clamped.
-- **One instance per model.** A load config is never sent for a model that is
+- **Reuse an existing instance.** A load config is never sent for a model that is
   already resident, because LM Studio answers that with a second instance
   holding another copy of the weights and KV cache. A resident model is reused
   as loaded, and the output budget follows the window the server actually has
-  open. Duplicate instances found at load time are released.
-- **Roles are never evicted blind.** Every model the configuration references
-  carries the plane it serves (chat, memory, worker, target default). Clio
-  evicts an unprotected resident first, and an eviction that has to touch a
-  configured model names its role in the warning, so unloading the model serving
-  proactive memory can never read as freeing a spare.
+  open. Same-key instances reported by separate LM Link nodes are independent,
+  not duplicates, and remain untouched.
+- **Unload only process-owned instances.** Clio may release an instance only
+  when this adapter process loaded it and recorded the exact returned instance
+  id. Every pre-existing local instance and every LM Link instance is
+  observe-only. A fallback swap can therefore release an earlier Clio load but
+  cannot disturb the operator's resident models.
+- **Roles remain visible.** Every model the configuration references carries
+  the plane it serves (chat, memory, worker, target default). Notices name that
+  role and describe co-residency without claiming that an operator-owned model
+  can be evicted.
 
 A turn whose token rate collapses below 2 tokens per second for 30 seconds
 surfaces a `degraded` notice listing what is resident on the target. That is
@@ -348,58 +432,84 @@ Every value change in Settings is transactional: selecting an editable row and p
 - `Apply and save globally`
 - `Cancel` (or `Esc`)
 
-For restart-required settings (`budget.concurrency`, `runtimePlugins`), the session-only option is suppressed and global saving announces `Saved to settings.yaml · restart Clio to apply`. For destructive actions (removing a target or fleet profile), the confirmation preflight details affected chat, fleet, and memory routes before execution.
+For restart-required settings (`budget.concurrency`, `runtimePlugins`, `terminal.tuiMode`, `terminal.fullscreenScrollbar`), the session-only option is suppressed and global saving announces `Saved to settings.yaml · restart Clio to apply`. For destructive actions (removing a target or fleet profile), the confirmation preflight details affected chat, fleet, and memory routes before execution.
 
 The Settings Center organizes all configuration under four non-selectable group headers:
 
-| Group | Section | Purpose & Content |
+| Group | Section | Rows, in order |
 | --- | --- | --- |
-| **CORE** | Autonomy & Safety (`safety`) | Autonomy level (`autonomy`), Worker permission asks (`workers.onPermission`), Delegation governance (`delegation.defaults.toolGovernance`), and Safety net status (read-only fact). |
-| **CORE** | Orchestrator (`orchestrator`) | Active chat target (`orchestrator.target`), model (`orchestrator.model`), and thinking level (`orchestrator.thinkingLevel`). Changing target rebases model and thinking choices. |
-| **ROUTING** | Fleet (`fleet`) | Entity workbench with group headers for `Defaults` (target, model, thinking level), `Profiles` (one-row summaries with `◆ Edit` drill-down and destructive removal preflight), `Agent routes`, and `Placement` (node status). |
-| **ROUTING** | Targets (`targets`) | Operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with in-place action/detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
-| **ROUTING** | Models (`models`) | Provider-backed scoped model checklist with target-level and target/model entries, `Space` toggle, capability inspector, and preserved `Unavailable` group. Deep link `/scoped-models`. |
-| **RUNTIME** | Budget (`budget`) | Session ceiling USD (`budget.sessionCeilingUsd`), max output tokens (`budget.maxOutputTokens`), and worker concurrency (`budget.concurrency`, restart-required). |
-| **RUNTIME** | Compaction (`compaction`) | Auto-compact toggle (`compaction.auto`), protected recent turns (`compaction.excludeLastTurns`), and compaction threshold (`compaction.threshold`). |
-| **RUNTIME** | Retry (`retry`) | Transient error recovery toggle (`retry.enabled`), max retries (`retry.maxRetries`), base delay (`retry.baseDelayMs`), and max delay (`retry.maxDelayMs`). |
-| **EXPERIENCE** | Terminal (`terminal`) | Terminal progress badges (`terminal.showTerminalProgress`), transcript output detail (`terminal.outputVerbosity`: `minimal`, `default`, `verbose`), and inline status lines (`terminal.showInlineStatus`). |
-| **EXPERIENCE** | Advanced (`advanced`) | Notification dismiss defaults, memory intervention toggles, and runtime extension settings. |
+| **CORE** | Autonomy & Safety (`safety`) | `autonomy`, `workers.onPermission`, `delegation.defaults.toolGovernance`, `skills.trustProjectCompatRoots`, and the read-only safety-net fact. |
+| **CORE** | Orchestrator (`orchestrator`) | `orchestrator.thinkingLevel`, `orchestrator.target`, `orchestrator.model`, the memory plane (`background.target`, `background.model`, `background.thinkingLevel`), and the proactive-memory knobs (`memory.intervention.enabled`, `.everyNTools`, `.windowSteps`, `.maxTokens`, `.timeoutMs`). Changing target rebases model and thinking choices. |
+| **ROUTING** | Fleet (`fleet`) | `workers.default.target`, `workers.default.model`, `workers.default.thinkingLevel`, `workers.maxRetries`, `workers.profiles`, and `workers.agentBindings`, rendered under the group headers `Defaults`, `Profiles`, `Agent routes`, and `Placement`. Profile rows carry a `◆ Edit` drill-down and a destructive removal preflight; placement rows are read-only node status. |
+| **ROUTING** | Targets (`targets`) | The `targets` console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action and detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
+| **ROUTING** | Models (`models`) | `scope`, `modelSelector.recentLimit`, and `modelSelector.favorites`, rendered as a provider-backed checklist with target-level and target/model entries, `Space` toggle, capability inspector, and a preserved `Unavailable` group. Deep link `/scoped-models`. |
+| **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, and `budget.concurrency` (restart required). |
+| **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, and `compaction.excludeLastTurns`. |
+| **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, and `retry.maxDelayMs`. |
+| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), and `theme`. |
+| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
+
+`retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
 
 Label to config path mapping:
 
 | Label | Config path |
 | --- | --- |
 | Autonomy level | `autonomy` |
-| Worker permission asks | `workers.onPermission` |
+| Fleet approvals routing | `workers.onPermission` |
 | Delegation governance | `delegation.defaults.toolGovernance` |
+| Trust project skill roots | `skills.trustProjectCompatRoots` |
+| Safety net | read-only fact, no config path |
 | Thinking level | `orchestrator.thinkingLevel` |
 | Target | `orchestrator.target` |
 | Model | `orchestrator.model` |
+| Memory target | `background.target` |
+| Memory model | `background.model` |
+| Memory thinking level | `background.thinkingLevel` |
+| Proactive memory | `memory.intervention.enabled` |
+| Memory cadence (tools) | `memory.intervention.everyNTools` |
+| Memory trajectory steps | `memory.intervention.windowSteps` |
+| Memory reminder tokens | `memory.intervention.maxTokens` |
+| Memory timeout (ms) | `memory.intervention.timeoutMs` |
 | Default target | `workers.default.target` |
 | Default model | `workers.default.model` |
 | Default thinking level | `workers.default.thinkingLevel` |
-| Dispatched worker profiles | `workers.profiles.*` |
-| Agent route bindings | `workers.agentBindings.*` |
-| Scoped model set | `scope` |
-| Model favorites | `modelSelector.favorites` |
+| Fleet retries | `workers.maxRetries` |
+| Add profile | `workers.profiles` |
+| Add agent route | `workers.agentBindings` |
+| Configured targets | `targets` |
+| Model cycle set | `scope` |
+| Recent models kept | `modelSelector.recentLimit` |
+| Pinned favorites | `modelSelector.favorites` |
 | Session ceiling (USD) | `budget.sessionCeilingUsd` |
-| Output token budget | `budget.maxOutputTokens` |
-| Worker concurrency | `budget.concurrency` (restart required) |
+| Output budget (tokens) | `defaults.maxTokens` |
+| Fleet concurrency | `budget.concurrency` (restart required) |
 | Auto-compact | `compaction.auto` |
-| Protected recent turns | `compaction.excludeLastTurns` |
 | Compaction threshold | `compaction.threshold` |
+| Protected recent turns | `compaction.excludeLastTurns` |
 | Retry transient errors | `retry.enabled` |
 | Max retries | `retry.maxRetries` |
 | Base delay (ms) | `retry.baseDelayMs` |
 | Max delay (ms) | `retry.maxDelayMs` |
 | Terminal progress badges | `terminal.showTerminalProgress` |
-| Transcript output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
+| Output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
+| TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
+| Fullscreen scrollbar | `terminal.fullscreenScrollbar` (`hidden`, `auto`, or `always`, restart required) |
+| Theme | `theme` |
+| Runtime plugins | `runtimePlugins` |
+| Compaction model | `compaction.model` |
+| Compaction prompt | `compaction.systemPrompt` |
+| Delegate connect (ms) | `delegation.defaults.connectTimeoutMs` |
+| Delegate turn (ms) | `delegation.defaults.turnTimeoutMs` |
+| Delegate permission (ms) | `delegation.defaults.permissionTimeoutMs` |
+| Keybinding overrides | `keybindings` |
+| Delegation agents | `delegation.agents` |
 
 ---
 
 ## Settings inventory
 
-Every key `settings.yaml` accepts, with its shipped default, what validation admits, and when a change takes effect. `DEFAULT_SETTINGS` in `src/core/defaults.ts` is the one place a default is written; validation lives in `src/core/config.ts`. A key absent from this table is an unknown-key error, not a silently ignored typo.
+Every key `settings.yaml` accepts, with its shipped default, what validation admits, and when a change takes effect. `DEFAULT_SETTINGS` in `src/core/defaults.ts` is the one place a default is written; validation lives in `src/core/config.ts`. A key absent from this table is an unknown-key error, not a silently ignored typo. The one exception is `identity`, which pre-0.3.1 files carry: it is accepted and ignored so those files keep loading.
 
 "When it applies" has four values. **Immediately** means a running session picks the change up from the config watcher. **Next turn** means the running turn finishes on the old value. **Next session** means `settings.yaml` is a saved default that a launched session copies and then owns, so writing it never redirects a session already running. **Restart** means the process reads it once at boot.
 
@@ -425,7 +535,7 @@ These are saved defaults, not a live control surface. See [Live routing vs saved
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
 | `autonomy` | `auto-edit` | `read-only`, `suggest`, `auto-edit`, `full-auto` | immediately |
-| `workers.onPermission` | `deny` | `deny`, `escalate` | next dispatch |
+| `workers.onPermission` | `deny` | `deny`, `fail`, `escalate` | next dispatch |
 | `workers.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
 | `workers.escalation.fallback` | `deny` | `deny`, `fail` | next dispatch |
 | `workers.maxRetries` | `2` | integer ≥ 0 | next dispatch |
@@ -454,7 +564,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `compaction.auto` | `true` | boolean | next turn |
 | `compaction.threshold` | `0.8` | number in 0 to 1 | next turn |
 | `compaction.excludeLastTurns` | `6` | integer ≥ 1 | next turn |
-| `defaults.maxTokens` | `32768` | integer ≥ 1 | next turn |
+| `defaults.maxTokens` | `32768` | integer ≥ 0 | next turn |
 | `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |
 | `budget.concurrency` | `auto` | `auto` or integer ≥ 1 | next dispatch |
 | `retry.enabled` | `true` | boolean | next turn |
@@ -464,6 +574,8 @@ Every one of these has an environment override for a single process; see [enviro
 | `retry.streamStallMs` | `180000` | integer ≥ 0, `0` disables | next turn |
 
 `retry.streamStallMs` covers the failure a request error never reports: the backend answers `/health` while the slot behind the stream is dead. A run whose stream produces nothing for that long is aborted and handed to the same retry ladder as any transient error, so a headless run or a fleet worker recovers without a human pressing Esc. Time inside a tool call and inside the post-tool compaction guard does not count against it, so a long build is never mistaken for a wedged stream. Set it to `0` to keep the old behavior, where a stalled stream waits forever.
+
+Generic provider and transport errors are classified by transient retry rules, including DNS and WebSocket failures while excluding quota, usage-limit, and billing exhaustion even when the message also contains `429` or `500`. Clio adds only its local-runtime policy: model-loading errors receive a longer bounded delay, the TUI shows a cancellable countdown, and recovery resumes through the existing agent loop.
 
 ### Proactive memory
 
@@ -483,7 +595,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `delegation.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
 | `delegation.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
 | `delegation.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
-| `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `runtime-native` | next dispatch |
+| `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
 
 `delegation.agents` is the one settings key Clio itself appends to, and only after an explicit answer in `clio-coder configure --interop` or `/interop`. Everything else here is operator-authored.
 
@@ -494,6 +606,8 @@ Every one of these has an environment override for a single process; see [enviro
 | `theme` | `default` | string naming a registered theme | immediately |
 | `terminal.showTerminalProgress` | `false` | boolean | immediately |
 | `terminal.outputVerbosity` | `default` | `minimal`, `default`, `verbose` | immediately |
+| `terminal.tuiMode` | `regular` | `regular`, `fullscreen` | restart |
+| `terminal.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
 | `modelSelector.favorites` | `[]` | list of strings | immediately |
 | `modelSelector.recentLimit` | `12` | integer ≥ 1 | immediately |
 | `keybindings` | `{}` | map of binding id to a key string or list of them | restart |
@@ -529,7 +643,7 @@ clio-coder configure --list
 clio-coder configure --list --all
 ```
 
-`clio-coder configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in pi-ai catalog`). It also includes a reference to `clio-coder auth list` for runtimes that require authentication.
+`clio-coder configure --list` outputs every registered runtime across all categories (local, cloud, subscription, worker-only) along with its auth type and catalog status. For catalog-backed runtimes, it reports the catalog size (for example, `models=38 in catalog`). It also includes a reference to `clio-coder auth list` for runtimes that require authentication.
 
 When configuring a catalog-backed runtime non-interactively, `clio-coder configure` requires the `--model` flag to specify an explicit model from the catalog; it will not silently seed a generic default model.
 
@@ -824,12 +938,12 @@ Representative built-in runtime IDs:
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
 | Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for `agy --print` subprocess workers |
-| Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
+| Local native | `llamacpp`, `lmstudio`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio-coder configure --list --all` to see them.
 
 > [!NOTE]
-> Chat and print targets are HTTP/native/pi-ai-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: `claude-sdk`, `claude-code`, and `antigravity-code`.
+> Chat and print targets are HTTP and native engine-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: `claude-sdk`, `claude-code`, and `antigravity-code`.
 
 ---
 
@@ -863,6 +977,8 @@ You have two ways to give Clio an API key:
 
 - **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio-coder configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default. The wizard suggests it for new credentials and offers `keep` first when a stored credential already exists.
 - **Stored credential** (`--api-key <literal>`, or `clio-coder auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
+
+OAuth refresh follows signal-aware credential mutation. Clio serializes the read, token exchange, and atomic `credentials.yaml` write under one lock, forwards the active agent or background-request abort signal through `providers.auth`, and cancels a queued lock wait immediately. A cancelled refresh neither continues later nor publishes an uncommitted token into the process-local credential view.
 
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio-coder auth status`, `clio-coder targets`, or `clio-coder configure`; only the source (env var name or `stored-api-key`) is shown.
 

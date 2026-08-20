@@ -1,25 +1,33 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { createTaskNudgeRegistration, TASK_NUDGE_REGISTRATION_ID } from "../../src/domains/middleware/task-nudge.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import {
 	createTaskBoardStore,
+	foldSessionTaskHistory,
 	foldTaskBoard,
+	LEGACY_TASK_BOARD_ID,
 	type TaskBoardSnapshot,
 	type TaskBoardStore,
 	type TaskLedgerEntryFields,
 	taskBoardCounts,
 	toTaskLedgerEntryFields,
 } from "../../src/domains/session/task-board.js";
+import { createUserTasksStore } from "../../src/domains/user-tasks/store.js";
 import { createTasksTool } from "../../src/tools/tasks.js";
 
 function storeWithLog(): { store: TaskBoardStore; appended: TaskLedgerEntryFields[] } {
 	const appended: TaskLedgerEntryFields[] = [];
+	let nextBoardId = 1;
 	const store = createTaskBoardStore({
 		getSessionId: () => "session-1",
 		readEntries: () => [],
 		appendEntry: (entry) => appended.push(entry),
+		createBoardId: () => `board-${nextBoardId++}`,
 	});
 	return { store, appended };
 }
@@ -57,6 +65,21 @@ describe("contracts/task-board store", () => {
 			],
 		);
 		strictEqual(store.snapshot()?.title, "Ship it");
+		strictEqual(result.board.boardId, "board-1");
+	});
+
+	it("keeps one stable board identity across mutations and mints a new one for plan", () => {
+		const { store, appended } = plannedStore();
+		strictEqual(store.snapshot()?.boardId, "board-1");
+		ok(store.apply({ op: "add", tasks: ["follow-up"] }).ok);
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		strictEqual(store.snapshot()?.boardId, "board-1");
+		ok(appended.every((entry) => entry.boardId === "board-1"));
+
+		const replanned = store.apply({ op: "plan", title: "Second board", tasks: ["new work"] });
+		ok(replanned.ok);
+		strictEqual(replanned.board.boardId, "board-2");
+		strictEqual(appended.at(-1)?.boardId, "board-2");
 	});
 
 	it("keeps exactly one task active and reports the parked one", () => {
@@ -132,12 +155,28 @@ describe("contracts/task-board store", () => {
 			ok(isSessionEntry(entry), "persisted taskLedger snapshot must satisfy the session entry guard");
 		}
 		const last = appended[appended.length - 1];
+		ok(last);
 		strictEqual(last?.goals[0]?.title, "Ship the feature");
 		strictEqual(last?.subgoals[0]?.status, "completed");
 		deepStrictEqual(
 			last?.requiredValidationEvidence.map((item) => [item.id, item.status, item.description]),
 			[["t1.evidence", "passed", "verified by hand"]],
 		);
+		const envelope = { ...last, turnId: "turn-2", timestamp: new Date().toISOString() };
+		ok(isSessionEntry(envelope));
+		ok(isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "u1" }] }));
+		ok(!isSessionEntry({ ...envelope, boardId: 7 }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "operator" }] }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user" }] }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "" }] }));
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: "user", userTaskId: "t1" }] }));
+		ok(
+			!isSessionEntry({
+				...envelope,
+				subgoals: [{ ...envelope.subgoals[0], origin: "agent", userTaskId: "u1" }],
+			}),
+		);
+		ok(!isSessionEntry({ ...envelope, subgoals: [{ ...envelope.subgoals[0], origin: undefined, userTaskId: "u1" }] }));
 	});
 
 	it("folds the last ledger snapshot back into the identical board", () => {
@@ -153,11 +192,179 @@ describe("contracts/task-board store", () => {
 		deepStrictEqual(foldTaskBoard(entries), live);
 	});
 
+	it("ignores contradictory provenance instead of admitting it during a refold", () => {
+		const board: TaskBoardSnapshot = {
+			boardId: "board-valid",
+			title: "Valid board",
+			tasks: [{ id: "t1", title: "valid", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		const valid = {
+			...toTaskLedgerEntryFields(board, new Date("2026-07-03T00:00:00.000Z")),
+			turnId: "ledger-valid",
+			timestamp: "2026-07-03T00:00:00.000Z",
+		};
+		const malformed = [
+			{ ...valid.subgoals[0], origin: "user", userTaskId: undefined },
+			{ ...valid.subgoals[0], origin: "user", userTaskId: "" },
+			{ ...valid.subgoals[0], origin: "user", userTaskId: "task-1" },
+			{ ...valid.subgoals[0], origin: "agent", userTaskId: "u1" },
+			{ ...valid.subgoals[0], origin: undefined, userTaskId: "u1" },
+		];
+		for (const [index, subgoal] of malformed.entries()) {
+			const invalid = {
+				...valid,
+				turnId: `ledger-invalid-${index}`,
+				timestamp: `2026-07-03T00:0${index + 1}:00.000Z`,
+				subgoals: [subgoal],
+			};
+			deepStrictEqual(foldTaskBoard([valid, invalid]), foldTaskBoard([valid]));
+			deepStrictEqual(foldSessionTaskHistory([valid, invalid]), foldSessionTaskHistory([valid]));
+		}
+	});
+
+	it("retains completed work from prior board generations in session history", () => {
+		const { store, appended } = plannedStore();
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		ok(store.apply({ op: "done", id: "t1", evidence: "verified" }).ok);
+		ok(store.apply({ op: "plan", title: "Follow-up", tasks: ["publish"] }).ok);
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		const entries = appended.map((fields, index) => ({
+			...fields,
+			turnId: `turn-${index}`,
+			timestamp: `2026-07-03T00:0${index}:00.000Z`,
+		}));
+
+		const history = foldSessionTaskHistory(entries);
+		deepStrictEqual(
+			history.map((item) => [item.boardId, item.title]),
+			[
+				["board-2", "Follow-up"],
+				["board-1", "Ship the feature"],
+			],
+		);
+		strictEqual(history[0]?.tasks[0]?.status, "active");
+		strictEqual(history[1]?.tasks[0]?.status, "completed");
+	});
+
+	it("folds old snapshots as one newest legacy board without aliasing generations", () => {
+		const first: TaskBoardSnapshot = {
+			boardId: "ignored",
+			title: "Old plan",
+			tasks: [{ id: "t1", title: "old identity", status: "completed", evidence: "done" }],
+			activeRunIds: [],
+		};
+		const second: TaskBoardSnapshot = {
+			boardId: "ignored",
+			title: "New plan",
+			tasks: [{ id: "t1", title: "new identity", status: "pending" }],
+			activeRunIds: [],
+		};
+		const withoutBoardId = (board: TaskBoardSnapshot, timestamp: string): unknown => {
+			const { boardId: _boardId, ...fields } = toTaskLedgerEntryFields(board, new Date(timestamp));
+			return { ...fields, turnId: timestamp, timestamp };
+		};
+		const history = foldSessionTaskHistory([
+			withoutBoardId(first, "2026-07-03T00:00:00.000Z"),
+			withoutBoardId(second, "2026-07-03T00:01:00.000Z"),
+		]);
+		strictEqual(history.length, 1);
+		strictEqual(history[0]?.boardId, LEGACY_TASK_BOARD_ID);
+		strictEqual(history[0]?.title, "New plan");
+		deepStrictEqual(
+			history[0]?.tasks.map((task) => task.title),
+			["new identity"],
+		);
+	});
+
+	it("picks one operator task with durable provenance and refuses a duplicate link", () => {
+		const { store, appended } = plannedStore();
+		const picked = store.apply({ op: "pick", title: "operator request", userTaskId: "u3" });
+		ok(picked.ok);
+		deepStrictEqual(picked.board.tasks.at(-1), {
+			id: "t4",
+			title: "operator request",
+			status: "pending",
+			origin: "user",
+			userTaskId: "u3",
+		});
+		strictEqual(appended.at(-1)?.subgoals.at(-1)?.origin, "user");
+		strictEqual(appended.at(-1)?.subgoals.at(-1)?.userTaskId, "u3");
+		const duplicate = store.apply({ op: "pick", title: "duplicate", userTaskId: "u3" });
+		ok(!duplicate.ok);
+		ok(duplicate.message.includes("already linked"));
+	});
+
+	it("preserves open operator work across plan and allocates agent ids after it", () => {
+		const { store } = plannedStore();
+		ok(store.apply({ op: "pick", title: "operator request", userTaskId: "u1" }).ok);
+		ok(store.apply({ op: "start", id: "t4" }).ok);
+		const replanned = store.apply({ op: "plan", title: "New agent plan", tasks: ["first", "second"] });
+		ok(replanned.ok);
+		deepStrictEqual(
+			replanned.board.tasks.map((task) => [task.id, task.origin, task.userTaskId]),
+			[
+				["t4", "user", "u1"],
+				["t5", "agent", undefined],
+				["t6", "agent", undefined],
+			],
+		);
+		ok(replanned.notes.some((note) => note.includes("preserved 1 open operator")));
+	});
+
+	it("publishes no linked board mutation when the required ledger append fails", () => {
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => [],
+			createBoardId: () => "board-failed",
+			appendEntry: () => {
+				throw new Error("ledger unavailable");
+			},
+		});
+		const result = store.apply({ op: "pick", title: "operator request", userTaskId: "u1" });
+		ok(!result.ok);
+		ok(result.message.includes("ledger unavailable"));
+		strictEqual(store.snapshot(), null);
+	});
+
+	it("keeps the prior board when a replan preserving operator work cannot append", () => {
+		let rejectAppend = false;
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => [],
+			createBoardId: () => "board-preserved",
+			appendEntry: () => {
+				if (rejectAppend) throw new Error("ledger unavailable");
+			},
+		});
+		ok(store.apply({ op: "pick", title: "operator request", userTaskId: "u1" }).ok);
+		const before = store.snapshot();
+		rejectAppend = true;
+		const replanned = store.apply({ op: "plan", title: "Replacement plan", tasks: ["agent task"] });
+		ok(!replanned.ok);
+		ok(replanned.message.includes("ledger unavailable"));
+		deepStrictEqual(store.snapshot(), before);
+	});
+
+	it("refolds user provenance from the durable task ledger", () => {
+		const { store, appended } = plannedStore();
+		ok(store.apply({ op: "pick", title: "operator request", userTaskId: "u7" }).ok);
+		const entries = appended.map((fields, index) => ({
+			...fields,
+			turnId: `turn-${index}`,
+			timestamp: `2026-07-03T00:0${index}:00.000Z`,
+		}));
+		const folded = foldTaskBoard(entries);
+		strictEqual(folded?.tasks.at(-1)?.origin, "user");
+		strictEqual(folded?.tasks.at(-1)?.userTaskId, "u7");
+	});
+
 	it("refolds from the session ledger when the session switches", () => {
 		let sessionId = "session-a";
 		const boardA: TaskBoardSnapshot = {
+			boardId: "board-a",
 			title: "Board A",
-			tasks: [{ id: "t1", title: "a", status: "pending" }],
+			tasks: [{ id: "t1", title: "a", status: "pending", origin: "agent" }],
 			activeRunIds: [],
 		};
 		const entriesBySession: Record<string, unknown[]> = {
@@ -173,6 +380,94 @@ describe("contracts/task-board store", () => {
 		deepStrictEqual(store.snapshot(), boardA);
 		sessionId = "session-b";
 		strictEqual(store.snapshot(), null);
+	});
+
+	// issue #94: a /tree switch moves the active append point inside the same
+	// session, so getSessionId() alone never noticed the branch changed and the
+	// cache kept showing the abandoned branch's board. invalidate() is what the
+	// SessionTurnSwitched bus signal calls to force the next read to refold.
+	it("does not refold on its own when the session id is unchanged, and does after invalidate()", () => {
+		const boardA: TaskBoardSnapshot = {
+			boardId: "board-a",
+			title: "Board A",
+			tasks: [{ id: "t1", title: "a", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		const boardB: TaskBoardSnapshot = {
+			boardId: "board-b",
+			title: "Board B (abandoned branch)",
+			tasks: [{ id: "t1", title: "b", status: "active", origin: "agent" }],
+			activeRunIds: [],
+		};
+		let entries: unknown[] = [
+			{ ...toTaskLedgerEntryFields(boardA, new Date()), turnId: "turn-1", timestamp: "2026-07-03T00:00:00.000Z" },
+		];
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-a",
+			readEntries: () => entries,
+		});
+		deepStrictEqual(store.snapshot(), boardA);
+
+		// The ledger now folds to a different board (the /tree switch's filtered
+		// active-path read), but the session id is still "session-a".
+		entries = [
+			{ ...toTaskLedgerEntryFields(boardB, new Date()), turnId: "turn-2", timestamp: "2026-07-03T00:01:00.000Z" },
+		];
+		deepStrictEqual(store.snapshot(), boardA, "same session id: cache is not stale by that signal alone");
+
+		store.invalidate();
+		deepStrictEqual(store.snapshot(), boardB, "invalidate() forces the next read to refold");
+	});
+
+	it("exposes a cache-only snapshot while eager reads happen outside repaint consumers", () => {
+		const boardA: TaskBoardSnapshot = {
+			boardId: "board-a",
+			title: "Board A",
+			tasks: [{ id: "t1", title: "a", status: "pending", origin: "agent" }],
+			activeRunIds: [],
+		};
+		const boardB: TaskBoardSnapshot = {
+			boardId: "board-b",
+			title: "Board B",
+			tasks: [{ id: "t1", title: "b", status: "active", origin: "agent" }],
+			activeRunIds: [],
+		};
+		let sessionId = "session-a";
+		let entries: unknown[] = [
+			{ ...toTaskLedgerEntryFields(boardA, new Date()), turnId: "turn-a", timestamp: "2026-07-03T00:00:00.000Z" },
+		];
+		let reads = 0;
+		const store = createTaskBoardStore({
+			getSessionId: () => sessionId,
+			readEntries: () => {
+				reads += 1;
+				return entries;
+			},
+		});
+
+		strictEqual(store.cachedSnapshot(), null);
+		strictEqual(reads, 0);
+		deepStrictEqual(store.snapshot(), boardA, "composition eagerly populates the cache");
+		strictEqual(reads, 1);
+		for (let index = 0; index < 10; index += 1) deepStrictEqual(store.cachedSnapshot(), boardA);
+		strictEqual(reads, 1, "cache reads never reach the ledger");
+
+		entries = [
+			{ ...toTaskLedgerEntryFields(boardB, new Date()), turnId: "turn-b", timestamp: "2026-07-03T00:01:00.000Z" },
+		];
+		store.invalidate();
+		strictEqual(store.cachedSnapshot(), null, "a dirty branch never leaks its prior projection");
+		strictEqual(reads, 1);
+		deepStrictEqual(store.snapshot(), boardB, "the switch boundary eagerly repopulates the cache");
+		strictEqual(reads, 2);
+
+		sessionId = "session-b";
+		strictEqual(store.cachedSnapshot(), null, "a changed session id never leaks the old session's board");
+		strictEqual(reads, 2);
+		deepStrictEqual(store.snapshot(), boardB, "the cross-session boundary eagerly populates the new cache");
+		strictEqual(reads, 3);
+		deepStrictEqual(store.cachedSnapshot(), boardB);
+		strictEqual(reads, 3);
 	});
 
 	it("links and unlinks dispatch runs through the board's activeRunIds", () => {
@@ -279,6 +574,163 @@ describe("contracts/task-board tool", () => {
 		const counts = (done.details as { counts: { completed: number; total: number } }).counts;
 		strictEqual(counts.completed, 1);
 		strictEqual(counts.total, 2);
+	});
+
+	it("discovers waiting operator tasks and picks one onto durable board work", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-bridge-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("review the release notes");
+		const { store } = storeWithLog();
+		const tool = createTasksTool({ board: store, userTasks, getSessionId: () => "session-1" });
+		strictEqual(tool.baseActionClass, "read", "project-local task pickup is intentionally ungated");
+		const listed = await tool.run({ action: "list" });
+		ok(listed.kind === "ok");
+		ok(listed.output.includes('operator tasks waiting: u1 "review the release notes"'));
+		const missingId = await tool.run({ action: "pick" });
+		strictEqual(missingId.kind, "error");
+		ok(missingId.kind === "error" && missingId.message.includes("requires an operator task id"));
+		strictEqual(store.snapshot(), null, "an ungated pick without durable uN identity must not mutate the ledger");
+		strictEqual(userTasks.get("u1")?.status, "open");
+
+		const picked = await tool.run({ action: "pick", id: "u1" });
+		strictEqual(picked.kind, "ok");
+		strictEqual(store.snapshot()?.tasks[0]?.origin, "user");
+		strictEqual(store.snapshot()?.tasks[0]?.userTaskId, "u1");
+		strictEqual(userTasks.get("u1")?.status, "picked");
+		strictEqual(userTasks.get("u1")?.boardTaskId, "t1");
+		const duplicate = await tool.run({ action: "pick", id: "u1" });
+		strictEqual(duplicate.kind, "error");
+	});
+
+	it("propagates a linked board completion to the operator inbox", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-complete-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("verify release");
+		const { store } = storeWithLog();
+		const tool = createTasksTool({ board: store, userTasks, getSessionId: () => "session-1" });
+		strictEqual((await tool.run({ action: "pick", id: "u1" })).kind, "ok");
+		strictEqual((await tool.run({ action: "start", id: "t1" })).kind, "ok");
+		const done = await tool.run({ action: "done", id: "t1", note: "tests passed" });
+		strictEqual(done.kind, "ok");
+		strictEqual(userTasks.get("u1")?.status, "done");
+		ok(done.kind === "ok");
+		const details = done.details as { tasks: Array<{ origin?: string; userTaskId?: string }> };
+		strictEqual(details.tasks[0]?.origin, "user");
+		strictEqual(details.tasks[0]?.userTaskId, "u1");
+	});
+
+	it("keeps a successful ledger pickup authoritative when the sidecar write fails", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-sidecar-fail-"));
+		const durableInbox = createUserTasksStore({ cwd });
+		durableInbox.add("durable pickup");
+		const failingInbox = createUserTasksStore({
+			cwd,
+			write: () => {
+				throw new Error("sidecar unavailable");
+			},
+		});
+		const { store, appended } = storeWithLog();
+		const tool = createTasksTool({ board: store, userTasks: failingInbox, getSessionId: () => "session-1" });
+		const result = await tool.run({ action: "pick", id: "u1" });
+		strictEqual(result.kind, "error");
+		ok(result.kind === "error" && result.message.includes("durably picked up"));
+		const details = result.details as { boardId: string; tasks: Array<{ origin?: string; userTaskId?: string }> };
+		strictEqual(details.boardId, store.snapshot()?.boardId);
+		strictEqual(details.tasks[0]?.origin, "user");
+		strictEqual(details.tasks[0]?.userTaskId, "u1");
+		strictEqual(appended.at(-1)?.subgoals[0]?.userTaskId, "u1");
+		strictEqual(durableInbox.get("u1")?.status, "open");
+	});
+
+	it("publishes neither completion nor sidecar done when the required completion append fails", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-completion-ledger-fail-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("must remain picked");
+		let rejectAppend = false;
+		const store = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => [],
+			createBoardId: () => "board-completion-failure",
+			appendEntry: () => {
+				if (rejectAppend) throw new Error("ledger unavailable");
+			},
+		});
+		const tool = createTasksTool({ board: store, userTasks, getSessionId: () => "session-1" });
+		strictEqual((await tool.run({ action: "pick", id: "u1" })).kind, "ok");
+		strictEqual((await tool.run({ action: "start", id: "t1" })).kind, "ok");
+		rejectAppend = true;
+		const completed = await tool.run({ action: "done", id: "t1", note: "unpersisted evidence" });
+		strictEqual(completed.kind, "error");
+		ok(completed.kind === "error" && completed.message.includes("ledger unavailable"));
+		strictEqual(store.snapshot()?.tasks[0]?.status, "active");
+		strictEqual(userTasks.get("u1")?.status, "picked");
+	});
+
+	it("repairs an interrupted sidecar pickup from the durable board on restart", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-reconcile-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("recover me");
+		const { store, appended } = storeWithLog();
+		ok(store.apply({ op: "pick", title: "recover me", userTaskId: "u1" }).ok);
+		const entries = appended.map((fields, index) => ({
+			...fields,
+			turnId: `turn-${index}`,
+			timestamp: "2026-08-19T12:00:00.000Z",
+		}));
+		const restarted = createTaskBoardStore({
+			getSessionId: () => "session-1",
+			readEntries: () => entries,
+			appendEntry: () => undefined,
+		});
+		const tool = createTasksTool({ board: restarted, userTasks, getSessionId: () => "session-1" });
+		strictEqual((await tool.run({ action: "list" })).kind, "ok");
+		strictEqual(userTasks.get("u1")?.status, "picked");
+		strictEqual(userTasks.get("u1")?.boardTaskId, "t1");
+	});
+
+	it("prevents a picked project task from being duplicated across sessions and restarts", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-task-cross-session-"));
+		const userTasks = createUserTasksStore({ cwd });
+		userTasks.add("owned by session A");
+		const { store: boardA } = storeWithLog();
+		const toolA = createTasksTool({ board: boardA, userTasks, getSessionId: () => "session-a" });
+		strictEqual((await toolA.run({ action: "pick", id: "u1" })).kind, "ok");
+		deepStrictEqual(
+			[userTasks.get("u1")?.status, userTasks.get("u1")?.handedSessionId, userTasks.get("u1")?.boardTaskId],
+			["picked", "session-a", "t1"],
+		);
+
+		let sessionBAppends = 0;
+		const createSessionBTool = () => {
+			const board = createTaskBoardStore({
+				getSessionId: () => "session-b",
+				readEntries: () => [],
+				appendEntry: () => {
+					sessionBAppends += 1;
+				},
+			});
+			const inbox = createUserTasksStore({ cwd });
+			return { board, inbox, tool: createTasksTool({ board, userTasks: inbox, getSessionId: () => "session-b" }) };
+		};
+
+		for (let restart = 0; restart < 2; restart += 1) {
+			const sessionB = createSessionBTool();
+			const listed = await sessionB.tool.run({ action: "list" });
+			ok(listed.kind === "ok");
+			strictEqual(listed.output.includes("operator tasks waiting: u1"), false);
+			const duplicate = await sessionB.tool.run({ action: "pick", id: "u1" });
+			ok(duplicate.kind === "error" && duplicate.message.includes("is picked"));
+			strictEqual(sessionB.board.snapshot(), null);
+			deepStrictEqual(
+				[
+					sessionB.inbox.get("u1")?.status,
+					sessionB.inbox.get("u1")?.handedSessionId,
+					sessionB.inbox.get("u1")?.boardTaskId,
+				],
+				["picked", "session-a", "t1"],
+			);
+		}
+		strictEqual(sessionBAppends, 0, "neither the session switch nor restart creates duplicate board work");
 	});
 });
 

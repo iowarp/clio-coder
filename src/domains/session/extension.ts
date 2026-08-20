@@ -6,7 +6,7 @@ import {
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
-import type { LabelEntry, SessionEntry } from "./entries.js";
+import type { LabelEntry, SessionEntry, SessionInfoEntry } from "./entries.js";
 import { listSessionsForCwd } from "./history.js";
 import {
 	appendEntry,
@@ -46,6 +46,26 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 
 	function emitResume(sessionId: string, via: ResumeVia): void {
 		context.bus.emit(BusChannels.SessionResumed, { sessionId, via, at: Date.now() });
+	}
+
+	function emitTurnSwitched(sessionId: string, turnId: string): void {
+		context.bus.emit(BusChannels.SessionTurnSwitched, { sessionId, turnId, at: Date.now() });
+	}
+
+	/**
+	 * The leaf to resume onto: the persisted `/tree` pin when it still names a
+	 * real turn in this session's tree, otherwise the inferred newest-node leaf.
+	 * A pin surviving here is what makes a `/tree` switch made without a
+	 * follow-up message survive quit + resume instead of silently reverting to
+	 * the abandoned tip (issue #94).
+	 */
+	function resolveLeafOnOpen(resumed: {
+		state: SessionManagerState;
+		nodes: ReadonlyArray<TreeInputNode>;
+	}): string | null {
+		const pinned = resumed.state.meta.pinnedLeafTurnId;
+		if (pinned && resumed.nodes.some((node) => node.id === pinned)) return pinned;
+		return computeLeafId(resumed.nodes);
 	}
 
 	async function closeCurrent(reason: ParkReason = "close"): Promise<void> {
@@ -118,6 +138,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// to a previewless snapshot. The overlay handles missing previews
 			// gracefully via its kind-label fallback.
 		}
+		const persistedLeaf =
+			bundle.meta.pinnedLeafTurnId && bundle.nodes.some((node) => node.id === bundle.meta.pinnedLeafTurnId)
+				? bundle.meta.pinnedLeafTurnId
+				: computeLeafId(bundle.nodes);
 		return buildTreeSnapshot({
 			meta,
 			nodes: [...bundle.nodes, ...structural],
@@ -126,7 +150,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// The leaf is the next append point, so it is computed over turn nodes
 			// only: a structural node marks a moment in the timeline, never a place
 			// the session continues from.
-			leafId: state?.meta.id === sessionId ? currentTurnId : computeLeafId(bundle.nodes),
+			leafId: state?.meta.id === sessionId ? currentTurnId : persistedLeaf,
 		});
 	}
 
@@ -156,8 +180,28 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 		append(turn: TurnInput) {
 			if (!state) throw new Error("session.append: no current session");
+			// Invariant: a turn can only extend this session's own current leaf.
+			// The interactive layer tracks its own copy of "the last turn id"
+			// (turn-persistence.ts) and normally keeps it in lockstep with
+			// currentTurnId via chat.resetForSession after every switch; when a
+			// failed resume/fork/switchBranch left that copy pointing at a turn
+			// from a session that was never actually opened here, this is the
+			// one place that catches it before a foreign parent id reaches disk.
+			if (turn.parentId !== currentTurnId) {
+				throw new Error(
+					`session.append: turn parentId ${turn.parentId ?? "null"} is not this session's current leaf (expected ${currentTurnId ?? "null"}); refusing to parent a turn onto another session's turn`,
+				);
+			}
 			const record = appendTurn(state, turn);
 			currentTurnId = record.id;
+			// A fresh append moves the leaf past whatever /tree pinned earlier
+			// (or this append could not have been made: see the invariant above),
+			// so the persisted pin is stale and must not outlive it. Once cleared,
+			// resolveLeafOnOpen's timestamp inference is trustworthy again.
+			if (state.meta.pinnedLeafTurnId !== undefined && state.meta.pinnedLeafTurnId !== null) {
+				state.meta.pinnedLeafTurnId = null;
+				persistSessionMeta(state);
+			}
 			return record;
 		},
 		appendEntry(entry: SessionEntryInput) {
@@ -190,29 +234,37 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 		resume(sessionId) {
 			if (state && state.meta.id === sessionId) return state.meta;
+			// Open the target before touching the current session: resumeSessionState
+			// reads and migrates the target's meta.json and can throw (unsupported
+			// format version, unreadable entries, missing files). Closing or nulling
+			// the prior session ahead of that risk is how a failed switch used to
+			// orphan the operator with no current session (issue #93); on success,
+			// the prior is parked and closed only now that the successor is known good.
+			const resumed = resumeSessionState(sessionId);
 			if (state) {
-				// best-effort close of prior session before switching
 				const prior = state;
 				emitPark(prior.meta.id, "resume_other");
-				state = null;
 				void prior.writer.close();
 			}
-			const resumed = resumeSessionState(sessionId);
 			state = resumed.state;
-			currentTurnId = computeLeafId(resumed.nodes);
+			currentTurnId = resolveLeafOnOpen(resumed);
 			emitResume(resumed.state.meta.id, "resume");
 			return resumed.state.meta;
 		},
 		fork(parentTurnId, input) {
 			if (!state) throw new Error("session.fork: no current session to fork from");
 			const prior = state;
-			emitPark(prior.meta.id, "fork");
-			state = null;
+			// forkFromState reads and validates the parent's own ancestry chain
+			// and can throw (unknown or broken parent turn) before it ever creates
+			// the child session; it closes `prior.writer` itself, and only once the
+			// child is known good (see tree/fork.ts). Do not null or park `state`
+			// until forkFromState returns, for the same reason as resume() above.
 			const { next, nodes } = forkFromState({
 				from: prior,
 				parentTurnId,
 				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
 			});
+			emitPark(prior.meta.id, "fork");
 			state = next;
 			currentTurnId = computeLeafId(nodes);
 			return next.meta;
@@ -232,17 +284,17 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		switchBranch(sessionId) {
 			// /tree-driven branch switch currently delegates to resume. Kept as a
 			// distinct contract method so later slices can layer telemetry or
-			// chat-loop rewiring without changing resume's semantics.
+			// chat-loop rewiring without changing resume's semantics. Same
+			// open-before-close ordering as resume() above and for the same reason.
 			if (state?.meta.id === sessionId) return state.meta;
+			const resumed = resumeSessionState(sessionId);
 			if (state) {
 				const prior = state;
 				emitPark(prior.meta.id, "switch_branch");
-				state = null;
 				void prior.writer.close();
 			}
-			const resumed = resumeSessionState(sessionId);
 			state = resumed.state;
-			currentTurnId = computeLeafId(resumed.nodes);
+			currentTurnId = resolveLeafOnOpen(resumed);
 			emitResume(resumed.state.meta.id, "switch_branch");
 			return resumed.state.meta;
 		},
@@ -254,6 +306,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				throw new Error(`session.switchTurn: turn not found: ${turnId}`);
 			}
 			currentTurnId = turnId;
+			// Persist the pin immediately, not just in memory: without this, a
+			// switch made without a follow-up message was silently lost on quit
+			// because resume() had nothing but timestamp inference to fall back
+			// on and always landed back on the abandoned tip (issue #94).
+			state.meta.pinnedLeafTurnId = turnId;
+			persistSessionMeta(state);
+			emitTurnSwitched(state.meta.id, turnId);
 			return state.meta;
 		},
 		editLabel(turnId, label, sessionId) {
@@ -278,6 +337,28 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				timestamp: new Date().toISOString(),
 				targetTurnId: turnId,
 				label,
+			};
+			appendEntryToSessionFile(targetId, entry);
+		},
+		setName(name, sessionId) {
+			const targetId = sessionId ?? state?.meta.id;
+			if (!targetId) throw new Error("session.setName: no sessionId provided and no current session");
+			// A name is session-wide metadata rather than a turn label. Keep it
+			// unanchored and let history's last-wins SessionInfoEntry fold resolve it.
+			if (state && state.meta.id === targetId) {
+				appendEntry(state, {
+					kind: "sessionInfo",
+					parentTurnId: null,
+					name,
+				} as SessionEntryInput);
+				return;
+			}
+			const entry: SessionInfoEntry = {
+				kind: "sessionInfo",
+				turnId: newTurnId(),
+				parentTurnId: null,
+				timestamp: new Date().toISOString(),
+				name,
 			};
 			appendEntryToSessionFile(targetId, entry);
 		},

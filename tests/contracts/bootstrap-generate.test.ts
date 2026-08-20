@@ -22,10 +22,6 @@ import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 async function bootstrapInput(): Promise<BootstrapGenerateInput> {
 	const cwd = mkdtempSync(join(tmpdir(), "clio-bootstrap-generate-"));
 	scratchRoots.push(cwd);
@@ -143,6 +139,14 @@ function fakeDispatch(
 }
 
 describe("contracts/bootstrap model generation", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("keeps the wire schema inside the deployed llama.cpp grammar subset", () => {
 		const serialized = JSON.stringify(BOOTSTRAP_OUTPUT_JSON_SCHEMA);
 		strictEqual(serialized.includes("minLength"), false);

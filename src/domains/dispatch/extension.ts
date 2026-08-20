@@ -73,6 +73,7 @@ import {
 	isDispatchEligibleRuntime,
 	type ProvidersContract,
 	type ResolvedRuntimeTarget,
+	type RuntimeApiFamily,
 	type RuntimeDescriptor,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
@@ -372,6 +373,14 @@ const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
+/**
+ * Where the worker process ran when no fleet placement chose a node. This is the
+ * worker's own host, never the host serving the model: a run against a remote
+ * target from this machine is still a local node. Emitted on every run so a
+ * receipt has one node shape, rather than carrying the block only on the paths
+ * that happened to have a placement object.
+ */
+const LOCAL_RUN_NODE: RunNodeIdentity = { id: "local", kind: "local" };
 function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): RunReceiptDraft {
 	return { ...draft, routeDecision: decision };
 }
@@ -980,8 +989,14 @@ function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string 
 
 /**
  * Per-run context for the dynamic worker prompt messages. Everything here
- * flows through dynamic messages, never through the stable system prompt, so
- * `staticCompositionHash` stays byte-identical run over run.
+ * flows through dynamic messages, never through the system prompt. The system
+ * prompt itself is stable per recipe and tool surface with one exception: the
+ * operator-editable layer (`additionalFragments`) folds in path-scoped project
+ * rules selected by `workerWorkingContextPaths`, which are recalled from the
+ * task and briefing text, so `staticCompositionHash` can differ between two
+ * runs of one recipe when a rule's glob matches one task and not the other.
+ * A local model's worker prefix cache misses on that flip; the trade was made
+ * deliberately in #96 to keep rules scoped rather than shipped wholesale.
  */
 export interface WorkerDynamicContext {
 	/** Used only for the verification-section inclusion rule, never for tier policy. */
@@ -1046,6 +1061,35 @@ export function renderWorkerProjectContext(
 /** True when the rendered project message body includes the verification block. */
 function workerProjectContextIncludesVerification(body: string): boolean {
 	return body.includes("\nVerification expectations:\n");
+}
+
+/**
+ * Path-like tokens in free text: a slash-separated segment, or a bare
+ * `name.ext` token. The model-facing dispatch tool has no structured
+ * path/file field, so a worker's task text is the only working-context
+ * signal available at compile time; this is best-effort recall, not a
+ * parser. A false-positive token is harmless because `selectActiveRules`
+ * only activates a rule when the token matches that rule's own glob.
+ */
+const PATH_TOKEN_RE = /(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1,8}\b/g;
+
+/**
+ * Best-effort working-context paths for a dispatched worker: `writeRoots`
+ * when the caller set them (the precise signal, for internal/programmatic
+ * callers), plus path-like tokens recalled from the task and briefing text.
+ * Feeds the same `selectActiveRules` a session uses, so a worker whose task
+ * touches a ruled path reads that rule instead of never hearing about it.
+ */
+function workerWorkingContextPaths(req: DispatchRequest): string[] {
+	const out = new Set<string>();
+	for (const root of req.writeRoots ?? []) out.add(root);
+	const text = `${req.task}\n${req.briefing ?? ""}`;
+	for (const match of text.matchAll(PATH_TOKEN_RE)) {
+		const token = match[0];
+		if (token.startsWith("http://") || token.startsWith("https://")) continue;
+		out.add(token);
+	}
+	return [...out];
 }
 
 export function buildDynamicPromptMessages(
@@ -1122,6 +1166,15 @@ interface ResolvedTarget {
 	thinkingLevel: ThinkingLevel;
 	capabilities: CapabilityFlags | null;
 	modelCapabilities: CapabilityFlags | null;
+	/**
+	 * What actually answered the tool-support question for this wire model: the
+	 * operator's own target override, else the knowledge-base entry, else null
+	 * when nothing named it. The merged `modelCapabilities` cannot express this,
+	 * because a runtime default of `tools: false` is indistinguishable there
+	 * from a measurement, and a knowledge-base miss on a local model id is
+	 * routine rather than an answer. See {@link targetToolCapability}.
+	 */
+	toolsCapabilityExplicit: boolean | null;
 	runtimeResolution: ResolvedRuntimeTarget;
 	effectivePricing: EffectivePricing;
 	/** Why the route this run got is not the route it asked for. Belongs in the outcome. */
@@ -1226,6 +1279,10 @@ interface DispatchLifecycleStage {
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	/** Rule ids the worker prompt compiler selected into this run's system prompt; [] when none matched. */
+	rulesApplied: string[];
+	/** Whether the operator profile rendered non-empty content into this run's system prompt. */
+	operatorProfileApplied: boolean;
 	/** Read-only recipe admitted against a mutating task; null when the pairing was sound. */
 	capabilityMismatch: CapabilityMismatch | null;
 	effectiveAutonomy: AutonomyLevel;
@@ -1252,6 +1309,10 @@ interface AcpDelegationLifecycleStage {
 	briefing: RunBriefingProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	/** ACP delegation bypasses the worker prompt compiler entirely, so this is always []. */
+	rulesApplied: string[];
+	/** ACP delegation bypasses the worker prompt compiler entirely, so this is always false. */
+	operatorProfileApplied: boolean;
 	sessionAutonomy: AutonomyLevel;
 	autonomy: AutonomyLevel;
 }
@@ -1307,16 +1368,6 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
-	if (runtimeId === "lmstudio-native") {
-		// The SDK owns model management only. Predictions go over the same
-		// server's OpenAI-compatible port, which is the surface that carries a
-		// thinking control, so the resolved level does reach the wire. What the
-		// SDK still cannot do is unload a model another client loaded outside
-		// Clio's residency plan, which is the one dispatch-visible limit left.
-		return [
-			"LM Studio residency is reconciled through the native SDK; models loaded outside Clio are observed rather than evicted",
-		];
-	}
 	// HTTP/native runtimes run through pi-agent-core, which Clio observes and
 	// controls directly, so there are no runtime-imposed dispatch limitations.
 	return [];
@@ -1364,8 +1415,65 @@ function assertWorkerBudgetEnforceable(runtime: RuntimeDescriptor, hasDeclaredBu
 	);
 }
 
+/**
+ * API families whose wire protocol carries tool calls. Membership is a property
+ * of the protocol, not of any one model: every server speaking one of these can
+ * express a tool call, so a model served over it is presumed able to take one
+ * until something says otherwise. The excluded families (`embeddings-http`,
+ * `rerank-http`) have no tool surface to offer at all.
+ */
+const TOOL_CARRYING_API_FAMILIES: ReadonlySet<RuntimeApiFamily> = new Set([
+	"openai-completions",
+	"openai-responses",
+	"openai-codex-responses",
+	"azure-openai-responses",
+	"anthropic-messages",
+	"bedrock-converse-stream",
+	"google-generative-ai",
+	"google-vertex",
+	"mistral-conversations",
+	"ollama-native",
+	"claude-agent-sdk",
+	"claude-code-subprocess",
+]);
+
+/**
+ * Whether this run may be offered tools at all.
+ *
+ * A runtime default of `tools: false` on a protocol runtime is a placeholder,
+ * not a measurement: the generic `openai-compat` descriptor cannot know what an
+ * arbitrary local server has loaded, so it declares the conservative value and
+ * leaves the answer to the knowledge base. A knowledge-base miss on a local
+ * model id is routine (a new quant, a renamed GGUF, a model newer than the
+ * catalog), so reading that miss as "no tools" denied every dispatch against
+ * every unlisted local model while the same target answered tool calls fine on
+ * the chat path. Only an explicit `false`, from the operator's target override
+ * or from a knowledge-base entry that names the model, denies now; an unanswered
+ * question lets a tool-carrying protocol try and surface a real provider error
+ * if the server genuinely cannot.
+ */
 function targetToolCapability(target: ResolvedTarget): boolean {
-	return target.modelCapabilities?.tools ?? target.runtime.defaultCapabilities.tools === true;
+	if (target.modelCapabilities?.tools === true) return true;
+	if (target.runtime.defaultCapabilities.tools === true) return true;
+	if (target.toolsCapabilityExplicit === false) return false;
+	return TOOL_CARRYING_API_FAMILIES.has(target.runtime.apiFamily);
+}
+
+/**
+ * The only two sources that can actually answer "does this model take tools":
+ * the operator's own target override, which wins, and the knowledge-base entry
+ * for the wire model. Null means nothing named it, which is the common case for
+ * a local model id the catalog has never seen.
+ */
+function explicitToolCapability(
+	providers: ProvidersContract,
+	target: TargetDescriptor,
+	wireModelId: string,
+): boolean | null {
+	if (typeof target.capabilities?.tools === "boolean") return target.capabilities.tools;
+	const hit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
+	const fromKnowledgeBase = hit?.entry.capabilities?.tools;
+	return typeof fromKnowledgeBase === "boolean" ? fromKnowledgeBase : null;
 }
 
 function writeConfinedRequest(req: DispatchRequest): boolean {
@@ -1674,7 +1782,10 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		...(input.dynamicHash !== null ? { dynamicHash: input.dynamicHash } : {}),
 		agentId: input.req.agentId,
 		task: input.req.task,
-		target: input.target.target,
+		// The configured target may name its runtime by a legacy alias. The attested
+		// document records the resolved runtime instead, so what the worker reads
+		// and what the orchestrator routed on are the same id.
+		target: { ...input.target.target, runtime: input.target.runtime.id },
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
 		runtimeId: input.target.runtime.id,
 		wireModelId: input.target.wireModelId,
@@ -1705,7 +1816,18 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	}
 	const product = input.req.product ?? input.recipe?.product;
 	if (product) spec.product = product;
-	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
+	// The orchestrator's tool decision is the one the run was admitted under and
+	// the one the approved tool signature was computed from, so it travels on the
+	// snapshot rather than being re-derived worker-side. The worker's
+	// workerProviderSupportsTools reads this field first; letting it recompute
+	// from the merged capability decision made an unanswered tool question
+	// resolve differently in the two processes, and the announcement was then
+	// refused for tool surface drift.
+	const resolutionSnapshot = runtimeTargetSnapshot(input.target.runtimeResolution);
+	spec.runtimeResolution = {
+		...resolutionSnapshot,
+		capabilities: { ...resolutionSnapshot.capabilities, tools: targetToolCapability(input.target) },
+	};
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	// Configured model ids with the role each serves, so the worker's empty
 	// residency registry evicts nothing and names what it must touch.
@@ -2023,6 +2145,7 @@ function resolveSelectedDispatchTarget(
 		thinkingLevel: resolved.target.effectiveThinkingLevel,
 		capabilities: capabilityInfoForTarget(providers, target.id),
 		modelCapabilities,
+		toolsCapabilityExplicit: explicitToolCapability(providers, target, wireModelId),
 		runtimeResolution: resolved.target,
 		effectivePricing: resolveEffectivePricing(target, runtime.id, wireModelId),
 	};
@@ -3103,6 +3226,8 @@ export function createDispatchBundle(
 				contentHash: sha256(personaBody),
 				dynamic: false,
 			},
+			cwd,
+			workingContextPaths: workerWorkingContextPaths(req),
 		});
 		const systemPrompt = compiledWorkerPrompt.systemPrompt;
 		const budget = resolveEffectiveWorkerBudget({ declared: spec.budget, allowedTools: effectiveTools, settings });
@@ -3161,6 +3286,8 @@ export function createDispatchBundle(
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			rulesApplied: compiledWorkerPrompt.rulesApplied ?? [],
+			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
 			effectiveAutonomy,
 			budget,
@@ -3250,6 +3377,8 @@ export function createDispatchBundle(
 			briefing: briefingProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			rulesApplied: [],
+			operatorProfileApplied: false,
 			sessionAutonomy,
 			autonomy,
 		};
@@ -3485,6 +3614,7 @@ export function createDispatchBundle(
 				heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
 				lineage,
 				identity,
+				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
@@ -3639,12 +3769,16 @@ export function createDispatchBundle(
 				outcomeDetail,
 				lineage,
 				identity,
+				// An ACP peer is spawned by this process, so the run's node is this host.
+				node: LOCAL_RUN_NODE,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
+				rulesApplied: lifecycle.rulesApplied,
+				operatorProfileApplied: lifecycle.operatorProfileApplied,
 				startedAt,
 				endedAt,
 				exitCode:
@@ -4479,7 +4613,7 @@ export function createDispatchBundle(
 				pid,
 				lineage,
 				identity,
-				...(placement ? { node: placement.node } : {}),
+				node: placement?.node ?? LOCAL_RUN_NODE,
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
 					? { reroutes: [...placement.reroutes] }
 					: {}),
@@ -4690,7 +4824,7 @@ export function createDispatchBundle(
 				outcomeCode,
 				lineage,
 				identity,
-				...(placement ? { node: placement.node } : {}),
+				node: placement?.node ?? LOCAL_RUN_NODE,
 				...receiptAttestationFields(worker.attestation?.() ?? null),
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
 					? { reroutes: [...placement.reroutes] }
@@ -4702,6 +4836,8 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
+				rulesApplied: lifecycle.rulesApplied,
+				operatorProfileApplied: lifecycle.operatorProfileApplied,
 				...(validationGrounding !== null ? { validationGrounding } : {}),
 				...(ledgerContribution !== null ? { ledgerContribution } : {}),
 				...(lifecycle.capabilityMismatch !== null
@@ -5534,11 +5670,11 @@ export function createDispatchBundle(
 			// recordReceipt() and persist(); quarantine tampered ones.
 			try {
 				const recovery = recoverOrphanReceipts(ledger);
-				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0) {
+				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0 || recovery.sealed > 0) {
 					await ledger.persist();
 					if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
 						process.stderr.write(
-							`[dispatch] ledger recovery: recovered=${recovery.recovered} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
+							`[dispatch] ledger recovery: recovered=${recovery.recovered} sealed=${recovery.sealed} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
 						);
 					}
 				}

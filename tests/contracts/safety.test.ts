@@ -20,8 +20,8 @@ describe("contracts/safety", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-");
 	});
 
 	afterEach(() => {
@@ -38,6 +38,7 @@ describe("contracts/safety", () => {
 		// Read tools
 		strictEqual(classify({ tool: "read", args: { path: "/x" } }).actionClass, "read");
 		strictEqual(classify({ tool: "grep", args: {} }).actionClass, "read");
+		strictEqual(classify({ tool: ToolNames.Tasks, args: { action: "pick", id: "u1" } }).actionClass, "read");
 
 		// Write tools
 		const cwdPath = `${process.cwd()}/scratch.txt`;
@@ -478,8 +479,8 @@ describe("contracts/safety damage-control scan surface", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-scan-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-scan-");
 	});
 
 	afterEach(() => {
@@ -569,8 +570,8 @@ describe("contracts/safety credential damage control", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-safety-cred-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-safety-cred-");
 	});
 
 	afterEach(() => {

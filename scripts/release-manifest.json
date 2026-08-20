@@ -9,6 +9,8 @@
 		"assets/clio-coder-logo-128.webp",
 		"docs/html/index.html",
 		"damage-control-rules.yaml",
+		"skills/skill-marketplace.json",
+		"skills/registry.yaml",
 		"README.md",
 		"LICENSE",
 		"NOTICE",
@@ -18,8 +20,7 @@
 		"dist/assets/grammars/",
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",
-		"skills/workflow/cut-it/",
-		"skills/git/",
+		"skills/",
 		"src/domains/providers/models/",
 		"docs/html/"
 	]

@@ -27,9 +27,9 @@ local-vs-contribute boundary.
 npm run typecheck         # tsc -p tsconfig.tests.json (includes tests/)
 npm run lint              # biome check .
 npm run check:boundaries  # import boundary rules (tsx, no build)
-npm run test:contracts    # contract tests (tsx, import src directly, no build)
-npm run test:smoke        # spawn dist/cli/index.js end-to-end (NEEDS a build)
-npm run test              # contracts + smoke + boundaries
+npm run test:file -- 'tests/contracts/**/*.test.ts'  # contract tests (tsx, import src directly, no build)
+npm run test:file -- 'tests/smoke/**/*.test.ts'      # spawn dist/cli/index.js end-to-end (NEEDS a build)
+npm run test              # contracts + smoke, sharded across processes (the full gate)
 npm run build             # tsup -> dist/
 npm run dev               # tsup --watch -> rebuilds dist/ on save
 npm run ci                # typecheck && lint && skills:check && build && test && test:trace-viewer
@@ -41,12 +41,12 @@ npm run test:live -- --delegation  # adds local opencode/copilot ACP checks
 
 | Change site | Run first | Why |
 |---|---|---|
-| pure logic in `src/domains/<x>/*.ts` | `npm run test:contracts` | contract tests import `src` via tsx; no build |
-| dispatch / providers / prompts / safety / config / persistence / acp behavior | `npm run test:contracts` | each has a file in `tests/contracts/` |
-| skills loader / activation | `npm run test:contracts` | `tests/contracts/skills.test.ts`, `skill-activation-compaction.test.ts` |
+| pure logic in `src/domains/<x>/*.ts` | `npm run test:file -- 'tests/contracts/**/*.test.ts'` | contract tests import `src` via tsx; no build |
+| dispatch / providers / prompts / safety / config / persistence / acp behavior | `npm run test:file -- 'tests/contracts/**/*.test.ts'` | each has a file in `tests/contracts/` |
+| skills loader / activation | `npm run test:file -- 'tests/contracts/**/*.test.ts'` | `tests/contracts/skills.test.ts`, `skill-activation-compaction.test.ts` |
 | any `src/` import edit | `npm run check:boundaries` | enforces rule1/2/3 |
-| `src/cli/*` or `src/entry/*` user-facing flow | build, then `npm run test:smoke` | smoke spawns the real `dist/cli/index.js` |
-| ACP surface (`src/cli/acp.ts`, engine ACP) | build, then `npm run test:smoke` | smoke drives `clio-coder acp` over JSON-RPC/stdio |
+| `src/cli/*` or `src/entry/*` user-facing flow | build, then `npm run test:file -- 'tests/smoke/**/*.test.ts'` | smoke spawns the real `dist/cli/index.js` |
+| ACP surface (`src/cli/acp.ts`, engine ACP) | build, then `npm run test:file -- 'tests/smoke/**/*.test.ts'` | smoke drives `clio-coder acp` over JSON-RPC/stdio |
 
 **See `references/test-map.md`** for exactly where each test lives and how to run
 a single file.
@@ -70,13 +70,13 @@ There are two independent reload mechanisms; know which applies.
 
 **Source reload for tests.** This is the "pick up latest code" loop:
 
-- **Fast loop — no build.** `test:contracts` and `check:boundaries` run
+- **Fast loop — no build.** The contracts glob and `check:boundaries` run
   `node --import tsx --test` and import `src/**` directly, so they always run the
   latest source with zero build step. Iterate here whenever the change is pure
   logic or a contract.
-- **Full loop — needs `dist/`.** `test:smoke` spawns `dist/cli/index.js`, so it
+- **Full loop — needs `dist/`.** The smoke glob spawns `dist/cli/index.js`, so it
   only sees code that has been built. Keep `npm run dev` (`tsup --watch`) running
-  in another pane; it rebuilds `dist/` on every save, so `npm run test:smoke`
+  in another pane; it rebuilds `dist/` on every save, so the smoke lane
   picks up your latest source without a manual `npm run build`.
 
 **Config reload for a running session.** Clio classifies a settings change
@@ -100,7 +100,7 @@ restart the process (against a freshly built `dist/`).
 3. Run the narrowest layer from the table above.
 4. `npm run check:boundaries` if you touched imports.
 5. If you touched CLI/entry/ACP: `npm run build` (or rely on `dev` watch), then
-   `npm run test:smoke`.
+   `npm run test:file -- 'tests/smoke/**/*.test.ts'`.
 6. `npm run ci` before calling it done. Report exactly what ran and what is
    unverified.
 

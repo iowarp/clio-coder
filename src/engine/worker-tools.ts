@@ -156,6 +156,10 @@ export function createWorkerToolRegistry(
 	// without one answers that it has no coordination ledger.
 	registerAllTools(registry, {
 		...(agentLedger ? { agentLedger } : {}),
+		// A worker cannot install a skill or reach the operator who could, so
+		// its skill listing carries installed (or bound) skills only; the
+		// marketplace is the orchestrator's to offer.
+		skillMarketplace: false,
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: skillLoaderOptions?.trustProjectCompatRoots === true,
 			disableDiscovery: skillLoaderOptions?.noSkills === true,

@@ -39,6 +39,7 @@ export interface AgentRuntime {
 
 export interface ChatLoopRunSnapshot {
 	targetId: string;
+	targetUrl: string | null;
 	runtimeId: string;
 	runtimeKind: RuntimeDescriptor["kind"];
 	wireModelId: string;

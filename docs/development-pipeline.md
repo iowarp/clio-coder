@@ -31,6 +31,31 @@ hard bugs, not a mandatory toll booth. Batch ticket creation from a PRD
 bypasses stage 1 and uses [`backlog`](../skills/planning/backlog/)
 instead; everything downstream is identical.
 
+## Inheriting a Pi release
+
+Pi dependency upgrades use a fixed five-step review so that upstream fixes
+replace Clio copies without crossing the product boundary:
+
+1. Read the release notes or package changelogs for `pi-ai`, `pi-agent-core`,
+   and `pi-tui`.
+2. Run `npm run pi:surface-diff`. A changed or removed symbol that Clio imports
+   is an error; a new export is review input.
+3. Run `npm run ci`, then explicitly run the wire-capture fixtures and
+   `tests/smoke/tui-width-matrix.test.ts` from the
+   [Pi regression net](pi-boundary.md#pi-regression-net).
+4. Walk Pi's fixed-issue list against the
+   [Pi SDK boundary table](pi-boundary.md). For every fix in a surface Clio
+   still owns, either delete Clio's copy in favor of Pi or add a dated reason
+   for keeping the delta.
+5. Review the matching pi-coding-agent release diff for application features
+   worth a Clio ticket.
+
+After review, regenerate `docs/pi-surface.json` with
+`npm run pi:surface-snapshot`, inspect the symbol and signature changes, and
+commit the dependency pins, snapshot, boundary notes, and proving contracts
+together. `npm run lint` invokes the surface check automatically when the
+installed Pi versions differ from the checked-in snapshot.
+
 ## Issue conventions
 
 - **Title**: conventional tag plus imperative summary (`fix: memory overlay
@@ -55,7 +80,7 @@ New `area:*` labels are proposed in an issue, not created ad hoc.
 
 ## Milestones are releases
 
-Each open milestone is the next version (`v0.3.1`, `v0.4.0`). Triage means
+Each open milestone is the next version (`v0.3.2`, `v0.4.0`). Triage means
 assigning an issue to a milestone or explicitly leaving it in the backlog.
 A release cut requires every issue in its milestone to be closed
 or bumped; the milestone closes when the tag is published.

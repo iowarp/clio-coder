@@ -120,7 +120,11 @@ cpSync(REPO_ROOT, workspaceDir, {
 });
 
 function git(args) {
-	return execFileSync("git", args, { cwd: workspaceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+	return execFileSync("git", args, {
+		cwd: workspaceDir,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 }
 
 git(["init", "--quiet"]);
@@ -173,7 +177,10 @@ const settings = {
 		},
 	],
 	orchestrator: { target: targetId, model, thinkingLevel },
-	workers: { default: { target: targetId, model, thinkingLevel }, profiles: {} },
+	workers: {
+		default: { target: targetId, model, thinkingLevel },
+		profiles: {},
+	},
 };
 writeFileSync(join(clioConfigDir, "settings.yaml"), stringify(settings), "utf8");
 
@@ -243,7 +250,9 @@ function parseJsonLines(text) {
 		if (line.trim().length === 0) continue;
 		try {
 			const value = JSON.parse(line);
-			if (value && typeof value === "object" && !Array.isArray(value)) events.push({ index, event: value });
+			if (value && typeof value === "object" && !Array.isArray(value)) {
+				events.push({ index, event: value });
+			}
 		} catch {
 			// A main-agent JSONL stream may be followed by a pretty receipt on an
 			// explicit agent path. This scenario uses the main path, so non-JSONL
@@ -435,8 +444,9 @@ try {
 	check(Boolean(monitorStatus), "detached specialist was not monitored before steering");
 	check(Boolean(monitorWait), "detached specialist was not waited on after steering");
 	check(Boolean(monitorCollect), "detached specialist batch was not collected after wait");
-	if (monitorStatus && steeringCall)
+	if (monitorStatus && steeringCall) {
 		check(monitorStatus.index < steeringCall.index, "steer occurred before the first monitor call");
+	}
 
 	let runs = [];
 	let receipts = [];

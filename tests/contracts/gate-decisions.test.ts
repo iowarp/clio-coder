@@ -33,8 +33,8 @@ const INDEPENDENT_GATE_CORRELATION = {
 } as const;
 
 describe("gate decision artifacts", () => {
-	it("durably distinguishes every review terminal state and detects tampering", () => {
-		const isolated = isolateClioEnv("clio-gate-decisions-");
+	it("durably distinguishes every review terminal state and detects tampering", async () => {
+		const isolated = await isolateClioEnv("clio-gate-decisions-");
 		try {
 			for (const outcome of [
 				"pass",
@@ -70,8 +70,8 @@ describe("gate decision artifacts", () => {
 		}
 	});
 
-	it("links a compete winner to judge and candidate receipt digests", () => {
-		const isolated = isolateClioEnv("clio-gate-winner-");
+	it("links a compete winner to judge and candidate receipt digests", async () => {
+		const isolated = await isolateClioEnv("clio-gate-winner-");
 		try {
 			const candidateTwo = { runId: "candidate-2", digest: "c".repeat(64) };
 			const judge = { runId: "judge-1", digest: "d".repeat(64) };
@@ -124,8 +124,8 @@ describe("gate decision artifacts", () => {
 		}
 	});
 
-	it("recovers every reviewer/judge outcome from output staged before receipt settlement", () => {
-		const isolated = isolateClioEnv("clio-gate-output-pending-");
+	it("recovers every reviewer/judge outcome from output staged before receipt settlement", async () => {
+		const isolated = await isolateClioEnv("clio-gate-output-pending-");
 		try {
 			const candidateTwo = { runId: "candidate-2", digest: "c".repeat(64) };
 			const cases: Array<{
@@ -211,8 +211,8 @@ describe("gate decision artifacts", () => {
 		}
 	});
 
-	it("replays no-output terminal failures and winner confirmations", () => {
-		const isolated = isolateClioEnv("clio-gate-ready-pending-");
+	it("replays no-output terminal failures and winner confirmations", async () => {
+		const isolated = await isolateClioEnv("clio-gate-ready-pending-");
 		try {
 			const candidateTwo = { runId: "candidate-2", digest: "c".repeat(64) };
 			const winner = {
@@ -272,8 +272,8 @@ describe("gate decision artifacts", () => {
 		}
 	});
 
-	it("clears an already-written replay idempotently and fails closed on tamper", () => {
-		const isolated = isolateClioEnv("clio-gate-pending-integrity-");
+	it("clears an already-written replay idempotently and fails closed on tamper", async () => {
+		const isolated = await isolateClioEnv("clio-gate-pending-integrity-");
 		try {
 			const alreadyWritten = stagePendingGateDecision({
 				group: "already-written",

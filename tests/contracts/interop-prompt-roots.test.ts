@@ -19,11 +19,15 @@ function writePrompt(root: string, relative: string, body: string): void {
 	writeFileSync(file, body, "utf8");
 }
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 describe("contracts/foreign prompt roots", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("lists a project .claude/commands template as untrusted and refuses to expand it", () => {
 		const cwd = scratchDir();
 		writePrompt(cwd, join(".claude", "commands", "demo.md"), "---\ndescription: demo\n---\n\nRun the demo.\n");

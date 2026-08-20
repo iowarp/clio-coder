@@ -4,10 +4,11 @@ import type { CapabilityFlags } from "./types/capability-flags.js";
  * Layer capability sources onto a runtime's defaults, weakest first.
  *
  * A probe is what the server currently reports; a knowledge-base entry is what
- * an operator wrote down about a specific model. The written entry wins, because
- * a hand-authored `model-catalog.d` file exists precisely to correct metadata a
- * server gets wrong, and losing to the probe would leave no per-model escape
- * hatch at all. A target-level override still outranks both.
+ * an operator wrote down about a specific model. The written entry wins for
+ * descriptive capabilities because a hand-authored `model-catalog.d` file is
+ * the per-model escape hatch for incorrect server metadata. Context and output
+ * limits are deployment facts, so a live probe overrides the model's maximums.
+ * A target-level override still outranks every source.
  */
 export function mergeCapabilities(
 	base: CapabilityFlags,
@@ -18,8 +19,15 @@ export function mergeCapabilities(
 	const merged: Record<string, unknown> = { ...base };
 	applyLayer(merged, probe);
 	applyLayer(merged, kb);
+	applyDeploymentLimits(merged, probe);
 	applyLayer(merged, userOverride);
 	return merged as unknown as CapabilityFlags;
+}
+
+function applyDeploymentLimits(target: Record<string, unknown>, probe: Partial<CapabilityFlags> | null): void {
+	if (!probe) return;
+	if (probe.contextWindow !== undefined) target.contextWindow = probe.contextWindow;
+	if (probe.maxTokens !== undefined) target.maxTokens = probe.maxTokens;
 }
 
 /**

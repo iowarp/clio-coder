@@ -7,8 +7,8 @@ import {
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
+import { StringEnum } from "../engine/ai.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
@@ -91,7 +91,7 @@ export const gitTool: ToolSpec = {
 	name: ToolNames.Git,
 	description: "Read-only git inspection: op=status (short status), diff, or log (oneline).",
 	parameters: Type.Object({
-		op: stringEnum(["status", "diff", "log"], "Inspection to run."),
+		op: StringEnum(["status", "diff", "log"], { description: "Inspection to run." }),
 		path: Type.Optional(Type.String({ description: "Limit diff/log to one path." })),
 		cached: Type.Optional(Type.Boolean({ description: "diff: staged changes (--cached)." })),
 		stat: Type.Optional(Type.Boolean({ description: "diff: summary only (--stat)." })),

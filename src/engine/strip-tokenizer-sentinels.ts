@@ -83,7 +83,7 @@ function isSentinelPrefix(tail: string): boolean {
  * at that point cannot be a sentinel and is emitted verbatim minus any
  * complete sentinels still embedded in it.
  */
-export interface SentinelStripper {
+interface SentinelStripper {
 	/** Sanitize the next streamed chunk, returning the safe-to-emit prefix. */
 	push(chunk: string): string;
 	/** Drain the trailing buffer at end-of-stream. */

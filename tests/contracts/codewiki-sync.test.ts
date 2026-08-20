@@ -7,10 +7,6 @@ import { buildCodewiki, syncCodewiki } from "../../src/domains/context/codewiki/
 
 const roots: string[] = [];
 
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function project(): string {
 	const cwd = mkdtempSync(join(tmpdir(), "clio-codewiki-sync-"));
 	roots.push(cwd);
@@ -19,6 +15,14 @@ function project(): string {
 }
 
 describe("contracts/codewiki-sync", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("returns the existing object when the workspace is unchanged", async () => {
 		const cwd = project();
 		writeFileSync(join(cwd, "src", "main.ts"), "export const main = true;\n");

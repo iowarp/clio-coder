@@ -106,4 +106,29 @@ describe("interactive shell ownership", () => {
 		strictEqual(schedules, 1);
 		strictEqual(clears, 1);
 	});
+
+	it("registers the fullscreen layout root before focus and rendering start", () => {
+		const log: string[] = [];
+		const root = {} as Component;
+		const editor = {} as Component;
+		const tui: InteractiveShellTui = {
+			mode: "fullscreen",
+			addChild: () => log.push("add-root"),
+			setLayoutRoot: (component) => log.push(component === root ? "layout-root" : "layout-other"),
+			setFocus: () => log.push("focus-editor"),
+			start: () => log.push("start"),
+			stop: () => {},
+			requestRender: () => {},
+		};
+		const shell = createInteractiveShell({
+			createTerminal: () => ({ id: "terminal" }) as TestTerminal,
+			createTui: () => tui,
+			scheduleInterval: () => ({ id: 1 }) as TestInterval,
+			clearScheduledInterval: () => {},
+		});
+
+		shell.mount(root, editor);
+
+		deepStrictEqual(log, ["add-root", "layout-root", "focus-editor", "start"]);
+	});
 });

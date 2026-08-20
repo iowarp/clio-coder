@@ -164,8 +164,8 @@ function sealOrphan(provenance: {
 }
 
 describe("orphan provenance recovery", () => {
-	it("quarantines a v4 orphan before it can adopt an injected v5-only field", () => {
-		const isolated = isolateClioEnv("clio-orphan-v4-injection-");
+	it("quarantines a v4 orphan before it can adopt an injected v5-only field", async () => {
+		const isolated = await isolateClioEnv("clio-orphan-v4-injection-");
 		try {
 			// Let the ledger resolve the repository-scoped state directory, then
 			// replace its orphan artifact with a v4 artifact carrying an injected
@@ -239,8 +239,8 @@ describe("orphan provenance recovery", () => {
 		}
 	});
 
-	it("adopts gate-only, plan-only, and combined v7 receipts from the receipt-written crash window", () => {
-		const isolated = isolateClioEnv("clio-orphan-matrix-");
+	it("adopts gate-only, plan-only, and combined v7 receipts from the receipt-written crash window", async () => {
+		const isolated = await isolateClioEnv("clio-orphan-matrix-");
 		try {
 			const gateOnly = sealOrphan({ gate });
 			const planOnly = sealOrphan({ plan });
@@ -263,8 +263,8 @@ describe("orphan provenance recovery", () => {
 		}
 	});
 
-	it("quarantines a shape-valid v7 orphan whose authenticated steering provenance was tampered", () => {
-		const isolated = isolateClioEnv("clio-orphan-tamper-");
+	it("quarantines a shape-valid v7 orphan whose authenticated steering provenance was tampered", async () => {
+		const isolated = await isolateClioEnv("clio-orphan-tamper-");
 		try {
 			const orphan = sealOrphan({ gate, plan, steering });
 			const receipt = JSON.parse(readFileSync(orphan.receiptPath, "utf8")) as Record<string, unknown>;
@@ -281,8 +281,8 @@ describe("orphan provenance recovery", () => {
 		}
 	});
 
-	it("quarantines an orphan sealed under a retired integrity version", () => {
-		const isolated = isolateClioEnv("clio-orphan-retired-version-");
+	it("quarantines an orphan sealed under a retired integrity version", async () => {
+		const isolated = await isolateClioEnv("clio-orphan-retired-version-");
 		try {
 			const orphan = sealOrphan({ gate, plan });
 			const receipt = JSON.parse(readFileSync(orphan.receiptPath, "utf8")) as RunReceipt;

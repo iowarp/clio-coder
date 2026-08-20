@@ -68,7 +68,7 @@ export interface LeaderTarget {
 }
 
 export interface ClioKeybindingManager {
-	matches(data: string, id: ClioKeybinding): boolean;
+	matches(data: string, id: Keybinding): boolean;
 	getKeys(id: Keybinding): ReadonlyArray<KeyId>;
 	getDescription(id: ClioKeybinding): string;
 	getConflicts(): ReadonlyArray<KeybindingConflict>;

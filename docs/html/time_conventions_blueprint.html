@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder - Time &amp; Clock Conventions Blueprint</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Clock Icon</title>
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Time &amp; Clock Conventions Blueprint</h1>
+          <p>Monotonic duration spans, wall clock anchor instants, UTC storage, and render-boundary formatters</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Populated dynamically by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('clock-types')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Clocks</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            Monotonic vs Wall Clocks
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('utc-formatters')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Formatters</title><globe></globe><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            UTC Everywhere &amp; Formatters
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('concurrency-testing')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Testing</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            Ordering &amp; Test Determinism
+          </button>
+        </div>
+
+        <!-- TAB 1: CLOCK TYPES -->
+        <div class="tab-pane active" id="pane-clock-types">
+          <div class="glass-card">
+            <h2>Which Clock for What Purpose</h2>
+            <div class="grid grid-2">
+              <div>
+                <h3>Monotonic Clocks for Spans &amp; Durations</h3>
+                <p>All durations, latencies, TTFT, timeouts, watchdogs, and retry backoffs MUST use <code>performance.now()</code> or <code>process.hrtime.bigint()</code>:</p>
+                <ul>
+                  <li>Immune to NTP stepping, system sleep/wake, and DST clock shifts.</li>
+                  <li>Answers: "How long did this take?" or "How long until timeout?".</li>
+                </ul>
+              </div>
+              <div>
+                <h3>Wall Clocks for Anchored Instants</h3>
+                <p><code>Date.now()</code> or <code>new Date().toISOString()</code> are reserved exclusively for anchor timestamps that humans or external systems inspect:</p>
+                <ul>
+                  <li>Includes <code>startedAt</code>, <code>endedAt</code>, <code>createdAt</code>, <code>expiresAt</code>.</li>
+                  <li>NEVER used for calculating elapsed durations or intervals.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <h2>Combined Anchor and Span Pattern</h2>
+          <p>When recording an operation with both an anchor and an exact duration (e.g. <code>src/domains/dispatch/code-step.ts</code>):</p>
+          <pre><code>const startedAtMs = Date.now();                      // wall anchor, for the record
+const clock = process.hrtime.bigint();               // monotonic span
+const startedAt = new Date(startedAtMs).toISOString();
+
+// ... execution runs ...
+
+const durationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
+const endedAt = new Date(startedAtMs + durationMs).toISOString();
+
+// Guarantees: endedAt - startedAt === durationMs, unaffected by NTP shifts</code></pre>
+        </div>
+
+        <!-- TAB 2: UTC & FORMATTERS -->
+        <div class="tab-pane" id="pane-utc-formatters">
+          <h2>Storage, Transport, and Comparisons in UTC</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>UTC Invariants</h3>
+              <ul>
+                <li><strong>Storage:</strong> All timestamps in JSON/JSONL are canonical ISO-8601 UTC strings.</li>
+                <li><strong>Transport:</strong> Stored and sent across stdio/NDJSON as UTC.</li>
+                <li><strong>Comparisons:</strong> Time comparisons are performed on UTC epoch milliseconds.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Render-Boundary Conversion</h3>
+              <p>Conversion to the operator's local timezone occurs strictly at the final UI render call site:</p>
+              <ul>
+                <li>The canonical UTC instant remains accessible in detail views.</li>
+              </ul>
+            </div>
+          </div>
+
+          <h2>Standardized Formatter Functions (`src/interactive/format-time.ts`)</h2>
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Function</th>
+                <th>Output Format</th>
+                <th>Locale &amp; Frame</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>clockLocal(instant)</code></td>
+                <td><code>HH:MM:SS</code></td>
+                <td>Operator local timezone (<code>en-GB</code>, 24h)</td>
+                <td>Renders time-of-day for logs, tree selectors, and message pickers.</td>
+              </tr>
+              <tr>
+                <td><code>dateLocal(instant)</code></td>
+                <td><code>YYYY-MM-DD</code></td>
+                <td>Operator local timezone (<code>en-CA</code>)</td>
+                <td>Renders calendar dates for session pickers, welcome dashboards, and export files.</td>
+              </tr>
+              <tr>
+                <td><code>relative(instant, now)</code></td>
+                <td><code>"3m ago"</code></td>
+                <td>Operator local timezone</td>
+                <td>Renders relative recency ladders with automatic fallback to calendar dates.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- TAB 3: ORDERING & DETERMINISM -->
+        <div class="tab-pane" id="pane-concurrency-testing">
+          <h2>Sequence Ordering &amp; Cross-Host Boundaries</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Sequence Numbers Over Timestamps</h3>
+              <p>Under concurrent execution, components like the agent ledger and execution scheduler rely on monotonic sequence numbers rather than timestamps for total ordering.</p>
+            </div>
+            <div class="glass-card">
+              <h3>Cross-Host Boundaries</h3>
+              <p>Timestamps produced on one host are never compared directly against clocks on another host. Events are receive-stamped locally on arrival.</p>
+            </div>
+          </div>
+
+          <h2>Test Determinism &amp; Steppable Harness</h2>
+          <p>In test suites (<code>tests/harness/clock.ts</code>):</p>
+          <ul>
+            <li>Every module that reads a clock accepts an injectable clock interface.</li>
+            <li>Test harnesses advance time deterministically via steppable clocks, eliminating flakes and real-time passage delays.</li>
+            <li>Receipt integrity digests seal normalized timestamps before sealing; timestamps are never rewritten after receipt creation.</li>
+          </ul>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="capacity_scheduling_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Capacity &amp; Scheduling</span>
+          </a>
+          <a href="artifact_placement_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Artifact Placement</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Time Conventions Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const pane = document.getElementById(`pane-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
+        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
+      });
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+  </script>
+</body>
+</html>

@@ -35,7 +35,10 @@ import {
 	permissionOverlayLines,
 	permissionOverlayTitle,
 } from "../../src/interactive/permission-overlay.js";
-import { formatTasksOverlayBodyLines } from "../../src/interactive/tasks-overlay.js";
+import {
+	formatCompositeTasksOverlayBodyLines,
+	formatTasksOverlayBodyLines,
+} from "../../src/interactive/tasks-overlay.js";
 import { ViewOverlayView, viewFooterHint } from "../../src/interactive/view/view-overlay.js";
 
 const ESC = String.fromCharCode(27);
@@ -369,6 +372,48 @@ describe("contracts/overlay width — /tasks empty state", () => {
 			ok(flat.includes(remedy), `at ${width} cols the remedy was cut: ${flat}`);
 		}
 	});
+
+	it("fits every composite section and marks clipped rows", () => {
+		for (const width of WIDTHS) {
+			const bodyWidth = Math.min(84, width - 4);
+			const lines = formatCompositeTasksOverlayBodyLines(
+				{
+					board: {
+						boardId: "board-current",
+						title: "A very long current board title that must be fitted rather than hard-cut on narrow terminals",
+						tasks: [{ id: "t1", title: "current work with a deliberately long descriptive title", status: "active" }],
+						activeRunIds: [],
+					},
+					history: [],
+					artifacts: [
+						{
+							path: "reports/a-very-long-artifact-name-that-must-fit-the-board.md",
+							tool: "write",
+							turnId: "turn-1",
+							timestamp: "2026-08-19T10:04:00.000Z",
+							overwrites: 0,
+						},
+					],
+					userTasks: [
+						{
+							id: "u1",
+							title: "operator task with a title that is too long for forty columns",
+							status: "open",
+							createdAt: "2026-08-19T10:00:00.000Z",
+							updatedAt: "2026-08-19T10:00:00.000Z",
+						},
+					],
+				},
+				bodyWidth,
+			).map(stripAnsi);
+			for (const line of lines) ok(visibleWidth(line) <= bodyWidth, `${width}: ${JSON.stringify(line)}`);
+			const flat = lines.join("\n");
+			for (const heading of ["Tasks", "Task history", "Artifacts", "Operator tasks"]) {
+				ok(flat.includes(heading), `at ${width} columns the ${heading} section vanished`);
+			}
+			if (width === 40) ok(flat.includes("…"), flat);
+		}
+	});
 });
 
 describe("contracts/overlay width — /view panes", () => {
@@ -423,7 +468,7 @@ describe("contracts/overlay width — /view panes", () => {
 
 /**
  * Esc unwinds one step per press. Every other list overlay clears a typed
- * filter first and closes on the second press; `/models` closed on the first,
+ * filter first and closes on the second press; `/model` closed on the first,
  * so narrowing to one model and reaching for Esc threw away the whole overlay.
  */
 describe("contracts/overlay — model selector Esc hierarchy", () => {

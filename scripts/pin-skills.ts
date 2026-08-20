@@ -87,8 +87,12 @@ function collectPackageDirs(dir: string, rel: string): string[] {
  * empty list" stay distinguishable.
  */
 function toolSurfaceEntries(value: unknown): string[] | null {
-	if (typeof value === "string") return value.split(",").map((entry) => entry.trim());
-	if (Array.isArray(value)) return value.map((entry) => (typeof entry === "string" ? entry.trim() : String(entry)));
+	if (typeof value === "string") {
+		return value.split(",").map((entry) => entry.trim());
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => (typeof entry === "string" ? entry.trim() : String(entry)));
+	}
 	return null;
 }
 
@@ -147,9 +151,13 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 		}
 		let name = path.basename(relPath);
 		let version: string | null = null;
-		if (typeof fm.name === "string" && fm.name.trim().length > 0) name = fm.name.trim();
+		if (typeof fm.name === "string" && fm.name.trim().length > 0) {
+			name = fm.name.trim();
+		}
 		const fmVersion = fm.version ?? (fm.metadata as Record<string, unknown> | undefined)?.version;
-		if (typeof fmVersion === "string" && fmVersion.trim().length > 0) version = fmVersion.trim();
+		if (typeof fmVersion === "string" && fmVersion.trim().length > 0) {
+			version = fmVersion.trim();
+		}
 		for (const key of REQUIRED_CORE_KEYS) {
 			const value = fm[key];
 			if (typeof value !== "string" || value.trim().length === 0) {
@@ -175,7 +183,9 @@ function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
 					`${skillPath}: catalog skills must carry "audit: pass" under clio: (found ${JSON.stringify(clio.audit ?? null)})`,
 				);
 			}
-			if (typeof clio["source-url"] === "string") sourceUrl = clio["source-url"].trim();
+			if (typeof clio["source-url"] === "string") {
+				sourceUrl = clio["source-url"].trim();
+			}
 			// The published index installs from this URL, so a skill that moved
 			// between categories without its source-url following would publish a
 			// pointer at its old location: `clio-coder skills install <name>` would then
@@ -225,7 +235,12 @@ function renderManifest(entries: ReadonlyArray<CatalogEntry>): string {
 			currentCategory = category;
 			lines.push(`  # ── ${category === "." ? "(catalog root)" : category} ──`);
 		}
-		const pin: PinEntry = { name: entry.name, path: entry.path, version: entry.version, sha256: entry.sha256 };
+		const pin: PinEntry = {
+			name: entry.name,
+			path: entry.path,
+			version: entry.version,
+			sha256: entry.sha256,
+		};
 		const rendered = yaml.stringify([pin]).trimEnd();
 		lines.push(...rendered.split("\n").map((line) => `  ${line}`));
 	}
@@ -275,10 +290,14 @@ function describeDrift(current: string, expected: ReadonlyArray<PinEntry>): stri
 	for (const entry of expected) {
 		const pin = pinnedByName.get(entry.name);
 		if (!pin) lines.push(`${entry.name}: in catalog but not pinned`);
-		else if (pin.sha256 !== entry.sha256 || pin.version !== entry.version) lines.push(`${entry.name}: pin is stale`);
+		else if (pin.sha256 !== entry.sha256 || pin.version !== entry.version) {
+			lines.push(`${entry.name}: pin is stale`);
+		}
 	}
 	for (const pin of pinned) {
-		if (!expectedByName.has(pin.name)) lines.push(`${pin.name}: pinned but not in catalog`);
+		if (!expectedByName.has(pin.name)) {
+			lines.push(`${pin.name}: pinned but not in catalog`);
+		}
 	}
 	return lines;
 }
@@ -312,7 +331,9 @@ if (checkMode) {
 	}
 	if (currentManifest !== manifest) {
 		process.stderr.write(`pin-skills: ${manifestPath} does not match the catalog content hashes\n`);
-		for (const line of describeDrift(currentManifest ?? "", entries)) process.stderr.write(`pin-skills:   ${line}\n`);
+		for (const line of describeDrift(currentManifest ?? "", entries)) {
+			process.stderr.write(`pin-skills:   ${line}\n`);
+		}
 	}
 	if (currentIndex !== index) {
 		process.stderr.write(`pin-skills: ${indexPath} does not match the catalog\n`);

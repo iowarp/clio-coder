@@ -76,7 +76,7 @@ describe("contracts/skills-hub", () => {
 		);
 		const detail = items[0]?.detail?.(80) ?? [];
 		const joined = detail.join("\n");
-		ok(joined.includes("/skill:clio-test [task]"));
+		ok(joined.includes("/skill clio-test [task]"));
 		ok(joined.includes(skill.filePath));
 		ok(joined.includes("stale pin"));
 		ok(joined.includes("Body of clio-test"));
@@ -110,7 +110,7 @@ function skillFile(name: string): string {
 }
 
 // The hub used to list a remote GitHub directory listing while the installer and
-// `/skill:<name>` resolved through the local marketplace, so every row it drew in
+// `/skill <name>` resolved through the local marketplace, so every row it drew in
 // a fresh environment failed both advertised paths. These pin the hub to the one
 // lookup that can resolve what it lists.
 describe("contracts/skills-hub marketplace rows", () => {
@@ -131,7 +131,7 @@ describe("contracts/skills-hub marketplace rows", () => {
 		strictEqual(items[0]?.meta, "catalog · v0.1.0");
 
 		const detail = (items.find((item) => item.label === "beta")?.detail?.(80) ?? []).join("\n");
-		ok(detail.includes("/skill:beta [task]"), detail);
+		ok(detail.includes("/skill beta [task]"), detail);
 		ok(detail.includes(path.join(cwd, "skills", "research", "beta")), detail);
 		ok(detail.includes("beta description"), detail);
 	});
@@ -143,8 +143,11 @@ describe("contracts/skills-hub marketplace rows", () => {
 	});
 
 	it("has no rows and no diagnostic row when nothing is configured", () => {
+		// The installed package carries its own catalog, so "nothing configured"
+		// is only reachable with catalog discovery switched off entirely; a bare
+		// cwd alone now resolves to the package catalog.
 		const cwd = seedCatalog({ "README.md": "no skills here\n" });
-		const discovery = discoverMarketplaceSkills({ cwd, indexPath: null });
+		const discovery = discoverMarketplaceSkills({ cwd, indexPath: null, catalogDir: null });
 
 		strictEqual(discovery.status, "unavailable");
 		deepStrictEqual(discovery.diagnostics, [MARKETPLACE_UNCONFIGURED]);

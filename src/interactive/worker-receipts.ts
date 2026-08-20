@@ -13,7 +13,8 @@
  * to take down a render.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import { receiptFilePath } from "./view/artifacts.js";
 import type { WorkerReceiptFacts, WorkerResultContract } from "./worker-stream.js";
@@ -83,12 +84,60 @@ export function workerReceiptFacts(receipt: Record<string, unknown>): WorkerRece
 	};
 }
 
-/** Read and project `<state>/receipts/<runId>.json`; null when it is absent or unreadable. */
-export function readWorkerReceiptFacts(runId: string, stateDir = clioStateDir()): WorkerReceiptFacts | null {
+/** Read and project `<state>/receipts/<runId>.json` alone; null when it is absent or unreadable. */
+function readReceiptFileFacts(runId: string, stateDir: string): WorkerReceiptFacts | null {
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
 		return isRecord(parsed) ? workerReceiptFacts(parsed) : null;
 	} catch {
 		return null;
 	}
+}
+
+/** Read and project `<state>/receipts/<runId>.json`; null when it is absent or unreadable. */
+export function readWorkerReceiptFacts(runId: string, stateDir = clioStateDir()): WorkerReceiptFacts | null {
+	return readReceiptFileFacts(runId, stateDir);
+}
+
+/**
+ * The subset of a `runs.json` row replay needs once a receipt has failed to
+ * read: whether the run is still open, and, if the ledger closed it early
+ * (`closeAbandonedRows`), the closing row's own explanation.
+ */
+function findRunRow(runId: string, stateDir: string): Record<string, unknown> | null {
+	const path = join(stateDir, "runs.json");
+	if (!existsSync(path)) return null;
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+		if (!Array.isArray(parsed)) return null;
+		for (const entry of parsed) {
+			if (isRecord(entry) && entry.id === runId) return entry;
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Replay-only receipt reader: falls back to the run's own `runs.json` row
+ * when no receipt was sealed for it, so a resumed transcript can tell a run
+ * still going in another process, one the ledger closed as dead/stalled
+ * before it could seal a receipt, and one whose evidence is genuinely gone
+ * apart from each other. Never used by the live subscription: there, a
+ * missing receipt at settle time is a flush race the terminal event's own
+ * payload already covers (`worker-stream.ts`'s `settle`), not an open run.
+ */
+export function readWorkerReceiptFactsForReplay(runId: string, stateDir = clioStateDir()): WorkerReceiptFacts | null {
+	const sealed = readReceiptFileFacts(runId, stateDir);
+	if (sealed !== null) return sealed;
+	const row = findRunRow(runId, stateDir);
+	if (row === null) return null;
+	if (row.endedAt === null || row.endedAt === undefined) return { outcome: "running", stillRunning: true };
+	const outcome = optionalString(row.outcome) ?? optionalString(row.status) ?? "unknown";
+	const abandonedDetail = optionalString(row.outcomeDetail);
+	return {
+		outcome,
+		...(abandonedDetail !== undefined ? { abandonedDetail } : {}),
+	};
 }

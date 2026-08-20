@@ -192,6 +192,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const unsubscribePermission =
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
 			const autonomy = deps.getAutonomy();
+			const view = mainApprovalRequestView(call, decision, meta, autonomy, deps.toolRegistry?.parkedCount());
 			// The dialog states the tool, the target, the action class, the axis
 			// that asked, and the keys that answer it. While it is on screen the
 			// notice repeats all of that one line above the transcript, so it is
@@ -207,13 +208,13 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					type: "tool_approval_state",
 					toolCallId: meta.toolCallId,
 					state: "awaiting-approval",
+					view,
 				});
 			}
 			if (deps.getOverlayState() !== "closed") {
 				announceParked();
 				return;
 			}
-			const view = mainApprovalRequestView(call, decision, meta, autonomy, deps.toolRegistry?.parkedCount());
 			if (!deps.openPermissionOverlay(view)) {
 				announceParked();
 				return;

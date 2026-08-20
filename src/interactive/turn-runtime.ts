@@ -11,7 +11,6 @@ import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import {
 	applyModelCapabilityPatch,
-	firstRuntimeResolutionError,
 	modelResidencyForStatus,
 	type ProvidersContract,
 	refineRuntimeTargetWithModelHints,
@@ -51,6 +50,22 @@ import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-local-target";
+
+/**
+ * A turn that never started, with a machine-readable reason attached. The
+ * operator-facing message is unchanged prose; `reason` exists because the ACP
+ * server has to tell a client *why* Clio refused to admit the prompt, and
+ * parsing that out of the prose would bind a wire contract to a sentence.
+ */
+export class TurnAdmissionError extends Error {
+	constructor(
+		message: string,
+		readonly reason: string,
+	) {
+		super(message);
+		this.name = "TurnAdmissionError";
+	}
+}
 
 /**
  * Say that the first request will pay for a load, before it does.
@@ -177,8 +192,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			requireOutputBudget: true,
 		});
 		if (!resolved.ok) {
-			const message = firstRuntimeResolutionError(resolved.diagnostics) ?? resolved.diagnostics[0]?.message;
-			throw new Error(`[Clio Coder] ${message ?? "orchestrator target resolution failed"}`);
+			const failure = resolved.diagnostics.find((entry) => entry.severity === "error") ?? resolved.diagnostics[0];
+			throw new TurnAdmissionError(
+				`[Clio Coder] ${failure?.message ?? "orchestrator target resolution failed"}`,
+				failure?.code ?? "admission-failed",
+			);
 		}
 		for (const message of runtimeResolutionWarnings(resolved.diagnostics)) {
 			const key = `${targetId}|${wireModelId}|${message}`;
@@ -331,8 +349,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		if (!target) return null;
 		context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
-			throw new Error(
+			throw new TurnAdmissionError(
 				`[Clio Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
+				"target-unknown",
 			);
 		}
 		if (
@@ -400,6 +419,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			state.runtime.agent.abort();
 			cleanupSessionResources(state.runtime.agent.sessionId);
 		}
+		let getCurrentAgentSignal: () => AbortSignal | undefined = () => undefined;
 		const handle = deps.createAgent({
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
@@ -428,10 +448,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
-				const resolved = await deps.providers.auth.resolveForTarget(target.target, target.runtime);
+				const signal = getCurrentAgentSignal();
+				const resolved = await deps.providers.auth.resolveForTarget(
+					target.target,
+					target.runtime,
+					signal ? { signal } : undefined,
+				);
 				return resolved.apiKey;
 			},
 		});
+		getCurrentAgentSignal = () => handle.agent.signal;
 
 		// Build the runtime object before subscribing so the callback closes
 		// over the same heap object the hot-swap path mutates. Reading

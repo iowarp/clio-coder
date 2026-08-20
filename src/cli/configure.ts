@@ -26,6 +26,7 @@ import { probeCapabilitiesForModel } from "../domains/providers/model-capabiliti
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
@@ -88,6 +89,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 	"llamacpp-embed": 8080,
 	"llamacpp-rerank": 8080,
 	"lmstudio-native": 1234,
+	lmstudio: 1234,
 	"ollama-native": 11434,
 	vllm: 8000,
 	sglang: 30000,
@@ -270,7 +272,8 @@ function normalizeUrl(input: string, runtimeId: string): string {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return defaultUrlFor(runtimeId);
 	const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
-	const withScheme = hasScheme ? trimmed : `http://${trimmed}`;
+	let withScheme = hasScheme ? trimmed : `http://${trimmed}`;
+	if (runtimeId === "lmstudio") withScheme = withScheme.replace(/^ws:/u, "http:").replace(/^wss:/u, "https:");
 	try {
 		const parsed = new URL(withScheme);
 		if (!hasScheme && !parsed.port && DEFAULT_PORTS[runtimeId]) {
@@ -418,10 +421,15 @@ async function runtimeProbe(runtime: RuntimeDescriptor, target: TargetDescriptor
 	}
 }
 
-async function runtimeProbeModels(runtime: RuntimeDescriptor, target: TargetDescriptor): Promise<string[]> {
+async function runtimeProbeModels(
+	runtime: RuntimeDescriptor,
+	target: TargetDescriptor,
+	authToken?: string,
+): Promise<string[]> {
 	if (typeof runtime.probeModels !== "function") return [];
 	try {
-		return await runtime.probeModels(target, await buildProbeContext(runtime, target));
+		const context = await buildProbeContext(runtime, target);
+		return await runtime.probeModels(target, authToken === undefined ? context : { ...context, authToken });
 	} catch {
 		return [];
 	}
@@ -591,6 +599,7 @@ function buildDescriptor(
 		contextWindow?: number;
 		maxTokens?: number;
 		reasoning?: boolean;
+		lmstudio?: TargetDescriptor["lmstudio"];
 	},
 ): TargetDescriptor {
 	const descriptor: TargetDescriptor = { id, runtime: runtime.id };
@@ -615,6 +624,7 @@ function buildDescriptor(
 	if (parts.maxTokens !== undefined) caps.maxTokens = parts.maxTokens;
 	if (parts.reasoning !== undefined) caps.reasoning = parts.reasoning;
 	if (Object.keys(caps).length > 0) descriptor.capabilities = caps;
+	if (parts.lmstudio) descriptor.lmstudio = parts.lmstudio;
 	return descriptor;
 }
 
@@ -673,10 +683,11 @@ async function resolveSupportedWireModels(
 	runtime: RuntimeDescriptor,
 	target: TargetDescriptor,
 	existing?: TargetDescriptor,
+	authToken?: string,
 ): Promise<string[]> {
 	const known = listKnownModelsForRuntime(runtime.id);
 	if (known.length > 0) return known;
-	const discovered = runtime.kind === "http" ? await runtimeProbeModels(runtime, target) : [];
+	const discovered = runtime.kind === "http" ? await runtimeProbeModels(runtime, target, authToken) : [];
 	if (discovered.length > 0) return discovered;
 	return existing?.wireModels ? [...existing.wireModels] : [];
 }
@@ -712,7 +723,7 @@ async function askModelChoice(
  */
 function refuseCatalogSeededModel(runtime: RuntimeDescriptor, support: ProviderSupportEntry): void {
 	printError(
-		`--model is required for ${runtime.id}: its ${support.modelHints.length} model ids come from the pi-ai catalog in name order, which recommends none of them`,
+		`--model is required for ${runtime.id}: its ${support.modelHints.length} model ids come from the provider catalog in name order, which recommends none of them`,
 	);
 	process.stderr.write(
 		`  run \`clio-coder configure --runtime ${runtime.id}\` with no other flags to choose from the full list\n`,
@@ -742,13 +753,23 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	const auth = openAuthStorage();
 	const support = buildProviderSupportEntry(runtime);
 	const existing = settings.targets.find((e) => e.id === args.id);
-	if (existing && existing.runtime !== runtime.id) {
+	if (existing && (getRuntimeRegistry().get(existing.runtime)?.id ?? existing.runtime) !== runtime.id) {
 		printError(`target ${args.id} already exists with runtime ${existing.runtime}`);
 		return 2;
 	}
 	let url: string | undefined = args.url ? normalizeUrl(args.url, runtime.id) : existing?.url;
 	if (!url && support.supportsCustomUrl) {
 		url = defaultUrlFor(runtime.id);
+	}
+	if (url && runtime.id === "lmstudio") {
+		const greeting = await greetLmStudio(
+			{ id: args.id, runtime: runtime.id, url },
+			{ credentialsPresent: new Set(), httpTimeoutMs: 750 },
+		);
+		if (!greeting.ok) {
+			printError(`refusing to save LM Studio target '${args.id}': ${url} did not return the LM Studio greeting`);
+			return 2;
+		}
 	}
 	if (url && (runtime.id === "openai-compat" || runtime.id === "anthropic-compat")) {
 		const fingerprint = await fingerprintNativeRuntime(url);
@@ -787,8 +808,9 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
+		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 	});
-	const wireModels = await resolveSupportedWireModels(runtime, seed, existing);
+	const wireModels = await resolveSupportedWireModels(runtime, seed, existing, args.apiKey);
 	const model =
 		args.model ??
 		existing?.defaultModel ??
@@ -816,6 +838,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.contextWindow !== undefined ? { contextWindow: args.contextWindow } : {}),
 		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
+		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 	});
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
 	const setBackground = args.setBackground || args.backgroundModel !== undefined;
@@ -933,7 +956,7 @@ async function pickRuntimeFromEntries(
 	}
 }
 
-const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lmstudio-native"]);
+const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lmstudio"]);
 
 // Generic protocol-compatible runtimes. They are classified local-http (they
 // carry a probe and no cloud catalog entry), but a hosted endpoint such as
@@ -1099,6 +1122,16 @@ async function runInteractive(
 			runtime = steered;
 			support = buildProviderSupportEntry(runtime);
 		}
+		if (runtime.id === "lmstudio") {
+			const greeting = await greetLmStudio(
+				{ id: targetId, runtime: runtime.id, url },
+				{ credentialsPresent: new Set(), httpTimeoutMs: 750 },
+			);
+			if (!greeting.ok) {
+				printError(`refusing to save LM Studio target '${targetId}': ${url} did not return the LM Studio greeting`);
+				return 2;
+			}
+		}
 	}
 
 	let apiKeyEnv: string | undefined;
@@ -1174,6 +1207,7 @@ async function runInteractive(
 		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
+		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 	});
 
 	if (runtime.kind === "http") {
@@ -1190,7 +1224,7 @@ async function runInteractive(
 			process.stdout.write(`  ${index + 1}. ${wireModel}${wireModel === model ? "  [default]" : ""}\n`);
 		}
 		if (!model && catalogOrdered) {
-			process.stdout.write(`  listed in pi-ai catalog order, which recommends none of them; pick one.\n`);
+			process.stdout.write(`  listed in provider catalog order, which recommends none of them; pick one.\n`);
 		}
 		for (;;) {
 			const pickedModel = await askModelChoice(rl, "Default target model", wireModels, model);
@@ -1259,6 +1293,7 @@ async function runInteractive(
 		...(contextWindowChoice !== undefined ? { contextWindow: contextWindowChoice } : {}),
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
 		...(reasoningChoice !== undefined ? { reasoning: reasoningChoice } : {}),
+		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 	});
 	try {
 		assertOrchestratorReplacementEligible(settings, descriptor);
@@ -1440,6 +1475,9 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 			printError(`unknown runtime id: ${runtimeId}`);
 			process.stdout.write("run `clio-coder configure --list` to see registered runtimes\n");
 			return 2;
+		}
+		if (runtimeId === "lmstudio-native" && runtime.id === "lmstudio") {
+			process.stderr.write("warning: runtime 'lmstudio-native' is deprecated; using 'lmstudio'\n");
 		}
 	}
 	const hasTargetSetupFlag =

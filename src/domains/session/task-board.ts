@@ -1,4 +1,10 @@
-import type { SessionEntry, TaskLedgerGoal, TaskLedgerStatus, TaskLedgerValidationEvidence } from "./entries.js";
+import { randomUUID } from "node:crypto";
+import {
+	isSessionEntry,
+	type TaskLedgerGoal,
+	type TaskLedgerStatus,
+	type TaskLedgerValidationEvidence,
+} from "./entries.js";
 
 /**
  * The session task board: the live state behind the `tasks` tool, the footer
@@ -15,11 +21,14 @@ import type { SessionEntry, TaskLedgerGoal, TaskLedgerStatus, TaskLedgerValidati
  */
 
 const TASK_BOARD_GOAL_ID = "board";
+export const LEGACY_TASK_BOARD_ID = "legacy";
 
 export interface TaskBoardTask {
 	id: string;
 	title: string;
 	status: TaskLedgerStatus;
+	origin?: "agent" | "user";
+	userTaskId?: string;
 	/** Block or drop reason; empty for pending/active/completed tasks. */
 	reason?: string;
 	/** Evidence note recorded when the task was completed. */
@@ -27,6 +36,8 @@ export interface TaskBoardTask {
 }
 
 export interface TaskBoardSnapshot {
+	/** Stable identity for this plan generation; task display ids are reusable. */
+	boardId: string;
 	title: string;
 	tasks: ReadonlyArray<TaskBoardTask>;
 	/**
@@ -53,6 +64,7 @@ export interface TaskBoardCounts {
 export type TaskBoardMutation =
 	| { op: "plan"; title: string; tasks: ReadonlyArray<string> }
 	| { op: "add"; tasks: ReadonlyArray<string> }
+	| { op: "pick"; title: string; userTaskId: string }
 	| { op: "start"; id: string }
 	| { op: "done"; id: string; evidence: string }
 	| { op: "block"; id: string; reason: string }
@@ -71,6 +83,7 @@ export type TaskBoardMutationResult =
 export interface TaskLedgerEntryFields {
 	kind: "taskLedger";
 	parentTurnId: null;
+	boardId: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	activeRunIds: string[];
@@ -88,18 +101,48 @@ export interface TaskBoardStoreDeps {
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** Persist one full-snapshot taskLedger entry. Absent means in-memory only. */
 	appendEntry?: (entry: TaskLedgerEntryFields) => void;
+	/** Stable board-id source; injectable for deterministic contract tests. */
+	createBoardId?: () => string;
 	now?: () => Date;
+}
+
+export interface SessionTaskHistoryBoard {
+	boardId: string;
+	title: string;
+	tasks: ReadonlyArray<TaskBoardTask>;
+	lastSnapshotAt: string;
 }
 
 export interface TaskBoardStore {
 	/** Current board, refolded from the session ledger after a session switch. */
 	snapshot(): TaskBoardSnapshot | null;
+	/**
+	 * Current in-memory projection only. Unlike snapshot(), this never reads or
+	 * folds the session ledger and returns null rather than leaking a stale board
+	 * when the session id changed or invalidate() has marked the cache dirty.
+	 */
+	cachedSnapshot(): TaskBoardSnapshot | null;
+	/** Durable board generations on the active session path, newest first. */
+	historySnapshot(): ReadonlyArray<SessionTaskHistoryBoard>;
 	/** Apply one mutation, persist the resulting snapshot, and return it. */
 	apply(mutation: TaskBoardMutation): TaskBoardMutationResult;
 	/** Link an in-flight dispatch run to the board; a no-op without a board. */
 	attachRun(runId: string): void;
 	/** Unlink a finished dispatch run; a no-op when it was never attached. */
 	detachRun(runId: string): void;
+	/**
+	 * Force the next read to refold from the ledger even if `getSessionId()`
+	 * reports the same id it did last time. A `/tree` switch moves the active
+	 * append point without changing which session is open, so the id-keyed
+	 * cache alone never noticed the branch change and kept showing the
+	 * abandoned branch's board (issue #94). Callers invalidate on the bus
+	 * signal that switch emits.
+	 */
+	invalidate(): void;
+}
+
+function isOpenUserTask(task: TaskBoardTask): boolean {
+	return task.origin === "user" && (task.status === "pending" || task.status === "active");
 }
 
 export function taskBoardCounts(board: Pick<TaskBoardSnapshot, "tasks">): TaskBoardCounts {
@@ -150,12 +193,15 @@ export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): Ta
 			status: task.status,
 			parentGoalId: TASK_BOARD_GOAL_ID,
 		};
+		if (task.origin) goal.origin = task.origin;
+		if (task.userTaskId) goal.userTaskId = task.userTaskId;
 		if (task.reason) goal.description = task.reason;
 		return goal;
 	});
 	return {
 		kind: "taskLedger",
 		parentTurnId: null,
+		boardId: board.boardId,
 		goals: [{ id: TASK_BOARD_GOAL_ID, title: board.title, status: boardStatus(board.tasks) }],
 		subgoals,
 		activeRunIds: [...board.activeRunIds],
@@ -165,13 +211,13 @@ export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): Ta
 
 function isTaskLedgerShaped(value: unknown): value is {
 	kind: "taskLedger";
+	boardId?: string;
+	timestamp?: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
 } {
-	if (!value || typeof value !== "object") return false;
-	const entry = value as Partial<SessionEntry>;
-	return entry.kind === "taskLedger" && Array.isArray((entry as { goals?: unknown }).goals);
+	return isSessionEntry(value) && value.kind === "taskLedger";
 }
 
 /**
@@ -186,7 +232,60 @@ export function foldTaskBoard(entries: ReadonlyArray<unknown>): TaskBoardSnapsho
 	return last;
 }
 
+/**
+ * Fold every safely identifiable board generation in a session. New ledgers
+ * key generations by boardId; pre-boardId ledgers collapse to the newest
+ * legacy snapshot because reusable tN ids cannot safely distinguish their
+ * older plan generations.
+ */
+export function foldSessionTaskHistory(entries: ReadonlyArray<unknown>): SessionTaskHistoryBoard[] {
+	type MutableHistoryBoard = {
+		boardId: string;
+		title: string;
+		tasks: Map<string, TaskBoardTask>;
+		lastSnapshotAt: string;
+		lastIndex: number;
+	};
+	const boards = new Map<string, MutableHistoryBoard>();
+	for (const [index, raw] of entries.entries()) {
+		if (!isTaskLedgerShaped(raw)) continue;
+		const view = toEntryView(raw);
+		if (!view) continue;
+		const boardId = typeof raw.boardId === "string" && raw.boardId.length > 0 ? raw.boardId : LEGACY_TASK_BOARD_ID;
+		const timestamp = typeof raw.timestamp === "string" ? raw.timestamp : "";
+		if (boardId === LEGACY_TASK_BOARD_ID) {
+			boards.set(boardId, {
+				boardId,
+				title: view.title,
+				tasks: new Map(view.tasks.map((task) => [task.id, task])),
+				lastSnapshotAt: timestamp,
+				lastIndex: index,
+			});
+			continue;
+		}
+		const existing = boards.get(boardId);
+		if (!existing) {
+			boards.set(boardId, {
+				boardId,
+				title: view.title,
+				tasks: new Map(view.tasks.map((task) => [task.id, task])),
+				lastSnapshotAt: timestamp,
+				lastIndex: index,
+			});
+			continue;
+		}
+		existing.title = view.title;
+		for (const task of view.tasks) existing.tasks.set(task.id, task);
+		existing.lastSnapshotAt = timestamp;
+		existing.lastIndex = index;
+	}
+	return [...boards.values()]
+		.sort((left, right) => right.lastIndex - left.lastIndex)
+		.map(({ lastIndex: _lastIndex, tasks, ...board }) => ({ ...board, tasks: [...tasks.values()] }));
+}
+
 function toEntryView(entry: {
+	boardId?: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
@@ -199,9 +298,16 @@ function toEntryView(entry: {
 		evidenceByTask.set(taskId, item.description);
 	}
 	return {
+		boardId: entry.boardId ?? LEGACY_TASK_BOARD_ID,
 		title: boardGoal.title,
 		tasks: entry.subgoals.map((goal) => {
-			const task: TaskBoardTask = { id: goal.id, title: goal.title, status: goal.status };
+			const task: TaskBoardTask = {
+				id: goal.id,
+				title: goal.title,
+				status: goal.status,
+				origin: goal.origin ?? "agent",
+			};
+			if (goal.userTaskId) task.userTaskId = goal.userTaskId;
 			if (goal.description) task.reason = goal.description;
 			const evidence = evidenceByTask.get(goal.id);
 			if (evidence) task.evidence = evidence;
@@ -235,14 +341,27 @@ function applyMutation(
 		const titles = normalizeTitles(mutation.tasks);
 		if (mutation.title.trim().length === 0) return { error: "plan requires a non-empty title" };
 		if (titles.length === 0) return { error: "plan requires at least one task" };
+		const retained = board?.tasks.filter(isOpenUserTask) ?? [];
 		const notes: string[] = [];
-		if (board && taskBoardCounts(board).open > 0) {
-			notes.push(`replaced board "${board.title}" with ${taskBoardCounts(board).open} task(s) still open`);
+		const replacedOpen = board ? taskBoardCounts(board).open - retained.length : 0;
+		if (board && replacedOpen > 0) {
+			notes.push(`replaced board "${board.title}" with ${replacedOpen} agent task(s) still open`);
 		}
+		if (retained.length > 0) notes.push(`preserved ${retained.length} open operator task(s)`);
+		const start = nextTaskId(retained);
 		return {
 			board: {
+				boardId: "",
 				title: mutation.title.trim(),
-				tasks: titles.map((title, index) => ({ id: `t${index + 1}`, title, status: "pending" as const })),
+				tasks: [
+					...retained,
+					...titles.map((title, index) => ({
+						id: `t${start + index}`,
+						title,
+						status: "pending" as const,
+						origin: "agent" as const,
+					})),
+				],
 				// Runs in flight outlive a board swap: they belong to the session,
 				// so the fresh board inherits the linkage until the runs finish.
 				activeRunIds: board?.activeRunIds ?? [],
@@ -250,12 +369,48 @@ function applyMutation(
 			notes,
 		};
 	}
+	if (mutation.op === "pick") {
+		const title = mutation.title.trim();
+		if (title.length === 0) return { error: "pick requires a non-empty operator task title" };
+		if (!/^u[1-9]\d*$/.test(mutation.userTaskId)) return { error: "pick requires an operator task id like u3" };
+		if (
+			board?.tasks.some(
+				(task) =>
+					task.userTaskId === mutation.userTaskId &&
+					(task.status === "pending" || task.status === "active" || task.status === "completed"),
+			)
+		) {
+			return { error: `operator task ${mutation.userTaskId} is already linked to durable board work` };
+		}
+		const tasks = board?.tasks ?? [];
+		const picked: TaskBoardTask = {
+			id: `t${nextTaskId(tasks)}`,
+			title,
+			status: "pending",
+			origin: "user",
+			userTaskId: mutation.userTaskId,
+		};
+		return {
+			board: {
+				boardId: board?.boardId ?? "",
+				title: board?.title ?? "Operator tasks",
+				tasks: [...tasks, picked],
+				activeRunIds: board?.activeRunIds ?? [],
+			},
+			notes: [],
+		};
+	}
 	if (board === null) return { error: 'no task board yet; declare one with action="plan" first' };
 	if (mutation.op === "add") {
 		const titles = normalizeTitles(mutation.tasks);
 		if (titles.length === 0) return { error: "add requires at least one task" };
 		const start = nextTaskId(board.tasks);
-		const added = titles.map((title, index) => ({ id: `t${start + index}`, title, status: "pending" as const }));
+		const added = titles.map((title, index) => ({
+			id: `t${start + index}`,
+			title,
+			status: "pending" as const,
+			origin: "agent" as const,
+		}));
 		return { board: { ...board, tasks: [...board.tasks, ...added] }, notes: [] };
 	}
 	const target = board.tasks.find((task) => task.id === mutation.id);
@@ -323,11 +478,13 @@ function applyStatusMutation(
 
 export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardStore {
 	let cachedSessionId: string | null | undefined;
+	let dirty = true;
 	let board: TaskBoardSnapshot | null = null;
 
 	const syncToSession = (): void => {
 		const sessionId = deps.getSessionId?.() ?? null;
-		if (cachedSessionId === sessionId) return;
+		if (!dirty && cachedSessionId === sessionId) return;
+		dirty = false;
 		cachedSessionId = sessionId;
 		try {
 			board = deps.readEntries ? foldTaskBoard(deps.readEntries()) : null;
@@ -345,18 +502,52 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 		}
 	};
 
+	const mutationRequiresAcknowledgement = (current: TaskBoardSnapshot | null, mutation: TaskBoardMutation): boolean => {
+		if (mutation.op === "pick") return true;
+		if (mutation.op === "plan") return current?.tasks.some(isOpenUserTask) ?? false;
+		if (mutation.op !== "done") return false;
+		return current?.tasks.some((task) => task.id === mutation.id && task.origin === "user") ?? false;
+	};
+
 	return {
 		snapshot(): TaskBoardSnapshot | null {
 			syncToSession();
 			return board;
 		},
+		cachedSnapshot(): TaskBoardSnapshot | null {
+			const sessionId = deps.getSessionId?.() ?? null;
+			return !dirty && cachedSessionId === sessionId ? board : null;
+		},
+		historySnapshot(): ReadonlyArray<SessionTaskHistoryBoard> {
+			syncToSession();
+			try {
+				return deps.readEntries ? foldSessionTaskHistory(deps.readEntries()) : [];
+			} catch {
+				return [];
+			}
+		},
 		apply(mutation: TaskBoardMutation): TaskBoardMutationResult {
 			syncToSession();
 			const result = applyMutation(board, mutation);
 			if ("error" in result) return { ok: false, message: result.error };
-			board = result.board;
-			persist(result.board);
-			return { ok: true, board: result.board, notes: result.notes };
+			const needsBoardId = mutation.op === "plan" || result.board.boardId.length === 0;
+			const nextBoard = needsBoardId ? { ...result.board, boardId: deps.createBoardId?.() ?? randomUUID() } : result.board;
+			if (mutationRequiresAcknowledgement(board, mutation)) {
+				if (!deps.appendEntry) {
+					return { ok: false, message: "durable task-ledger persistence is unavailable for operator-linked work" };
+				}
+				try {
+					deps.appendEntry(toTaskLedgerEntryFields(nextBoard, deps.now?.() ?? new Date()));
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					return { ok: false, message: `could not persist operator-linked task board: ${message}` };
+				}
+				board = nextBoard;
+				return { ok: true, board: nextBoard, notes: result.notes };
+			}
+			board = nextBoard;
+			persist(nextBoard);
+			return { ok: true, board: nextBoard, notes: result.notes };
 		},
 		attachRun(runId: string): void {
 			syncToSession();
@@ -370,6 +561,9 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 			if (board === null || !board.activeRunIds.includes(runId)) return;
 			board = { ...board, activeRunIds: board.activeRunIds.filter((id) => id !== runId) };
 			persist(board);
+		},
+		invalidate(): void {
+			dirty = true;
 		},
 	};
 }

@@ -17,6 +17,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
 import type { CodeReportResult } from "../agents/result-contract.js";
 
@@ -140,6 +141,7 @@ export function codeStepEnv(command: FleetCommand, source: NodeJS.ProcessEnv): N
 		const value = source[name];
 		if (value !== undefined) env[name] = value;
 	}
+	env.AI_AGENT = AI_AGENT_NAME;
 	return env;
 }
 

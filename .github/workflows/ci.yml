@@ -17,7 +17,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -38,20 +38,28 @@ jobs:
       - name: Install uv
         run: pipx install uv
       - run: npm ci --prefer-offline --no-audit --no-fund
-      # The full release gate runs once, on the engines floor. Typecheck,
-      # lint, the skills pin check, and the package audit are node-version
-      # insensitive; repeating them on the 24 lane buys nothing.
+      # One job, one set of checks, run in full on both node lanes. Typecheck,
+      # lint, the skills pin check, the build, the sharded test suite, the
+      # trace-viewer suite, and the packaging audit all run here; `npm run
+      # build` inside `ci` leaves dist/ in place for the steps below, so
+      # smoke's dist-spawning tests already ran once by the time this step
+      # returns.
       - name: Release gate
-        if: matrix.node-version == 22
         run: npm run ci:release
-      # The 24 lane verifies runtime behavior only. The coverage-instrumented
-      # suite is its main (and only) full-suite run; smoke tests execute
-      # dist/, hence the build. pipefail keeps tee from masking failures.
-      - name: Build dist for the test suite
-        if: matrix.node-version == 24
-        run: npm run build
+      # A second, coverage-instrumented full run for the PR's coverage
+      # summary. Distinct from the gate above: that one uses the sharded
+      # runner for speed, this one pays node's per-file coverage
+      # instrumentation to get an accurate range map. pipefail keeps tee from
+      # masking a failing suite.
+      #
+      # This is the one step that stays pinned to a single lane, and the
+      # distinction is deliberate: a check runs on every node version because
+      # runtime behavior can differ between them, but coverage is a report
+      # about the suite rather than about a runtime. Running it twice would
+      # pay the most expensive step in the workflow a second time to post the
+      # same numbers to the summary twice.
       - name: Tests with coverage summary
-        if: matrix.node-version == 24
+        if: matrix.node-version == 22
         run: |
           set -o pipefail
           npm run test:coverage | tee coverage.txt
@@ -61,6 +69,7 @@ jobs:
             sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Repeat smoke and boundary lane
-        if: matrix.node-version == 24
+      # Shuffled reruns of the smoke lane catch order- and timing-dependent
+      # flakes that one deterministic pass cannot.
+      - name: Repeat smoke lane
         run: npm run test:repeat

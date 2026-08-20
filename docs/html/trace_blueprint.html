@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Trace Store Blueprint (v0.3.1)</title>
+  <title>Clio Coder Trace Store Blueprint (v0.3.2)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     .subcommand-card {
@@ -99,10 +99,10 @@
     <header>
       <div>
         <h1>Trace Store Blueprint</h1>
-        <p style="color: var(--text-muted);">Interactive reference and query validator simulator for the SQLite trace mirror (v0.3.1)</p>
+        <p style="color: var(--text-muted);">Interactive reference and query validator simulator for the SQLite trace mirror (v0.3.2)</p>
       </div>
       <div>
-        <span class="badge-tag">v0.3.1</span>
+        <span class="badge-tag">v0.3.2</span>
         <span class="badge-tag" style="color: var(--color-orange); border-color: rgba(255, 126, 41, 0.3); background: rgba(255, 126, 41, 0.1);">Trace Mirror</span>
       </div>
     </header>
@@ -117,7 +117,7 @@
         <p style="color: var(--text-muted); margin-bottom: 1.5rem;">The CLI exposes six dedicated subcommands for operational tracing and diagnostics:</p>
 
         <div class="subcommand-card">
-          <div class="subcommand-title">clio-coder trace runs [--db PATH] [--limit N]</div>
+          <div class="subcommand-title">clio-coder trace runs [--db PATH] [--limit N] [--json]</div>
           <p>Queries and formats recent execution runs up to limit N (1 to 500, default 50). Displays run status, start timestamp, total tokens, USD cost, and run ID.</p>
         </div>
 

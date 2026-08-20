@@ -325,7 +325,12 @@ export function effectiveThinkingLevel(
 	const fallback = available[0] ?? "off";
 	if (!configured) return fallback;
 	if (available.includes(configured)) return configured;
-	if ((configured === "high" || configured === "xhigh") && available.includes("high")) return "high";
+	// Catalog effort maps intentionally stop at xhigh; `max` must clamp to that
+	// supported ceiling instead of falling through to the generic low fallback.
+	if (configured === "max" && available.includes("xhigh")) return "xhigh";
+	if ((configured === "high" || configured === "xhigh" || configured === "max") && available.includes("high")) {
+		return "high";
+	}
 	if (configured === "medium" && available.includes("medium")) return "medium";
 	if (configured !== "off" && available.includes("low")) return "low";
 	if (configured === "off" && !available.includes("off") && available.includes("low")) return "low";
@@ -359,7 +364,9 @@ export function thinkingLevelFromChoiceLabel(value: string): ThinkingLevel | nul
 	return null;
 }
 
-function acceptsBudgetTokensField(input: Pick<ResolveRuntimeCapabilitiesInput, "apiFamily" | "capabilities">): boolean {
+function acceptsBudgetTokensField(
+	input: Pick<ResolveRuntimeCapabilitiesInput, "runtimeId" | "apiFamily" | "capabilities">,
+): boolean {
 	const format = input.capabilities.thinkingFormat;
 	if (format === "anthropic-extended") {
 		return (
@@ -369,12 +376,13 @@ function acceptsBudgetTokensField(input: Pick<ResolveRuntimeCapabilitiesInput, "
 		);
 	}
 	if (input.apiFamily !== "openai-completions") return false;
+	if (input.runtimeId === "vllm") return true;
 	return format === "openrouter" || format === "zai";
 }
 
 function resolveBudgetEnforcement(
 	mechanism: ThinkingMechanism,
-	input: Pick<ResolveRuntimeCapabilitiesInput, "apiFamily" | "capabilities">,
+	input: Pick<ResolveRuntimeCapabilitiesInput, "runtimeId" | "apiFamily" | "capabilities">,
 ): ThinkingBudgetEnforcement {
 	if (mechanism !== "budget-tokens") return "none";
 	return acceptsBudgetTokensField(input) ? "enforced" : "informational";
@@ -483,7 +491,7 @@ function resolveThinkingCapability(
  * while llama.cpp did the reverse. Sending the wrong spelling reads as "no
  * preference" to the server, so the model keeps reasoning at every dial.
  */
-const REASONING_EFFORT_ON_OFF_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio-native", "lmstudio"]);
+const REASONING_EFFORT_ON_OFF_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio"]);
 
 /** `none` is LM Studio's documented off value; on-off models have no finer dial than `low`. */
 function onOffReasoningEffort(thinkingActive: boolean): string {
@@ -498,6 +506,9 @@ function resolveRequestCapability(
 	const request: ResolvedRequestCapability = { budgetEnforcement: thinking.budgetEnforcement };
 	if (thinking.mechanism === "effort-levels" && thinking.effort) {
 		request.reasoningEffort = thinking.effort;
+	}
+	if (thinking.mechanism === "effort-levels" && !thinking.thinkingActive) {
+		request.chatTemplateKwargs = { ...(request.chatTemplateKwargs ?? {}), enable_thinking: false };
 	}
 	if (thinking.mechanism === "budget-tokens" && thinking.budgetTokens !== undefined) {
 		request.budgetTokens = thinking.budgetTokens;

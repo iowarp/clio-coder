@@ -1,7 +1,8 @@
 import { type SpawnOptions, spawn } from "node:child_process";
-import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scratchClioEnvVars } from "./scratch-env.js";
 
 export interface RunResult {
 	code: number | null;
@@ -79,3 +80,34 @@ export function runCli(args: ReadonlyArray<string>, opts: RunOptions = {}): Prom
 // The scratch-home helper lives in scratch-env.ts (the one Clio-state isolation
 // module); re-exported here so existing `../harness/spawn.js` importers are unchanged.
 export { makeScratchHome } from "./scratch-env.js";
+
+/**
+ * `doctor --fix` writes the same config/data/state/cache tree into any empty
+ * scratch home; the tree does not name the home it was written into, so one
+ * home's output is valid for any other. A test that spawns it only to have a
+ * bootstrapped home to test something else against does not need its own
+ * process and its own module-graph load, only a copy of that tree.
+ *
+ * The real binary still runs, once per test file: the first caller pays for
+ * it and every later caller in the same process replays the result with a
+ * filesystem copy. A test asserting on `doctor --fix` itself calls runCli
+ * directly instead, the same as before.
+ */
+let doctorFixTemplate: Promise<string> | undefined;
+
+function buildDoctorFixTemplate(): Promise<string> {
+	const template = mkdtempSync(join(tmpdir(), "clio-doctor-template-"));
+	const env = scratchClioEnvVars(template, { requireHomePrefix: true });
+	return runCli(["doctor", "--fix"], { cwd: template, env }).then((result) => {
+		if (result.code !== 0) {
+			throw new Error(`doctor --fix failed while building the shared scratch template: ${result.stderr}`);
+		}
+		return template;
+	});
+}
+
+export async function seedDoctorFix(dir: string): Promise<void> {
+	doctorFixTemplate ??= buildDoctorFixTemplate();
+	const template = await doctorFixTemplate;
+	cpSync(template, dir, { recursive: true });
+}

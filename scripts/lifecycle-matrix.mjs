@@ -140,7 +140,11 @@ function snapshot(root) {
 		try {
 			names = readdirSync(dir).sort();
 		} catch (error) {
-			entries.push({ path: relative(root, dir) || ".", type: "unreadable", detail: String(error.code ?? error) });
+			entries.push({
+				path: relative(root, dir) || ".",
+				type: "unreadable",
+				detail: String(error.code ?? error),
+			});
 			return;
 		}
 		for (const name of names) {
@@ -161,7 +165,13 @@ function snapshot(root) {
 				} catch {
 					// A dangling link still has a name worth recording.
 				}
-				entries.push({ path: rel, type: "symlink", mode, target, dangling: !existsSync(full) });
+				entries.push({
+					path: rel,
+					type: "symlink",
+					mode,
+					target,
+					dangling: !existsSync(full),
+				});
 				continue;
 			}
 			if (stat.isDirectory()) {
@@ -173,7 +183,12 @@ function snapshot(root) {
 		}
 	};
 	walk(root);
-	return { root, exists: true, entries, truncated: entries.length >= SNAPSHOT_LIMIT };
+	return {
+		root,
+		exists: true,
+		entries,
+		truncated: entries.length >= SNAPSHOT_LIMIT,
+	};
 }
 
 function paths(snap) {
@@ -235,12 +250,27 @@ function freshHome(name) {
 const PREFIX = () => child("prefix");
 const LAUNCHER = () => join(PREFIX(), "bin", "clio-coder");
 
+/**
+ * Outcome of the case-2 install, read by the driver. Every case after 2 runs
+ * the installed launcher, so when the install failed they are reported as
+ * skipped with npm's exit code and stderr attached to case 2, instead of
+ * cascading a launcher-not-found failure per case that says nothing about the
+ * code under test (issue #103).
+ */
+const INSTALL = { failed: false, reason: "" };
+
 function installPackage(env) {
 	mkdirSync(PREFIX(), { recursive: true });
+	// A cache of its own, under the root: the operator's `~/.npm/_cacache` is
+	// shared with whatever else is running on the machine (a concurrent
+	// `test:coverage` also packs and installs this tarball), and a failure
+	// there would be invisible from here.
+	const cache = child("npm-cache");
+	mkdirSync(cache, { recursive: true });
 	return run(
 		"npm",
 		["install", "--global", "--prefix", PREFIX(), "--no-audit", "--no-fund", "--loglevel=error", PACK.tarball],
-		{ env, timeoutMs: 300_000 },
+		{ env: { ...env, npm_config_cache: cache }, timeoutMs: 300_000 },
 	);
 }
 
@@ -257,7 +287,10 @@ testCase(1, "package creation and inspection", () => {
 	PACK.tarball = join(out, name);
 	// Read outside `run`, whose output clip would truncate a 198-file listing
 	// to 118 lines and fail five contents checks on a complete package.
-	const listing = spawnSync("tar", ["-tzf", PACK.tarball], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+	const listing = spawnSync("tar", ["-tzf", PACK.tarball], {
+		encoding: "utf8",
+		maxBuffer: 16 * 1024 * 1024,
+	});
 	PACK.files = (listing.stdout ?? "")
 		.split("\n")
 		.map((line) => line.replace(/^package\//, "").trim())
@@ -297,6 +330,15 @@ testCase(2, "clean install into a temporary prefix", () => {
 	const launcher = LAUNCHER();
 	const after = snapshot(join(prefix, "bin"));
 	const stat = existsSync(launcher) ? lstatSync(launcher) : null;
+	// Read the entry only when it exists. A failed install has no entry, and a
+	// throw here would replace this record, npm's exit code and stderr with it,
+	// by a stack trace.
+	const entry = join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js");
+	const entryHead = existsSync(entry) ? readFileSync(entry, "utf8").split("\n", 1)[0] : "";
+	if (install.exitCode !== 0 || !existsSync(launcher)) {
+		INSTALL.failed = true;
+		INSTALL.reason = `case 2 install failed (npm exit ${install.exitCode ?? install.signal ?? "unknown"})`;
+	}
 	return {
 		command: install.command,
 		exitCode: install.exitCode,
@@ -308,12 +350,7 @@ testCase(2, "clean install into a temporary prefix", () => {
 			["install succeeded", install.exitCode === 0],
 			["launcher exists", existsSync(launcher)],
 			["launcher is executable", stat !== null && (stat.mode & 0o111) !== 0],
-			[
-				"entry has an ESM shebang",
-				readFileSync(join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js"), "utf8")
-					.split("\n", 1)[0]
-					.startsWith("#!"),
-			],
+			["entry has an ESM shebang", entryHead.startsWith("#!")],
 		],
 	};
 });
@@ -788,7 +825,9 @@ testCase(15, "uninstall including an owned launcher symlink", () => {
 	symlinkSync(join(PREFIX(), "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js"), link);
 	run(launcher, ["doctor", "--fix"], { env });
 	const before = snapshot(binDir);
-	const result = run(launcher, ["uninstall", "--remove-binary", "--force"], { env });
+	const result = run(launcher, ["uninstall", "--remove-binary", "--force"], {
+		env,
+	});
 	const after = snapshot(binDir);
 	return {
 		...result,
@@ -913,13 +952,17 @@ testCase(18, "TUI task journeys at narrow, normal, and wide sizes", async () => 
 		[80, 24],
 		[160, 50],
 	]) {
+		// The prompt placeholder is the readiness signal. The footer's "idle" badge
+		// that this used to wait on was removed in 29a34c91, after which the
+		// keystrokes below were never sent and both PTY cases timed out at 40s
+		// while the process sat at an untouched prompt (issue #100).
 		const result = await runInPty(launcher, [], {
 			cols,
 			rows,
 			cwd: ROOT,
 			env,
 			timeoutMs: 40_000,
-			readyWhen: /idle/,
+			readyWhen: /Ask Clio/,
 			input: [
 				{ afterMs: 500, data: "/help\r" },
 				{ afterMs: 1_500, data: String.fromCharCode(27) },
@@ -973,7 +1016,7 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 		cwd: ROOT,
 		env,
 		timeoutMs: 40_000,
-		readyWhen: /idle/,
+		readyWhen: /Ask Clio/,
 		input: [
 			{ afterMs: 500, data: String.fromCharCode(3) },
 			{ afterMs: 650, data: String.fromCharCode(3) },
@@ -985,7 +1028,7 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 		cwd: ROOT,
 		env: { ...env, NO_COLOR: "1" },
 		timeoutMs: 40_000,
-		readyWhen: /idle/,
+		readyWhen: /Ask Clio/,
 		input: [
 			{ afterMs: 500, data: String.fromCharCode(3) },
 			{ afterMs: 650, data: String.fromCharCode(3) },
@@ -1038,7 +1081,11 @@ testCase(20, "docs and help commands executed exactly as written", () => {
 		const args = command.split(/\s+/).slice(1);
 		if (args.length === 0) continue;
 		const result = run(launcher, args, { env, timeoutMs: 60_000 });
-		results.push({ command, exitCode: result.exitCode, stderr: clip(result.stderr).slice(0, 400) });
+		results.push({
+			command,
+			exitCode: result.exitCode,
+			stderr: clip(result.stderr).slice(0, 400),
+		});
 	}
 	// A documented example may name a target the reader was told to create
 	// first. That cannot exit 0 here, and requiring it to would only push the
@@ -1088,12 +1135,29 @@ async function main() {
 
 	for (const entry of cases) {
 		// Cases 1 and 2 build the artifact and the prefix every other case uses.
-		if (ONLY && !ONLY.has(entry.id) && entry.id !== "1" && entry.id !== "2") continue;
+		if (ONLY && !ONLY.has(entry.id) && entry.id !== "1" && entry.id !== "2") {
+			continue;
+		}
 		const startedAt = performance.now();
 		let record;
 		try {
-			const result = await entry.body();
-			const checks = (result.checks ?? []).map(([name, passed]) => ({ name, passed: passed === true }));
+			// Everything after case 2 drives the launcher case 2 installed. Without
+			// it each case would fail on a missing binary (or, for the PTY cases,
+			// sit out a 40s timeout), so they are skipped with the reason instead.
+			const result =
+				INSTALL.failed && Number(entry.id) > 2
+					? {
+							command: "(not run)",
+							exitCode: null,
+							status: "not-run",
+							notes: `skipped: ${INSTALL.reason}; see case 2 for npm's exit code and stderr`,
+							checks: [],
+						}
+					: await entry.body();
+			const checks = (result.checks ?? []).map(([name, passed]) => ({
+				name,
+				passed: passed === true,
+			}));
 			const failed = checks.filter((check) => !check.passed);
 			record = {
 				id: entry.id,
@@ -1160,24 +1224,37 @@ function renderMarkdown(records) {
 		lines.push(`## ${record.id}. ${record.title}`, "");
 		lines.push(`- status: **${record.status}**`);
 		if (record.command) lines.push(`- command: \`${record.command}\``);
-		if (record.exitCode !== undefined) lines.push(`- exit: \`${record.exitCode}\``);
+		if (record.exitCode !== undefined) {
+			lines.push(`- exit: \`${record.exitCode}\``);
+		}
 		if (record.notes) lines.push(`- notes: ${record.notes}`);
-		if (record.before)
+		if (record.before) {
 			lines.push(`- filesystem before: ${record.before.entries.length} entries under \`${record.before.root}\``);
-		if (record.after)
+		}
+		if (record.after) {
 			lines.push(`- filesystem after: ${record.after.entries.length} entries under \`${record.after.root}\``);
+		}
 		if (record.before && record.after) {
 			const removed = [...paths(record.before)].filter((path) => !paths(record.after).has(path));
 			const added = [...paths(record.after)].filter((path) => !paths(record.before).has(path));
-			if (removed.length > 0)
+			if (removed.length > 0) {
 				lines.push(`- removed: ${removed.slice(0, 12).join(", ")}${removed.length > 12 ? " …" : ""}`);
-			if (added.length > 0) lines.push(`- added: ${added.slice(0, 12).join(", ")}${added.length > 12 ? " …" : ""}`);
+			}
+			if (added.length > 0) {
+				lines.push(`- added: ${added.slice(0, 12).join(", ")}${added.length > 12 ? " …" : ""}`);
+			}
 		}
 		lines.push("");
-		for (const check of record.checks) lines.push(`  - ${check.passed ? "pass" : "FAIL"}: ${check.name}`);
+		for (const check of record.checks) {
+			lines.push(`  - ${check.passed ? "pass" : "FAIL"}: ${check.name}`);
+		}
 		if (record.error) lines.push("", "```", record.error, "```");
-		if (record.stdout) lines.push("", "stdout:", "", "```", record.stdout, "```");
-		if (record.stderr) lines.push("", "stderr:", "", "```", record.stderr, "```");
+		if (record.stdout) {
+			lines.push("", "stdout:", "", "```", record.stdout, "```");
+		}
+		if (record.stderr) {
+			lines.push("", "stderr:", "", "```", record.stderr, "```");
+		}
 		lines.push("");
 	}
 	return `${lines.join("\n")}\n`;

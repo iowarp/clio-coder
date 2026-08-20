@@ -17,8 +17,10 @@ import {
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
-import type { SessionEntry } from "../domains/session/index.js";
+import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
+import { stripTerminalSequences } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ChatLoop } from "./chat-loop.js";
@@ -26,6 +28,7 @@ import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorCommand } from "./command-output.js";
+import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
@@ -41,12 +44,6 @@ import { verifyReceiptFile } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 const EXPORT_RENDER_WIDTH = 100;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
-const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
-
-function stripAnsiForExport(line: string): string {
-	return line.replace(ANSI_PATTERN, "");
-}
 
 export interface InteractiveSlashSubmitExpansion {
 	text: string;
@@ -74,6 +71,7 @@ export interface InteractiveSlashRuntimeDeps {
 	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
+	userTasks?: UserTasksStore;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
 	/**
@@ -95,12 +93,19 @@ export interface InteractiveSlashRuntimeDeps {
 	dismissContextBootstrapNotices: () => void;
 	recordSubmittedTurn: () => void;
 	readStructuredEntries: (sessionId: string) => ReadonlyArray<SessionEntry>;
+	/**
+	 * Leaf lookup for `/export`, so the export follows the branch the session
+	 * is actually on. current.jsonl still holds the abandoned turns after a
+	 * `/tree` pin, and an unscoped rehydrate reproduced them (issue #109).
+	 */
+	session?: Pick<SessionContract, "tree">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
 	openSkillsHub: () => void;
 	openCost: () => void;
 	openContextView: () => void;
 	openTasks: () => void;
+	openDecisions: () => void;
 	openMemory: () => void;
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	openView: (filter?: string) => void;
@@ -168,6 +173,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	let activeContextInit = false;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
 	const resources = deps.resources;
+	const userTasks = deps.userTasks;
 
 	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
 		appendNotice(level, text, {
@@ -251,6 +257,17 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openCost: deps.openCost,
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
+		openDecisions: deps.openDecisions,
+		...(userTasks
+			? {
+					userTasks: {
+						add: (title: string) => userTasks.add(title),
+						hand: (id: string) => userTasks.hand(id, deps.chat.getSessionId() ?? undefined),
+						done: (id: string) => userTasks.done(id),
+						drop: (id: string) => userTasks.drop(id),
+					},
+				}
+			: {}),
 		openMemory: deps.openMemory,
 		seedTaskMemory: () => {
 			const result = deps.seedTaskMemory?.() ?? { status: "not-found" as const };
@@ -333,32 +350,43 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			}
 			try {
 				const turns = deps.readStructuredEntries(sessionId);
-				// Same pure render pipeline as the live panel and /resume replay:
-				// a throwaway panel rehydrated from the ledger, every tool segment
-				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
-				// live view, export renders full tool bodies (no middle-elision or
-				// char truncation) so the transcript reproduces the complete output.
+				// Same pure render pipeline as the live panel and /resume replay: a
+				// throwaway panel is rehydrated from the ledger, every tool segment is
+				// expanded, and the transcript is rendered at a stable width. HTML
+				// converts the resulting ANSI presentation to inline styles; Markdown
+				// keeps the prior plain-text fenced transcript.
 				const exportPanel = createChatPanel({ unboundedToolBodies: true });
-				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
+				// Scoped to the leaf the session is on, the same way /resume replays
+				// (issue #107): with a /tree pin persisted and not yet extended, the
+				// file still holds the abandoned branch after the pin, and an unscoped
+				// rehydrate exported it as ordinary history (issue #109). No session
+				// contract means no pin can exist for this reader, so the file replays whole.
+				const leafTurnId = deps.session?.tree(sessionId).leafId ?? null;
+				rehydrateChatPanelFromTurns(exportPanel, turns, {
+					unboundedToolBodies: true,
+					...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+				});
 				exportPanel.toggleAllToolsExpanded();
-				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
+				const ansiLines = exportPanel.render(EXPORT_RENDER_WIDTH);
 				// The operator names this file by the day they ran the export, so the
 				// date in it is their calendar date. The header below keeps the ISO
 				// instant, which is the machine-readable half of the same fact.
-				const date = dateLocal(deps.now?.() ?? new Date());
+				const exportedAt = deps.now?.() ?? new Date();
+				const date = dateLocal(exportedAt);
+				const requestedPath = pathArg?.trim() ?? "";
+				const markdown = requestedPath.toLowerCase().endsWith(".md");
 				const target = resolve(
-					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio-coder", "exports", `${sessionId}-${date}.md`),
+					requestedPath.length > 0 ? requestedPath : join(".clio-coder", "exports", `${sessionId}-${date}.html`),
 				);
 				mkdirSync(resolve(target, ".."), { recursive: true });
-				const header = [
-					`# Clio session ${sessionId}`,
-					"",
-					`Exported ${(deps.now?.() ?? new Date()).toISOString()}`,
-					"",
-					"```text",
-				];
-				writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
-				appendCommandNotice("success", `[/export] wrote ${lines.length} lines to ${target}`);
+				if (markdown) {
+					const lines = ansiLines.map(stripTerminalSequences);
+					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", "```text"];
+					writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
+				} else {
+					writeFileSync(target, renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines }), "utf8");
+				}
+				appendCommandNotice("success", `[/export] wrote ${ansiLines.length} lines to ${target}`);
 			} catch (err) {
 				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
 			}

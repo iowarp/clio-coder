@@ -70,6 +70,7 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 		case "label":
 		case "protectedArtifact":
 		case "taskLedger":
+		case "decisionLedger":
 		case "workerRun":
 			return false;
 	}
@@ -96,7 +97,7 @@ function findValidCutPoints(entries: ReadonlyArray<SessionEntry>, startIndex: nu
  * accumulating `keepRecentTokens`, the pi-coding-agent reference left
  * `cutIndex` at the oldest valid cut, which made `compact()` produce an
  * empty `pre` slice and the chat-loop report "nothing to compact" on
- * populated sessions below the keep-recent window. Clio's manual `/compact`
+ * populated sessions below the keep-recent window. Clio's manual `/context compact`
  * expects to summarize whatever older history exists, so when no suffix
  * crosses the threshold the cut falls back to the newest turn start (user
  * message, bashExecution, or branchSummary). Sessions with only a single

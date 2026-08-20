@@ -224,8 +224,8 @@ describe("dispatch plan detection", () => {
 });
 
 describe("reviewer-gated dispatch", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();
@@ -619,8 +619,8 @@ describe("compete dispatch", () => {
 		}
 	});
 	let repo = "";
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 		repo = mkdtempSync(join(tmpdir(), "clio-compete-repo-"));
 		const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
 		git("init", "-b", "main");
@@ -1457,8 +1457,8 @@ describe("compete dispatch", () => {
 });
 
 describe("Slice 3 gate role defaults and independence", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	after(() => {
 		restoreDispatchState();
@@ -1545,7 +1545,7 @@ describe("Slice 3 gate role defaults and independence", () => {
 				deepStrictEqual(decisionOutcomes(group ?? ""), [expected]);
 			} finally {
 				await bundle.extension.stop?.();
-				isolateDispatchState();
+				await isolateDispatchState();
 			}
 		}
 		// The judge protocol is structured for the same reason.

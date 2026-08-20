@@ -14,12 +14,22 @@
  */
 
 /** Columns to lay out for, with a floor that keeps arithmetic non-negative. */
-export function terminalColumns(stream: { columns?: number | undefined } = process.stdout): number {
+export function terminalColumns(
+	stream: { columns?: number | undefined } = process.stdout,
+	env: { COLUMNS?: string | undefined } = process.env,
+): number {
 	const columns = stream.columns;
-	// A pipe reports no width. 80 is the conventional answer and is also the
-	// width the fixed-width rows were implicitly written for.
-	if (typeof columns !== "number" || !Number.isFinite(columns)) return 80;
-	return Math.max(20, Math.floor(columns));
+	if (typeof columns === "number" && Number.isFinite(columns)) return Math.max(20, Math.floor(columns));
+	// A pipe reports no width, and the fallback used to end there: `clio-coder
+	// targets | less` was pinned to 80 with no way to widen it, which cut the
+	// port off every url and ellipsized the model column, the two the table
+	// exists to tell apart. $COLUMNS is what a shell exports for exactly this,
+	// so an operator or a CI job can say how wide the capture is.
+	const declared = Number(env.COLUMNS);
+	if (Number.isFinite(declared) && declared > 0) return Math.max(20, Math.floor(declared));
+	// 80 is the conventional answer and is also the width the fixed-width rows
+	// were implicitly written for.
+	return 80;
 }
 
 /** Shorten to `width`, marking the cut so a truncated value never reads as complete. */

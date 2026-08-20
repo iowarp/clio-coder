@@ -19,7 +19,7 @@
  * the environment, so the run has exactly one root and only the process that
  * created it removes it.
  */
-import { lstatSync, mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
@@ -60,6 +60,44 @@ export function isRemovableRoot(dir: string): boolean {
 	return stats?.isDirectory() ?? false;
 }
 
+/** How long a root must have gone untouched before a later run may collect it. */
+const STALE_ROOT_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * Remove roots that an earlier run never got to.
+ *
+ * The exit hook below only collects the root of a run that exits. A run killed
+ * by SIGKILL, an out-of-memory abort, or an operator's Ctrl-C leaves its root
+ * behind forever, and nothing else ever looks at it. On a machine where /tmp is
+ * a tmpfs (4GB here) a day of interrupted runs fills it and every later run
+ * fails for lack of space, which reads as an unrelated test failure.
+ *
+ * Age is the only signal available: a root carries no owner pid, and stat'ing
+ * for holders would cost more than the sweep saves. Four hours is far longer
+ * than any run this suite has, so a root that old belongs to nobody.
+ */
+function sweepStaleRoots(): void {
+	const cutoff = Date.now() - STALE_ROOT_MS;
+	let entries: string[];
+	try {
+		entries = readdirSync(systemTmp);
+	} catch {
+		return;
+	}
+	for (const entry of entries) {
+		if (!entry.startsWith(TEST_TMP_ROOT_PREFIX)) continue;
+		const path = join(systemTmp, entry);
+		if (!isRemovableRoot(path)) continue;
+		try {
+			if (lstatSync(path).mtimeMs > cutoff) continue;
+			rmSync(path, { recursive: true, force: true });
+		} catch {
+			// A root another run is actively removing, or one this user cannot
+			// touch. Either way it is not this run's to worry about.
+		}
+	}
+}
+
 const inherited = process.env[ROOT_ENV];
 // The same predicate the delete is gated on: a root that would not be safe to
 // remove is not one to write into either, so a stale or hostile value from the
@@ -69,6 +107,9 @@ if (inherited !== undefined && isRemovableRoot(inherited)) {
 	// created it is the one that removes it.
 	process.env.TMPDIR = inherited;
 } else {
+	// Only the run that creates a root sweeps; a test child inherits one and has
+	// nothing to collect.
+	sweepStaleRoots();
 	const root = mkdtempSync(join(systemTmp, TEST_TMP_ROOT_PREFIX));
 	process.env[ROOT_ENV] = root;
 	process.env.TMPDIR = root;
@@ -81,4 +122,25 @@ if (inherited !== undefined && isRemovableRoot(inherited)) {
 			// reported whatever failure caused that; it is not this module's to raise.
 		}
 	});
+}
+
+const clioRootEnvKeys = [
+	"CLIO_CODER_HOME",
+	"CLIO_CODER_CONFIG_DIR",
+	"CLIO_CODER_DATA_DIR",
+	"CLIO_CODER_STATE_DIR",
+	"CLIO_CODER_CACHE_DIR",
+] as const;
+
+// A test that has not chosen its own Clio roots must never inherit the
+// operator's platform defaults. The preload runs before every test module, so
+// this catches settingsPath() and every XDG role resolver without requiring
+// each call site to remember an override. Tests of default XDG resolution set
+// an explicit environment in their own child process.
+if (clioRootEnvKeys.every((key) => !process.env[key]?.trim())) {
+	const runRoot = process.env[ROOT_ENV];
+	if (runRoot !== undefined) {
+		process.env.CLIO_CODER_HOME = join(runRoot, "home");
+		process.env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+	}
 }

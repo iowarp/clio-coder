@@ -11,10 +11,13 @@ import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import type { SessionEntry } from "../../src/domains/session/index.js";
+import { createUserTasksStore } from "../../src/domains/user-tasks/store.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
+import { formatDecisionCorrectionTurn } from "../../src/interactive/overlays/decisions.js";
 import { withTimeZone } from "../harness/clock.js";
 
 const flushAsync = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -66,6 +69,7 @@ function createHarness() {
 		openCost: () => events.push("cost"),
 		openContextView: () => events.push("context"),
 		openTasks: () => events.push("tasks"),
+		openDecisions: () => events.push("decisions"),
 		openMemory: () => events.push("memory"),
 		openView: () => events.push("view"),
 		openModel: () => events.push("model"),
@@ -90,6 +94,194 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	it("submits one attributed decision correction through the ordinary user-turn path while idle or streaming", async () => {
+		for (const streaming of [false, true]) {
+			const harness = createHarness();
+			harness.deps.chat.isStreaming = () => streaming;
+			const runtime = createInteractiveSlashRuntime(harness.deps);
+			const correction = formatDecisionCorrectionTurn(
+				{ interviewId: "interview-1", key: "scope", label: "Scope", value: "CLI only" },
+				"Include the TUI",
+			);
+
+			runtime.context.submitChat(correction);
+			await flushAsync();
+			deepStrictEqual(
+				harness.events.filter((event) => event.startsWith("submit:")),
+				[
+					'submit:expanded:Decision "Scope" (previously: CLI only) is superseded by the operator. New direction: Include the TUI. Acknowledge and adjust the plan.',
+				],
+			);
+			strictEqual(harness.events.filter((event) => event === "record-turn").length, 1);
+			strictEqual(
+				harness.events.filter((event) => event.startsWith("user:")).length,
+				streaming ? 0 : 1,
+				"a streaming correction is queued by chat.submit and is not painted before delivery",
+			);
+			harness.finishSubmit();
+		}
+	});
+
+	it("logs without submitting and hands exactly one operator turn while idle or streaming", async () => {
+		for (const streaming of [false, true]) {
+			const harness = createHarness();
+			const cwd = mkdtempSync(join(tmpdir(), `clio-slash-user-tasks-${streaming ? "stream" : "idle"}-`));
+			const userTasks = createUserTasksStore({ cwd });
+			harness.deps.userTasks = userTasks;
+			harness.deps.chat.getSessionId = () => "session-1";
+			harness.deps.chat.isStreaming = () => streaming;
+			const runtime = createInteractiveSlashRuntime(harness.deps);
+
+			runtime.dispatchCommand("/tasks add write release notes");
+			await flushAsync();
+			strictEqual(userTasks.get("u1")?.status, "open");
+			strictEqual(harness.events.filter((event) => event.startsWith("submit:")).length, 0);
+
+			runtime.dispatchCommand("/tasks hand u1");
+			await flushAsync();
+			strictEqual(userTasks.get("u1")?.status, "handed");
+			strictEqual(userTasks.get("u1")?.handedSessionId, "session-1");
+			deepStrictEqual(
+				harness.events.filter((event) => event.startsWith("submit:")),
+				[
+					'submit:expanded:Operator task u1: write release notes. Pick it up with tasks action="pick" id="u1" and work it when appropriate.',
+				],
+			);
+			harness.finishSubmit();
+		}
+	});
+
+	it("submits nothing when the explicit handoff sidecar mutation fails", async () => {
+		const harness = createHarness();
+		const cwd = mkdtempSync(join(tmpdir(), "clio-slash-user-tasks-failed-hand-"));
+		const durable = createUserTasksStore({ cwd });
+		durable.add("keep local");
+		harness.deps.userTasks = createUserTasksStore({
+			cwd,
+			write: () => {
+				throw new Error("disk full");
+			},
+		});
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand("/tasks hand u1");
+		await flushAsync();
+		strictEqual(harness.events.filter((event) => event.startsWith("submit:")).length, 0);
+		strictEqual(durable.get("u1")?.status, "open");
+	});
+
+	// Issue #109: current.jsonl is append-only, so a session pinned by /tree and
+	// not yet extended still holds the abandoned turns after the pin. /export
+	// rehydrated the file unscoped and reproduced them, the same root cause as
+	// #107 on a different surface. It now follows the leaf the session is on.
+	it("exports only the pinned branch, leaving the abandoned turns out of the file", () => {
+		const messageEntry = (
+			turnId: string,
+			parentTurnId: string | null,
+			role: "user" | "assistant",
+			text: string,
+		): SessionEntry =>
+			({
+				kind: "message",
+				turnId,
+				parentTurnId,
+				timestamp: "2026-08-09T00:00:00.000Z",
+				role,
+				payload: { text },
+			}) as SessionEntry;
+		const harness = createHarness();
+		harness.deps.chat.getSessionId = () => "session-pinned";
+		harness.deps.readStructuredEntries = () => [
+			messageEntry("turn-u1", null, "user", "PROMPT-ONE"),
+			messageEntry("turn-a1", "turn-u1", "assistant", "ANSWER-ONE"),
+			messageEntry("turn-u2", "turn-a1", "user", "PROMPT-TWO"),
+			messageEntry("turn-a2", "turn-u2", "assistant", "ANSWER-TWO"),
+		];
+		harness.deps.session = { tree: () => ({ leafId: "turn-a1" }) } as never;
+		harness.deps.now = () => new Date("2026-08-15T12:00:00.000Z");
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+		const scratch = mkdtempSync(join(tmpdir(), "clio-export-pin-"));
+		const target = join(scratch, "pinned.md");
+		try {
+			runtime.dispatchCommand(`/export ${target}`);
+			const body = readFileSync(target, "utf8");
+			ok(body.startsWith("# Clio session session-pinned\n\n"), body);
+			ok(body.includes("```text\n"), body);
+			ok(!body.includes("\x1b"), "Pi terminal control sequences never cross into the transcript export");
+			ok(body.includes("PROMPT-ONE"), body);
+			ok(body.includes("ANSWER-ONE"), body);
+			ok(!body.includes("PROMPT-TWO"), `u2 is past the pin, got:\n${body}`);
+			ok(!body.includes("ANSWER-TWO"), `a2 is past the pin, got:\n${body}`);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("exports a fixture session as self-contained HTML with semantic tool rows", () => {
+		const ts = "2026-08-15T12:00:00.000Z";
+		const harness = createHarness();
+		harness.deps.chat.getSessionId = () => "session-html";
+		harness.deps.now = () => new Date(ts);
+		harness.deps.readStructuredEntries = () =>
+			[
+				{
+					kind: "message",
+					role: "user",
+					turnId: "u1",
+					parentTurnId: null,
+					timestamp: ts,
+					payload: { text: "Run the fixture" },
+				},
+				{
+					kind: "message",
+					role: "tool_call",
+					turnId: "t1",
+					parentTurnId: "u1",
+					timestamp: ts,
+					payload: { toolCallId: "bash-1", toolName: "bash", args: { command: "printf fixture" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					turnId: "t2",
+					parentTurnId: "t1",
+					timestamp: ts,
+					payload: {
+						toolCallId: "bash-1",
+						toolName: "bash",
+						result: { content: [{ type: "text", text: "fixture" }], details: { exitCode: 0 } },
+						isError: false,
+					},
+				},
+				{
+					kind: "message",
+					role: "assistant",
+					turnId: "a1",
+					parentTurnId: "t2",
+					timestamp: ts,
+					payload: { text: "Fixture complete" },
+				},
+			] as SessionEntry[];
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+		const scratch = mkdtempSync(join(tmpdir(), "clio-export-html-"));
+		const previousCwd = process.cwd();
+		try {
+			process.chdir(scratch);
+			runtime.dispatchCommand("/export");
+			const target = join(scratch, ".clio-coder", "exports", "session-html-2026-08-15.html");
+			const body = readFileSync(target, "utf8");
+			ok(body.startsWith("<!doctype html>"), body.slice(0, 80));
+			ok(body.includes('class="tool-row" data-tool="bash"'), body);
+			ok(body.includes("printf fixture"), body);
+			ok(body.includes("Fixture complete"), body);
+			ok(!body.includes("\x1b"), "raw terminal control sequences must not cross into HTML");
+			ok(!/<(?:link|script)\b[^>]+(?:src|href)=/iu.test(body), "the export must not reference external assets");
+		} finally {
+			process.chdir(previousCwd);
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	// The export is named for the day the operator ran it. At 21:30 in Chicago
 	// the UTC date is already tomorrow, so the old naming sent an operator
 	// looking for a file dated today that was never written.
@@ -108,12 +300,12 @@ describe("contracts/interactive slash runtime", () => {
 					return readdirSync(join(scratch, ".clio-coder", "exports"));
 				});
 
-			ok(exported("America/Chicago").includes("session-1-2026-08-14.md"), exported("America/Chicago").join(", "));
-			ok(exported("Asia/Kolkata").includes("session-1-2026-08-15.md"), exported("Asia/Kolkata").join(", "));
-			ok(exported("UTC").includes("session-1-2026-08-15.md"), exported("UTC").join(", "));
+			ok(exported("America/Chicago").includes("session-1-2026-08-14.html"), exported("America/Chicago").join(", "));
+			ok(exported("Asia/Kolkata").includes("session-1-2026-08-15.html"), exported("Asia/Kolkata").join(", "));
+			ok(exported("UTC").includes("session-1-2026-08-15.html"), exported("UTC").join(", "));
 			// The header inside the file stays UTC: it is the machine-readable half.
 			ok(
-				readFileSync(join(scratch, ".clio-coder", "exports", "session-1-2026-08-15.md"), "utf8").includes(
+				readFileSync(join(scratch, ".clio-coder", "exports", "session-1-2026-08-15.html"), "utf8").includes(
 					"Exported 2026-08-15T02:30:00.000Z",
 				),
 			);
@@ -129,8 +321,9 @@ describe("contracts/interactive slash runtime", () => {
 
 		runtime.dispatchCommand("/help model");
 		runtime.dispatchCommand("/tasks");
+		runtime.dispatchCommand("/decisions");
 
-		deepStrictEqual(harness.events, ["help:model", "tasks"]);
+		deepStrictEqual(harness.events, ["help:model", "tasks", "decisions"]);
 	});
 
 	it("derives interactive /run roles from the named agent recipe", async () => {
@@ -261,19 +454,19 @@ describe("contracts/interactive slash runtime", () => {
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 
 		runtime.context.submitOperatorNote?.(
-			"[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+			"[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill writer",
 		);
 		await flushAsync();
 
 		// The same path typed text takes, minus expansion: a worker's answer is
-		// literal, so an @path or a /skill: inside it must reach the model as the
+		// literal, so an @path or a `/skill <name>` inside it must reach the model as the
 		// characters the worker wrote.
 		deepStrictEqual(harness.events, [
 			"record-turn",
 			"footer",
-			"user:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+			"user:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill writer",
 			"render",
-			"submit:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill:writer",
+			"submit:[worker result] coder · run r1 · ok · shared by the operator\nsee @plan.md and /skill writer",
 		]);
 		harness.finishSubmit();
 	});

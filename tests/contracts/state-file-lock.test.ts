@@ -136,4 +136,21 @@ describe("contracts/state-file-lock", () => {
 			/timed out .* waiting for/,
 		);
 	});
+
+	it("cancels a lock convoy without entering the critical section", async () => {
+		holdLock(process.pid);
+		let ran = false;
+		const controller = new AbortController();
+		const waiting = withStateFileLock(
+			target,
+			async () => {
+				ran = true;
+			},
+			{ timeoutMs: 20_000, signal: controller.signal },
+		);
+		controller.abort(new Error("operator cancelled lock wait"));
+		await rejects(waiting, /operator cancelled lock wait/);
+		strictEqual(ran, false, "an aborted waiter never enters the protected mutation");
+		ok(existsSync(lockPath), "cancelling a waiter does not release the live holder's lock");
+	});
 });

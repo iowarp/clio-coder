@@ -390,6 +390,15 @@ describe("dispatch agent automation", () => {
 		const requests = prepared.requests.map((request, index) =>
 			withResolvedPlanTaskPin(request, prepared.artifact.tasks[index]),
 		);
+		// Captured before dispatch, not after: assignmentDeadlineAt is `Date.now()
+		// + deadlineMs` computed inside runScoutContinuationPlan, and this fixture's
+		// deadlineMs is ~200ms (two 100ms-p95 waves). Comparing against a fresh
+		// Date.now() taken after the await raced that 200ms budget against however
+		// long the event loop took to get back to this line, which a loaded 24-lane
+		// CI run lost. beforeDispatch is a lower bound on the internal Date.now()
+		// call, so `assignmentDeadlineAt > beforeDispatch` holds independent of any
+		// scheduling delay after dispatch returns.
+		const beforeDispatch = Date.now();
 		await runScoutContinuationPlan({
 			dispatch: {
 				preview: (request) => {
@@ -432,7 +441,7 @@ describe("dispatch agent automation", () => {
 		});
 		strictEqual(launched.length, 2);
 		strictEqual(launched[0]?.assignmentDeadlineAt, launched[1]?.assignmentDeadlineAt);
-		strictEqual((launched[0]?.assignmentDeadlineAt ?? 0) > Date.now(), true);
+		strictEqual((launched[0]?.assignmentDeadlineAt ?? 0) > beforeDispatch, true);
 	});
 
 	it("scout output cannot inject undeclared agents routes or authority", () => {

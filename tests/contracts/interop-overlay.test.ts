@@ -173,8 +173,8 @@ describe("contracts/interop overlay", () => {
 	 * left Detected on the keystroke and appeared under Configured only when the
 	 * overlay was next opened.
 	 */
-	it("draws an accepted peer as Configured in the frame the keystroke asks for", () => {
-		const scratch = isolateClioEnv("clio-interop-overlay-");
+	it("draws an accepted peer as Configured in the frame the keystroke asks for", async () => {
+		const scratch = await isolateClioEnv("clio-interop-overlay-");
 		try {
 			initializeClioHome();
 			writeInteropReport({

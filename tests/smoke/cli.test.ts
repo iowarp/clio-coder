@@ -12,7 +12,7 @@ import {
 	seedUnregisteredRuntimeTarget,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
-import { makeScratchHome, runCli } from "../harness/spawn.js";
+import { makeScratchHome, runCli, seedDoctorFix } from "../harness/spawn.js";
 
 const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
 	version: string;
@@ -20,18 +20,13 @@ const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", impor
 const VERSION_STDOUT = `Clio Coder ${PACKAGE_JSON.version}\n`;
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
-const FORBIDDEN_TERMINAL_STREAM_TYPES = new Set([
-	"message_start",
-	"message_update",
-	"text_start",
-	"text_delta",
-	"text_end",
-	"thinking",
-	"thinking_start",
-	"thinking_delta",
-	"thinking_end",
-	"toolcall_delta",
-]);
+/**
+ * Every type `--json-events terminal` may emit: the `turn_start` and `turn_end`
+ * frames the mode synthesizes, the session header, the per-segment accounting,
+ * and operator-facing notices. Anything else is either a partial the mode exists
+ * to suppress or a transcript event that belongs to `--json-events full`.
+ */
+const TERMINAL_STREAM_TYPES = new Set(["session", "turn_start", "agent_end", "turn_end", "notice"]);
 
 interface JsonRpcProcessClient {
 	request<T>(method: string, params?: unknown): Promise<T>;
@@ -217,7 +212,11 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const result = await runCli(["definitely-not-a-command"], { env: scratch.env });
 		strictEqual(result.code, 2);
 		match(result.stderr, /unknown subcommand: definitely-not-a-command/);
-		match(result.stdout, /Usage:/);
+		// The usage that explains a rejection goes to stderr with it. It used to
+		// go to stdout, so a mistyped command produced a full page on the stream
+		// the caller was capturing for output.
+		match(result.stderr, /Usage:/);
+		strictEqual(result.stdout, "");
 	});
 
 	it("rejects removed top-level context aliases", async () => {
@@ -225,7 +224,9 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const result = await runCli([alias, "--help"], { env: scratch.env });
 			strictEqual(result.code, 2, alias);
 			match(result.stderr, new RegExp(`unknown subcommand: ${alias}`));
-			match(result.stdout, /clio-coder context init/);
+			// The usage naming the replacement rides on stderr with the rejection.
+			match(result.stderr, /clio-coder context init/);
+			strictEqual(result.stdout, "", alias);
 		}
 	});
 
@@ -267,7 +268,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("reset requires --force and removes only the selected root", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const dataMarker = join(scratch.dir, "data", "marker.txt");
 		const stateMarker = join(scratch.dir, "state", "marker.txt");
 		writeFileSync(dataMarker, "data marker\n", "utf8");
@@ -292,7 +293,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("uninstall requires --force and removes all four roots only when forced", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const dirs = ["config", "data", "state", "cache"].map((name) => join(scratch.dir, name));
 
 		const denied = await runCli(["uninstall"], { env: scratch.env });
@@ -323,7 +324,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const binDir = join(scratch.dir, "bin");
 		const launcher = join(binDir, "clio-coder");
 		mkdirSync(binDir, { recursive: true });
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 
 		writeFileSync(launcher, "#!/bin/sh\nexit 0\n", { encoding: "utf8", mode: 0o755 });
 		const keepRealFile = await runCli(["uninstall", "--remove-binary", "--force"], {
@@ -334,7 +335,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		ok(existsSync(launcher), "a real launcher file must be left for the package manager");
 
 		rmSync(launcher, { force: true });
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		symlinkSync(CLI_ENTRY, launcher);
 		const removeSymlink = await runCli(["uninstall", "--remove-binary", "--force"], {
 			env: { ...scratch.env, CLIO_CODER_BIN_DIR: binDir },
@@ -345,7 +346,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("targets --json returns an object with a targets array", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const result = await runCli(["targets", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0);
 		const parsed = JSON.parse(result.stdout) as { targets: unknown[] };
@@ -354,7 +355,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("configures an openai-compat target and lists fixture-backed models through the built CLI", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("probe reply", {
 			models: [
 				{
@@ -527,7 +528,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("agents --json lists built-in recipes", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const result = await runCli(["agents", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0);
 		const parsed = JSON.parse(result.stdout) as unknown[];
@@ -535,7 +536,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("targets use rejects a target whose runtime is not registered", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		seedUnregisteredRuntimeTarget(join(scratch.dir, "config"));
 		const result = await runCli(["targets", "use", "codex-worker"], { env: scratch.env });
 		strictEqual(result.code, 1);
@@ -545,7 +546,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("skills list, inspect, and validate work in a scratch project", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const project = join(scratch.dir, "project");
 		const skillFile = writeSkill(join(project, ".clio-coder", "skills"), "smoke-skill", "Smoke test skill.");
 
@@ -573,7 +574,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("runs non-interactively against a mock provider", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("mock reply");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
@@ -589,7 +590,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("carries bootstrap schema and fallback contracts through the provider wire", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		// Cites `index.ts`, which the fixture project below actually contains. The
 		// rule used to be that a Scout line had to be a verbatim copy of a sibling
 		// file's line; it is now that the line has to cite something real, so this
@@ -669,29 +670,41 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		}
 	});
 
-	it("streams only terminal events with main-agent --json-events terminal", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+	it("streams only the run receipt with main-agent --json-events terminal", async () => {
+		// The mode's contract is the receipt and nothing else. It used to admit
+		// `message_end`, the largest event on the stream, which carries the
+		// injected system reminders, the operator's prompt, and every thinking
+		// block: "Say OK." produced 39.8 KB. What is left is the two frames the
+		// mode synthesizes, the session header, per-segment accounting, and any
+		// notice the operator has to see.
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("terminal mock reply");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
-			const result = await runCli(["--no-context-files", "run", "--json-events", "terminal", "hello"], {
+			const result = await runCli(["--no-context-files", "run", "--json-events", "terminal", "unrepeatable-prompt"], {
 				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			const events = jsonLines(result.stdout);
 			const types = events.map((event) => event.type);
-			for (const expected of ["session", "turn_start", "agent_start", "message_end", "agent_end", "turn_end"]) {
+			for (const expected of ["session", "turn_start", "agent_end", "turn_end"]) {
 				ok(types.includes(expected), `missing ${expected}: ${result.stdout}`);
 			}
 			for (const type of types) {
 				ok(typeof type === "string");
-				ok(!FORBIDDEN_TERMINAL_STREAM_TYPES.has(type), `unexpected partial event ${type}: ${result.stdout}`);
+				ok(TERMINAL_STREAM_TYPES.has(type), `unexpected event ${type} on the receipt stream: ${result.stdout}`);
 			}
-			const messageEnd = events.find(
-				(event) => event.type === "message_end" && JSON.stringify(event).includes("assistant"),
+			// The two shapes that made the mode a transcript rather than a receipt.
+			ok(!types.includes("message_end"), `message_end leaked into the receipt: ${result.stdout}`);
+			ok(
+				!result.stdout.includes("unrepeatable-prompt"),
+				`the receipt must not restate the operator's prompt: ${result.stdout}`,
 			);
-			ok(JSON.stringify(messageEnd).includes("terminal mock reply"), `stdout=${result.stdout}`);
+			// The final frame is the settlement, and it is what carries the status.
+			const turnEnd = events.filter((event) => event.type === "turn_end").pop();
+			strictEqual(turnEnd?.exitCode, 0);
+			ok(typeof turnEnd?.endedAt === "string", "the receipt frame carries the settle time");
 		} finally {
 			await closeServer(fixture.server);
 		}
@@ -702,7 +715,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		// `message_update` snapshots of a 44 KB message. The stream publishes
 		// each piece of content once: deltas while it streams, one completed
 		// message when it lands.
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("full stream mock reply");
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
@@ -730,7 +743,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("applies one-run autonomy without rewriting settings and seals it in the main receipt", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("autonomy mock reply");
 		try {
 			const configDir = join(scratch.dir, "config");
@@ -763,7 +776,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("prints the worker final answer for headless --agent dispatch", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture(
 			JSON.stringify({
 				mutatedPaths: [],
@@ -793,7 +806,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("serves ACP over stdio against a mock provider", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const fixture = await startOpenAICompatFixture("acp mock reply");
 		const project = join(scratch.dir, "project");
 		mkdirSync(project, { recursive: true });
@@ -856,7 +869,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("honors explicit --skill paths even with --no-skills", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const project = join(scratch.dir, "project");
 		mkdirSync(project, { recursive: true });
 		const explicitDir = join(scratch.dir, "explicit");
@@ -880,7 +893,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("honors top-level skill flags before run subcommand", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const project = join(scratch.dir, "project");
 		mkdirSync(project, { recursive: true });
 		const explicitDir = join(scratch.dir, "explicit");
@@ -909,7 +922,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("runs a prompt template named as a command and stops on one it may not read", async () => {
-		await runCli(["doctor", "--fix"], { env: scratch.env });
+		await seedDoctorFix(scratch.dir);
 		const project = join(scratch.dir, "project");
 		mkdirSync(join(project, ".clio-coder", "prompts"), { recursive: true });
 		writeFileSync(join(project, ".clio-coder", "prompts", "smoketemplate.md"), "Say the words tortoise shell.\n", "utf8");

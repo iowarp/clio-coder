@@ -1,17 +1,15 @@
 import type { SlashCommand } from "./slash-commands.js";
 
 export interface CommandFlagSpec {
-	/** Primary flag, e.g. "--target". */
+	/** Unique flag name, e.g. "--target". */
 	name: string;
-	/** Accepted synonyms, e.g. ["--worker-profile", "--worker"]. */
-	aliases?: ReadonlyArray<string>;
 	/** True when the flag consumes the next token as its value. */
 	takesValue?: boolean;
 	/** True when every occurrence should be retained instead of last-one-wins. */
 	repeatable?: boolean;
 	/** Closed set of legal values; parse failure produces the usage result. */
 	values?: ReadonlyArray<string>;
-	/** Usage placeholder, e.g. "profile" renders as `[--worker <profile>]`. */
+	/** Usage placeholder, e.g. "profile" renders as `[--agent-profile <profile>]`. */
 	valueName?: string;
 }
 
@@ -214,7 +212,7 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 					const tokenStart = index;
 					const read = readToken();
 					if (read === null) break;
-					const matchedFlagSpec = flagSpecs.find((f) => f.name === read.token || f.aliases?.includes(read.token));
+					const matchedFlagSpec = flagSpecs.find((f) => f.name === read.token);
 					if (!matchedFlagSpec) {
 						index = tokenStart;
 						break;
@@ -242,7 +240,7 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 		let matchedFlagSpec: CommandFlagSpec | undefined;
 
 		if (token.startsWith("--")) {
-			matchedFlagSpec = flagSpecs.find((f) => f.name === token || f.aliases?.includes(token));
+			matchedFlagSpec = flagSpecs.find((f) => f.name === token);
 			if (matchedFlagSpec) {
 				isFlag = true;
 			} else {
@@ -324,10 +322,7 @@ function walkCompletedTokens(spec: CommandArgsSpec, tokens: ReadonlyArray<string
 		}
 		const atRest = positionalSpecs[walk.positionalIndex]?.rest === true;
 		const flagsParseable = !atRest || spec.parseFlagsBeforeRest === true;
-		const matched =
-			flagsParseable && token.startsWith("--")
-				? flagSpecs.find((flag) => flag.name === token || flag.aliases?.includes(token))
-				: undefined;
+		const matched = flagsParseable && token.startsWith("--") ? flagSpecs.find((flag) => flag.name === token) : undefined;
 		if (matched) {
 			walk.usedFlags.add(matched.name);
 			if (matched.takesValue) walk.awaitingValue = matched;
@@ -344,14 +339,7 @@ function walkCompletedTokens(spec: CommandArgsSpec, tokens: ReadonlyArray<string
 
 function flagCompletions(spec: CommandArgsSpec, walk: CompletionWalk, current: string): ArgCompletion[] {
 	const available = (spec.flags ?? []).filter((flag) => flag.repeatable === true || !walk.usedFlags.has(flag.name));
-	let rows = available.filter((flag) => flag.name.startsWith(current)).map((flag) => ({ flag, name: flag.name }));
-	// When the typed token matches no primary name, fall back to aliases so a
-	// legal spelling like --rewrite still completes instead of going silent.
-	if (rows.length === 0) {
-		rows = available.flatMap((flag) =>
-			(flag.aliases ?? []).filter((alias) => alias.startsWith(current)).map((alias) => ({ flag, name: alias })),
-		);
-	}
+	const rows = available.filter((flag) => flag.name.startsWith(current)).map((flag) => ({ flag, name: flag.name }));
 	return rows.map(({ flag, name }) => ({
 		token: name,
 		...(flag.takesValue ? { hint: `<${getFlagValuePlaceholder(flag)}>` } : {}),
@@ -418,31 +406,14 @@ export function completeArgs(spec: CommandArgsSpec, argumentText: string): ArgCo
 export function matchFromSpec(
 	entry: {
 		name: string;
-		aliases?: ReadonlyArray<string>;
-		aliasArgs?: Readonly<Record<string, string>>;
 		args?: CommandArgsSpec;
 		fromArgs?: (parsed: ParsedArgs, trimmed: string) => SlashCommand;
 	},
 	trimmed: string,
 ): SlashCommand | null {
-	const nameOrAlias = [entry.name, ...(entry.aliases ?? [])];
-	let matchedPrefix: string | null = null;
-	let matchedTerm: string | null = null;
-	for (const term of nameOrAlias) {
-		const prefix = `/${term}`;
-		if (trimmed === prefix || trimmed.startsWith(`${prefix} `)) {
-			matchedPrefix = prefix;
-			matchedTerm = term;
-			break;
-		}
-	}
-	if (!matchedPrefix) return null;
-
-	// An alias that stands for a subcommand supplies that subcommand ahead of
-	// whatever was typed after it, so `/compact tidy up` parses as the line
-	// `/context compact tidy up` and reaches the same handler by the same route.
-	const implied = matchedTerm === null ? undefined : entry.aliasArgs?.[matchedTerm];
-	const argsLine = implied ? ` ${implied}${trimmed.slice(matchedPrefix.length)}` : trimmed.slice(matchedPrefix.length);
+	const matchedPrefix = `/${entry.name}`;
+	if (trimmed !== matchedPrefix && !trimmed.startsWith(`${matchedPrefix} `)) return null;
+	const argsLine = trimmed.slice(matchedPrefix.length);
 	const parsed = parseArgs(entry.args ?? {}, argsLine);
 
 	if (entry.fromArgs) {

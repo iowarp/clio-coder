@@ -182,7 +182,7 @@ export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: numb
 }
 
 /**
- * The one word for narrowing a list by typing. `/help` said `filter`, `/models`
+ * The one word for narrowing a list by typing. `/help` said `filter`, `/model`
  * and `/resume` said `search`, and they are the same gesture, so a reader who
  * learned one had to relearn it in the next overlay.
  */

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { ResourcesContract } from "../../src/domains/resources/index.js";
+import { createResourcesLoader } from "../../src/domains/resources/index.js";
 import {
 	expandPromptTemplateInput,
 	loadPromptTemplates,
@@ -11,6 +12,7 @@ import {
 } from "../../src/domains/resources/prompts/loader.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
 import {
+	BUILTIN_SLASH_COMMANDS,
 	dispatchSlashCommand,
 	parseSlashCommand,
 	type SlashCommandContext,
@@ -38,7 +40,6 @@ function resourcesFor(list: PromptTemplateList): ResourcesContract {
 		parsePendingSkillRequests: (text: string) => ({ text, pendingSkillRequests: [] }),
 		prompts: () => list,
 		expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, list),
-		themes: () => ({ items: [], diagnostics: [] }),
 		resolvePath: (value: string) => value,
 		reload: async () => undefined,
 	} as unknown as ResourcesContract;
@@ -66,10 +67,6 @@ function harness(list: PromptTemplateList): DispatchHarness {
 	return { submitted, notices, opened, ctx };
 }
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 /**
  * `/name` is how every agent on the machine invokes the commands in the roots
  * Clio reads, and the parser answered "is not a command" for all of them: the
@@ -78,6 +75,14 @@ afterEach(() => {
  * prompt roots bought nothing until this branch asks about them.
  */
 describe("contracts/slash prompt templates", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("submits a trusted template's line so the submit path expands it", async () => {
 		const home = scratchDir();
 		const cwd = scratchDir();
@@ -91,6 +96,50 @@ describe("contracts/slash prompt templates", () => {
 		deepStrictEqual(notices, []);
 		const expanded = await expandInteractiveSubmitAsync(submitted[0] as string, resourcesFor(list), cwd);
 		strictEqual(expanded.text, "Run the demo for alpha.");
+	});
+
+	it("substitutes Pi positional and aggregate arguments through the prompt loader", () => {
+		const root = scratchDir();
+		writePrompt(
+			root,
+			"arguments.md",
+			["$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "all=$ARGUMENTS"].join("\n"),
+		);
+		const list = loadPromptTemplates({ roots: [{ path: root, scope: "project", trusted: true }] });
+
+		const expansion = expandPromptTemplateInput(
+			`/arguments alpha "bravo two" charlie delta echo foxtrot golf hotel india`,
+			list,
+		);
+
+		strictEqual(expansion.expanded, true);
+		if (!expansion.expanded) throw new Error("expected the prompt template to expand");
+		deepStrictEqual(expansion.args, [
+			"alpha",
+			"bravo two",
+			"charlie",
+			"delta",
+			"echo",
+			"foxtrot",
+			"golf",
+			"hotel",
+			"india",
+		]);
+		strictEqual(
+			expansion.text,
+			[
+				"alpha",
+				"bravo two",
+				"charlie",
+				"delta",
+				"echo",
+				"foxtrot",
+				"golf",
+				"hotel",
+				"india",
+				"all=alpha bravo two charlie delta echo foxtrot golf hotel india",
+			].join("\n"),
+		);
 	});
 
 	it("refuses an untrusted template with the loader's reason and sends nothing to the model", () => {
@@ -119,11 +168,24 @@ describe("contracts/slash prompt templates", () => {
 		ok(notices[0]?.includes("/help"), notices.join(" | "));
 	});
 
-	it("lets a builtin keep its own spelling against a template of the same name", () => {
-		const home = scratchDir();
-		writePrompt(home, join(".claude", "commands", "help.md"), "Not the help center.\n");
-		const list = loadPromptTemplates({ cwd: scratchDir(), home });
+	it("reserves every builtin spelling against prompt templates in interactive and headless modes", () => {
+		const cwd = scratchDir();
+		const promptPath = join(".clio-coder", "prompts", "help.md");
+		writePrompt(cwd, promptPath, "Not the help center.\n");
+		const loader = createResourcesLoader({
+			cwd,
+			reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
+		});
+		const list = loader.prompts();
 		const { submitted, opened, ctx } = harness(list);
+
+		strictEqual(
+			list.items.some((entry) => entry.name === "help"),
+			false,
+		);
+		const collision = list.diagnostics.find((entry) => entry.type === "collision" && entry.path?.endsWith(promptPath));
+		ok(collision?.message.includes("/help conflicts with the built-in slash command /help"), collision?.message);
+		strictEqual(loader.expandPromptTemplate("/help").expanded, false, "headless expansion reserves the same name");
 
 		dispatchSlashCommand(parseSlashCommand("/help"), ctx);
 

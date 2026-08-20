@@ -1,14 +1,15 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SKILL_SUGGESTION_ANCHOR, SKILL_SUGGESTION_PREFIX } from "../../src/core/skill-activation.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import type { ApprovalRequestView } from "../../src/interactive/permission-overlay.js";
 import { redactToolArgs, renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { fgSequence, GLYPH, SGR_DIM } from "../../src/interactive/theme/index.js";
 import { createTestClock } from "../harness/clock.js";
 
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
-const strip = (s: string): string => s.replace(ANSI, "");
+const strip = stripTerminalSequences;
 
 /**
  * Every panel in this file is built on the harness clock. A panel that reads
@@ -18,6 +19,19 @@ const strip = (s: string): string => s.replace(ANSI, "");
  * The tests that need time to move keep their own stepped `now` instead.
  */
 const frozen = createTestClock();
+
+function approvalView(overrides: Partial<ApprovalRequestView> = {}): ApprovalRequestView {
+	return {
+		requestId: "approval-test",
+		tool: "bash",
+		actionClass: "execute",
+		axis: { kind: "net", ruleId: "test-confirm" },
+		origin: { kind: "main" },
+		reason: "approval required",
+		target: "printf ready",
+		...overrides,
+	};
+}
 
 describe("chat-panel live thinking streaming", () => {
 	it("folded render shows token count when pending, shows static label when settled", () => {
@@ -89,6 +103,18 @@ describe("chat-panel live thinking streaming", () => {
 });
 
 describe("chat-panel queued user turn injection", () => {
+	it("marks every user turn for Pi fullscreen prompt navigation", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.appendUser("first prompt");
+		panel.appendUser("second prompt");
+		const rendered = panel.render(80);
+		strictEqual(
+			rendered.filter((line) => line.startsWith("\x1b]133;A\x07")).length,
+			2,
+			"each semantic user turn begins with Pi's OSC 133 prompt marker",
+		);
+	});
+
 	it("renders an injected steer as a user turn between assistant entries", () => {
 		const panel = createChatPanel({ now: frozen.now });
 		panel.appendUser("start a long task");
@@ -180,6 +206,25 @@ describe("chat-panel voice-first prose gutter", () => {
 				JSON.stringify(rows),
 			);
 		}
+	});
+
+	it("renders Mermaid fences and inline LaTeX through the transcript Markdown component", () => {
+		const markdown = ["The invariant is $x^2$.", "", "```mermaid", "flowchart LR", "  A[Start] --> B[Done]", "```"].join(
+			"\n",
+		);
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: markdown }], stopReason: "stop" },
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+		const plain = panel.render(80).map(strip).join("\n");
+		ok(plain.includes("x²"), plain);
+		ok(plain.includes("Start"), plain);
+		ok(plain.includes("Done"), plain);
+		ok(/[┌┐└┘╭╮╰╯]/u.test(plain), plain);
+		ok(!plain.includes("flowchart LR"), plain);
 	});
 
 	it("leaves interleaved tool ledgers on their existing full-width grammar", () => {
@@ -358,6 +403,110 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(rendered.includes("streamed tail line"), `the streamed body still renders after the split, got: ${rendered}`);
 	});
 
+	it("re-renders a live replay block until it declares itself settled", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock });
+		// Mirrors the operator's `!` bash row: the closure reads state the command
+		// keeps mutating, so the panel must not treat the first frame as final.
+		const command = { output: "", running: true };
+		panel.appendReplayBlock(
+			() => [`local bash ${command.running ? "running" : "done"}: ${command.output || "(no output yet)"}`],
+			() => command.running,
+		);
+		const first = strip(panel.render(100).join("\n"));
+		ok(first.includes("(no output yet)"), `the first frame shows the empty live row, got: ${first}`);
+
+		command.output = "src/tools";
+		clock = 1_100;
+		const streaming = strip(panel.render(100).join("\n"));
+		ok(streaming.includes("running: src/tools"), `streamed output reaches a later frame, got: ${streaming}`);
+
+		command.output = "src/tools";
+		command.running = false;
+		clock = 1_200;
+		const settled = strip(panel.render(100).join("\n"));
+		ok(settled.includes("done: src/tools"), `the row settles when the command finishes, got: ${settled}`);
+
+		// Once settled the block is frozen again, so a later clock renders identically.
+		clock = 3_601_000;
+		strictEqual(strip(panel.render(100).join("\n")), settled, "a settled replay block renders time-invariant");
+	});
+
+	it("keeps one Pi tool row from streamed arguments through live output and settlement", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock });
+		const partial = {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "streamed-call-1",
+					name: "grep",
+					arguments: { pattern: "AgentToolResult", path: "src", ignoreCase: true },
+				},
+			],
+			api: "openai-completions",
+			provider: "test",
+			model: "fixture",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
+			stopReason: "pending",
+			timestamp: 0,
+		};
+		panel.applyEvent({
+			type: "message_update",
+			message: partial,
+			assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: "src", partial },
+		} as unknown as ChatLoopEvent);
+		let rendered = strip(panel.render(110).join("\n"));
+		ok(rendered.includes("forming call"), rendered);
+		ok(rendered.includes("grep(AgentToolResult)"), rendered);
+
+		panel.applyEvent({ type: "message_end", message: { ...partial, stopReason: "toolUse" } } as unknown as ChatLoopEvent);
+		rendered = strip(panel.render(110).join("\n"));
+		ok(rendered.includes("ready"), rendered);
+
+		clock = 1_300;
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "streamed-call-1",
+			toolName: "grep",
+			args: { pattern: "AgentToolResult", path: "src", ignoreCase: true },
+		} as ChatLoopEvent);
+		clock = 1_600;
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "streamed-call-1",
+			toolName: "grep",
+			partialResult: {
+				content: [{ type: "text", text: "src/engine/types.ts:42" }],
+				details: { observation: { shownCount: 1, totalCount: 3, unit: "matches", shownBytes: 22 } },
+			},
+		} as ChatLoopEvent);
+		rendered = strip(panel.render(110).join("\n"));
+		ok(rendered.includes("running · 300ms"), rendered);
+		ok(rendered.includes("args · 2"), rendered);
+		ok(rendered.includes("path"), rendered);
+		ok(rendered.includes("live output · 1/3 matches · 22B"), rendered);
+		ok(rendered.includes("src/engine/types.ts:42"), rendered);
+
+		clock = 1_700;
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "streamed-call-1",
+			toolName: "grep",
+			result: {
+				content: [{ type: "text", text: "src/engine/types.ts:42" }],
+				details: { observation: { shownCount: 1, totalCount: 3, unit: "matches", shownBytes: 22 } },
+			},
+			isError: false,
+			durationMs: 400,
+		} as ChatLoopEvent);
+		rendered = strip(panel.render(110).join("\n"));
+		strictEqual((rendered.match(/▸ grep\(/g) ?? []).length, 1, rendered);
+		ok(rendered.includes("✓ · 400ms"), rendered);
+		ok(rendered.includes("output · 1/3 matches · 22B"), rendered);
+	});
+
 	it("settles a reused-id orphan stranded in an earlier entry when the id restarts", () => {
 		let clock = 1000;
 		const panel = createChatPanel({ now: () => clock });
@@ -456,10 +605,26 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(!rendered.includes("awaiting approval"), rendered);
 		ok(rendered.includes("500ms"), `pre-park the segment counts elapsed, got: ${rendered}`);
 
-		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park1", state: "awaiting-approval" } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_approval_state",
+			toolCallId: "park1",
+			state: "awaiting-approval",
+			view: approvalView({
+				tool: "dispatch",
+				actionClass: "dispatch",
+				axis: { kind: "net", ruleId: "dispatch-plan-confirm" },
+				target: "fix the flaky test",
+			}),
+		} as ChatLoopEvent);
 		clock = 2500;
 		rendered = strip(panel.render(80).join("\n"));
 		ok(rendered.includes("⏸ awaiting approval"), `a parked call renders the awaiting marker, got: ${rendered}`);
+		ok(rendered.includes("action · dispatch"), `the parked row names its action class, got: ${rendered}`);
+		ok(
+			rendered.includes("axis · safety-net rail dispatch-plan-confirm"),
+			`the parked row names its axis, got: ${rendered}`,
+		);
+		ok(rendered.includes("target · fix the flaky test"), `the parked row names its redacted target, got: ${rendered}`);
 		ok(!rendered.includes("1.5s"), `a parked call must not keep counting elapsed, got: ${rendered}`);
 		ok(!rendered.includes("✓") && !rendered.includes("✗"), rendered);
 
@@ -468,6 +633,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park1", state: "resumed" } as ChatLoopEvent);
 		rendered = strip(panel.render(80).join("\n"));
 		ok(!rendered.includes("awaiting approval"), `a resumed call sheds the awaiting marker, got: ${rendered}`);
+		ok(!rendered.includes("dispatch-plan-confirm"), `a resumed call sheds transient approval facts, got: ${rendered}`);
 		panel.applyEvent({
 			type: "tool_execution_end",
 			toolCallId: "park1",
@@ -490,7 +656,12 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 			toolName: "bash",
 			args: { command: "rm -rf build" },
 		} as ChatLoopEvent);
-		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park2", state: "awaiting-approval" } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_approval_state",
+			toolCallId: "park2",
+			state: "awaiting-approval",
+			view: approvalView({ target: "rm -rf build" }),
+		} as ChatLoopEvent);
 		ok(strip(panel.render(80).join("\n")).includes("⏸ awaiting approval"));
 		// Operator cancel: the registry resolves the parked promise blocked and
 		// the segment settles through its ordinary tool_execution_end, which the
@@ -609,7 +780,7 @@ describe("chat-panel agent voice", () => {
 	 */
 	it("leaves a leading skill suggestion unglyphed and gives ✦ to the answer after the tool ledger", () => {
 		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
-		strictEqual(suggestion, "Suggested skill: /skill:tui-design");
+		strictEqual(suggestion, "Suggested skill: /skill tui-design");
 		ok(suggestion.startsWith(SKILL_SUGGESTION_PREFIX), "a substituted suggestion still carries the shared prefix");
 		ok(!suggestion.includes("<name>"), "no live reply writes the placeholder");
 
@@ -867,7 +1038,8 @@ describe("chat-panel agent voice", () => {
 
 describe("chat-panel tool ledger subline", () => {
 	function feedCollapsedRead(panel: ReturnType<typeof createChatPanel>): void {
-		// A streaming turn keeps its tool collapsed to the ledger subline.
+		// Rich non-resource calls expand consistently; explicitly fold this one
+		// to exercise the compact ledger contract without relying on event order.
 		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as ChatLoopEvent);
 		panel.applyEvent({
 			type: "tool_execution_start",
@@ -886,6 +1058,7 @@ describe("chat-panel tool ledger subline", () => {
 			isError: false,
 			durationMs: 230,
 		} as ChatLoopEvent);
+		panel.toggleLastToolExpanded();
 		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 	}
 
@@ -906,26 +1079,28 @@ describe("chat-panel tool ledger subline", () => {
 });
 
 describe("chat-panel edit diff block", () => {
-	it("suppresses the \\ No newline at end of file marker rows", () => {
+	it("renders the canonical result diff for the current multi-edit argument shape", () => {
 		const panel = createChatPanel({ now: frozen.now });
-		// A fresh (non-streaming) turn expands the edit tool to its diff block.
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "e1",
 			toolName: "edit",
-			args: { path: "a.txt", old_string: "line one\nline two", new_string: "line one\nline TWO" },
+			args: { path: "a.txt", edits: [{ oldText: "line two", newText: "line TWO" }] },
 		} as ChatLoopEvent);
 		panel.applyEvent({
 			type: "tool_execution_end",
 			toolCallId: "e1",
 			toolName: "edit",
-			result: "ok",
+			result: {
+				content: [{ type: "text", text: "edited a.txt" }],
+				details: { diff: " 1 line one\n-2 line two\n+2 line TWO" },
+			},
 			isError: false,
 		} as ChatLoopEvent);
 		const rendered = strip(panel.render(80).join("\n"));
 		ok(rendered.includes("line TWO"), "the diff still renders the actual change");
-		ok(rendered.includes("@@"), "the diff still renders its hunk header");
-		ok(!rendered.includes("No newline at end of file"), "the no-newline sentinel rows are filtered out");
+		ok(rendered.includes("line two"), "the diff keeps the removed text");
+		ok(!rendered.includes("edited a.txt"), "the confirmation does not replace the review surface");
 	});
 });
 

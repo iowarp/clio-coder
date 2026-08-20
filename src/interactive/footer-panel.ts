@@ -95,9 +95,9 @@ export interface FooterPanel {
 	refresh(): void;
 }
 
-export function fitFooterText(text: string, width: number): string {
+export function fitFooterText(text: string, width: number, ellipsis = ""): string {
 	const safeWidth = Math.max(1, Math.floor(width));
-	return visibleWidth(text) > safeWidth ? truncateToWidth(text, safeWidth, "", true) : text;
+	return visibleWidth(text) > safeWidth ? truncateToWidth(text, safeWidth, ellipsis, true) : text;
 }
 
 const CONTEXT_PERCENT_FIELD_WIDTH = 6;

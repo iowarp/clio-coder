@@ -41,17 +41,8 @@ export function openHelpOverlay(
 				// Overlay key actions are deliberately not duplicated here: each
 				// overlay's footer hint is the live source of its keys, and a static
 				// copy would rot exactly like the old SLASH_HOTKEYS table did.
-				detail: () => {
-					const lines = [`# Command: /${ref.name}`, `**Usage:** \`${ref.usage}\``, `**Description:** ${ref.description}`];
-					if (ref.aliases.length > 0) {
-						lines.push(`**Aliases:** ${ref.aliases.map((a) => `/${a}`).join(", ")}`);
-					}
-					return lines;
-				},
+				detail: () => [`# Command: /${ref.name}`, `**Usage:** \`${ref.usage}\``, `**Description:** ${ref.description}`],
 			};
-			if (ref.aliases.length > 0) {
-				item.meta = ref.aliases.join(", ");
-			}
 			return item;
 		});
 
@@ -107,6 +98,20 @@ export function openHelpOverlay(
 				"**Cancel**: press `x` on a running, stale, queued, or retry-waiting run. The row changes to cancelling while the worker or retry is being stopped.",
 				"**Capabilities**: ACP delegation runs cannot accept live steering. The board footer only advertises actions supported by the selected row.",
 				"**Tasks versus runs**: `/tasks` shows the agent's plan steps. Fleet runs are concrete delegated worker executions and remain in this board as recent terminal history.",
+			],
+		},
+		{
+			id: "topic-steering-modes",
+			label: `${"steering modes".padEnd(30)}Interrupt, next slot, or end of turn: when a message lands mid-run`,
+			group: "Topics",
+			detail: () => [
+				"# Steering modes",
+				"While Clio is running, the key that submits a message chooses when it lands. The default is next slot.",
+				"**Next slot** (Enter): the message is delivered between tool batches, mid-run. The agent keeps going and reads it before its next model call.",
+				"**End of turn** (Alt+Enter by default): the message waits until the whole run settles and Clio would hand control back, then starts the next round.",
+				"**Interrupt** (Alt+I by default, or Ctrl+G then i): cancels the in-flight work the way Esc does, including a running bash child, then delivers the message as a fresh prompt. Anything already queued returns to the editor.",
+				"**Interrupt is refused** while an attached dispatch is running (the abort would kill the worker's run with no receipt; steer it with `@<agent>` or cancel it with Esc) and while a permission ask is parked (it is already waiting on you). In both cases the message is queued for the next slot and a notice says why.",
+				"**Alt+Up** restores queued messages to the editor. Workers accept next-slot steering only, through `@<agent>`.",
 			],
 		},
 		{

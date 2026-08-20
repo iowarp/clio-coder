@@ -79,9 +79,10 @@ export interface TurnRecovery {
  * that landed in the same window wins: `activeInterruptReason` is set only by
  * `ChatLoop.cancel`, so the stall reason is dropped rather than retried.
  *
- * The failure's assistant message is rewritten in place because it is the same
- * object the ledger persists and the transcript renders; without it the turn
- * would read "[aborted] Request was aborted." instead of naming the stall.
+ * The runtime event seam calls `rewriteStallAbortMessage` before publishing or
+ * persisting `message_end`, so the provider's one terminal message becomes the
+ * corrected ledger row. This post-settlement pass covers engines that settle
+ * without emitting that event and consumes the watchdog reason in either case.
  */
 export function reclassifyStallAbort(
 	state: ChatTurnState,
@@ -90,12 +91,28 @@ export function reclassifyStallAbort(
 	const reason = state.streamStallReason;
 	state.streamStallReason = null;
 	if (reason === null || failure.stopReason !== "aborted" || state.activeInterruptReason !== null) return failure;
-	if (failure.message) {
-		const message = failure.message as { stopReason?: unknown; errorMessage?: unknown };
-		message.stopReason = "error";
-		message.errorMessage = reason;
-	}
+	if (failure.message) rewriteStallAbortMessage(state, failure.message, reason);
 	return { ...failure, stopReason: "error", errorMessage: reason };
+}
+
+/** Rewrite the provider's terminal abort object before its event is emitted and persisted. */
+export function rewriteStallAbortMessage(
+	state: ChatTurnState,
+	message: AgentMessage,
+	reason = state.streamStallReason,
+): boolean {
+	if (
+		reason === null ||
+		state.activeInterruptReason !== null ||
+		message.role !== "assistant" ||
+		(message as { stopReason?: unknown }).stopReason !== "aborted"
+	) {
+		return false;
+	}
+	const failure = message as { stopReason?: unknown; errorMessage?: unknown };
+	failure.stopReason = "error";
+	failure.errorMessage = reason;
+	return true;
 }
 
 export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {

@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import { StringEnum } from "../engine/ai.js";
 import { resolveFdBinary } from "./executables.js";
 import { compileGlobRegex, fallbackIgnoredDirs, fdIgnoreArgs, normalizeGlobInput } from "./ignore-policy.js";
 import {
@@ -17,7 +18,6 @@ import {
 import { resolveReadPath, toPosixPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
-import { stringEnum } from "./string-enum.js";
 import { truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 500;
@@ -218,7 +218,9 @@ export const findTool: ToolSpec = {
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Glob pattern, e.g. 'src/**/*.ts'." }),
 		path: Type.Optional(Type.String({ description: "Directory to search in." })),
-		order: Type.Optional(stringEnum(["path", "mtime"], "Result order: path (default) or mtime descending.")),
+		order: Type.Optional(
+			StringEnum(["path", "mtime"], { description: "Result order: path (default) or mtime descending." }),
+		),
 		limit: Type.Optional(Type.Number({ description: `Max results (default ${DEFAULT_LIMIT}).` })),
 		include_ignored: Type.Optional(Type.Boolean({ description: "Search gitignored and generated paths too." })),
 	}),

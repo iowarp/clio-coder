@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TUI Design System Blueprint (v0.3.1)</title>
+  <title>TUI Design System Blueprint (v0.3.2)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Terminal custom styles */
@@ -69,7 +69,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.1</span>
+        <span class="version-badge">Clio Coder v0.3.2</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -96,6 +96,12 @@
         <div class="tabs-nav">
           <button type="button" class="tab-btn active" onclick="switchTab('token-lab')">
             Color &amp; Glyph Lab
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('fullscreen-spec')">
+            Fullscreen Mode &amp; Surfaces
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('ledger-diffs')">
+            Tool Ledgers &amp; Diffs
           </button>
           <button type="button" class="tab-btn" onclick="switchTab('terminal-sim')">
             Transcript Previewer
@@ -137,7 +143,7 @@
                     <tr onclick="previewToken('success')">
                       <td class="env-name" style="color:#57e389;">success</td>
                       <td><span class="color-swatch" style="background:#57e389;"></span> #57E389</td>
-                      <td>Success ticks, clean state status, verified health</td>
+                      <td>Success ticks, clean state status, verified health, diff additions</td>
                     </tr>
                     <tr onclick="previewToken('warning')">
                       <td class="env-name" style="color:#ffb454;">warning</td>
@@ -147,7 +153,7 @@
                     <tr onclick="previewToken('error')">
                       <td class="env-name" style="color:#ff5c66;">error</td>
                       <td><span class="color-swatch" style="background:#ff5c66;"></span> #FF5C66</td>
-                      <td>Failures, bad loops, errors, critical alerts</td>
+                      <td>Failures, bad loops, errors, critical alerts, diff removals</td>
                     </tr>
                     <tr onclick="previewToken('reason')">
                       <td class="env-name" style="color:#9d8cff;">reason</td>
@@ -162,7 +168,7 @@
                     <tr onclick="previewToken('muted')">
                       <td class="env-name" style="color:#8a99a4;">muted</td>
                       <td><span class="color-swatch" style="background:#8a99a4;"></span> #8A99A4</td>
-                      <td>Secondary content, paths, previews, telemetry values</td>
+                      <td>System text, notices, inactive metadata</td>
                     </tr>
                   </tbody>
                 </table>
@@ -171,32 +177,30 @@
 
             <div class="specs-col">
               <div class="glass-card">
-                <h3>Glyph Vocabulary Constants</h3>
-                <p>Glyph representations loaded from <code>glyphs.ts</code>:</p>
-                
+                <h3>Glyph System Vocabulary</h3>
                 <table class="env-table">
                   <thead>
                     <tr>
-                      <th>Symbol</th>
-                      <th>Token Key</th>
-                      <th>Role</th>
+                      <th>Glyph</th>
+                      <th>Token</th>
+                      <th>Meaning</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>✦</code></td>
-                      <td><code>agent</code></td>
-                      <td>Voice character for Clio Agent response lines (accent; red on error)</td>
+                      <td style="font-size:1.1rem; text-align:center;"><code>›</code></td>
+                      <td><code>accent</code></td>
+                      <td>User prompt turn start</td>
                     </tr>
                     <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>›</code></td>
-                      <td><code>user</code></td>
-                      <td>Voice character for user prompts (accent)</td>
+                      <td style="font-size:1.1rem; text-align:center;"><code>✦</code></td>
+                      <td><code>accent</code> / <code>error</code></td>
+                      <td>Agent turn voice glyph (turns red on turn failure)</td>
                     </tr>
                     <tr>
                       <td style="font-size:1.1rem; text-align:center;"><code>✓</code></td>
-                      <td><code>ok</code></td>
-                      <td>Success indicator checks</td>
+                      <td><code>success</code></td>
+                      <td>Operation success checkmark</td>
                     </tr>
                     <tr>
                       <td style="font-size:1.1rem; text-align:center;"><code>✗</code></td>
@@ -209,9 +213,9 @@
                       <td>Tool ledger header and subline indicator</td>
                     </tr>
                     <tr>
-                      <td style="font-size:1.1rem; text-align:center;"><code>◆</code></td>
+                      <td style="font-size:1.1rem; text-align:center;"><code>◆ / ◇</code></td>
                       <td><code>active</code></td>
-                      <td>Active/selected entity mark (Settings profile workbench)</td>
+                      <td>Model-requested (◆) vs operator-requested (◇) dispatch</td>
                     </tr>
                     <tr>
                       <td style="font-size:1.1rem; text-align:center;"><code>▰ ▒ ▱</code></td>
@@ -225,7 +229,76 @@
           </div>
         </div>
 
-        <!-- Tab 2: Transcript Sim -->
+        <!-- Tab 2: Fullscreen Spec -->
+        <div class="tab-pane" id="pane-fullscreen-spec">
+          <h2>Fullscreen Mode &amp; Screen Architecture</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Fullscreen Alternate-Screen Renderer</h3>
+              <p>Opt-in via <code>terminal.tuiMode: "fullscreen"</code> (restart required):</p>
+              <ul>
+                <li>Docked composer, follow-up queue, and footer remain locked at the bottom.</li>
+                <li>Transcript and launchpad occupy an independently scrollable upper viewport.</li>
+                <li><code>PageUp</code> / <code>PageDown</code> scroll one viewport; <code>Home</code> / <code>End</code> jump to bounds.</li>
+                <li><code>Ctrl+Shift+Up</code> / <code>Ctrl+Shift+Down</code> jump between semantic prompts via OSC 133 prompt markers.</li>
+                <li><code>terminal.fullscreenScrollbar</code>: <code>hidden</code>, <code>auto</code>, or <code>always</code>.</li>
+                <li>Manual scrolling suspends follow-end until the operator returns to the bottom.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Prompt Navigation History</h3>
+              <p>Process-local navigation history via <code>Ctrl+P</code> and <code>Ctrl+N</code>:</p>
+              <ul>
+                <li>Accepted chat turns, slash commands, steering inputs, follow-ups, and interrupts are recorded.</li>
+                <li>Consecutive duplicates are collapsed.</li>
+                <li>Rejected or malformed inputs remain editable in the composer without polluting history.</li>
+                <li>Navigating forward past the newest entry cleanly restores the unfinished draft prompt.</li>
+              </ul>
+            </div>
+          </div>
+
+          <h2>Four-Zone Layout</h2>
+          <pre><code>┌──────────────────────────────────────────────────────────────┐
+│ ZONE 1: Launchpad (Pre-Submit) / Immutable Header (Collapsed)│
+├──────────────────────────────────────────────────────────────┤
+│ ZONE 2: Conversation Transcript (Independently Scrollable)   │
+│         - User prose (› hanging indent)                      │
+│         - Assistant prose (✦ hanging indent)                 │
+│         - Folded thinking blocks (│ reason rail)             │
+│         - Tool ledgers & word-level diffs                    │
+├──────────────────────────────────────────────────────────────┤
+│ ZONE 3: Composer (ClioEditor: MESSAGE, FOLLOW-UP, STEER)     │
+├──────────────────────────────────────────────────────────────┤
+│ ZONE 4: Footer Dashboard (Compact 2-Line / Expanded Alt+U)   │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+        </div>
+
+        <!-- Tab 3: Ledgers & Diffs -->
+        <div class="tab-pane" id="pane-ledger-diffs">
+          <h2>Tool Ledgers, Diffs, and Approval Facts</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Stable Tool Lifecycle Rows</h3>
+              <p>Every tool call owns one stable transcript row from start to settlement:</p>
+              <ul>
+                <li><code>forming call</code> &rarr; <code>ready</code> &rarr; <code>running</code> &rarr; <code>settled</code>.</li>
+                <li>Running calls display <code>live output</code> and stream partial results in place.</li>
+                <li>Parked calls display transient approval facts: action class, asking safety axis, and target.</li>
+                <li>Settled calls display exit code, byte/line counts, duration, and full output path.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Word-Level Diffs &amp; Diagram Rendering</h3>
+              <ul>
+                <li><strong>edit / write:</strong> Render numbered diffs with word-level changes highlighted in <code>success</code> green and <code>error</code> red.</li>
+                <li><strong>Mermaid Diagrams:</strong> Fenced <code>mermaid</code> blocks render as Unicode flowcharts, state diagrams, and class diagrams when they fit width-wise.</li>
+                <li><strong>Unicode LaTeX:</strong> Math expressions like <code>$x^2$</code> render as Unicode (<code>x²</code>) without external image dependencies.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Transcript Sim -->
         <div class="tab-pane" id="pane-terminal-sim">
           <div class="blueprint-layout">
             <div class="specs-col">
@@ -238,6 +311,8 @@
                   <select id="stepState" onchange="renderTerminalSim()">
                     <option value="launchpad">Launchpad (Pre-Submit)</option>
                     <option value="thinking">Model Thinking (reasoning Purple)</option>
+                    <option value="diff">Edit / Write Word-Level Diff</option>
+                    <option value="approval">Parked Approval Facts</option>
                     <option value="executing">Tool Executing (gear Cyan)</option>
                     <option value="success">Success Final (Voice Turn + Hanging Indent)</option>
                     <option value="error">Failure Blocked (cross Red)</option>
@@ -278,12 +353,27 @@
     </div>
 
     <footer>
-      <p>Clio Coder TUI Blueprint &bull; Version 0.3.1 &bull; Gnosis Research Center</p>
+      <p>Clio Coder TUI Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
   <script src="shared.js"></script>
   <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const pane = document.getElementById(`pane-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
+        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
+      });
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
     function previewToken(token) {
       alert(`Token ${token} clicked. Semantics are loaded natively under themes/tokens.ts`);
     }
@@ -297,9 +387,9 @@
 
       if (state === 'launchpad') {
         html += `
-          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.1</span><span class="tui-warn">EXPERIMENTAL</span></div>
+          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.2</span><span class="tui-warn">EXPERIMENTAL</span></div>
           <div style="margin-bottom:0.75rem;">
-            <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.3.1</span></div>
+            <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.3.2</span></div>
             <div>&nbsp;&nbsp;<span class="tui-accent-deep">ROUTE</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">local-lmstudio/qwen &middot; ready</span></div>
             <div>&nbsp;&nbsp;<span class="tui-accent-deep">NEXT</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">ctx ready &middot; type a task</span></div>
           </div>
@@ -307,12 +397,12 @@
             Ask Clio&hellip; &nbsp;/ for commands
           </div>
           <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
-            clio-coder &middot; git v0.3.1<br>
+            clio-coder &middot; git v0.3.2<br>
             <span class="tui-dim">ctx 8k/128k &middot; turn &middot; in 0 &middot; out 0</span>
           </div>
         `;
       } else {
-        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.1 &middot; EXPERIMENTAL &middot; ctx ready</span></div>`;
+        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.2 &middot; EXPERIMENTAL &middot; ctx ready</span></div>`;
         html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
 
         if (state === 'thinking') {
@@ -321,6 +411,26 @@
             <div style="margin-top:0.25rem; border-left: 2px solid #9d8cff; padding-left: 0.5rem; color:#888;">
               Analyzing source module boundaries and key contracts&hellip;<br>
               Checking compilation targets under dist/&hellip;
+            </div>
+          `;
+        } else if (state === 'diff') {
+          html += `
+            <div style="margin-top:0.5rem; color:#8a99a4;">
+              <span class="tui-accent">▸</span> <strong class="tui-accent">edit</strong> path="src/core/config.ts" &middot; 3 lines changed <span class="tui-success">✓</span>
+            </div>
+            <div style="margin-top:0.25rem; font-family: monospace; font-size:0.8rem; background:rgba(0,0,0,0.3); padding:0.5rem; border-radius:4px;">
+              <div style="color:#6a7a85;">@@ -42,3 +42,3 @@</div>
+              <div style="color:#ff5c66; background:rgba(255,92,102,0.1);">- <span style="background:rgba(255,92,102,0.3);">terminal.tuiMode: "regular"</span></div>
+              <div style="color:#57e389; background:rgba(87,227,137,0.1);">+ <span style="background:rgba(87,227,137,0.3);">terminal.tuiMode: "fullscreen"</span></div>
+            </div>
+          `;
+        } else if (state === 'approval') {
+          html += `
+            <div style="margin-top:0.5rem; color:#8a99a4;">
+              <span class="tui-accent">▸</span> <strong class="tui-action">bash</strong> command="rm -rf /tmp/build-cache" &middot; <span style="color:#ff7e29;">[approval required]</span>
+            </div>
+            <div style="margin-top:0.25rem; border-left: 2px solid #ff7e29; padding-left: 0.5rem; color:#888; font-size:0.8rem;">
+              <span style="color:#ff7e29;">Asked by:</span> damage-control-rules.yaml &middot; <span style="color:#ff7e29;">Action:</span> recursive-delete &middot; <span style="color:#ff7e29;">Target:</span> /tmp/build-cache
             </div>
           `;
         } else if (state === 'executing') {
@@ -353,7 +463,7 @@
 
         html += `
           <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
-            clio-coder &middot; git v0.3.1<br>
+            clio-coder &middot; git v0.3.2<br>
             <span class="tui-dim">ctx 14k/128k &middot; turn &middot; in 1.4k &middot; out 420</span>
           </div>
         `;

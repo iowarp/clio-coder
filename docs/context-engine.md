@@ -1,7 +1,7 @@
 # Context Engine
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/context_blueprint.html](html/context_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/context_blueprint.html](html/context_blueprint.html) (Version: 0.3.2).
 
 Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.
 
@@ -41,6 +41,8 @@ Marker format:
 
 Already-compacted entries are not masked again. Recent turns keep their full observations and thinking. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
 
+When the ledger is replayed to the model, compaction summaries, branch summaries, and bash executions become standardized user-role message text. Clio imports `COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, their suffixes, and `bashExecutionToText` through `src/engine/messages.ts`; `src/interactive/chat-renderer.ts` maps Clio's entry shapes onto them and applies replay truncation.
+
 Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
 
 ## Cache-divergence honesty
@@ -70,21 +72,31 @@ Settings validation is strict: an older file still carrying the removed `compact
 
 ---
 
+## Directory-scoped project handbooks
+
+Project guidance is resolved from the filesystem root to the working directory. An ordinary `CLIO-CODER.md` adds a layer for its directory and descendants. `CLIO-CODER.override.md` starts a replacement boundary: it wins over `CLIO-CODER.md` in the same directory, discards all handbook layers inherited from ancestors, and remains effective below that directory. Ordinary handbooks in deeper directories may add new layers after the override. A sibling outside the override's subtree keeps its own inherited chain.
+
+For example, a session in `repo/src/parser/` loads `repo/src/CLIO-CODER.override.md` followed by `repo/src/parser/CLIO-CODER.md`; it does not load `repo/CLIO-CODER.md`. A session in `repo/docs/` still loads `repo/CLIO-CODER.md`. Surviving files are rendered in ancestor-to-descendant order as separate `<project-context path="...">` blocks, preserving the source of every instruction. The nearest surviving handbook supplies the project name used by compact reporting, while conventions, hard invariants, imported context, and custom sections layer in order.
+
+An unreadable or malformed override fails closed. Clio warns about that file but does not reactivate the inherited or same-directory handbook it replaced. `clio-coder config inspect` lists every effective handbook and its layer number.
+
+Handbook resolution is read-only. `/context init` and its CLI form are the only commands that author or update the exact `CLIO-CODER.md` in the current directory; `/context refresh` touches neither standard nor override handbooks. Neither command rewrites an inherited file or an override. A same-directory override therefore continues to shadow a standard handbook created or updated by init until the operator removes the override. Normal reset preserves both handbook names; `context reset --all` may remove the local standard `CLIO-CODER.md` after its second confirmation but always preserves `CLIO-CODER.override.md` as operator-authored context.
+
 ## Project-context preload class
 
-The compiled session prompt preloads the full rendered project context (the `CLIO-CODER.md` fragment plus project-type and codewiki markers) only when a parseable `CLIO-CODER.md` exists and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
+The compiled session prompt preloads the full rendered project context (the effective handbook fragments plus project-type and codewiki markers) only when at least one selected handbook parses and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
 
 - `/context init` and `clio-coder context init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
-- `clio-coder config inspect` shows the preload class in the `CLIO-CODER.md` entry's detail.
+- `clio-coder config inspect` shows the shared preload class and layer position on every effective handbook entry.
 - The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled.
 
 ## Context refresh
 
 `/context refresh` and `clio-coder context refresh` rebuild the structural codewiki
-and restamp `.clio-coder/state.json` without reading or writing `CLIO-CODER.md`. The CLI
+and restamp `.clio-coder/state.json` without reading or writing inherited handbooks or overrides. The CLI
 flag `--wiki` is the only refresh path that may update the Markdown wiki, and
 it only runs when an existing wiki metadata file is present. Regenerating or
-updating handbook prose stays with `/context init`.
+updating the exact local standard handbook stays with `/context init`.
 
 `clio-coder context init` is model-driven by default. The `--heuristic` flag is the sole deterministic flag for offline handbook generation. The `--propose` flag writes ignored drafts to `.clio-coder/proposals/`, `--apply` updates from the existing handbook, and `--rewrite` generates a fresh handbook.
 

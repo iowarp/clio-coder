@@ -31,7 +31,7 @@ describe("contracts/response-schema/tool-grammar-conflict", () => {
 	 */
 	it("claims nothing about runtimes outside the dialect", () => {
 		strictEqual(
-			responseSchemaConflictsWithTools({ id: "lmstudio-native", kind: "http", apiFamily: "lmstudio-native" }, 4),
+			responseSchemaConflictsWithTools({ id: "lmstudio", kind: "http", apiFamily: "openai-completions" }, 4),
 			false,
 		);
 		strictEqual(

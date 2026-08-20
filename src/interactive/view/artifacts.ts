@@ -1,6 +1,6 @@
 import { createReadStream, readFileSync, statSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import {
 	isReceiptIntegrity,
@@ -31,6 +31,8 @@ import {
 	readPromptCompileManifest,
 	type SessionPromptCompileRecord,
 } from "../../domains/session/prompt-manifest.js";
+import { foldSessionArtifacts, resolveSessionArtifactPath } from "../../domains/session/session-artifacts.js";
+import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { clockLocal } from "../format-time.js";
@@ -42,6 +44,7 @@ export type ViewArtifactCategory =
 	| "receipt"
 	| "dispatch"
 	| "task-ledger"
+	| "workspace"
 	| "tool-output"
 	| "protected-artifact"
 	| "compaction"
@@ -91,6 +94,7 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"receipt",
 	"dispatch",
 	"task-ledger",
+	"workspace",
 	"tool-output",
 	"protected-artifact",
 	"compaction",
@@ -815,6 +819,8 @@ function renderTaskLedgerGoals(lines: string[], heading: string, goals: Readonly
 	for (const goal of goals) {
 		const parent = goal.parentGoalId ? ` parent ${goal.parentGoalId}` : "";
 		lines.push(`- [${goal.status}] ${goal.id} ${goal.title}${parent}`);
+		if (goal.origin) lines.push(`  - origin: ${goal.origin}`);
+		if (goal.userTaskId) lines.push(`  - operator task: ${goal.userTaskId}`);
 		if (goal.description) lines.push(`  - description: ${goal.description}`);
 	}
 }
@@ -842,6 +848,7 @@ function renderTaskLedgerMarkdown(entry: TaskLedgerEntry): string[] {
 		`- timestamp: ${entry.timestamp}`,
 		`- status: ${taskLedgerStatusSummary(entry)}`,
 	];
+	if (entry.boardId) lines.push(`- board id: ${entry.boardId}`);
 	renderTaskLedgerGoals(lines, "## Board Goals", entry.goals);
 	renderTaskLedgerGoals(lines, "## Subgoals", entry.subgoals);
 	lines.push("", "## Active Runs");
@@ -873,9 +880,24 @@ export class TaskLedgerArtifactProvider implements ArtifactProvider {
 				...(path ? { path } : {}),
 				searchText: [
 					entry.turnId,
+					entry.boardId ?? "",
 					...entry.activeRunIds,
-					...entry.goals.flatMap((goal) => [goal.id, goal.title, goal.description ?? "", goal.parentGoalId ?? ""]),
-					...entry.subgoals.flatMap((goal) => [goal.id, goal.title, goal.description ?? "", goal.parentGoalId ?? ""]),
+					...entry.goals.flatMap((goal) => [
+						goal.id,
+						goal.title,
+						goal.description ?? "",
+						goal.parentGoalId ?? "",
+						goal.origin ?? "agent",
+						goal.userTaskId ?? "",
+					]),
+					...entry.subgoals.flatMap((goal) => [
+						goal.id,
+						goal.title,
+						goal.description ?? "",
+						goal.parentGoalId ?? "",
+						goal.origin ?? "agent",
+						goal.userTaskId ?? "",
+					]),
 					...entry.requiredValidationEvidence.flatMap((item) => [
 						item.id,
 						item.description,
@@ -889,6 +911,93 @@ export class TaskLedgerArtifactProvider implements ArtifactProvider {
 					lines: renderTaskLedgerMarkdown(entry),
 				}),
 			}));
+	}
+}
+
+function workspaceArtifactFormat(path: string): ViewArtifactFormat {
+	const lower = path.toLowerCase();
+	return lower.endsWith(".md") || lower.endsWith(".markdown") ? "markdown" : "text";
+}
+
+class WorkspaceArtifactContainmentError extends Error {}
+
+async function canonicalWorkspaceArtifactPath(path: string, workspace: string): Promise<string> {
+	// Resolve both sides from the live filesystem for every load. The artifact
+	// row is durable, but neither an earlier lexical check nor an earlier realpath
+	// result is authority after a symlink has changed.
+	const canonicalWorkspace = await realpath(workspace);
+	const canonicalTarget = await realpath(path);
+	const rel = relative(canonicalWorkspace, canonicalTarget);
+	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+		throw new WorkspaceArtifactContainmentError("canonical target is outside the recorded workspace");
+	}
+	return canonicalTarget;
+}
+
+async function loadWorkspaceArtifact(
+	path: string,
+	workspace: string,
+	recordedAt: string,
+): Promise<ViewArtifactLoadResult> {
+	try {
+		const canonicalPath = await canonicalWorkspaceArtifactPath(path, workspace);
+		const { lines } = await readTextFileLinesCapped(canonicalPath);
+		return { lines, format: workspaceArtifactFormat(path) };
+	} catch (error) {
+		const err = error as NodeJS.ErrnoException;
+		if (err.code === "ENOENT") {
+			return { lines: [`file no longer on disk (recorded at ${recordedAt})`], format: "text" };
+		}
+		if (error instanceof WorkspaceArtifactContainmentError) {
+			return { lines: [`refusing to read ${path}: ${error.message}`], format: "text" };
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		return { lines: [`unable to read ${path}: ${message}`], format: "text" };
+	}
+}
+
+/** Files successfully produced by artifact/write/edit on the active session branch. */
+export class WorkspaceArtifactProvider implements ArtifactProvider {
+	readonly category = "workspace" as const;
+	private readonly entries: ReadonlyArray<SessionEntry>;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {
+		const entries = [...sessionEntries(deps)];
+		this.entries = filterEntriesToActivePath(entries, deps.sessionMeta?.pinnedLeafTurnId ?? undefined);
+	}
+
+	async list(): Promise<ViewArtifact[]> {
+		const workspace = this.deps.sessionMeta?.cwd;
+		if (!workspace) return [];
+		return foldSessionArtifacts(this.entries, { workspace }).flatMap((artifact) => {
+			const path = resolveSessionArtifactPath(artifact.path, workspace);
+			if (path === null) return [];
+			const kind = artifact.artifactKind ? ` · ${artifact.artifactKind}` : "";
+			const overwriteLabel = `${artifact.overwrites} overwrite${artifact.overwrites === 1 ? "" : "s"}`;
+			return [
+				{
+					id: `workspace:${path}`,
+					category: this.category,
+					title: safeTitle(`${artifact.path} · ${artifact.tool}${kind}`, artifact.path),
+					timestamp: parseTime(artifact.timestamp),
+					sizeBytes: maybeSizeBytes(path),
+					path,
+					description: `${artifact.tool}${kind} · ${overwriteLabel}`,
+					toolName: artifact.tool,
+					searchText: [
+						artifact.path,
+						path,
+						basename(path),
+						artifact.tool,
+						artifact.artifactKind ?? "",
+						overwriteLabel,
+						String(artifact.overwrites),
+						artifact.turnId,
+					].filter(isNonEmptyString),
+					load: () => loadWorkspaceArtifact(path, workspace, artifact.timestamp),
+				},
+			];
+		});
 	}
 }
 
@@ -1310,6 +1419,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		new ReceiptArtifactProvider(deps),
 		new DispatchArtifactProvider(deps),
 		new TaskLedgerArtifactProvider(deps),
+		new WorkspaceArtifactProvider(deps),
 		new ToolOutputArtifactProvider(deps),
 		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),

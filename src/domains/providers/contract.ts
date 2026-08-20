@@ -1,8 +1,9 @@
 import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
+import type { AuthOperationOptions } from "../../engine/types.js";
 import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
-import type { ProbeModelStatus, RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { ProbeModelStatus, ProbeSurfaceMap, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 /**
@@ -54,6 +55,8 @@ export interface TargetStatus {
 	probeModelId?: string | null;
 	/** Diagnostic notes from the last probe (e.g. wire-model mismatch warnings). */
 	probeNotes?: ReadonlyArray<string>;
+	/** Inference and management surfaces selected by the last successful probe. */
+	probeSurfaces?: Readonly<ProbeSurfaceMap>;
 	/** Ids returned by the last successful probeModels() call. */
 	discoveredModels: ReadonlyArray<string>;
 	/**
@@ -85,8 +88,12 @@ export interface ProvidersContract {
 	/** Live liveness + probeModels sweep. */
 	probeAllLive(): Promise<void>;
 
-	/** Probe a single target live. Null when the id is not in settings.targets. */
-	probeTarget(id: string): Promise<TargetStatus | null>;
+	/**
+	 * Probe a single target live. Null when the id is not in settings.targets.
+	 * `reasoning: false` skips an inference-based reasoning-capability probe while
+	 * retaining the target's liveness and model-catalog checks.
+	 */
+	probeTarget(id: string, options?: { reasoning?: boolean }): Promise<TargetStatus | null>;
 
 	/** Clear in-memory live connection state for a configured target. */
 	disconnectTarget(id: string): TargetStatus | null;
@@ -114,7 +121,11 @@ export interface ProvidersContract {
 	 */
 	auth: {
 		statusForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): AuthStatus;
-		resolveForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
+		resolveForTarget(
+			target: TargetDescriptor,
+			runtime: RuntimeDescriptor,
+			options?: AuthOperationOptions,
+		): Promise<AuthResolution>;
 		getStored(providerId: string): AuthCredential | null;
 		listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }>;
 		setApiKey(providerId: string, key: string): void;

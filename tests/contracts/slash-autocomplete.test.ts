@@ -56,13 +56,6 @@ describe("contracts/slash-autocomplete", () => {
 		strictEqual(skillItems.length, 0);
 	});
 
-	it("lists every skill once a name separator follows /skill (colon)", async () => {
-		const suggestions = await suggestionsFor("/skill:");
-		const values = (suggestions?.items ?? []).map((item) => item.value);
-		ok(values.includes("skill:arxiv-literature"));
-		ok(values.includes("skill:find-skills"));
-	});
-
 	it("lists every skill once a name separator follows /skill (space)", async () => {
 		const suggestions = await suggestionsFor("/skill ");
 		const values = (suggestions?.items ?? []).map((item) => item.value);
@@ -71,27 +64,25 @@ describe("contracts/slash-autocomplete", () => {
 	});
 
 	it("filters skill-name suggestions by the typed prefix after the separator", async () => {
-		const suggestions = await suggestionsFor("/skill:fi");
+		const suggestions = await suggestionsFor("/skill fi");
 		const values = (suggestions?.items ?? []).map((item) => item.value);
 		ok(values.includes("skill:find-skills"));
 		ok(!values.includes("skill:arxiv-literature"));
 	});
 
-	/**
-	 * An alias is a real invocation: /exit, /ctx, /compact and /models all run.
-	 * Completion built its list from canonical names only, so the spelling
-	 * `/help` teaches offered nothing back and read as though it did not exist.
-	 */
-	it("offers alias spellings, because typing one of them runs the command", async () => {
-		for (const [typed, alias] of [
+	it("never offers retired command aliases", async () => {
+		for (const [typed, retired] of [
 			["/exi", "exit"],
 			["/ct", "ctx"],
 			["/comp", "compact"],
 			["/model", "models"],
+			["/conf", "config"],
 		] as const) {
 			const values = ((await suggestionsFor(typed))?.items ?? []).map((item) => item.value);
-			ok(values.includes(alias), `${typed} does not offer ${alias}: ${values.join(", ")}`);
+			ok(!values.includes(retired), `${typed} offered retired /${retired}: ${values.join(", ")}`);
 		}
+		strictEqual(await suggestionsFor("/skill:fi"), null);
+		strictEqual(await suggestionsFor("/skills:fi"), null);
 	});
 
 	it("presents bare slash as canonical commands ordered by command group", async () => {
@@ -102,22 +93,13 @@ describe("contracts/slash-autocomplete", () => {
 				.map((command) => command.name),
 		);
 		deepStrictEqual(values, expected, "the palette contains canonical commands in group order");
-		for (const alias of ["exit", "ctx", "compact", "models"]) {
-			ok(!values.includes(alias), `bare slash does not list alias /${alias}`);
+		for (const retired of ["exit", "ctx", "compact", "models", "config", "skill:", "skills:"]) {
+			ok(!values.includes(retired), `bare slash does not list retired /${retired}`);
 		}
 	});
 
-	it("surfaces an alias only when the typed command stem matches it", async () => {
-		const unrelated = ((await suggestionsFor("/c"))?.items ?? []).map((item) => item.value);
-		ok(unrelated.includes("compact"), `matching alias remains visible: ${unrelated.join(", ")}`);
-		ok(!unrelated.includes("exit"), `unmatched alias stays hidden: ${unrelated.join(", ")}`);
-	});
-
-	it("ellipsizes composed command and alias descriptions before the popup can hard-clip them", async () => {
-		const items = [
-			...((await suggestionsFor("/"))?.items ?? []),
-			...((await suggestionsFor("/c"))?.items ?? []).filter((item) => item.value === "ctx"),
-		];
+	it("ellipsizes canonical command descriptions before the popup can hard-clip them", async () => {
+		const items = (await suggestionsFor("/"))?.items ?? [];
 		const descriptions = items.flatMap((item) => (item.description ? [item.description] : []));
 		ok(descriptions.length > 0);
 		for (const description of descriptions) {
@@ -125,29 +107,20 @@ describe("contracts/slash-autocomplete", () => {
 		}
 		const truncated = descriptions.filter((description) => description.endsWith("…"));
 		ok(truncated.length > 0, "the contract exercises composed-description truncation");
-		for (const name of ["context", "output", "ctx"]) {
+		for (const name of ["context", "output"]) {
 			const description = items.find((item) => item.value === name)?.description;
 			ok(description?.endsWith("…"), `/${name} truncation ends in an ellipsis instead of a mid-token hard clip`);
 		}
 	});
 
-	it("preserves canonical subcommand and alias argument-stem completion", async () => {
+	it("preserves canonical subcommand argument-stem completion", async () => {
 		const canonical = ((await suggestionsFor("/context in"))?.items ?? []).map((item) => item.value);
 		deepStrictEqual(canonical, ["init"], "canonical subcommand stem completes");
 
-		const alias = ((await suggestionsFor("/ctx re"))?.items ?? []).map((item) => item.value);
-		deepStrictEqual(alias, ["refresh", "reset"], "alias invocation preserves argument-stem completion");
+		strictEqual(await suggestionsFor("/ctx re"), null, "retired aliases have no argument completions");
 	});
 
-	it("ranks the canonical spelling above the alias that stands for it", async () => {
-		const values = ((await suggestionsFor("/model"))?.items ?? []).map((item) => item.value);
-		ok(values.indexOf("model") < values.indexOf("models"), `got: ${values.join(", ")}`);
-	});
-
-	// The skill branch owns everything after the colon and offers skill names
-	// there. Listing the bare prefixes as commands would put two near identical
-	// rows in front of it.
-	it("keeps the colon skill prefixes out of the command list", async () => {
+	it("keeps retired colon skill prefixes out of the command list", async () => {
 		const values = ((await suggestionsFor("/ski"))?.items ?? []).map((item) => item.value);
 		ok(values.includes("skill"), `the canonical command is offered: ${values.join(", ")}`);
 		ok(!values.includes("skill:"), `got: ${values.join(", ")}`);

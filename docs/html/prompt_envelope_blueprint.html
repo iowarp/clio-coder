@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder - Prompt Envelope &amp; Tools Blueprint</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Prompt Icon</title>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Prompt Envelope &amp; Tools Architecture</h1>
+          <p>Layered system prompts, shell-style template expansion, handbook subtree boundaries, and seven tool planes</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Populated dynamically by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('prompt-compilation')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Prompt Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path></svg>
+            System Prompt Compilation
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('templates-overrides')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Templates Icon</title><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+            Templates &amp; Handbook Overrides
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('tool-planes')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Planes Icon</title><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            Seven Planes &amp; Twenty Tools
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('observation-envelope')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Observation Icon</title><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            Observation Envelope &amp; Budgets
+          </button>
+        </div>
+
+        <!-- TAB 1: SYSTEM PROMPT COMPILATION -->
+        <div class="tab-pane active" id="pane-prompt-compilation">
+          <div class="glass-card">
+            <h2>One System Prompt Per Session</h2>
+            <p>The chat loop compiles one provider-facing system prompt per session. The compile key is <code>target|model|autonomy|sessionId|workingContextPaths</code>, with paths sorted before hashing into the key.</p>
+            <p>The compiled prompt is reused byte-for-byte on ordinary submissions. When path-scoped project rules trigger a recompile, the session ledger records a <code>promptRecompiled</code> entry with previous/new hashes and token estimates.</p>
+          </div>
+
+          <h2>Fragment Layering Architecture</h2>
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Fragment Category</th>
+                <th>Fragment Names</th>
+                <th>Admission &amp; Gating Condition</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Constitutional</strong></td>
+                <td><code>identity.clio</code>, <code>operating.contract</code></td>
+                <td>Unconditional. Renders for every reader without mentioning tool names.</td>
+              </tr>
+              <tr>
+                <td><strong>Delegation &amp; Skills</strong></td>
+                <td><code>operating.delegation</code>, <code>operating.skills</code></td>
+                <td>Rendered only when <code>dispatch</code> or <code>context</code> are on the session tool surface.</td>
+              </tr>
+              <tr>
+                <td><strong>Self-Awareness &amp; Docs</strong></td>
+                <td><code>identity.self-awareness</code>, <code>identity.docs-routing</code></td>
+                <td>Self-awareness is unconditional; docs-routing calls <code>context(scope="docs")</code> when context tool is active.</td>
+              </tr>
+              <tr>
+                <td><strong>Worker Contract</strong></td>
+                <td><code>operating.worker</code></td>
+                <td>Rendered exclusively for dispatched worker subagents, which never see coordinator fragments.</td>
+              </tr>
+              <tr>
+                <td><strong>Autonomy &amp; Safety</strong></td>
+                <td><code>safety.&lt;level&gt;</code></td>
+                <td>Formulates permissions in action-class terms (read, write, execute, <code>system_modify</code>, <code>git_destructive</code>).</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>Dynamic User Message Ordering</h2>
+          <p>Variable task context is delivered via structured, dynamic user messages rather than system prompt mutations:</p>
+          <pre><code>1. Project Context (CLIO-CODER.md / codewiki summary)
+2. Safety Posture Reminder (action-class rules)
+3. Memory Injections (approved task bank / lessons)
+4. Dispatch Briefing (bounded, untrusted data envelope, &le;12KB)
+5. Pipeline Input (upstream worker artifacts)
+6. Operator Task Prompt (user's submitted task)</code></pre>
+        </div>
+
+        <!-- TAB 2: TEMPLATES & HANDBOOK OVERRIDES -->
+        <div class="tab-pane" id="pane-templates-overrides">
+          <h2>Prompt Template Expansion ($1..$9, $@, $ARGUMENTS)</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Shell-Style Parameter Parsing</h3>
+              <p>Templates expand into the operator's message prior to submission:</p>
+              <ul>
+                <li>Single and double quotes preserve whitespace within arguments.</li>
+                <li><code>$1</code> through <code>$9</code> bind to positional arguments.</li>
+                <li><code>$@</code> and <code>$ARGUMENTS</code> join all arguments with single spaces.</li>
+                <li>Unsupplied positional parameters expand to empty strings.</li>
+                <li>Collisions with built-in slash commands fail closed and are excluded from <code>/prompts</code>.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Template Expansion Example</h3>
+              <pre><code># Template body:
+Review PR #$1 on branch $2 with flags: $ARGUMENTS
+
+# Invocations:
+/review 104 feat/auth --verbose
+# Expands to:
+Review PR #104 on branch feat/auth with flags: 104 feat/auth --verbose</code></pre>
+            </div>
+          </div>
+
+          <h2>Directory-Scoped Handbook Overrides (`CLIO-CODER.override.md`)</h2>
+          <div class="glass-card">
+            <h3>Subtree Isolation Boundaries</h3>
+            <ul>
+              <li><code>CLIO-CODER.override.md</code> replaces inherited root instructions for its directory and all subdirectories.</li>
+              <li>Sibling directories outside the subtree continue to inherit from the root handbook or their own local overrides.</li>
+              <li>Subdirectories within the subtree may supply narrower instructions with additional override files.</li>
+              <li>Prompt blocks preserve explicit source paths for provenance.</li>
+              <li>Malformed override files fail closed; context resets never delete override files.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- TAB 3: SEVEN PLANES & TWENTY TOOLS -->
+        <div class="tab-pane" id="pane-tool-planes">
+          <h2>The Seven Policy Planes &amp; Twenty Tools</h2>
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Plane</th>
+                <th>Tools</th>
+                <th>Action Class</th>
+                <th>Concurrency</th>
+                <th>Default Result Cap</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>OBSERVE</strong></td>
+                <td><code>read</code>, <code>grep</code>, <code>find</code>, <code>ls</code>, <code>code_nav</code>, <code>context</code>, <code>credential_present</code></td>
+                <td><code>read</code></td>
+                <td>Parallel</td>
+                <td>8 KB &ndash; 50 KB (Envelope bounded)</td>
+              </tr>
+              <tr>
+                <td><strong>MUTATE</strong></td>
+                <td><code>write</code>, <code>edit</code></td>
+                <td><code>write</code></td>
+                <td>Sequential</td>
+                <td>8 KB (Carries numbered word-diff)</td>
+              </tr>
+              <tr>
+                <td><strong>EXECUTE</strong></td>
+                <td><code>bash</code>, <code>verify</code></td>
+                <td><code>execute</code></td>
+                <td>Sequential</td>
+                <td>16 KB (AI_AGENT=clio-coder in env)</td>
+              </tr>
+              <tr>
+                <td><strong>EXECUTE</strong></td>
+                <td><code>git</code> (status / diff / log)</td>
+                <td><code>read</code></td>
+                <td>Parallel</td>
+                <td>16 KB</td>
+              </tr>
+              <tr>
+                <td><strong>ORCHESTRATE</strong></td>
+                <td><code>dispatch</code>, <code>steer</code>, <code>tasks</code>, <code>ledger</code></td>
+                <td><code>dispatch</code> / <code>read</code></td>
+                <td>Sequential</td>
+                <td>16 KB</td>
+              </tr>
+              <tr>
+                <td><strong>ORCHESTRATE</strong></td>
+                <td><code>monitor</code></td>
+                <td><code>read</code></td>
+                <td>Parallel</td>
+                <td>16 KB</td>
+              </tr>
+              <tr>
+                <td><strong>RETRIEVE</strong></td>
+                <td><code>web_fetch</code></td>
+                <td><code>read</code></td>
+                <td>Parallel</td>
+                <td>16 KB (max_bytes default 600KB)</td>
+              </tr>
+              <tr>
+                <td><strong>INTERACT</strong></td>
+                <td><code>ask_user</code></td>
+                <td><code>read</code></td>
+                <td>Sequential</td>
+                <td>20 KB</td>
+              </tr>
+              <tr>
+                <td><strong>ARTIFACT</strong></td>
+                <td><code>artifact</code></td>
+                <td><code>write</code></td>
+                <td>Sequential</td>
+                <td>8 KB</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- TAB 4: OBSERVATION ENVELOPE -->
+        <div class="tab-pane" id="pane-observation-envelope">
+          <h2>The Observation Envelope (OBSERVE Tools)</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Envelope Guarantees</h3>
+              <ol style="margin-left: 1.25rem; font-size: 0.875rem; color: var(--text-muted);">
+                <li><strong>One Notice Line:</strong> <code>[&lt;tool&gt;: &lt;shown&gt;/&lt;total&gt; &lt;unit&gt; shown (&lt;shownSize&gt; of &lt;totalSize&gt;) | full: &lt;offloadPath&gt; | next: &lt;exact-call&gt;]</code></li>
+                <li><strong>Offload on Truncation:</strong> Spills complete output to <code>&lt;stateDir&gt;/scratch/&lt;sessionId&gt;/&lt;toolCallId&gt;.txt</code>.</li>
+                <li><strong>Always-Valid JSON:</strong> Over-cap JSON is replaced by a parseable stub: <code>{"error":"result exceeded cap","offloadPath":"...","next":"..."}</code></li>
+                <li><strong>192 KB Turn Budget Pool:</strong> Shared across all 6 envelope tools per turn; prevents context exhaustion.</li>
+              </ol>
+            </div>
+            <div class="glass-card">
+              <h3>Per-Tool Self Caps</h3>
+              <table class="ref-table" style="font-size: 0.82rem;">
+                <thead>
+                  <tr>
+                    <th>Tool</th>
+                    <th>Self Cap</th>
+                    <th>Registry Backstop</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td><code>read</code></td><td>50 KB</td><td>52 KB</td></tr>
+                  <tr><td><code>grep</code> (content)</td><td>16 KB</td><td>18 KB</td></tr>
+                  <tr><td><code>grep</code> (files/count)</td><td>8 KB</td><td>10 KB</td></tr>
+                  <tr><td><code>find</code> / <code>ls</code></td><td>8 KB</td><td>10 KB</td></tr>
+                  <tr><td><code>code_nav</code></td><td>16 KB</td><td>18 KB</td></tr>
+                  <tr><td><code>context</code> (docs)</td><td>16 KB</td><td>18 KB</td></tr>
+                  <tr><td><code>context</code> (skills/ws)</td><td>50 KB</td><td>52 KB</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="exit_codes_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Exit Codes &amp; Output Contracts</span>
+          </a>
+          <a href="troubleshooting_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Troubleshooting</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Prompt Envelope Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const pane = document.getElementById(`pane-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
+        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
+      });
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+  </script>
+</body>
+</html>

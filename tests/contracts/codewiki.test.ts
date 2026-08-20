@@ -1125,9 +1125,33 @@ describe("contracts/codewiki", () => {
 		strictEqual(hasSymbol(codewiki, "main.go", "localVar"), false);
 	});
 
-	it("awaits the final codewiki write during context extension stop", async () => {
+	it("awaits the final incremental codewiki write during context extension stop", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
-		writeFileSync(join(scratch, "src", "index.ts"), "export const stopWritten = true;\n", "utf8");
+		writeFileSync(join(scratch, "src", "index.ts"), "export const seeded = true;\n", "utf8");
+		const initial = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		writeIndexedCodewiki(scratch, initial);
+		const originalCwd = process.cwd();
+		process.chdir(scratch);
+		try {
+			const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+			await bundle.extension.start();
+			writeFileSync(join(scratch, "src", "late.ts"), "export const stopWritten = true;\n", "utf8");
+			// Not awaited through waitForCodewiki on purpose: stop() must drain the
+			// incremental queue itself before the process is allowed to exit.
+			bundle.contract.noteFileChanges(["src/late.ts"], scratch);
+			await bundle.extension.stop?.();
+		} finally {
+			process.chdir(originalCwd);
+		}
+
+		const codewiki = readCodewiki(scratch);
+		ok(codewiki);
+		ok(hasSymbol(codewiki, "src/late.ts", "stopWritten", "const"));
+	});
+
+	it("leaves a never-indexed directory alone across context extension start and stop", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const untouched = true;\n", "utf8");
 		const originalCwd = process.cwd();
 		process.chdir(scratch);
 		try {
@@ -1138,9 +1162,9 @@ describe("contracts/codewiki", () => {
 			process.chdir(originalCwd);
 		}
 
-		const codewiki = readCodewiki(scratch);
-		ok(codewiki);
-		ok(hasSymbol(codewiki, "src/index.ts", "stopWritten", "const"));
+		// Indexing is opt-in; exiting in a directory is not a request to index it (issue #99).
+		strictEqual(existsSync(join(scratch, ".clio-coder")), false);
+		strictEqual(readCodewiki(scratch), null);
 	});
 
 	it("skips TS function-local functions, classes, and object-literal methods", async () => {

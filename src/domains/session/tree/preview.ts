@@ -21,10 +21,10 @@ import { stripTokenizerSentinels } from "../../../engine/strip-tokenizer-sentine
  * and optional label suffix. Callers that need a tighter budget can clamp
  * the output further.
  */
-export const TURN_PREVIEW_MAX_CHARS = 60;
+const TURN_PREVIEW_MAX_CHARS = 60;
 
 /** Minimal turn shape buildTurnPreview accepts. */
-export type TurnPreviewInput = Pick<ClioTurnRecord, "kind" | "payload">;
+type TurnPreviewInput = Pick<ClioTurnRecord, "kind" | "payload">;
 
 /**
  * Strip ANSI escape sequences. Tool outputs sometimes carry colour codes

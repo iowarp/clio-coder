@@ -1,14 +1,21 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
+import type { SessionArtifact } from "../../src/domains/session/session-artifacts.js";
+import type { SessionTaskHistoryBoard, TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
+import type { UserTask } from "../../src/domains/user-tasks/store.js";
 import { type Component, type OverlayHandle, type TUI, visibleWidth } from "../../src/engine/tui.js";
-import { formatTasksOverlayBodyLines, openTasksOverlay } from "../../src/interactive/tasks-overlay.js";
+import {
+	formatCompositeTasksOverlayBodyLines,
+	formatTasksOverlayBodyLines,
+	openTasksOverlay,
+} from "../../src/interactive/tasks-overlay.js";
 
 const ESC = "\x1b";
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 
 function board(overrides: Partial<TaskBoardSnapshot> = {}): TaskBoardSnapshot {
 	return {
+		boardId: "board-overlay",
 		title: "Ship the feature",
 		tasks: [
 			{ id: "t1", title: "design it", status: "pending" },
@@ -21,6 +28,16 @@ function board(overrides: Partial<TaskBoardSnapshot> = {}): TaskBoardSnapshot {
 
 function plainBody(snapshot: TaskBoardSnapshot | null, width = 84): string {
 	return stripAnsi(formatTasksOverlayBodyLines(snapshot, width).join("\n"));
+}
+
+function userTask(id: string, status: UserTask["status"] = "open"): UserTask {
+	return {
+		id,
+		title: `operator work ${id}`,
+		status,
+		createdAt: "2026-08-19T10:00:00.000Z",
+		updatedAt: "2026-08-19T10:00:00.000Z",
+	};
 }
 
 function overlayHandle(onHide: () => void = () => {}): OverlayHandle {
@@ -159,6 +176,186 @@ describe("contracts/tasks-overlay", () => {
 		// The derived evidence:<runId> suffix is gone; the id it echoed survives
 		// only inside the evidence prose the agent wrote.
 		ok(!body.includes("evidence:run-proof-123"), body);
+	});
+
+	it("renders all four sections with generation identity, exact origins, artifacts, and operator status", () => {
+		const current = board({
+			tasks: [
+				{ id: "t1", title: "agent work", status: "active", origin: "agent" },
+				{ id: "t2", title: "operator pickup", status: "pending", origin: "user", userTaskId: "u7" },
+			],
+		});
+		const history: SessionTaskHistoryBoard[] = [
+			{
+				boardId: current.boardId,
+				title: current.title,
+				tasks: current.tasks,
+				lastSnapshotAt: "2026-08-19T10:03:00.000Z",
+			},
+			{
+				boardId: "board-prior",
+				title: "Prior plan",
+				tasks: [
+					{ id: "t1", title: "prior proof", status: "completed", evidence: "contracts passed", origin: "agent" },
+					{ id: "t2", title: "unfinished old row", status: "active", origin: "agent" },
+				],
+				lastSnapshotAt: "2026-08-19T10:02:00.000Z",
+			},
+		];
+		const artifacts: SessionArtifact[] = [
+			{
+				path: ".clio-coder/artifacts/release.md",
+				tool: "artifact",
+				artifactKind: "report",
+				turnId: "turn-artifact",
+				timestamp: "2026-08-19T10:04:00.000Z",
+				overwrites: 0,
+			},
+		];
+		const text = stripAnsi(
+			formatCompositeTasksOverlayBodyLines({
+				board: current,
+				history,
+				artifacts,
+				userTasks: [userTask("u7", "picked")],
+				selectedIndex: 1,
+				workspace: process.cwd(),
+			}).join("\n"),
+		);
+		for (const heading of ["Tasks", "Task history", "Artifacts", "Operator tasks"]) ok(text.includes(heading), text);
+		ok(text.includes("operator pickup · operator u7"), text);
+		ok(text.includes("board-prior:t1 prior proof · agent · Prior plan"), text);
+		ok(text.includes("evidence contracts passed"), text);
+		ok(!text.includes("unfinished old row"), text);
+		ok(text.includes(".clio-coder/artifacts/release.md · artifact:report"), text);
+		ok(text.includes("u7   operator work u7 · picked"), text);
+	});
+
+	it("keeps every composite section within narrow widths", () => {
+		const lines = formatCompositeTasksOverlayBodyLines(
+			{
+				board: board({ title: "A current board title long enough to be clipped at narrow widths" }),
+				history: [],
+				artifacts: [
+					{
+						path: "a/very/long/path/to/an/operator/report-that-must-be-clipped.md",
+						tool: "artifact",
+						turnId: "turn-1",
+						timestamp: "2026-08-19T10:04:00.000Z",
+						overwrites: 0,
+					},
+				],
+				userTasks: [userTask("u1")],
+			},
+			34,
+		);
+		for (const line of lines) ok(visibleWidth(line) <= 34, `line overflowed: ${stripAnsi(line)}`);
+	});
+
+	it("captures expensive snapshots once, refreshes explicitly, and performs no I/O on repaint", () => {
+		const harness = fakeTui();
+		let boardReads = 0;
+		let sessionReads = 0;
+		let userReads = 0;
+		openTasksOverlay(
+			harness.tui,
+			() => {
+				boardReads += 1;
+				return board();
+			},
+			{
+				getSessionSnapshot: () => {
+					sessionReads += 1;
+					return { history: [], artifacts: [] };
+				},
+				getUserTasks: () => {
+					userReads += 1;
+					return [];
+				},
+			},
+		);
+		strictEqual(sessionReads, 1);
+		strictEqual(userReads, 1);
+		for (let index = 0; index < 25; index += 1) harness.component().render(80);
+		strictEqual(boardReads, 25, "only the cached live-board getter participates in repaint");
+		strictEqual(sessionReads, 1);
+		strictEqual(userReads, 1);
+		harness.component().handleInput?.("r");
+		strictEqual(sessionReads, 2);
+		strictEqual(userReads, 2);
+	});
+
+	it("applies add, hand, done, and drop only after successful store callbacks", () => {
+		const harness = fakeTui();
+		let tasks = [userTask("u1"), userTask("u2"), userTask("u3")];
+		const events: string[] = [];
+		const mutate = (id: string, status: UserTask["status"]): void => {
+			events.push(`${status}:${id}`);
+			tasks = tasks.map((task) => (task.id === id ? { ...task, status } : task));
+		};
+		openTasksOverlay(harness.tui, () => null, {
+			getUserTasks: () => tasks,
+			onAddUserTask: (title) => {
+				events.push(`add:${title}`);
+				tasks = [...tasks, { ...userTask("u4"), title }];
+			},
+			onHandUserTask: (id) => mutate(id, "handed"),
+			onDoneUserTask: (id) => mutate(id, "done"),
+			onDropUserTask: (id) => mutate(id, "dropped"),
+		});
+		const component = harness.component();
+		component.handleInput?.("h");
+		component.handleInput?.("\x1b[B");
+		component.handleInput?.("d");
+		component.handleInput?.("\x1b[B");
+		component.handleInput?.("x");
+		component.handleInput?.("a");
+		for (const char of "new operator work") component.handleInput?.(char);
+		component.handleInput?.("\r");
+		deepStrictEqual(events, ["handed:u1", "done:u2", "dropped:u3", "add:new operator work"]);
+		const rendered = stripAnsi(component.render(80).join("\n"));
+		ok(rendered.includes("u1   operator work u1 · handed"), rendered);
+		ok(rendered.includes("u2   operator work u2 · done"), rendered);
+		ok(rendered.includes("u3   operator work u3 · dropped"), rendered);
+		ok(rendered.includes("u4   new operator work · open"), rendered);
+	});
+
+	it("retains the old snapshot and reports a failed mutation", () => {
+		const harness = fakeTui();
+		openTasksOverlay(harness.tui, () => null, {
+			getUserTasks: () => [userTask("u1")],
+			onHandUserTask: () => {
+				throw new Error("sidecar unavailable");
+			},
+		});
+		harness.component().handleInput?.("h");
+		const rendered = stripAnsi(harness.component().render(80).join("\n"));
+		ok(rendered.includes("operator work u1 · open"), rendered);
+		ok(rendered.includes("sidecar unavailable"), rendered);
+	});
+
+	it("closes before opening an artifact by its exact recorded path", () => {
+		const harness = fakeTui();
+		const events: string[] = [];
+		const path = "reports/Release Notes.md";
+		openTasksOverlay(harness.tui, () => null, {
+			getSessionSnapshot: () => ({
+				history: [],
+				artifacts: [
+					{
+						path,
+						tool: "write",
+						turnId: "turn-1",
+						timestamp: "2026-08-19T10:04:00.000Z",
+						overwrites: 0,
+					},
+				],
+			}),
+			onClose: () => events.push("close"),
+			onOpenArtifact: (selectedPath) => events.push(`view:${selectedPath}`),
+		});
+		harness.component().handleInput?.("\r");
+		deepStrictEqual(events, ["close", `view:${path}`]);
 	});
 
 	it("preserves Escape close behavior", () => {

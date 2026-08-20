@@ -803,6 +803,32 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		strictEqual(emptyActivity, "ACTIVITY");
 	});
 
+	it("keeps the cached current-board progress and active row in the expanded footer", () => {
+		const activity = strip(
+			activityQuadrant(
+				{
+					statusText: null,
+					dispatchSummary: null,
+					toolTally: "none · 0✗",
+					dispatchRows: [],
+					lastTurn: null,
+					taskBoard: {
+						boardId: "board-footer",
+						title: "Operator work",
+						tasks: [
+							{ id: "t1", title: "done", status: "completed", origin: "agent" },
+							{ id: "t2", title: "verify release", status: "active", origin: "user", userTaskId: "u1" },
+						],
+						activeRunIds: [],
+					},
+				},
+				{ status: { ...status, phase: "idle" }, toolCounts: { tools: {}, errors: 0 } },
+			).join("\n"),
+		);
+		ok(activity.includes("tasks 1/2 done"), activity);
+		ok(activity.includes("● t2 verify release"), activity);
+	});
+
 	it("paints the dashboard header wordmark as a logotype: dim scaffolding around a bold accent C", () => {
 		const lines = renderFooterStatusLines(
 			expandedRenderState({

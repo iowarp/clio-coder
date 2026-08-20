@@ -7,7 +7,7 @@ export type PendingSkillRequestSource = "slash-command" | "selector" | "marketpl
  * reminder, and the operator-gate denial all cite this exact line so the
  * model learns a single protocol.
  */
-export const SKILL_SUGGESTION_ANCHOR = "Suggested skill: /skill:<name>";
+export const SKILL_SUGGESTION_ANCHOR = "Suggested skill: /skill <name>";
 
 /**
  * The part of the anchor a real reply keeps once `<name>` is substituted.

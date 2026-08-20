@@ -53,7 +53,7 @@ function estimateSummary(entry: BranchSummaryEntry | CompactionSummaryEntry): nu
 /**
  * Estimate the token load of a single session entry. Non-context-bearing
  * kinds (modelChange, thinkingLevelChange, fileEntry, sessionInfo,
- * label, protectedArtifact, taskLedger, workerRun) return 0 so they never
+ * label, protectedArtifact, taskLedger, decisionLedger, workerRun) return 0 so they never
  * distort the context budget.
  */
 export function estimateTokens(entry: SessionEntry): number {
@@ -76,6 +76,7 @@ export function estimateTokens(entry: SessionEntry): number {
 		case "label":
 		case "protectedArtifact":
 		case "taskLedger":
+		case "decisionLedger":
 		case "workerRun":
 			return 0;
 	}

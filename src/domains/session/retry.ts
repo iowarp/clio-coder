@@ -10,16 +10,17 @@
  *
  * This module is the pure building block for the Clio equivalent. It:
  *   1. Declares the RetrySettings shape and sensible defaults.
- *   2. Exposes a deterministic heuristic (`isRetryableErrorMessage`) that
- *      matches the transient error strings pi-ai providers actually emit.
+ *   2. Routes generic provider classification through pi-ai 0.84's
+ *      `isRetryableAssistantError`, retaining only Clio's local-model delta.
  *   3. Computes the backoff delay for a given attempt (`computeRetryDelayMs`)
  *      with the cap the settings declare; callers schedule the wait.
  *   4. Provides `createRetryCountdown` so the TUI can show seconds remaining
  *      and cancel a pending retry on `Esc` without coupling to a specific
  *      timer abstraction.
  *
- * No I/O, no pi-agent-core/pi-ai imports. The chat-loop wiring (which decides
- * whether an agent_end with stopReason "error" triggers a retry) lives in
+ * No I/O. The only engine dependency is the classifier re-exported by
+ * `src/engine/ai.ts`. The chat-loop wiring (which decides whether an
+ * agent_end with stopReason "error" triggers a retry) lives in
  * `src/interactive/chat-loop.ts` and consumes this module; keeping the two
  * split so the countdown can be exercised in unit tests without spinning up a
  * runtime.
@@ -27,6 +28,7 @@
 
 import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
+import { isEngineRetryableAssistantError } from "../../engine/ai.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
 
@@ -43,16 +45,6 @@ export const DEFAULT_RETRY_SETTINGS: RetrySettings = {
 };
 
 /**
- * Pattern list built from pi-mono's `_isRetryableError` regex (agent-session.ts).
- * Kept as a plain RegExp so the check is `O(1)` per assistant error message.
- * The match is case-insensitive: providers phrase the same error in mixed
- * case (Anthropic: "Overloaded", OpenRouter: "rate limited", Fireworks:
- * "connection error"), and we want all of them classified as transient.
- */
-const RETRYABLE_PATTERN =
-	/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|timed? out|timeout|terminated|retry delay/i;
-
-/**
  * A self-hosted server refusing a request because the model is not resident.
  *
  * Measured against LM Studio, which answers a request for an evicted model
@@ -61,7 +53,7 @@ const RETRYABLE_PATTERN =
  * llama-swap and Ollama phrase the same condition differently, so the pattern
  * covers the family rather than one vendor's wording.
  *
- * Deliberately not folded into {@link RETRYABLE_PATTERN}: this is transient in
+ * Deliberately kept outside pi's generic classifier: this is transient in
  * a different unit. A rate limit clears in a second or two; a 35B model loads
  * off disk in twenty to sixty, and retrying it on a rate limit's backoff burns
  * every attempt before the server is ready. `clio-coder run --target node-a --model
@@ -95,7 +87,7 @@ export function isModelLoadingErrorMessage(errorMessage: string | null | undefin
  */
 export function isRetryableErrorMessage(errorMessage: string | null | undefined): boolean {
 	if (!errorMessage || errorMessage.length === 0) return false;
-	return RETRYABLE_PATTERN.test(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
+	return isEngineRetryableAssistantError(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
 }
 
 /**
@@ -125,7 +117,7 @@ export function computeRetryDelayMs(
  * initial delay; `done` flips true when the deadline is reached; `cancelled`
  * flips true when a caller aborts via `cancel()` before the deadline.
  */
-export interface RetryCountdownState {
+interface RetryCountdownState {
 	attempt: number;
 	maxAttempts: number;
 	seconds: number;
@@ -133,7 +125,7 @@ export interface RetryCountdownState {
 	cancelled: boolean;
 }
 
-export interface RetryCountdownOptions {
+interface RetryCountdownOptions {
 	/** 1-indexed attempt id displayed to the user, e.g. "Retrying (1/3)". */
 	attempt: number;
 	/** Upper bound displayed alongside `attempt`. */

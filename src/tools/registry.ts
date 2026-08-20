@@ -188,6 +188,14 @@ export interface ToolInvokeOptions {
 	 * one-minute test run in the transcript, the receipt, and toolStats.
 	 */
 	onParked?: (parkedMs: number) => void;
+	/**
+	 * Display-only cumulative progress supplied by pi-agent-core's
+	 * `AgentToolUpdateCallback`. Tool bodies may report the result snapshot the
+	 * operator should see while the call runs. Admission, final result shaping,
+	 * telemetry, and ledger persistence continue to consume only the terminal
+	 * return value.
+	 */
+	onUpdate?: (partialResult: ToolResult) => void;
 }
 
 export type AskUserInterviewStatus = "idle" | "active" | "complete" | "cancelled";

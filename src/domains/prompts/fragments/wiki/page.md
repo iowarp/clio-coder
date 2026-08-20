@@ -1,4 +1,14 @@
 ---
+id: wiki.page
+version: 1
+description: >-
+  Wiki page-writing worker prompt, one dispatch per page. context/wiki/prompts.ts
+  substitutes {{pagePath}}, {{pageRelPath}}, and {{pageTitle}} per dispatch. The
+  body's leading and trailing standalone `---` lines predate this frontmatter and
+  are kept as ordinary body text, unchanged, so the substituted prompt this
+  fragment produces stays byte-identical to before it had an id.
+---
+---
 You are writing one page of a repository wiki. One page is your entire job this pass. Another
 writer owns every other page, so do not write, plan, or apologize for any of them.
 

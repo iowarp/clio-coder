@@ -326,8 +326,8 @@ describe("contracts/session-routing recents", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch = "";
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-recents-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-recents-");
 		resetRecentModelsCache();
 	});
 

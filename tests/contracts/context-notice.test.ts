@@ -33,7 +33,7 @@ function context(): DomainContext {
 
 describe("contracts/context startup notice", () => {
 	it("suppresses the missing CLIO-CODER.md notice when context files are disabled", async () => {
-		const scratchHome = newScratchClioHome("clio-context-notice-");
+		const scratchHome = await newScratchClioHome("clio-context-notice-");
 		const cwd = mkdtempSync(join(tmpdir(), "clio-context-project-"));
 		const previousCwd = process.cwd();
 		try {

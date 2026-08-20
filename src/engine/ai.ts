@@ -13,7 +13,6 @@ import {
 	type Api,
 	type AssistantMessage,
 	fauxAssistantMessage,
-	fauxToolCall,
 	type KnownProvider,
 	type Model,
 	type ModelThinkingLevel,
@@ -21,9 +20,9 @@ import {
 	cleanupSessionResources as piCleanupSessionResources,
 	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
-	parseJsonWithRepair as piParseJsonWithRepair,
-	parseStreamingJson as piParseStreamingJson,
+	isRetryableAssistantError as piIsRetryableAssistantError,
 	validateToolArguments as piValidateToolArguments,
+	StringEnum,
 	type Tool,
 	type ToolCall,
 	type Usage,
@@ -39,7 +38,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import type { EngineModel } from "./types.js";
 
-export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
+export { StringEnum };
 
 export const stream = piStream;
 
@@ -152,20 +151,28 @@ export function isEngineContextOverflow(errorMessage: string, contextWindow?: nu
 	return piIsContextOverflow(message, contextWindow);
 }
 
+/** Classify one provider error through pi-ai without leaking its message shape across the engine boundary. */
+export function isEngineRetryableAssistantError(errorMessage: string): boolean {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: "clio",
+		provider: "clio",
+		model: "unknown",
+		usage: emptyUsage(),
+		stopReason: "error",
+		errorMessage,
+		timestamp: Date.now(),
+	};
+	return piIsRetryableAssistantError(message);
+}
+
 export function validateEngineToolArguments(tool: Tool, toolCall: ToolCall): unknown {
 	return piValidateToolArguments(tool, toolCall);
 }
 
 export function calculateEngineCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
 	return piCalculateCost(model, usage);
-}
-
-export function parseEngineJsonWithRepair<T>(json: string): T {
-	return piParseJsonWithRepair<T>(json);
-}
-
-export function parseEngineStreamingJson<T = Record<string, unknown>>(partialJson: string | undefined): T {
-	return piParseStreamingJson<T>(partialJson);
 }
 
 /**

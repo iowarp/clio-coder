@@ -8,10 +8,6 @@ import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
 
 const roots: string[] = [];
 
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function scratch(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-file-refs-"));
 	roots.push(root);
@@ -21,6 +17,14 @@ function scratch(): string {
 }
 
 describe("contracts/file references working paths", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("returns referenced paths for inline and explicit file context", async () => {
 		const cwd = scratch();
 		const target = join(cwd, "src", "index.ts");

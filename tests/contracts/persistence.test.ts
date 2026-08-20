@@ -1,11 +1,17 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { isSkillActivation } from "../../src/core/skill-activation.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { isSessionEntry, isSessionHeader, type SkillActivationEntry } from "../../src/domains/session/entries.js";
+import {
+	type DecisionLedgerEntry,
+	isSessionEntry,
+	isSessionHeader,
+	type SessionInfoEntry,
+	type SkillActivationEntry,
+} from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import {
 	appendPromptCompileRecord,
@@ -13,6 +19,7 @@ import {
 	readPromptCompileManifest,
 	readPromptCompileRecords,
 } from "../../src/domains/session/prompt-manifest.js";
+import { foldTaskBoard } from "../../src/domains/session/task-board.js";
 import {
 	type ClioTurnRecord,
 	createSession,
@@ -42,8 +49,8 @@ function payloadText(payload: unknown): string | undefined {
 describe("contracts/persistence", () => {
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-persistence-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-persistence-");
 	});
 
 	afterEach(() => {
@@ -160,6 +167,123 @@ describe("contracts/persistence", () => {
 		};
 		strictEqual(isSessionEntry(messageEntry), true);
 		strictEqual(isSessionEntry({ kind: "invalid" }), false);
+
+		const decisionEntry: DecisionLedgerEntry = {
+			kind: "decisionLedger",
+			turnId: "decision-ledger-1",
+			parentTurnId: "user-1",
+			timestamp: "2026-04-17T00:03:00.000Z",
+			interviewId: "interview-1",
+			interviewStatus: "complete",
+			startedAt: "2026-04-17T00:00:00.000Z",
+			endedAt: "2026-04-17T00:03:00.000Z",
+			roundCount: 1,
+			decisions: [
+				{
+					key: "scope",
+					value: "focused",
+					status: "active",
+					decidedAt: "2026-04-17T00:01:00.000Z",
+				},
+			],
+		};
+		strictEqual(isSessionEntry(decisionEntry), true);
+		strictEqual(isSessionEntry({ ...decisionEntry, roundCount: -1 }), false);
+		strictEqual(isSessionEntry({ ...decisionEntry, interviewStatus: "active" }), false);
+		strictEqual(
+			isSessionEntry({ ...decisionEntry, decisions: [{ ...decisionEntry.decisions[0], key: "Bad key" }] }),
+			false,
+		);
+		strictEqual(
+			isSessionEntry({
+				...decisionEntry,
+				decisions: [{ ...decisionEntry.decisions[0], status: "superseded" }],
+			}),
+			false,
+			"a superseded record requires revisedAt",
+		);
+		strictEqual(
+			isSessionEntry({
+				...decisionEntry,
+				decisions: [{ ...decisionEntry.decisions[0], correction: "new direction" }],
+			}),
+			false,
+			"an active record cannot carry correction fields",
+		);
+	});
+
+	it("rejects contradictory task provenance before persistence and refold", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+		const base = {
+			kind: "taskLedger" as const,
+			parentTurnId: null,
+			boardId: "board-provenance",
+			goals: [{ id: "board", title: "Provenance", status: "active" as const }],
+			activeRunIds: [],
+			requiredValidationEvidence: [],
+		};
+		contract.appendEntry({
+			...base,
+			subgoals: [{ id: "t1", title: "legacy agent task", status: "pending" }],
+		});
+
+		for (const subgoal of [
+			{ id: "t2", title: "missing user id", status: "pending" as const, origin: "user" as const },
+			{ id: "t2", title: "empty user id", status: "pending" as const, origin: "user" as const, userTaskId: "" },
+			{ id: "t2", title: "malformed user id", status: "pending" as const, origin: "user" as const, userTaskId: "t1" },
+			{ id: "t2", title: "agent with user id", status: "pending" as const, origin: "agent" as const, userTaskId: "u1" },
+			{ id: "t2", title: "legacy with user id", status: "pending" as const, userTaskId: "u1" },
+		]) {
+			throws(
+				() => contract.appendEntry({ ...base, subgoals: [subgoal] }),
+				/session\.appendEntry: invalid taskLedger entry/,
+			);
+		}
+
+		const persisted = openSession(meta.id).turns().filter(isSessionEntry);
+		strictEqual(persisted.filter((entry) => entry.kind === "taskLedger").length, 1);
+		const refolded = foldTaskBoard(persisted);
+		strictEqual(refolded?.tasks[0]?.origin, "agent");
+		strictEqual(refolded?.tasks[0]?.userTaskId, undefined);
+		await contract.close();
+	});
+
+	it("round-trips branch-anchored decision ledger snapshots", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+		const userTurn = contract.append({ parentId: null, kind: "user", payload: { text: "choose scope" } });
+		const appended = contract.appendEntry({
+			kind: "decisionLedger",
+			parentTurnId: userTurn.id,
+			interviewId: "interview-round-trip",
+			interviewStatus: "complete",
+			startedAt: "2026-04-17T00:00:00.000Z",
+			endedAt: "2026-04-17T00:03:00.000Z",
+			roundCount: 1,
+			summary: "Use focused scope.",
+			transcriptPath: "/tmp/interviews/interview-round-trip.json",
+			decisions: [
+				{
+					key: "scope",
+					value: "focused",
+					label: "Scope",
+					source_question: "Which scope?",
+					status: "active",
+					decidedAt: "2026-04-17T00:01:00.000Z",
+				},
+			],
+		});
+
+		const reopened = openSession(meta.id).turns();
+		const decision = reopened.find(
+			(entry): entry is DecisionLedgerEntry => isSessionEntry(entry) && entry.kind === "decisionLedger",
+		);
+		ok(decision);
+		deepStrictEqual(decision, appended);
+		strictEqual(decision.parentTurnId, userTurn.id);
 	});
 
 	it("persists ordinary turns as structured messages while preserving tree continuity", () => {
@@ -472,6 +596,27 @@ describe("contracts/persistence", () => {
 		);
 	});
 
+	it("persists session names as session-wide metadata for current and off-current sessions", async () => {
+		const contract = createSessionBundle(stubContext()).contract;
+		const first = contract.create({ cwd: scratch });
+		contract.setName("First session");
+		const second = contract.create({ cwd: scratch });
+
+		contract.setName("Renamed first session", first.id);
+		contract.setName("Second session", second.id);
+
+		const namesFor = (sessionId: string): string[] =>
+			openSession(sessionId)
+				.turns()
+				.filter((entry): entry is SessionInfoEntry => isSessionEntry(entry) && entry.kind === "sessionInfo")
+				.map((entry) => entry.name ?? "");
+		deepStrictEqual(namesFor(first.id), ["First session", "Renamed first session"]);
+		deepStrictEqual(namesFor(second.id), ["Second session"]);
+		strictEqual(contract.history().find((meta) => meta.id === first.id)?.name, "Renamed first session");
+		strictEqual(contract.history().find((meta) => meta.id === second.id)?.name, "Second session");
+		await contract.close();
+	});
+
 	it("reopens the append fd after replaceEntries so later appends land in the new file", () => {
 		const { meta, writer } = createSession({ cwd: scratch });
 		const turn = (id: string, text: string): ClioTurnRecord => ({
@@ -596,5 +741,22 @@ describe("contracts/persistence", () => {
 		const u3 = contract.append({ parentId, kind: "user", payload: { text: "alternate branch" } });
 		strictEqual(u3.parentId, a1.id);
 		strictEqual(contract.tree().leafId, u3.id);
+	});
+
+	it("reports a closed session's persisted branch pin instead of its abandoned newest leaf", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+
+		const meta = contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "first question" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "first reply" } });
+		const abandoned = contract.append({ parentId: a1.id, kind: "user", payload: { text: "abandoned branch" } });
+		strictEqual(contract.tree().leafId, abandoned.id);
+
+		contract.switchTurn(a1.id);
+		await contract.close();
+
+		strictEqual(contract.current(), null);
+		strictEqual(contract.tree(meta.id).leafId, a1.id);
 	});
 });

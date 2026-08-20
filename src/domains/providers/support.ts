@@ -55,7 +55,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	"openai-codex": "ChatGPT Plus/Pro via Codex OAuth",
 	openrouter: "OpenRouter API",
 	"ollama-native": "Ollama native API",
-	"lmstudio-native": "LM Studio SDK + native model management",
+	lmstudio: "LM Studio chat over OpenAI-compatible REST with native REST model management",
 	llamacpp: "llama.cpp server (auto-detect surface)",
 	"anthropic-compat": "Generic Anthropic-compatible REST",
 	"openai-compat": "Generic OpenAI-compatible REST",
@@ -151,7 +151,7 @@ export function defaultModelForRuntime(runtimeId: string): string | undefined {
  * about which ids matter.
  */
 export function describeRuntimeModels(entry: ProviderSupportEntry, sample: number): string {
-	if (entry.modelSource === "catalog") return `${entry.modelHints.length} in pi-ai catalog`;
+	if (entry.modelSource === "catalog") return `${entry.modelHints.length} in catalog`;
 	if (entry.modelHints.length === 0) return "-";
 	return entry.modelHints.slice(0, sample).join(", ");
 }
@@ -206,7 +206,10 @@ export function configuredTargetsForRuntime(
 	settings: Readonly<ClioSettings>,
 	runtimeId: string,
 ): ReadonlyArray<TargetDescriptor> {
-	return settings.targets.filter((target) => target.runtime === runtimeId);
+	const canonical = getRuntimeIfRegistered(runtimeId)?.id ?? runtimeId;
+	return settings.targets.filter(
+		(target) => (getRuntimeIfRegistered(target.runtime)?.id ?? target.runtime) === canonical,
+	);
 }
 
 export function resolveProviderReference(

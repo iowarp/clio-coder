@@ -1,6 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
+import type { AuthOperationOptions } from "../../../engine/types.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../types/target-descriptor.js";
 
@@ -39,7 +39,10 @@ export interface LockResult<T> {
 
 export interface AuthStorageBackend {
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
-	withLockAsync<T>(fn: (current: string | undefined) => Promise<LockResult<T>>): Promise<T>;
+	withLockAsync<T>(
+		fn: (current: string | undefined) => Promise<LockResult<T>>,
+		options?: AuthOperationOptions,
+	): Promise<T>;
 	/** Where the store lives, for error text. Absent for non-file backends. */
 	describe?(): string;
 }
@@ -371,6 +374,34 @@ export class AuthStorage {
 		delete this.data[providerId];
 	}
 
+	renameProvider(fromProviderId: string, toProviderId: string, options: { keepSource?: boolean } = {}): void {
+		this.backend.withLock((current) => {
+			const read = readStorageData(current);
+			const source = read.data[fromProviderId];
+			// A rename with nothing to rename writes nothing, so a file this parser
+			// could not fully read is in no danger from it. Refusing on damage before
+			// establishing that turned a hand-edited credentials.yaml into a
+			// permanent `clio-coder upgrade` failure: the lmstudio-native migration
+			// calls this on every upgrade, and it failed even on homes that had never
+			// held an lmstudio-native credential.
+			if (!source) {
+				// Adopt the fresh view only when it is the whole file. A damaged read
+				// yields an empty view, and adopting that would report stored
+				// credentials as gone.
+				if (read.damage === null) this.data = read.data;
+				return { result: undefined };
+			}
+			// Past here the rename rewrites the whole file, so a partially readable
+			// one would be serialized back with the unread entries dropped.
+			if (read.damage !== null) throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+			if (!read.data[toProviderId]) read.data[toProviderId] = source;
+			if (options.keepSource !== true) delete read.data[fromProviderId];
+			this.data = read.data;
+			this.damage = null;
+			return { result: undefined, next: serializeStorageData(read.data) };
+		});
+	}
+
 	listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }> {
 		return Object.entries(this.data)
 			.map(([providerId, credential]) => ({
@@ -486,41 +517,51 @@ export class AuthStorage {
 
 	private async refreshOAuthCredentialWithLock(
 		providerId: string,
+		signal: AbortSignal,
 	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
-		return this.backend.withLockAsync(async (current) => {
-			const read = readStorageData(current);
-			if (read.damage !== null) {
-				this.damage = read.damage;
-				throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
-			}
-			const currentData = read.data;
-			this.data = currentData;
-			this.damage = null;
-			const stored = currentData[providerId];
-			if (stored?.type !== "oauth") {
-				return { result: null };
-			}
-			if (Date.now() < stored.expires) {
-				return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
-			}
-			const refreshed = await refreshOAuthCredentials(providerId, stored);
-			const next: OAuthCredential = {
-				type: "oauth",
-				...refreshed,
-				updatedAt: nowIso(),
-			};
-			const merged: AuthStorageData = { ...currentData, [providerId]: next };
-			this.data = merged;
-			return {
-				result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
-				next: serializeStorageData(merged),
-			};
-		});
+		let latestData: AuthStorageData | undefined;
+		const result = await this.backend.withLockAsync(
+			async (current) => {
+				const read = readStorageData(current);
+				if (read.damage !== null) {
+					this.damage = read.damage;
+					throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+				}
+				const currentData = read.data;
+				latestData = currentData;
+				const stored = currentData[providerId];
+				if (stored?.type !== "oauth") {
+					return { result: null };
+				}
+				if (Date.now() < stored.expires) {
+					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
+				}
+				const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
+				const next: OAuthCredential = {
+					type: "oauth",
+					...refreshed,
+					updatedAt: nowIso(),
+				};
+				const merged: AuthStorageData = { ...currentData, [providerId]: next };
+				latestData = merged;
+				return {
+					result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
+					next: serializeStorageData(merged),
+				};
+			},
+			{ signal },
+		);
+		// Adopt the view only after the backend has committed it. Pi 0.84's
+		// CredentialStore.modify pattern prevents a cancellation between refresh
+		// and persistence from making memory advertise a token disk never received.
+		if (latestData) this.data = latestData;
+		this.damage = null;
+		return result;
 	}
 
 	async resolveApiKey(
 		providerId: string,
-		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
+		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
 	): Promise<AuthResolution> {
 		if (opts?.targetId) {
 			const override = this.runtimeOverrides.get(opts.targetId);
@@ -571,7 +612,10 @@ export class AuthStorage {
 				};
 			}
 			try {
-				const refreshed = await this.refreshOAuthCredentialWithLock(providerId);
+				const refreshed = await this.refreshOAuthCredentialWithLock(
+					providerId,
+					opts?.signal ?? new AbortController().signal,
+				);
 				if (refreshed) {
 					return {
 						providerId,
@@ -582,7 +626,8 @@ export class AuthStorage {
 						apiKey: refreshed.apiKey,
 					};
 				}
-			} catch {
+			} catch (error) {
+				if (opts?.signal?.aborted) throw opts.signal.reason ?? error;
 				// A refusal already recorded its reason on this.damage; a refresh that
 				// failed for any other reason is answered by re-reading the store below.
 				this.reload();
@@ -642,9 +687,18 @@ export class AuthStorage {
 		};
 	}
 
-	resolveForTarget(target: AuthTarget, opts?: { includeFallback?: boolean }): Promise<AuthResolution> {
-		const args: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
+	resolveForTarget(
+		target: AuthTarget,
+		opts?: { includeFallback?: boolean; signal?: AbortSignal },
+	): Promise<AuthResolution> {
+		const args: {
+			targetId?: string;
+			explicitEnvVar?: string;
+			includeFallback?: boolean;
+			signal?: AbortSignal;
+		} = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
+		if (opts?.signal !== undefined) args.signal = opts.signal;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
 		if (target.targetId) args.targetId = target.targetId;
 		return this.resolveApiKey(target.providerId, args);

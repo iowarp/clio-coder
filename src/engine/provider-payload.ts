@@ -1,10 +1,5 @@
 import { RESPONSE_SCHEMA_RUNTIME_ID } from "../core/response-schema.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
-import {
-	defaultAnthropicBudgetForLevel,
-	defaultAnthropicEffortForLevel,
-	type ThinkingEffortByLevel,
-} from "../domains/providers/thinking-control-policy.js";
 import type { EngineModel } from "./types.js";
 
 function reasoningSummaryForLevel(level: ThinkingLevel | undefined): "concise" | "detailed" | undefined {
@@ -15,6 +10,10 @@ function reasoningSummaryForLevel(level: ThinkingLevel | undefined): "concise" |
 
 function isOpenAIResponsesApi(api: string): boolean {
 	return api === "openai-codex-responses" || api === "openai-responses" || api === "azure-openai-responses";
+}
+
+function isAnthropicMessagesApi(api: string): boolean {
+	return api === "anthropic-messages";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,10 +44,6 @@ function namedToolDefinitions(tools: unknown, toolName: string): unknown[] | nul
 	return narrowed.length > 0 ? narrowed : null;
 }
 
-function numberValue(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
 function patchOpenAIReasoningSummaryPayload(
 	payload: unknown,
 	model: EngineModel,
@@ -69,65 +64,22 @@ function patchOpenAIReasoningSummaryPayload(
 	};
 }
 
-function isAnthropicMessagesApi(api: string): boolean {
-	return api === "anthropic-messages";
-}
-
-function anthropicThinkingLevelMap(model: EngineModel): ThinkingEffortByLevel | undefined {
-	return model.thinkingLevelMap as ThinkingEffortByLevel | undefined;
-}
-
-function anthropicUsesAdaptiveThinking(model: EngineModel): boolean {
-	const compat = model.compat as { forceAdaptiveThinking?: boolean } | undefined;
-	return compat?.forceAdaptiveThinking === true;
-}
-
-function patchAnthropicThinkingPayload(
-	payload: unknown,
-	model: EngineModel,
-	thinkingLevel: ThinkingLevel | undefined,
-): unknown | undefined {
-	if (!isAnthropicMessagesApi(model.api) || model.reasoning !== true) return undefined;
-	if (!thinkingLevel || thinkingLevel === "off" || !isRecord(payload)) return undefined;
-	const record = payload;
-	const existingThinking = isRecord(record.thinking) ? record.thinking : {};
-	const display = typeof existingThinking.display === "string" ? existingThinking.display : "summarized";
-
-	if (anthropicUsesAdaptiveThinking(model)) {
-		const effort = defaultAnthropicEffortForLevel(thinkingLevel, anthropicThinkingLevelMap(model));
-		const existingOutputConfig = isRecord(record.output_config) ? record.output_config : {};
-		return {
-			...record,
-			thinking: { ...existingThinking, type: "adaptive", display },
-			...(effort ? { output_config: { ...existingOutputConfig, effort } } : {}),
-		};
-	}
-
-	const maxTokens = numberValue(record.max_tokens) ?? model.maxTokens;
-	const budgetTokens = defaultAnthropicBudgetForLevel(thinkingLevel, maxTokens);
-	if (budgetTokens === undefined) return undefined;
-	return {
-		...record,
-		thinking: { ...existingThinking, type: "enabled", budget_tokens: budgetTokens, display },
-	};
-}
-
 /**
  * Align provider payloads with Clio's effective thinking level.
  *
  * OpenAI Responses defaults reasoning summaries to "auto", which can yield no
- * visible thinking blocks. Anthropic's generic stream path can also under-map
- * Clio levels when xhigh/adaptive metadata is available only on the model.
+ * visible thinking blocks, and the agent loop has no option for the summary
+ * field, so it is set here. Anthropic thinking is pi-owned: pi-ai's
+ * `streamSimple` maps the agent's thinking level onto adaptive effort (via
+ * `model.thinkingLevelMap` and `compat.forceAdaptiveThinking`) or a bounded
+ * `budget_tokens`, so the payload is left untouched for that API.
  */
 export function patchProviderThinkingPayload(
 	payload: unknown,
 	model: EngineModel,
 	thinkingLevel: ThinkingLevel | undefined,
 ): unknown | undefined {
-	return (
-		patchOpenAIReasoningSummaryPayload(payload, model, thinkingLevel) ??
-		patchAnthropicThinkingPayload(payload, model, thinkingLevel)
-	);
+	return patchOpenAIReasoningSummaryPayload(payload, model, thinkingLevel);
 }
 
 /**
@@ -234,7 +186,12 @@ export function patchToolChoiceNamedPayload(
 	if (model.api === "mistral-conversations") {
 		return { ...payload, tools, toolChoice: { type: "function", function: { name: toolName } } };
 	}
-	return { ...payload, tools, tool_choice: { type: "function", function: { name: toolName } } };
+	// Generic OpenAI-compatible servers reject the object form outright: both LM
+	// Studio and llama.cpp answer HTTP 400 with "Invalid tool_choice type:
+	// 'object'. Supported string values: none, auto, required". The tool surface
+	// is already narrowed to the single named definition above, so "required" is
+	// equivalent here and is the only spelling every server accepts.
+	return { ...payload, tools, tool_choice: "required" };
 }
 
 /** Attach llama-server's native JSON-schema response constraint without changing its tool surface. */
