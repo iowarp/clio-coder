@@ -12,16 +12,23 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+	closeServer,
+	seedOpenAICompatToolOrchestrator,
+	startOpenAICompatFixture,
+} from "../harness/openai-compat-fixture.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Packages tsup bundles into dist/; none may survive as a runtime import. */
-const BUNDLED = ["chalk", "diff", "uuid", "yaml", "typebox", "undici", "@vscode/tree-sitter-wasm", "tree-sitter-wasms"];
+const BUNDLED = ["chalk", "diff", "uuid", "yaml", "typebox", "@vscode/tree-sitter-wasm", "tree-sitter-wasms"];
 
 function runNode(
 	args: ReadonlyArray<string>,
@@ -100,16 +107,20 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 	it("keeps the bundled packages out of the runtime import graph and the install", () => {
 		const distDir = join(installedRoot, "dist");
 		const leaked: string[] = [];
+		let embedsUndici = false;
 		for (const entry of readdirSync(distDir, { recursive: true, withFileTypes: true })) {
 			if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
 			const text = readFileSync(join(entry.parentPath, entry.name), "utf8");
+			if (text.includes("node_modules/undici/")) embedsUndici = true;
 			for (const name of BUNDLED) {
 				const pattern = new RegExp(`^(import|export)\\b[^\\n]*\\bfrom\\s+["']${name}(/|["'])`, "m");
 				if (pattern.test(text)) leaked.push(`${entry.name} imports ${name}`);
 			}
 		}
 		strictEqual(leaked.join("; "), "", "bundled packages must not survive as runtime imports");
+		strictEqual(embedsUndici, false, "Node's built-in fetch must not carry userland Undici in the packed graph");
 		const topLevel = new Set(readdirSync(join(prefix, "node_modules")));
+		strictEqual(topLevel.has("undici"), false, "the installed package must not require userland Undici");
 		for (const name of ["@vscode", "tree-sitter-wasms"]) {
 			strictEqual(topLevel.has(name), false, `${name} must not be installed by the package`);
 		}
@@ -120,6 +131,56 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 		const result = await runNode([bin, "--version"], { cwd: prefix, env: { ...process.env, ...scratch.env } });
 		strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
 		match(result.stdout, /Clio Coder \d+\.\d+\.\d+/);
+	});
+
+	it("invokes built-in fetch through the installed tool graph from a foreign cwd", { timeout: 30_000 }, async () => {
+		const initialized = await runNode([bin, "doctor", "--fix"], {
+			cwd: prefix,
+			env: { ...process.env, ...scratch.env },
+		});
+		strictEqual(initialized.code, 0, `stdout=${initialized.stdout} stderr=${initialized.stderr}`);
+
+		let webHits = 0;
+		const webServer = createServer((_request, response) => {
+			webHits += 1;
+			response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+			response.end("installed web_fetch reached built-in fetch");
+		});
+		await new Promise<void>((resolve) => webServer.listen(0, "127.0.0.1", resolve));
+		const webAddress = webServer.address() as AddressInfo;
+		const webUrl = `http://127.0.0.1:${webAddress.port}/installed`;
+		const model = await startOpenAICompatFixture("installed tool turn complete", {
+			toolCall: { name: "web_fetch", arguments: { url: webUrl, format: "raw" } },
+		});
+		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), model.url, "full-auto");
+		const foreignCwd = join(work, "foreign-project");
+		mkdirSync(foreignCwd, { recursive: true });
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			...scratch.env,
+			CLIO_CODER_TEST_OPENAI_KEY: "pack-contract-key",
+			CLIO_CODER_RESIDENCY: "observe",
+		};
+		delete env.CLIO_CODER_NO_NETWORK_TOOLS;
+
+		try {
+			const result = await runNode(
+				[bin, "--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "fetch the fixture"],
+				{ cwd: foreignCwd, env },
+			);
+			strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
+			match(result.stdout, /installed tool turn complete/);
+			strictEqual(webHits, 1, "the packed tool must reach the localhost resource exactly once");
+			ok(
+				model.requests.some((request) => JSON.stringify(request).includes("installed web_fetch reached built-in fetch")),
+				"the second packed-provider request must carry the real web_fetch result",
+			);
+		} finally {
+			webServer.closeAllConnections();
+			await closeServer(webServer);
+			model.server.closeAllConnections();
+			await closeServer(model.server);
+		}
 	});
 
 	it("indexes a TypeScript fixture with grammars resolved from the pack", async () => {
