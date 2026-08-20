@@ -237,6 +237,8 @@ describe("render trace through a real PTY", {
 			session.write(CTRL_C);
 			await new Promise<void>((resolve) => setTimeout(resolve, 75));
 			session.write(CTRL_C);
+			await session.waitForOutput((output) => stripAnsi(output).includes("Ctrl+C again to quit"));
+			session.write(CTRL_C);
 			const exit = await session.waitForExit(10_000);
 			strictEqual(exit.exitCode, 0, `clean PTY exit; output tail: ${stripAnsi(session.output).slice(-400)}`);
 			const visibleBootOutput = stripAnsi(session.output);
