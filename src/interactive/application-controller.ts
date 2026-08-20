@@ -319,6 +319,10 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			return;
 		}
 		if (action === "clear-editor") {
+			// Clearing a draft consumes this press as an editor action, just like
+			// cancelling a stream or closing an overlay consumes it as their action.
+			// It must not become the hidden first half of a shutdown double tap.
+			lastCtrlCAt = 0;
 			setShutdownArmed(false);
 			deps.clearEditor();
 			deps.requestRender();

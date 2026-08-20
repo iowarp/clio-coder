@@ -46,6 +46,7 @@ import type {
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
+import type { TerminalLease } from "./terminal-lease.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 
 export {
@@ -111,6 +112,10 @@ export interface InteractiveDeps {
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
 	onFirstFrameCommit?: (frameId: number) => void;
+	/** Existing Stage 0 owner to hydrate in place. */
+	terminalLease?: TerminalLease;
+	/** Fired after the first committed frame containing the hydrated Stage 1 root. */
+	onHydratedFrameCommit?: (frameId: number | null) => void;
 	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
@@ -407,12 +412,15 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
 	const initialSmoothStreaming = resolveSmoothStreamingMode(deps.getSettings?.().terminal.smoothStreaming ?? "off");
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
-	const shell = createProcessInteractiveShell({
-		tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular",
-		streamPacingActive:
-			initialSmoothStreaming === "on" || (initialSmoothStreaming === "auto" && initialAutoPacingAllowed),
-		...(deps.onFirstFrameCommit ? { onFirstFrameCommit: deps.onFirstFrameCommit } : {}),
-	});
+	const lease = deps.terminalLease;
+	const shell =
+		lease?.shell ??
+		createProcessInteractiveShell({
+			tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular",
+			streamPacingActive:
+				initialSmoothStreaming === "on" || (initialSmoothStreaming === "auto" && initialAutoPacingAllowed),
+			...(deps.onFirstFrameCommit ? { onFirstFrameCommit: deps.onFirstFrameCommit } : {}),
+		});
 	const { terminal, tui } = shell;
 	const renderTrace = getActiveRenderTrace();
 	const visibleEventIngress = new WeakMap<
@@ -491,7 +499,14 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		sessionTranscript,
 		tui,
 		terminal,
-		mount: (root, editor) => shell.mount(root, editor),
+		...(!lease ? { mount: (root, editor) => shell.mount(root, editor) } : {}),
+		...(lease
+			? {
+					editor: lease.editor,
+					keybindings: lease.keybindings,
+					bootPending: lease.pending,
+				}
+			: {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.session ? { session: deps.session } : {}),
@@ -641,6 +656,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		beforeSemanticBoundary: () => chatRenderer.flush(),
 		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),
 		dispatchCommand: slashRuntime.dispatchCommand,
+		dispatchCommandAsync: slashRuntime.admitCommand,
 		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
@@ -874,16 +890,30 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				return settlement;
 			};
 		})(),
-		stopUi: () => shell.stop(),
+		stopUi: () => {
+			if (lease) void lease.close();
+			else shell.stop();
+		},
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onShutdown: async () => {
 			try {
 				await deps.onShutdown();
 			} finally {
-				await shell.settle();
+				if (lease) await lease.close();
+				else await shell.settle();
 			}
 		},
-		registerInputListener: (listener) => tui.addInputListener(listener),
+		registerInputListener: (listener) => {
+			if (lease) lease.registerApplicationInput(listener);
+			else tui.addInputListener(listener);
+		},
+		...(lease
+			? {
+					signals: lease.applicationSignals,
+					// The lease registered its exactly-once drain before hydration.
+					registerTerminalTeardown: () => {},
+				}
+			: {}),
 		...(renderTrace
 			? {
 					onInputIngress: (action, data) =>
@@ -891,6 +921,16 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				}
 			: {}),
 	});
+
+	if (lease) {
+		const adopted = lease.adopt({
+			root: presentation.root,
+			editorChrome: presentation.editorChrome,
+			admitSubmission: (submission) => editorSubmit.admitCapturedText(submission.rawText, lease.abortSignal),
+			...(deps.onHydratedFrameCommit ? { onHydratedFrame: deps.onHydratedFrameCommit } : {}),
+		});
+		if (!adopted) void applicationController.shutdown();
+	}
 
 	return applicationController.run;
 }

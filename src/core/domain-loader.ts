@@ -60,7 +60,10 @@ export interface LoadResult {
 	stop(): Promise<void>;
 }
 
-export async function loadDomains(modules: ReadonlyArray<DomainModule>): Promise<LoadResult> {
+export async function loadDomains(
+	modules: ReadonlyArray<DomainModule>,
+	options: { diagnostic?: (text: string) => void } = {},
+): Promise<LoadResult> {
 	const order = topoSort(modules);
 	const contracts = new Map<string, DomainContract>();
 	const extensions = new Map<string, DomainExtension>();
@@ -91,7 +94,9 @@ export async function loadDomains(modules: ReadonlyArray<DomainModule>): Promise
 			// The throw below aborts boot; nothing downstream gets a chance to
 			// render the failure, so the structured line must land first.
 			const message = error instanceof Error ? error.message : String(error);
-			process.stderr.write(`[clio:domain] load failed: ${name}: ${message}\n`);
+			(options.diagnostic ?? ((text: string) => process.stderr.write(text)))(
+				`[clio:domain] load failed: ${name}: ${message}\n`,
+			);
 			throw new DomainLoadError(name, error);
 		}
 	}

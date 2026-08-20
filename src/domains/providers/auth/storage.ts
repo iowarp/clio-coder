@@ -249,7 +249,12 @@ function serializeStorageData(data: AuthStorageData): string {
 	});
 }
 
-export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): AuthTarget {
+export type RuntimeAuthMetadata = Pick<
+	RuntimeDescriptor,
+	"id" | "auth" | "tier" | "credentialsEnvVar" | "oauthProviderId"
+>;
+
+export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuthMetadata): AuthTarget {
 	const providerId =
 		target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
 	const authTarget: AuthTarget = {
@@ -271,7 +276,7 @@ export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget
 	return target;
 }
 
-export function targetRequiresAuth(target: TargetDescriptor, runtime: RuntimeDescriptor): boolean {
+export function targetRequiresAuth(target: TargetDescriptor, runtime: RuntimeAuthMetadata): boolean {
 	if (runtime.auth === "oauth") return true;
 	if (runtime.auth !== "api-key") return false;
 	if (target.auth?.apiKeyEnvVar || target.auth?.apiKeyRef || target.auth?.oauthProfile) return true;

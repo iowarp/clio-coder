@@ -129,7 +129,12 @@ function createAsyncTraceWriter(path: string, options: AsyncTraceWriterOptions =
 	const batchRecords = options.batchRecords ?? 128;
 	const append = options.append ?? ((target, payload) => appendFile(target, payload, "utf8"));
 	const recordTime = options.recordTime ?? (() => performance.now());
-	const appendTimeoutMs = options.appendTimeoutMs ?? 500;
+	// Stage 0 deliberately commits immediately before a large synchronous ESM
+	// evaluation. A 500 ms timer could become runnable before the already-finished
+	// append callback when that evaluation held the event loop, falsely disabling
+	// the trace after its first frame. Five seconds still bounds a genuinely
+	// wedged filesystem while surviving boot-time callback starvation.
+	const appendTimeoutMs = options.appendTimeoutMs ?? 5_000;
 	const pending: string[] = [];
 	let dropped = 0;
 	let inFlight = false;

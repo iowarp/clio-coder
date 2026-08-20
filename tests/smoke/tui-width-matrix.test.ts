@@ -198,8 +198,10 @@ describe("TUI width matrix", { concurrency: false, skip: ptySupported ? false : 
 				readyWhen: READY,
 				input: [
 					{ afterMs: 500, data: wide },
+					// The first press clears the editor and is not shutdown intent.
 					{ afterMs: 1_200, data: CTRL_C },
 					{ afterMs: 1_350, data: CTRL_C },
+					{ afterMs: 1_500, data: CTRL_C },
 				],
 			});
 			strictEqual(result.exitCode, 0, "wide glyphs in the editor do not crash the render");

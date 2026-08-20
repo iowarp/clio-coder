@@ -1,8 +1,6 @@
-import { readSettings } from "../core/config.js";
-import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
-import { isOrchestratorEligibleRuntime } from "../domains/providers/index.js";
-import { getRuntimeRegistry } from "../domains/providers/registry.js";
-import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { type ClioSettings, readSettings } from "../core/config.js";
+import { bootAuthStatus } from "../domains/providers/auth/boot-status.js";
+import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/boot-manifest.js";
 
 /**
  * Why the configured chat target cannot be used, in the operator's terms
@@ -25,8 +23,7 @@ export type DefaultTargetVerdict =
 	| { kind: "ineligible-runtime"; targetId: string; runtime: string }
 	| { kind: "missing-credential"; targetId: string; store: string };
 
-export function classifyDefaultTarget(): DefaultTargetVerdict {
-	const settings = readSettings();
+export function classifyDefaultTarget(settings: Readonly<ClioSettings> = readSettings()): DefaultTargetVerdict {
 	const targetId = settings.orchestrator.target;
 	if (!targetId) return { kind: "no-target" };
 	// A chat target naming an id that is not in `targets` cannot arrive here:
@@ -36,18 +33,13 @@ export function classifyDefaultTarget(): DefaultTargetVerdict {
 	// it would be a case no settings file can produce.
 	const target = settings.targets.find((entry) => entry.id === targetId);
 	if (!target) return { kind: "no-target" };
-	const registry = getRuntimeRegistry();
-	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	const runtime = registry.get(target.runtime);
-	if (!runtime || !isOrchestratorEligibleRuntime(runtime)) {
+	const runtime = findBuiltinRuntimeBootMetadata(target.runtime);
+	if (runtime?.kind !== "http") {
 		return { kind: "ineligible-runtime", targetId, runtime: target.runtime };
 	}
-	if (!targetRequiresAuth(target, runtime)) return { kind: "usable" };
-	const authTarget = resolveAuthTarget(target, runtime);
-	if (openAuthStorage().statusForTarget(authTarget, { includeFallback: false }).available) {
-		return { kind: "usable" };
-	}
-	return { kind: "missing-credential", targetId, store: authTarget.providerId };
+	const auth = bootAuthStatus(target, runtime);
+	if (auth.available) return { kind: "usable" };
+	return { kind: "missing-credential", targetId, store: auth.providerId };
 }
 
 /** One sentence naming what is wrong, for the causes target selection can fix. */

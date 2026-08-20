@@ -340,6 +340,32 @@ describe("contracts/interactive application controller", () => {
 		]);
 	});
 
+	it("does not count the press that clears a draft toward the shutdown double tap", async () => {
+		const harness = createHarness();
+		const controller = createApplicationController(harness.deps);
+		harness.events.length = 0;
+
+		harness.setEditorText("preserved draft");
+		harness.setNow(25_000);
+		controller.handleCtrlC();
+		deepStrictEqual(harness.events, ["editor:clear", "render"]);
+
+		harness.events.length = 0;
+		harness.setNow(25_100);
+		controller.handleCtrlC();
+		deepStrictEqual(
+			harness.events,
+			[`interval:set:${APPLICATION_DOUBLE_TAP_MS}`, "armed:true", "render"],
+			"the first empty-editor press arms visibly instead of spending a hidden draft-clearing clock",
+		);
+
+		harness.events.length = 0;
+		harness.setNow(25_200);
+		controller.handleCtrlC();
+		strictEqual(await controller.run, 0);
+		strictEqual(harness.events.at(-1), "app:shutdown");
+	});
+
 	// Issue #108. Every other Ctrl+C outcome changed something on screen; arming
 	// changed nothing, so a first press was indistinguishable from a key the
 	// application never received, and the 500ms window that quits could not be

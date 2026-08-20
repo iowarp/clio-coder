@@ -1,7 +1,7 @@
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
-import { type ClioSettings, formatSettingsFailure, readSettings } from "../../core/config.js";
+import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { readLayeredSettings, updateLayeredSettings } from "../../core/settings-layers.js";
+import { readStrictLayeredSettings, updateLayeredSettings } from "../../core/settings-layers.js";
 import { assertAgentIdNamespace } from "./agent-namespace.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
@@ -13,7 +13,10 @@ interface NativeAgentNamespace {
 	list(): ReadonlyArray<{ id: string }>;
 }
 
-export function createConfigBundle(context: DomainContext): DomainBundle<ConfigContract> {
+export function createConfigBundle(
+	context: DomainContext,
+	initialSettings?: Readonly<ClioSettings>,
+): DomainBundle<ConfigContract> {
 	let watcher: ConfigWatcher | null = null;
 	let snapshot: ClioSettings | null = null;
 	let reloadFailure: string | null = null;
@@ -62,10 +65,9 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 	function onWatcherFire(): void {
 		let next: ClioSettings;
 		try {
-			// readSettings keeps the strict throw-on-invalid-user-settings gate; the
-			// layered read then overlays project .clio-coder/settings(.local).yaml.
-			readSettings();
-			next = readLayeredSettings(process.cwd()).settings;
+			// One file read keeps the strict user-settings gate while workspace
+			// overlays retain their established best-effort diagnostics.
+			next = readStrictLayeredSettings(process.cwd()).settings;
 		} catch (err) {
 			// The rejection is the whole effect: `snapshot` is untouched, so the
 			// session keeps running on the last good settings.
@@ -90,8 +92,8 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 
 	const extension: DomainExtension = {
 		async start() {
-			readSettings();
-			snapshot = readLayeredSettings(process.cwd()).settings;
+			if (initialSettings) snapshot = structuredClone(initialSettings);
+			else snapshot = readStrictLayeredSettings(process.cwd()).settings;
 			watcher = startConfigWatcher(() => onWatcherFire());
 		},
 		async stop() {

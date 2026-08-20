@@ -5,7 +5,12 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { buildCustomizationGraph } from "../../src/cli/config-inspect.js";
 import { SettingsValidationError, settingsPath } from "../../src/core/config.js";
-import { readLayeredSettings, settingsSourceFor, updateLayeredSettings } from "../../src/core/settings-layers.js";
+import {
+	readLayeredSettings,
+	readStrictLayeredSettings,
+	settingsSourceFor,
+	updateLayeredSettings,
+} from "../../src/core/settings-layers.js";
 import { loadOperatorProfile, renderOperatorProfile } from "../../src/domains/context/operator-profile.js";
 import { loadProjectRules, selectActiveRules } from "../../src/domains/context/project-rules.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -86,6 +91,25 @@ describe("contracts/customization", () => {
 			const result = readLayeredSettings(cwd, { userPath });
 			strictEqual(result.settings.autonomy, "suggest");
 			ok(result.issues.length >= 1);
+		});
+
+		it("strictly gates the user layer from the same effective read while keeping project layers best effort", () => {
+			const { cwd, userPath } = scratch();
+			write(userPath, ":\n  - [bad yaml");
+			throws(() => readStrictLayeredSettings(cwd, { userPath }), SettingsValidationError);
+			write(userPath, "autonomy: definitely-invalid\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), "autonomy: suggest\n");
+			throws(
+				() => readStrictLayeredSettings(cwd, { userPath }),
+				SettingsValidationError,
+				"a project override cannot hide an invalid user-layer value from the launch gate",
+			);
+
+			write(userPath, "autonomy: suggest\n");
+			write(join(cwd, ".clio-coder", "settings.yaml"), ":\n  - [bad yaml");
+			const result = readStrictLayeredSettings(cwd, { userPath });
+			strictEqual(result.settings.autonomy, "suggest");
+			ok(result.issues.some((issue) => issue.origin === "project"));
 		});
 
 		it("attributes project validation failures to the project layer", () => {

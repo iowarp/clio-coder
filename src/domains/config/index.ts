@@ -7,6 +7,16 @@ export const ConfigDomainModule: DomainModule = {
 	createExtension: createConfigBundle,
 };
 
+/** Bind the one strict startup snapshot without changing other command paths. */
+export function createConfigDomainModule(
+	initialSettings: Readonly<import("../../core/config.js").ClioSettings>,
+): DomainModule {
+	return {
+		manifest: ConfigManifest,
+		createExtension: (context) => createConfigBundle(context, initialSettings),
+	};
+}
+
 export { assertAgentIdNamespace } from "./agent-namespace.js";
 export { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
 export type { ConfigContract } from "./contract.js";

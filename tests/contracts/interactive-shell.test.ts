@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import type { Component, Terminal } from "../../src/engine/tui.js";
 import {
 	createInteractiveShell,
 	createProcessInteractiveShell,
+	getActiveRenderTrace,
 	type InteractiveShellInterval,
 	type InteractiveShellTui,
 	settleLatestInteractiveFrame,
@@ -184,6 +185,35 @@ describe("interactive shell ownership", () => {
 		}
 	});
 
+	it("rolls back stdout tracing when process TUI construction throws", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-shell-construction-rollback-"));
+		const tracePath = join(dir, "trace.jsonl");
+		const previous = process.env.CLIO_CODER_RENDER_TRACE;
+		const originalWrite = process.stdout.write;
+		process.env.CLIO_CODER_RENDER_TRACE = tracePath;
+		try {
+			throws(
+				() =>
+					createProcessInteractiveShell({
+						testing: {
+							createTerminal: () => ({}) as never,
+							createTui: () => {
+								throw new Error("injected TUI construction failure");
+							},
+						},
+					}),
+				/injected TUI construction failure/u,
+			);
+			strictEqual(process.stdout.write, originalWrite, "the process-global stdout wrapper is restored synchronously");
+			strictEqual(getActiveRenderTrace(), null, "a failed constructor cannot leave a globally active trace");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		} finally {
+			if (previous === undefined) delete process.env.CLIO_CODER_RENDER_TRACE;
+			else process.env.CLIO_CODER_RENDER_TRACE = previous;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("issues one final frame after a permanent no-drain bound instead of abandoning model state", async () => {
 		const waits: number[] = [];
 		let renders = 0;
@@ -204,5 +234,53 @@ describe("interactive shell ownership", () => {
 		strictEqual(frameId, 41);
 		strictEqual(renders, 1);
 		deepStrictEqual(waits, [7], "a failed pre-render wait does not add a second unbounded wait");
+	});
+
+	it("settles the final regular-screen frame without resetting physical cursor history", async () => {
+		const writes: string[] = [];
+		const terminal: Terminal = {
+			columns: 80,
+			rows: 24,
+			kittyProtocolActive: false,
+			start: () => {},
+			stop: () => {},
+			drainInput: async () => {},
+			write: (data) => writes.push(data),
+			moveBy: () => {},
+			hideCursor: () => {},
+			showCursor: () => {},
+			clearLine: () => {},
+			clearFromCursor: () => {},
+			clearScreen: () => {},
+			setTitle: () => {},
+			setProgress: () => {},
+		};
+		let content = "first frame";
+		const component: Component = {
+			render: () => [content],
+			invalidate: () => {},
+		};
+		const shell = createProcessInteractiveShell({
+			testing: { createTerminal: () => terminal as never },
+		});
+		try {
+			shell.mount(component, component);
+			shell.tui.renderNow(false);
+			writes.length = 0;
+			content = "settled frame";
+
+			await shell.commitCurrentFrame();
+
+			const settledWrite = writes.find((write) => write.includes("settled frame"));
+			strictEqual(typeof settledWrite, "string");
+			strictEqual(
+				settledWrite?.slice(0, settledWrite.indexOf("settled frame")).includes("\r"),
+				true,
+				"a final differential frame anchors at column zero before repainting",
+			);
+		} finally {
+			shell.stop();
+			await shell.settle();
+		}
 	});
 });

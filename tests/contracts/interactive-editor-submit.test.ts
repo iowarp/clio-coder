@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BashCommandResult, RunBashCommandOptions } from "../../src/core/bash-exec.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
@@ -65,6 +65,7 @@ function createHarness(options: { streaming?: boolean; running?: Array<{ runId: 
 		io: { stdout: () => {}, stderr: (message) => stderr.push(message) },
 		chat: {
 			isStreaming: () => streaming,
+			whenSettled: async () => {},
 			queueFollowUp: (message) => {
 				queued.push(message);
 				return queueAccepted;
@@ -169,6 +170,92 @@ describe("contracts/interactive editor submit", () => {
 		controller.submitEditorText("  /help topic  ");
 
 		deepStrictEqual(harness.events, ["history:/help topic", "set:", "dispatch:/help topic", "render"]);
+	});
+
+	it("admits an immutable boot submission without touching the later live draft", async () => {
+		const harness = createHarness();
+		harness.setText("draft typed after submit");
+		harness.deps.dispatchCommandAsync = async (command) => {
+			harness.events.push(`admit:${command}`);
+		};
+		const controller = createEditorSubmitController(harness.deps);
+
+		await controller.admitCapturedText("  early prompt  ");
+
+		strictEqual(harness.getText(), "draft typed after submit");
+		deepStrictEqual(harness.history, ["early prompt"]);
+		deepStrictEqual(harness.events, ["history:early prompt", "admit:early prompt", "render"]);
+	});
+
+	it("does not turn a rejected captured command into history or overwrite the live draft", async () => {
+		const harness = createHarness();
+		harness.setText("later draft");
+		const controller = createEditorSubmitController(harness.deps);
+
+		await rejects(controller.admitCapturedText("/context init --no-generate"), /preserving it for recovery/u);
+
+		strictEqual(harness.getText(), "later draft");
+		deepStrictEqual(harness.history, []);
+		deepStrictEqual(harness.events, ["dispatch:/context init --no-generate", "render"]);
+	});
+
+	it("serializes captured bash commands through the prior process settlement", async () => {
+		const harness = createHarness();
+		const commands: string[] = [];
+		const releases: Array<(result: BashCommandResult) => void> = [];
+		harness.deps.runBash = (command) => {
+			commands.push(command);
+			return new Promise((resolve) => releases.push(resolve));
+		};
+		const controller = createEditorSubmitController(harness.deps);
+
+		await controller.admitCapturedText("!! printf first");
+		const second = controller.admitCapturedText("!! printf second");
+		await flushAsync();
+		deepStrictEqual(commands, ["printf first"], "the second immutable record cannot collide with the active bash");
+
+		releases[0]?.(bashResult());
+		await second;
+		deepStrictEqual(commands, ["printf first", "printf second"]);
+		releases[1]?.(bashResult());
+		await flushAsync();
+	});
+
+	it("aborts a captured bash admission while a chat turn is settling", async () => {
+		const harness = createHarness({ streaming: true });
+		let settle = (): void => {};
+		harness.deps.chat.whenSettled = () =>
+			new Promise<void>((resolve) => {
+				settle = resolve;
+			});
+		let bashCalls = 0;
+		harness.deps.runBash = async () => {
+			bashCalls += 1;
+			return bashResult();
+		};
+		const controller = createEditorSubmitController(harness.deps);
+		const abort = new AbortController();
+		const admission = controller.admitCapturedText("!! printf late", abort.signal);
+		await flushAsync();
+		abort.abort();
+
+		await rejects(admission, /abort/u);
+		strictEqual(bashCalls, 0);
+		settle();
+	});
+
+	it("rejects an ambiguous captured steer so the lease can recover it without reordering later records", async () => {
+		const harness = createHarness({
+			running: [
+				{ runId: "run-1", agentId: "scout" },
+				{ runId: "run-2", agentId: "scout" },
+			],
+		});
+		const controller = createEditorSubmitController(harness.deps);
+
+		await rejects(controller.admitCapturedText("@scout preserve this"), /preserving it for recovery/u);
+		deepStrictEqual(harness.history, []);
+		deepStrictEqual(harness.steers, []);
 	});
 
 	// A token the registry does not claim used to be put back so it could be
