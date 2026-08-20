@@ -147,7 +147,7 @@ describe("instant shell through a real PTY", {
 			session.write(CTRL_C);
 			await new Promise<void>((resolve) => setTimeout(resolve, 50));
 			session.write(CTRL_C);
-			await new Promise<void>((resolve) => setTimeout(resolve, 50));
+			await session.waitForOutput((output) => stripAnsi(output).includes("Ctrl+C again to quit"));
 			session.write(CTRL_C);
 			const exit = await session.waitForExit(10_000);
 			strictEqual(exit.exitCode, 0, stripAnsi(session.output).slice(-800));
