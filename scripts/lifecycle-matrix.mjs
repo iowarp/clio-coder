@@ -1056,6 +1056,7 @@ testCase(19, "NO_COLOR, non-TTY, SIGINT, and terminal teardown", async () => {
 			["bracketed paste is disabled exactly once", count(colored.output, "\x1b[?2004l") === 1],
 			[
 				"only restore sequences follow the final cursor show",
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: this contract matches literal ANSI escape bytes.
 				/^\x1b\[\?25h(?:\x1b\[\?2004l|\x1b\[<u|\x1b\[>4;0m)+$/.test(teardownTail),
 			],
 			["the cursor is restored", count(colored.output, "[?25h") > 0],
