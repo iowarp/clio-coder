@@ -1,9 +1,9 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, parse } from "node:path";
 import { closeServer, seedOpenAICompatToolOrchestrator, startOpenAICompatFixture } from "./openai-compat-fixture.js";
 import { emittedJavaScriptContaining, runCliWithCoverage } from "./runtime-module-graph.js";
 
@@ -15,6 +15,63 @@ const IMPLEMENTATION_MARKERS = {
 } as const;
 
 type LazyToolName = keyof typeof IMPLEMENTATION_MARKERS;
+
+interface PiGraphFiles {
+	compat: string;
+	legacyAliases: string;
+	openAICompletions: string;
+	unconfiguredCatalog: string[];
+	unrelatedImplementations: string[];
+}
+
+function findPiPackage(packageRoot: string): string {
+	let cursor = packageRoot;
+	const root = parse(cursor).root;
+	while (true) {
+		const candidate = join(cursor, "node_modules", "@earendil-works", "pi-ai");
+		if (existsSync(candidate)) return realpathSync(candidate);
+		if (cursor === root) break;
+		cursor = dirname(cursor);
+	}
+	throw new Error(`could not resolve installed @earendil-works/pi-ai from ${packageRoot}`);
+}
+
+function piGraphFiles(packageRoot: string): PiGraphFiles {
+	const root = findPiPackage(packageRoot);
+	return {
+		compat: realpathSync(join(root, "dist", "compat.js")),
+		legacyAliases: realpathSync(join(root, "dist", "legacy-api-aliases.js")),
+		openAICompletions: realpathSync(join(root, "dist", "api", "openai-completions.js")),
+		unconfiguredCatalog: [
+			"providers/all.js",
+			"providers/azure-openai-responses.js",
+			"providers/cerebras.js",
+			"providers/xai.js",
+		].map((path) => realpathSync(join(root, "dist", path))),
+		unrelatedImplementations: [
+			"api/anthropic-messages.js",
+			"api/bedrock-converse-stream.js",
+			"api/google-generative-ai.js",
+			"api/mistral-conversations.js",
+			"api/openrouter-images.js",
+			"auth/oauth/anthropic.js",
+			"auth/oauth/openai-codex.js",
+			"auth/oauth/github-copilot.js",
+		].map((path) => realpathSync(join(root, "dist", path))),
+	};
+}
+
+function assertNarrowPiRuntimeGraph(files: Set<string>, pi: PiGraphFiles): void {
+	strictEqual(files.has(pi.compat), false, "no-plugin turns must not evaluate pi-ai/compat");
+	strictEqual(files.has(pi.legacyAliases), false, "the deprecated Pi API alias aggregate must remain absent");
+	ok(files.has(pi.openAICompletions), "the invoked OpenAI-compatible provider implementation must be present");
+	for (const unconfigured of pi.unconfiguredCatalog) {
+		strictEqual(files.has(unconfigured), false, `unconfigured Pi provider catalog must remain absent: ${unconfigured}`);
+	}
+	for (const unrelated of pi.unrelatedImplementations) {
+		strictEqual(files.has(unrelated), false, `unrelated Pi implementation must remain absent: ${unrelated}`);
+	}
+}
 
 function configuredEnv(input: { env: NodeJS.ProcessEnv }): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
@@ -49,6 +106,7 @@ async function invokeTool(input: {
 	env: NodeJS.ProcessEnv;
 	implementationFiles: Readonly<Record<LazyToolName, Set<string>>>;
 	baseSettings: string;
+	pi: PiGraphFiles;
 	expectedResult?: string;
 	seedFiles?: Readonly<Record<string, string>>;
 }): Promise<void> {
@@ -75,6 +133,7 @@ async function invokeTool(input: {
 			timeoutMs: 45_000,
 		});
 		strictEqual(result.code, 0, `tool=${input.name} stdout=${result.stdout} stderr=${result.stderr}`);
+		assertNarrowPiRuntimeGraph(result.files, input.pi);
 		ok(
 			includesAny(result.files, input.implementationFiles[input.name]),
 			`${input.name} must evaluate its implementation chunk on first invocation`,
@@ -110,6 +169,7 @@ export async function assertLazyToolLoading(input: {
 }): Promise<void> {
 	mkdirSync(input.workRoot, { recursive: true });
 	const env = configuredEnv(input);
+	const pi = piGraphFiles(input.packageRoot);
 	const implementationFiles = Object.fromEntries(
 		Object.entries(IMPLEMENTATION_MARKERS).map(([name, marker]) => {
 			const files = emittedJavaScriptContaining(input.packageRoot, marker);
@@ -149,6 +209,7 @@ export async function assertLazyToolLoading(input: {
 			coverageDir: discoveryCoverage,
 		});
 		strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
+		assertNarrowPiRuntimeGraph(result.files, pi);
 		assertProviderAdvertisedAllTools(discovery.requests);
 		for (const name of Object.keys(IMPLEMENTATION_MARKERS) as LazyToolName[]) {
 			strictEqual(
@@ -168,6 +229,7 @@ export async function assertLazyToolLoading(input: {
 		env,
 		implementationFiles,
 		baseSettings,
+		pi,
 		name: "context",
 		args: { scope: "docs" },
 		expectedResult: "Pass query=<terms> to search these bundled docs",
@@ -177,6 +239,7 @@ export async function assertLazyToolLoading(input: {
 		env,
 		implementationFiles,
 		baseSettings,
+		pi,
 		name: "verify",
 		args: {},
 		seedFiles: { "package.json": '{"scripts":{"test":"node --test"}}\n' },
@@ -187,6 +250,7 @@ export async function assertLazyToolLoading(input: {
 		env,
 		implementationFiles,
 		baseSettings,
+		pi,
 		name: "code_nav",
 		args: { mode: "entries" },
 		seedFiles: { "main.ts": "export function lazyCodeNavEntry() { return 1; }\n" },
@@ -207,6 +271,7 @@ export async function assertLazyToolLoading(input: {
 			env,
 			implementationFiles,
 			baseSettings,
+			pi,
 			name: "web_fetch",
 			args: { url: `http://127.0.0.1:${address.port}/lazy`, format: "raw" },
 			expectedResult: "lazy web_fetch implementation reached localhost fixture",

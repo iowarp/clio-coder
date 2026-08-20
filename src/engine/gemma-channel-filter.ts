@@ -1,6 +1,11 @@
-import type { AssistantMessage, AssistantMessageEvent, TextContent, ThinkingContent } from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	AssistantMessageEvent,
+	AssistantMessageEventStream,
+	TextContent,
+	ThinkingContent,
+} from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { streamOpenAICompletions } from "@earendil-works/pi-ai/compat";
 
 const THOUGHT_START = /<\|channel>[^\n]*\n/;
 const BARE_THOUGHT_START = /^\s*(?:thought|own[- ]?(?:thought|think))\s*\n/i;
@@ -114,9 +119,9 @@ export function createGemmaChannelFilter(): GemmaChannelFilter {
 type ReplacementBlock = TextContent | ThinkingContent;
 
 export function filterGemmaChannelStream(
-	source: ReturnType<typeof streamOpenAICompletions>,
+	source: AssistantMessageEventStream,
 	enabled: boolean,
-): ReturnType<typeof streamOpenAICompletions> {
+): AssistantMessageEventStream {
 	if (!enabled) return source;
 	const filtered = createAssistantMessageEventStream();
 	const replacements = new Map<number, ReplacementBlock[]>();

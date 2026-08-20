@@ -46,7 +46,8 @@ Clio-owned surface during a dependency bump.
 Review these files first when Pi changes. They intentionally contain little
 behavior and should not grow another implementation of an SDK primitive.
 
-- `src/engine/apis/index.ts` registers Clio's API provider through pi-ai `/compat`.
+- `src/engine/api-registry.ts` owns Clio's ordered dispatcher using Pi's public lazy API factories and full built-in provider catalog. Its dynamic `/compat` bridge exists only for configured out-of-tree runtime plugins that require Pi's process-global registry identity.
+- `src/engine/env-api-keys.ts` pins Pi 0.84's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
 - `src/engine/apis/openai-completions.ts` maps compatibility flags, sampling parameters, and thinking budgets. Its Clio deltas are the local-runtime guards and sentinel, Harmony, and Gemma filters.
 - `src/engine/provider-payload.ts` retains only the OpenAI Responses reasoning-summary patch.
 - `src/engine/types.ts` and `src/engine/ai.ts` expose erased Pi types and `StringEnum` behind the engine boundary.
