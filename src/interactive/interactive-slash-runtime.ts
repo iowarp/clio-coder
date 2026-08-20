@@ -190,7 +190,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	};
 
 	/** One expanded operator turn into the chat loop: record it, paint it, submit it. */
-	const submitExpanded = (sub: InteractiveSlashSubmitExpansion): void => {
+	const submitExpanded = (sub: InteractiveSlashSubmitExpansion, awaitAdmission = false): Promise<void> => {
 		try {
 			// Enter while streaming becomes a steer inside chat.submit. The
 			// queue panel shows it until the engine injects it, and the
@@ -203,22 +203,30 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			if (!willQueue) deps.chatPanel.appendUser(sub.text);
 			deps.requestRender();
 			deps.beforeSemanticSubmit?.();
+			let acknowledgeAdmission = (): void => {};
+			const admitted = new Promise<void>((resolve) => {
+				acknowledgeAdmission = resolve;
+			});
 			const turn = deps.chat.submit(sub.text, {
 				...(sub.images.length > 0 ? { images: sub.images } : {}),
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
+				...(awaitAdmission && willQueue ? { steering: "end-of-turn" as const } : {}),
+				...(awaitAdmission ? { onAdmitted: acknowledgeAdmission } : {}),
 			});
-			void turn
+			const settlement = turn
 				.then(() => deps.settleVisibleFrame?.("submit-return"))
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
 					deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
 				})
 				.finally(deps.requestRender);
+			return awaitAdmission ? Promise.race([admitted, settlement]) : settlement;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
 			deps.requestRender();
+			return Promise.resolve();
 		}
 	};
 
@@ -277,7 +285,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					});
 				return;
 			}
-			submitExpanded(submitted);
+			await submitExpanded(submitted, true);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
