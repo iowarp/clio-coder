@@ -167,11 +167,27 @@ async function main(argv: string[]): Promise<number> {
 		...(skillPaths.length > 0 ? { skillPaths } : {}),
 	};
 	if (!subcommand) {
+		await enableBootCompileCache();
 		const { runClioCommand } = await import("./clio.js");
 		return runClioCommand(bootOptions);
 	}
 
 	return dispatch(subcommand, subArgs, bootOptions);
+}
+
+/**
+ * Cache the boot-path module graphs' bytecode. Only the three long-lived
+ * entrypoints that already write state enable it (interactive, `run`, `acp`);
+ * read-only and dry-run commands such as `paths` and bare `doctor` document
+ * that they create nothing, and enabling the cache creates its directory, so
+ * a dispatch-wide enable would break that promise on every initialized home.
+ * A help invocation of a boot command is itself zero-side-effect, so the
+ * guard runs before enablement, not after the module's own help check.
+ */
+async function enableBootCompileCache(subArgs: ReadonlyArray<string> = []): Promise<void> {
+	if (subArgs.includes("--help") || subArgs.includes("-h")) return;
+	const { enableClioCompileCache } = await import("../core/compile-cache.js");
+	enableClioCompileCache();
 }
 
 /**
@@ -184,7 +200,13 @@ const extensionsCommand: CommandHandler = async (subArgs) =>
 	(await import("./extensions.js")).runExtensionsCommand(subArgs);
 
 const COMMAND_HANDLERS = new Map<string, CommandHandler>([
-	["acp", async (subArgs, bootOptions) => (await import("./acp.js")).runAcpCommand(subArgs, bootOptions)],
+	[
+		"acp",
+		async (subArgs, bootOptions) => {
+			await enableBootCompileCache(subArgs);
+			return (await import("./acp.js")).runAcpCommand(subArgs, bootOptions);
+		},
+	],
 	["auth", async (subArgs) => (await import("./auth.js")).runAuthCommand(subArgs)],
 	["config", async (subArgs) => (await import("./config.js")).runConfigCommand(subArgs)],
 	["configure", async (subArgs) => (await import("./configure.js")).runConfigureCommand(subArgs)],
@@ -226,7 +248,13 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],
 	["import", async (subArgs) => (await import("./share.js")).runImportCommand(subArgs)],
 	["context", async (subArgs) => (await import("./context.js")).runContextCommand(subArgs)],
-	["run", async (subArgs, bootOptions) => (await import("./run.js")).runClioRun(subArgs, bootOptions)],
+	[
+		"run",
+		async (subArgs, bootOptions) => {
+			await enableBootCompileCache(subArgs);
+			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
+		},
+	],
 	["doctor", async (subArgs) => (await import("./doctor.js")).runDoctorCommand(subArgs)],
 	["paths", async (subArgs) => (await import("./paths.js")).runPathsCommand(subArgs)],
 	["reset", async (subArgs) => (await import("./reset.js")).runResetCommand(subArgs)],
@@ -239,6 +267,12 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 			// Internal: the native worker stream server (WorkerSpec on stdin,
 			// NDJSON on stdout). The entry module runs main() on import and owns
 			// process exit; this settles only on a pre-run import failure.
+			// This is how SSH placement launches a worker on the remote install,
+			// where no local spawn boundary injected NODE_COMPILE_CACHE, so the
+			// worker graph enables the remote cache itself before it loads. The
+			// enable is in-process only: no environment variable is set, so the
+			// worker's own children inherit nothing.
+			await enableBootCompileCache();
 			await import("../worker/entry.js");
 			return 0;
 		},
