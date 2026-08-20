@@ -1,6 +1,5 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
-import { Type } from "typebox";
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
@@ -13,7 +12,6 @@ import {
 	type Skill,
 } from "../../domains/resources/index.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
-import { StringEnum } from "../../engine/ai.js";
 import {
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
@@ -24,6 +22,7 @@ import {
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { truncateHead } from "../truncate.js";
 import { listDocsCorpus, searchDocs } from "./docs-engine.js";
+import { contextToolSurface } from "./surface.js";
 
 /**
  * The context tool: one OBSERVE entry point for material about the working
@@ -485,18 +484,7 @@ function runSkillsScope(
 
 export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 	return {
-		name: ToolNames.Context,
-		description:
-			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists installed and marketplace skills or loads an installed one by name. For repository code and the repo's generated wiki use code_nav (mode=wiki).",
-		parameters: Type.Object({
-			scope: StringEnum(["workspace", "docs", "skills"], { description: "Context source." }),
-			query: Type.Optional(Type.String({ description: "scope=docs: question or terms; omit to list the corpus." })),
-			name: Type.Optional(Type.String({ description: "scope=skills: skill name to load; omit to list." })),
-			limit: Type.Optional(Type.Number({ description: "scope=docs: max sections (default 5, max 12)." })),
-			include_tree: Type.Optional(Type.Boolean({ description: "scope=skills: list files under the skill base_dir." })),
-		}),
-		baseActionClass: "read",
-		executionMode: "parallel",
+		...contextToolSurface,
 		async run(args, options): Promise<ToolResult> {
 			const scope = typeof args.scope === "string" ? args.scope : "";
 			if (scope !== "workspace" && scope !== "docs" && scope !== "skills") {

@@ -223,6 +223,48 @@ evidence is the source-built and installed runtime-coverage contract plus the
 coordinator's generation-order, reset-resurrection, lease-failure, demand,
 incremental, wiki, refresh, and shutdown suites.
 
+### Lazy heavyweight tool implementations
+
+`context`, `code_nav`, `verify`, and `web_fetch` now register immutable schema
+and policy surfaces while importing their implementations only after registry
+admission. The runtime-graph harness makes a real tool-capable provider request
+and asserts that all four schemas were serialized while every implementation
+file stayed absent from V8 coverage. Four fresh processes then invoke one tool
+each, assert its implementation is covered and its semantic result reaches the
+provider, and assert the other three remain absent. The exact same harness runs
+against an installed tarball from a foreign working directory. A second copied
+install deletes the emitted `web_fetch` implementation by stable behavior
+provenance and proves the resulting tool error names the missing chunk and the
+two standard reinstall commands. No hash, size, source-map, or timing value is
+used as a correctness assertion.
+
+The after-codewiki graph is the before point for this cut. Translated modules
+changed from 1,336 files (58 Clio chunks) to 1,357 files (79 Clio chunks), as
+the split surfaces and dynamic-import boundaries create more, smaller generated
+modules. The evaluated Clio JavaScript nevertheless fell from 5,015,343 to
+4,929,030 bytes. The four discoverable implementation entries total 104,804
+bytes (`context` 33,919; `web_fetch` 24,979; `verify` 24,063; `code_nav`
+21,843) and are absent until invoked. Total built JavaScript rose from 99 files
+and 5,812,402 bytes to 125 files and 5,840,309 bytes because the package must
+ship every first-use path. `npm pack --dry-run --json` reports approximately
+6.09 MB packed, 36.69 MB unpacked, and 1,127 entries, versus the previous
+rounded 6.08 MB, 36.65 MB, and 1,095 entries.
+
+Ten independent full-entry imports, with V8 compile caching disabled and a warm
+operating-system page cache on the same WSL2 host, produced:
+
+| Node | Before median / p90 | After median / p90 | Observation |
+| --- | ---: | ---: | --- |
+| 22.22.3 | 525.656 / 539.633 ms | 545.576 / 565.551 ms | no timing improvement in this sample |
+| 24.9.0 | 539.056 / 574.139 ms | 553.733 / 582.703 ms | no timing improvement in this sample |
+
+The cut is justified by the deterministic absence/presence contract and the
+smaller evaluated graph, not by a startup-time claim. Registration, listing,
+provider serialization, and a safety-rejected call are separately held against
+loading in the registry contract; surface parity, single-flight first use,
+ordinary exception semantics, and Clio-owned versus external missing-module
+diagnostics are covered there as well.
+
 ## Reporting checklist
 
 Every published observation records:
