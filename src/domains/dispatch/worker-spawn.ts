@@ -27,6 +27,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { withClioAgentEnvironment } from "../../core/agent-environment.js";
+import { enableClioCompileCache, workerCompileCacheEnvironment } from "../../core/compile-cache.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import {
@@ -562,6 +563,23 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	const { workerEntryPath: _entryPath, ...processOptions } = opts ?? {};
 	return spawnWorkerProcess(process.execPath, ["--disable-warning=ExperimentalWarning", workerEntry], spec, {
 		...processOptions,
-		env: opts?.env ?? process.env,
+		env: withCompileCacheEnvironment(opts?.env ?? process.env),
 	});
+}
+
+/**
+ * Hand a native worker the parent's compile-cache directory. The worker's
+ * whole static graph resolves before its first application statement, so an
+ * in-process enableCompileCache() call there is too late; NODE_COMPILE_CACHE
+ * is the only control Node reads early enough. Spawning a worker writes state
+ * by definition, so the cache is established here when no boot entrypoint did
+ * it earlier (a direct `fleet run` reaches this line with the cache still
+ * unsettled); the enable is settle-once, root-gated, and operator-controlled
+ * like everywhere else. Operator settings win, stale markers are normalized
+ * away, and the worker entry consumes the injected pair from its own
+ * process.env right after Node reads it, so the cache serves Clio's own
+ * entry graph and never the user's node processes.
+ */
+function withCompileCacheEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	return workerCompileCacheEnvironment(env, enableClioCompileCache());
 }

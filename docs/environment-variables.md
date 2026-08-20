@@ -93,6 +93,7 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_RUN` | Marks a dispatched worker process; a skill install run inside it is stamped `installed-by: worker` (`src/worker/entry.ts`, `src/domains/resources/skills/install.ts`). |
+| `CLIO_CODER_INJECTED_COMPILE_CACHE` | Marks a `NODE_COMPILE_CACHE` value Clio injected into a native worker's environment so its module graph compiles from Clio's V8 compile cache. The worker entry consumes the pair from its own environment immediately after Node reads it, so no worker child of any kind inherits it, and the spawn path never lets the marker travel beside an operator-supplied `NODE_COMPILE_CACHE` (`src/core/compile-cache.ts`, `src/domains/dispatch/worker-spawn.ts`, `src/worker/entry.ts`). |
 
 ## Test-only
 
