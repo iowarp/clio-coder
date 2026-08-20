@@ -28,19 +28,17 @@ import {
 	type Usage,
 } from "@earendil-works/pi-ai";
 import {
-	getModels,
-	getProviders,
-	completeSimple as piCompleteSimple,
-	getModel as piGetModel,
-	stream as piStream,
-	registerBuiltInApiProviders,
-	registerFauxProvider,
-} from "@earendil-works/pi-ai/compat";
+	completeEngineSimple,
+	engineStream,
+	registerEngineBuiltins,
+	registerEngineFauxProvider,
+} from "./api-registry.js";
+import { engineModelProviders, engineModelsFor, getEngineModel } from "./models.js";
 import type { EngineModel } from "./types.js";
 
 export { StringEnum };
 
-export const stream = piStream;
+export const stream = engineStream;
 
 export interface EngineTextCompletionInput {
 	model: EngineModel;
@@ -61,7 +59,7 @@ export interface EngineTextCompletionResult {
 
 /** Run one tool-free completion while keeping pi message types at the engine boundary. */
 export async function completeEngineText(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
-	const response = await piCompleteSimple(
+	const response = await completeEngineSimple(
 		input.model,
 		{
 			systemPrompt: input.systemPrompt,
@@ -98,18 +96,18 @@ let registered = false;
 
 export function ensurePiAiRegistered(): void {
 	if (registered) return;
-	registerBuiltInApiProviders();
+	registerEngineBuiltins();
 	registered = true;
 }
 
 export function createEngineAi(): EngineAi {
 	ensurePiAiRegistered();
 	return {
-		listProviders: () => getProviders(),
-		listModels: (provider) => [...getModels(provider as never)] as EngineModel[],
+		listProviders: () => engineModelProviders(),
+		listModels: (provider) => engineModelsFor(provider) as EngineModel[],
 		getModel: (provider, modelId) => {
 			try {
-				return piGetModel(provider as never, modelId as never) as EngineModel;
+				return getEngineModel(provider, modelId) as EngineModel | undefined;
 			} catch {
 				return undefined;
 			}
@@ -193,7 +191,7 @@ export function registerFauxFromEnv(): EngineModel | null {
 	const text = process.env.CLIO_CODER_WORKER_FAUX_TEXT ?? "ok";
 	const stopReason = (process.env.CLIO_CODER_WORKER_FAUX_STOP_REASON ?? "stop") as AssistantMessage["stopReason"];
 	const errorMessage = process.env.CLIO_CODER_WORKER_FAUX_ERROR_MESSAGE;
-	const reg = registerFauxProvider({
+	const reg = registerEngineFauxProvider({
 		provider: "faux",
 		models: [{ id: modelId }],
 	});

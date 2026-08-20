@@ -11,7 +11,7 @@
  */
 
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
+import { engineStreamSimple } from "./api-registry.js";
 
 export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & { streamFn?: StreamFn };
 
@@ -21,7 +21,7 @@ export interface EngineAgentHandle {
 }
 
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
-	const agent = new Agent({ streamFn: streamSimple, ...options });
+	const agent = new Agent({ streamFn: engineStreamSimple, ...options });
 	return {
 		agent,
 		state: () => agent.state,

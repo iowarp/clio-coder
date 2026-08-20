@@ -11,7 +11,17 @@
  */
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -132,6 +142,70 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 		const result = await runNode([bin, "--version"], { cwd: prefix, env: { ...process.env, ...scratch.env } });
 		strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
 		match(result.stdout, /Clio Coder \d+\.\d+\.\d+/);
+	});
+
+	it("loads the shared Pi registry only for an installed external runtime plugin", async () => {
+		const initialized = await runNode([bin, "doctor", "--fix"], {
+			cwd: prefix,
+			env: { ...process.env, ...scratch.env },
+		});
+		strictEqual(initialized.code, 0, `stdout=${initialized.stdout} stderr=${initialized.stderr}`);
+		const configDir = scratch.env.CLIO_CODER_CONFIG_DIR;
+		ok(configDir);
+		const settingsPath = join(configDir, "settings.yaml");
+		const originalSettings = readFileSync(settingsPath, "utf8");
+		const pluginRoot = join(prefix, "node_modules", "@clio-test", "runtime-plugin");
+		mkdirSync(pluginRoot, { recursive: true });
+		writeFileSync(
+			join(pluginRoot, "package.json"),
+			JSON.stringify({ name: "@clio-test/runtime-plugin", version: "1.0.0", type: "module", exports: "./index.js" }),
+			"utf8",
+		);
+		writeFileSync(
+			join(pluginRoot, "index.js"),
+			`import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+const faux = registerFauxProvider({ api: "openai-completions", provider: "plugin-provider", models: [{ id: "plugin-model" }] });
+faux.setResponses([fauxAssistantMessage("installed plugin bridge ok")]);
+export const clioRuntimes = [{
+  id: "compat-override",
+  displayName: "Compat override",
+  kind: "http",
+  apiFamily: "openai-completions",
+  auth: "none",
+  defaultCapabilities: { chat: true, tools: false, contextWindow: 32768, maxTokens: 4096 },
+  synthesizeModel() { return faux.getModel(); }
+}];
+`,
+			"utf8",
+		);
+		seedOpenAICompatToolOrchestrator(configDir, "http://127.0.0.1:1", "full-auto");
+		const pluginSettings = readFileSync(settingsPath, "utf8")
+			.replace(/^runtimePlugins: \[\]$/m, "runtimePlugins:\n  - '@clio-test/runtime-plugin'")
+			.replaceAll("mock-chat", "plugin-target")
+			.replaceAll("mock-model", "plugin-model")
+			.replaceAll("runtime: openai-compat", "runtime: compat-override");
+		writeFileSync(settingsPath, pluginSettings, "utf8");
+
+		const coverageDir = mkdtempSync(join(tmpdir(), "clio-pack-plugin-coverage-"));
+		const foreignCwd = join(work, "installed-plugin-foreign-cwd");
+		mkdirSync(foreignCwd, { recursive: true });
+		try {
+			const result = await runCliWithCoverage({
+				bin,
+				args: ["--no-context-files", "--no-skills", "run", "answer through the plugin"],
+				cwd: foreignCwd,
+				env: scratch.env,
+				coverageDir,
+			});
+			strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
+			match(result.stdout, /installed plugin bridge ok/);
+			const compatFile = realpathSync(join(prefix, "node_modules", "@earendil-works", "pi-ai", "dist", "compat.js"));
+			ok(result.files.has(compatFile), "configured plugin use must evaluate the shared installed Pi compat module");
+		} finally {
+			writeFileSync(settingsPath, originalSettings, "utf8");
+			rmSync(pluginRoot, { recursive: true, force: true });
+			rmSync(coverageDir, { recursive: true, force: true });
+		}
 	});
 
 	it("keeps heavyweight tools lazy and invokes each shipped chunk from a foreign cwd", {

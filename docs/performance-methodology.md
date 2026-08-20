@@ -265,6 +265,53 @@ loading in the registry contract; surface parity, single-flight first use,
 ordinary exception semantics, and Clio-owned versus external missing-module
 diagnostics are covered there as well.
 
+### Narrow Pi API registration and dispatch
+
+Ordinary engine startup no longer evaluates the deprecated `pi-ai/compat`
+aggregate. Clio composes the ten supported lazy API factories in Pi's canonical
+order and constructs a `Models` collection from the nine provider factories
+backing Clio's current built-in runtimes: Bedrock, Anthropic, DeepSeek, Google,
+Groq, Mistral, OpenAI, OpenAI Codex, and OpenRouter. Their full model catalogs,
+Bedrock path, OAuth flows, image registration, and provider-owned request policy
+remain Pi-owned. Clio's synchronous environment-key mapping is pinned to Pi 0.84
+and parity-tested for every provider id, Anthropic precedence, Vertex ADC, and
+Bedrock ambient credentials. A configured external runtime activates a dynamic
+bridge before plugin evaluation; it deliberately restores the shared Pi
+registry universe only for that plugin-bearing process.
+
+The source-built and installed-tarball foreign-working-directory harness runs
+real OpenAI-compatible turns under V8 coverage. It proves `compat.js` and
+`legacy-api-aliases.js` are absent, the invoked OpenAI implementation is
+present, and unrelated Anthropic, Bedrock, Google, Mistral, OAuth, and image
+implementation files remain absent. It also proves `providers/all` and sample
+unconfigured provider catalogs remain absent. A separate fresh-process contract
+registers a known-API override from an out-of-tree module and proves its result
+wins after the bridge; the installed-tarball lane repeats that semantic and
+coverage proof from a foreign working directory.
+
+The after-lazy-tools graph is the before point for this cut. Translated modules
+changed from 1,357 files (79 evaluated Clio chunks) to 1,289 files (80 Clio
+chunks); direct `pi-ai/dist` evaluation fell from 128 files to 59. Evaluated
+Clio JavaScript changed from 4,929,030 to 4,941,023 bytes because the local
+dispatcher and explicit configured-provider boundary are auditable Clio code.
+Total built JavaScript is 126 files and 5,853,293 bytes. `npm pack --dry-run
+--json` reports approximately 6.11 MB packed, 36.73 MB unpacked, and 1,132
+entries. Package bytes are not the success criterion;
+all Pi packages remain external and every first-use implementation still ships.
+
+Ten independent full-entry imports used `NODE_DISABLE_COMPILE_CACHE=1`, a warm
+operating-system page cache, and the same WSL2 host as the preceding cuts:
+
+| Node | Before median / p90 | After median / p90 | Observation |
+| --- | ---: | ---: | --- |
+| 22.22.3 | 545.576 / 565.551 ms | 518.345 / 534.925 ms | lower in this sample |
+| 24.9.0 | 553.733 / 582.703 ms | 522.001 / 554.388 ms | lower in this sample |
+
+These are local import observations, not a startup guarantee or CI threshold.
+The independently blocking evidence is the absence/presence graph contract,
+credential parity, plugin registry identity, provider behavior suites, and the
+installed foreign-cwd turn.
+
 ## Reporting checklist
 
 Every published observation records:
