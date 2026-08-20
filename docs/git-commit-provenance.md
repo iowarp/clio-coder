@@ -106,13 +106,15 @@ is reused for ten seconds per working directory and Git environment, and the
 managed hooks directory is installed once per process. A `git init` or a
 `core.hooksPath` change takes effect for spawns that begin after that window.
 
-## Platform identity and avatar prerequisite
+## Platform identity and avatar
 
 Git commit data contains names and email addresses, not logos. GitHub and
 GitLab obtain the displayed avatar from the platform account that has verified
-the commit email. Before release, maintainers must verify
-`clio-coder@iowarp.ai` on IOWarp-controlled GitHub and GitLab identities, for
-example `clio-coder-bot` or `iowarp-clio`, and upload the existing Clio logo as
-the account avatar. `assets/clio-coder-avatar-512.png` is an exact PNG
-conversion of the existing 512 px Clio logo for platforms that require PNG.
-No account creation or remote operation is performed by Clio Coder.
+the commit email. Until maintainers verify `clio-coder@iowarp.ai` on
+IOWarp-controlled GitHub and GitLab identities, for example `clio-coder-bot` or
+`iowarp-clio`, those platforms render the trailers as plain text with a default
+avatar; the trailers themselves are complete and correct either way. That
+verification is a maintainer follow-up rather than a release gate, and
+`assets/clio-coder-avatar-512.png` is an exact PNG conversion of the existing
+512 px Clio logo for platforms that require PNG. No account creation or remote
+operation is performed by Clio Coder.

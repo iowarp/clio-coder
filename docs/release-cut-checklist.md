@@ -18,19 +18,11 @@ every step; this page is the procedure.
 | Tags | none for 0.3.2, local or remote |
 | GitHub Release | none for 0.3.2 |
 | npm registry | `@iowarp/clio-coder@0.3.2` absent; `latest` is `0.3.1` |
-| Commit provenance identity | Release-blocking: `clio-coder@iowarp.ai` must be verified on IOWarp-controlled GitHub and GitLab identities, such as `clio-coder-bot` or `iowarp-clio`; use `assets/clio-coder-avatar-512.png` as the platform avatar. |
+| Commit provenance identity | Post-release maintainer follow-up, not a gate: verifying `clio-coder@iowarp.ai` on IOWarp-controlled GitHub and GitLab identities (such as `clio-coder-bot` or `iowarp-clio`, with `assets/clio-coder-avatar-512.png` as the avatar) only changes how those platforms render the trailers. |
 
 ---
 
 ## Part 1: verification (repeatable)
-
-Before the local gate, confirm the public commit-provenance email
-`clio-coder@iowarp.ai` is verified on IOWarp-controlled GitHub and GitLab
-identities. An IOWarp identity such as `clio-coder-bot` or `iowarp-clio` is
-appropriate. Upload `assets/clio-coder-avatar-512.png` as the platform account
-avatar if PNG is required; commit data itself cannot carry a logo. This is a
-release prerequisite, not an instruction for Clio to create an account or
-perform a remote operation.
 
 Run against the exact final candidate with `NO_COLOR` unset and
 `TERM=xterm-256color`, so the color-sensitive tests see a real terminal.
@@ -134,7 +126,7 @@ confirming the exact SHA and the commands.
 26. A published version cannot be replaced. `npm unpublish` is restricted and
     time-limited; a mistake is corrected by publishing a higher version.
 
-## Part 7: post-publish verification
+## Part 7: post-publish verification and follow-ups
 
 27. `npm view @iowarp/clio-coder@0.3.2` and the selected dist-tag.
 28. On a clean machine, `npm install -g @iowarp/clio-coder` from the registry
@@ -145,6 +137,14 @@ confirming the exact SHA and the commands.
     applies 0.3.2.
 30. Close #112 with the SHA, CI URL, tag, GitHub Release URL, npm version and
     dist-tag, tarball evidence, and the post-publish verification.
+31. Maintainer follow-up, independent of the release: verify the commit
+    provenance email `clio-coder@iowarp.ai` on IOWarp-controlled GitHub and
+    GitLab identities such as `clio-coder-bot` or `iowarp-clio`, and upload
+    `assets/clio-coder-avatar-512.png` as the account avatar where PNG is
+    required. Commit data itself cannot carry a logo, so this affects only how
+    those platforms render the trailers, never whether attributed commits or
+    the release work. Clio never creates accounts or performs remote
+    operations for this.
 
 ---
 
