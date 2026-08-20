@@ -290,7 +290,13 @@ The `/settings` overlay is a full-screen transactional control center:
 - **Scoped Models Checklist**: Settings → `Models` provides a provider-backed checklist subview with target-level and target/model items, checked current selections, `Space` to toggle, and capability details in the inspector. Unresolved model references are preserved under an `Unavailable` group.
 - **Narrow Terminal Drill-Down Navigation**: Below 72 columns, Settings transitions from a split view to a modal drill-down stack (section list → section rows → detail drawer) with a breadcrumb and `Esc` moving up one level before closing. Includes `/` filtering across label, path, and description. Below 60 columns, side margins are removed for full-width presentation.
 
-### 7.2 Slash Autocomplete Command Palette
+### 7.2 Task and Decision Boards
+
+- **Composite Tasks Board (`/tasks`, `Alt+B`)**: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered `/view` path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.
+- **Settled Decisions Board (`/decisions`, `Alt+D`)**: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.
+- **Approved editor overrides**: `Alt+B` and `Alt+D` are deliberate application-input boundary overrides of Pi's editor word-back and word-delete chords. Clio routes them before the editor so the two global boards remain one chord away. They are explicit exceptions to the general rule that Clio app bindings avoid Pi editor reserves, and users may rebind the Clio actions in `settings.yaml`.
+
+### 7.3 Slash Autocomplete Command Palette
 - **Grouped Palette**: Typing `/` opens a grouped command palette (ordered by `Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints and formatted descriptions.
 - **One Canonical Spelling**: Autocomplete, help, and parsing expose the same unique slash-command names; no alias rows compete with canonical commands.
 

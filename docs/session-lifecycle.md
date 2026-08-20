@@ -77,6 +77,10 @@ Subsequent lines represent typed `SessionEntry` objects (`src/domains/session/en
 2. **`label`**: User-defined turn bookmark or tag anchored to `targetTurnId`.
 3. **`sessionInfo`**: Metadata event (such as model switch, target change, or thinking level adjustment).
 4. **`compactionSummary`**: Progressive compaction snapshot retaining historical context up to `firstKeptTurnId`.
+5. **`taskLedger`**: Full session task-board snapshot with a stable board id, goal and subgoal states, active run ids, required validation evidence, and optional operator provenance through `origin: "user"` plus `userTaskId`.
+6. **`decisionLedger`**: Branch-anchored snapshot of a completed or cancelled `ask_user` interview, including its timing, round count, settled values, superseded values, and operator corrections.
+
+`taskLedger` and `decisionLedger` are context-free bookkeeping entries. They refold the `/tasks` and `/decisions` surfaces and enter evidence projection, but do not consume model-context tokens or become model messages by themselves.
 
 ### Write Durability & Atomicity
 
@@ -189,6 +193,7 @@ To guarantee that protected artifacts and validation locks survive unexpected cr
 
 ## 10. In-Session Task Board & Usage Accounting
 
-- **Task Board** (`src/domains/session/task-board.ts`): Maintains session task items with states (`todo`, `in_progress`, `done`, `failed`). Emits middleware reminders when uncompleted tasks remain before turn end.
+- **Task Board** (`src/domains/session/task-board.ts`): Maintains session task items as full `taskLedger` snapshots with `pending`, `active`, `completed`, `blocked`, and `cancelled` states. Stable board ids retain terminal board history; rows picked from the project operator inbox retain `origin: "user"` and `userTaskId` across `/resume`, `/fork`, `/view`, and evidence export. The project-scoped inbox itself lives at `.clio-coder/user-tasks.json`, outside the session directory.
+- **Decision Board** (`src/domains/session/decision-board.ts`): Appends one branch-anchored `decisionLedger` snapshot when an `ask_user` interview completes or is cancelled. Superseding or correcting a value appends a new snapshot, preserving the earlier value and the operator-authored revision trail.
 - **Usage Accounting** (`src/domains/session/usage.ts`): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.
 - **Aborted Turn Persistence**: When a turn is interrupted by `Ctrl+C` or a SIGINT signal, partial assistant output and completed tool executions are committed to `current.jsonl` with `interrupted: true` before yielding the prompt.
