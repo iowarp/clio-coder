@@ -115,4 +115,23 @@ describe("contracts/chat renderer coalescing", () => {
 		strictEqual(renders, 1, "tool-call formation still renders synchronously");
 		strictEqual(timers.size, 0, "and it flushes the pending display frame");
 	});
+
+	it("carries the canonical ingress sequence through queue and panel application", () => {
+		const log: string[] = [];
+		const event: ChatLoopEvent = { type: "text_delta", contentIndex: 0, delta: "x", partialText: "x" };
+		const renderer = createCoalescingChatRenderer({
+			chatPanel: {
+				applyEvent: () => log.push("panel:apply"),
+			} as unknown as ChatPanel,
+			requestRender: () => {},
+			visibleEventSequence: (candidate) => (candidate === event ? 17 : null),
+			onQueue: (sequence, action) => log.push(`queue:${action}:${sequence}`),
+			onPanelApplied: (sequence) => log.push(`panel:high-water:${sequence}`),
+			setTimer: () => 1,
+		});
+
+		renderer.applyEvent(event);
+
+		deepStrictEqual(log, ["queue:admit:17", "panel:apply", "panel:high-water:17", "queue:dequeue:17"]);
+	});
 });

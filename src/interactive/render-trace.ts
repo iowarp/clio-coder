@@ -1,125 +1,529 @@
-import { appendFileSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { TuiRenderObserver, TuiRenderPhase } from "../engine/tui.js";
 
-/**
- * Opt-in per-frame render instrument. Off unless CLIO_CODER_RENDER_TRACE names a
- * file, and it costs one `performance.now()` plus a buffered line per frame
- * when it is on.
- *
- * It exists because "the TUI is janky with a fast model" is not a number.
- * Two costs hide behind that sentence and they call for different fixes: time
- * spent building the frame (chat-panel render, markdown, wrapping) and time
- * spent writing it (bytes to the terminal, full redraws instead of diffs). A
- * row per frame carrying both, plus the gap since the previous frame, tells
- * them apart.
- */
-export interface RenderTraceRow {
-	/** ms since the trace opened. */
+/** The trace format is append-only JSONL so partial sessions remain readable. */
+export const RENDER_TRACE_VERSION = 2;
+
+export type RenderInputAction = "editor" | "overlay" | "scroll" | "submit" | "no-visual-change";
+export type VisibleEventKind = "text" | "thinking";
+
+export interface RenderTraceCommit {
+	writeId: number;
 	at: number;
-	/** ms since the previous frame's write, or null for the first. */
-	sinceLastMs: number | null;
-	/** Bytes handed to the terminal for this frame. */
 	bytes: number;
-	/** Chat-panel render time attributed to this frame, when one was recorded. */
-	panelMs: number | null;
-	panelCacheHit: boolean | null;
-	panelEntries: number | null;
-	/** Stream deltas applied since the previous frame. */
-	deltas: number;
-	/** ms from the first unrendered delta to this frame, or null when none arrived. */
-	deltaLagMs: number | null;
+	enqueueMs: number;
+	returned: boolean;
+	backpressured: boolean;
 }
 
-export interface RenderTrace {
-	recordPanelRender(metrics: { durationMs: number; cacheHit: boolean; entriesRendered: number }): void;
-	/** One streamed text/thinking delta reached the panel. */
-	recordDelta(): void;
-	recordFrame(bytes: number): void;
-	close(): void;
+export interface RenderTraceFrameRecord {
+	type: "frame";
+	version: typeof RENDER_TRACE_VERSION;
+	frameId: number;
+	mode: "regular" | "fullscreen";
+	columns: number;
+	rows: number;
+	beginAt: number;
+	endAt: number;
+	durationMs: number;
+	sinceLastCommitMs: number | null;
+	panelHighWater: number;
+	inputHighWater: number;
+	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null;
+	pipeline: {
+		componentMs: number;
+		overlayCompositionMs: number;
+		normalizationMs: number;
+		cursorExtractionMs: number;
+		/** Viewport selection, diffing, ANSI construction, and cursor work not exposed as narrower pi-tui hooks. */
+		viewportDiffAnsiCursorMs: number;
+		terminalEnqueueMs: number;
+	};
+	commits: RenderTraceCommit[];
+}
+
+export type RenderTraceRecord =
+	| { type: "trace_start"; version: typeof RENDER_TRACE_VERSION; at: number }
+	| {
+			type: "event_ingress";
+			version: typeof RENDER_TRACE_VERSION;
+			eventSeq: number;
+			generation: number;
+			kind: VisibleEventKind;
+			contentIndex: number;
+			at: number;
+			codeUnitStart: number;
+			codeUnitEnd: number;
+			graphemeStart: number;
+			graphemeEnd: number;
+			bytes: number;
+	  }
+	| {
+			type: "queue";
+			version: typeof RENDER_TRACE_VERSION;
+			eventSeq: number;
+			action: "admit" | "dequeue";
+			at: number;
+			depth: number;
+	  }
+	| {
+			type: "panel";
+			version: typeof RENDER_TRACE_VERSION;
+			eventSeq: number;
+			at: number;
+			highWater: number;
+	  }
+	| {
+			type: "input_ingress";
+			version: typeof RENDER_TRACE_VERSION;
+			inputSeq: number;
+			action: RenderInputAction;
+			at: number;
+			bytes: number;
+			visualExpected: boolean;
+	  }
+	| RenderTraceFrameRecord
+	| {
+			type: "terminal_write";
+			version: typeof RENDER_TRACE_VERSION;
+			writeId: number;
+			frameId: number | null;
+			at: number;
+			bytes: number;
+			enqueueMs: number;
+			returned: boolean;
+			backpressured: boolean;
+	  }
+	| {
+			type: "terminal_drain";
+			version: typeof RENDER_TRACE_VERSION;
+			writeId: number;
+			frameId: number | null;
+			at: number;
+			waitMs: number;
+	  }
+	| { type: "trace_drop"; version: typeof RENDER_TRACE_VERSION; at: number; records: number };
+
+interface TraceWriter {
+	enqueue(record: RenderTraceRecord): void;
+	close(): Promise<void>;
+}
+
+interface AsyncTraceWriterOptions {
+	maxRecords?: number;
+	batchRecords?: number;
+	append?: (path: string, payload: string) => Promise<void>;
+	recordTime?: () => number;
+	appendTimeoutMs?: number;
 }
 
 /**
- * Rows buffered before a synchronous append. Small enough that a session read
- * mid-run sees the frames it just produced, which the first measuring attempt
- * did not: a 64-row buffer that only ever flushed once described startup and
- * said nothing about the streaming turn it was opened for.
+ * One bounded producer queue and at most one asynchronous append in flight.
+ * JSON serialization is the only render-stack work; filesystem I/O never runs
+ * in a render callback, and a slow disk cannot grow an unbounded promise chain.
  */
-const FLUSH_EVERY = 8;
+function createAsyncTraceWriter(path: string, options: AsyncTraceWriterOptions = {}): TraceWriter {
+	const maxRecords = options.maxRecords ?? 4_096;
+	const batchRecords = options.batchRecords ?? 128;
+	const append = options.append ?? ((target, payload) => appendFile(target, payload, "utf8"));
+	const recordTime = options.recordTime ?? (() => performance.now());
+	const appendTimeoutMs = options.appendTimeoutMs ?? 500;
+	const pending: string[] = [];
+	let dropped = 0;
+	let inFlight = false;
+	let scheduled = false;
+	let failed = false;
+	let closing = false;
+	let closePromise: Promise<void> | null = null;
+	let resolveClose: (() => void) | null = null;
+
+	const settleClose = (): void => {
+		if (closing && !inFlight && pending.length === 0) resolveClose?.();
+	};
+	const pump = (): void => {
+		scheduled = false;
+		if (failed || inFlight || pending.length === 0) {
+			settleClose();
+			return;
+		}
+		inFlight = true;
+		const payload = pending.splice(0, batchRecords).join("");
+		let appendTimer: NodeJS.Timeout | null = null;
+		const appendDeadline = new Promise<never>((_resolve, reject) => {
+			appendTimer = setTimeout(() => reject(new Error("render trace append timed out")), appendTimeoutMs);
+		});
+		void Promise.race([append(path, payload), appendDeadline])
+			.catch(() => {
+				failed = true;
+				pending.length = 0;
+			})
+			.finally(() => {
+				if (appendTimer) clearTimeout(appendTimer);
+				inFlight = false;
+				if (pending.length > 0 && !failed) queueMicrotask(pump);
+				else settleClose();
+			});
+	};
+	const schedule = (): void => {
+		if (scheduled || inFlight || failed) return;
+		scheduled = true;
+		queueMicrotask(pump);
+	};
+
+	return {
+		enqueue(record): void {
+			if (failed || closing) return;
+			if (pending.length >= maxRecords) {
+				pending.shift();
+				dropped += 1;
+			}
+			pending.push(`${JSON.stringify(record)}\n`);
+			schedule();
+		},
+		close(): Promise<void> {
+			if (closePromise) return closePromise;
+			if (dropped > 0 && !failed) {
+				pending.push(
+					`${JSON.stringify({ type: "trace_drop", version: RENDER_TRACE_VERSION, at: recordTime(), records: dropped })}\n`,
+				);
+			}
+			closing = true;
+			closePromise = new Promise((resolve) => {
+				resolveClose = resolve;
+			});
+			if (failed) {
+				pending.length = 0;
+				resolveClose?.();
+			} else {
+				schedule();
+				settleClose();
+			}
+			return closePromise;
+		},
+	};
+}
+
+interface FrameState {
+	frameId: number;
+	mode: "regular" | "fullscreen";
+	columns: number;
+	rows: number;
+	beginAt: number;
+	panelHighWater: number;
+	inputHighWater: number;
+	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null;
+	phases: Record<"component" | TuiRenderPhase, number>;
+	commits: RenderTraceCommit[];
+}
+
+export interface RenderTrace extends TuiRenderObserver {
+	recordPanelRender(metrics: { durationMs: number; cacheHit: boolean; entriesRendered: number }): void;
+	beginGeneration(): void;
+	recordVisibleEvent(fields: { kind: VisibleEventKind; contentIndex: number; delta: string }): number;
+	recordQueue(eventSeq: number, action: "admit" | "dequeue"): void;
+	recordPanelApplied(eventSeq: number): void;
+	recordInputIngress(action: RenderInputAction, bytes: number, visualExpected?: boolean): number;
+	beginComponentRender(): unknown;
+	endComponentRender(token: unknown): void;
+	recordTerminalWrite(fields: { bytes: number; enqueueMs: number; returned: boolean }): number;
+	recordTerminalDrain(writeId: number): void;
+	currentFrameId(): number | null;
+	onFirstFrameCommit(listener: (frameId: number) => void): void;
+	close(): Promise<void>;
+}
+
+function rounded(value: number): number {
+	return Math.round(value * 1_000) / 1_000;
+}
+
+function graphemeCount(text: string): number {
+	const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+	let count = 0;
+	for (const _part of segmenter.segment(text)) count += 1;
+	return count;
+}
 
 export function renderTracePath(env: NodeJS.ProcessEnv = process.env): string | null {
 	const raw = env.CLIO_CODER_RENDER_TRACE?.trim();
 	return raw && raw.length > 0 ? raw : null;
 }
 
-export function createRenderTrace(path: string, now: () => number = () => performance.now()): RenderTrace {
+export function createRenderTrace(
+	path: string,
+	now: () => number = () => performance.now(),
+	writerOptions: AsyncTraceWriterOptions = {},
+): RenderTrace {
+	// Initialization happens before the terminal/TUI starts, never in a frame.
 	mkdirSync(dirname(path), { recursive: true });
-	// Truncate on open so a trace is one session, never an append of several.
-	writeSync(openSync(path, "w"), "");
+	writeFileSync(path, "", "utf8");
 	const openedAt = now();
-	let lastFrameAt: number | null = null;
-	// The panel renders during the frame that is about to be written, so its
-	// metrics are held until that write attributes them.
-	let pendingPanel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null = null;
-	let pendingDeltas = 0;
-	let firstPendingDeltaAt: number | null = null;
-	let buffer: string[] = [];
+	const at = (): number => rounded(now() - openedAt);
+	const writer = createAsyncTraceWriter(path, { ...writerOptions, recordTime: at });
+	let frameSeq = 0;
+	let writeSeq = 0;
+	let eventSeq = 0;
+	let inputSeq = 0;
+	let generation = 0;
+	let panelHighWater = 0;
+	let inputHighWater = 0;
+	let queueDepth = 0;
+	let currentFrame: FrameState | null = null;
+	let pendingPanel: FrameState["panel"] = null;
+	let lastCommitAt: number | null = null;
+	let firstCommitListener: ((frameId: number) => void) | null = null;
+	let firstCommitDelivered = false;
+	const ranges = new Map<string, { codeUnits: number; graphemes: number }>();
+	const pendingDrains = new Map<number, { frameId: number | null; at: number }>();
 
-	const flush = (): void => {
-		if (buffer.length === 0) return;
-		const payload = buffer.join("");
-		buffer = [];
-		try {
-			appendFileSync(path, payload);
-		} catch {
-			// A trace that cannot be written must not take the session down.
-		}
-	};
+	writer.enqueue({ type: "trace_start", version: RENDER_TRACE_VERSION, at: 0 });
 
-	return {
+	const trace: RenderTrace = {
 		recordPanelRender(metrics): void {
 			pendingPanel = metrics;
 		},
-		recordDelta(): void {
-			pendingDeltas += 1;
-			firstPendingDeltaAt ??= now() - openedAt;
+		beginGeneration(): void {
+			generation += 1;
+			ranges.clear();
 		},
-		recordFrame(bytes): void {
-			const at = now() - openedAt;
-			const row: RenderTraceRow = {
-				at: Math.round(at * 1000) / 1000,
-				sinceLastMs: lastFrameAt === null ? null : Math.round((at - lastFrameAt) * 1000) / 1000,
+		recordVisibleEvent(fields): number {
+			eventSeq += 1;
+			const key = `${generation}:${fields.kind}:${fields.contentIndex}`;
+			const previous = ranges.get(key) ?? { codeUnits: 0, graphemes: 0 };
+			const graphemes = graphemeCount(fields.delta);
+			const next = { codeUnits: previous.codeUnits + fields.delta.length, graphemes: previous.graphemes + graphemes };
+			ranges.set(key, next);
+			writer.enqueue({
+				type: "event_ingress",
+				version: RENDER_TRACE_VERSION,
+				eventSeq,
+				generation,
+				kind: fields.kind,
+				contentIndex: fields.contentIndex,
+				at: at(),
+				codeUnitStart: previous.codeUnits,
+				codeUnitEnd: next.codeUnits,
+				graphemeStart: previous.graphemes,
+				graphemeEnd: next.graphemes,
+				bytes: Buffer.byteLength(fields.delta, "utf8"),
+			});
+			return eventSeq;
+		},
+		recordQueue(sequence, action): void {
+			queueDepth = Math.max(0, queueDepth + (action === "admit" ? 1 : -1));
+			writer.enqueue({
+				type: "queue",
+				version: RENDER_TRACE_VERSION,
+				eventSeq: sequence,
+				action,
+				at: at(),
+				depth: queueDepth,
+			});
+		},
+		recordPanelApplied(sequence): void {
+			panelHighWater = Math.max(panelHighWater, sequence);
+			writer.enqueue({
+				type: "panel",
+				version: RENDER_TRACE_VERSION,
+				eventSeq: sequence,
+				at: at(),
+				highWater: panelHighWater,
+			});
+		},
+		recordInputIngress(action, bytes, visualExpected = action !== "no-visual-change"): number {
+			inputSeq += 1;
+			if (visualExpected) inputHighWater = inputSeq;
+			writer.enqueue({
+				type: "input_ingress",
+				version: RENDER_TRACE_VERSION,
+				inputSeq,
+				action,
+				at: at(),
 				bytes,
-				panelMs: pendingPanel ? Math.round(pendingPanel.durationMs * 1000) / 1000 : null,
-				panelCacheHit: pendingPanel ? pendingPanel.cacheHit : null,
-				panelEntries: pendingPanel ? pendingPanel.entriesRendered : null,
-				deltas: pendingDeltas,
-				deltaLagMs: firstPendingDeltaAt === null ? null : Math.round((at - firstPendingDeltaAt) * 1000) / 1000,
+				visualExpected,
+			});
+			return inputSeq;
+		},
+		beginFrame(fields): FrameState {
+			frameSeq += 1;
+			const frame: FrameState = {
+				frameId: frameSeq,
+				...fields,
+				beginAt: at(),
+				panelHighWater,
+				inputHighWater,
+				panel: pendingPanel,
+				phases: { component: 0, overlay: 0, normalization: 0, cursor: 0 },
+				commits: [],
 			};
-			lastFrameAt = at;
 			pendingPanel = null;
-			pendingDeltas = 0;
-			firstPendingDeltaAt = null;
-			buffer.push(`${JSON.stringify(row)}\n`);
-			if (buffer.length >= FLUSH_EVERY) flush();
+			currentFrame = frame;
+			return frame;
 		},
-		close(): void {
-			flush();
+		endFrame(frameToken): void {
+			const frame = frameToken as FrameState;
+			const endAt = at();
+			const terminalEnqueueMs = frame.commits.reduce((sum, commit) => sum + commit.enqueueMs, 0);
+			const measured =
+				frame.phases.component +
+				frame.phases.overlay +
+				frame.phases.normalization +
+				frame.phases.cursor +
+				terminalEnqueueMs;
+			const record: RenderTraceFrameRecord = {
+				type: "frame",
+				version: RENDER_TRACE_VERSION,
+				frameId: frame.frameId,
+				mode: frame.mode,
+				columns: frame.columns,
+				rows: frame.rows,
+				beginAt: frame.beginAt,
+				endAt,
+				durationMs: rounded(Math.max(0, endAt - frame.beginAt)),
+				sinceLastCommitMs:
+					lastCommitAt === null || frame.commits.length === 0
+						? null
+						: rounded(Math.max(0, (frame.commits[0]?.at ?? endAt) - lastCommitAt)),
+				panelHighWater: frame.panelHighWater,
+				inputHighWater: frame.inputHighWater,
+				panel: frame.panel,
+				pipeline: {
+					componentMs: rounded(frame.phases.component),
+					overlayCompositionMs: rounded(frame.phases.overlay),
+					normalizationMs: rounded(frame.phases.normalization),
+					cursorExtractionMs: rounded(frame.phases.cursor),
+					viewportDiffAnsiCursorMs: rounded(Math.max(0, endAt - frame.beginAt - measured)),
+					terminalEnqueueMs: rounded(terminalEnqueueMs),
+				},
+				commits: frame.commits,
+			};
+			writer.enqueue(record);
+			if (frame.commits.length > 0) {
+				lastCommitAt = frame.commits.at(-1)?.at ?? endAt;
+				if (!firstCommitDelivered) {
+					firstCommitDelivered = true;
+					firstCommitListener?.(frame.frameId);
+				}
+			}
+			if (currentFrame === frame) currentFrame = null;
 		},
+		beginPhase(_frame, _phase): number {
+			return now();
+		},
+		endPhase(frameToken, phase, phaseToken): void {
+			const frame = frameToken as FrameState;
+			frame.phases[phase] += Math.max(0, now() - (phaseToken as number));
+		},
+		beginComponentRender(): number | null {
+			return currentFrame ? now() : null;
+		},
+		endComponentRender(token): void {
+			if (currentFrame === null || token === null) return;
+			currentFrame.phases.component += Math.max(0, now() - (token as number));
+		},
+		recordTerminalWrite(fields): number {
+			writeSeq += 1;
+			const frameId = currentFrame?.frameId ?? null;
+			const commit: RenderTraceCommit = {
+				writeId: writeSeq,
+				at: at(),
+				bytes: fields.bytes,
+				enqueueMs: rounded(fields.enqueueMs),
+				returned: fields.returned,
+				backpressured: !fields.returned,
+			};
+			currentFrame?.commits.push(commit);
+			writer.enqueue({ type: "terminal_write", version: RENDER_TRACE_VERSION, frameId, ...commit });
+			if (!fields.returned) pendingDrains.set(writeSeq, { frameId, at: commit.at });
+			return writeSeq;
+		},
+		recordTerminalDrain(writeId): void {
+			const pending = pendingDrains.get(writeId);
+			if (!pending) return;
+			pendingDrains.delete(writeId);
+			const drainAt = at();
+			writer.enqueue({
+				type: "terminal_drain",
+				version: RENDER_TRACE_VERSION,
+				writeId,
+				frameId: pending.frameId,
+				at: drainAt,
+				waitMs: rounded(Math.max(0, drainAt - pending.at)),
+			});
+		},
+		currentFrameId: () => currentFrame?.frameId ?? null,
+		onFirstFrameCommit(listener): void {
+			firstCommitListener = listener;
+		},
+		close: () => writer.close(),
+	};
+	return trace;
+}
+
+/** Time the root component without replacing its identity or layout markers. */
+export function traceComponentRenders<TComponent extends { render(width: number): string[] }>(
+	component: TComponent,
+	trace: Pick<RenderTrace, "beginComponentRender" | "endComponentRender">,
+): () => void {
+	const original = component.render;
+	const wrapped = function (this: TComponent, width: number): string[] {
+		const token = trace.beginComponentRender();
+		try {
+			return original.call(this, width);
+		} finally {
+			trace.endComponentRender(token);
+		}
+	};
+	component.render = wrapped;
+	return () => {
+		if (component.render === wrapped) component.render = original;
 	};
 }
 
 /**
- * Wrap a terminal so every frame's byte count reaches the trace. pi-tui emits
- * exactly one `write` per rendered frame, so counting writes counts frames.
+ * Observe the real Node stdout boundary. This catches writes made by terminal
+ * helpers that bypass `Terminal.write()` and records the Writable boolean plus
+ * the matching `drain`, while preserving Node's overloaded write contract.
  */
-export function traceTerminalWrites<TTerminal extends { write(data: string): void }>(
-	terminal: TTerminal,
-	trace: Pick<RenderTrace, "recordFrame">,
-): TTerminal {
-	const original = terminal.write.bind(terminal);
-	terminal.write = (data: string): void => {
-		trace.recordFrame(Buffer.byteLength(data, "utf8"));
-		original(data);
+export function traceProcessStdout(
+	trace: Pick<RenderTrace, "recordTerminalWrite" | "recordTerminalDrain">,
+	now: () => number = () => performance.now(),
+	stdout: Pick<typeof process.stdout, "write" | "once"> = process.stdout,
+): () => void {
+	const original = stdout.write;
+	const pendingDrainWrites: number[] = [];
+	let drainListening = false;
+	const wrapped = function (this: typeof stdout, ...args: unknown[]): boolean {
+		const chunk = args[0];
+		const start = now();
+		const returned = Reflect.apply(original, this, args) as boolean;
+		const enqueueMs = Math.max(0, now() - start);
+		let bytes = 0;
+		try {
+			bytes = Buffer.isBuffer(chunk)
+				? chunk.byteLength
+				: ArrayBuffer.isView(chunk)
+					? chunk.byteLength
+					: Buffer.byteLength(String(chunk), typeof args[1] === "string" ? (args[1] as BufferEncoding) : "utf8");
+		} catch {
+			bytes = Buffer.byteLength(String(chunk), "utf8");
+		}
+		const writeId = trace.recordTerminalWrite({ bytes, enqueueMs, returned });
+		if (!returned) {
+			pendingDrainWrites.push(writeId);
+			if (!drainListening) {
+				drainListening = true;
+				stdout.once("drain", () => {
+					drainListening = false;
+					for (const pendingWriteId of pendingDrainWrites.splice(0)) trace.recordTerminalDrain(pendingWriteId);
+				});
+			}
+		}
+		return returned;
+	} as typeof stdout.write;
+	stdout.write = wrapped;
+	return () => {
+		if (stdout.write === wrapped) stdout.write = original;
 	};
-	return terminal;
 }

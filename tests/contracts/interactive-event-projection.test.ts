@@ -68,6 +68,17 @@ function createHarness(log: string[]): ProjectionHarness {
 }
 
 describe("interactive event projection", () => {
+	it("records canonical chat ingress before any projection consumer", () => {
+		const log: string[] = [];
+		const harness = createHarness(log);
+		harness.deps.onChatEventIngress = (event) => log.push(`ingress:${event.type}`);
+		createInteractiveEventProjection(harness.deps);
+
+		harness.emitChat({ type: "text_delta", contentIndex: 0, delta: "hello", partialText: "hello" });
+
+		deepStrictEqual(log.slice(0, 2), ["ingress:text_delta", "chat:text_delta"]);
+	});
+
 	it("preserves startup, queue, tool, and chat-render ordering", () => {
 		const log: string[] = [];
 		const harness = createHarness(log);

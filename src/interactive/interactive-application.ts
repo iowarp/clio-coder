@@ -23,7 +23,7 @@ import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { APPLICATION_DOUBLE_TAP_MS, type ApplicationController } from "./application-controller.js";
-import type { ChatLoop } from "./chat-loop.js";
+import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
@@ -31,7 +31,7 @@ import { createEditorSubmitController } from "./editor-submit.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
 import { createInteractivePresentation } from "./interactive-presentation.js";
-import { createProcessInteractiveShell } from "./interactive-shell.js";
+import { createProcessInteractiveShell, getActiveRenderTrace } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
@@ -108,6 +108,8 @@ export interface InteractiveDeps {
 	agents?: AgentsContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
+	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
+	onFirstFrameCommit?: (frameId: number) => void;
 	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
@@ -402,8 +404,27 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const shell = createProcessInteractiveShell({ tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular" });
+	const shell = createProcessInteractiveShell({
+		tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular",
+		...(deps.onFirstFrameCommit ? { onFirstFrameCommit: deps.onFirstFrameCommit } : {}),
+	});
 	const { terminal, tui } = shell;
+	const renderTrace = getActiveRenderTrace();
+	const visibleEventSequences = new WeakMap<object, number>();
+	const recordChatEventIngress = (event: ChatLoopEvent): void => {
+		if (!renderTrace) return;
+		if (event.type === "agent_start") {
+			renderTrace.beginGeneration();
+			return;
+		}
+		if (event.type !== "text_delta" && event.type !== "thinking_delta") return;
+		const sequence = renderTrace.recordVisibleEvent({
+			kind: event.type === "text_delta" ? "text" : "thinking",
+			contentIndex: event.contentIndex,
+			delta: event.delta,
+		});
+		visibleEventSequences.set(event, sequence);
+	};
 	let applicationController: ApplicationController;
 	const workspaceFacts = createWorkspaceFacts({
 		cwd: process.cwd(),
@@ -438,6 +459,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		bus: deps.bus,
 		getLeaderArmed: () => leaderArmed,
 		getShutdownArmed: () => shutdownArmed,
+		resolveVisibleEventSequence: (event) => visibleEventSequences.get(event) ?? null,
 		providers: deps.providers,
 		dispatch: deps.dispatch,
 		observability: deps.observability,
@@ -487,6 +509,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.initialNotices ? { initialNotices: deps.initialNotices } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getTerminalColumns: () => terminal.columns,
+		onChatEventIngress: recordChatEventIngress,
 		applyChatEvent: (event) => chatRenderer.applyEvent(event),
 		setFollowUpMessages: (messages) => followUpQueuePanel.setMessages(messages),
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
@@ -786,8 +809,20 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		},
 		stopUi: () => shell.stop(),
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
-		onShutdown: deps.onShutdown,
+		onShutdown: async () => {
+			try {
+				await deps.onShutdown();
+			} finally {
+				await shell.settle();
+			}
+		},
 		registerInputListener: (listener) => tui.addInputListener(listener),
+		...(renderTrace
+			? {
+					onInputIngress: (action, data) =>
+						renderTrace.recordInputIngress(action, Buffer.byteLength(data, "utf8"), action !== "no-visual-change"),
+				}
+			: {}),
 	});
 
 	return applicationController.run;
