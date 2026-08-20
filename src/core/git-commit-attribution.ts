@@ -16,6 +16,24 @@ const MANAGED_HOOK_VERSION = 2;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
+/**
+ * How long one repository probe (inside a work tree, effective core.hooksPath)
+ * is reused for the same cwd and Git environment. Each probe costs two `git`
+ * subprocesses, about 9 ms on a warm machine, and seams such as the verify
+ * tool's per-file `node --check` spawn in bursts. The window is short so a
+ * `git init` or a `core.hooksPath` change made during a session is seen on the
+ * next spawn after it rather than for the rest of the session.
+ */
+const PROBE_CACHE_TTL_MS = 10_000;
+const PROBE_CACHE_MAX_ENTRIES = 32;
+
+type RepositoryProbe =
+	| { kind: "outside" }
+	| { kind: "custom"; hooksPath: string }
+	| { kind: "default"; declaredDefault: boolean };
+
+const probeCache = new Map<string, { at: number; probe: RepositoryProbe }>();
+let installedHooksDirectory: string | null = null;
 
 const PER_SPAWN_ENV_NAMES = [ASSISTED_ENV, AUTHORED_ENV, CONFIG_BASE_COUNT_ENV, DEFAULT_HOOKS_EQUIVALENT_ENV] as const;
 
@@ -44,6 +62,12 @@ export function setGitCommitAttributionEnabled(enabled: boolean): void {
 
 export function gitCommitAttributionEnabled(source: NodeJS.ProcessEnv = process.env): boolean {
 	return source[CLIO_GIT_COMMITS_ENABLED_ENV] !== "0";
+}
+
+/** Forget cached repository probes and the installed managed hooks directory. */
+export function resetGitCommitAttributionCachesForTests(): void {
+	probeCache.clear();
+	installedHooksDirectory = null;
 }
 
 function boundedDiagnostic(message: string): string {
@@ -236,9 +260,48 @@ function installManagedHook(directory: string, name: string): void {
 
 function managedHooksDirectory(): string {
 	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}`);
+	// Installed once per process; one stat afterwards confirms the Clio-owned
+	// directory is still there rather than re-reading all of its wrappers.
+	if (installedHooksDirectory === directory && existsSync(join(directory, "prepare-commit-msg"))) return directory;
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	for (const name of MANAGED_HOOK_NAMES) installManagedHook(directory, name);
+	installedHooksDirectory = directory;
 	return directory;
+}
+
+/** The environment entries that change what `git` resolves for a cwd. */
+function gitEnvironmentFingerprint(env: NodeJS.ProcessEnv): string {
+	const parts: string[] = [];
+	for (const key of Object.keys(env)) {
+		if (key.startsWith("GIT_") || key === "HOME" || key === "XDG_CONFIG_HOME") parts.push(`${key}=${env[key] ?? ""}`);
+	}
+	return parts.sort().join("\0");
+}
+
+function probeRepositoryUncached(cwd: string, env: NodeJS.ProcessEnv): RepositoryProbe {
+	if (gitOutput(cwd, env, ["rev-parse", "--is-inside-work-tree"]) !== "true") return { kind: "outside" };
+	const customHooksPath = gitOutput(cwd, env, ["config", "--path", "--get", "core.hooksPath"]);
+	if (customHooksPath === null) return { kind: "default", declaredDefault: false };
+	const commonDirectory = gitOutput(cwd, env, ["rev-parse", "--git-common-dir"]);
+	const defaultHooksPath = commonDirectory === null ? null : resolve(cwd, commonDirectory, "hooks");
+	if (customHooksPath.length === 0 || resolve(cwd, customHooksPath) !== defaultHooksPath) {
+		return { kind: "custom", hooksPath: customHooksPath };
+	}
+	return { kind: "default", declaredDefault: true };
+}
+
+function probeRepository(cwd: string, env: NodeJS.ProcessEnv, now = Date.now()): RepositoryProbe {
+	const key = `${cwd}\0${gitEnvironmentFingerprint(env)}`;
+	const cached = probeCache.get(key);
+	if (cached !== undefined && now - cached.at < PROBE_CACHE_TTL_MS && now >= cached.at) return cached.probe;
+	const probe = probeRepositoryUncached(cwd, env);
+	if (cached === undefined && probeCache.size >= PROBE_CACHE_MAX_ENTRIES) {
+		const oldest = probeCache.keys().next().value;
+		if (oldest !== undefined) probeCache.delete(oldest);
+	}
+	probeCache.delete(key);
+	probeCache.set(key, { at: now, probe });
+	return probe;
 }
 
 /**
@@ -246,6 +309,10 @@ function managedHooksDirectory(): string {
  * command-scope Git configuration. Repository and user configuration are never
  * written. An effective core.hooksPath that is not the repository's default
  * hooks directory is left alone: attribution fails open with a diagnostic.
+ *
+ * The repository probe behind this is cached per cwd and Git environment for
+ * `PROBE_CACHE_TTL_MS`, and the managed hooks directory is installed once per
+ * process, so a burst of spawns pays the git subprocesses once.
  */
 export function withManagedGitCommitAttributionEnvironment(
 	source: NodeJS.ProcessEnv,
@@ -267,20 +334,15 @@ export function withManagedGitCommitAttributionEnvironment(
 		return { env, diagnostic: boundedDiagnostic("GIT_CONFIG_COUNT is invalid; Clio commit attribution skipped") };
 	}
 	const cwd = resolve(options.cwd ?? process.cwd());
-	if (gitOutput(cwd, env, ["rev-parse", "--is-inside-work-tree"]) !== "true") return { env, diagnostic: null };
-
-	const customHooksPath = gitOutput(cwd, env, ["config", "--path", "--get", "core.hooksPath"]);
-	if (customHooksPath !== null) {
-		const commonDirectory = gitOutput(cwd, env, ["rev-parse", "--git-common-dir"]);
-		const defaultHooksPath = commonDirectory === null ? null : resolve(cwd, commonDirectory, "hooks");
-		if (customHooksPath.length === 0 || resolve(cwd, customHooksPath) !== defaultHooksPath) {
-			return {
-				env,
-				diagnostic: boundedDiagnostic(`core.hooksPath is set to '${customHooksPath}'; Clio commit attribution skipped`),
-			};
-		}
-		env[DEFAULT_HOOKS_EQUIVALENT_ENV] = "1";
+	const probe = probeRepository(cwd, env);
+	if (probe.kind === "outside") return { env, diagnostic: null };
+	if (probe.kind === "custom") {
+		return {
+			env,
+			diagnostic: boundedDiagnostic(`core.hooksPath is set to '${probe.hooksPath}'; Clio commit attribution skipped`),
+		};
 	}
+	if (probe.declaredDefault) env[DEFAULT_HOOKS_EQUIVALENT_ENV] = "1";
 
 	let hooksDirectory: string;
 	try {

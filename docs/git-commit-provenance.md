@@ -100,6 +100,12 @@ bounded diagnostic, and relies on controlled commit seams such as the fleet
 runner. Attribution failure does not destroy a commit; only a pre-existing hook
 that already failed continues to block it.
 
+The repository probe behind the managed environment (whether the command's
+working directory is inside a work tree, and what `core.hooksPath` resolves to)
+is reused for ten seconds per working directory and Git environment, and the
+managed hooks directory is installed once per process. A `git init` or a
+`core.hooksPath` change takes effect for spawns that begin after that window.
+
 ## Platform identity and avatar prerequisite
 
 Git commit data contains names and email addresses, not logos. GitHub and
