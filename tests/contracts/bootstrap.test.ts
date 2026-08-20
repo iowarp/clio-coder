@@ -84,6 +84,91 @@ describe("contracts/bootstrap", () => {
 		strictEqual(verification.body.includes("`pnpm run format`"), false, verification.body);
 	});
 
+	/**
+	 * CMake presets are the project's own declared configure/build/test recipes,
+	 * so they carry the authority package.json scripts do. A CMake tree without
+	 * presets declares no runnable command, and the section names only declared
+	 * commands: a guessed `cmake -B build` fails on exactly the toolchain-file
+	 * and MPI-wrapper projects this tool targets, which is worse than silence.
+	 */
+	it("names the declared CMake presets as verification commands", async () => {
+		writeFileSync(
+			join(scratch, "CMakeLists.txt"),
+			"cmake_minimum_required(VERSION 3.20)\nproject(fixture CXX)\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(scratch, "CMakePresets.json"),
+			JSON.stringify({
+				version: 6,
+				configurePresets: [
+					{ name: "base", hidden: true, generator: "Ninja" },
+					{ name: "debug", inherits: "base", binaryDir: "build" },
+				],
+				buildPresets: [{ name: "debug", configurePreset: "debug" }],
+				testPresets: [{ name: "debug", configurePreset: "debug" }],
+			}),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.cpp"), "int main() { return 0; }\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a repository with declared presets must get a verification section");
+
+		ok(verification.body.includes("`cmake --preset debug`"), verification.body);
+		ok(verification.body.includes("`cmake --build --preset debug`"), verification.body);
+		ok(verification.body.includes("`ctest --preset debug`"), verification.body);
+		// The hidden preset exists only to be inherited from; CMake refuses to run it.
+		strictEqual(verification.body.includes("base"), false, verification.body);
+	});
+
+	/**
+	 * A build preset commonly inherits its configure settings from a hidden
+	 * configure preset (the base every variant shares), leaving no *visible*
+	 * configure preset to name. That must not suppress the build command: it's
+	 * still one the agent can run, and configure/build/test are named
+	 * independently rather than folded into a single conditional sentence.
+	 */
+	it("names a visible build preset even without a visible configure preset", async () => {
+		writeFileSync(
+			join(scratch, "CMakeLists.txt"),
+			"cmake_minimum_required(VERSION 3.20)\nproject(fixture CXX)\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(scratch, "CMakePresets.json"),
+			JSON.stringify({
+				version: 6,
+				configurePresets: [{ name: "base", hidden: true, generator: "Ninja" }],
+				buildPresets: [{ name: "release", configurePreset: "base" }],
+			}),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.cpp"), "int main() { return 0; }\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		ok(verification, "a repository with a visible build preset must get a verification section");
+
+		ok(verification.body.includes("`cmake --build --preset release`"), verification.body);
+		strictEqual(verification.body.includes("cmake --preset"), false, verification.body);
+		strictEqual(verification.body.includes("base"), false, verification.body);
+	});
+
+	it("stays silent on a CMake tree that declares no presets", async () => {
+		writeFileSync(
+			join(scratch, "CMakeLists.txt"),
+			"cmake_minimum_required(VERSION 3.20)\nproject(fixture CXX)\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.cpp"), "int main() { return 0; }\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
 	it("measures the local import extension instead of reading it off the stack", async () => {
 		writeFileSync(
 			join(scratch, "package.json"),
