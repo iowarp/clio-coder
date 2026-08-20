@@ -1,6 +1,6 @@
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
+import { readCodewiki, structuralCodewikiHash } from "../../context/codewiki/artifact.js";
 import { renderCodewikiDigest } from "../../context/codewiki/digest.js";
-import { readCodewiki, structuralCodewikiHash } from "../../context/codewiki/indexer.js";
 import { detectProjectProfile } from "../../session/workspace/project-type.js";
 
 export function collectContextMetrics(cwd: string): Record<string, number | string | null> {

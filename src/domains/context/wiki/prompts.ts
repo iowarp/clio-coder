@@ -15,7 +15,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { loadFragments } from "../../prompts/fragment-loader.js";
 import { renderCodewikiDigest } from "../codewiki/digest.js";
-import type { Codewiki } from "../codewiki/indexer.js";
+import type { Codewiki } from "../codewiki/schema.js";
 import { WIKI_PLAN_FILE } from "./layout.js";
 import type { WikiGenerationPlan, WikiPlan, WikiPlanPage } from "./plan.js";
 

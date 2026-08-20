@@ -6,7 +6,8 @@ import { ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { ContextDomainModule, type WikiGenerate, type WikiGenerateInput } from "../domains/context/index.js";
+import { ContextDomainModule } from "../domains/context/runtime.js";
+import type { WikiGenerate, WikiGenerateInput } from "../domains/context/wiki/generate.js";
 import type { WikiPlan, WikiPlanPage } from "../domains/context/wiki/plan.js";
 import {
 	MAX_PAGE_ATTEMPTS,

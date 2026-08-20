@@ -12,8 +12,9 @@ import {
 	scanAgentConfigs,
 } from "./adoption.js";
 import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
-import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
-import { computeFingerprint } from "./fingerprint.js";
+import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
+import type { Codewiki } from "./codewiki/schema.js";
+import type { Fingerprint } from "./fingerprint.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
@@ -1041,10 +1042,10 @@ function writeProjectState(
 	adoption: AdoptionScanResult,
 	recordAdoption: boolean,
 	codewikiVersion: number,
+	fingerprint: Fingerprint,
 	generation: BootstrapGenerationTelemetry,
 	generated: boolean,
 ): string {
-	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
 	const prev = readClioState(cwd);
 	// lastBootstrap describes how the CLIO-CODER.md on disk was produced, not what the
@@ -1059,7 +1060,7 @@ function writeProjectState(
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
-		fingerprint: finalFingerprint,
+		fingerprint,
 		codewikiVersion,
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
@@ -1082,13 +1083,13 @@ function persistCodewikiForGeneration(
 	projectType: ProjectType,
 	indexedAt: string,
 	codewiki: Codewiki,
+	fingerprint: Fingerprint,
 ): void {
-	writeCodewiki(cwd, codewiki);
 	const prev = readClioState(cwd);
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
-		fingerprint: computeFingerprint(cwd, codewiki),
+		fingerprint,
 		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
@@ -1176,7 +1177,22 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	// Index the repository before generation so the generator can ground CLIO-CODER.md
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
-	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	let codewiki: Codewiki;
+	let codewikiFingerprint: Fingerprint;
+	if (input.preview === true) {
+		const candidate = await buildCodewikiCandidate(cwd, projectType);
+		codewiki = candidate.codewiki;
+		codewikiFingerprint = candidate.fingerprint;
+	} else {
+		const coordinated = await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: projectType }), {
+			beforeCommit: (_result, workspace) => ensureGitignore(workspace, input),
+			afterCommit: ({ codewiki: committed, fingerprint }, workspace) =>
+				persistCodewikiForGeneration(workspace, projectType, indexedAt, committed, fingerprint),
+		});
+		if (!coordinated) throw new Error("codewiki bootstrap transaction did not commit");
+		codewiki = coordinated.codewiki;
+		codewikiFingerprint = coordinated.worker.fingerprint;
+	}
 	const codewikiEntryCount = indexedSourceFileCount(codewiki);
 	progress(input, {
 		phase: "codewiki",
@@ -1185,10 +1201,6 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		current: codewikiEntryCount,
 		total: codewikiEntryCount,
 	});
-	if (input.preview !== true) {
-		await ensureGitignore(cwd, input);
-		persistCodewikiForGeneration(cwd, projectType, indexedAt, codewiki);
-	}
 	const hadClioMd = existsSync(join(cwd, "CLIO-CODER.md"));
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
 	const existingClioMdText = useExistingClioMdAsSource ? readExistingClioMdText(cwd) : null;
@@ -1362,6 +1374,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		adoption,
 		adoptionApplied,
 		codewiki.version,
+		codewikiFingerprint,
 		generation,
 		shouldGenerate,
 	);

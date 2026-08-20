@@ -102,6 +102,37 @@ Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
    - Tier 2: Distinctive `#include` directives (standard C++ headers vs standard C headers).
    - Tier 3: Language-exclusive tokens (`template<`, `namespace `, `class `, `nullptr`, `constexpr`).
 
+## Codewiki ownership and worker boundary
+
+Codewiki keeps its boot-time read surface separate from its build graph:
+
+- `src/domains/context/codewiki/schema.ts`, `artifact.ts`, and `paths.ts` own the
+  stable data shapes, normalized artifact compatibility, synchronous and
+  asynchronous reads, serialization, and cheap path classification. Reading a
+  cached artifact does not load tree-sitter.
+- `indexer.ts` owns full, synchronized, and incremental candidate construction.
+  Its tree-sitter adapter is a real dynamic import; grammars load only for the
+  source paths an actual build needs.
+- `build-worker.ts` is the sole runtime execution boundary for codewiki
+  candidate walks, freshness fingerprinting, and parsing. Other context surfaces
+  independently detect project metadata, but the interactive process does not
+  run a codewiki scan or an uninterruptible parser call on its render/input loop.
+- `coordinator.ts` owns production commits. One FIFO per workspace establishes
+  generation order inside a process, and `withStateFileLock` extends that order
+  across Clio processes. Each transaction rereads the artifact after acquiring
+  the lease, publishes atomically, and updates freshness state before releasing
+  ownership.
+
+Session-start refresh, parallel tool demand, incremental mutation notices,
+explicit index/refresh, context bootstrap, wiki grounding, and context reset all
+enter this transaction boundary. A never-indexed workspace remains untouched by
+background session startup. `code_nav` still waits for a fresh demand result;
+reset queues behind already-admitted work and therefore cannot be undone by an
+older completion. Context-domain shutdown drains both mutation admission and the
+coordinator lane before returning. The direct builder and artifact writer remain
+available to build scripts and test fixtures, but production workspace writes
+must go through the coordinator.
+
 ## Boundary invariants
 
 `npm run lint` executes the boundary checker (`tests/boundaries/check-boundaries.ts`, imported by `scripts/check-hygiene.ts`). Treat these checks as executable specifications.

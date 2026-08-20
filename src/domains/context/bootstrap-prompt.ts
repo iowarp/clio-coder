@@ -3,7 +3,7 @@ import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
 import type { BootstrapStructuredOutput } from "./bootstrap.js";
 import { renderCodewikiDigest } from "./codewiki/digest.js";
-import type { Codewiki } from "./codewiki/indexer.js";
+import type { Codewiki } from "./codewiki/schema.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
 export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to write the custom sections of CLIO-CODER.md for the project at <cwd>. CLIO-CODER.md is a lean, project-specific handbook that the clio-coder coding agent loads on every session, so write for an experienced engineer who has never seen this repository and is about to change it.
