@@ -179,7 +179,7 @@ import { createToolProseRegistration } from "../interactive/tool-prose-registrat
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
-import { createDispatchBackgroundRegistry } from "../tools/dispatch.js";
+import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 
