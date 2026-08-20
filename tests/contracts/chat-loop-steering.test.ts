@@ -342,6 +342,64 @@ describe("contracts/chat-loop steering queue routing", () => {
 		await run;
 	});
 
+	// DOGFOOD-F5: two prompts typed during the boot window. The first submit
+	// stamps the target-probe TTL and awaits the probe; the second used to find
+	// the TTL fresh, skip the probe, run the rest of the pipeline concurrently,
+	// and reach the engine first. The first then failed on the engine's
+	// active-prompt invariant with its user turn already in the ledger.
+	it("admits concurrent fresh submits in submission order and routes the second into the stream", async () => {
+		const log = emptyLog();
+		const runGate = gate();
+		const probeGate = gate();
+		const entries: SessionEntry[] = [];
+		const fakeProviders = providers();
+		const status = fakeProviders.list()[0];
+		let probes = 0;
+		fakeProviders.probeTarget = async () => {
+			probes += 1;
+			if (probes === 1) await probeGate.wait;
+			return status ?? null;
+		};
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: fakeProviders,
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			createAgent: createSteeringAgentFactory(log, async () => runGate.wait),
+		} as never);
+		const notices: string[] = [];
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push(event.text);
+		});
+
+		const first = loop.submit("FIRST");
+		const second = loop.submit("SECOND");
+		await settle();
+		deepStrictEqual(log.prompts, [], "nothing reaches the engine while the first admission awaits its probe");
+		strictEqual(probes, 1, "the second submit is parked behind the first, not racing it");
+
+		probeGate.release();
+		await settle();
+		await settle();
+		deepStrictEqual(log.prompts, ["FIRST"], "the first typed prompt owns the stream");
+		strictEqual(loop.isStreaming(), true);
+		deepStrictEqual(
+			log.steered.map((message) => (message as { content?: unknown }).content),
+			["SECOND"],
+			"the second typed prompt waits its turn as a steer instead of a competing fresh prompt",
+		);
+		const userTurns = entries.filter((entry) => entry.kind === "message" && entry.role === "user");
+		strictEqual(userTurns.length, 1, "only the admitted prompt has a user turn; the steer is injected by the engine");
+		strictEqual(
+			notices.some((notice) => notice.includes("another response was already active")),
+			false,
+		);
+
+		runGate.release();
+		await Promise.all([first, second]);
+	});
+
 	it("replaces the engine's active-prompt invariant with operator-facing text", async () => {
 		const raw =
 			"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.";
