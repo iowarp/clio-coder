@@ -272,6 +272,18 @@ decoding and before the application controller mutates editor, overlay, scroll,
 or submit state. The first frame whose input high water includes that id is the
 input-to-stdout-commit endpoint.
 
+Adaptive streaming remains inside that presentation boundary. One semantic
+classifier drops only transparent raw text/thinking mirrors, sends derived
+visible content through one generation/epoch FIFO, and treats every other
+transcript mutation as an ordered drain boundary. Pacer slices mutate the
+panel directly and are never re-emitted on the public bus, so session storage,
+replay/export, tool-call formation, and cumulative tool-result behavior keep
+their canonical synchronous inputs. Abort, retry, interrupt, submit, mode
+change, and teardown drain the queue and can await the containing committed
+frame. The stdout gate stops later frame construction after a false write and
+coalesces to current model state until `drain`; it is not installed for the
+default `off` path and therefore cannot become a second unbounded SSH buffer.
+
 Tracing is opt-in and content-free. Its bounded asynchronous writer never does
 filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
 See [performance-methodology.md](performance-methodology.md) for vocabulary,

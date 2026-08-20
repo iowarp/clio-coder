@@ -279,6 +279,8 @@ export interface ChatPanel extends Component {
 	 */
 	toggleLastThinking(): boolean;
 	toggleAllThinking(): boolean;
+	/** Current panel-level live-thinking visibility used by presentation pacing. */
+	isThinkingExpanded(): boolean;
 	/** Toggle whether expanded live tool bodies include cumulative partial output. */
 	toggleLiveToolOutput(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
@@ -1450,6 +1452,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			markDirty();
 			return true;
 		},
+		isThinkingExpanded: () => thinkingExpanded,
 		toggleLiveToolOutput(): boolean {
 			liveToolOutput = !liveToolOutput;
 			markDirty();

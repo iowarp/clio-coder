@@ -86,6 +86,8 @@ export interface EditorSubmitDeps {
 	session?: EditorSubmitSession;
 	sessionTranscript: EditorSubmitSessionTranscript;
 	chatPanel: Pick<ChatPanel, "appendReplayBlock">;
+	beforeSemanticBoundary?: (reason: string) => void;
+	settleVisibleFrame?: (reason: string) => Promise<void>;
 	dispatchCommand: (text: string) => void;
 	/** Idempotently collapses a fresh-session launchpad before any handler can append output. */
 	collapseLaunchpadBeforeSubmit?: () => void;
@@ -346,6 +348,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
 				return;
 			}
+			deps.beforeSemanticBoundary?.("follow-up-submit");
 			if (!deps.chat.queueFollowUp(submitted.text)) {
 				deps.io.stderr("[follow-up] no active response to queue against\n");
 				return;
@@ -390,11 +393,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.sessionTranscript.recordSubmittedTurn();
 			const paths = submitted.workingContextPaths ?? [];
 			const skillRequests = submitted.pendingSkillRequests ?? [];
+			deps.beforeSemanticBoundary?.("interrupt-submit");
 			await deps.chat.submit(submitted.text, {
 				steering: "interrupt",
 				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
 				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
 			});
+			await deps.settleVisibleFrame?.("interrupt-submit-return");
 		})().catch((err) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interrupt] ${msg}\n`);

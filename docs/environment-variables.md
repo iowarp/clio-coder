@@ -42,6 +42,9 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | unset | Skill-marketplace index path override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | `1` strips network tools from every registry in the process; the skills-eval harness sets it for hermetic arms; `--allow-network` clears it (`src/tools/network-policy.ts`). |
+| `CLIO_CODER_SMOOTH_STREAM` | settings value | Per-process override for `terminal.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`. A valid value wins over settings; an invalid value fails safely to `off`. |
+| `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
+| `CLIO_CODER_SCREEN_READER` | off | `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader receives the existing low-motion update behavior. |
 
 ## Directory and install layout
 

@@ -264,6 +264,7 @@ describe("contracts/settings center", () => {
 		strictEqual(byId.get("runtimePlugins")?.scope, "restart");
 		strictEqual(byId.get("terminal.tuiMode")?.scope, "restart");
 		strictEqual(byId.get("terminal.fullscreenScrollbar")?.scope, "restart");
+		strictEqual(byId.get("terminal.smoothStreaming")?.scope, "live");
 		strictEqual(byId.get("autonomy")?.scope, "live");
 		strictEqual(byId.get("retry.maxRetries")?.scope, "live");
 	});
@@ -825,6 +826,11 @@ describe("contracts/settings center", () => {
 				id: "terminal.fullscreenScrollbar",
 				value: "always",
 				assert: (s) => strictEqual(s.terminal.fullscreenScrollbar, "always"),
+			},
+			{
+				id: "terminal.smoothStreaming",
+				value: "on",
+				assert: (s) => strictEqual(s.terminal.smoothStreaming, "on"),
 			},
 			{
 				id: "runtimePlugins",

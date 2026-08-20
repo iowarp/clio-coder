@@ -29,6 +29,8 @@ import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import { parseSlashCommand, type RunIo } from "./slash-commands.js";
 import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
+import type { SmoothStreamingMode } from "./stream-pacer.js";
+import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
 import { formatTargetLabel } from "./theme/index.js";
 import { createWelcomeDashboard, type WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
@@ -84,6 +86,12 @@ export interface InteractivePresentationDeps {
 	getShutdownArmed?: () => boolean;
 	getCwd?: () => string;
 	resolveVisibleEventSequence?: (event: ChatLoopEvent) => number | null;
+	resolveStreamIngress?: (
+		event: ChatLoopEvent,
+	) => { sequence: number; generation: string | number; ingressAt: number } | null;
+	commitFrame?: (reason?: string) => Promise<unknown>;
+	hasObservedBackpressure?: () => boolean;
+	onSmoothStreamingMode?: (mode: SmoothStreamingMode, pacingActive: boolean) => void;
 	scheduleInterval?: (callback: () => void, intervalMs: number) => PresentationTickerHandle;
 	clearScheduledInterval?: (handle: PresentationTickerHandle) => void;
 	factories?: Partial<InteractivePresentationFactories>;
@@ -339,6 +347,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const chatRenderer = factories.createChatRenderer({
 		chatPanel,
 		requestRender,
+		...(deps.resolveStreamIngress && deps.getSettings
+			? {
+					streamIngress: deps.resolveStreamIngress,
+					getSmoothStreamingMode: () => {
+						const mode = resolveSmoothStreamingMode(deps.getSettings?.().terminal.smoothStreaming ?? "off");
+						const autoAllowed = processAutoPacingAllowed(deps.hasObservedBackpressure?.() ?? false);
+						deps.onSmoothStreamingMode?.(mode, mode === "on" || (mode === "auto" && autoAllowed));
+						return mode;
+					},
+					isAutoPacingAllowed: () => processAutoPacingAllowed(deps.hasObservedBackpressure?.() ?? false),
+					...(deps.commitFrame ? { commitFrame: deps.commitFrame } : {}),
+				}
+			: {}),
 		...(renderTrace
 			? {
 					visibleEventSequence: (event) => deps.resolveVisibleEventSequence?.(event) ?? null,
@@ -348,8 +369,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			: {}),
 	});
 	const io = factories.createIo({
-		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
-		requestRender,
+		appendReplayBlock: (renderBlock) =>
+			chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "command-output"),
+		requestRender: () => {},
 	});
 	const root = factories.buildLayout(
 		{

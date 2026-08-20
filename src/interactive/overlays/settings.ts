@@ -197,6 +197,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"terminal.outputVerbosity": "Output detail",
 	"terminal.tuiMode": "TUI mode",
 	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
+	"terminal.smoothStreaming": "Smooth streaming",
 	theme: "Theme",
 	runtimePlugins: "Runtime plugins",
 	"compaction.model": "Compaction model",
@@ -266,6 +267,7 @@ export const SETTINGS_SECTION_ROWS = {
 		"terminal.outputVerbosity",
 		"terminal.tuiMode",
 		"terminal.fullscreenScrollbar",
+		"terminal.smoothStreaming",
 		"theme",
 	],
 	advanced: [
@@ -322,6 +324,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	"terminal.tuiMode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
 	"terminal.fullscreenScrollbar": "When the draggable transcript scrollbar is visible in fullscreen mode.",
+	"terminal.smoothStreaming": "Presentation-only pacing for streamed assistant text and thinking.",
 	theme: "Color palette. Clio ships a single tuned palette.",
 	runtimePlugins: "npm packages exporting clioRuntimes: RuntimeDescriptor[].",
 	"compaction.model": "Dedicated summarization model; blank uses the orchestrator.",
@@ -408,6 +411,11 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		hidden: "never draw the fullscreen transcript scrollbar",
 		auto: "show the scrollbar while scrolling or dragging",
 		always: "reserve the rightmost column for the scrollbar",
+	},
+	"terminal.smoothStreaming": {
+		off: "preserve the current immediate 16ms-coalesced streaming behavior",
+		auto: "pace only on a capable local TTY without accessibility or backpressure risk",
+		on: "request grapheme-safe pacing; stdout backpressure still pauses presentation",
 	},
 };
 
@@ -1389,6 +1397,9 @@ export function buildSettingItems(
 		settingItem("terminal.fullscreenScrollbar", terminal.fullscreenScrollbar, {
 			values: ["hidden", "auto", "always"],
 		}),
+		settingItem("terminal.smoothStreaming", terminal.smoothStreaming, {
+			values: ["off", "auto", "on"],
+		}),
 		settingItem("theme", settings.theme, {
 			affordance: "single clio-coder palette",
 			readOnly: true,
@@ -1869,6 +1880,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			if (value === "hidden" || value === "auto" || value === "always") {
 				settings.terminal.fullscreenScrollbar = value;
 			}
+			return;
+		case "terminal.smoothStreaming":
+			if (value === "off" || value === "auto" || value === "on") settings.terminal.smoothStreaming = value;
 			return;
 		case "runtimePlugins":
 			settings.runtimePlugins = value

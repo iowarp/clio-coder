@@ -5,7 +5,7 @@
  * not call an in-process timestamp "glass" latency: a terminal emulator or
  * external observation harness is required to measure a displayed pixel.
  */
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import { describe, it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { RenderTraceFrameRecord, RenderTraceRecord } from "../../src/interactive/render-trace.js";
+import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 import { openPty, ptySupported, stripAnsi } from "../harness/pty.js";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -22,30 +23,63 @@ const READY = /ctx /;
 interface Scratch {
 	dir: string;
 	tracePath: string;
+	backpressureArmPath: string;
 	env: Record<string, string>;
 	cleanup(): void;
 }
 
-function makeScratch(): Scratch {
+function makeScratch(
+	options: { providerUrl?: string; smoothStreaming?: "off" | "auto" | "on"; simulateBackpressure?: boolean } = {},
+): Scratch {
 	const dir = mkdtempSync(join(tmpdir(), "clio-render-trace-pty-"));
 	const configDir = join(dir, "config");
 	mkdirSync(configDir, { recursive: true });
 	const settings = structuredClone(DEFAULT_SETTINGS) as Record<string, unknown>;
+	const targetId = options.providerUrl ? "mock-chat" : "declared";
+	const modelId = options.providerUrl ? "mock-model" : "declared-model";
 	settings.targets = [
 		{
-			id: "declared",
+			id: targetId,
 			runtime: "openai-compat",
-			url: "http://127.0.0.1:9",
-			defaultModel: "declared-model",
+			url: options.providerUrl ?? "http://127.0.0.1:9",
+			defaultModel: modelId,
 			lifecycle: "user-managed",
+			...(options.providerUrl ? { auth: { apiKeyEnvVar: "CLIO_CODER_TEST_OPENAI_KEY" }, wireModels: [modelId] } : {}),
 		},
 	];
-	settings.orchestrator = { target: "declared", model: "declared-model", thinkingLevel: "off" };
+	settings.orchestrator = { target: targetId, model: modelId, thinkingLevel: "off" };
+	(settings.terminal as Record<string, unknown>).smoothStreaming = options.smoothStreaming ?? "off";
 	writeFileSync(join(configDir, "settings.yaml"), stringify(settings), "utf8");
 	const tracePath = join(dir, "render.jsonl");
+	const backpressureArmPath = join(dir, "arm-backpressure");
+	const backpressurePreload = join(dir, "stdout-backpressure.mjs");
+	if (options.simulateBackpressure) {
+		writeFileSync(
+			backpressurePreload,
+			[
+				"import { existsSync } from 'node:fs';",
+				"const stdout = process.stdout;",
+				"const originalWrite = stdout.write.bind(stdout);",
+				"let injected = false;",
+				`const armPath = ${JSON.stringify(backpressureArmPath)};`,
+				"stdout.write = function controlledWrite(chunk, encoding, callback) {",
+				"  const returned = originalWrite(chunk, encoding, callback);",
+				"  if (!injected && existsSync(armPath)) {",
+				"    injected = true;",
+				"    setTimeout(() => stdout.emit('drain'), 250);",
+				"    return false;",
+				"  }",
+				"  return returned;",
+				"};",
+			].join("\n"),
+			"utf8",
+		);
+	}
+	const inheritedNodeOptions = process.env.NODE_OPTIONS?.trim();
 	return {
 		dir,
 		tracePath,
+		backpressureArmPath,
 		env: {
 			...process.env,
 			CLIO_CODER_HOME: dir,
@@ -56,7 +90,11 @@ function makeScratch(): Scratch {
 			CLIO_CODER_RESIDENCY: "observe",
 			CLIO_CODER_RENDER_TRACE: tracePath,
 			CLIO_CODER_TRACE_BOOT: "1",
+			CLIO_CODER_TEST_OPENAI_KEY: "sk-test",
 			TERM: "xterm-256color",
+			...(options.simulateBackpressure
+				? { NODE_OPTIONS: [inheritedNodeOptions, `--import=${backpressurePreload}`].filter(Boolean).join(" ") }
+				: {}),
 		} as Record<string, string>,
 		cleanup() {
 			rmSync(dir, { recursive: true, force: true });
@@ -220,6 +258,12 @@ describe("render trace through a real PTY", {
 					})}\n`,
 				);
 			}
+		} catch (error) {
+			const traceTypes = readTrace(scratch.tracePath).map((record) => record.type);
+			throw new Error(
+				`${error instanceof Error ? error.message : String(error)}; trace=${JSON.stringify(traceTypes.slice(-40))}; output=${JSON.stringify(stripAnsi(session.output).slice(-800))}`,
+				{ cause: error },
+			);
 		} finally {
 			if (!session.exited) {
 				session.resumeOutput();
@@ -248,5 +292,129 @@ describe("render trace through a real PTY", {
 		const settledAgain = await session.killAndWaitForExit();
 		strictEqual(settledAgain.exitCode, first.exitCode);
 		strictEqual(settledAgain.signal, first.signal);
+	});
+
+	it("paces provider deltas to a final committed frame and recovers from real PTY backpressure", async () => {
+		const pacedMiddle = "x".repeat(4 * 1_024);
+		const replyChunks = ["paced-start-", "👩‍🔬", pacedMiddle, "-paced-final"];
+		const fixture = await startOpenAICompatFixture(replyChunks.join(""), { replyChunks, chunkDelayMs: 2 });
+		const scratch = makeScratch({
+			providerUrl: fixture.url,
+			smoothStreaming: "on",
+			simulateBackpressure: true,
+		});
+		const session = await openPty(
+			process.execPath,
+			[join(REPO_ROOT, "dist", "cli", "index.js"), "--no-context-files", "--no-skills"],
+			{
+				cols: 80,
+				rows: 24,
+				cwd: REPO_ROOT,
+				env: scratch.env,
+			},
+		);
+		try {
+			await session.waitForOutput((output) => READY.test(stripAnsi(output)), 30_000);
+			session.pauseOutput();
+			writeFileSync(scratch.backpressureArmPath, "armed\n", "utf8");
+			session.write("exercise paced PTY output");
+			await waitForTrace(
+				scratch.tracePath,
+				(records) => records.find((record) => record.type === "input_ingress" && record.action === "editor"),
+				"editor ingress before paced submit",
+			);
+			session.write("\r");
+			const submitIngress = await waitForTrace(
+				scratch.tracePath,
+				(records) => records.find((record) => record.type === "input_ingress" && record.action === "submit"),
+				"semantic submit ingress",
+			);
+			ok(submitIngress.type === "input_ingress");
+
+			const backpressuredWrite = await waitForTrace(
+				scratch.tracePath,
+				(records) => records.find((record) => record.type === "terminal_write" && record.returned === false),
+				"stdout.write() backpressure against a paused PTY",
+				30_000,
+			);
+			ok(backpressuredWrite.type === "terminal_write" && backpressuredWrite.backpressured);
+			const ingress = await waitForTrace(
+				scratch.tracePath,
+				(records) => {
+					const visible = records.filter((record) => record.type === "event_ingress");
+					return visible.length >= 2 ? visible : undefined;
+				},
+				"multiple provider delta ingress records",
+			);
+			const lastIngress = ingress.at(-1);
+			ok(lastIngress?.type === "event_ingress");
+
+			session.resumeOutput();
+			await session.waitForOutput((output) => stripAnsi(output).includes("paced-final"), 30_000);
+			const drained = await waitForTrace(
+				scratch.tracePath,
+				(records) => records.find((record) => record.type === "terminal_drain"),
+				"matching stdout drain",
+			);
+			ok(drained.type === "terminal_drain");
+			const finalFrame = await waitForTrace(
+				scratch.tracePath,
+				(records) =>
+					frames(records).find((frame) => frame.panelHighWater >= lastIngress.eventSeq && frame.commits.length > 0),
+				"first committed frame containing the final paced delta",
+			);
+			ok(finalFrame.panelHighWater >= lastIngress.eventSeq);
+			const records = readTrace(scratch.tracePath);
+			for (const event of ingress) {
+				const actions = records.flatMap((record) =>
+					record.type === "queue" && record.eventSeq === event.eventSeq ? [record.action] : [],
+				);
+				deepStrictEqual(actions, ["admit", "dequeue"], `event ${event.eventSeq} settles exactly once`);
+			}
+			if (process.env.CLIO_CODER_PERF_REPORT === "1") {
+				const submitFrame = frames(records).find(
+					(frame) => frame.inputHighWater >= submitIngress.inputSeq && frame.commits.length > 0,
+				);
+				const firstVisibleFrame = frames(records).find(
+					(frame) => frame.panelHighWater >= (ingress[0]?.eventSeq ?? 0) && frame.commits.length > 0,
+				);
+				process.stdout.write(
+					`${JSON.stringify({
+						node: process.versions.node,
+						mode: "on",
+						providerIngressEvents: ingress.length,
+						inputToStdoutCommitMs:
+							submitFrame && submitIngress.type === "input_ingress"
+								? (submitFrame.commits[0]?.at ?? submitFrame.endAt) - submitIngress.at
+								: null,
+						firstIngressToStdoutCommitMs:
+							firstVisibleFrame && ingress[0]?.type === "event_ingress"
+								? (firstVisibleFrame.commits[0]?.at ?? firstVisibleFrame.endAt) - ingress[0].at
+								: null,
+						finalIngressToStdoutCommitMs: (finalFrame.commits[0]?.at ?? finalFrame.endAt) - lastIngress.at,
+						controlledBackpressureWaitMs: drained.at - backpressuredWrite.at,
+					})}\n`,
+				);
+			}
+
+			session.write(CTRL_C);
+			await new Promise<void>((resolve) => setTimeout(resolve, 75));
+			session.write(CTRL_C);
+			const exit = await session.waitForExit(10_000);
+			strictEqual(exit.exitCode, 0, `clean PTY exit; output tail: ${stripAnsi(session.output).slice(-400)}`);
+		} catch (error) {
+			const traceTypes = readTrace(scratch.tracePath).map((record) => record.type);
+			throw new Error(
+				`${error instanceof Error ? error.message : String(error)}; requests=${fixture.requests.length}; trace=${JSON.stringify(traceTypes.slice(-40))}; output=${JSON.stringify(stripAnsi(session.output).slice(-800))}`,
+				{ cause: error },
+			);
+		} finally {
+			if (!session.exited) {
+				session.resumeOutput();
+				await session.killAndWaitForExit();
+			}
+			scratch.cleanup();
+			await closeServer(fixture.server);
+		}
 	});
 });

@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels, type LoopBlockedPayload } from "../../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ChatCancelOptions, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import {
@@ -77,6 +78,21 @@ describe("interactive event projection", () => {
 		harness.emitChat({ type: "text_delta", contentIndex: 0, delta: "hello", partialText: "hello" });
 
 		deepStrictEqual(log.slice(0, 2), ["ingress:text_delta", "chat:text_delta"]);
+	});
+
+	it("applies a hot presentation setting before refreshing the overlay", () => {
+		const log: string[] = [];
+		const harness = createHarness(log);
+		harness.deps.onConfigHotReload = (settings) => log.push(`hot:${settings.terminal.smoothStreaming}`);
+		createInteractiveEventProjection(harness.deps);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.terminal.smoothStreaming = "on";
+		harness.deps.bus.emit(BusChannels.ConfigHotReload, {
+			diff: { hotReload: ["terminal.smoothStreaming"], nextTurn: [], restartRequired: [] },
+			settings,
+		});
+
+		deepStrictEqual(log, ["hot:on", "settings:refresh"]);
 	});
 
 	it("preserves startup, queue, tool, and chat-render ordering", () => {

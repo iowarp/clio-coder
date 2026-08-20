@@ -77,6 +77,7 @@ export interface InteractiveEventProjectionDeps {
 	dismissNotification: (key: string) => void;
 	appendTranscriptNotice: (level: InteractiveTranscriptNoticeLevel, text: string) => void;
 	refreshSettingsOverlay: () => void;
+	onConfigHotReload?: (settings: Readonly<ClioSettings>) => void;
 }
 
 export interface InteractiveEventProjection {
@@ -313,7 +314,8 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ConfigHotReload, () => {
+		deps.bus.on(BusChannels.ConfigHotReload, (payload) => {
+			deps.onConfigHotReload?.(payload.settings);
 			deps.refreshSettingsOverlay();
 		}),
 		deps.bus.on(BusChannels.ConfigReloadFailed, (payload) => {

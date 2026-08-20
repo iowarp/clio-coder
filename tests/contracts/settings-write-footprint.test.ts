@@ -68,11 +68,13 @@ describe("contracts/settings-write-footprint", () => {
 		for (const testCase of [
 			{ leaf: "tuiMode", value: "fullscreen" },
 			{ leaf: "fullscreenScrollbar", value: "always" },
+			{ leaf: "smoothStreaming", value: "on" },
 		] as const) {
 			const before = seedMinimalFile();
 			updateSettings((settings) => {
 				if (testCase.leaf === "tuiMode") settings.terminal.tuiMode = testCase.value;
-				else settings.terminal.fullscreenScrollbar = testCase.value;
+				else if (testCase.leaf === "fullscreenScrollbar") settings.terminal.fullscreenScrollbar = testCase.value;
+				else settings.terminal.smoothStreaming = testCase.value;
 			});
 
 			const after = readFileSync(settingsPath(), "utf8");
@@ -83,10 +85,9 @@ describe("contracts/settings-write-footprint", () => {
 			strictEqual(loaded[testCase.leaf], testCase.value);
 			strictEqual(loaded.showTerminalProgress, false);
 			strictEqual(loaded.outputVerbosity, "default");
-			strictEqual(
-				testCase.leaf === "tuiMode" ? loaded.fullscreenScrollbar : loaded.tuiMode,
-				testCase.leaf === "tuiMode" ? "auto" : "regular",
-			);
+			strictEqual(loaded.tuiMode, testCase.leaf === "tuiMode" ? "fullscreen" : "regular");
+			strictEqual(loaded.fullscreenScrollbar, testCase.leaf === "fullscreenScrollbar" ? "always" : "auto");
+			strictEqual(loaded.smoothStreaming, testCase.leaf === "smoothStreaming" ? "on" : "off");
 		}
 	});
 

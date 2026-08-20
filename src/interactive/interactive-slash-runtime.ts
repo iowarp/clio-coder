@@ -89,6 +89,8 @@ export interface InteractiveSlashRuntimeDeps {
 	stateDir: string;
 	shutdown: () => void | Promise<void>;
 	requestRender: () => void;
+	beforeSemanticSubmit?: () => void;
+	settleVisibleFrame?: (reason: string) => Promise<void>;
 	refreshFooter: () => void;
 	dismissContextBootstrapNotices: () => void;
 	recordSubmittedTurn: () => void;
@@ -196,11 +198,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				deps.refreshFooter();
 				if (!willQueue) deps.chatPanel.appendUser(sub.text);
 				deps.requestRender();
+				deps.beforeSemanticSubmit?.();
 				await deps.chat.submit(sub.text, {
 					...(sub.images.length > 0 ? { images: sub.images } : {}),
 					...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 					...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
 				});
+				await deps.settleVisibleFrame?.("submit-return");
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
