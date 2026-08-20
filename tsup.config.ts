@@ -70,10 +70,8 @@ export default defineConfig({
 	removeNodeProtocol: false,
 	outDir: "dist",
 	// The pure-JS tail is bundled and tree-shaken into dist/ so an install does
-	// not pull these packages; they live in devDependencies. undici is CJS that
-	// require()s node builtins, so every ESM chunk needs a real `require` (see
-	// banner below).
-	noExternal: ["chalk", "diff", "uuid", "yaml", "typebox", "undici", "@vscode/tree-sitter-wasm"],
+	// not pull these packages; they live in devDependencies.
+	noExternal: ["chalk", "diff", "uuid", "yaml", "typebox", "@vscode/tree-sitter-wasm"],
 	// The shebang comes from the hashbang line in each entry source file;
 	// esbuild hoists it above this banner on the entry chunks and never puts
 	// one on a shared chunk.

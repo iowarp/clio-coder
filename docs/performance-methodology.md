@@ -142,6 +142,40 @@ The former 1,054 ms “first TUI paint” figure is not a before value: that mar
 was taken before `startInteractive()` and therefore did not measure a frame.
 It must not be compared numerically with this corrected baseline.
 
+## Graph-cut observations
+
+Each graph reduction is measured and committed independently. Counts below use
+the import-graph method above with V8 compile caching disabled and a warm
+operating-system page cache. An unchanged translated-module count can still
+hide a meaningful bundled-code reduction: esbuild represents all bundled
+sources in one translated Clio chunk.
+
+### Node built-in fetch
+
+Replacing the eager userland Undici import with Node's supported built-in
+`fetch` left the translated file-module count unchanged at 1,332 (54 Clio
+modules), because Undici had been embedded inside one existing Clio chunk. It
+did remove every `node_modules/undici/` source marker and reduced built
+JavaScript from 6,859,244 to 5,801,755 bytes. The eager tool-bearing chunk
+containing `web_fetch` changed from 2,552,692 to 1,494,333 bytes, a 1,058,359
+byte reduction.
+
+Ten full-entry imports changed as follows:
+
+| Node | Before median / p90 | After median / p90 | Observation |
+| --- | ---: | ---: | --- |
+| 22.22.3 | 670.680 / 803.053 ms | 605.907 / 646.730 ms | lower in this sample |
+| 24.9.0 | 656.781 / 674.592 ms | 668.652 / 896.238 ms | no reproducible timing improvement; host noise dominated |
+
+The cut is justified by the deterministic graph and package-size reduction,
+not by claiming a universal boot saving. Localhost transport contracts cover
+methods, headers, bodies, redirects, streamed UTF-8 truncation and cancellation,
+external abort, timeout, HTTP preview errors, binary rejection, and transport
+errors on Node 22 and Node 24. The packed-install test invokes `web_fetch`
+through a real installed headless tool turn from a foreign working directory
+and asserts that neither the packed chunks nor the installed dependency tree
+contains userland Undici.
+
 ## Reporting checklist
 
 Every published observation records:
