@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { relative } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
@@ -40,6 +42,27 @@ function contextWindowProvenanceLabel(source: ContextLedger["contextWindowSource
 	}
 }
 
+/** A handbook path the operator can read at a glance: workspace-relative when
+ * the file sits under the current directory, `~`-shortened otherwise. */
+function displayHandbookPath(filePath: string): string {
+	const rel = relative(process.cwd(), filePath);
+	if (rel.length > 0 && !rel.startsWith("..")) return rel;
+	const home = homedir();
+	return home.length > 0 && filePath.startsWith(`${home}/`) ? `~${filePath.slice(home.length)}` : filePath;
+}
+
+/**
+ * Which CLIO-CODER*.md file(s) the compiled prompt actually selected. With
+ * override semantics the operator cannot infer the winner from the preload
+ * size alone, so the effective chain is named explicitly, nearest last.
+ */
+function handbookProvenanceLines(handbookFiles: ReadonlyArray<string> | null): string[] {
+	if (!handbookFiles || handbookFiles.length === 0) return [];
+	const first = handbookFiles[0];
+	if (handbookFiles.length === 1 && first !== undefined) return [`handbook: ${displayHandbookPath(first)}`];
+	return ["handbooks (ancestor → nearest):", ...handbookFiles.map((filePath) => `  ${displayHandbookPath(filePath)}`)];
+}
+
 function gridDimensions(ledger: ContextLedger, contentWidth: number): { cols: number; rows: number } {
 	const cols = Math.max(12, Math.min(contentWidth, 40));
 	const rows = ledger.contextWindow >= 200_000 ? 8 : 6;
@@ -58,7 +81,7 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("muted", right)}`;
 }
 
-function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): string[] {
+export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
 
@@ -91,6 +114,9 @@ function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): 
 	lines.push("");
 	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
 		lines.push(theme.fg("dim", `project preload: ${ledger.projectPreload}`));
+	}
+	for (const handbookLine of handbookProvenanceLines(ledger.projectHandbookFiles)) {
+		lines.push(theme.fg("dim", handbookLine));
 	}
 	const compaction =
 		ledger.compactionThreshold !== null

@@ -57,5 +57,5 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		const suffix = notes.length > 0 ? ` (${notes.join("; ")}; run clio-coder context wiki --update)` : "";
 		pieces.push(`<wiki>${pages.length} pages at .clio-coder/wiki (start: quickstart.md)${suffix}</wiki>`);
 	}
-	return { text: pieces.join("\n\n"), clioMd, warnings };
+	return { text: pieces.join("\n\n"), clioMd, warnings, handbookFiles: loadedClioMd.files.map((file) => file.path) };
 }
