@@ -12,11 +12,8 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
-import {
-	createDispatchBackgroundRegistry,
-	createDispatchRunEventRegistry,
-	createDispatchTool,
-} from "../../src/tools/dispatch.js";
+import { createDispatchRunEventRegistry, createDispatchTool } from "../../src/tools/dispatch.js";
+import { createDispatchBackgroundRegistry } from "../../src/tools/dispatch-background.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
