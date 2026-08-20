@@ -271,7 +271,11 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 			// where no local spawn boundary injected NODE_COMPILE_CACHE, so the
 			// worker graph enables the remote cache itself before it loads. The
 			// enable is in-process only: no environment variable is set, so the
-			// worker's own children inherit nothing.
+			// worker's own children inherit nothing. Nothing on this path
+			// injected the provenance pair either, so any marker present is
+			// foreign; strip it (and only it) so the entry's consume can never
+			// match and delete an operator's own NODE_COMPILE_CACHE.
+			Reflect.deleteProperty(process.env, "CLIO_CODER_INJECTED_COMPILE_CACHE");
 			await enableBootCompileCache();
 			await import("../worker/entry.js");
 			return 0;
