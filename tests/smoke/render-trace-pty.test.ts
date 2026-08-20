@@ -149,14 +149,9 @@ describe("render trace through a real PTY", {
 			env: scratch.env,
 		});
 		try {
-			await session.waitForOutput((output) => READY.test(stripAnsi(output)), 30_000);
-			const bootOutput = await session.waitForOutput(/\[clio:boot\] \+\d+(?:\.\d+)?ms first TUI paint/u);
+			await session.waitForOutput((output) => stripAnsi(output).includes("Hydrating session services"));
 			const ptyObservedFirstFrameMs = performance.now() - ptyOpenedAt;
-			const visibleBootOutput = stripAnsi(bootOutput);
-			ok(
-				visibleBootOutput.indexOf("Clio Coder") < visibleBootOutput.indexOf("first TUI paint"),
-				"the boot mark follows the first application-frame bytes at the PTY boundary",
-			);
+			await session.waitForOutput((output) => READY.test(stripAnsi(output)), 30_000);
 			const firstFrame = await waitForTrace(
 				scratch.tracePath,
 				(records) => frames(records).find((frame) => frame.commits.length > 0),
@@ -244,14 +239,25 @@ describe("render trace through a real PTY", {
 			session.write(CTRL_C);
 			const exit = await session.waitForExit(10_000);
 			strictEqual(exit.exitCode, 0, `clean PTY exit; output tail: ${stripAnsi(session.output).slice(-400)}`);
+			const visibleBootOutput = stripAnsi(session.output);
+			const stage0Index = visibleBootOutput.indexOf("Stage 0 shell commit");
+			const stage1Index = visibleBootOutput.indexOf("Stage 1 hydration");
+			ok(stage0Index > visibleBootOutput.indexOf("Clio Coder"), "the captured Stage 0 timestamp follows shell bytes");
+			ok(stage1Index > stage0Index, "the captured hydration timestamp follows Stage 0");
+			ok(
+				session.output.indexOf("\u001b[?2004l") < session.output.indexOf("Stage 0 shell commit"),
+				"boot traces flush only after terminal protocol restoration",
+			);
 			if (process.env.CLIO_CODER_PERF_REPORT === "1") {
-				const bootMatch = /\[clio:boot\] \+(\d+(?:\.\d+)?)ms first TUI paint/u.exec(visibleBootOutput);
+				const stage0Match = /\[clio:boot\] \+(\d+(?:\.\d+)?)ms Stage 0 shell commit/u.exec(visibleBootOutput);
+				const stage1Match = /\[clio:boot\] \+(\d+(?:\.\d+)?)ms Stage 1 hydration/u.exec(visibleBootOutput);
 				process.stdout.write(
 					`${JSON.stringify({
 						node: process.versions.node,
 						columns: firstFrame.columns,
 						rows: firstFrame.rows,
-						inProcessFirstCommitMs: Number(bootMatch?.[1]),
+						stage0CommitMs: Number(stage0Match?.[1]),
+						stage1HydrationMs: Number(stage1Match?.[1]),
 						ptyObservedFirstFrameMs: Math.round(ptyObservedFirstFrameMs * 1_000) / 1_000,
 						firstFrameDurationMs: firstFrame.durationMs,
 						firstFrameWrites: firstFrame.commits.length,

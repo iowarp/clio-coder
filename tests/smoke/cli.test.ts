@@ -579,11 +579,13 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			const result = await runCli(["--no-context-files", "run", "hello"], {
-				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test" },
+				env: { ...scratch.env, CLIO_CODER_TEST_OPENAI_KEY: "sk-test", CLIO_CODER_INTERACTIVE: "1" },
 				timeoutMs: 20_000,
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "mock reply\n");
+			strictEqual(result.stderr.includes("Hydrating session services"), false);
+			strictEqual(result.stderr.includes("\u001b[?2004h"), false, "ambient interactive state cannot mount a headless TUI");
 		} finally {
 			await closeServer(fixture.server);
 		}

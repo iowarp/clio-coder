@@ -65,7 +65,7 @@ export interface EditorSubmitUi {
 
 type EditorSubmitChat = Pick<
 	ChatLoop,
-	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "queueFollowUp" | "submit"
+	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "queueFollowUp" | "submit" | "whenSettled"
 >;
 type EditorSubmitDispatch = Pick<DispatchContract, "snapshot" | "steer">;
 type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tree">;
@@ -89,6 +89,7 @@ export interface EditorSubmitDeps {
 	beforeSemanticBoundary?: (reason: string) => void;
 	settleVisibleFrame?: (reason: string) => Promise<void>;
 	dispatchCommand: (text: string) => void;
+	dispatchCommandAsync?: (text: string, signal?: AbortSignal) => Promise<void>;
 	/** Idempotently collapses a fresh-session launchpad before any handler can append output. */
 	collapseLaunchpadBeforeSubmit?: () => void;
 	expandSubmit: (text: string) => Promise<EditorSubmitExpansion>;
@@ -105,6 +106,8 @@ export interface EditorSubmitController {
 	openExternalEditorForInput(): void;
 	handleEditorSteerMention(mention: { target: string; text: string }): boolean;
 	submitEditorText(text: string): void;
+	/** Admit an immutable boot record without reading or mutating the live draft. */
+	admitCapturedText(text: string, signal?: AbortSignal): Promise<void>;
 	queueFollowUpFromEditor(): void;
 	/**
 	 * Interrupt mode: cancel the active run and deliver the draft now. Idle, it
@@ -123,6 +126,7 @@ type EditorSteerSubmission = "unhandled" | "accepted" | "rejected";
 /** Owns editor submission and the one local bash process attached to it. */
 export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubmitController {
 	let activeEditorBash: AbortController | null = null;
+	let activeEditorBashSettlement: Promise<void> | null = null;
 
 	const runEditorBash = (text: string): boolean => {
 		const parsed = parseEditorBashCommand(text);
@@ -168,7 +172,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		);
 		deps.ui.requestRender();
 
-		void (async () => {
+		let settlement!: Promise<void>;
+		settlement = (async () => {
 			try {
 				const result = await (deps.runBash ?? runBashCommand)(parsed.command, {
 					cwd: deps.getCwd?.() ?? process.cwd(),
@@ -217,9 +222,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.io.stderr(`[bash] ${msg}\n`);
 			} finally {
 				if (activeEditorBash === abort) activeEditorBash = null;
+				if (activeEditorBashSettlement === settlement) activeEditorBashSettlement = null;
 				deps.ui.requestRender();
 			}
 		})();
+		activeEditorBashSettlement = settlement;
+		void settlement;
 		return true;
 	};
 
@@ -333,6 +341,64 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		deps.ui.requestRender();
 	};
 
+	const awaitWithAbort = async (promise: Promise<void>, signal?: AbortSignal): Promise<void> => {
+		if (!signal) return await promise;
+		signal.throwIfAborted();
+		let abort: (() => void) | null = null;
+		try {
+			await Promise.race([
+				promise,
+				new Promise<never>((_resolve, reject) => {
+					abort = () => reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+					signal.addEventListener("abort", abort, { once: true });
+				}),
+			]);
+		} finally {
+			if (abort) signal.removeEventListener("abort", abort);
+		}
+	};
+
+	const admitCapturedText = async (text: string, signal?: AbortSignal): Promise<void> => {
+		const trimmed = text.trim();
+		if (trimmed.length === 0) return;
+		signal?.throwIfAborted();
+		deps.collapseLaunchpadBeforeSubmit?.();
+		if (parseEditorBashCommand(text)) {
+			while (deps.chat.isStreaming()) await awaitWithAbort(deps.chat.whenSettled(), signal);
+			while (activeEditorBashSettlement) await awaitWithAbort(activeEditorBashSettlement, signal);
+			signal?.throwIfAborted();
+			deps.editor.addToHistory(text);
+			runEditorBash(text);
+			deps.ui.requestRender();
+			return;
+		}
+		const steerMention = parseEditorSteerMention(trimmed);
+		if (steerMention) {
+			const submission = submitEditorSteerMention(steerMention);
+			if (submission !== "unhandled") {
+				if (submission === "rejected") {
+					throw new Error("queued boot steer was not admitted; preserving it for recovery");
+				}
+				deps.editor.addToHistory(text);
+				deps.ui.requestRender();
+				return;
+			}
+		}
+		const command = parseSlashCommand(trimmed);
+		if (isRejectedCommand(command)) {
+			signal?.throwIfAborted();
+			if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(trimmed, signal);
+			else deps.dispatchCommand(trimmed);
+			deps.ui.requestRender();
+			throw new Error("queued boot command needs correction; preserving it for recovery");
+		}
+		deps.editor.addToHistory(text);
+		signal?.throwIfAborted();
+		if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(trimmed, signal);
+		else deps.dispatchCommand(trimmed);
+		deps.ui.requestRender();
+	};
+
 	const queueFollowUpFromEditor = (): void => {
 		const text = deps.editor.getText().trim();
 		if (text.length === 0) return;
@@ -423,6 +489,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		openExternalEditorForInput,
 		handleEditorSteerMention,
 		submitEditorText,
+		admitCapturedText,
 		queueFollowUpFromEditor,
 		interruptFromEditor,
 		restoreQueuedFollowUpsToEditor,

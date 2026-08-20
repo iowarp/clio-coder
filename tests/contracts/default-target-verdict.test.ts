@@ -75,4 +75,37 @@ describe("contracts/default-target verdict", { concurrency: false }, () => {
 		strictEqual(verdict.targetId, "remote");
 		strictEqual(verdict.store, "lmstudio-native");
 	});
+
+	it("recognizes stored OAuth during the lightweight preflight", () => {
+		writeSettings(dir, {
+			targets: [{ id: "codex", runtime: "openai-codex", defaultModel: "m" }],
+			orchestrator: { target: "codex", model: "m", thinkingLevel: "off" },
+		});
+		writeFileSync(
+			join(dir, "config", "credentials.yaml"),
+			stringifyYaml({
+				version: 2,
+				entries: {
+					"openai-codex": { type: "oauth", access: "access", refresh: "refresh", expires: 1, updatedAt: "now" },
+				},
+			}),
+			"utf8",
+		);
+		deepStrictEqual(classifyDefaultTarget(), { kind: "usable" });
+	});
+
+	it("recognizes the runtime's explicit environment credential", () => {
+		writeSettings(dir, {
+			targets: [{ id: "openai", runtime: "openai", defaultModel: "m" }],
+			orchestrator: { target: "openai", model: "m", thinkingLevel: "off" },
+		});
+		const previous = process.env.OPENAI_API_KEY;
+		process.env.OPENAI_API_KEY = "test-key";
+		try {
+			deepStrictEqual(classifyDefaultTarget(), { kind: "usable" });
+		} finally {
+			if (previous === undefined) delete process.env.OPENAI_API_KEY;
+			else process.env.OPENAI_API_KEY = previous;
+		}
+	});
 });

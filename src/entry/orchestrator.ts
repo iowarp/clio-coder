@@ -2,6 +2,7 @@ import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
+import { formatBootTrace } from "../core/boot-trace.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
@@ -38,7 +39,7 @@ import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.j
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
-import { ConfigDomainModule } from "../domains/config/index.js";
+import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/index.js";
 import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
@@ -149,11 +150,7 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
-import {
-	type AcpJsonRpcPeerTransport,
-	createStdioServerTransport,
-	type StdioServerTransportOptions,
-} from "../engine/acp/transport.js";
+import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { completeEngineText } from "../engine/ai.js";
 import { setProtectedModelsProvider } from "../engine/apis/residency.js";
 import {
@@ -162,10 +159,14 @@ import {
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
 import { openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
-import type { EngineModel, ImageContent } from "../engine/types.js";
+import type { EngineModel } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
+import type { BootOptions } from "./boot-options.js";
+
+export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
+
 import {
 	detectPlatformKeybindingWarnings,
 	detectTerminalKeySupport,
@@ -186,57 +187,6 @@ import { createRegistry } from "../tools/registry.js";
 export interface BootResult {
 	exitCode: number;
 	bootTimeMs: number;
-}
-
-export interface HeadlessSamplingOverrides {
-	temperature?: number;
-	topP?: number;
-	topK?: number;
-	minP?: number;
-	presencePenalty?: number;
-	frequencyPenalty?: number;
-	repeatPenalty?: number;
-}
-
-export interface BootOptions {
-	/** Process-lifetime API key override applied to the active orchestrator target. */
-	apiKey?: string;
-	/** Suppress CLIO-CODER.md project-context injection for this run. */
-	noContextFiles?: boolean;
-	noSkills?: boolean;
-	skillPaths?: ReadonlyArray<string>;
-	/** Run one non-interactive main-agent turn. */
-	headless?: {
-		prompt: string;
-		images?: ReadonlyArray<ImageContent>;
-		workingContextPaths?: ReadonlyArray<string>;
-		mode?: "text" | "json";
-		jsonEvents?: "full" | "terminal";
-		target?: string;
-		model?: string;
-		thinking?: ThinkingLevel;
-		autonomy?: AutonomyLevel;
-		sampling?: HeadlessSamplingOverrides;
-		noSkills?: boolean;
-		skillPaths?: ReadonlyArray<string>;
-		steerChannel?: string;
-		/**
-		 * Append this turn to an existing session instead of starting a fresh
-		 * one. `latest` means the most recent session recorded for this
-		 * workspace. A named session that cannot be resumed fails the run
-		 * rather than silently starting a new one, because a caller that asked
-		 * to continue a conversation would otherwise get an answer with no
-		 * history behind it.
-		 */
-		resumeSession?: { kind: "id"; id: string } | { kind: "latest" };
-	};
-	/** Serve Clio as an Agent Client Protocol v1 agent over JSON-RPC stdio. */
-	acp?: {
-		transport?: AcpJsonRpcPeerTransport;
-		transportOptions?: StdioServerTransportOptions;
-		/** Overrides delegation.defaults.permissionTimeoutMs for this server only. */
-		permissionTimeoutMs?: number;
-	};
 }
 
 /**
@@ -755,7 +705,22 @@ export function advanceScopedTarget(
 }
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
-	const timer = new StartupTimer();
+	const bootStdout = (text: string): void => {
+		if (options.terminalLease) options.terminalLease.writeDiagnostic("stdout", text);
+		else process.stdout.write(text);
+	};
+	const bootStderr = (text: string): void => {
+		if (options.terminalLease) options.terminalLease.writeDiagnostic("stderr", text);
+		else process.stderr.write(text);
+	};
+	const timer = new StartupTimer(
+		options.terminalLease
+			? (phase) => {
+					const line = formatBootTrace(phase);
+					if (line) options.terminalLease?.deferDiagnostic("stderr", line);
+				}
+			: undefined,
+	);
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
 	installBusTracer();
@@ -798,55 +763,56 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				preserveAllActive: pendingGate.errors.length > 0,
 			});
 			for (const failure of recovery.failed) {
-				process.stderr.write(`[dispatch] compete recovery preserved ${failure.group}: ${failure.message}\n`);
+				bootStderr(`[dispatch] compete recovery preserved ${failure.group}: ${failure.message}\n`);
 			}
 		} catch (err) {
-			process.stderr.write(
-				`[dispatch] compete recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`,
-			);
+			bootStderr(`[dispatch] compete recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}
 	}
 
 	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
 
-	const result = await loadDomains([
-		ConfigDomainModule,
-		ExtensionsDomainModule,
-		InteropDomainModule,
-		createResourcesDomainModule({
-			reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
-			skills: () => ({
-				disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
-				...(options.skillPaths && options.skillPaths.length > 0
-					? { explicitSkillPaths: options.skillPaths }
-					: options.headless?.skillPaths && options.headless.skillPaths.length > 0
-						? { explicitSkillPaths: options.headless.skillPaths }
-						: {}),
+	const result = await loadDomains(
+		[
+			options.startupSettings ? createConfigDomainModule(options.startupSettings) : ConfigDomainModule,
+			ExtensionsDomainModule,
+			InteropDomainModule,
+			createResourcesDomainModule({
+				reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
+				skills: () => ({
+					disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
+					...(options.skillPaths && options.skillPaths.length > 0
+						? { explicitSkillPaths: options.skillPaths }
+						: options.headless?.skillPaths && options.headless.skillPaths.length > 0
+							? { explicitSkillPaths: options.headless.skillPaths }
+							: {}),
+				}),
 			}),
-		}),
-		ShareDomainModule,
-		createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
-		ProvidersDomainModule,
-		SafetyDomainModule,
-		createPromptsDomainModule({
-			noContextFiles: options.noContextFiles === true,
-		}),
-		AgentsDomainModule,
-		MiddlewareDomainModule,
-		SessionDomainModule,
-		ObservabilityDomainModule,
-		SchedulingDomainModule,
-		// Dispatch resolves worker targets through the session's effective
-		// settings view once it exists (assigned below, after the config
-		// contract loads); until then it falls back to the shared snapshot.
-		createDispatchDomainModule({
-			getSettings: () => effectiveSettingsForDispatch?.(),
-			getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
-			autonomyOverride: options.headless?.autonomy !== undefined,
-		}),
-		LifecycleDomainModule,
-	]);
+			ShareDomainModule,
+			createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
+			ProvidersDomainModule,
+			SafetyDomainModule,
+			createPromptsDomainModule({
+				noContextFiles: options.noContextFiles === true,
+			}),
+			AgentsDomainModule,
+			MiddlewareDomainModule,
+			SessionDomainModule,
+			ObservabilityDomainModule,
+			SchedulingDomainModule,
+			// Dispatch resolves worker targets through the session's effective
+			// settings view once it exists (assigned below, after the config
+			// contract loads); until then it falls back to the shared snapshot.
+			createDispatchDomainModule({
+				getSettings: () => effectiveSettingsForDispatch?.(),
+				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
+				autonomyOverride: options.headless?.autonomy !== undefined,
+			}),
+			LifecycleDomainModule,
+		],
+		{ diagnostic: bootStderr },
+	);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
 	const dispatch = result.getContract<DispatchContract>("dispatch");
@@ -865,8 +831,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const acpMode = options.acp !== undefined;
 	const interactive = !options.headless && !acpMode && process.env.CLIO_CODER_INTERACTIVE === "1";
 	if (!interactive && !options.headless && !acpMode) {
-		process.stdout.write(buildBanner());
-		if (process.env.CLIO_CODER_TIMING === "1") process.stdout.write(`${timer.report()}\n`);
+		bootStdout(buildBanner());
+		if (process.env.CLIO_CODER_TIMING === "1") bootStdout(`${timer.report()}\n`);
 	}
 
 	const config = result.getContract<ConfigContract>("config");
@@ -875,7 +841,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	if (options.apiKey) {
 		if (!providers) {
-			process.stderr.write("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
+			bootStderr("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
 		} else {
 			const settingsNow = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
 			const activeTargetId = settingsNow.orchestrator?.target;
@@ -884,13 +850,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (target && runtime) {
 				providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
 			} else {
-				process.stderr.write("Clio Coder: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
+				bootStderr("Clio Coder: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
 			}
 		}
 	}
 
 	if (!interactive && !options.headless && !acpMode) {
-		process.stdout.write(`${chalk.dim("  (non-interactive boot. pass CLIO_CODER_INTERACTIVE=1 to launch the TUI.)")}\n`);
+		bootStdout(`${chalk.dim("  (non-interactive boot. pass CLIO_CODER_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -920,7 +886,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (interopHint !== null) initialNotices.push(interopHint);
 	}
 	if (!providers || !dispatch || !observability || !safety || !middleware) {
-		process.stderr.write(
+		bootStderr(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
@@ -954,12 +920,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		} catch (err) {
 			const detail = err instanceof Error ? err.message : String(err);
 			if (requestedResume !== undefined) headlessResumeFailure = `failed to resume session ${resumeId}: ${detail}`;
-			else process.stderr.write(`Clio Coder: failed to resume session ${resumeId}: ${detail}\n`);
+			else bootStderr(`Clio Coder: failed to resume session ${resumeId}: ${detail}\n`);
 		}
 	}
 	Reflect.deleteProperty(process.env, "CLIO_CODER_RESUME_SESSION_ID");
 	if (headlessResumeFailure !== null) {
-		process.stderr.write(`clio-coder run: ${headlessResumeFailure}\n`);
+		bootStderr(`clio-coder run: ${headlessResumeFailure}\n`);
 		await termination.shutdown(2);
 		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -1629,7 +1595,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			try {
 				leafTurnId = session.tree(resumedMeta.id).leafId;
 			} catch (err) {
-				process.stderr.write(
+				bootStderr(
 					`Clio Coder: failed to read resumed session tree ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
 			}
@@ -1645,7 +1611,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				);
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
-				process.stderr.write(
+				bootStderr(
 					`Clio Coder: failed to replay resumed session context ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
 			}
@@ -1810,6 +1776,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
+	if (options.terminalLease) {
+		for (const diagnostic of options.terminalLease.takeDiagnostics()) {
+			const text = diagnostic.text.trimEnd();
+			if (text.length > 0) initialNotices.push(text);
+		}
+	}
+
 	await startInteractive({
 		bus,
 		providers,
@@ -1817,7 +1790,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(agents ? { agents } : {}),
 		observability,
 		chat,
-		onFirstFrameCommit: () => timer.mark("first TUI paint"),
+		...(options.terminalLease
+			? {
+					terminalLease: options.terminalLease,
+					onHydratedFrameCommit: () => timer.mark("Stage 1 hydration"),
+				}
+			: { onFirstFrameCommit: () => timer.mark("first TUI paint") }),
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
