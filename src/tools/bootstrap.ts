@@ -7,19 +7,19 @@ import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
-import { probeWorkspace } from "../domains/session/workspace/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
-import { codeNavTool } from "./codewiki/code-nav.js";
-import { createContextTool } from "./context/index.js";
+import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
+import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDispatchRunEventRegistry, createDispatchTool, type DispatchBackgroundRegistry } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
+import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
 import { lsTool } from "./ls.js";
 import { createMonitorTool } from "./monitor.js";
@@ -31,8 +31,8 @@ import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./reg
 import { gitTool } from "./safe-exec.js";
 import { createSteerTool } from "./steer.js";
 import { createTasksTool } from "./tasks.js";
-import { verifyTool } from "./verify/index.js";
-import { webFetchTool } from "./web-fetch.js";
+import { verifyToolSurface } from "./verify/surface.js";
+import { webFetchToolSurface } from "./web-fetch-surface.js";
 import { writeTool } from "./write.js";
 
 export interface ToolBootstrapDeps {
@@ -373,17 +373,26 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	if (includeNetworkTools) {
 		registry.register({
-			...builtin(webFetchTool, { path: "src/tools/web-fetch.ts", scope: "core" }),
+			...builtin(
+				lazyTool(webFetchToolSurface, async () => (await import("./web-fetch.js")).webFetchTool),
+				{ path: "src/tools/web-fetch.ts", scope: "core" },
+			),
 		});
 	}
 	registry.register({
 		...builtin(gitTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(verifyTool, { path: "src/tools/verify/index.ts", scope: "core" }),
+		...builtin(
+			lazyTool(verifyToolSurface, async () => (await import("./verify/index.js")).verifyTool),
+			{ path: "src/tools/verify/index.ts", scope: "core" },
+		),
 	});
 	registry.register({
-		...builtin(codeNavTool, { path: "src/tools/codewiki/code-nav.ts", scope: "core" }),
+		...builtin(
+			lazyTool(codeNavToolSurface, async () => (await import("./codewiki/code-nav.js")).codeNavTool),
+			{ path: "src/tools/codewiki/code-nav.ts", scope: "core" },
+		),
 	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
@@ -404,21 +413,22 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const session = deps.session;
 	registry.register({
 		...builtin(
-			createContextTool({
-				...skillToolDeps,
-				...(session
-					? {
-							workspace: {
-								hasSession: () => session.current() !== null,
-								getSnapshot: () => session.current()?.workspace ?? null,
-								probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
-								saveSnapshot: (snap) => {
-									const meta = session.current();
-									if (meta) meta.workspace = snap;
-								},
-							},
-						}
-					: {}),
+			lazyTool(contextToolSurface, async () => {
+				const { createContextTool } = await import("./context/index.js");
+				if (!session) return createContextTool(skillToolDeps);
+				const { probeWorkspace } = await import("../domains/session/workspace/index.js");
+				return createContextTool({
+					...skillToolDeps,
+					workspace: {
+						hasSession: () => session.current() !== null,
+						getSnapshot: () => session.current()?.workspace ?? null,
+						probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
+						saveSnapshot: (snap) => {
+							const meta = session.current();
+							if (meta) meta.workspace = snap;
+						},
+					},
+				});
 			}),
 			{ path: "src/tools/context/index.ts", scope: "core" },
 		),

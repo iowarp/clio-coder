@@ -133,6 +133,28 @@ coordinator lane before returning. The direct builder and artifact writer remain
 available to build scripts and test fixtures, but production workspace writes
 must go through the coordinator.
 
+## Lazy built-in tool boundary
+
+The registry always owns one complete, immutable `ToolSpec` surface before a
+model turn starts. `context`, `code_nav`, `verify`, and `web_fetch` keep their
+name, description, TypeBox schema, action class, execution mode, synchronous
+argument hooks, source provenance, and policy metadata in lightweight surface
+modules. `registerAllTools` registers those surfaces in the same order as every
+other built-in; capability discovery, worker attestation, provider schema
+serialization, safety classification, autonomy and permission admission, and
+`before_tool` middleware therefore run without evaluating the implementation.
+
+Only the admitted `run` step crosses `src/tools/lazy-tool.ts`. One cached promise
+owns the implementation import, including a deterministic failure, so concurrent
+first calls cannot initialize competing implementations. The loaded spec must
+match the advertised surface before its body can run. Ordinary body exceptions,
+result shaping, `after_tool` middleware, abort signals, and telemetry continue
+through the registry's existing path. This mechanism is built-in-only; it does
+not turn extension manifests or provider plugins into an executable tool loader.
+Source-built and installed-package coverage contracts locate implementations by
+stable behavior provenance, prove them absent during a real provider capability
+request, and prove only the invoked implementation present after first use.
+
 ## Boundary invariants
 
 `npm run lint` executes the boundary checker (`tests/boundaries/check-boundaries.ts`, imported by `scripts/check-hygiene.ts`). Treat these checks as executable specifications.
