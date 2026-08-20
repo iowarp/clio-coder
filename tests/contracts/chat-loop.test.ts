@@ -23,6 +23,7 @@ import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { backendCacheVerdict } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { createStatusController } from "../../src/interactive/status/controller.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -755,8 +756,17 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 			| undefined;
 		ok(end, "agent_end reaches the public stream");
 		ok((end?.messages?.length ?? 0) >= 2, "the enriched agent_end carries the run window, not one synthetic message");
-		const inputTokens = (end?.messages ?? []).reduce((sum, message) => sum + (message.usage?.input ?? 0), 0);
-		strictEqual(inputTokens, 52_000, "the run's real input tokens survive the abort");
+		const settledInput = (end?.messages ?? [])
+			.filter((message) => (message as { stopReason?: string }).stopReason !== "aborted")
+			.reduce((sum, message) => sum + (message.usage?.input ?? 0), 0);
+		strictEqual(settledInput, 52_000, "the run's real input tokens survive the abort");
+		// The aborted call re-sent the prompt; the public window reports that
+		// estimate instead of the provider's zeros.
+		const windowAbort = end?.messages?.find((message) => (message as { stopReason?: string }).stopReason === "aborted") as
+			| { usage?: { input?: number; estimated?: boolean } }
+			| undefined;
+		ok((windowAbort?.usage?.input ?? 0) > 0, "the aborted call's prompt spend is reported, not the provider's zero");
+		strictEqual(windowAbort?.usage?.estimated, true, "and it is labelled as an estimate");
 	});
 
 	it("publishes the same interrupted usage estimate that persistence records", async () => {
@@ -806,6 +816,102 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		ok((publicAbort?.message?.usage?.input as number) > 0, "the sent prompt is reflected in status usage");
 		ok((publicAbort?.message?.usage?.output as number) > 0, "the streamed partial is reflected in status usage");
 		deepStrictEqual(publicAbort?.message?.usage, persistedAbort?.usage, "status and the durable transcript agree");
+	});
+
+	it("feeds the footer tally a thinking-only abort while keeping it out of the transcript (DOGFOOD-F2)", async () => {
+		// Esc during a reasoning-only stream: the abort leaves an assistant message
+		// with thinking, no text, and the provider's untouched zero usage. The
+		// transcript rightly suppresses that hollow turn after the cancel notice,
+		// but the footer and the `turn · in/out` receipt settled to zero while the
+		// persisted entry carried the estimate.
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const seen: ChatLoopEvent[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers("local-native"),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				await agent.emit({ type: "agent_start" } as never);
+				const thinking = "Weighing which file owns the footer before answering.";
+				const aborted = {
+					role: "assistant",
+					content: [{ type: "thinking", thinking }],
+					stopReason: "aborted",
+					errorMessage: "Request was aborted",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				await agent.emit({ type: "message_start", message: aborted } as never);
+				await agent.emit({
+					type: "message_update",
+					message: aborted,
+					assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: thinking, partial: aborted },
+				} as never);
+				holder.loop?.cancel();
+				agent.state.messages.push(aborted);
+				await agent.emit({ type: "message_end", message: aborted });
+				await agent.emit({ type: "agent_end", messages: [aborted] });
+			}),
+		} as never);
+		holder.loop = loop;
+		let now = 1_000;
+		const status = createStatusController({
+			chat: loop,
+			bus,
+			providers: providers("local-native"),
+			now: () => now,
+			setInterval: () => Symbol("interval"),
+			clearInterval: () => {},
+			setTimeout: () => Symbol("timeout"),
+			clearTimeout: () => {},
+		});
+		const panel = createChatPanel();
+		loop.onEvent((event: ChatLoopEvent) => {
+			now += 100;
+			seen.push(event);
+			panel.applyEvent(event as never);
+		});
+
+		try {
+			await loop.submit("think about it");
+		} finally {
+			status.dispose();
+		}
+
+		const abortedEnds = seen.filter(
+			(event) =>
+				event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "aborted",
+		);
+		strictEqual(abortedEnds.length, 0, "the hollow aborted turn stays out of the public transcript stream");
+		const persistedRows = entries
+			.filter(isAssistantMessageEntry)
+			.map((entry) => entry.payload as { text?: string; stopReason?: string; usage?: Record<string, unknown> });
+		strictEqual(persistedRows.length, 1, "the hollow aborted message stays out of the ledger");
+		const persistedAbort = persistedRows[0];
+		const summary = status.current().summary;
+		strictEqual(status.current().phase, "ended");
+		ok(
+			(summary?.inputTokens ?? 0) > 0,
+			`the footer reports the prompt the cancelled call sent, got ${summary?.inputTokens}`,
+		);
+		strictEqual(summary?.outputTokens, 14, "the footer reports the streamed reasoning (53 chars), not the notice text");
+		const receipt = panel.render(120).join("\n");
+		ok(
+			receipt.includes(`turn · in ${summary?.inputTokens}`) && receipt.includes(`· out ${summary?.outputTokens}`),
+			`the transcript receipt matches the footer:\n${receipt}`,
+		);
+		// The ledger's only row for the cancelled turn is the closing notice; it
+		// records the cancelled call's spend rather than an estimate of its own text.
+		strictEqual(persistedAbort?.text, "[Clio Coder] active response cancelled.");
+		strictEqual(persistedAbort?.usage?.input, summary?.inputTokens, "footer and ledger agree on input");
+		strictEqual(persistedAbort?.usage?.output, summary?.outputTokens, "footer and ledger agree on output");
+		strictEqual(persistedAbort?.usage?.estimated, true);
 	});
 });
 

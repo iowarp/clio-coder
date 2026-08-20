@@ -76,6 +76,14 @@ export interface ChatTurnState {
 	 */
 	activeInterruptReason: string | null;
 	/**
+	 * Estimated spend of the cancelled call whose hollow aborted message the
+	 * interrupt suppressed (thinking streamed, no text). The message never reaches
+	 * the ledger, so the closing turn persisted in submit's finally carries this
+	 * instead of an estimate derived from its own notice text. Cleared with
+	 * `activeInterruptReason`.
+	 */
+	interruptedUsage: Record<string, unknown> | null;
+	/**
 	 * Loop-guard synthesis lockout: once the guard locks a turn, the remaining
 	 * model rounds are forced text-only at the request level (tool_choice none
 	 * in onPayload). Cleared when the next user turn starts.
@@ -109,6 +117,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		replayedContextMessages: [],
 		activeUserTurnId: null,
 		activeInterruptReason: null,
+		interruptedUsage: null,
 		synthesisToolLock: false,
 		toolProseAbortReason: null,
 		streamStallReason: null,
