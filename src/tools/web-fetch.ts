@@ -1,5 +1,4 @@
 import { Type } from "typebox";
-import { fetch } from "undici";
 import { ToolNames } from "../core/tool-names.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
