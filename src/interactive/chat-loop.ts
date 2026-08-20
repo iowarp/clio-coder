@@ -802,6 +802,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.toolProseAbortReason = null;
 			state.toolProseAssessedChars = 0;
 			state.activeInterruptReason = null;
+			state.interruptedUsage = null;
 
 			// 6. Cache-disturbance honesty (T3.3)
 			context.consumeExpectedColdReasons(agentRuntime.runtimeId);
@@ -893,8 +894,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// the durable closing turn only now, after the aborted run's
 					// in-flight tool results have all landed, so the ledger replays
 					// as tool_calls → tool_results → closing text.
-					persistence.appendAssistantTurn(noticeMessage(state.activeInterruptReason));
+					// A thinking-only abort never reaches the ledger, so its estimated
+					// spend rides on the closing turn; persistence computes nothing
+					// further for a message that already reports positive usage.
+					const closing = noticeMessage(state.activeInterruptReason);
+					if (state.interruptedUsage !== null) {
+						(closing as { usage?: unknown }).usage = state.interruptedUsage;
+					}
+					persistence.appendAssistantTurn(closing);
 					state.activeInterruptReason = null;
+					state.interruptedUsage = null;
 				}
 				state.currentPendingSkillPolicy = priorPendingSkillPolicy;
 				state.currentAskUserPolicy = priorAskUserPolicy;

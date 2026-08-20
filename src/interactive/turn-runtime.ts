@@ -570,6 +570,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// message of the run (prompts, assistant, tool results) via message_end,
 		// so the slice from here is the run's real message window.
 		let runStartMessageCount = 0;
+		// Estimated spend of each cancelled call, keyed by the engine's message
+		// object: message_end publishes it, agent_end re-reports it on the same
+		// object from agent state, and a suppressed hollow abort hands it to the
+		// closing turn. Weak so a settled run's messages are not retained.
+		const interruptedUsageByMessage = new WeakMap<object, Record<string, unknown>>();
 
 		handle.agent.subscribe(async (event) => {
 			// Wall anchor for the one field a human reads back (`recordedAt`);
@@ -642,11 +647,27 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					// Persistence records the same estimate, but it does so after the
 					// public event has already fed status. Copy it onto the public event
 					// only: the raw engine message and observability/cost path must remain
-					// provider-reported.
+					// provider-reported. Remember it by message identity so the public
+					// agent_end window below reports the same figure.
+					interruptedUsageByMessage.set(enrichedEvent.message as object, interruptedUsage);
 					publicEvent = {
 						...enrichedEvent,
 						message: { ...enrichedEvent.message, usage: interruptedUsage as unknown as Usage },
 					} as typeof enrichedEvent;
+				}
+			}
+			if (enrichedEvent.type === "agent_end") {
+				// The aborted message in the run window still carries the provider's
+				// untouched zeros. The footer's settled summary and the transcript's
+				// `turn · in/out` receipt both rebuild from this window, so give them
+				// the estimate the message_end published; the raw window feeds
+				// observability and the cache summary below unchanged.
+				const reported = enrichedEvent.messages.map((message) => {
+					const estimate = interruptedUsageByMessage.get(message as object);
+					return estimate === undefined ? message : ({ ...message, usage: estimate as unknown as Usage } as typeof message);
+				});
+				if (reported.some((message, index) => message !== enrichedEvent.messages[index])) {
+					publicEvent = { ...enrichedEvent, messages: reported } as typeof enrichedEvent;
 				}
 			}
 			if (publicEvent?.type === "agent_start") {
@@ -684,11 +705,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventClock;
 				if (hasDelta && apiCallFirstDeltaAt === null) apiCallFirstDeltaAt = eventClock;
 			}
-			if (publicEvent?.type === "agent_end") {
-				context.noteRunCacheSummary(publicEvent.messages, runFirstCallVerdict);
+			if (enrichedEvent.type === "agent_end") {
+				context.noteRunCacheSummary(enrichedEvent.messages, runFirstCallVerdict);
 			}
-			if (publicEvent?.type === "agent_end" && deps.observability) {
-				const summary = sumRunUsage(publicEvent.messages);
+			if (enrichedEvent.type === "agent_end" && deps.observability) {
+				const summary = sumRunUsage(enrichedEvent.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
 					deps.observability.recordTokens(
 						localRuntime.targetId,
@@ -727,9 +748,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// persistence does.
 			if (
 				state.activeInterruptReason !== null &&
-				publicEvent?.type === "message_end" &&
-				isEmptyAbortedAssistantMessage(publicEvent.message)
+				enrichedEvent.type === "message_end" &&
+				isEmptyAbortedAssistantMessage(enrichedEvent.message)
 			) {
+				// The ledger drops this message too, so the spend the cancelled call
+				// streamed as thinking would otherwise vanish from the durable record.
+				// Hand it to the closing turn the interrupt persists when the run
+				// settles; the public agent_end window above still feeds status.
+				const estimate = interruptedUsageByMessage.get(enrichedEvent.message as object);
+				if (estimate !== undefined) state.interruptedUsage = estimate;
 				return;
 			}
 			if (publicEvent) deps.emit(publicEvent);
