@@ -1,12 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { Type } from "typebox";
 import { ToolNames } from "../../core/tool-names.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/schema.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
 import { readWikiMeta } from "../../domains/context/wiki/meta.js";
 import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";
-import { StringEnum } from "../../engine/ai.js";
 import { compileGlobRegex } from "../ignore-policy.js";
 import {
 	finalizeObservation,
@@ -15,12 +13,15 @@ import {
 	reserveObservation,
 } from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
+import {
+	codeNavToolSurface,
+	CODE_NAV_DEFAULT_ENTRY_LIMIT as DEFAULT_ENTRY_LIMIT,
+	CODE_NAV_DEFAULT_LIMIT as DEFAULT_LIMIT,
+	CODE_NAV_MAX_LIMIT as MAX_LIMIT,
+} from "./code-nav-surface.js";
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
-const DEFAULT_LIMIT = 50;
-const DEFAULT_ENTRY_LIMIT = 25;
-const MAX_LIMIT = 200;
 
 interface NavIndex {
 	filesById: Map<string, CodewikiFile>;
@@ -485,24 +486,7 @@ function parseLimit(value: unknown, fallback: number): number {
 }
 
 export const codeNavTool: ToolSpec = {
-	name: ToolNames.CodeNav,
-	description:
-		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use context scope=docs.",
-	parameters: Type.Object({
-		mode: StringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], {
-			description: "Lookup mode.",
-		}),
-		query: Type.Optional(
-			Type.String({ description: "Symbol name, indexed path/pattern/substring, or wiki page id/title." }),
-		),
-		limit: Type.Optional(
-			Type.Number({
-				description: `Max results (default ${DEFAULT_LIMIT}, entries ${DEFAULT_ENTRY_LIMIT}, max ${MAX_LIMIT}).`,
-			}),
-		),
-	}),
-	baseActionClass: "read",
-	executionMode: "parallel",
+	...codeNavToolSurface,
 	async run(args, options): Promise<ToolResult> {
 		const mode = typeof args.mode === "string" ? args.mode : "";
 		const loaded = await loadCodewikiForTool();

@@ -9,8 +9,10 @@ import { resolveReadPath } from "../path-utils.js";
 import type { ToolResult, ToolResultDetails } from "../registry.js";
 import { maxOutputArg, timeoutArg } from "../safe-exec.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
+import { BROWSER_MODES } from "./surface.js";
 
-export const BROWSER_MODES = ["auto", "required", "off"] as const;
+export { BROWSER_MODES } from "./surface.js";
+
 type BrowserMode = (typeof BROWSER_MODES)[number];
 
 type CheckStatus = "pass" | "warn" | "fail" | "skip";

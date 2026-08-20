@@ -11,9 +11,7 @@
  */
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -24,7 +22,9 @@ import {
 	seedOpenAICompatToolOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
+import { emittedJavaScriptContaining, runCliWithCoverage } from "../harness/runtime-module-graph.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+import { assertLazyToolLoading } from "../harness/tool-module-graph.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -134,53 +134,75 @@ describe("smoke/pack-install", { concurrency: false }, () => {
 		match(result.stdout, /Clio Coder \d+\.\d+\.\d+/);
 	});
 
-	it("invokes built-in fetch through the installed tool graph from a foreign cwd", { timeout: 30_000 }, async () => {
-		const initialized = await runNode([bin, "doctor", "--fix"], {
-			cwd: prefix,
-			env: { ...process.env, ...scratch.env },
+	it("keeps heavyweight tools lazy and invokes each shipped chunk from a foreign cwd", {
+		timeout: 240_000,
+	}, async () => {
+		await assertLazyToolLoading({
+			packageRoot: installedRoot,
+			bin,
+			workRoot: join(work, "installed-lazy-tool-graph"),
+			env: scratch.env,
+		});
+	});
+
+	it("returns the standard reinstall diagnostic when an installed lazy chunk is missing", async () => {
+		const brokenRoot = join(prefix, "node_modules", "@iowarp", "clio-coder-broken");
+		cpSync(installedRoot, brokenRoot, { recursive: true });
+		const chunks = emittedJavaScriptContaining(brokenRoot, "web_fetch: binary or unsupported content type");
+		ok(chunks.size > 0, "the copied install must contain a discoverable web_fetch implementation chunk");
+		const missingNames = [...chunks].map((path) => path.slice(path.lastIndexOf("/") + 1));
+		for (const path of chunks) rmSync(path, { force: true });
+
+		const home = makeScratchHome("clio-pack-broken-lazy-");
+		const coverageDir = mkdtempSync(join(tmpdir(), "clio-pack-broken-lazy-coverage-"));
+		const cwd = join(work, "broken-lazy-foreign-cwd");
+		mkdirSync(cwd, { recursive: true });
+		const brokenBin = join(brokenRoot, "dist", "cli", "index.js");
+		const initialized = await runCliWithCoverage({
+			bin: brokenBin,
+			args: ["doctor", "--fix"],
+			cwd,
+			env: home.env,
+			coverageDir,
 		});
 		strictEqual(initialized.code, 0, `stdout=${initialized.stdout} stderr=${initialized.stderr}`);
+		rmSync(coverageDir, { recursive: true, force: true });
+		mkdirSync(coverageDir, { recursive: true });
 
-		let webHits = 0;
-		const webServer = createServer((_request, response) => {
-			webHits += 1;
-			response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-			response.end("installed web_fetch reached built-in fetch");
+		const model = await startOpenAICompatFixture("broken install diagnostic delivered", {
+			toolCall: {
+				name: "web_fetch",
+				arguments: { url: "http://127.0.0.1:1/must-not-run", format: "raw" },
+			},
 		});
-		await new Promise<void>((resolve) => webServer.listen(0, "127.0.0.1", resolve));
-		const webAddress = webServer.address() as AddressInfo;
-		const webUrl = `http://127.0.0.1:${webAddress.port}/installed`;
-		const model = await startOpenAICompatFixture("installed tool turn complete", {
-			toolCall: { name: "web_fetch", arguments: { url: webUrl, format: "raw" } },
-		});
-		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), model.url, "full-auto");
-		const foreignCwd = join(work, "foreign-project");
-		mkdirSync(foreignCwd, { recursive: true });
-		const env: NodeJS.ProcessEnv = {
-			...process.env,
-			...scratch.env,
-			CLIO_CODER_TEST_OPENAI_KEY: "pack-contract-key",
-			CLIO_CODER_RESIDENCY: "observe",
-		};
-		delete env.CLIO_CODER_NO_NETWORK_TOOLS;
-
+		seedOpenAICompatToolOrchestrator(join(home.dir, "config"), model.url, "full-auto");
 		try {
-			const result = await runNode(
-				[bin, "--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "fetch the fixture"],
-				{ cwd: foreignCwd, env },
-			);
+			const result = await runCliWithCoverage({
+				bin: brokenBin,
+				args: ["--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "fetch"],
+				cwd,
+				env: {
+					...home.env,
+					CLIO_CODER_TEST_OPENAI_KEY: "broken-pack-key",
+					CLIO_CODER_RESIDENCY: "observe",
+				},
+				coverageDir,
+			});
 			strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
-			match(result.stdout, /installed tool turn complete/);
-			strictEqual(webHits, 1, "the packed tool must reach the localhost resource exactly once");
+			const providerHistory = JSON.stringify(model.requests);
+			match(providerHistory, /installation is incomplete/);
+			match(providerHistory, /npm install -g @iowarp\/clio-coder/);
+			match(providerHistory, /npm run install:local/);
 			ok(
-				model.requests.some((request) => JSON.stringify(request).includes("installed web_fetch reached built-in fetch")),
-				"the second packed-provider request must carry the real web_fetch result",
+				missingNames.some((name) => providerHistory.includes(name)),
+				"the diagnostic must name the missing chunk",
 			);
+			match(result.stdout, /broken install diagnostic delivered/);
 		} finally {
-			webServer.closeAllConnections();
-			await closeServer(webServer);
 			model.server.closeAllConnections();
 			await closeServer(model.server);
+			home.cleanup();
+			rmSync(coverageDir, { recursive: true, force: true });
 		}
 	});
 
