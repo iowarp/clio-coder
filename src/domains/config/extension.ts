@@ -1,7 +1,7 @@
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
-import { type ClioSettings, formatSettingsFailure, readSettings, updateSettings } from "../../core/config.js";
+import { type ClioSettings, formatSettingsFailure, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { readLayeredSettings } from "../../core/settings-layers.js";
+import { readLayeredSettings, updateLayeredSettings } from "../../core/settings-layers.js";
 import { assertAgentIdNamespace } from "./agent-namespace.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
@@ -114,10 +114,10 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 			const candidate = structuredClone(previous);
 			mutate(candidate);
 			assertAgentNamespace(candidate);
-			// updateSettings writes the user layer; re-layer so project overlays
-			// stay applied in the refreshed snapshot.
-			updateSettings(mutate);
-			const normalized = readLayeredSettings(process.cwd()).settings;
+			// Apply the effective-view delta to the user document under one lock,
+			// then validate it with the project layers before writing. In particular,
+			// a route may name a target supplied only by this workspace.
+			const normalized = updateLayeredSettings(process.cwd(), mutate);
 			snapshot = normalized;
 			const diff = diffSettings(previous, normalized);
 			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });

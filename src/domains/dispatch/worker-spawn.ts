@@ -26,6 +26,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
+import { withClioAgentEnvironment } from "../../core/agent-environment.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import {
@@ -184,7 +185,7 @@ export function spawnWorkerProcess(
 	const child: ChildProcess = spawn(command, [...args], {
 		stdio: ["pipe", "pipe", "pipe"],
 		cwd: opts?.cwd,
-		env: opts?.env ?? process.env,
+		env: withClioAgentEnvironment(opts?.env ?? process.env),
 		// The worker leads its own process group so abort escalation covers the
 		// descendants a runtime spawned, not only the immediate child.
 		detached: true,

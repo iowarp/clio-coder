@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder - Artifact Versions &amp; Serialization Contracts Blueprint</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .version-tag {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: rgba(70, 229, 208, 0.15);
+      color: var(--color-cyan);
+      border: 1px solid rgba(70, 229, 208, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-emerald);"><title>Versions Icon</title>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Artifact Versions &amp; Serialization Contracts</h1>
+          <p>Authoritative registry and migration policies for all serialized artifact schemas across Clio Coder</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Populated dynamically by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('version-registry')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Registry</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            Artifact Schema Registry
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('receipt-integrity')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Integrity</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            Receipt Integrity v15
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('migration-mechanics')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Migrations</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Automated Migrations
+          </button>
+        </div>
+
+        <!-- TAB 1: VERSION REGISTRY -->
+        <div class="tab-pane active" id="pane-version-registry">
+          <div class="glass-card">
+            <h2>Serialized Artifact Version Registry</h2>
+            <p>Every persistent artifact and network-transported frame is strictly versioned:</p>
+            
+            <table class="ref-table">
+              <thead>
+                <tr>
+                  <th>Artifact / Subsystem</th>
+                  <th>Current Version</th>
+                  <th>Symbol &amp; Source Location</th>
+                  <th>Persisted Path / Wire Location</th>
+                  <th>Mismatch Handling</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Run Receipt</strong></td>
+                  <td><span class="version-tag">v15</span></td>
+                  <td><code>RUN_RECEIPT_INTEGRITY_VERSION = 15</code><br><code>src/domains/dispatch/receipt-integrity.ts:13</code></td>
+                  <td><code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code></td>
+                  <td>Fail-closed. Incompatible receipts fail validation.</td>
+                </tr>
+                <tr>
+                  <td><strong>Session Ledger</strong></td>
+                  <td><span class="version-tag">v3</span></td>
+                  <td><code>CURRENT_SESSION_FORMAT_VERSION = 3</code><br><code>src/engine/session.ts:66</code></td>
+                  <td><code>&lt;stateDir&gt;/sessions/.../</code> (<code>meta.json</code>, <code>current.jsonl</code>)</td>
+                  <td>Automated migration via <code>src/domains/session/migrations/</code> on <code>/resume</code>.</td>
+                </tr>
+                <tr>
+                  <td><strong>Worker Spec</strong></td>
+                  <td><span class="version-tag">v3</span></td>
+                  <td><code>WORKER_SPEC_VERSION = 3</code><br><code>src/worker/spec-contract.ts:22</code></td>
+                  <td>Subprocess <code>stdin</code> payload</td>
+                  <td>Fail-closed preflight rejection before activation.</td>
+                </tr>
+                <tr>
+                  <td><strong>Worker Runtime Descriptor</strong></td>
+                  <td><span class="version-tag">v2</span></td>
+                  <td><code>WORKER_RUNTIME_DESCRIPTOR_VERSION = 2</code><br><code>src/worker/spec-contract.ts:23</code></td>
+                  <td>Worker attestation descriptor frame</td>
+                  <td>Attestation mismatch causes process termination.</td>
+                </tr>
+                <tr>
+                  <td><strong>Fleet Contract</strong></td>
+                  <td><span class="version-tag">v4</span></td>
+                  <td><code>FLEET_WRITE_BOUNDARY_VERSION = 4</code><br><code>src/domains/agents/fleet-contract.ts:37, 140</code></td>
+                  <td><code>.clio-coder/fleets/&lt;name&gt;.yaml</code></td>
+                  <td>Refuses unsupported contract version features.</td>
+                </tr>
+                <tr>
+                  <td><strong>Execution Plan</strong></td>
+                  <td><span class="version-tag">v4</span></td>
+                  <td><code>version: 4</code> in <code>ExecutionPlan</code><br><code>src/domains/dispatch/execution-plan.ts:98</code></td>
+                  <td>Statically compiled DAG in memory &amp; receipts</td>
+                  <td>Preflight rejects unsupported plan versions.</td>
+                </tr>
+                <tr>
+                  <td><strong>Eval Artifact</strong></td>
+                  <td><span class="version-tag">v4</span></td>
+                  <td><code>version: 4</code> in <code>EvalArtifactV4</code><br><code>src/domains/eval/schema/artifact.ts:51-52</code></td>
+                  <td><code>&lt;stateDir&gt;/evals/&lt;evalId&gt;.json</code></td>
+                  <td>Rejected during report and compare operations. (Note: <code>types.ts:2</code> v1 is dead code).</td>
+                </tr>
+                <tr>
+                  <td><strong>Trace Database</strong></td>
+                  <td><span class="version-tag">v1</span></td>
+                  <td><code>TRACE_SCHEMA_VERSION = 1</code><br><code>src/domains/observability/trace-store.ts:23</code></td>
+                  <td><code>&lt;stateDir&gt;/trace.sqlite</code></td>
+                  <td>Emits warning; trace writing degrades safely.</td>
+                </tr>
+                <tr>
+                  <td><strong>Capacity State File</strong></td>
+                  <td><span class="version-tag">v2</span></td>
+                  <td><code>version: 2</code> in <code>CapacityStateFile</code><br><code>src/domains/dispatch/capacity-lease.ts:40</code></td>
+                  <td><code>&lt;stateDir&gt;/dispatch-admission.json</code></td>
+                  <td>Corrupted file causes admission to fail closed.</td>
+                </tr>
+                <tr>
+                  <td><strong>Protected Artifact Journal</strong></td>
+                  <td><span class="version-tag">v1</span></td>
+                  <td><code>version: 1</code> in <code>PendingProtectedArtifactRecord</code><br><code>src/domains/session/protected-artifact-journal.ts:22</code></td>
+                  <td><code>&lt;stateDir&gt;/protected-artifact-pending/...</code></td>
+                  <td>Reconciled during session initialization.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 2: RECEIPT INTEGRITY -->
+        <div class="tab-pane" id="pane-receipt-integrity">
+          <h2>Cryptographic Receipt Integrity (Version 15)</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Canonical Digest Calculation</h3>
+              <p>Receipt integrity guarantees that execution facts, token counts, tool outputs, and validation grounding were sealed authoritatively by the orchestrator:</p>
+              <pre><code>export function computeReceiptDigest(receipt: RunReceiptV15): string {
+  const canonical = serializeCanonicalReceipt(receipt);
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}</code></pre>
+            </div>
+            <div class="glass-card">
+              <h3>Sealed Integrity Checks</h3>
+              <ol style="margin-left:1.25rem; font-size:0.875rem; color:var(--text-muted);">
+                <li><code>integrity.version === 15</code></li>
+                <li>Calculated SHA-256 digest matches <code>integrity.digest</code></li>
+                <li>All optional blocks (<code>validationGrounding</code>, <code>capabilityMismatch</code>, <code>steering</code>, <code>gate</code>, <code>plan</code>, <code>briefing</code>) strictly conform to v15 schema.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: MIGRATIONS -->
+        <div class="tab-pane" id="pane-migration-mechanics">
+          <h2>Automated Session Migrations</h2>
+          <p>When resuming a session via <code>/resume</code> whose <code>meta.sessionFormatVersion &lt; 3</code>:</p>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Sequential Migration Pipeline</h3>
+              <ul>
+                <li><strong>Discovery:</strong> <code>runMigrations</code> reads recorded format version.</li>
+                <li><strong>Step Execution:</strong> Runs sequential passes (<code>v1 &rarr; v2</code>, <code>v2 &rarr; v3</code>), transforming <code>current.jsonl</code> and updating <code>tree.json</code>.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Atomic Commitment</h3>
+              <p style="font-size:0.875rem; color:var(--text-muted);">
+                Staged migrations are written to temporary files, fsync'd, and atomically renamed over the original session directory before <code>meta.sessionFormatVersion</code> is updated to 3.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="artifact_placement_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Artifact Placement</span>
+          </a>
+          <a href="index.html" class="nav-link-card next">
+            <span class="nav-label">Dashboard Hub</span>
+            <span class="nav-title">Visual Documentation Center</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Artifact Versions Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const pane = document.getElementById(`pane-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
+        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
+      });
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+  </script>
+</body>
+</html>

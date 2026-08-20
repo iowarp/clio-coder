@@ -9,13 +9,10 @@
 export type {
 	AgentEvent,
 	AgentMessage,
-	AgentOptions,
-	AgentState,
 	AgentTool,
 	AgentToolResult,
-	StreamFn,
+	AgentToolUpdateCallback,
 } from "@earendil-works/pi-agent-core";
-export { Agent } from "@earendil-works/pi-agent-core";
 
 import type { AgentState as PiAgentState } from "@earendil-works/pi-agent-core";
 
@@ -36,6 +33,7 @@ export type MutableAgentState = Omit<PiAgentState, "errorMessage"> & {
 export type {
 	AnthropicMessagesCompat,
 	Api,
+	AuthOperationOptions,
 	ImageContent,
 	KnownProvider,
 	Model,
@@ -53,14 +51,13 @@ import type { Api as PiApi, Model as PiModel } from "@earendil-works/pi-ai";
  */
 export type EngineModel = PiModel<PiApi>;
 export type {
-	EditorOptions,
 	EditorTheme,
 	SelectItem,
 	SelectListLayoutOptions,
 	SettingItem,
 	SettingsListTheme,
+	TUI,
 } from "@earendil-works/pi-tui";
-export { TUI } from "@earendil-works/pi-tui";
 // SelectListTheme carries the Clio design cursor as an engine augmentation; see
 // ./select-list.ts. Re-export the augmented type so every engine surface agrees.
 export type { SelectListTheme } from "./select-list.js";

@@ -16,12 +16,6 @@ import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-init-options-"));
 	scratchRoots.push(root);
@@ -78,6 +72,16 @@ async function captureProcessWrites<T>(fn: () => Promise<T>): Promise<{ stdout: 
 }
 
 describe("contracts/context-init-options", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps rewrite implications in the shell options while /context init stays zero-argument", () => {
 		deepStrictEqual(applyInitImplications({ rewriteClioMd: true }), {
 			applyClioMd: true,

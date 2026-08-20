@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Lifecycle Operations Blueprint (v0.3.1)</title>
+  <title>Clio Coder Lifecycle Operations Blueprint (v0.3.2)</title>
   
   <style>
     :root {
@@ -414,7 +414,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.1</span>
+        <span class="version-badge">Clio Coder v0.3.2</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -603,6 +603,15 @@
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
         <p><code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Upgrading to Version 0.3.2</h3>
+        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.3.2:</p>
+        <ul>
+          <li><strong>Engine SDK 0.84.0:</strong> Upgrades provider integrations and adds signal-aware OAuth token cancellation.</li>
+          <li><strong>Migration Resilience (#121):</strong> Damaged <code>credentials.yaml</code> files do not fail upgrade when no provider renames are needed; <code>--skip-migrations</code> is supported.</li>
+          <li><strong>Turn Settlement (#114):</strong> Session switches (<code>/new</code>, <code>/resume</code>, <code>/tree</code>, <code>/fork</code>) cleanly settle and commit in-flight turns before writer handover.</li>
+          <li><strong>Fullscreen Mode:</strong> Settings → Terminal provides opt-in <code>terminal.tuiMode: "fullscreen"</code>.</li>
+        </ul>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
         <pre><code># checkout repo
 git clone https://github.com/iowarp/clio-coder.git
@@ -616,7 +625,7 @@ clio-coder --version</code></pre>
     </main>
 
     <footer>
-      <p>Clio Coder Lifecycle spec &bull; Version 0.3.1</p>
+      <p>Clio Coder Lifecycle spec &bull; Version 0.3.2</p>
     </footer>
   </div>
 
@@ -709,7 +718,7 @@ clio-coder --version</code></pre>
       }, 1000);
 
       setTimeout(() => {
-        consoleEl.innerHTML += `\n[METADATA] Writing ${state}/install.json: { version: "0.3.1", node: "v22.19.0" }`;
+        consoleEl.innerHTML += `\n[METADATA] Writing ${state}/install.json: { version: "0.3.2", node: "v22.19.0" }`;
         consoleEl.innerHTML += `\n[BOOT] initializeClioHome() completed successfully.`;
       }, 1400);
     }

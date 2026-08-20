@@ -94,6 +94,11 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	plan: true,
 	personaOverride: true,
 	projectContext: true,
+	// Always set on receipts written after #104 landed; absent only on older
+	// receipts, which digest exactly as they did before these fields existed,
+	// so the integrity version stays where it is.
+	rulesApplied: true,
+	operatorProfileApplied: true,
 	exitCode: true,
 	failureMessage: true,
 	tokenCount: true,

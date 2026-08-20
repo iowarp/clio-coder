@@ -168,8 +168,8 @@ describe("contracts/interactive resource overlay openers", () => {
 
 		lifecycle.openSkillsHubState();
 		events.length = 0;
-		skillsDeps?.setEditorText("/skill:review ");
+		skillsDeps?.setEditorText("/skill review ");
 
-		deepStrictEqual(events, ["editor:/skill:review ", "render"]);
+		deepStrictEqual(events, ["editor:/skill review ", "render"]);
 	});
 });

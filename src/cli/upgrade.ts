@@ -172,9 +172,12 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	// After `npm install -g` the two differ until the refresh below, and that
 	// difference is the upgrade this command reports.
 	const recorded = readStateInfo()?.version ?? null;
+	// Both the dry run and the real run print this, so it stays in the mood the
+	// call site sets with "would refresh" or "refreshed". The null branch used to
+	// bake in "would write it", which a real upgrade printed after writing it.
 	const describeRefresh = (): string =>
 		recorded === null
-			? "state metadata (none recorded; would write it)"
+			? "state metadata (none recorded)"
 			: recorded === before
 				? `state metadata (already ${before})`
 				: `state metadata ${recorded} -> ${before}`;
@@ -233,7 +236,20 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 				printError("lifecycle domain unavailable");
 				return 1;
 			}
-			const result = await lifecycle.runMigrations(stateDir);
+			let result: Awaited<ReturnType<LifecycleContract["runMigrations"]>>;
+			try {
+				result = await lifecycle.runMigrations(stateDir);
+			} catch (err) {
+				// A migration reports why it could not run, but on its own that reads
+				// as the whole upgrade being impossible. It is not: the rest of the
+				// upgrade is independent of it, and naming the flag that runs the rest
+				// is the difference between a stuck operator and a moved one.
+				printError(
+					`migration failed: ${err instanceof Error ? err.message : String(err)}`,
+					"the rest of the upgrade does not depend on it; run `clio-coder upgrade --skip-migrations` to continue, then fix the cause and re-run `clio-coder upgrade`.",
+				);
+				return 1;
+			}
 			appliedIds = [...result.applied];
 			appliedCount = appliedIds.length;
 			if (appliedCount === 0) {

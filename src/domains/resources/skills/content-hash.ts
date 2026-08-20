@@ -20,6 +20,8 @@ export const PROVENANCE_KEYS = new Set([
 	"installed-hash",
 	"installedHash",
 	"audit",
+	"installed-by",
+	"installedBy",
 ]);
 
 export interface FrontmatterRegion {

@@ -2,7 +2,7 @@
 
 Every environment variable the shipped `src/` tree reads, grouped by role. Settings.yaml is the durable home for operator policy; env vars exist for per-process overrides (CI, one-off experiments), directory layout, debugging, and internal plumbing. When prose and source disagree, prefer the source; the table cites the read site.
 
-This page is the complete inventory, and `tests/contracts/environment-variable-inventory.test.ts` fails if `src/` reads a variable that has no row here.
+This page is the complete inventory, and the `environment-variable-inventory` check in `scripts/check-hygiene.ts` (run by `npm run lint`) fails if `src/` reads a variable that has no row here.
 
 > [!TIP]
 > [docs/html/environment_blueprint.html](html/environment_blueprint.html) is a browsable walkthrough of the most commonly set variables with an effective-path resolver. It covers a curated subset, so use the tables below when you need the full list.
@@ -38,7 +38,6 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_HOOK_BUDGET_WINDOW` | 5 | Sliding-window size for steady-state hook-budget warnings. |
 | `CLIO_CODER_HOOK_BUDGET_THRESHOLD` | 3 | Overruns within the window before a steady-state warning. |
 | `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | 131072 | Largest context length Clio requests when it loads an LM Studio model while another model is resident on the same server. LM Studio reports no VRAM and caps GPU offload instead of refusing an oversized load, so a KV cache that does not fit is served from CPU at a crawl; the ceiling bounds that by evidence. `off` or `0` disables clamping (`src/engine/apis/lmstudio-residency.ts`). |
-| `CLIO_CODER_LMSTUDIO_SDK_PREDICT` | off | `1` sends LM Studio predictions over the SDK again instead of its OpenAI-compatible port. Predictions moved to HTTP because the SDK surface ignores the thinking control, so this is an escape hatch back to the older transport and not a debug toggle. Listing, loading, and unloading always use the SDK (`src/engine/apis/lmstudio-native.ts`). |
 | `CLIO_CODER_SKILL_CATALOG_DIR` | unset | Local skill-catalog directory override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | unset | Skill-marketplace index path override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
@@ -63,8 +62,6 @@ All default off; enable with `1`.
 | `CLIO_CODER_TRACE_BOOT` | Boot-phase timing trace (`src/core/boot-trace.ts`). |
 | `CLIO_CODER_TIMING` | Startup timing report (`src/entry/orchestrator.ts`). |
 | `CLIO_CODER_DEBUG_SHUTDOWN` | Shutdown-path diagnostics (`src/core/termination.ts`). |
-| `CLIO_CODER_DEBUG_LMSTUDIO` | LM Studio wire logging (`src/domains/providers/runtimes/common/lmstudio-logger.ts`). |
-| `CLIO_CODER_RUNTIME_VERBOSE` | Verbose runtime logging (`src/engine/apis/lmstudio-native.ts`). |
 | `CLIO_CODER_HOOK_BUDGET_DEBUG` | Per-overrun hook-budget diagnostics (`src/domains/middleware/runtime.ts`). |
 
 ### File-writing traces
@@ -88,12 +85,14 @@ Set by Clio for its own processes; not operator knobs.
 
 | Variable | Purpose |
 | --- | --- |
+| `AI_AGENT` | Clio sets this generic child-process attribution marker to `clio-coder` at both shipped entry points and reinforces it for bash tools, fleet workers, registered code steps, and command hooks. Child tooling may read it to identify the agent that launched it (`src/cli/index.ts`, `src/worker/entry.ts`, `src/core/bash-exec.ts`). |
 | `CLIO_CODER_INTERACTIVE` | Marks the interactive TUI process; scrubbed from bash-tool children so nested invocations do not inherit it (`src/cli/clio.ts`, `src/core/bash-exec.ts`). |
 | `CLIO_CODER_RUN_OVERRIDES` | JSON envelope for run-scoped CLI options (`--max-context-tokens`, `--kv-cache-mode`, sampling flags). One typed variable instead of one env var per option; worker subprocesses inherit it (`src/core/run-overrides.ts`). |
 | `CLIO_CODER_RESUME_SESSION_ID` | Session id handed across a self-restart; consumed and deleted at boot (`src/entry/orchestrator.ts`). |
 | `CLIO_CODER_BOOTSTRAP_GENERATE_CHILD` | Marks the CLIO-CODER.md-generation child so it skips recursion (`src/domains/context/extension.ts`). |
 | `CLIO_CODER_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
+| `CLIO_CODER_WORKER_RUN` | Marks a dispatched worker process; a skill install run inside it is stamped `installed-by: worker` (`src/worker/entry.ts`, `src/domains/resources/skills/install.ts`). |
 
 ## Test-only
 

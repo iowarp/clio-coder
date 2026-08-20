@@ -19,11 +19,11 @@ import { persistSessionMeta, type SessionManagerState, startSession } from "../.
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("contracts/session state after an uninstall", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 	let stateDir: string;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-session-uninstall-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-session-uninstall-");
 		stateDir = join(scratch.dir, "state");
 		resetRecentModelsCache();
 	});

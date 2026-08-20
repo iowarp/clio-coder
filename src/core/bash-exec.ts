@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { AI_AGENT_NAME } from "./agent-environment.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
@@ -24,14 +25,28 @@ export interface BashCommandResult {
 	outputCapped: boolean;
 }
 
+export interface BashCommandProgress {
+	/** Cumulative stdout captured so far. */
+	stdout: string;
+	/** Cumulative stderr captured so far. */
+	stderr: string;
+	/** Total bytes accepted from both streams so far. */
+	outputBytes: number;
+}
+
 export interface RunBashCommandOptions {
 	cwd?: string;
 	timeoutMs?: number;
 	signal?: AbortSignal;
+	/** Cumulative snapshots, throttled to keep terminal rendering responsive. */
+	onUpdate?: (progress: BashCommandProgress) => void;
 }
+
+const BASH_UPDATE_THROTTLE_MS = 100;
 
 function buildToolEnv(): NodeJS.ProcessEnv {
 	const env = { ...process.env };
+	env.AI_AGENT = AI_AGENT_NAME;
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
@@ -102,6 +117,7 @@ async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 	// the capture still flow through; the CLIO control keys are re-stripped
 	// last so they never reach the child from either source.
 	const env: NodeJS.ProcessEnv = { ...process.env, ...captured };
+	env.AI_AGENT = AI_AGENT_NAME;
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
@@ -127,6 +143,9 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let stderr = "";
 		let outputBytes = 0;
 		let outputCapped = false;
+		let updateTimer: ReturnType<typeof setTimeout> | null = null;
+		let updateDirty = false;
+		let lastUpdateAt = 0;
 
 		const child = spawn("/bin/bash", [plan.mode, command], {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),
@@ -134,6 +153,44 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
+
+		const emitUpdate = (): void => {
+			if (options.onUpdate === undefined || !updateDirty) return;
+			updateDirty = false;
+			lastUpdateAt = Date.now();
+			try {
+				options.onUpdate({ stdout, stderr, outputBytes: Math.min(outputBytes, BASH_HARD_CAP_BYTES) });
+			} catch {
+				// Rendering progress is advisory and must never change command execution.
+			}
+		};
+		const clearUpdateTimer = (): void => {
+			if (updateTimer === null) return;
+			clearTimeout(updateTimer);
+			updateTimer = null;
+		};
+		const scheduleUpdate = (): void => {
+			if (options.onUpdate === undefined) return;
+			updateDirty = true;
+			const delay = BASH_UPDATE_THROTTLE_MS - (Date.now() - lastUpdateAt);
+			if (delay <= 0) {
+				clearUpdateTimer();
+				emitUpdate();
+				return;
+			}
+			updateTimer ??= setTimeout(() => {
+				updateTimer = null;
+				emitUpdate();
+			}, delay);
+		};
+		const finishUpdates = (): void => {
+			clearUpdateTimer();
+			emitUpdate();
+		};
+		if (options.onUpdate !== undefined) {
+			updateDirty = true;
+			emitUpdate();
+		}
 
 		const clearKillGraceTimer = (): void => {
 			if (!killGraceTimer) return;
@@ -195,11 +252,13 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 					else stderr += slice;
 				}
 				outputCapped = true;
+				scheduleUpdate();
 				killChild();
 				return;
 			}
 			if (target === "stdout") stdout += chunk.toString("utf8");
 			else stderr += chunk.toString("utf8");
+			scheduleUpdate();
 		};
 
 		child.stdout?.on("data", (chunk: Buffer) => appendChunk("stdout", chunk));
@@ -209,6 +268,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
+			finishUpdates();
 			options.signal?.removeEventListener("abort", onAbort);
 			resolve({
 				error: error as NodeJS.ErrnoException,
@@ -226,6 +286,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
+			finishUpdates();
 			options.signal?.removeEventListener("abort", onAbort);
 			const error =
 				code === 0 && signalName === null

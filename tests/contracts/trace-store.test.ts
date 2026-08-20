@@ -15,7 +15,6 @@ import {
 } from "../../src/domains/observability/trace-store.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "clio-trace-store-"));
-after(() => rmSync(scratch, { recursive: true, force: true }));
 
 function path(name: string): string {
 	return join(scratch, `${name}-${Math.random().toString(16).slice(2)}.sqlite`);
@@ -35,6 +34,12 @@ function run(runId = "run-1"): DispatchEnqueuedPayload {
 }
 
 describe("durable trace store", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level after() runs at the end of the whole process,
+	// not the end of this file's suite.
+	after(() => rmSync(scratch, { recursive: true, force: true }));
+
 	it("creates the exact schema version with WAL connection settings", () => {
 		const file = path("schema");
 		const store = new TraceStore(file);

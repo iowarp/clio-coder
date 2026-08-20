@@ -86,7 +86,7 @@ describe("bounded dispatch admission queue", () => {
 		strictEqual(timing.queueWaitMs, 100);
 	});
 	it("the controller holds one plan to its reserved peak", async () => {
-		const isolated = isolateClioEnv("clio-admit-");
+		const isolated = await isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 4, nodes: { local: 4 } }),
 			reservedPlanPeak: (planId) => (planId === "plan-1" ? 1 : undefined),
@@ -121,7 +121,7 @@ describe("bounded dispatch admission queue", () => {
 	 * wall it hit nor a way past it, so the model had nothing to act on.
 	 */
 	it("an admission timeout names the capacity it waited on and what would clear it", async () => {
-		const isolated = isolateClioEnv("clio-admit-");
+		const isolated = await isolateClioEnv("clio-admit-");
 		// Which of the two branches below fires is decided by arithmetic on this
 		// clock, not by a 120ms real deadline racing the pump's 10ms→500ms
 		// backoff: on a loaded runner that race produced the sibling test's
@@ -161,7 +161,7 @@ describe("bounded dispatch admission queue", () => {
 	 * concurrency were all wrong, and the real cost sat before admission.
 	 */
 	it("an already-expired deadline says so instead of blaming capacity", async () => {
-		const isolated = isolateClioEnv("clio-admit-");
+		const isolated = await isolateClioEnv("clio-admit-");
 		// The other branch of the same fork, and the same reason for a clock: the
 		// deadline is 16s behind the injected now at the instant admit() reads it,
 		// so nothing about how long the runner takes can move this off the
@@ -190,7 +190,7 @@ describe("bounded dispatch admission queue", () => {
 		}
 	});
 	it("a rejected admission leaves nothing pending behind it", async () => {
-		const isolated = isolateClioEnv("clio-admit-");
+		const isolated = await isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 1, nodes: { local: 1 } }),
 			maxQueueSize: 1,
@@ -211,7 +211,7 @@ describe("bounded dispatch admission queue", () => {
 		}
 	});
 	it("shutdown drain is process-local and cancels queued work", async () => {
-		const isolated = isolateClioEnv("clio-admit-");
+		const isolated = await isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 1, nodes: { local: 1 } }),
 		});

@@ -1,3 +1,4 @@
+import { join, resolve } from "node:path";
 import type { BootstrapProgressEvent } from "../domains/context/index.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
 
@@ -60,15 +61,19 @@ async function printContextStatus(): Promise<number> {
 	const preload = await import("../domains/prompts/preload.js");
 	const cwd = process.cwd();
 
-	const clio = context.tryReadClioMd(cwd);
+	const clio = context.loadProjectClioMd(cwd);
 	const state = context.readClioState(cwd);
-	const clioMdState = !clio
-		? "none"
-		: !clio.ok
-			? "malformed"
-			: state?.contextSources !== undefined && context.adoptionSourcesChanged(state.contextSources, { cwd })
-				? "stale"
-				: "ok";
+	const localStandardIsEffective = clio.files.some((file) => file.path === join(resolve(cwd), "CLIO-CODER.md"));
+	const clioMdState =
+		clio.files.length === 0 && clio.errors.length === 0
+			? "none"
+			: clio.errors.length > 0
+				? "malformed"
+				: localStandardIsEffective &&
+						state?.contextSources !== undefined &&
+						context.adoptionSourcesChanged(state.contextSources, { cwd })
+					? "stale"
+					: "ok";
 
 	const prompt = context.renderPromptContext(cwd);
 	const preloadClass = preload.classifyProjectPreload({

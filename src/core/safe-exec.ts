@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { AI_AGENT_NAME } from "./agent-environment.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
@@ -53,6 +54,7 @@ export function buildSafeToolEnv(extra: Record<string, string> = {}): NodeJS.Pro
 		if (!/^[A-Z_][A-Z0-9_]*$/i.test(key)) continue;
 		env[key] = value;
 	}
+	env.AI_AGENT = AI_AGENT_NAME;
 	return env;
 }
 

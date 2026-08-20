@@ -123,7 +123,7 @@ function toolResultText(entry: MessageEntry): string {
  * stable for a given input. Tests rely on this determinism.
  *
  * Non-context-bearing kinds (modelChange, thinkingLevelChange, fileEntry,
- * sessionInfo, protectedArtifact, custom) are skipped: they never contribute
+ * sessionInfo, protectedArtifact, taskLedger, decisionLedger, custom) are skipped: they never contribute
  * to the replayed LLM context, so summarizing them would waste tokens on
  * bookkeeping.
  */
@@ -180,7 +180,8 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 			);
 		}
 		// custom, modelChange, thinkingLevelChange, fileEntry, sessionInfo,
-		// protectedArtifact do not project into the serialized conversation.
+		// protectedArtifact, taskLedger, decisionLedger, and workerRun do not
+		// project into the serialized conversation.
 	}
 	return parts.join("\n\n");
 }

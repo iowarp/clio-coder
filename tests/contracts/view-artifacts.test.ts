@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -27,6 +27,7 @@ import {
 	VIEW_ARTIFACT_CATEGORIES,
 	VIEW_ARTIFACT_LINE_CAP,
 	verifyReceiptFile,
+	WorkspaceArtifactProvider,
 } from "../../src/interactive/view/artifacts.js";
 import { withTimeZoneAsync } from "../harness/clock.js";
 
@@ -252,6 +253,7 @@ describe("contracts/view-artifacts", () => {
 			"receipt",
 			"dispatch",
 			"task-ledger",
+			"workspace",
 			"tool-output",
 			"protected-artifact",
 			"compaction",
@@ -271,6 +273,10 @@ describe("contracts/view-artifacts", () => {
 		ok(artifacts.some((artifact) => artifact.category === "accountability"));
 		ok(!artifacts.some((artifact) => artifact.category === "evidence"), "missing data dir produces no evidence rows");
 		ok(!artifacts.some((artifact) => artifact.category === "audit"), "missing audit dir produces no audit rows");
+		ok(
+			createDefaultArtifactProviders({ stateDir }).some((provider) => provider.category === "workspace"),
+			"the default /view registry includes workspace outputs",
+		);
 
 		const isolated = await listViewArtifacts([
 			{
@@ -282,6 +288,326 @@ describe("contracts/view-artifacts", () => {
 			new EvidenceArtifactProvider({ stateDir }),
 		]);
 		deepStrictEqual(isolated, []);
+	});
+
+	it("snapshots branch-local workspace outputs with deterministic metadata, loading, and missing-file fallbacks", async () => {
+		const stateDir = await scratchDir();
+		const workspace = await scratchDir();
+		const reportPath = join(workspace, "REPORT.md");
+		const planPath = join(workspace, "plan.md");
+		const notesPath = join(workspace, "notes.txt");
+		const largePath = join(workspace, "large.txt");
+		await writeFile(reportPath, "# Report\n\nDone.\n");
+		await writeFile(planPath, "# Revised plan\n");
+		await writeFile(notesPath, "plain text\n");
+		await writeFile(
+			largePath,
+			Array.from({ length: VIEW_ARTIFACT_LINE_CAP + 2 }, (_, index) => `line ${index + 1}`).join("\n"),
+		);
+
+		const message = (
+			turnId: string,
+			parentTurnId: string | null,
+			role: "user" | "assistant",
+			text: string,
+		): SessionEntry => ({
+			kind: "message",
+			turnId,
+			parentTurnId,
+			timestamp: "2026-08-19T10:00:00.000Z",
+			role,
+			payload: { text },
+		});
+		const toolResult = (input: {
+			turnId: string;
+			parentTurnId: string;
+			toolName: "artifact" | "write" | "edit";
+			paths: unknown;
+			timestamp: string;
+			kind?: string;
+			isError?: boolean;
+			outcome?: string;
+		}): SessionEntry => ({
+			kind: "message",
+			turnId: input.turnId,
+			parentTurnId: input.parentTurnId,
+			timestamp: input.timestamp,
+			role: "tool_result",
+			payload: {
+				toolName: input.toolName,
+				result: {
+					content: [{ type: "text", text: "ok" }],
+					details: { paths: input.paths, ...(input.kind ? { kind: input.kind } : {}) },
+				},
+				...(input.isError === undefined ? {} : { isError: input.isError }),
+				...(input.outcome === undefined ? {} : { outcome: input.outcome }),
+			},
+		});
+
+		const entries: SessionEntry[] = [
+			message("user-root", null, "user", "produce files"),
+			message("assistant-abandoned", "user-root", "assistant", "abandoned branch"),
+			toolResult({
+				turnId: "abandoned-write",
+				parentTurnId: "assistant-abandoned",
+				toolName: "write",
+				paths: ["abandoned.txt"],
+				timestamp: "2026-08-19T10:01:00.000Z",
+			}),
+			message("assistant-active", "user-root", "assistant", "active branch"),
+			toolResult({
+				turnId: "report",
+				parentTurnId: "assistant-active",
+				toolName: "artifact",
+				paths: ["REPORT.md"],
+				kind: "report",
+				timestamp: "2026-08-19T10:02:00.000Z",
+			}),
+			toolResult({
+				turnId: "plan-first",
+				parentTurnId: "report",
+				toolName: "artifact",
+				paths: ["plan.md"],
+				kind: "plan",
+				timestamp: "2026-08-19T10:03:00.000Z",
+			}),
+			toolResult({
+				turnId: "plan-edit",
+				parentTurnId: "plan-first",
+				toolName: "edit",
+				paths: [planPath],
+				timestamp: "2026-08-19T10:04:00.000Z",
+			}),
+			toolResult({
+				turnId: "notes",
+				parentTurnId: "plan-edit",
+				toolName: "write",
+				paths: ["notes.txt"],
+				timestamp: "2026-08-19T10:05:00.000Z",
+			}),
+			toolResult({
+				turnId: "large",
+				parentTurnId: "notes",
+				toolName: "write",
+				paths: ["large.txt"],
+				timestamp: "2026-08-19T10:06:00.000Z",
+			}),
+			toolResult({
+				turnId: "gone",
+				parentTurnId: "large",
+				toolName: "write",
+				paths: ["gone.md"],
+				timestamp: "2026-08-19T10:07:00.000Z",
+			}),
+			toolResult({
+				turnId: "failed",
+				parentTurnId: "gone",
+				toolName: "write",
+				paths: ["failed.txt"],
+				isError: true,
+				timestamp: "2026-08-19T10:08:00.000Z",
+			}),
+			toolResult({
+				turnId: "blocked",
+				parentTurnId: "failed",
+				toolName: "edit",
+				paths: ["blocked.txt"],
+				outcome: "blocked",
+				timestamp: "2026-08-19T10:09:00.000Z",
+			}),
+			toolResult({
+				turnId: "escape",
+				parentTurnId: "blocked",
+				toolName: "write",
+				paths: ["../outside.txt"],
+				timestamp: "2026-08-19T10:10:00.000Z",
+			}),
+			message("assistant-terminal", "escape", "assistant", "done"),
+		];
+		let reads = 0;
+		const provider = new WorkspaceArtifactProvider({
+			stateDir,
+			sessionMeta: { ...sessionMeta(), cwd: workspace, pinnedLeafTurnId: "assistant-terminal" },
+			readSessionEntries: () => {
+				reads += 1;
+				return entries;
+			},
+		});
+		entries.push(
+			toolResult({
+				turnId: "late",
+				parentTurnId: "assistant-terminal",
+				toolName: "write",
+				paths: ["late.txt"],
+				timestamp: "2026-08-19T10:11:00.000Z",
+			}),
+		);
+
+		try {
+			const artifacts = await provider.list();
+			strictEqual(reads, 1, "workspace entries are captured exactly once when /view constructs its providers");
+			deepStrictEqual(
+				artifacts.map((artifact) => artifact.path),
+				[join(workspace, "gone.md"), largePath, notesPath, planPath, reportPath],
+			);
+			ok(!artifacts.some((artifact) => artifact.path?.includes("abandoned")), "the abandoned branch is excluded");
+			ok(!artifacts.some((artifact) => artifact.path?.includes("failed")), "error results are excluded");
+			ok(!artifacts.some((artifact) => artifact.path?.includes("blocked")), "blocked results are excluded");
+			ok(!artifacts.some((artifact) => artifact.path?.includes("outside")), "workspace escapes are excluded");
+			ok(!artifacts.some((artifact) => artifact.path?.includes("late")), "the opening snapshot never polls later entries");
+
+			const report = artifacts.find((artifact) => artifact.path === reportPath);
+			ok(report?.title.includes("report"), report?.title);
+			ok(report?.searchText?.includes("REPORT.md"));
+			ok(report?.searchText?.includes("artifact"));
+			ok(report?.searchText?.includes("report"));
+			strictEqual((await report?.load())?.format, "markdown");
+			ok((await report?.load())?.lines.includes("# Report"));
+
+			const plan = artifacts.find((artifact) => artifact.path === planPath);
+			strictEqual(plan?.toolName, "edit");
+			ok(plan?.searchText?.includes("1 overwrite"));
+			strictEqual((await plan?.load())?.format, "markdown");
+
+			const notes = artifacts.find((artifact) => artifact.path === notesPath);
+			strictEqual((await notes?.load())?.format, "text");
+
+			const gone = artifacts.find((artifact) => artifact.path === join(workspace, "gone.md"));
+			deepStrictEqual(await gone?.load(), {
+				lines: ["file no longer on disk (recorded at 2026-08-19T10:07:00.000Z)"],
+				format: "text",
+			});
+
+			const large = artifacts.find((artifact) => artifact.path === largePath);
+			const largeBody = await large?.load();
+			strictEqual(largeBody?.lines.length, VIEW_ARTIFACT_LINE_CAP + 1);
+			strictEqual(largeBody?.lines.at(-1), `[truncated, open file directly: ${largePath}]`);
+		} finally {
+			await rm(stateDir, { recursive: true, force: true });
+			await rm(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("rechecks canonical containment after file and directory symlink swaps", async () => {
+		const stateDir = await scratchDir();
+		const workspace = await scratchDir();
+		const outside = await scratchDir();
+		const directPath = join(workspace, "direct.txt");
+		const nestedPath = join(workspace, "reports", "nested.txt");
+		const outsideDirectPath = join(outside, "direct.txt");
+		const outsideNestedPath = join(outside, "nested.txt");
+		await mkdir(join(workspace, "reports"), { recursive: true });
+		await writeFile(directPath, "inside direct\n");
+		await writeFile(nestedPath, "inside nested\n");
+		await writeFile(outsideDirectPath, "outside direct secret\n");
+		await writeFile(outsideNestedPath, "outside nested secret\n");
+
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				turnId: "direct-write",
+				parentTurnId: null,
+				timestamp: "2026-08-19T11:00:00.000Z",
+				role: "tool_result",
+				payload: {
+					toolName: "write",
+					result: { content: [{ type: "text", text: "ok" }], details: { paths: ["direct.txt"] } },
+				},
+			},
+			{
+				kind: "message",
+				turnId: "nested-write",
+				parentTurnId: "direct-write",
+				timestamp: "2026-08-19T11:01:00.000Z",
+				role: "tool_result",
+				payload: {
+					toolName: "write",
+					result: { content: [{ type: "text", text: "ok" }], details: { paths: ["reports/nested.txt"] } },
+				},
+			},
+		];
+		const provider = new WorkspaceArtifactProvider({
+			stateDir,
+			sessionMeta: { ...sessionMeta(), cwd: workspace },
+			readSessionEntries: () => entries,
+		});
+
+		try {
+			const artifacts = await provider.list();
+			const direct = artifacts.find((artifact) => artifact.path === directPath);
+			const nested = artifacts.find((artifact) => artifact.path === nestedPath);
+			ok(direct);
+			ok(nested);
+
+			await rm(directPath);
+			await symlink(outsideDirectPath, directPath);
+			await rm(join(workspace, "reports"), { recursive: true });
+			await symlink(outside, join(workspace, "reports"), "dir");
+
+			deepStrictEqual(await direct.load(), {
+				lines: [`refusing to read ${directPath}: canonical target is outside the recorded workspace`],
+				format: "text",
+			});
+			deepStrictEqual(await nested.load(), {
+				lines: [`refusing to read ${nestedPath}: canonical target is outside the recorded workspace`],
+				format: "text",
+			});
+
+			await rm(directPath);
+			deepStrictEqual(await direct.load(), {
+				lines: ["file no longer on disk (recorded at 2026-08-19T11:00:00.000Z)"],
+				format: "text",
+			});
+		} finally {
+			await rm(stateDir, { recursive: true, force: true });
+			await rm(workspace, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("re-resolves a symlinked workspace root for every artifact load", async () => {
+		const stateDir = await scratchDir();
+		const root = await scratchDir();
+		const originalWorkspace = join(root, "workspace-original");
+		const replacementWorkspace = join(root, "workspace-replacement");
+		const workspaceLink = join(root, "workspace-current");
+		await mkdir(originalWorkspace);
+		await mkdir(replacementWorkspace);
+		await writeFile(join(originalWorkspace, "report.txt"), "original workspace\n");
+		await writeFile(join(replacementWorkspace, "report.txt"), "replacement workspace\n");
+		await symlink(originalWorkspace, workspaceLink, "dir");
+
+		const entry: SessionEntry = {
+			kind: "message",
+			turnId: "report-write",
+			parentTurnId: null,
+			timestamp: "2026-08-19T12:00:00.000Z",
+			role: "tool_result",
+			payload: {
+				toolName: "write",
+				result: { content: [{ type: "text", text: "ok" }], details: { paths: ["report.txt"] } },
+			},
+		};
+		const provider = new WorkspaceArtifactProvider({
+			stateDir,
+			sessionMeta: { ...sessionMeta(), cwd: workspaceLink },
+			readSessionEntries: () => [entry],
+		});
+
+		try {
+			const [artifact] = await provider.list();
+			ok(artifact);
+			await rm(workspaceLink);
+			await symlink(replacementWorkspace, workspaceLink, "dir");
+
+			deepStrictEqual(await artifact.load(), {
+				lines: ["replacement workspace"],
+				format: "text",
+			});
+		} finally {
+			await rm(stateDir, { recursive: true, force: true });
+			await rm(root, { recursive: true, force: true });
+		}
 	});
 
 	it("lists receipt artifacts without loading and verifies plus pretty-prints JSON", async () => {
@@ -676,9 +1002,17 @@ describe("contracts/view-artifacts", () => {
 				turnId: "ledger-1",
 				parentTurnId: null,
 				timestamp: "2026-06-11T12:05:00.000Z",
+				boardId: "board-release-1",
 				goals: [{ id: "G1", title: "Ship proof catalog", status: "active" }],
 				subgoals: [
-					{ id: "T1", title: "Add evidence provider", status: "completed", parentGoalId: "G1" },
+					{
+						id: "T1",
+						title: "Add evidence provider",
+						status: "completed",
+						parentGoalId: "G1",
+						origin: "user",
+						userTaskId: "u7",
+					},
 					{ id: "T2", title: "Add audit provider", status: "active", parentGoalId: "G1" },
 				],
 				activeRunIds: ["run-view-1"],
@@ -709,13 +1043,19 @@ describe("contracts/view-artifacts", () => {
 		ok(artifacts[0]?.title.includes("1/3 done"));
 		ok(artifacts[0]?.searchText?.includes("run-view-1"));
 		ok(artifacts[0]?.searchText?.includes("G1"));
+		ok(artifacts[0]?.searchText?.includes("board-release-1"));
+		ok(artifacts[0]?.searchText?.includes("user"));
+		ok(artifacts[0]?.searchText?.includes("u7"));
 		ok(artifacts[0]?.path?.endsWith("current.jsonl"));
 
 		const loaded = await artifacts[0]?.load();
 		const text = loaded?.lines.join("\n") ?? "";
 		strictEqual(loaded?.format, "markdown");
 		ok(text.includes("## Board Goals"), text);
+		ok(text.includes("- board id: board-release-1"), text);
 		ok(text.includes("- [active] G1 Ship proof catalog"), text);
+		ok(text.includes("- origin: user"), text);
+		ok(text.includes("- operator task: u7"), text);
 		ok(text.includes("- run-view-1"), text);
 		ok(text.includes("npm test -- tests/contracts/view-artifacts.test.ts"), text);
 		ok(text.includes("- observed: 2026-06-11T12:06:00.000Z"), text);

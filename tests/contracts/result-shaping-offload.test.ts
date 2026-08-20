@@ -27,18 +27,6 @@ const savedEnv = {
 	CLIO_CODER_CACHE_DIR: process.env.CLIO_CODER_CACHE_DIR,
 };
 
-afterEach(() => {
-	for (const root of roots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-	restoreEnv("CLIO_CODER_HOME", savedEnv.CLIO_CODER_HOME);
-	restoreEnv("CLIO_CODER_DATA_DIR", savedEnv.CLIO_CODER_DATA_DIR);
-	restoreEnv("CLIO_CODER_CONFIG_DIR", savedEnv.CLIO_CODER_CONFIG_DIR);
-	restoreEnv("CLIO_CODER_STATE_DIR", savedEnv.CLIO_CODER_STATE_DIR);
-	restoreEnv("CLIO_CODER_CACHE_DIR", savedEnv.CLIO_CODER_CACHE_DIR);
-	resetXdgCache();
-});
-
 function restoreEnv(key: keyof typeof savedEnv, value: string | undefined): void {
 	if (value === undefined) delete process.env[key];
 	else process.env[key] = value;
@@ -97,6 +85,22 @@ function offloadPath(result: ToolResult): string {
 }
 
 describe("contracts/result-shaping offload", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of roots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+		restoreEnv("CLIO_CODER_HOME", savedEnv.CLIO_CODER_HOME);
+		restoreEnv("CLIO_CODER_DATA_DIR", savedEnv.CLIO_CODER_DATA_DIR);
+		restoreEnv("CLIO_CODER_CONFIG_DIR", savedEnv.CLIO_CODER_CONFIG_DIR);
+		restoreEnv("CLIO_CODER_STATE_DIR", savedEnv.CLIO_CODER_STATE_DIR);
+		restoreEnv("CLIO_CODER_CACHE_DIR", savedEnv.CLIO_CODER_CACHE_DIR);
+		resetXdgCache();
+	});
+
 	it("passes under-cap results through untouched with no scratch file", () => {
 		const stateDir = useStateDir();
 		const original: ToolResult = { kind: "ok", output: "short output" };

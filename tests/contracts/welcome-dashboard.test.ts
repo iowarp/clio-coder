@@ -116,12 +116,6 @@ const mockObservability = {
 
 const scratchRoots: string[] = [];
 
-afterEach(() => {
-	for (const root of scratchRoots.splice(0)) {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 function scratchDashboardProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-welcome-dashboard-"));
 	scratchRoots.push(root);
@@ -162,6 +156,16 @@ function dashboardStatsFor(cwd: string) {
 }
 
 describe("welcome-dashboard and footer integration tests", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of scratchRoots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("derives stats correctly from providers and settings", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
@@ -186,10 +190,12 @@ describe("welcome-dashboard and footer integration tests", () => {
 	});
 
 	it("renders the adaptive launchpad with only WORKSPACE, ROUTE, and NEXT decision rows", () => {
+		const cwd = scratchDashboardProject();
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
 		});
 
 		const lines = buildWelcomeDashboardLines(stats, 100);
@@ -245,12 +251,14 @@ describe("welcome-dashboard and footer integration tests", () => {
 	});
 
 	it("chooses one honest NEXT action from repository readiness", () => {
+		const cwd = scratchDashboardProject();
 		const missing = deriveWelcomeDashboardStats({
 			providers: mockProviders,
 			observability: mockObservability,
 			getSettings: () => mockSettings,
+			getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
 			readRepositoryFacts: () => {
-				const { pending: _pending, ...facts } = placeholderRepositoryFacts(process.cwd());
+				const { pending: _pending, ...facts } = placeholderRepositoryFacts(cwd);
 				return facts;
 			},
 		});

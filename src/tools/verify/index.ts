@@ -1,8 +1,8 @@
 import { Type } from "typebox";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { StringEnum } from "../../engine/ai.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
-import { stringEnum } from "../string-enum.js";
 import { BROWSER_MODES, runFrontendCheck } from "./frontend.js";
 import { listChecks, runScriptCheck, VERIFICATION_SCRIPT_FAMILY_HINT } from "./scripts.js";
 
@@ -40,7 +40,9 @@ export const verifyTool: ToolSpec = {
 		),
 		path: Type.Optional(Type.String({ description: "check=frontend: artifact file under the workspace root." })),
 		args: Type.Optional(Type.Array(Type.String(), { description: "Extra arguments passed after --." })),
-		browser: Type.Optional(stringEnum(BROWSER_MODES, "check=frontend: headless browser mode (default auto).")),
+		browser: Type.Optional(
+			StringEnum(BROWSER_MODES, { description: "check=frontend: headless browser mode (default auto)." }),
+		),
 		cwd: Type.Optional(Type.String({ description: "Working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
 		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes (default 600000)." })),

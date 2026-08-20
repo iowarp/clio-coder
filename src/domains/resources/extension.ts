@@ -10,6 +10,7 @@ export function createResourcesBundle(
 	const config = (): ConfigContract | undefined => context.getContract<ConfigContract>("config");
 	const loader = createResourcesLoader({
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+		...(options.reservedPromptNames !== undefined ? { reservedPromptNames: options.reservedPromptNames } : {}),
 		skills: () => ({
 			...skillOptions(config()?.get().skills.trustProjectCompatRoots === true, options),
 		}),
@@ -34,9 +35,6 @@ export function createResourcesBundle(
 		},
 		expandPromptTemplate(text, cwd) {
 			return loader.expandPromptTemplate(text, cwd);
-		},
-		themes() {
-			return loader.themes();
 		},
 		resolvePath(value, cwd) {
 			return loader.resolvePath(value, cwd);

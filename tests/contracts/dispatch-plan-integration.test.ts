@@ -70,8 +70,8 @@ function baseSettings(): typeof DEFAULT_SETTINGS {
 }
 
 describe("resolved dispatch plan admission", () => {
-	beforeEach(() => {
-		isolateDispatchState();
+	beforeEach(async () => {
+		await isolateDispatchState();
 	});
 	afterEach(() => {
 		restoreDispatchState();

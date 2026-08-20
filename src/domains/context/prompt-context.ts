@@ -1,9 +1,9 @@
 import { detectProjectType } from "../session/workspace/project-type.js";
 import {
+	loadProjectClioMd,
 	type ParsedClioMd,
 	renderProjectContextFragment,
 	renderProjectTypeFragment,
-	tryReadClioMd,
 } from "./clio-md.js";
 import { readCodewiki } from "./codewiki/indexer.js";
 import type { ProjectPromptContext } from "./contract.js";
@@ -14,7 +14,7 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
 
 /**
  * Render the project prompt context for `cwd`: the project-type marker, the
- * CLIO-CODER.md fragment when a parseable handbook exists, the codewiki availability
+ * effective CLIO-CODER.md fragments when parseable handbooks exist, the codewiki availability
  * marker, and the Markdown wiki marker when a valid wiki exists. Shared by the
  * prompts extension (session compile),
  * context-init preload reporting, and `clio-coder config inspect`, so every surface
@@ -24,13 +24,12 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const projectType = detectProjectType(cwd);
 	const pieces = [renderProjectTypeFragment(projectType)];
 	const warnings: string[] = [];
-	const clio = tryReadClioMd(cwd);
-	let clioMd: ParsedClioMd | null = null;
-	if (clio?.ok) {
-		clioMd = clio.value;
-		pieces.push(renderProjectContextFragment(clio.value));
+	const loadedClioMd = loadProjectClioMd(cwd);
+	const clioMd: ParsedClioMd | null = loadedClioMd.value;
+	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.value, file.path));
+	for (const issue of loadedClioMd.errors) {
+		warnings.push(`clio: malformed ${issue.path} ignored: ${issue.error}`);
 	}
-	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO-CODER.md ignored: ${clio.error}`);
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
 		const state = readClioState(cwd);

@@ -85,9 +85,9 @@ describe("contracts/help-reference", () => {
 		ok(exitRow.label.includes("Ctrl+D") || exitRow.label.includes("ctrl+d"));
 		ok(exitRow.label.includes("Exit the TUI"));
 
-		// 4. Topics group carries the autonomy and fleet-control concept entries.
+		// 4. Topics group carries the autonomy, steering-mode, and fleet-control concept entries.
 		const topicsItems = items.filter((item) => item.group === "Topics");
-		strictEqual(topicsItems.length, 2);
+		strictEqual(topicsItems.length, 3);
 		const fleetTopic = topicsItems.find((item) => item.id === "topic-fleet-runs");
 		ok(fleetTopic);
 		ok(fleetTopic.label.includes("fleet runs & steering"));

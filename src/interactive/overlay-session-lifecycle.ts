@@ -12,6 +12,7 @@ import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { lastTurnSummaryFromLedger } from "./session-last-turn.js";
+import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { reseedSessionUsageFromLedger, type SessionUsageSink } from "./session-usage-reseed.js";
 import type { SlashCommandContext } from "./slash-commands.js";
 import type { TurnSummary } from "./status/index.js";
@@ -20,7 +21,7 @@ export interface OverlaySessionLifecycleDeps {
 	tui: TUI;
 	transitions: OverlayTransitions;
 	session?: SessionContract;
-	chat: Pick<ChatLoop, "resetForSession">;
+	chat: Pick<ChatLoop, "cancel" | "isStreaming" | "resetForSession" | "whenSettled">;
 	chatPanel: ChatPanel;
 	/** The one transcript reset: the panel plus every view folded alongside it. */
 	resetTranscript(): void;
@@ -113,20 +114,58 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.state = "resume";
 		deps.transitions.handle = openResumeOverlay(deps.tui, {
 			session,
-			onResume: (sessionId) => {
+			onResume: async (sessionId) => {
+				const settlement = settleChatBeforeSessionSwitch(deps.chat);
+				if (settlement) await settlement;
 				deps.onResumeSession?.(sessionId);
+				// onResumeSession (wired to session.resume) catches and stderr-logs
+				// its own failure rather than throwing here, so this is the only
+				// signal available: a successful switch always leaves session.current()
+				// pointing at the requested id. Without this check, a failed switch
+				// still replayed the target's transcript and moved the chat leaf to
+				// it while session.current() stayed on the session the operator
+				// started on (issue #93), so the next message was appended with a
+				// parent turn from a session that was never actually opened.
+				if (session.current()?.id !== sessionId) {
+					emitCommandNotice(
+						deps.getSlashNotice(),
+						"error",
+						"resume",
+						`could not switch to that session; staying on ${preResumeSessionId ?? "no session"}`,
+					);
+					deps.refreshFooter();
+					deps.requestRender();
+					return;
+				}
 				try {
 					const turns = deps.readStructuredEntries(sessionId);
-					deps.resetTranscript();
-					rehydrateChatPanelFromTurns(deps.chatPanel, turns);
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
+					// The leaf is read before the transcript is rebuilt because it is
+					// what the rebuild has to follow. resolveLeafOnOpen prefers a
+					// persisted `/tree` pin over the newest turn, so a session resumed
+					// on a pin extends from the pinned turn while the file still holds
+					// the abandoned branch after it. Replaying the file unfiltered
+					// rendered those abandoned turns as ordinary history above the
+					// prompt, disagreeing with the branch the next message parents onto
+					// and with the tip `/tree` marks (issue #107). The `/tree` switch
+					// path below has always scoped its replay to the selected turn;
+					// this is the same active-path filter, rooted at the leaf resume
+					// actually landed on.
 					const leafTurnId = session.tree(sessionId).leafId;
+					// activeLeafTurnId, not uptoTurnId: this is a live branch about to
+					// be extended, so sidecars anchored to a path turn but written
+					// after it (a compaction summary covering the leaf, above all)
+					// still belong on screen. uptoTurnId is the historical-truncation
+					// variant `/tree` uses.
+					const replayOptions = leafTurnId ? { activeLeafTurnId: leafTurnId } : {};
+					deps.resetTranscript();
+					rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns, replayOptions);
 					deps.chat.resetForSession(leafTurnId, replayMessages);
 					rescopeToBranch(session, turns, leafTurnId);
 				} catch (error) {
 					deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}
-				if (session.current()?.id === sessionId && sessionId !== preResumeSessionId) {
+				if (sessionId !== preResumeSessionId) {
 					deps.announceTaskMemorySeedOffer();
 				}
 				deps.refreshFooter();
@@ -160,7 +199,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.state = "tree";
 		deps.transitions.handle = openTreeSelector(deps.tui, {
 			session,
-			onSwitchTurn: (turnId) => {
+			onSwitchTurn: async (turnId) => {
+				const settlement = settleChatBeforeSessionSwitch(deps.chat);
+				if (settlement) await settlement;
 				try {
 					session.switchTurn(turnId);
 					const sessionId = session.current()?.id ?? null;
@@ -195,7 +236,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			return;
 		}
 		const session = deps.session;
-		if (session.current() === null) {
+		const preForkSessionId = session.current()?.id ?? null;
+		if (preForkSessionId === null) {
 			emitCommandNotice(
 				deps.getSlashNotice(),
 				"warn",
@@ -207,14 +249,29 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.state = "message-picker";
 		deps.transitions.handle = openMessagePicker(deps.tui, {
 			session,
-			onFork: (parentTurnId) => {
+			onFork: async (parentTurnId) => {
+				const settlement = settleChatBeforeSessionSwitch(deps.chat);
+				if (settlement) await settlement;
 				try {
 					if (deps.onForkSession) deps.onForkSession(parentTurnId);
 					else session.fork(parentTurnId);
-					deps.resetTranscript();
 					const forkedSessionId = session.current()?.id ?? null;
-					if (forkedSessionId) replayFork(forkedSessionId, parentTurnId, session);
-					else deps.chat.resetForSession(null);
+					// A successful fork always creates a fresh session id; landing back
+					// on the id fork started from means the fork threw and
+					// onForkSession swallowed it (orchestrator.ts stderr-logs there).
+					// Do not replay: session.current() did not move (issue #93's
+					// extension.ts/fork.ts ordering fix keeps it on the session the
+					// operator started on instead of orphaning it), so there is
+					// nothing new to replay and doing so anyway just re-renders the
+					// same transcript while hiding that the fork failed.
+					if (forkedSessionId === null || forkedSessionId === preForkSessionId) {
+						emitCommandNotice(deps.getSlashNotice(), "error", "fork", `fork failed; staying on ${preForkSessionId}`);
+						deps.refreshFooter();
+						deps.requestRender();
+						return;
+					}
+					deps.resetTranscript();
+					replayFork(forkedSessionId, parentTurnId, session);
 				} catch (error) {
 					deps.stderr(`[/fork] fork failed: ${error instanceof Error ? error.message : String(error)}\n`);
 				}

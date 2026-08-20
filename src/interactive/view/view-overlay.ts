@@ -109,6 +109,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 			return "Dispatch outputs";
 		case "task-ledger":
 			return "Task ledgers";
+		case "workspace":
+			return "Workspace outputs";
 		case "tool-output":
 			return "Tool outputs";
 		case "protected-artifact":
@@ -125,6 +127,7 @@ function categoryLabel(category: ViewArtifactCategory): string {
 const VIEW_ARTIFACT_CATEGORY_SET = new Set<ViewArtifactCategory>(VIEW_ARTIFACT_CATEGORIES);
 const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
 	"task-ledger",
+	"workspace",
 	"protected-artifact",
 	"compaction",
 	"prompt-manifest",

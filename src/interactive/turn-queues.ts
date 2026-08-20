@@ -10,7 +10,19 @@
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatTurnState } from "./turn-state.js";
 
+/** Which engine queue a queued message rides: the steering queue or the follow-up queue. */
 export type QueuedMessageKind = "steer" | "follow-up";
+
+/**
+ * Operator-chosen delivery point for a message submitted while a run is
+ * active. `next-slot` rides the steering queue and lands between tool batches,
+ * mid-run. `end-of-turn` rides the follow-up queue and lands when the whole run
+ * settles and the agent would hand control back. `interrupt` cancels the
+ * in-flight work and delivers now; it never enters a queue.
+ */
+export type SteeringMode = "interrupt" | "next-slot" | "end-of-turn";
+
+export const DEFAULT_STEERING_MODE: SteeringMode = "next-slot";
 
 export interface QueuedChatMessage {
 	text: string;

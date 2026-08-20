@@ -3,10 +3,10 @@ import path from "node:path";
 import { Type } from "typebox";
 import { artifactDefaultPath, CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
 import { ToolNames } from "../core/tool-names.js";
+import { StringEnum } from "../engine/ai.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
 
 /**
  * The artifact tool: terminal document writers. kind=plan|review|report writes
@@ -85,7 +85,7 @@ export function createArtifactTool(deps: ArtifactToolDeps = {}): ToolSpec {
 		name: ToolNames.Artifact,
 		description: `Write a named artifact: kind=plan|review|report writes a terminal Markdown document and completes the turn. Without an explicit path it lands in ${CLIO_ARTIFACT_DIR}/ (PLAN.md, REVIEW.md, REPORT.md); pass path only when the user asked for a file at a specific place.`,
 		parameters: Type.Object({
-			kind: stringEnum(ARTIFACT_KINDS, "Artifact kind."),
+			kind: StringEnum(ARTIFACT_KINDS, { description: "Artifact kind." }),
 			content: Type.String({ description: "Full Markdown body." }),
 			title: Type.Optional(Type.String({ description: "Document title." })),
 			path: Type.Optional(Type.String({ description: "Override the default artifact path." })),

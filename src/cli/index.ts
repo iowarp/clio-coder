@@ -5,6 +5,13 @@
 // a crashed boot are both legible to `ps`, `pgrep -f`, and htop.
 process.title = "clio-coder";
 
+import { AI_AGENT_NAME } from "../core/agent-environment.js";
+
+// Pi and other agent-aware developer tools use this generic marker to
+// attribute subprocess activity without knowing Clio-specific variables.
+// Set it unconditionally so every child inherits the actual spawning agent.
+process.env.AI_AGENT = AI_AGENT_NAME;
+
 // Only argument parsing and boot tracing load statically. Every subcommand is
 // imported dynamically through the command registry (see `dispatch`), so a bare `clio`
 // (interactive) or `clio-coder --version` pays for its own module graph and nothing
@@ -295,7 +302,12 @@ async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliB
 		}
 	}
 	printError(`unknown subcommand: ${subcommand}`);
-	process.stdout.write(helpText(false));
+	// The usage that explains a rejection belongs with the rejection on stderr.
+	// Writing it to stdout meant a mistyped command still produced a full page on
+	// the stream the caller was capturing for output, next to an error on the one
+	// it was probably not reading. `clio-coder --help` is the request for this
+	// text, and it still answers on stdout with exit 0.
+	process.stderr.write(helpText(false));
 	return 2;
 }
 

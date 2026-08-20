@@ -12,12 +12,13 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
 import { clioDataDir } from "../core/xdg.js";
 import {
 	loadOperatorProfile,
+	loadProjectClioMd,
 	loadProjectRules,
 	renderOperatorProfile,
 	renderPromptContext,
@@ -51,7 +52,7 @@ export interface CustomizationEntry {
 	sourcePath?: string;
 	hash?: string;
 	trust?: "trusted" | "untrusted" | "n/a";
-	precedence?: "winner" | "loser" | "single";
+	precedence?: "winner" | "loser" | "single" | "layer";
 	reloadClass: ReloadClass;
 	/** Token cost where the item enters the prompt; absent when it does not. */
 	contextCostTokens?: number;
@@ -105,29 +106,34 @@ function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 }
 
 function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
-	const path = join(cwd, "CLIO-CODER.md");
-	if (!existsSync(path)) return;
+	const loaded = loadProjectClioMd(cwd);
+	for (const issue of loaded.errors) graph.issues.push(`clio-md ${issue.path}: ${issue.error}`);
+	if (loaded.files.length === 0) return;
 	try {
-		const text = readFileSync(path, "utf8");
 		const promptContext = renderPromptContext(cwd);
 		const preload = classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
-		graph.entries.push({
-			category: "clio-md",
-			id: "CLIO-CODER.md",
-			scope: "project",
-			sourcePath: path,
-			hash: shortHash(text),
-			trust: "trusted",
-			precedence: "single",
-			reloadClass: "next-turn",
-			contextCostTokens: ceilChars(text.length),
-			detail: {
-				preload: preload.label,
-				preloadChars: preload.chars,
-				preloadLines: preload.lines,
-				...(preload.nearLimit ? { preloadNearLimit: true } : {}),
-			},
-		});
+		for (const [index, file] of loaded.files.entries()) {
+			const text = readFileSync(file.path, "utf8");
+			graph.entries.push({
+				category: "clio-md",
+				id: basename(file.path),
+				scope: "project",
+				sourcePath: file.path,
+				hash: shortHash(text),
+				trust: "trusted",
+				precedence: loaded.files.length === 1 ? "single" : "layer",
+				reloadClass: "next-turn",
+				contextCostTokens: ceilChars(text.length),
+				detail: {
+					layer: index + 1,
+					layers: loaded.files.length,
+					preload: preload.label,
+					preloadChars: preload.chars,
+					preloadLines: preload.lines,
+					...(preload.nearLimit ? { preloadNearLimit: true } : {}),
+				},
+			});
+		}
 	} catch (err) {
 		graph.issues.push(`clio-md: ${err instanceof Error ? err.message : String(err)}`);
 	}

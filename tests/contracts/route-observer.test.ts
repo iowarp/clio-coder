@@ -11,10 +11,6 @@ import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/ty
 
 const roots: string[] = [];
 
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function candidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 	return {
 		agentId: "coder",
@@ -105,6 +101,14 @@ function receiptDraft(run: RunEnvelope): RunReceiptDraft {
 }
 
 describe("route observer durable history", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("restart preserves route history and decision replay", () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-history-"));
 		roots.push(stateDir);

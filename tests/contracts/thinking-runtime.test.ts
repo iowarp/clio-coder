@@ -1,12 +1,13 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import {
 	applyThinkingMechanism,
 	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilities,
 	resolveModelRuntimeCapabilitiesForModel,
 } from "../../src/domains/providers/model-runtime-capabilities.js";
-import type { CapabilityFlags } from "../../src/domains/providers/types/capability-flags.js";
+import type { CapabilityFlags, ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
 import { availableThinkingLevels, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { createEngineAi } from "../../src/engine/ai.js";
@@ -76,37 +77,57 @@ describe("contracts/thinking-runtime", () => {
 		strictEqual(resolved.request.reasoningEffort, "high");
 	});
 
-	it("patches Anthropic adaptive payloads with the resolved effort field", () => {
+	/**
+	 * pi-ai's streamSimple owns Anthropic thinking assembly: adaptive effort
+	 * comes from model.thinkingLevelMap and compat.forceAdaptiveThinking,
+	 * budget models get a bounded budget_tokens. Clio no longer rewrites that
+	 * payload, so the agent's thinking level reaches the wire exactly as pi
+	 * maps it.
+	 */
+	async function anthropicWirePayload(modelId: string, reasoning: ThinkingLevel): Promise<Record<string, unknown>> {
+		const model = engineAi.getModel("anthropic", modelId);
+		ok(model, `pi-ai catalog should include ${modelId}`);
+		let captured: Record<string, unknown> | undefined;
+		const events = streamSimple(
+			model,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				apiKey: "sk-ant-test",
+				...(reasoning === "off" ? {} : { reasoning }),
+				onPayload: (payload) => {
+					captured = payload as Record<string, unknown>;
+					return undefined;
+				},
+				fetch: async () => new Response("", { status: 500 }),
+			},
+		);
+		for await (const _event of events) {
+			// Drain; the stubbed fetch fails the request after onPayload ran.
+		}
+		ok(captured, "pi must build the Anthropic payload before the request");
+		return captured;
+	}
+
+	it("leaves pi's adaptive Anthropic payload untouched and pi sends the mapped effort", async () => {
+		const payload = await anthropicWirePayload("claude-opus-4-7", "xhigh");
+		deepStrictEqual(payload.thinking, { type: "adaptive", display: "summarized" });
+		deepStrictEqual(payload.output_config, { effort: "xhigh" });
 		const opus = engineAi.getModel("anthropic", "claude-opus-4-7");
-		ok(opus, "pi-ai catalog should include claude-opus-4-7");
-		const payload = {
-			model: opus.id,
-			messages: [],
-			max_tokens: 128000,
-			stream: true,
-			thinking: { type: "adaptive", display: "summarized" },
-		};
-
-		const patched = patchProviderThinkingPayload(payload, opus, "xhigh") as Record<string, unknown>;
-
-		deepStrictEqual(patched.thinking, { type: "adaptive", display: "summarized" });
-		deepStrictEqual(patched.output_config, { effort: "xhigh" });
+		ok(opus);
+		strictEqual(patchProviderThinkingPayload(payload, opus, "xhigh"), undefined);
 	});
 
-	it("patches Anthropic budget payloads with bounded token budgets", () => {
+	it("leaves pi's budget Anthropic payload untouched and pi bounds budget_tokens", async () => {
+		const payload = await anthropicWirePayload("claude-sonnet-4-5-20250929", "high");
+		deepStrictEqual(payload.thinking, { type: "enabled", budget_tokens: 16384, display: "summarized" });
 		const sonnet = engineAi.getModel("anthropic", "claude-sonnet-4-5-20250929");
-		ok(sonnet, "pi-ai catalog should include claude-sonnet-4-5-20250929");
-		const payload = {
-			model: sonnet.id,
-			messages: [],
-			max_tokens: 8192,
-			stream: true,
-			thinking: { type: "enabled", budget_tokens: 1024, display: "summarized" },
-		};
+		ok(sonnet);
+		strictEqual(patchProviderThinkingPayload(payload, sonnet, "high"), undefined);
+	});
 
-		const patched = patchProviderThinkingPayload(payload, sonnet, "high") as Record<string, unknown>;
-
-		deepStrictEqual(patched.thinking, { type: "enabled", budget_tokens: 7168, display: "summarized" });
+	it("disables Anthropic thinking when the level is off", async () => {
+		const payload = await anthropicWirePayload("claude-sonnet-4-5-20250929", "off");
+		deepStrictEqual(payload.thinking, { type: "disabled" });
 	});
 });
 
@@ -139,7 +160,7 @@ describe("contracts/tool-choice lockout payload patch", () => {
 		const openai = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
 		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, openai, "dispatch"), {
 			tools: [dispatchFunction],
-			tool_choice: { type: "function", function: { name: "dispatch" } },
+			tool_choice: "required",
 		});
 		const responses = { api: "openai-responses" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
 		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, responses, "dispatch"), {
@@ -193,6 +214,25 @@ describe("contracts/tool-choice lockout payload patch", () => {
 			tools: [dispatchFunction],
 			toolChoice: { type: "function", function: { name: "dispatch" } },
 		});
+	});
+
+	it("never sends an object tool_choice on a generic openai-compatible payload", () => {
+		// LM Studio and llama.cpp both answer HTTP 400 to the object form, so the
+		// string spelling is the contract for every api family that lands on the
+		// generic branch, not just openai-completions.
+		const dispatchFunction = { type: "function", function: { name: "dispatch" } };
+		const readFunction = { type: "function", function: { name: "read" } };
+		for (const api of ["openai-completions", "ollama-native"] as const) {
+			const model = { api } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+			const patched = patchToolChoiceNamedPayload(
+				{ model: "qwen3.8-27b", tools: [readFunction, dispatchFunction] },
+				model,
+				"dispatch",
+			) as Record<string, unknown>;
+			strictEqual(patched.tool_choice, "required", `${api} must use the string tool_choice`);
+			strictEqual(typeof patched.tool_choice, "string", `${api} must not send an object tool_choice`);
+			deepStrictEqual(patched.tools, [dispatchFunction], `${api} narrows tools to the forced tool`);
+		}
 	});
 });
 
@@ -377,13 +417,55 @@ describe("contracts/thinking-runtime local reasoning classes", () => {
 		strictEqual(high.thinkingActive, true);
 	});
 
-	it("still sends nothing for off when a family maps no off-effort", () => {
+	it("resolves the strict Qwen3.8 effort vocabulary for every Clio thinking level", () => {
+		const quirks: LocalModelQuirks = {
+			thinking: {
+				mechanism: "effort-levels",
+				effortByLevel: { low: "low", medium: "medium", high: "xhigh", xhigh: "xhigh" },
+			},
+		};
+		const cases: ReadonlyArray<{
+			configured: ThinkingLevel;
+			effective: ThinkingLevel;
+			effort?: "low" | "medium" | "xhigh";
+		}> = [
+			{ configured: "off", effective: "off" },
+			{ configured: "minimal", effective: "low", effort: "low" },
+			{ configured: "low", effective: "low", effort: "low" },
+			{ configured: "medium", effective: "medium", effort: "medium" },
+			{ configured: "high", effective: "high", effort: "xhigh" },
+			{ configured: "xhigh", effective: "xhigh", effort: "xhigh" },
+			{ configured: "max", effective: "xhigh", effort: "xhigh" },
+		];
+
+		for (const expected of cases) {
+			const resolved = resolveModelRuntimeCapabilities({
+				runtimeId: "llamacpp",
+				apiFamily: "openai-completions",
+				modelId: "Qwen3.8-27B",
+				capabilities: qwenCaps,
+				quirks,
+				configuredThinkingLevel: expected.configured,
+			});
+
+			deepStrictEqual(resolved.thinking.supportedLevels, ["off", "low", "medium", "high", "xhigh"]);
+			strictEqual(resolved.thinking.effectiveLevel, expected.effective, `${expected.configured} effective level`);
+			strictEqual(resolved.request.reasoningEffort, expected.effort, `${expected.configured} wire effort`);
+			deepStrictEqual(
+				resolved.request.chatTemplateKwargs,
+				expected.configured === "off" ? { enable_thinking: false } : undefined,
+				`${expected.configured} template toggle`,
+			);
+		}
+	});
+
+	it("keeps the applied effort empty for off when a family maps no off-effort", () => {
 		const quirks: LocalModelQuirks = {
 			thinking: { mechanism: "effort-levels", effortByLevel: { low: "low", high: "high" } },
 		};
 
 		const off = applyThinkingMechanism(quirks, "off", qwenCaps);
-		strictEqual(off.effort, undefined, "a family that reasons only on request keeps the send-nothing behaviour");
+		strictEqual(off.effort, undefined, "off uses the template toggle instead of an invalid effort string");
 		strictEqual(off.thinkingActive, false);
 	});
 });

@@ -73,10 +73,10 @@ function seedHomeFrom030(dir: string): void {
 }
 
 describe("contracts/upgrade path from 0.3.0", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-upgrade-path-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-upgrade-path-");
 		seedHomeFrom030(scratch.dir);
 	});
 
@@ -126,9 +126,9 @@ describe("contracts/upgrade path from 0.3.0", () => {
 		strictEqual(takeUpgradeNotice(), null);
 	});
 
-	it("a fresh install has no notice", () => {
+	it("a fresh install has no notice", async () => {
 		scratch.restore();
-		scratch = isolateClioEnv("clio-upgrade-path-fresh-");
+		scratch = await isolateClioEnv("clio-upgrade-path-fresh-");
 		initializeClioHome();
 		strictEqual(readStateInfo()?.upgradedFrom, undefined);
 		strictEqual(takeUpgradeNotice(), null);
@@ -151,20 +151,21 @@ describe("contracts/upgrade path from 0.3.0", () => {
 		});
 		strictEqual(result.code, 0, result.stderr);
 		ok(result.stdout.includes(`would refresh state metadata ${OLD_VERSION} -> ${readClioVersion()}`), result.stdout);
-		ok(result.stdout.includes("no migrations registered"), result.stdout);
+		ok(result.stdout.includes("would consider 1 migration(s)"), result.stdout);
+		ok(result.stdout.includes("2026-08-18-lmstudio-runtime-id"), result.stdout);
 		strictEqual(readStateInfo()?.version, OLD_VERSION, "a dry run leaves the record alone");
 		ok(!existsSync(join(scratch.dir, "state", "migrations.json")), "and writes no manifest");
 	});
 
-	it("`upgrade` without a network refreshes the record, writes the empty manifest, and reports the real transition", async () => {
+	it("`upgrade` without a network refreshes the record, records the migration, and reports the real transition", async () => {
 		const result = await runCli(["upgrade"], {
 			env: { ...scratchClioEnvVars(scratch.dir, { requireHomePrefix: true }), CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" },
 		});
 		strictEqual(result.code, 0, result.stderr);
 		ok(result.stdout.includes(`refreshed state metadata ${OLD_VERSION} -> ${readClioVersion()}`), result.stdout);
-		ok(result.stdout.includes(`ok: ${OLD_VERSION} -> ${readClioVersion()} (migrations: 0)`), result.stdout);
+		ok(result.stdout.includes(`ok: ${OLD_VERSION} -> ${readClioVersion()} (migrations: 1)`), result.stdout);
 		const manifest = JSON.parse(readFileSync(join(scratch.dir, "state", "migrations.json"), "utf8"));
-		deepStrictEqual(manifest, { applied: [] });
+		deepStrictEqual(manifest, { applied: ["2026-08-18-lmstudio-runtime-id"] });
 		strictEqual(readStateInfo()?.upgradedFrom, OLD_VERSION);
 		strictEqual(
 			readStateInfo()?.noticedVersion,

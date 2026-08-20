@@ -96,6 +96,7 @@ function recorder(options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState
 		openCost: () => undefined,
 		openContextView: () => undefined,
 		openTasks: () => undefined,
+		openDecisions: () => undefined,
 		openMemory: () => undefined,
 		openView: () => undefined,
 		openModel: () => undefined,

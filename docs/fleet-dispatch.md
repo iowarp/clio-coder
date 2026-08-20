@@ -1,6 +1,6 @@
 # Fleet Dispatch
 
-> **Interactive Spec Available:** An interactive fleet node topology planner, scout router, receipt verifier, and failure taxonomy simulator is located at [docs/html/fleet_dispatch_blueprint.html](html/fleet_dispatch_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive fleet node topology planner, scout router, receipt verifier, and failure taxonomy simulator is located at [docs/html/fleet_dispatch_blueprint.html](html/fleet_dispatch_blueprint.html) (Version: 0.3.2).
 
 Clio Coder dispatches bounded worker agents. With a fleet configured, those
 workers run on remote machines over SSH while the orchestrator keeps every
@@ -37,8 +37,8 @@ attestation are strict protocol evidence, not proof against a malicious child
 that controls its own process; SSH also uses the attested remote process group
 for bounded abort escalation.
 
-Scout routing is advisory rather than forced: the worker operating contract
-steers explicit broad repository exploration to the read-only `scout` recipe,
+Scout routing is advisory rather than forced: the session's Delegation
+passage steers explicit broad repository exploration to the read-only `scout` recipe,
 and middleware emits one advisory notice after nine or more manual
 read-only exploration calls without a successful Scout dispatch. The advisory
 costs no extra model round. Direct reads remain allowed; Clio does not
@@ -82,7 +82,9 @@ Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` i
 ## Node setup
 
 Fleet nodes are declared under `fleet.nodes` in `settings.yaml`. The implicit
-`local` node always exists and is never declared.
+`local` node always exists and is never declared. A run's node is the host its
+worker process ran on, never the host serving the model, so a run against a
+remote target from this machine still records `node: local`.
 
 ```yaml
 fleet:
@@ -537,7 +539,7 @@ closed while a winner remains unapplied.
 Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 15`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
-- `node`: the fleet node the worker ran on (`id`, `kind`, `host`).
+- `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
 - `reroutes`: dead-node failover hops, oldest first.
 - `gate`: review/compete provenance (role, group, cycle, subject run ids with
   their receipt digests, and the verdict that caused a revise builder).

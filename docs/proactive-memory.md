@@ -1,6 +1,6 @@
 # Proactive task memory
 
-> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.3.2).
 
 Clio's proactive task memory protects long-running work from behavioral state
 decay: a requirement, environment fact, failed attempt, or diagnosis can still
@@ -159,7 +159,7 @@ records one telemetry row, not two.
 
 ## Background steps never hold a turn open
 
-The pi agent does not become idle until every `agent_end` listener settles, so a
+The agent loop does not become idle until every `agent_end` listener settles, so a
 memory step awaited at that boundary would add its full latency to the visible
 end of every triggered turn. Measured on the reference route below, step latency
 has a median of 18.6 seconds and ranges up to 220.8 seconds. This makes an awaited
@@ -290,7 +290,7 @@ tier usable anyway.
 Size `timeoutMs` off that tail rather than off the median. The shipped 180000
 captures roughly the whole distribution on this route. A 20000 setting looks
 generous against an 18.6-second median and in practice discarded about half of
-all steps, since the step still runs to completion and only its result is thrown
+all steps, since the request is aborted on timeout and its work is thrown
 away. A route whose steps mostly record `timeout` is a misconfigured deadline
 before it is a slow model.
 

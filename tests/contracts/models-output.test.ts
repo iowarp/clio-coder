@@ -52,7 +52,7 @@ describe("contracts/models-output", () => {
 		const lines = modelTableLines([
 			row({
 				targetId: "dynamo",
-				runtimeId: "lmstudio-native",
+				runtimeId: "lmstudio",
 				modelId: longId,
 				caps: "CTRV---",
 				contextWindow: 1_000_000,

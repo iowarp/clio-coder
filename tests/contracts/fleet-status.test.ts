@@ -14,9 +14,9 @@ import { setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.j
 import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
-function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
+async function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
 	const originalEnv = { ...process.env };
-	const scratch = newScratchClioHome("clio-fleet-status-");
+	const scratch = await newScratchClioHome("clio-fleet-status-");
 	return Promise.resolve()
 		.then(() => fn(scratch))
 		.finally(() => {

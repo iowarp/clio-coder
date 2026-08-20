@@ -19,7 +19,7 @@ import { grepTool } from "../../src/tools/grep.js";
 import { fdIgnoreArgs, rgIgnoreArgs } from "../../src/tools/ignore-policy.js";
 import { DEFAULT_READ_MAX_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
+import { DEFAULT_MAX_BYTES, truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
 
@@ -65,6 +65,16 @@ describe("contracts/tool-hardening truncate primitives", () => {
 		const result = truncateHead("a\nb\nc\n", { maxLines: 2000, maxBytes: 64 * 1024 });
 		strictEqual(result.totalLines, 3);
 	});
+
+	it("keeps Clio's 16 KiB observation cap while Pi owns UTF-8-safe truncation", () => {
+		strictEqual(DEFAULT_MAX_BYTES, 16 * 1024);
+		const exact = truncateHead("x".repeat(DEFAULT_MAX_BYTES));
+		strictEqual(exact.truncated, false);
+		const over = truncateTail(`${"x".repeat(DEFAULT_MAX_BYTES)}😀END`);
+		strictEqual(over.truncated, true);
+		strictEqual(over.outputBytes <= DEFAULT_MAX_BYTES, true);
+		strictEqual(over.content.endsWith("😀END"), true);
+	});
 });
 
 describe("contracts/tool-hardening bash tail-biased non-destructive output", () => {
@@ -104,6 +114,27 @@ describe("contracts/tool-hardening bash tail-biased non-destructive output", () 
 		if (result.kind !== "ok") return;
 		strictEqual(result.output.trim(), "hello\nworld");
 		strictEqual((result.details as { resultSize?: unknown } | undefined)?.resultSize, undefined);
+	});
+
+	it("streams cumulative snapshots through pi before the terminal result", async () => {
+		const updates: string[] = [];
+		const result = await bashTool.run(
+			{ command: "printf first; sleep 0.15; printf '\\nsecond\\n'" },
+			{
+				onUpdate: (partial) => {
+					if (partial.kind === "ok") updates.push(partial.output);
+				},
+			},
+		);
+
+		strictEqual(result.kind, "ok");
+		ok(updates.length >= 2, `expected an initial/live/final snapshot sequence, got ${updates.length}`);
+		strictEqual(updates[0], "", "pi receives an empty initial snapshot so the UI can show a running body");
+		ok(
+			updates.some((snapshot) => snapshot.includes("first")),
+			JSON.stringify(updates),
+		);
+		ok(updates.at(-1)?.includes("first\nsecond"), JSON.stringify(updates));
 	});
 });
 
@@ -146,6 +177,12 @@ describe("contracts/tool-hardening bash spawn env and shell freshness (W5)", () 
 		const result = await runBashCommand("printenv CLIO_CODER_INTERACTIVE || printf unset");
 		strictEqual(result.exitCode, 0);
 		strictEqual(result.stdout, "unset");
+	});
+
+	it("marks every bash child as running under Clio Coder", async () => {
+		const result = await runBashCommand('printf %s "$AI_AGENT"');
+		strictEqual(result.exitCode, 0);
+		strictEqual(result.stdout, "clio-coder");
 	});
 
 	it("gives every call a fresh shell: no state bleed between commands", async () => {

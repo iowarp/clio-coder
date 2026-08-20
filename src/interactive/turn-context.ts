@@ -2,7 +2,7 @@
  * Turn context ownership: the session-prompt compile cache, context-snapshot
  * accounting, prompt-cache honesty, and compaction. `runAutoCompact` is the
  * one compaction entry point; the pre-submit trigger, the preflight overflow
- * guard, overflow recovery, `/compact`, and the post-tool continuation guard
+ * guard, overflow recovery, `/context compact`, and the post-tool continuation guard
  * all flow through it.
  */
 
@@ -345,7 +345,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * compaction summary entry, then replay from the session view.
 	 *
 	 * `force = true` skips the pressure check and the mask pre-stage and runs
-	 * the LLM summary directly. Used for `/compact`, CLIO_CODER_FORCE_COMPACT=1,
+	 * the LLM summary directly. Used for `/context compact`, CLIO_CODER_FORCE_COMPACT=1,
 	 * and overflow recovery.
 	 */
 	const runAutoCompact = async (
@@ -692,7 +692,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const after = liveContextEstimate(agentRuntime);
 			if (after.tokens >= after.contextWindow) {
 				throw new Error(
-					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /compact, narrower reads, or a follow-up turn with smaller observations.`,
+					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
 			}
 			return compacted ? continuationContextUpdate(agentRuntime) : undefined;

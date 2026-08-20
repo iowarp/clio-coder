@@ -76,19 +76,33 @@ function headerLine(entry: WorkerEntryState, width: number): string {
 /**
  * Outcome glyph, with the word on the footer. The folded row uses the glyph
  * alone, as a tool subline does, so a list of cards reads like a list of calls.
+ * Abandoned names itself rather than falling through to its `stalled`
+ * outcome code, so it reads as a ledger-side finding instead of the ordinary
+ * heartbeat-timeout `stalled` a sealed receipt reports.
  */
 function outcomeUnit(receipt: WorkerReceiptSummary, word: boolean): string {
 	if (receipt.outcome === "succeeded") return theme.fg("success", word ? `${GLYPH.ok} ok` : GLYPH.ok);
 	if (receipt.outcome === "canceled") return theme.fg("dim", `${GLYPH.cancelled} canceled`);
+	if (receipt.abandonedDetail !== undefined) return theme.fg("error", word ? `${GLYPH.error} abandoned` : GLYPH.error);
 	return theme.fg("error", `${GLYPH.error} ${receipt.outcomeCode ?? receipt.outcome}`);
 }
 
-/** Live status for a block that has not settled: a spinner-free, honest "running". */
+/** A block with no settled receipt yet: a spinner-free, honest "running". */
 function pendingUnit(entry: WorkerEntryState): string {
 	return theme.fg(
 		"action",
 		entry.attempts.length > 1 ? `${GLYPH.running} attempt ${entry.attempts.length}` : `${GLYPH.running} running`,
 	);
+}
+
+/**
+ * Whether a block should render as still going rather than settled: live,
+ * never yet received a receipt (`entry.receipt === undefined`), or replayed
+ * from a `runs.json` row with no `endedAt` (`stillRunning`) because its
+ * process is still executing in another instance of Clio.
+ */
+function isPending(entry: WorkerEntryState): boolean {
+	return entry.receipt === undefined || entry.receipt.stillRunning === true;
 }
 
 /**
@@ -108,7 +122,8 @@ function footerUnits(receipt: WorkerReceiptSummary): string[] {
 	}
 	if (receipt.durationMs !== undefined) units.push(dim(formatCompactMs(receipt.durationMs)));
 	if (receipt.contract !== undefined) units.push(dim(`contract ${receipt.contract}`));
-	if (receipt.receiptUnavailable === true) units.push(theme.fg("warning", "receipt unavailable"));
+	if (receipt.abandonedDetail !== undefined) units.push(theme.fg("warning", receipt.abandonedDetail));
+	else if (receipt.receiptUnavailable === true) units.push(theme.fg("warning", "receipt unavailable"));
 	return units;
 }
 
@@ -221,7 +236,7 @@ function failureLines(entry: WorkerEntryState, width: number): string[] {
 
 /** The receipt line, whole units only; a unit that would not fit is dropped behind a dim ellipsis. */
 function footerLine(entry: WorkerEntryState, width: number): string {
-	const units = entry.receipt === undefined ? [pendingUnit(entry)] : footerUnits(entry.receipt);
+	const units = isPending(entry) || entry.receipt === undefined ? [pendingUnit(entry)] : footerUnits(entry.receipt);
 	return fitUnits(theme, dim(FOOTER), units, width);
 }
 
@@ -236,7 +251,8 @@ function footerLine(entry: WorkerEntryState, width: number): string {
  */
 function foldedLine(entry: WorkerEntryState, width: number, expandKey: string | undefined): string {
 	const identity = `${originGlyph(entry)} ${identityUnits(entry).join(dim(SEPARATOR))}`;
-	const status = entry.receipt === undefined ? pendingUnit(entry) : outcomeUnit(entry.receipt, false);
+	const status =
+		isPending(entry) || entry.receipt === undefined ? pendingUnit(entry) : outcomeUnit(entry.receipt, false);
 	const elapsed =
 		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
 	const hint = expandKey === undefined || expandKey.length === 0 ? "" : dim(` (${expandKey})`);

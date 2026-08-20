@@ -3,7 +3,7 @@
 Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.3.1). You can open it directly in any web browser to view details dynamically.
+> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.3.2). You can open it directly in any web browser to view details dynamically.
 
 ---
 
@@ -49,7 +49,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
 | `.clio-coder/fleets/*.md`, `.clio-coder/fleets/commands.yaml` | Overlay | Fleet contracts and their command registry. Adds to the fleets shipped under `src/domains/agents/fleets/`. | Yes; shipped fleets remain. | Kept |
 | `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
-| `.clio-coder/skills/**` | Overlay | Project skills, trusted as repository-local. Composes with skills Clio ships. | Yes; shipped skills remain. | Kept, and named |
+| `.clio-coder/skills/**` | Overlay | Project skills, trusted as repository-local. This is where `clio-coder skills install <name>` lands a catalog skill; the shipped catalog under the package's `skills/` is a marketplace to install from, not a discovery root, so nothing appears here until the operator installs it. | Yes; the shipped catalog remains installable. | Kept, and named |
 | `CLIO-CODER.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio-coder context init`. | Kept unless `--all` |
 | `.clio-coder/codewiki.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
 | `.clio-coder/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
@@ -63,10 +63,12 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 user configuration directory, not in any repository.
 
 None of `.clio-coder/` is published by Clio's own package. The directories Clio ships
-(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, `skills/workflow/cut-it/`, `skills/git/`,
-`src/domains/prompts/fragments/`, `src/domains/providers/models/`) are read from
-the installed package root; the `.clio-coder/` entries above compose with them and never
-replace them on disk.
+(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, the whole `skills/` catalog
+with its `registry.yaml` and `skill-marketplace.json`, `src/domains/prompts/fragments/`,
+`src/domains/providers/models/`) are read from the installed package root; the `.clio-coder/`
+entries above compose with them and never replace them on disk. Builtin agent recipes bind
+skills straight out of the package catalog; the operator's own session reaches the same
+catalog only as a marketplace, through `clio-coder skills install <name>` or `/skill <name>`.
 
 ---
 
@@ -134,7 +136,7 @@ First-run target setup after install:
 **Option A: Local Model / API Key Target**
 ```bash
 clio-coder configure --list
-clio-coder configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
+clio-coder configure --id local-lmstudio --runtime lmstudio --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
 clio-coder targets use local-lmstudio
 clio-coder targets --probe
 clio-coder
@@ -198,15 +200,16 @@ The 0.3.0 binary prints its header (`install npm`, `channel latest`,
 `current 0.3.0`), runs `npm install -g @iowarp/clio-coder@latest`, and then
 hands over to the binary that install just put on `PATH` with
 `clio-coder upgrade --post-install`. That newer binary runs the migration
-check (the registry is empty for 0.3.1, so `state/migrations.json` is written
-as `{"applied": []}` and nothing else moves), runs `clio-coder doctor --fix`,
+check, records `2026-08-18-lmstudio-runtime-id` in `state/migrations.json`, and
+normalizes any legacy LM Studio target id, websocket URL, and stored credential
+name. It then runs `clio-coder doctor --fix`,
 which refreshes `install.json`, and reports the transition as
-`ok: 0.3.0 -> 0.3.1 (migrations: 0)`. The outer 0.3.0 process closes with
+`ok: 0.3.0 -> 0.3.1 (migrations: 1)`. The outer 0.3.0 process closes with
 `ok: 0.3.0 -> post-install checks complete`. Under nvm or a custom npm prefix
 this works because `npm install -g` and the bare `clio-coder` resolve through
 the same prefix; the doctor rows the child prints are the proof of which binary
 answered. `clio-coder upgrade --dry-run` first names the exact command it would
-run, says that no migrations are registered, and prints
+run, names the pending LM Studio migration, and prints
 `would refresh state metadata 0.3.0 -> 0.3.1` without touching the record.
 
 If you instead ran `npm install -g @iowarp/clio-coder` yourself, or launched
@@ -218,22 +221,25 @@ next `clio-coder` launch refreshes it. `install.json` then reads
 `upgradedFrom: "0.3.0"`; doctor's row becomes
 `0.3.1 (installed ..., upgraded ... from 0.3.0)`.
 
-The first interactive launch after the version changed shows one notice,
-`clio: upgraded 0.3.0 → 0.3.1. What changed at the keyboard: ...`, naming the
-commands that moved into `/settings` (`/targets`, `/fleet`, `/scoped-models`),
-the retired git skills (`commit-crafting`, `create-pr`, `investigate-issue`,
-`review-changes`, replaced by `file-ticket`, `fix-issue`, `ship`), the artifact
-tool's new default location under `.clio-coder/artifacts/`, and the CHANGELOG
-section for the rest. It is shown once per version, recorded as
-`noticedVersion` in `install.json`, and never to a headless `run` or an ACP
-server.
+#### Upgrading to 0.3.2
 
-Settings written by 0.3.0 keep working unchanged. `identity:` is accepted and
-ignored, since nothing ever read it; the next settings write drops the line. A
-fleet node's `clioEntry` is read as `clioCoderEntry` and left spelled as it
-was. `CLIO_CODER_MAX_RUNS` still reads as the older spelling of
-`CLIO_CODER_MAX_DISPATCH_RUNS`. No credentials, sessions, receipts, or memory
-records are touched.
+Upgrading from 0.3.1 to 0.3.2 is automated:
+
+```bash
+clio-coder upgrade
+```
+
+Key lifecycle and operational updates in v0.3.2:
+- Upgraded the underlying engine SDK libraries to 0.84.0 with signal-aware OAuth cancellation.
+- Hardened migration resilience: damaged `credentials.yaml` files no longer block upgrades when no renames are needed (#121); `--skip-migrations` is available as a recovery override.
+- Fullscreen TUI mode (`terminal.tuiMode`, `terminal.fullscreenScrollbar`) is available via Settings → Terminal (restart required).
+- Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
+- Resumed and forked session entry replays standardize message prefixes through `src/engine/messages.ts`.
+- `AI_AGENT=clio-coder` is set on all child processes for system attribution.
+
+The first interactive launch after upgrading shows the version notice:
+`clio: upgraded 0.3.1 → 0.3.2. What changed at the keyboard: ...`
+Recorded once per version in `install.json` as `noticedVersion`.
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:

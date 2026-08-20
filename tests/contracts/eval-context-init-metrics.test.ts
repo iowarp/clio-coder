@@ -144,7 +144,7 @@ describe("contracts/eval context-init metrics", () => {
 			const entry = join(root, "fake-clio.mjs");
 			writeFileSync(
 				entry,
-				`process.stdout.write(JSON.stringify({version:1,generation:{mode:"model",parserOutcome:"parsed",run:{structuredOutputMode:"native-schema",runId:"run-1",targetId:"dynamo",wireModelId:"wrong",runtimeId:"lmstudio-native",runtimeKind:"http",thinkingLevel:"off",durationMs:1,promptBytes:1,outputBytes:1}}}));\n`,
+				`process.stdout.write(JSON.stringify({version:1,generation:{mode:"model",parserOutcome:"parsed",run:{structuredOutputMode:"native-schema",runId:"run-1",targetId:"dynamo",wireModelId:"wrong",runtimeId:"lmstudio",runtimeKind:"http",thinkingLevel:"off",durationMs:1,promptBytes:1,outputBytes:1}}}));\n`,
 				"utf8",
 			);
 

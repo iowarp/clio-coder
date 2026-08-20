@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,7 +12,13 @@ import {
 	resolveProviderModelCatalogDirs,
 } from "../../src/domains/providers/knowledge-base-path.js";
 import { resolveModelCapabilities } from "../../src/domains/providers/model-capabilities.js";
-import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
+import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
+import {
+	type CapabilityFlags,
+	EMPTY_CAPABILITIES,
+	type ThinkingLevel,
+	VALID_THINKING_LEVELS,
+} from "../../src/domains/providers/types/capability-flags.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 
@@ -61,6 +67,19 @@ function localStatus(modelId: string, probeCapabilities?: Partial<CapabilityFlag
 }
 
 describe("contracts/model knowledge base", () => {
+	it("does not cite missing source files in shipped catalog prose", () => {
+		const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
+		const catalog = readFileSync(
+			join(repoRoot, "src/domains/providers/models/local-models/clio-local-coding-targets.yaml"),
+			"utf8",
+		);
+		const references = catalog.match(/src\/[A-Za-z0-9_./-]+\.ts(?::\d+(?:-\d+)?)?/gu) ?? [];
+		for (const reference of references) {
+			const sourcePath = reference.replace(/:\d+(?:-\d+)?$/u, "");
+			strictEqual(existsSync(join(repoRoot, sourcePath)), true, `catalog cites missing source file ${sourcePath}`);
+		}
+	});
+
 	it("loads ordered catalog roots and lets overlays win equally specific matches", () => {
 		const root = scratchDir("clio-kb-");
 		try {
@@ -170,6 +189,32 @@ describe("contracts/model knowledge base", () => {
 		strictEqual(hero?.entry.family, "qwopus3.6-35b-a3b-coder");
 		strictEqual(hero?.entry.capabilities.contextWindow, 262144);
 
+		// The official 3.8 family must win over every earlier Qwen substring and
+		// retain the strict template effort map validated by the runtime contracts.
+		const qwen38 = kb.lookup("Qwen3.8-27B-IQ4_NL-262K");
+		strictEqual(qwen38?.entry.family, "qwen3.8-27b");
+		strictEqual(qwen38?.entry.capabilities.contextWindow, 262144);
+		strictEqual(qwen38?.entry.capabilities.maxTokens, 131072);
+		const qwen38Quirks = qwen38?.entry.quirks as LocalModelQuirks | undefined;
+		strictEqual(qwen38Quirks?.thinking?.mechanism, "effort-levels");
+		deepStrictEqual(qwen38Quirks?.thinking?.effortByLevel, {
+			low: "low",
+			medium: "medium",
+			high: "xhigh",
+			xhigh: "xhigh",
+		});
+		strictEqual(qwen38Quirks?.sampling?.thinking?.temperature, 1);
+		strictEqual(qwen38Quirks?.sampling?.instruct?.temperature, 0.7);
+		strictEqual(qwen38Quirks?.sampling?.instruct?.presencePenalty, 1.5);
+		strictEqual(
+			resolveModelCapabilities(
+				localStatus("Qwen3.8-27B-IQ4_NL-262K", { contextWindow: 131_072 }),
+				"Qwen3.8-27B-IQ4_NL-262K",
+				kb,
+			).contextWindow,
+			131_072,
+		);
+
 		// The qat family's `gemma-4-31b-it-qat` patterns are not substrings of
 		// the 12B or 26B ids, so those must not be captured by it.
 		strictEqual(kb.lookup("Gemma-4-12B-it-UD-Q4_K_XL-262K")?.entry.family !== "gemma-4-31b-it-qat-mtp", true);
@@ -228,6 +273,37 @@ describe("contracts/model knowledge base", () => {
 		// Ornith is reasoning class "always": it cannot be silenced.
 		const ornithQuirks = kb.lookup("Ornith-1.0-35B-Q4_K_M-262K")?.entry.quirks as LocalModelQuirks | undefined;
 		strictEqual(ornithQuirks?.thinking?.mechanism, "always-on");
+	});
+
+	it("keeps the effective thinking dial monotonic for every catalog family", () => {
+		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
+		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
+		const rank = new Map<ThinkingLevel, number>(VALID_THINKING_LEVELS.map((level, index) => [level, index]));
+
+		for (const entry of kb.entries()) {
+			const capabilities: CapabilityFlags = { ...LOCAL_BASE_CAPABILITIES, ...entry.capabilities };
+			const quirks = entry.quirks as LocalModelQuirks | undefined;
+			const effective = VALID_THINKING_LEVELS.map(
+				(configured) =>
+					resolveModelRuntimeCapabilities({
+						runtimeId: "llamacpp",
+						apiFamily: "openai-completions",
+						modelId: entry.family,
+						capabilities,
+						...(quirks ? { quirks } : {}),
+						configuredThinkingLevel: configured,
+					}).thinking.effectiveLevel,
+			);
+
+			for (let index = 1; index < effective.length; index += 1) {
+				const previous = effective[index - 1] ?? "off";
+				const current = effective[index] ?? "off";
+				ok(
+					(rank.get(current) ?? -1) >= (rank.get(previous) ?? -1),
+					`${entry.family}: ${VALID_THINKING_LEVELS[index - 1]} -> ${previous}, then ${VALID_THINKING_LEVELS[index]} -> ${current}`,
+				);
+			}
+		}
 	});
 
 	/**

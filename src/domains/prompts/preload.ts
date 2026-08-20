@@ -1,6 +1,6 @@
 /**
  * Project-context preload classification. One place owns the preload cliff:
- * the session compiler uses it to choose full-CLIO-CODER.md preload versus compact
+ * the session compiler uses it to choose a full effective-handbook preload versus compact
  * synopsis, and reporting surfaces (context-init output, `clio-coder config
  * inspect`, the context-window overlay) use it to make the cliff visible.
  */
@@ -29,7 +29,7 @@ export interface ProjectPreloadClass {
 }
 
 export interface ClassifyProjectPreloadInput {
-	/** True when a parseable CLIO-CODER.md contributed to the rendered text. */
+	/** True when at least one selected project handbook contributed to the rendered text. */
 	hasClioMd: boolean;
 	/** The rendered project prompt context (ProjectPromptContext.text). */
 	text: string;
@@ -42,7 +42,7 @@ function formatKb(chars: number): string {
 /**
  * Classify how the session compiler will treat this project context. Must
  * mirror the selection in prompts/extension.ts exactly: full preload only
- * when a parseable CLIO-CODER.md exists and the rendered text is within both the
+ * when a selected project handbook parses and the rendered text is within both the
  * char and line limits; empty text preloads nothing.
  */
 export function classifyProjectPreload(input: ClassifyProjectPreloadInput): ProjectPreloadClass {

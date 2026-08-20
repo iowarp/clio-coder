@@ -25,6 +25,8 @@ export interface ResourceList<T> {
 
 export interface ResourceLoaderOptions {
 	cwd?: string;
+	/** Slash-command names prompt templates may not claim. */
+	reservedPromptNames?: ReadonlySet<string>;
 	skills?: () => Pick<LoadSkillsInput, "trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths">;
 }
 
@@ -38,7 +40,6 @@ export interface ResourcesLoader {
 	): { text: string; pendingSkillRequests: PendingSkillRequest[] };
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
-	themes(): ResourceList<never>;
 	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
 }
@@ -53,6 +54,7 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 	// trust decision whichever kind is read out of it.
 	const promptOptions = (cwd: string): LoadPromptTemplatesInput => ({
 		cwd,
+		...(options.reservedPromptNames !== undefined ? { reservedNames: options.reservedPromptNames } : {}),
 		...(skillOptions().trustProjectCompatRoots !== undefined
 			? { trustProjectCompatRoots: skillOptions().trustProjectCompatRoots === true }
 			: {}),
@@ -72,9 +74,6 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		},
 		expandPromptTemplate(text, cwd = defaultCwd) {
 			return expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
-		},
-		themes() {
-			return { items: [], diagnostics: [] };
 		},
 		resolvePath(value, cwd = defaultCwd) {
 			return expandConfigPath(value, { cwd });

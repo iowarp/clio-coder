@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path, { join, relative } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import { StringEnum } from "../engine/ai.js";
 import { resolveRgBinary } from "./executables.js";
 import { compileGlobRegex, fallbackIgnoredDirs, normalizeGlobInput, rgIgnoreArgs } from "./ignore-policy.js";
 import {
@@ -17,7 +18,6 @@ import {
 import { resolveReadPath, toPosixPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
-import { stringEnum } from "./string-enum.js";
 import { GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "./truncate.js";
 
 const DEFAULT_LIMIT = 100;
@@ -420,7 +420,7 @@ export const grepTool: ToolSpec = {
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Search pattern (regex by default)." }),
 		path: Type.Optional(Type.String({ description: "Directory or file to search." })),
-		mode: Type.Optional(stringEnum(["content", "files", "count"], "Output mode (default content).")),
+		mode: Type.Optional(StringEnum(["content", "files", "count"], { description: "Output mode (default content)." })),
 		glob: Type.Optional(Type.String({ description: "Filter files by glob, e.g. '*.ts'." })),
 		ignore_case: Type.Optional(Type.Boolean({ description: "Case-insensitive search." })),
 		literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal text." })),

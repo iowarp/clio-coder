@@ -9,6 +9,12 @@
  * hanging hook cannot block the TUI from exiting. The cap is 500ms by
  * default and can be overridden via CLIO_CODER_SHUTDOWN_HOOK_MS for tests.
  * Timed-out hooks are logged and shutdown continues to the next hook.
+ *
+ * Every diagnostic here is written after the TUI has stopped: the interactive
+ * controller stops the terminal before it calls shutdown(), and the signal path
+ * stops it from a drain hook, which precedes persist. The renderer is gone, so
+ * a diagnostic goes to stderr and is wrapped to the terminal width so it does
+ * not overrun the frame the TUI just handed back.
  */
 
 import { BusChannels } from "./bus-events.js";
@@ -26,6 +32,46 @@ const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
 	SIGINT: 130,
 	SIGTERM: 143,
 };
+
+/**
+ * Break `text` into lines no wider than `width` columns, at spaces where
+ * possible and mid-word when a single token is wider than the terminal.
+ */
+export function wrapToWidth(text: string, width: number): string[] {
+	if (!Number.isFinite(width) || width < 1) return [text];
+	const lines: string[] = [];
+	let current = "";
+	for (const word of text.split(/\s+/).filter((w) => w.length > 0)) {
+		let token = word;
+		while (token.length > width) {
+			if (current) {
+				lines.push(current);
+				current = "";
+			}
+			lines.push(token.slice(0, width));
+			token = token.slice(width);
+		}
+		if (!current) current = token;
+		else if (current.length + 1 + token.length <= width) current = `${current} ${token}`;
+		else {
+			lines.push(current);
+			current = token;
+		}
+	}
+	if (current) lines.push(current);
+	return lines.length > 0 ? lines : [""];
+}
+
+/**
+ * Emit a shutdown notice on stderr, wrapped to the terminal width when stderr
+ * or stdout is a TTY. Off a TTY the text goes out unwrapped, since a log
+ * consumer wants one record per line.
+ */
+export function writeShutdownNotice(text: string): void {
+	const width = process.stderr.columns ?? process.stdout.columns;
+	const lines = width === undefined ? [text] : wrapToWidth(text, width);
+	process.stderr.write(`${lines.join("\n")}\n`);
+}
 
 export function resolveShutdownHookBudgetMs(): number {
 	const raw = process.env.CLIO_CODER_SHUTDOWN_HOOK_MS;
@@ -72,6 +118,8 @@ class TerminationCoordinator {
 	private readonly persistHooks: Hook[] = [];
 	private exitCode = 0;
 	private started = false;
+	private drained = false;
+	private readonly pendingNotices: string[] = [];
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
 
 	getPhase(): TerminationPhase {
@@ -116,6 +164,8 @@ class TerminationCoordinator {
 		log("drain:start");
 		await this.runHooks(this.drainHooks, "drain", budgetMs, log);
 		log("drain:end");
+		this.drained = true;
+		this.flushNotices();
 		bus.emit(BusChannels.ShutdownDrained, {});
 
 		this.phase = "terminating";
@@ -142,13 +192,13 @@ class TerminationCoordinator {
 			if (!hook) continue;
 			const t0 = process.hrtime.bigint();
 			const completed = await runWithBudget(hook, budgetMs, (err) => {
-				console.error("[clio:termination] hook failed:", err);
+				const message = err instanceof Error ? err.message : String(err);
+				writeShutdownNotice(`[clio:termination] ${phase}[${i}] failed: ${message}`);
+				if (err instanceof Error && err.stack) log(err.stack);
 			});
 			const dt = Number(process.hrtime.bigint() - t0) / 1e6;
 			if (!completed) {
-				process.stderr.write(
-					`[clio:termination] ${phase}[${i}] exceeded ${budgetMs}ms budget; abandoning and continuing shutdown\n`,
-				);
+				writeShutdownNotice(`[clio:termination] ${phase}[${i}] exceeded ${budgetMs}ms budget; shutdown continues`);
 			}
 			log(`  ${phase}[${i}] ${dt.toFixed(1)}ms${completed ? "" : " (timed out)"}`);
 		}
@@ -163,13 +213,36 @@ class TerminationCoordinator {
 	installSignalHandlers(): void {
 		if (this.signalHandler) return;
 		const handler = (signal: NodeJS.Signals): void => {
-			process.stderr.write(`\nClio Coder: received ${signal}, shutting down...\n`);
+			this.notice(`Clio Coder: received ${signal}, shutting down...`);
 			void this.shutdown(SIGNAL_EXIT_CODES[signal] ?? 143);
 		};
 		this.signalHandler = handler;
 		process.once("SIGINT", handler);
 		process.once("SIGTERM", handler);
 		process.once("SIGHUP", handler);
+	}
+
+	/**
+	 * Report something the operator should read after the process is gone,
+	 * such as which signal ended it. Nothing here knows whether a TUI is on
+	 * screen, but it does know that the terminal teardown is a drain hook: so
+	 * until drain has finished the notice is held, and the moment it has, the
+	 * notice goes to the terminal the TUI just handed back. Written straight
+	 * away once drain is over, which is the case for a re-armed SIGINT arriving
+	 * mid-shutdown. A second SIGTERM or SIGHUP inside the drain window takes
+	 * Node's default action and the held notice dies with the process; that
+	 * window is bounded by the per-hook budget and the shell reports the kill.
+	 */
+	notice(text: string): void {
+		if (this.drained) {
+			writeShutdownNotice(text);
+			return;
+		}
+		this.pendingNotices.push(text);
+	}
+
+	private flushNotices(): void {
+		for (const text of this.pendingNotices.splice(0)) writeShutdownNotice(text);
 	}
 
 	/**

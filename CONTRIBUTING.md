@@ -63,25 +63,26 @@ output in-process while the reporter runs.
 
 ## Releasing
 
-Releases are tag-driven and publish from CI. Nothing is published from a
-workstation.
+Releases are cut from a tag. The GitHub release is created by CI; the npm
+publish is a manual maintainer step. The ordered procedure for a cut lives in
+[docs/release-cut-checklist.md](docs/release-cut-checklist.md).
 
-1. Bump `version` in `package.json` and retitle the `unreleased` section in
-   `CHANGELOG.md` to the version being cut.
+1. Bump `version` in `package.json` and retitle the top section of
+   `CHANGELOG.md` to the version being cut. `scripts/check-release.mjs` fails
+   when the two disagree or the heading still says `Unreleased`.
 2. Run `npm run ci:release`. It runs the full `ci` gate, then
    `scripts/check-release.mjs`, which verifies the built `dist/` and audits
    the exact npm package contents.
-3. Land the release commit through the normal PR flow.
-4. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must
+3. Land the release commit on `main` and let the `ci` workflow go green on
+   that commit.
+4. Tag and push: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. The tag must
    match `package.json`'s version; the release workflow refuses mismatches.
-5. `.github/workflows/release.yml` verifies the tag against `package.json`,
-   reruns the full gate, and creates the GitHub release with the tarball
-   attached. The npm publish step runs only when the repository variable
-   `NPM_PUBLISH` is `true` and the `NPM_TOKEN` secret holds an automation
-   token that can publish `@iowarp` packages; with the variable unset the
-   step is skipped and the GitHub release is still created. A maintainer may
-   run the first publish manually (`npm login && npm publish`);
-   `prepublishOnly` runs the same `ci:release` gate either way.
+5. `.github/workflows/release.yml` requires a successful `ci` run for the
+   tagged commit, verifies the tag against `package.json`, builds `dist/`,
+   runs `scripts/check-release.mjs`, and creates the GitHub release with the
+   tarball attached. It does not publish to npm.
+6. A maintainer publishes from the tagged commit with `npm publish`;
+   `prepublishOnly` runs the same `ci:release` gate first.
 
 What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 
@@ -97,9 +98,10 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
   both package.json `files` and the required list in `check-release.mjs`.
   The double bookkeeping is deliberate: neither edit can silently drop a
   resource the CLI needs at runtime.
-- Size budgets: 2 MB tarball, 6 MB unpacked. If a legitimate change exceeds
-  them, raise the budget in the same PR with a justification, never as a
-  drive-by.
+- Size budgets: 15 MB tarball, 40 MB unpacked, set in `check-release.mjs`.
+  They are a tripwire for packaging defects such as a leaked `node_modules`
+  or a doubled `dist/`, not a diet. If a legitimate change exceeds them,
+  raise the budget in the same PR with a justification, never as a drive-by.
 
 Build shape, for anyone changing `tsup.config.ts`: two ESM entries with code
 splitting on. `src/cli/index.ts` imports every subcommand dynamically, so a
@@ -130,11 +132,9 @@ The boundary checker enforces these:
   all other worker domain imports must be type-only.
 - Domain independence: cross-domain flows go through `SafeEventBus`.
 
-Run:
-
-```bash
-npm run check:boundaries
-```
+The checker runs as part of `npm run lint` (`scripts/check-hygiene.ts` imports
+`tests/boundaries/check-boundaries.ts`), so a boundary violation fails the
+same lint every PR runs.
 
 ## Branches
 

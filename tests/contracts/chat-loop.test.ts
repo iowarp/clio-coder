@@ -145,6 +145,7 @@ function createSession(entries: SessionEntry[] = []): SessionContract {
 		switchBranch: () => current as SessionMeta,
 		switchTurn: () => current as SessionMeta,
 		editLabel: () => {},
+		setName: () => {},
 		deleteSession: () => {},
 		history: () => (current ? [current] : []),
 		close: async () => {
@@ -264,6 +265,44 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 			"a notice is never a fake assistant message_end",
 		);
 		strictEqual(events.filter((event) => event.type === "agent_end").length, 0, "notices never synthesize agent_end");
+	});
+
+	// Both halves of a null runtime render the same operator notice, but the
+	// machine-readable reason has to tell them apart: a protocol surface reports
+	// it as the admission code, and sending a client with a configured target to
+	// "configure an orchestrator" points at the wrong half of the settings.
+	it("distinguishes a missing orchestrator model from a missing orchestrator target", async () => {
+		const admissionReasonFor = async (target: string, model: string): Promise<string | undefined> => {
+			const events: ChatLoopEvent[] = [];
+			const unconfigured = settings();
+			unconfigured.orchestrator.target = target;
+			unconfigured.orchestrator.model = model;
+			const loop = createChatLoop({
+				getSettings: () => unconfigured,
+				providers: providers(),
+				knownTargets: () => new Set(["test-target"]),
+				session: createSession(),
+				readSessionEntries: () => [],
+				createAgent: createFakeAgentFactory(async () => {
+					throw new Error("agent factory should not run for an unconfigured notice");
+				}),
+			} as never);
+			loop.onEvent((event: ChatLoopEvent) => events.push(event));
+
+			await loop.submit("hello");
+
+			const notices = events.filter(
+				(event): event is Extract<ChatLoopEvent, { type: "notice" }> =>
+					event.type === "notice" && event.surface === "transcript" && event.text.includes("orchestrator not configured"),
+			);
+			strictEqual(notices.length, 1, `expected one admission notice for target=${target} model=${model}`);
+			return notices[0]?.admission?.reason;
+		};
+
+		strictEqual(await admissionReasonFor("test-target", ""), "model-not-configured");
+		strictEqual(await admissionReasonFor("test-target", "   "), "model-not-configured", "a blank model is no model");
+		strictEqual(await admissionReasonFor("", ""), "orchestrator-not-configured");
+		strictEqual(await admissionReasonFor("", "model"), "orchestrator-not-configured", "no target is the wider failure");
 	});
 
 	it("runs post-tool compaction guard before an oversized continuation", async () => {
@@ -1315,6 +1354,7 @@ function createSilentStreamAgentFactory(
 			timestamp: Date.now(),
 		} as unknown as AgentMessage;
 		state.messages.push(failure);
+		await emit({ type: "message_end", message: failure } as never);
 		await emit({ type: "agent_end", messages: [failure] } as never);
 	};
 	const factory = (() => ({
@@ -1478,14 +1518,17 @@ describe("contracts/chat-loop stream stall escalation", () => {
 			exhausted?.errorMessage?.includes("stream stalled"),
 			`the stall reason survives into the typed failure, got: ${exhausted?.errorMessage}`,
 		);
-		ok(
-			entries
-				.filter(isAssistantMessageEntry)
-				.some((entry) =>
-					String((entry.payload as { errorMessage?: unknown }).errorMessage ?? "").includes("stream stalled"),
-				),
-			"the transcript records the stall rather than a bare aborted turn",
-		);
+		const terminalAssistants = entries.filter(isAssistantMessageEntry);
+		strictEqual(terminalAssistants.length, 3, "each attempt persists exactly one terminal assistant row");
+		for (const entry of terminalAssistants) {
+			const payload = entry.payload as { stopReason?: unknown; errorMessage?: unknown };
+			strictEqual(payload.stopReason, "error");
+			ok(
+				String(payload.errorMessage ?? "").startsWith("stream stalled:"),
+				"every persisted attempt names the stall rather than the provider's generic abort",
+			);
+			strictEqual(String(payload.errorMessage ?? "").includes("Request aborted"), false);
+		}
 	});
 
 	it("leaves a long-running tool alone: silence during tool execution is not a stalled stream", async () => {

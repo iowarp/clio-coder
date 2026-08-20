@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder - Session Lifecycle &amp; Ledger Blueprint</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .tree-sim-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-top: 1rem;
+    }
+    @media (max-width: 1024px) {
+      .tree-sim-container { grid-template-columns: 1fr; }
+    }
+    .tree-node-card {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.85rem;
+      margin-bottom: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .tree-node-card:hover {
+      border-color: var(--color-cyan);
+      transform: translateX(4px);
+    }
+    .tree-node-card.active-path {
+      border-color: var(--color-emerald);
+      background: rgba(87, 227, 137, 0.08);
+    }
+    .tree-node-card.pinned {
+      border-color: var(--color-purple);
+      box-shadow: 0 0 12px rgba(157, 140, 255, 0.2);
+    }
+    .node-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.35rem;
+    }
+    .node-title {
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: #fff;
+    }
+    .node-badge {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+    }
+    .node-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+    .node-meta {
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Session Icon</title>
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Session Lifecycle &amp; Ledger Blueprint</h1>
+          <p>On-disk ledger v3, directed conversation tree, /fork branching, streaming turn settlement, and recovery</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">v0.3.2</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Populated dynamically by shared.js -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('tree-sim')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Tree Icon</title><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><path d="M10 6.5h4M17.5 10v4"></path></svg>
+            Tree &amp; Lineage Simulator
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('ledger-spec')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Ledger Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+            Ledger &amp; Storage Architecture
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('resumption-export')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Export Icon</title><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Resumption, CWD &amp; Export
+          </button>
+        </div>
+
+        <!-- TAB 1: TREE & LINEAGE SIMULATOR -->
+        <div class="tab-pane active" id="pane-tree-sim">
+          <div class="glass-card">
+            <h2>Directed Conversation Tree &amp; Active-Path Lineage</h2>
+            <p>Clio Coder records conversation turns as a directed graph. Switching branches with <code>/tree</code> or creating child sessions with <code>/fork</code> isolates the active path without deleting historical entries.</p>
+          </div>
+
+          <div class="tree-sim-container">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Conversation Tree Graph</h3>
+                <p>Click any turn to simulate selecting/pinning active leaf:</p>
+
+                <div id="treeNodeList">
+                  <div class="tree-node-card active-path" onclick="selectTreeNode('turn-1')">
+                    <div class="node-header">
+                      <span class="node-title">Turn 1: Root Prompt</span>
+                      <span class="node-badge" style="background: rgba(70,229,208,0.2); color: var(--color-cyan);">user</span>
+                    </div>
+                    <div class="node-desc">"Analyze codebase boundary and types"</div>
+                    <div class="node-meta">ID: 01912a34-0001 &middot; Parent: null</div>
+                  </div>
+
+                  <div class="tree-node-card active-path" onclick="selectTreeNode('turn-2')">
+                    <div class="node-header">
+                      <span class="node-title">Turn 2: Tool Execution</span>
+                      <span class="node-badge" style="background: rgba(157,140,255,0.2); color: var(--color-purple);">tool_call</span>
+                    </div>
+                    <div class="node-desc">read_file("src/engine/session.ts")</div>
+                    <div class="node-meta">ID: 01912a34-0002 &middot; Parent: 01912a34-0001</div>
+                  </div>
+
+                  <div class="tree-node-card active-path pinned" onclick="selectTreeNode('turn-3a')">
+                    <div class="node-header">
+                      <span class="node-title">Turn 3a: Branch A (Active)</span>
+                      <span class="node-badge" style="background: rgba(87,227,137,0.2); color: var(--color-emerald);">assistant</span>
+                    </div>
+                    <div class="node-desc">"Refactor session writer to debounce fsync"</div>
+                    <div class="node-meta">ID: 01912a34-0003a &middot; Parent: 01912a34-0002 &middot; <strong>[PINNED]</strong></div>
+                  </div>
+
+                  <div class="tree-node-card" onclick="selectTreeNode('turn-3b')">
+                    <div class="node-header">
+                      <span class="node-title">Turn 3b: Branch B (Alternate)</span>
+                      <span class="node-badge" style="background: rgba(255,180,84,0.2); color: var(--color-amber);">assistant</span>
+                    </div>
+                    <div class="node-desc">"Maintain synchronous flush per append"</div>
+                    <div class="node-meta">ID: 01912a34-0003b &middot; Parent: 01912a34-0002</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Active Path Projection</h3>
+                <div id="pathProjectionOutput" style="font-family: var(--font-mono); font-size: 0.82rem; color: #fff; background: rgba(0,0,0,0.5); padding: 1rem; border-radius: 8px;">
+                  <div style="color: var(--color-emerald); font-weight: 700; margin-bottom: 0.5rem;">[ACTIVE PATH LINEAGE]</div>
+                  <div>&bull; Turn 1 (01912a34-0001): user</div>
+                  <div>&bull; Turn 2 (01912a34-0002): tool_call</div>
+                  <div>&bull; Turn 3a (01912a34-0003a): assistant [PINNED LEAF]</div>
+                  <div style="margin-top: 1rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
+                    Pruned Sibling Nodes: Turn 3b (01912a34-0003b)<br>
+                    Sidecars Filtered: unanchored taskLedger post-turn 3a excluded
+                  </div>
+                </div>
+
+                <h3 style="margin-top: 1.5rem;">Turn Settlement Safety (#114)</h3>
+                <p>When switching sessions via <code>/new</code>, <code>/resume</code>, <code>/tree</code>, or <code>/fork</code> during an active stream:</p>
+                <div style="background: rgba(0,0,0,0.3); border-left: 3px solid var(--color-cyan); padding: 0.75rem; border-radius: 4px; font-size: 0.85rem;">
+                  <code>settleChatBeforeSessionSwitch</code> cancels the in-flight stream and awaits completion. The partial turn and completed tool executions seal cleanly into the original session ledger before the session writer is replaced, preventing orphaned root entries or lost answers.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: LEDGER & STORAGE ARCHITECTURE -->
+        <div class="tab-pane" id="pane-ledger-spec">
+          <h2>On-Disk Session Directory Structure</h2>
+          <pre><code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/
+  meta.json        # ClioSessionMeta JSON document (atomic write)
+  current.jsonl    # Append-only structured session event ledger (v3)
+  tree.json        # SessionTreeNode[] conversation tree graph</code></pre>
+
+          <h2>Session Metadata Schema (`meta.json`)</h2>
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>id</code></td>
+                <td><code>string</code></td>
+                <td>UUIDv7 session identifier generated at initialization.</td>
+              </tr>
+              <tr>
+                <td><code>cwd</code></td>
+                <td><code>string</code></td>
+                <td>Absolute workspace root directory at session creation.</td>
+              </tr>
+              <tr>
+                <td><code>cwdHash</code></td>
+                <td><code>string</code></td>
+                <td>First 16 hexadecimal characters of SHA-256 of canonical <code>resolve(cwd)</code>.</td>
+              </tr>
+              <tr>
+                <td><code>createdAt / endedAt</code></td>
+                <td><code>string / string | null</code></td>
+                <td>ISO-8601 UTC timestamps for session start and completion.</td>
+              </tr>
+              <tr>
+                <td><code>model / target</code></td>
+                <td><code>string | null</code></td>
+                <td>Active model selector and target identifier.</td>
+              </tr>
+              <tr>
+                <td><code>clioVersion</code></td>
+                <td><code>string</code></td>
+                <td>Clio Coder release version (<code>0.3.2</code>).</td>
+              </tr>
+              <tr>
+                <td><code>sessionFormatVersion</code></td>
+                <td><code>number</code></td>
+                <td><code>CURRENT_SESSION_FORMAT_VERSION = 3</code> (<code>src/engine/session.ts:66</code>).</td>
+              </tr>
+              <tr>
+                <td><code>pinnedLeafTurnId</code></td>
+                <td><code>string | null</code></td>
+                <td>Active leaf turn pinned via <code>/tree</code>, cleared on next append.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>Append-Only Ledger Taxonomy (`current.jsonl`)</h2>
+          <p>Every line in <code>current.jsonl</code> is a complete JSON document written via <code>O_APPEND</code> file descriptors:</p>
+          <ul>
+            <li><strong>Header Frame (Line 1):</strong> <code>{"type":"session","version":3,"id":"...","timestamp":"...","cwd":"..."}</code></li>
+            <li><strong>Message Entry (<code>kind: "message"</code>):</strong> User inputs, assistant thoughts/prose, and tool calls/results.</li>
+            <li><strong>Label Entry (<code>kind: "label"</code>):</strong> User-defined bookmark anchored to a specific <code>targetTurnId</code>.</li>
+            <li><strong>Session Info Entry (<code>kind: "sessionInfo"</code>):</strong> Model switches, target migrations, and thinking dial updates.</li>
+            <li><strong>Compaction Summary (<code>kind: "compactionSummary"</code>):</strong> Progressive summary preserving historical context up to <code>firstKeptTurnId</code>.</li>
+          </ul>
+
+          <h2>Protected-Artifact Write-Ahead Journal</h2>
+          <p>Location: <code>&lt;stateDir&gt;/protected-artifact-pending/&lt;sessionKey&gt;/&lt;recordId&gt;.json</code></p>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Staging &amp; Commit Lifecycle</h3>
+              <ol style="margin-left: 1.25rem; font-size: 0.875rem; color: var(--text-muted);">
+                <li><strong>Stage:</strong> Mutating tool results stage artifact registration to the pending directory before returning.</li>
+                <li><strong>Commit:</strong> When the turn finishes and appends to <code>current.jsonl</code>, the staged file is unlinked.</li>
+              </ol>
+            </div>
+            <div class="glass-card">
+              <h3>Reconciliation on Startup</h3>
+              <p style="font-size: 0.875rem; color: var(--text-muted);">
+                During <code>/resume</code>, <code>reconcilePendingProtectedArtifacts</code> checks for leftover journal entries and restores protected artifact locks before user interaction begins.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: RESUMPTION, CWD & EXPORT -->
+        <div class="tab-pane" id="pane-resumption-export">
+          <h2>Session Resumption &amp; CWD Fallback</h2>
+          <p>When resuming via <code>/resume</code> or <code>CLIO_CODER_RESUME_SESSION_ID</code>, <code>resolveSessionCwd</code> validates the recorded workspace path:</p>
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Condition</th>
+                <th>Failure Reason</th>
+                <th>Remediation Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Directory exists and is readable</td>
+                <td><code>null</code> (valid)</td>
+                <td>Resumes session immediately without prompts.</td>
+              </tr>
+              <tr>
+                <td><code>meta.cwd</code> is empty or missing</td>
+                <td><code>no-cwd</code></td>
+                <td>Opens CWD-fallback dialog to select current directory.</td>
+              </tr>
+              <tr>
+                <td>Directory path no longer exists</td>
+                <td><code>missing</code></td>
+                <td>Opens CWD-fallback dialog with path suggestion.</td>
+              </tr>
+              <tr>
+                <td>Path points to a non-directory file</td>
+                <td><code>not-a-directory</code></td>
+                <td>Prompts operator for valid directory path.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>Transcript Export Contract (`/export`)</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Self-Contained HTML (Default)</h3>
+              <ul>
+                <li>Path: <code>.clio-coder/exports/&lt;sessionId&gt;-&lt;local-date&gt;.html</code></li>
+                <li>Carries converted ANSI styling with full Clio theme colors.</li>
+                <li>Semantic tool rows with expandable parameters and output.</li>
+                <li>Self-contained: 0 external scripts, stylesheets, or images.</li>
+                <li>Bounded: Capped at 2 MiB; truncates cleanly at whole row.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Plain Markdown Export</h3>
+              <ul>
+                <li>Requested by specifying an explicit <code>.md</code> file extension.</li>
+                <li>Heading with UTC instant, metadata, and fenced text.</li>
+                <li>Terminal escape codes and controls stripped cleanly.</li>
+                <li>Follows active leaf path; omits pruned sibling turns.</li>
+              </ul>
+            </div>
+          </div>
+
+          <h2>Directory Handbooks &amp; Prompt History</h2>
+          <div class="grid grid-2">
+            <div class="glass-card">
+              <h3>Handbook Subtree Overrides</h3>
+              <p><code>CLIO-CODER.override.md</code> replaces inherited instructions for its directory subtree:</p>
+              <ul>
+                <li>Creates explicit subtree boundaries without affecting sibling directories.</li>
+                <li>Subdirectories can add narrower rules with additional override files.</li>
+                <li>Context resets never delete override files.</li>
+              </ul>
+            </div>
+            <div class="glass-card">
+              <h3>Prompt Navigation History</h3>
+              <p>Process-local navigation via <code>Ctrl+P</code> / <code>Ctrl+N</code>:</p>
+              <ul>
+                <li>Preserves accepted chat, slash, steering, and follow-up inputs.</li>
+                <li>Consecutive duplicate prompts are collapsed.</li>
+                <li>Malformed inputs remain in editor without polluting history.</li>
+                <li>Forward navigation restores the unfinished draft.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="commands_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Commands &amp; Modes</span>
+          </a>
+          <a href="exit_codes_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Exit Codes &amp; Output Contracts</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Session Lifecycle Blueprint &bull; Version 0.3.2 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const pane = document.getElementById(`pane-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
+        return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
+      });
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    function selectTreeNode(nodeId) {
+      document.querySelectorAll('.tree-node-card').forEach(card => {
+        card.classList.remove('active-path', 'pinned');
+      });
+
+      const out = document.getElementById('pathProjectionOutput');
+      if (nodeId === 'turn-3b') {
+        document.querySelectorAll('.tree-node-card')[0].classList.add('active-path');
+        document.querySelectorAll('.tree-node-card')[1].classList.add('active-path');
+        document.querySelectorAll('.tree-node-card')[3].classList.add('active-path', 'pinned');
+        out.innerHTML = `
+          <div style="color: var(--color-amber); font-weight: 700; margin-bottom: 0.5rem;">[ACTIVE PATH LINEAGE - BRANCH B]</div>
+          <div>&bull; Turn 1 (01912a34-0001): user</div>
+          <div>&bull; Turn 2 (01912a34-0002): tool_call</div>
+          <div>&bull; Turn 3b (01912a34-0003b): assistant [PINNED LEAF]</div>
+          <div style="margin-top: 1rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
+            Pruned Sibling Nodes: Turn 3a (01912a34-0003a)<br>
+            Active Pin: meta.pinnedLeafTurnId = "01912a34-0003b"
+          </div>
+        `;
+      } else {
+        document.querySelectorAll('.tree-node-card')[0].classList.add('active-path');
+        document.querySelectorAll('.tree-node-card')[1].classList.add('active-path');
+        document.querySelectorAll('.tree-node-card')[2].classList.add('active-path', 'pinned');
+        out.innerHTML = `
+          <div style="color: var(--color-emerald); font-weight: 700; margin-bottom: 0.5rem;">[ACTIVE PATH LINEAGE - BRANCH A]</div>
+          <div>&bull; Turn 1 (01912a34-0001): user</div>
+          <div>&bull; Turn 2 (01912a34-0002): tool_call</div>
+          <div>&bull; Turn 3a (01912a34-0003a): assistant [PINNED LEAF]</div>
+          <div style="margin-top: 1rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
+            Pruned Sibling Nodes: Turn 3b (01912a34-0003b)<br>
+            Active Pin: meta.pinnedLeafTurnId = "01912a34-0003a"
+          </div>
+        `;
+      }
+    }
+  </script>
+</body>
+</html>

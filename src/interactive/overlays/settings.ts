@@ -118,7 +118,12 @@ class SettingsSelectList extends SelectList {
  * overlay only offers a global save that a restart picks up.
  */
 type SettingScope = "live" | "restart";
-const RESTART_REQUIRED_IDS = new Set<string>(["budget.concurrency", "runtimePlugins"]);
+const RESTART_REQUIRED_IDS = new Set<string>([
+	"budget.concurrency",
+	"runtimePlugins",
+	"terminal.tuiMode",
+	"terminal.fullscreenScrollbar",
+]);
 
 export const SETTINGS_SECTIONS = [
 	{ id: "safety", label: "Autonomy & Safety", group: "CORE" },
@@ -140,7 +145,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 	orchestrator: "Interactive chat routing and the optional proactive-memory model plane.",
 	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers, and where they run.",
 	targets: "Configured inference targets: which one chat and the fleet use, and whether each answers.",
-	models: "The /models picker, favorites, and Alt+J / Alt+K cycling.",
+	models: "The /model picker, favorites, and Alt+J / Alt+K cycling.",
 	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
 	compaction: "When and how the context window is summarized under pressure.",
 	retry: "Automatic recovery from transient provider and network errors.",
@@ -190,6 +195,8 @@ export const SETTINGS_LABELS_BY_ID = {
 	"retry.maxDelayMs": "Max delay (ms)",
 	"terminal.showTerminalProgress": "Terminal progress badges",
 	"terminal.outputVerbosity": "Output detail",
+	"terminal.tuiMode": "TUI mode",
+	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
 	theme: "Theme",
 	runtimePlugins: "Runtime plugins",
 	"compaction.model": "Compaction model",
@@ -254,7 +261,13 @@ export const SETTINGS_SECTION_ROWS = {
 	budget: ["budget.sessionCeilingUsd", "defaults.maxTokens", "budget.concurrency"],
 	compaction: ["compaction.auto", "compaction.threshold", "compaction.excludeLastTurns"],
 	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs"],
-	terminal: ["terminal.showTerminalProgress", "terminal.outputVerbosity", "theme"],
+	terminal: [
+		"terminal.showTerminalProgress",
+		"terminal.outputVerbosity",
+		"terminal.tuiMode",
+		"terminal.fullscreenScrollbar",
+		"theme",
+	],
 	advanced: [
 		"runtimePlugins",
 		"compaction.model",
@@ -293,8 +306,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
 	scope: "Alt+J and Alt+K model cycle set.",
-	"modelSelector.recentLimit": "How many recently used models /models remembers.",
-	"modelSelector.favorites": "Exact target/model refs pinned in /models.",
+	"modelSelector.recentLimit": "How many recently used models /model remembers.",
+	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
 	"defaults.maxTokens": "Output tokens requested per turn, applied to every target.",
 	"budget.concurrency": "Parallel workers allowed during dispatch.",
@@ -307,6 +320,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"retry.maxDelayMs": "Maximum retry delay in milliseconds.",
 	"terminal.showTerminalProgress": "Emit OSC 9;4 progress badges during agent turns.",
 	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
+	"terminal.tuiMode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
+	"terminal.fullscreenScrollbar": "When the draggable transcript scrollbar is visible in fullscreen mode.",
 	theme: "Color palette. Clio ships a single tuned palette.",
 	runtimePlugins: "npm packages exporting clioRuntimes: RuntimeDescriptor[].",
 	"compaction.model": "Dedicated summarization model; blank uses the orchestrator.",
@@ -366,7 +381,7 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	},
 	"compaction.auto": {
 		true: "compact automatically before a turn crosses the threshold",
-		false: "context is only compacted when you run /compact",
+		false: "context is only compacted when you run /context compact",
 	},
 	"retry.enabled": {
 		true: "retry transient provider errors automatically",
@@ -384,6 +399,15 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		minimal: "quiet transcript; tools stay to one-line outcomes and reasoning stays folded",
 		default: "balanced transcript; unfold the latest tool, worker, or reasoning block on demand",
 		verbose: "transparent transcript; reasoning, arguments, and live tool output stay visible",
+	},
+	"terminal.tuiMode": {
+		regular: "preserve terminal scrollback and render the composer below the transcript",
+		fullscreen: "use the alternate screen with an independently scrollable transcript and sticky composer/footer",
+	},
+	"terminal.fullscreenScrollbar": {
+		hidden: "never draw the fullscreen transcript scrollbar",
+		auto: "show the scrollbar while scrolling or dragging",
+		always: "reserve the rightmost column for the scrollbar",
 	},
 };
 
@@ -1319,7 +1343,7 @@ export function buildSettingItems(
 			values: ["6", "12", "20", "50"],
 		}),
 		settingItem("modelSelector.favorites", favorites.length > 0 ? `${favorites.length} pinned` : "(none)", {
-			affordance: "manage in /models",
+			affordance: "manage in /model",
 			readOnly: true,
 		}),
 		settingItem("budget.sessionCeilingUsd", String(settings.budget.sessionCeilingUsd), {
@@ -1358,6 +1382,12 @@ export function buildSettingItems(
 		}),
 		settingItem("terminal.outputVerbosity", terminal.outputVerbosity, {
 			values: ["minimal", "default", "verbose"],
+		}),
+		settingItem("terminal.tuiMode", terminal.tuiMode, {
+			values: ["regular", "fullscreen"],
+		}),
+		settingItem("terminal.fullscreenScrollbar", terminal.fullscreenScrollbar, {
+			values: ["hidden", "auto", "always"],
 		}),
 		settingItem("theme", settings.theme, {
 			affordance: "single clio-coder palette",
@@ -1831,6 +1861,14 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "terminal.outputVerbosity":
 			if (value === "minimal" || value === "default" || value === "verbose") settings.terminal.outputVerbosity = value;
+			return;
+		case "terminal.tuiMode":
+			if (value === "regular" || value === "fullscreen") settings.terminal.tuiMode = value;
+			return;
+		case "terminal.fullscreenScrollbar":
+			if (value === "hidden" || value === "auto" || value === "always") {
+				settings.terminal.fullscreenScrollbar = value;
+			}
 			return;
 		case "runtimePlugins":
 			settings.runtimePlugins = value

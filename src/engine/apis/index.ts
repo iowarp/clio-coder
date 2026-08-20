@@ -1,10 +1,8 @@
 import { registerApiProvider } from "@earendil-works/pi-ai/compat";
 
-import { lmstudioNativeApiProvider } from "./lmstudio-native.js";
 import { ollamaNativeApiProvider } from "./ollama-native.js";
 import { openAICompletionsApiProvider } from "./openai-completions.js";
 
-export { lmstudioNativeApiProvider } from "./lmstudio-native.js";
 export { ollamaNativeApiProvider } from "./ollama-native.js";
 export { openAICompletionsApiProvider } from "./openai-completions.js";
 export { setGlobalDefaultMaxOutputTokens } from "./output-budget.js";
@@ -16,5 +14,4 @@ export function registerClioApiProviders(): void {
 	registered = true;
 	registerApiProvider(openAICompletionsApiProvider, "clio");
 	registerApiProvider(ollamaNativeApiProvider, "clio");
-	registerApiProvider(lmstudioNativeApiProvider, "clio");
 }

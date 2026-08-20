@@ -24,7 +24,7 @@ skills:
   - name: context-handoff
     path: context/context-handoff
     version: 0.3.1
-    sha256: 281e33a6c0919d82821d9831f052077ac368488754a1836ba9e1580b2d1401f7
+    sha256: 2dc67e24a88607dbedb12163d8afd412421b004df7a845e301accc4e908e18ff
   - name: context-prime
     path: context/context-prime
     version: 0.2.2
@@ -62,7 +62,7 @@ skills:
   - name: clio-test
     path: meta/clio-test
     version: 0.1.3
-    sha256: 681aa0c087e6bf97cca3d8023966fd0f09d086f983d3db75276551a822570977
+    sha256: 99683ea7d7bf5bf57788e58ee6c66e01a4e30ec8d3d7d0a1f8b2b85caff4ae5a
   - name: credentials
     path: meta/credentials
     version: 0.1.2

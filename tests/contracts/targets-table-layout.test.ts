@@ -22,7 +22,7 @@ const ROWS: ReadonlyArray<TargetTableRow> = [
 	{
 		id: "local-lmstudio-workstation",
 		tier: "local-native",
-		runtime: "lmstudio-native",
+		runtime: "lmstudio",
 		auth: "none",
 		url: "http://localhost:1234/v1/openai/compat",
 		model: "qwen3-coder-30b-a3b-instruct-mlx@8bit",
@@ -107,7 +107,8 @@ describe("contracts/targets table layout", () => {
 		const [first = "", second = ""] = table.rows;
 		// Same offset for the runtime cell on both rows is the property the fixed
 		// widths were reaching for and lost as soon as an id overran.
-		strictEqual(first.indexOf("lmstudio-native"), second.indexOf("anthropic", 1));
-		strictEqual(table.header.indexOf("runtime"), first.indexOf("lmstudio-native"));
+		const runtimeOffset = first.indexOf("lmstudio", ROWS[0]?.id.length ?? 0);
+		strictEqual(runtimeOffset, second.indexOf("anthropic", 1));
+		strictEqual(table.header.indexOf("runtime"), runtimeOffset);
 	});
 });

@@ -14,8 +14,10 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
+import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { createAgentProgress } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -35,6 +37,7 @@ import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
+import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
 	ContextClearCommandOptions,
@@ -124,6 +127,12 @@ export interface InteractiveDeps {
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Live session task board for the footer tasks row and the /tasks overlay. */
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Settled interview snapshots folded from the active session branch. */
+	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
+	/** Append an acknowledged operator-authored decision revision. */
+	supersedeDecision?: (interviewId: string, key: string, correction?: string) => unknown;
+	/** Project-scoped operator task inbox used by `/tasks` subcommands. */
+	userTasks?: UserTasksStore;
 	/** Live, read-only task-memory state for status surfaces and the /memory overlay. */
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	/** Newest structured handoff available for an opt-in seed, when enabled. */
@@ -174,7 +183,7 @@ export interface InteractiveDeps {
 	 */
 	onForkSession?: (parentTurnId: string) => void;
 	/**
-	 * Run /compact for the current session. Resolves the compaction model
+	 * Run `/context compact` for the current session. Resolves the compaction model
 	 * (settings.compaction.model with fallback to the orchestrator target),
 	 * reads session entries, streams a summary via the session compaction
 	 * engine, and persists a compactionSummary entry.
@@ -256,6 +265,8 @@ export interface KeyBindingDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	openTasks: () => void;
+	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
@@ -269,6 +280,7 @@ export interface KeyBindingDeps {
 	toggleAllThinkingExpansion: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
+	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 }
 
@@ -314,6 +326,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio.message.followUp":
 			deps.queueFollowUp();
 			return true;
+		case "clio.message.interrupt":
+			deps.interruptWithMessage();
+			return true;
 		case "clio.message.dequeue":
 			deps.restoreQueuedFollowUps();
 			return true;
@@ -334,6 +349,12 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			return true;
 		case "clio.dispatchBoard.toggle":
 			deps.toggleDispatchBoard();
+			return true;
+		case "clio.tasks.open":
+			deps.openTasks();
+			return true;
+		case "clio.decisions.open":
+			deps.openDecisions();
 			return true;
 		case "clio.dispatch.background":
 			deps.backgroundDispatch();
@@ -363,6 +384,8 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		"clio.thinking.cycle",
 		"clio.session.tree",
 		"clio.dispatchBoard.toggle",
+		"clio.tasks.open",
+		"clio.decisions.open",
 		"clio.dispatch.background",
 		"clio.model.select",
 		// Match cycleBackward before cycleForward so a user rebind where one key
@@ -379,7 +402,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 }
 
 export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
-	const shell = createProcessInteractiveShell();
+	const shell = createProcessInteractiveShell({ tuiMode: deps.getSettings?.().terminal.tuiMode ?? "regular" });
 	const { terminal, tui } = shell;
 	let applicationController: ApplicationController;
 	const workspaceFacts = createWorkspaceFacts({
@@ -406,9 +429,15 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	 * the footer reads it and the input runtime that flips it is built later.
 	 */
 	let leaderArmed = false;
+	/**
+	 * A Ctrl+C armed the double tap and its 500ms window is still open. Owned
+	 * here for the same reason as the leader flag above.
+	 */
+	let shutdownArmed = false;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLeaderArmed: () => leaderArmed,
+		getShutdownArmed: () => shutdownArmed,
 		providers: deps.providers,
 		dispatch: deps.dispatch,
 		observability: deps.observability,
@@ -486,6 +515,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		io,
 		bus: deps.bus,
 		dispatch: deps.dispatch,
+		...(deps.session ? { session: deps.session } : {}),
 		providers: deps.providers,
 		chat: deps.chat,
 		chatPanel,
@@ -494,6 +524,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(interopSurface ? { interop: interopSurface } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.share ? { share: deps.share } : {}),
+		...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.writeSettings ? { writeSettings: deps.writeSettings } : {}),
 		...(deps.commitSetting ? { commitSetting: deps.commitSetting } : {}),
@@ -516,6 +547,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
+		openDecisions: () => openDecisionsOverlayState(),
 		openMemory: () => openMemoryOverlayState(),
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
@@ -560,6 +592,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		contextActivityStore,
 		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		isFooterExpanded: () => footer.isExpanded(),
+		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 	});
 	/**
 	 * The one transcript reset. The chat panel and the worker fold are two views
@@ -599,6 +632,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		openTasksOverlayState,
+		openDecisionsOverlayState,
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openModelOverlayState,
@@ -639,11 +673,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		tui.requestRender();
 	};
 
-	const startNewSession = (): void => {
+	const startNewSession = async (): Promise<void> => {
 		if (!deps.onNewSession) {
 			emitCommandNotice(slashRuntime.notice, "error", "new", "session contract unavailable");
 			return;
 		}
+		const settlement = settleChatBeforeSessionSwitch(deps.chat);
+		if (settlement) await settlement;
 		deps.onNewSession();
 		deps.observability.resetSession();
 		presentation.resetForNewSession();
@@ -721,6 +757,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		refreshFooter: () => footer.refresh(),
 		onLeaderStateChange: (pending) => {
 			leaderArmed = pending;
+		},
+		onShutdownArmedChange: (armed) => {
+			shutdownArmed = armed;
 		},
 		dispatchBoard,
 		steerSelectedDispatch,

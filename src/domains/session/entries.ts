@@ -85,10 +85,10 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
 
 /**
  * Why a compaction run fired. Persisted on CompactionSummaryEntry so post-mortem
- * tools can distinguish a threshold-driven shrink from a user-issued /compact
+ * tools can distinguish a threshold-driven shrink from a user-issued `/context compact`
  * and from a context-overflow retry.
  *   - "auto"      : pre-submit context-pressure trigger via shouldCompact().
- *   - "force"     : explicit /compact slash command or CLIO_CODER_FORCE_COMPACT=1.
+ *   - "force"     : explicit `/context compact` command or CLIO_CODER_FORCE_COMPACT=1.
  *   - "overflow"  : compact-and-retry path after a context overflow error.
  */
 export type CompactionTrigger = "auto" | "force" | "overflow";
@@ -183,6 +183,8 @@ export interface TaskLedgerGoal {
 	status: TaskLedgerStatus;
 	parentGoalId?: string | null;
 	description?: string;
+	origin?: "agent" | "user";
+	userTaskId?: string;
 }
 
 export interface TaskLedgerValidationEvidence {
@@ -197,10 +199,37 @@ export interface TaskLedgerValidationEvidence {
 
 export interface TaskLedgerEntry extends BaseSessionEntry {
 	kind: "taskLedger";
+	boardId?: string;
 	goals: TaskLedgerGoal[];
 	subgoals: TaskLedgerGoal[];
 	activeRunIds: string[];
 	requiredValidationEvidence: TaskLedgerValidationEvidence[];
+}
+
+export type DecisionStatus = "active" | "superseded";
+
+export interface DecisionRecord {
+	key: string;
+	value: string;
+	label?: string;
+	source_question?: string;
+	status: DecisionStatus;
+	decidedAt: string;
+	revisedAt?: string;
+	correction?: string;
+}
+
+/** One complete, branch-anchored snapshot of a settled operator interview. */
+export interface DecisionLedgerEntry extends BaseSessionEntry {
+	kind: "decisionLedger";
+	interviewId: string;
+	interviewStatus: "complete" | "cancelled";
+	startedAt: string;
+	endedAt: string;
+	roundCount: number;
+	summary?: string;
+	transcriptPath?: string;
+	decisions: DecisionRecord[];
 }
 
 /** Who asked for a dispatched run. Internal runs never reach the transcript, so they never reach this entry. */
@@ -261,6 +290,7 @@ export type SessionEntry =
 	| ProtectedArtifactEntry
 	| SkillActivationEntry
 	| TaskLedgerEntry
+	| DecisionLedgerEntry
 	| WorkerRunEntry;
 
 export type SessionFileEntry = SessionHeader | SessionEntry;
@@ -285,6 +315,7 @@ export const SESSION_ENTRY_KINDS = [
 	"protectedArtifact",
 	"skillActivation",
 	"taskLedger",
+	"decisionLedger",
 	"workerRun",
 ] as const;
 
@@ -354,6 +385,8 @@ const TASK_LEDGER_EVIDENCE_STATUSES: readonly TaskLedgerEvidenceStatus[] = [
 	"failed",
 	"missing",
 ];
+const DECISION_STATUSES: readonly DecisionStatus[] = ["active", "superseded"];
+const DECISION_INTERVIEW_STATUSES = ["complete", "cancelled"] as const;
 const WORKER_RUN_ORIGINS: readonly WorkerRunOrigin[] = ["user", "agent"];
 const WORKER_RUN_RUNTIME_KINDS: readonly WorkerRunRuntimeKind[] = ["clio", "acp", "claude-sdk", "claude-code"];
 
@@ -372,7 +405,11 @@ function isTaskLedgerGoal(value: unknown): value is TaskLedgerGoal {
 	if (!isString(value.id) || !isString(value.title)) return false;
 	if (!isOneOf(value.status, TASK_LEDGER_STATUSES)) return false;
 	if (value.parentGoalId !== undefined && !isNullableString(value.parentGoalId)) return false;
-	return isOptionalString(value.description);
+	const hasPairedProvenance =
+		value.origin === "user"
+			? isString(value.userTaskId) && /^u[1-9]\d*$/.test(value.userTaskId)
+			: (value.origin === undefined || value.origin === "agent") && value.userTaskId === undefined;
+	return isOptionalString(value.description) && hasPairedProvenance;
 }
 
 function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvidence {
@@ -385,6 +422,17 @@ function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvid
 		isOptionalString(value.observedAt) &&
 		isOptionalString(value.notes)
 	);
+}
+
+function isDecisionRecord(value: unknown): value is DecisionRecord {
+	if (!isRecord(value)) return false;
+	if (!isString(value.key) || !/^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(value.key)) return false;
+	if (!isString(value.value) || !isOneOf(value.status, DECISION_STATUSES) || !isString(value.decidedAt)) return false;
+	if (!isOptionalString(value.label) || !isOptionalString(value.source_question)) return false;
+	if (!isOptionalString(value.revisedAt) || !isOptionalString(value.correction)) return false;
+	return value.status === "superseded"
+		? isString(value.revisedAt)
+		: value.revisedAt === undefined && value.correction === undefined;
 }
 
 function isOptionalCompactionUsage(value: unknown): boolean {
@@ -487,6 +535,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			return isSkillActivation(v.activation);
 		case "taskLedger":
 			return (
+				isOptionalString(v.boardId) &&
 				Array.isArray(v.goals) &&
 				v.goals.every(isTaskLedgerGoal) &&
 				Array.isArray(v.subgoals) &&
@@ -494,6 +543,20 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isStringArray(v.activeRunIds) &&
 				Array.isArray(v.requiredValidationEvidence) &&
 				v.requiredValidationEvidence.every(isTaskLedgerEvidence)
+			);
+		case "decisionLedger":
+			return (
+				isString(v.interviewId) &&
+				isOneOf(v.interviewStatus, DECISION_INTERVIEW_STATUSES) &&
+				isString(v.startedAt) &&
+				isString(v.endedAt) &&
+				isNumber(v.roundCount) &&
+				Number.isInteger(v.roundCount) &&
+				v.roundCount >= 0 &&
+				isOptionalString(v.summary) &&
+				isOptionalString(v.transcriptPath) &&
+				Array.isArray(v.decisions) &&
+				v.decisions.every(isDecisionRecord)
 			);
 		case "workerRun":
 			return (

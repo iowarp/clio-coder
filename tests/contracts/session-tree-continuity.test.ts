@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import { foldDecisionBoard } from "../../src/domains/session/decision-board.js";
 import type { SessionEntry, TaskLedgerEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { foldSessionArtifacts } from "../../src/domains/session/session-artifacts.js";
+import { foldSessionTaskHistory } from "../../src/domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
@@ -68,8 +71,8 @@ function seedBranchedSession(contract: SessionContract): {
 describe("contracts/session-tree-continuity", () => {
 	let scratch: string;
 
-	beforeEach(() => {
-		scratch = newScratchClioHome("clio-tree-continuity-");
+	beforeEach(async () => {
+		scratch = await newScratchClioHome("clio-tree-continuity-");
 	});
 
 	afterEach(() => {
@@ -428,5 +431,265 @@ describe("contracts/session-tree-continuity", () => {
 		deepStrictEqual(texts, ["u1", "a1", "u3", "a3", "u4", "a4"]);
 
 		await contract.close();
+	});
+
+	// issue #94, finding 5: the /tree pin lived in memory only, so a switch made
+	// without a follow-up message was silently lost on quit and resume put the
+	// operator back on the abandoned tip via computeLeafId's timestamp inference.
+	it("a /tree switch with no follow-up message survives quit and resume", async () => {
+		const first = createSessionBundle(stubContext());
+		const { sessionId, a1, a2 } = seedBranchedSession(first.contract);
+		// seedBranchedSession already switches to a1 and appends u3/a3 on the new
+		// branch; switch back to a1 again and quit without sending anything.
+		first.contract.switchTurn(a1);
+		await first.contract.close();
+
+		const second = createSessionBundle(stubContext());
+		const resumed = second.contract.resume(sessionId);
+		strictEqual(resumed.id, sessionId);
+		strictEqual(second.contract.tree(sessionId).leafId, a1, "the persisted pin wins over timestamp inference");
+		ok(a1 !== a2, "sanity: a1 and a2 are actually different turns");
+
+		await second.contract.close();
+	});
+
+	// issue #107: the pin surviving quit was only half the fix. Resume replayed
+	// the file unfiltered, so the abandoned turns after the pin rendered as
+	// ordinary history above the prompt while the engine extended from the pin.
+	// The transcript and the branch the next message parents onto disagreed, and
+	// the disagreement was silent.
+	it("resume renders the pinned branch only, and the next append extends it", async () => {
+		const first = createSessionBundle(stubContext());
+		const contract = first.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+		contract.switchTurn(a1.id);
+		await contract.close();
+
+		const second = createSessionBundle(stubContext());
+		const resumed = second.contract;
+		resumed.resume(meta.id);
+		const leafTurnId = resumed.tree(meta.id).leafId;
+		strictEqual(leafTurnId, a1.id, "resolveLeafOnOpen honors the persisted pin");
+
+		const entries = sessionEntries(meta.id);
+		deepStrictEqual(
+			textBlocks(buildReplayAgentMessagesFromTurns(entries)),
+			["u1", "a1", "u2", "a2"],
+			"the file still holds the abandoned turns; only the leaf tells them apart",
+		);
+		deepStrictEqual(
+			textBlocks(buildReplayAgentMessagesFromTurns(entries, { activeLeafTurnId: leafTurnId ?? undefined })),
+			["u1", "a1"],
+			"the rendered transcript stops at the pin",
+		);
+
+		// session.append refuses any parent that is not the session's current leaf,
+		// so this both appends and asserts what the pin made the next append point.
+		const u3 = resumed.append({ parentId: a1.id, kind: "user", payload: { text: "u3" } });
+		strictEqual(u3.parentId, a1.id);
+		deepStrictEqual(
+			textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(meta.id))),
+			["u1", "a1", "u3"],
+			"the append made the pin authoritative for every later reader too",
+		);
+
+		await resumed.close();
+	});
+
+	// The pin names a turn, not an exchange: /tree rows are turns, so pinning the
+	// user turn resumes with that prompt alone and parents the next message onto
+	// it. That is what the live capture on issue #107 recorded.
+	it("resume on a pinned user turn renders that turn alone and parents onto it", async () => {
+		const first = createSessionBundle(stubContext());
+		const contract = first.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "a2" } });
+		contract.switchTurn(u1.id);
+		await contract.close();
+
+		const second = createSessionBundle(stubContext());
+		const resumed = second.contract;
+		resumed.resume(meta.id);
+		const leafTurnId = resumed.tree(meta.id).leafId;
+		strictEqual(leafTurnId, u1.id);
+
+		deepStrictEqual(
+			textBlocks(
+				buildReplayAgentMessagesFromTurns(sessionEntries(meta.id), { activeLeafTurnId: leafTurnId ?? undefined }),
+			),
+			["u1"],
+			"a1 is the pinned turn's child, not its ancestor, so it is not on the path",
+		);
+		const next = resumed.append({ parentId: u1.id, kind: "user", payload: { text: "u3" } });
+		strictEqual(next.parentId, u1.id);
+
+		await resumed.close();
+	});
+
+	// issue #94: fork's positional cut for unanchored sidecars (task board,
+	// routing notices, leafless workerRun) is now the rule active-path replay
+	// follows too, so /tree switch and /fork of the same turn agree on what the
+	// model sees. Before this fix, filterEntriesToActivePath kept every
+	// unanchored sidecar regardless of file position while fork.ts's
+	// sessionEntryBelongsToPath dropped anything written after the fork point;
+	// the same turn reached the two ways produced two different task boards.
+	it("/tree switch and /fork of the same turn reconstruct the same composite task snapshot", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const ledgerFields = { subgoals: [], activeRunIds: [], requiredValidationEvidence: [] };
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "u1" } });
+		contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: null,
+			goals: [{ id: "board", title: "board as of a1", status: "active" }],
+			...ledgerFields,
+		});
+		const keptArtifact = contract.append({
+			parentId: u1.id,
+			kind: "tool_result",
+			payload: {
+				toolName: "write",
+				isError: false,
+				result: { details: { paths: ["reports/kept.md"] } },
+			},
+		});
+		const a1 = contract.append({ parentId: keptArtifact.id, kind: "assistant", payload: { text: "a1" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u2" } });
+		contract.appendEntry({
+			kind: "taskLedger",
+			parentTurnId: null,
+			goals: [{ id: "board", title: "board as of a2, on the abandoned branch", status: "active" }],
+			...ledgerFields,
+		});
+		const abandonedArtifact = contract.append({
+			parentId: u2.id,
+			kind: "tool_result",
+			payload: {
+				toolName: "write",
+				isError: false,
+				result: { details: { paths: ["reports/abandoned.md"] } },
+			},
+		});
+		contract.append({ parentId: abandonedArtifact.id, kind: "assistant", payload: { text: "a2" } });
+
+		// Reconstruction 1: /tree switch back to a1, then replay/fold as of a1.
+		contract.switchTurn(a1.id);
+		const liveEntries = filterEntriesToActivePath(sessionEntries(meta.id), a1.id);
+		const liveLedgers = liveEntries.filter(
+			(entry): entry is TaskLedgerEntry => (entry as { kind?: string }).kind === "taskLedger",
+		);
+		strictEqual(liveLedgers.length, 1, "only the taskLedger written at or before a1 is visible");
+		strictEqual(liveLedgers[0]?.goals[0]?.title, "board as of a1");
+		const liveComposite = {
+			history: foldSessionTaskHistory(liveEntries),
+			artifacts: foldSessionArtifacts(liveEntries, { workspace: process.cwd() }),
+		};
+		strictEqual(liveComposite.artifacts[0]?.path, "reports/kept.md");
+		strictEqual(
+			liveComposite.artifacts.some((artifact) => artifact.path === "reports/abandoned.md"),
+			false,
+		);
+		await contract.close();
+
+		// Reconstruction 2: /fork at a1 from a fresh contract over the same file.
+		const second = createSessionBundle(stubContext());
+		second.contract.resume(meta.id);
+		const forkedMeta = second.contract.fork(a1.id);
+		const forkedLedgers = sessionEntries(forkedMeta.id).filter(
+			(entry): entry is TaskLedgerEntry => (entry as { kind?: string }).kind === "taskLedger",
+		);
+		strictEqual(forkedLedgers.length, 1);
+		strictEqual(forkedLedgers[0]?.goals[0]?.title, "board as of a1");
+		const forkedEntries = sessionEntries(forkedMeta.id);
+		const forkedComposite = {
+			history: foldSessionTaskHistory(forkedEntries),
+			artifacts: foldSessionArtifacts(forkedEntries, { workspace: process.cwd() }),
+		};
+
+		// Same turn, two reconstruction paths, same task history and artifacts.
+		strictEqual(liveLedgers[0]?.goals[0]?.title, forkedLedgers[0]?.goals[0]?.title);
+		deepStrictEqual(forkedComposite, liveComposite);
+
+		await second.contract.close();
+	});
+
+	it("/tree and /fork reconstruct finalized and revised decision snapshots identically", async () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: process.cwd() });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "choose scope" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "scope chosen" } });
+		const baseSnapshot = {
+			kind: "decisionLedger" as const,
+			interviewId: "interview-tree-1",
+			interviewStatus: "complete" as const,
+			startedAt: "2026-08-19T10:00:00.000Z",
+			endedAt: "2026-08-19T10:02:00.000Z",
+			roundCount: 1,
+			summary: "Use focused scope.",
+			decisions: [
+				{
+					key: "scope",
+					value: "focused",
+					status: "active" as const,
+					decidedAt: "2026-08-19T10:01:00.000Z",
+				},
+			],
+		};
+		const baseDecision = baseSnapshot.decisions[0];
+		ok(baseDecision);
+		// Host finalization occurs after the terminal assistant message. Its
+		// originating-user anchor must keep it visible at a1 anyway.
+		contract.appendEntry({ ...baseSnapshot, parentTurnId: u1.id });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "revise scope" } });
+		const a2 = contract.append({ parentId: u2.id, kind: "assistant", payload: { text: "scope revised" } });
+		contract.appendEntry({
+			...baseSnapshot,
+			parentTurnId: a2.id,
+			decisions: [
+				{
+					...baseDecision,
+					status: "superseded",
+					revisedAt: "2026-08-19T10:04:00.000Z",
+					correction: "cover every package",
+				},
+			],
+		});
+
+		const allEntries = sessionEntries(meta.id);
+		const treeFinalized = foldDecisionBoard(filterEntriesToActivePath(allEntries, a1.id));
+		const treeRevised = foldDecisionBoard(filterEntriesToActivePath(allEntries, a2.id));
+		strictEqual(treeFinalized.length, 1);
+		strictEqual(treeFinalized[0]?.decisions[0]?.status, "active");
+		strictEqual(treeRevised[0]?.decisions[0]?.status, "superseded");
+		await contract.close();
+
+		const finalizedForkBundle = createSessionBundle(stubContext());
+		finalizedForkBundle.contract.resume(meta.id);
+		const finalizedFork = finalizedForkBundle.contract.fork(a1.id);
+		const forkFinalized = foldDecisionBoard(sessionEntries(finalizedFork.id));
+		deepStrictEqual(
+			forkFinalized.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+			treeFinalized.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+		);
+		await finalizedForkBundle.contract.close();
+
+		const revisedForkBundle = createSessionBundle(stubContext());
+		revisedForkBundle.contract.resume(meta.id);
+		const revisedFork = revisedForkBundle.contract.fork(a2.id);
+		const forkRevised = foldDecisionBoard(sessionEntries(revisedFork.id));
+		deepStrictEqual(
+			forkRevised.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+			treeRevised.map(({ turnId: _turnId, timestamp: _timestamp, ...entry }) => entry),
+		);
+		await revisedForkBundle.contract.close();
 	});
 });

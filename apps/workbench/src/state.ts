@@ -1,0 +1,564 @@
+/**
+ * Renderer state for protocol v3.
+ *
+ * The host holds the authoritative projection; this module validates what
+ * arrives, folds turn events through the same `applyTurnEvent` the host used,
+ * and keeps nothing the host did not send. One project is open at a time.
+ */
+
+import {
+	type CommandErrorCode,
+	type ProjectBrowseListingPayload,
+	PROTOCOL_VERSION,
+	type ServerEvent,
+	validateServerEvent,
+	type WireClioSnapshot,
+	type WireDeleteChallenge,
+	type WireProjectPath,
+	type WireProjectSummary,
+	type WireProjectWorkspace,
+	type WireSessionSummary,
+	type WireSettingsState,
+	type WireTarget,
+	type WireTreeNode,
+} from "./protocol.ts";
+import {
+	applyTurnEvent,
+	emptyTurnProjection,
+	restoreTurnProjection,
+	type TurnEventInput,
+	type TurnProjection,
+} from "./timeline.ts";
+
+export type ConnectionState = "connecting" | "connected" | "disconnected" | "failed";
+
+export interface OpenWorkspaceState {
+	readonly project: WireProjectSummary;
+	readonly tree: readonly WireTreeNode[];
+	readonly treeTruncated: boolean;
+	readonly sessions: readonly WireSessionSummary[];
+	readonly sessionsTruncated: boolean;
+	readonly clio: WireClioSnapshot;
+	readonly projection: TurnProjection;
+	readonly deleteChallenge: WireDeleteChallenge | null;
+	readonly settings: WireSettingsState | null;
+	readonly targets: readonly WireTarget[] | null;
+	readonly targetsTruncated: boolean;
+	readonly processGeneration: string | null;
+}
+
+export interface WireBootstrap {
+	readonly protocolVersion: typeof PROTOCOL_VERSION;
+	readonly appName: "Clio Workbench";
+	readonly workspaceInstanceId: string;
+	readonly localToken: string;
+	readonly mode: "browser" | "desktop";
+	readonly openProjectId: string | null;
+	readonly workspace: WireProjectWorkspace | null;
+	readonly recent: readonly WireProjectSummary[];
+	readonly homePath: string;
+	readonly stateDirNote: string;
+	readonly securityNote: string;
+}
+
+export interface Notice {
+	readonly tone: "error" | "warning" | "info";
+	readonly message: string;
+}
+
+export interface AppState {
+	readonly boot: "loading" | "ready" | "failed";
+	readonly bootError: string | null;
+	readonly workspaceInstanceId: string | null;
+	readonly localToken: string | null;
+	readonly mode: "browser" | "desktop";
+	readonly connection: ConnectionState;
+	readonly open: OpenWorkspaceState | null;
+	readonly recent: readonly WireProjectSummary[];
+	readonly homePath: string;
+	readonly stateDirNote: string;
+	readonly securityNote: string;
+	readonly browse: ProjectBrowseListingPayload | null;
+	readonly leftDrawerOpen: boolean;
+	readonly settingsOpen: boolean;
+	/**
+	 * Whether an approval may post a desktop notification. Held in memory only,
+	 * because the browser's own permission is the durable half of this decision
+	 * and Workbench must not keep a second, staler copy of it.
+	 */
+	readonly desktopNotifications: boolean;
+	readonly announcement: string;
+	readonly notice: Notice | null;
+	/** Request id of a submitted prompt whose acknowledgement has not arrived. */
+	readonly pendingTurnStart: string | null;
+	/**
+	 * The recent project a `project.select` is waiting on. A refusal for this
+	 * exact request is the only evidence the renderer has that a remembered folder
+	 * stopped being openable since bootstrap computed its availability.
+	 */
+	readonly pendingProjectSelect: { readonly requestId: string; readonly projectId: string } | null;
+	readonly lastSequence: number;
+}
+
+export type AppAction =
+	| { readonly type: "bootstrap.loaded"; readonly payload: WireBootstrap }
+	| { readonly type: "bootstrap.failed"; readonly message: string }
+	| { readonly type: "connection.changed"; readonly connection: ConnectionState }
+	| { readonly type: "drawer.left"; readonly open: boolean }
+	| { readonly type: "settings.opened"; readonly open: boolean }
+	| { readonly type: "notifications.set"; readonly enabled: boolean }
+	| { readonly type: "browse.dismissed" }
+	| { readonly type: "notice.dismissed" }
+	| { readonly type: "notice.raised"; readonly tone: Notice["tone"]; readonly message: string }
+	| { readonly type: "turn.submitted"; readonly requestId: string }
+	| { readonly type: "project.select.submitted"; readonly requestId: string; readonly projectId: string }
+	| { readonly type: "host.event"; readonly event: ServerEvent };
+
+export const initialAppState: AppState = {
+	boot: "loading",
+	bootError: null,
+	workspaceInstanceId: null,
+	localToken: null,
+	mode: "browser",
+	connection: "connecting",
+	open: null,
+	recent: [],
+	homePath: "/",
+	stateDirNote: "Workbench has not reported where it keeps its own state yet.",
+	securityNote: "Workbench has not reported its project boundary yet.",
+	browse: null,
+	leftDrawerOpen: false,
+	settingsOpen: false,
+	desktopNotifications: true,
+	announcement: "Loading Clio Workbench",
+	notice: null,
+	pendingTurnStart: null,
+	pendingProjectSelect: null,
+	lastSequence: 0,
+};
+
+const encoder = new TextEncoder();
+const BOOTSTRAP_KEYS = [
+	"protocolVersion",
+	"appName",
+	"workspaceInstanceId",
+	"localToken",
+	"mode",
+	"openProjectId",
+	"workspace",
+	"recent",
+	"homePath",
+	"stateDirNote",
+	"securityNote",
+] as const;
+
+function invalidBootstrap(detail: string): never {
+	throw new Error(`The Workbench bootstrap response did not match protocol v${PROTOCOL_VERSION}: ${detail}.`);
+}
+
+function expectExactBootstrapRecord(value: unknown): Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return invalidBootstrap("the payload must be a record");
+	}
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) {
+		return invalidBootstrap("the payload must be a plain record");
+	}
+	const record = value as Record<string, unknown>;
+	const expected = new Set<string>(BOOTSTRAP_KEYS);
+	for (const key of Object.keys(record)) {
+		if (!expected.has(key)) invalidBootstrap(`the payload has unknown field ${JSON.stringify(key)}`);
+	}
+	for (const key of BOOTSTRAP_KEYS) {
+		if (!Object.hasOwn(record, key)) invalidBootstrap(`the payload is missing field ${JSON.stringify(key)}`);
+	}
+	return record;
+}
+
+function expectBootstrapString(
+	value: unknown,
+	label: string,
+	options: { readonly maxBytes: number; readonly trim?: boolean } = { maxBytes: 4096 },
+): string {
+	if (typeof value !== "string" || value.length === 0) return invalidBootstrap(`${label} must be a non-empty string`);
+	if (options.trim && value.trim() !== value) return invalidBootstrap(`${label} must not have surrounding whitespace`);
+	if (encoder.encode(value).byteLength > options.maxBytes) return invalidBootstrap(`${label} is too long`);
+	for (const character of value) {
+		const codePoint = character.codePointAt(0) ?? 0;
+		if (codePoint === 0x7f || (codePoint < 0x20 && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d)) {
+			return invalidBootstrap(`${label} contains an unsafe control character`);
+		}
+	}
+	return value;
+}
+
+function expectBootstrapId(value: unknown, label: string): string {
+	const id = expectBootstrapString(value, label, { maxBytes: 128, trim: true });
+	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id)) return invalidBootstrap(`${label} is not a valid identifier`);
+	return id;
+}
+
+function expectAbsolutePath(value: unknown, label: string): string {
+	const path = expectBootstrapString(value, label, { maxBytes: 4096, trim: true });
+	if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/u.test(path)) return invalidBootstrap(`${label} must be absolute`);
+	return path;
+}
+
+/**
+ * The one contradiction the renderer refuses: an approval that is pending
+ * without the phase that says so, or the reverse. The host publishes the card
+ * and the phase in the same step, so a disagreement means a broken host.
+ */
+export function workspaceConsistencyError(workspace: WireProjectWorkspace): string | null {
+	const awaiting = workspace.clio.phase === "awaiting-approval";
+	if (awaiting !== (workspace.pendingPermission !== null)) {
+		return "pendingPermission must be present exactly while Clio awaits approval";
+	}
+	if (workspace.pendingPermission !== null && workspace.activeTurn === null) {
+		return "pendingPermission requires an active turn";
+	}
+	if (workspace.pendingPermission !== null && workspace.pendingPermission.toolCallId.length === 0) {
+		return "pendingPermission must name its tool call";
+	}
+	const sessionIds = new Set(workspace.sessions.map((session) => session.id));
+	if (sessionIds.size !== workspace.sessions.length) return "session identifiers must be unique";
+	return null;
+}
+
+function validateBootstrapWorkspace(
+	value: unknown,
+	workspaceInstanceId: string,
+	projectId: string,
+): WireProjectWorkspace {
+	let event: ServerEvent;
+	try {
+		// Reuse the protocol's authoritative workspace validator.
+		event = validateServerEvent({
+			protocolVersion: PROTOCOL_VERSION,
+			workspaceInstanceId,
+			sequence: 1,
+			eventId: "bootstrap-workspace",
+			kind: "project.opened",
+			projectId,
+			terminal: false,
+			payload: { workspace: value },
+		});
+	} catch (error) {
+		return invalidBootstrap(`workspace is invalid${error instanceof Error ? ` (${error.message})` : ""}`);
+	}
+	if (event.kind !== "project.opened") return invalidBootstrap("workspace could not be validated");
+	const consistency = workspaceConsistencyError(event.payload.workspace);
+	if (consistency !== null) return invalidBootstrap(`workspace is contradictory (${consistency})`);
+	return event.payload.workspace;
+}
+
+function validateRecent(value: unknown, workspaceInstanceId: string): readonly WireProjectSummary[] {
+	if (!Array.isArray(value) || value.length > 512) return invalidBootstrap("recent must be a bounded array");
+	const summaries = value.map((entry, index) => {
+		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+			return invalidBootstrap(`recent[${index}] must be a record`);
+		}
+		const record = entry as Record<string, unknown>;
+		return {
+			id: expectBootstrapId(record.id, `recent[${index}].id`),
+			displayName: expectBootstrapString(record.displayName, `recent[${index}].displayName`, {
+				maxBytes: 128,
+				trim: true,
+			}),
+			rootPath: expectAbsolutePath(record.rootPath, `recent[${index}].rootPath`),
+			lastOpenedAt: expectBootstrapString(record.lastOpenedAt, `recent[${index}].lastOpenedAt`, { maxBytes: 128 }),
+			available: typeof record.available === "boolean"
+				? record.available
+				: invalidBootstrap(`recent[${index}].available must be a boolean`),
+		};
+	});
+	if (new Set(summaries.map((entry) => entry.id)).size !== summaries.length) {
+		return invalidBootstrap("recent project identifiers must be unique");
+	}
+	void workspaceInstanceId;
+	return summaries;
+}
+
+export function parseBootstrapPayload(value: unknown): WireBootstrap {
+	const record = expectExactBootstrapRecord(value);
+	if (record.protocolVersion !== PROTOCOL_VERSION) invalidBootstrap(`protocolVersion must be ${PROTOCOL_VERSION}`);
+	if (record.appName !== "Clio Workbench") invalidBootstrap("appName is invalid");
+	const workspaceInstanceId = expectBootstrapId(record.workspaceInstanceId, "workspaceInstanceId");
+	const localToken = expectBootstrapString(record.localToken, "localToken", { maxBytes: 512, trim: true });
+	if (record.mode !== "browser" && record.mode !== "desktop") invalidBootstrap("mode is invalid");
+	const openProjectId = record.openProjectId === null ? null : expectBootstrapId(record.openProjectId, "openProjectId");
+	if ((record.workspace === null) !== (openProjectId === null)) {
+		invalidBootstrap("workspace and openProjectId must be present or absent together");
+	}
+	const workspace = record.workspace === null || openProjectId === null
+		? null
+		: validateBootstrapWorkspace(record.workspace, workspaceInstanceId, openProjectId);
+	if (workspace !== null && workspace.project.id !== openProjectId) {
+		invalidBootstrap("workspace does not describe the open project");
+	}
+	return {
+		protocolVersion: PROTOCOL_VERSION,
+		appName: "Clio Workbench",
+		workspaceInstanceId,
+		localToken,
+		mode: record.mode,
+		openProjectId,
+		workspace,
+		recent: validateRecent(record.recent, workspaceInstanceId),
+		homePath: expectAbsolutePath(record.homePath, "homePath"),
+		stateDirNote: expectBootstrapString(record.stateDirNote, "stateDirNote", { maxBytes: 4096 }),
+		securityNote: expectBootstrapString(record.securityNote, "securityNote", { maxBytes: 4096 }),
+	};
+}
+
+export function workspaceFromWire(workspace: WireProjectWorkspace): OpenWorkspaceState {
+	return {
+		project: workspace.project,
+		tree: workspace.tree,
+		treeTruncated: workspace.treeTruncated,
+		sessions: workspace.sessions,
+		sessionsTruncated: workspace.sessionsTruncated,
+		clio: workspace.clio,
+		projection: restoreTurnProjection({
+			timeline: workspace.timeline,
+			timelineTruncated: workspace.timelineTruncated,
+			activeTurn: workspace.activeTurn,
+			pendingPermission: workspace.pendingPermission,
+		}),
+		deleteChallenge: workspace.deleteChallenge,
+		settings: workspace.settings,
+		targets: workspace.targets,
+		targetsTruncated: workspace.targetsTruncated,
+		processGeneration: workspace.processGeneration,
+	};
+}
+
+const TURN_EVENT_KINDS = new Set<ServerEvent["kind"]>([
+	"turn.started",
+	"turn.text",
+	"turn.thought",
+	"turn.tool",
+	"turn.loop",
+	"turn.permission.requested",
+	"turn.permission.resolved",
+	"turn.terminal",
+]);
+
+function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string): OpenWorkspaceState {
+	if (TURN_EVENT_KINDS.has(event.kind)) {
+		if (event.turnId === undefined) return open;
+		const input = { kind: event.kind, turnId: event.turnId, payload: event.payload } as TurnEventInput;
+		return { ...open, projection: applyTurnEvent(open.projection, input, now) };
+	}
+	switch (event.kind) {
+		case "project.snapshot":
+		case "fs.changed":
+			return { ...open, tree: event.payload.tree, treeTruncated: event.payload.treeTruncated, deleteChallenge: null };
+		case "fs.delete.challenge":
+			return { ...open, deleteChallenge: event.payload };
+		case "clio.state":
+			return { ...open, clio: event.payload.snapshot };
+		case "session.list":
+			return { ...open, sessions: event.payload.sessions, sessionsTruncated: event.payload.truncated };
+		case "settings.state":
+			return { ...open, settings: event.payload.settings };
+		case "targets.state":
+			return { ...open, targets: event.payload.targets, targetsTruncated: event.payload.truncated };
+		case "targets.probed": {
+			const targetId = event.payload.targetId;
+			const health = event.payload.health;
+			return {
+				...open,
+				targets: (open.targets ?? []).map((target) => target.id === targetId ? { ...target, health } : target),
+			};
+		}
+		default:
+			return open;
+	}
+}
+
+function announcementFor(event: ServerEvent): string | null {
+	switch (event.kind) {
+		case "turn.permission.requested":
+			return `${event.payload.title} needs your approval`;
+		case "turn.terminal":
+			return event.payload.outcome === "completed" ? "Clio finished this turn." : event.payload.summary;
+		case "turn.loop":
+			return `Clio blocked a repeated ${event.payload.tool} call`;
+		case "clio.state":
+			return event.payload.snapshot.phase === "failed"
+				? (event.payload.snapshot.lastFailure?.summary ?? "Clio failed.")
+				: null;
+		case "project.opened":
+			return `${event.payload.workspace.project.displayName} is open`;
+		case "project.forgotten":
+			return "The project was closed and removed from the recent list";
+		default:
+			return null;
+	}
+}
+
+/** Command failures the composer must reflect rather than only announce. */
+function noticeToneFor(code: CommandErrorCode): Notice["tone"] {
+	return code === "conflict" || code === "refused" || code === "not-ready" ? "warning" : "error";
+}
+
+export function appReducer(state: AppState, action: AppAction): AppState {
+	switch (action.type) {
+		case "bootstrap.loaded": {
+			const open = action.payload.workspace === null ? null : workspaceFromWire(action.payload.workspace);
+			return {
+				...state,
+				boot: "ready",
+				bootError: null,
+				workspaceInstanceId: action.payload.workspaceInstanceId,
+				localToken: action.payload.localToken,
+				mode: action.payload.mode,
+				open,
+				recent: action.payload.recent,
+				homePath: action.payload.homePath,
+				stateDirNote: action.payload.stateDirNote,
+				securityNote: action.payload.securityNote,
+				announcement: open === null
+					? "Clio Workbench is ready. Open a project folder to begin."
+					: `${open.project.displayName} is open`,
+			};
+		}
+		case "bootstrap.failed":
+			return {
+				...state,
+				boot: "failed",
+				bootError: action.message,
+				connection: "failed",
+				announcement: action.message,
+			};
+		case "connection.changed":
+			return {
+				...state,
+				connection: action.connection,
+				lastSequence: action.connection === "connected" ? 0 : state.lastSequence,
+				announcement: action.connection === "connected"
+					? "Local Workbench connection ready"
+					: action.connection === "disconnected"
+					? "The local Workbench connection dropped; reconnecting"
+					: state.announcement,
+			};
+		case "drawer.left":
+			return { ...state, leftDrawerOpen: action.open };
+		case "settings.opened":
+			return { ...state, settingsOpen: action.open };
+		case "notifications.set":
+			return { ...state, desktopNotifications: action.enabled };
+		case "browse.dismissed":
+			return { ...state, browse: null };
+		case "notice.dismissed":
+			return { ...state, notice: null };
+		case "notice.raised":
+			return { ...state, notice: { tone: action.tone, message: action.message }, announcement: action.message };
+		case "turn.submitted":
+			return { ...state, pendingTurnStart: action.requestId };
+		case "project.select.submitted":
+			return { ...state, pendingProjectSelect: { requestId: action.requestId, projectId: action.projectId } };
+		case "host.event": {
+			const event = action.event;
+			if (state.workspaceInstanceId !== null && event.workspaceInstanceId !== state.workspaceInstanceId) return state;
+			if (event.kind === "connection.ready") {
+				return {
+					...state,
+					connection: "connected",
+					lastSequence: event.sequence,
+					announcement: "Local Workbench connection ready",
+				};
+			}
+			if (event.sequence <= state.lastSequence) return state;
+			const sequenced: AppState = { ...state, lastSequence: event.sequence };
+			switch (event.kind) {
+				case "protocol.error":
+					return {
+						...sequenced,
+						connection: "failed",
+						notice: { tone: "error", message: event.payload.message },
+						announcement: event.payload.message,
+						pendingTurnStart: null,
+					};
+				case "command.error": {
+					const pendingSelect = state.pendingProjectSelect;
+					const answersSelect = pendingSelect !== null && event.payload.requestId === pendingSelect.requestId;
+					// Only a refusal means the guards or the filesystem rejected the
+					// canonical path. A conflict or an internal fault says nothing about
+					// whether the folder is still openable, so neither may flip the row.
+					const unavailableId = answersSelect && event.payload.code === "refused" ? pendingSelect.projectId : null;
+					return {
+						...sequenced,
+						notice: { tone: noticeToneFor(event.payload.code), message: event.payload.message },
+						announcement: event.payload.message,
+						recent: unavailableId === null
+							? state.recent
+							: state.recent.map((entry) => entry.id === unavailableId ? { ...entry, available: false } : entry),
+						pendingTurnStart:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingTurnStart
+								? null
+								: state.pendingTurnStart,
+						pendingProjectSelect: answersSelect ? null : pendingSelect,
+					};
+				}
+				case "project.browse.listing":
+					return { ...sequenced, browse: event.payload };
+				case "project.opened": {
+					const consistency = workspaceConsistencyError(event.payload.workspace);
+					if (consistency !== null) {
+						return {
+							...sequenced,
+							notice: { tone: "error", message: "Workbench received a contradictory project snapshot and ignored it." },
+						};
+					}
+					const open = workspaceFromWire(event.payload.workspace);
+					return {
+						...sequenced,
+						open,
+						leftDrawerOpen: false,
+						browse: null,
+						recent: state.recent.some((entry) => entry.id === open.project.id)
+							? state.recent.map((entry) => entry.id === open.project.id ? open.project : entry)
+							: [open.project, ...state.recent],
+						pendingProjectSelect: state.pendingProjectSelect?.projectId === open.project.id
+							? null
+							: state.pendingProjectSelect,
+						announcement: `${open.project.displayName} is open`,
+					};
+				}
+				case "project.forgotten":
+					return {
+						...sequenced,
+						open: event.projectId === state.open?.project.id ? null : state.open,
+						recent: state.recent.filter((entry) => entry.id !== event.projectId),
+						pendingProjectSelect: state.pendingProjectSelect?.projectId === event.projectId
+							? null
+							: state.pendingProjectSelect,
+						announcement: "The project was removed from the recent list",
+					};
+				default: {
+					if (state.open === null || event.projectId !== state.open.project.id) return sequenced;
+					const open = applyToOpen(state.open, event, new Date().toISOString());
+					return {
+						...sequenced,
+						open,
+						pendingTurnStart: event.kind === "turn.started" ? null : state.pendingTurnStart,
+						announcement: announcementFor(event) ?? state.announcement,
+					};
+				}
+			}
+		}
+	}
+}
+
+export function formatProjectPath(path: WireProjectPath | Readonly<{ segments: readonly string[] }>): string {
+	return path.segments.length === 0 ? "/" : path.segments.join("/");
+}
+
+export function isPromptBlocked(open: OpenWorkspaceState | null): boolean {
+	if (open === null) return true;
+	return open.clio.phase === "running" || open.clio.phase === "awaiting-approval" || open.clio.phase === "cancelling";
+}
+
+export const emptyProjection = emptyTurnProjection;

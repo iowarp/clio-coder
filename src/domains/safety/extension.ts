@@ -31,7 +31,7 @@ import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./sc
 function isPermissionResolvedPayload(value: unknown): value is PermissionResolvedPayload {
 	if (!value || typeof value !== "object") return false;
 	const p = value as Record<string, unknown>;
-	if (p.status !== "granted" && p.status !== "denied") return false;
+	if (p.status !== "granted" && p.status !== "denied" && p.status !== "expired") return false;
 	if (p.tool !== undefined && typeof p.tool !== "string") return false;
 	if (p.actionClass !== undefined && typeof p.actionClass !== "string") return false;
 	if (p.reason !== undefined && typeof p.reason !== "string") return false;

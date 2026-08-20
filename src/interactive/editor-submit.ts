@@ -1,9 +1,9 @@
-import { runBashCommand } from "../core/bash-exec.js";
+import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
-import { renderBashExecutionEntry } from "./chat-renderer.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import {
 	formatSteerCandidates,
@@ -12,6 +12,7 @@ import {
 	resolveSteerTarget,
 } from "./editor-steer.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "./external-editor.js";
+import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 import { parseSlashCommand, type RunIo, type SlashCommand } from "./slash-commands.js";
 
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
@@ -44,6 +45,10 @@ function isRejectedCommand(command: SlashCommand): boolean {
 export interface EditorSubmitExpansion {
 	text: string;
 	images: ReadonlyArray<unknown>;
+	/** Paths the draft referenced inline; the idle path hands them to the chat loop for rule scoping. */
+	workingContextPaths?: ReadonlyArray<string>;
+	/** Skill requests parsed out of the draft; the idle path hands them to the chat loop as the pending-skill policy. */
+	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 }
 
 export interface EditorSubmitEditor {
@@ -58,13 +63,18 @@ export interface EditorSubmitUi {
 	requestRender(force?: boolean): void;
 }
 
-type EditorSubmitChat = Pick<ChatLoop, "clearQueuedFollowUps" | "isStreaming" | "queueFollowUp">;
+type EditorSubmitChat = Pick<
+	ChatLoop,
+	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "queueFollowUp" | "submit"
+>;
 type EditorSubmitDispatch = Pick<DispatchContract, "snapshot" | "steer">;
 type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tree">;
 
 export interface EditorSubmitSessionTranscript {
 	ensureSessionForLocalEntry(): void;
 	refreshChatContextFromSession(leafTurnId: string | null): void;
+	/** Count a prompt the operator submitted; the idle path does this through the slash runtime. */
+	recordSubmittedTurn(): void;
 }
 
 export interface EditorSubmitDeps {
@@ -94,10 +104,19 @@ export interface EditorSubmitController {
 	handleEditorSteerMention(mention: { target: string; text: string }): boolean;
 	submitEditorText(text: string): void;
 	queueFollowUpFromEditor(): void;
+	/**
+	 * Interrupt mode: cancel the active run and deliver the draft now. Idle, it
+	 * is a plain send. The chat loop owns cancel → settle → submit and the two
+	 * refusals (attached dispatch, parked permission ask), which degrade the
+	 * message to next-slot delivery with a notice.
+	 */
+	interruptFromEditor(): void;
 	restoreQueuedFollowUpsToEditor(): void;
 	hasActiveEditorBash(): boolean;
 	cancelActiveEditorBash(): boolean;
 }
+
+type EditorSteerSubmission = "unhandled" | "accepted" | "rejected";
 
 /** Owns editor submission and the one local bash process attached to it. */
 export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubmitController {
@@ -126,6 +145,26 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			activeEditorBash = null;
 			return true;
 		}
+		const startedAt = performance.now();
+		const execution: BashTranscriptExecution = {
+			command: parsed.command,
+			output: "",
+			running: true,
+			totalBytes: 0,
+			excludeFromContext: parsed.excludeFromContext,
+		};
+		deps.chatPanel.appendReplayBlock(
+			(width) =>
+				renderBashTranscriptExecution(
+					{
+						...execution,
+						...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}),
+					},
+					width,
+				),
+			() => execution.running,
+		);
+		deps.ui.requestRender();
 
 		void (async () => {
 			try {
@@ -133,6 +172,11 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					cwd: deps.getCwd?.() ?? process.cwd(),
 					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
 					signal: abort.signal,
+					onUpdate: (progress) => {
+						execution.output = combineBashOutput(progress);
+						execution.totalBytes = progress.outputBytes;
+						deps.ui.requestRender();
+					},
 				});
 				const input = bashExecutionEntryInput({
 					command: parsed.command,
@@ -149,11 +193,25 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 							timestamp: deps.nowIso?.() ?? new Date().toISOString(),
 						} as SessionEntry);
 				if (entry.kind === "bashExecution") {
-					deps.chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
+					execution.output = entry.output;
+					execution.running = false;
+					execution.exitCode = entry.exitCode;
+					execution.cancelled = entry.cancelled;
+					execution.truncated = entry.truncated;
+					execution.fullOutputPath = entry.fullOutputPath;
+					execution.totalBytes = Math.max(execution.totalBytes ?? 0, Buffer.byteLength(combineBashOutput(result), "utf8"));
 				}
-				deps.sessionTranscript.refreshChatContextFromSession(parentTurnId);
+				// `parentTurnId` was the leaf when the command started and stays the
+				// entry's anchor. The chat leaf is a different question: a prompt
+				// may have landed while the command ran, so restore the leaf the
+				// session has now, not the one captured then. Restoring the stale
+				// one wedged every later submit on a parent that was no longer
+				// the leaf.
+				deps.sessionTranscript.refreshChatContextFromSession(deps.session?.tree().leafId ?? parentTurnId);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
+				execution.running = false;
+				execution.error = msg;
 				deps.io.stderr(`[bash] ${msg}\n`);
 			} finally {
 				if (activeEditorBash === abort) activeEditorBash = null;
@@ -186,14 +244,14 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		deps.ui.requestRender(true);
 	};
 
-	const handleEditorSteerMention = (mention: { target: string; text: string }): boolean => {
+	const submitEditorSteerMention = (mention: { target: string; text: string }): EditorSteerSubmission => {
 		let running: RunningDispatchRef[] = [];
 		try {
 			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
 		} catch {
 			running = [];
 		}
-		if (running.length === 0) return false;
+		if (running.length === 0) return "unhandled";
 		const resolution = resolveSteerTarget(mention.target, running);
 		if (resolution.kind === "match") {
 			try {
@@ -203,11 +261,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
 					`steer:${resolution.run.runId}`,
 				);
+				return "accepted";
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				deps.notify("error", `steer to @${mention.target} failed: ${msg}`, `steer:${mention.target}`);
+				return "rejected";
 			}
-			return true;
 		}
 		if (resolution.kind === "ambiguous") {
 			deps.notify(
@@ -215,33 +274,59 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				`@${mention.target} matches ${resolution.candidates.length} runs: ${formatSteerCandidates(resolution.candidates)}; use a runId prefix`,
 				`steer:${mention.target}`,
 			);
-			return true;
+			return "rejected";
 		}
 		deps.notify(
 			"warning",
 			`no running dispatch matches @${mention.target}; running: ${formatSteerCandidates(running)}`,
 			`steer:${mention.target}`,
 		);
-		return true;
+		return "rejected";
 	};
+
+	const handleEditorSteerMention = (mention: { target: string; text: string }): boolean =>
+		submitEditorSteerMention(mention) !== "unhandled";
 
 	const submitEditorText = (text: string): void => {
 		const trimmed = text.trim();
 		if (trimmed.length === 0) return;
 		deps.collapseLaunchpadBeforeSubmit?.();
 		if (parseEditorBashCommand(text)) {
-			if (!deps.chat.isStreaming() && !activeEditorBash) deps.editor.setText("");
+			if (!deps.chat.isStreaming() && !activeEditorBash) {
+				deps.editor.addToHistory(text);
+				deps.editor.setText("");
+			} else {
+				// Pi Editor clears the buffer before invoking onSubmit. A command
+				// refused by either admission guard is still a draft, so put it back
+				// for the operator instead of silently discarding it.
+				deps.editor.setText(text);
+			}
 			if (runEditorBash(text)) deps.ui.requestRender();
 			return;
 		}
 		const steerMention = parseEditorSteerMention(trimmed);
-		if (steerMention && handleEditorSteerMention(steerMention)) {
+		if (steerMention) {
+			const submission = submitEditorSteerMention(steerMention);
+			if (submission !== "unhandled") {
+				if (submission === "accepted") {
+					deps.editor.addToHistory(text);
+					deps.editor.setText("");
+				} else {
+					// Resolution and dispatch failures are correctable rejections. Pi
+					// has already cleared the editor, so explicitly restore the draft.
+					deps.editor.setText(text);
+				}
+				deps.ui.requestRender();
+				return;
+			}
+		}
+		const command = parseSlashCommand(trimmed);
+		if (isRejectedCommand(command)) {
+			deps.editor.setText(text);
+		} else {
 			deps.editor.addToHistory(text);
 			deps.editor.setText("");
-			deps.ui.requestRender();
-			return;
 		}
-		deps.editor.setText(isRejectedCommand(parseSlashCommand(trimmed)) ? text : "");
 		deps.dispatchCommand(trimmed);
 		deps.ui.requestRender();
 	};
@@ -274,6 +359,48 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		});
 	};
 
+	const interruptFromEditor = (): void => {
+		const text = deps.editor.getText().trim();
+		if (text.length === 0) return;
+		if (!deps.chat.isStreaming()) {
+			deps.editor.setText("");
+			submitEditorText(text);
+			deps.ui.requestRender();
+			return;
+		}
+		void (async () => {
+			const submitted = await deps.expandSubmit(text);
+			if (submitted.images.length > 0) {
+				deps.io.stderr("[interrupt] image references cannot be sent while a response is streaming\n");
+				return;
+			}
+			deps.editor.addToHistory(text);
+			// Same restore Esc performs: when the interrupt will really cancel the
+			// run, the queued steers and follow-ups come back to the editor rather
+			// than vanishing with the cancelled run. A refused interrupt cancels
+			// nothing, so the queue stays put.
+			const restored = deps.chat.interruptRefusal() === null ? deps.chat.clearQueuedFollowUps() : [];
+			deps.editor.setText(restored.join("\n\n"));
+			deps.ui.requestRender();
+			// An interrupt is a fresh prompt, so it carries what the idle path
+			// carries: the launchpad collapse, the submitted-turn count, and the
+			// expansion's working-context paths and pending skill requests. Only
+			// images stay behind, rejected above, as they are for a follow-up.
+			deps.collapseLaunchpadBeforeSubmit?.();
+			deps.sessionTranscript.recordSubmittedTurn();
+			const paths = submitted.workingContextPaths ?? [];
+			const skillRequests = submitted.pendingSkillRequests ?? [];
+			await deps.chat.submit(submitted.text, {
+				steering: "interrupt",
+				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
+				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
+			});
+		})().catch((err) => {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.io.stderr(`[interrupt] ${msg}\n`);
+		});
+	};
+
 	const restoreQueuedFollowUpsToEditor = (): void => {
 		const restored = deps.chat.clearQueuedFollowUps();
 		if (restored.length === 0) {
@@ -292,6 +419,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		handleEditorSteerMention,
 		submitEditorText,
 		queueFollowUpFromEditor,
+		interruptFromEditor,
 		restoreQueuedFollowUpsToEditor,
 		hasActiveEditorBash: () => activeEditorBash !== null,
 		cancelActiveEditorBash: () => {

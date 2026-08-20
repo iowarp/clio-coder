@@ -1,18 +1,18 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.3.2).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
 1. **Configured targets** in `settings.yaml` (`targets[]`, `defaultModel`, and optional `wireModels`).
 2. **Live runtime probes** (`probe()` / `probeModels()`), which discover models that appeared after Clio started.
-3. **Catalog knowledge** from pi-ai provider catalogs, Clio's bundled local YAML knowledge base under `src/domains/providers/models/**`, and user/project model-catalog overlays.
+3. **Catalog knowledge** from provider catalogs, Clio's bundled local YAML knowledge base under `src/domains/providers/models/**`, and user/project model-catalog overlays.
 
 ## Runtime refresh controls
 
 - `/targets` (Settings → Targets): probes every target when it opens; a row's probe action re-probes that target.
-- `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
+- `/model`: `r` refreshes the selected row's target; `R` refreshes all targets.
 - `clio-coder models`: probes live targets by default before printing the CLI model list. Use `--offline` to skip live probing. Former `--probe` and `--no-probe` flags are gone.
 
 Configured `wireModels` and a target `defaultModel` remain selectable before a
@@ -53,14 +53,14 @@ The benchmarks record context-window, thinking, sampling, weight quantization, a
 A model family is "sanctioned" only when we can say what was tested and under which runtime. It is not a blanket endorsement. For each family, capture:
 
 - exact model id / artifact / quantization;
-- provider or runtime surface (`lmstudio-native`, `ollama-native`, `llamacpp`, `openrouter`, `openai-codex`, etc.);
+- provider or runtime surface (`lmstudio`, `ollama-native`, `llamacpp`, `openrouter`, `openai-codex`, etc.);
 - hardware and serving configuration;
 - context window and max output actually exercised;
 - tool-use, reasoning, vision, embeddings/rerank/FIM behavior where relevant;
 - quirks needed by the engine (thinking mechanism, sampling, KV cache);
 - failures and "do not use this route yet" notes.
 
-Engine-visible quirks belong in catalog YAML entries under `quirks.kvCache`, `quirks.sampling`, and `quirks.thinking`. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts.
+Engine-visible quirks belong in catalog YAML entries under `quirks.kvCache`, `quirks.sampling`, and `quirks.thinking`. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
 
 ## Local catalog overlays
 
@@ -85,10 +85,11 @@ Overlay files are ordinary YAML lists using the same schema as the bundled
 catalog:
 
 ```yaml
-- family: ornith-1.0-35b-local
+- family: qwen3.8-27b
   matchPatterns:
-    - ornith-1.0-35b
-    - Ornith-1.0-35B-Q4_K_M-262K
+    - qwen3.8-27b
+    - qwen3_8-27b
+    - qwen3-8-27b
   capabilities:
     chat: true
     tools: true
@@ -102,7 +103,7 @@ catalog:
     rerank: false
     fim: false
     contextWindow: 262144
-    maxTokens: 65536
+    maxTokens: 32768
   quirks:
     sampling:
       thinking:
@@ -112,8 +113,7 @@ catalog:
     thinking:
       mechanism: always-on
       guidance: |
-        The serving endpoint separates Qwen-style thinking into
-        reasoning_content while content contains the final answer.
+        Official Qwen3.8-27B chat template. llama.cpp's qwen3_coder parser converts XML tool calls to standard tool_calls JSON.
 ```
 
 Use `settings.yaml` `wireModels` for target inventory. Use overlays for
@@ -162,7 +162,7 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 The Context Engine evaluates thinking mechanisms per model target and manages live reasoning streams. Depending on the runtime capabilities, Clio Coder employs specific thinking replay semantics to ensure chain-of-thought data is preserved or replayed correctly in the conversation history:
 
 - **Ollama Native (`ollama-native`):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
-- **LM Studio Native (`lmstudio-native`):** Because LM Studio does not expose a native reasoning field, the engine replays prior thinking blocks by prepending them to assistant message payloads. These are formatted as a text-prepended part wrapped in `<think>` and `</think>` tags.
+- **LM Studio (`lmstudio`):** Chat uses the OpenAI-compatible `/v1/chat/completions` surface, including its `reasoning` stream field. Clio controls thinking only with `reasoning_effort` and never sends `chat_template_kwargs` to LM Studio. See <https://lmstudio.ai/docs/developer/openai-compat/chat-completions>.
 - **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the `reasoning_content` parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.
 - **Anthropic OAuth / API (`anthropic-max`):** Uses the `anthropic-extended` thinking format. The engine supports Anthropic's native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.
 - **Reasoning-Never Models (`thinking.mechanism: none`):** When a model is configured or cataloged with `thinking.mechanism: none`, it is treated as a reasoning-never model. For these models, Clio must not send any thinking fields or parameters in requests, must not replay thinking blocks, must not surface thinking events to the TUI, and must not preserve or log reasoning token usage in metrics.
@@ -174,16 +174,47 @@ The Context Engine evaluates thinking mechanisms per model target and manages li
 Subscription models are registered and managed as standard HTTP/cloud targets:
 
 - **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to catalog-backed Codex model ids surfaced by `clio-coder configure --list` and `clio-coder models` via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
-- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio-coder configure --list` and `clio-coder models`. It relies on pi-ai's `anthropic` OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
+- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio-coder configure --list` and `clio-coder models`. It relies on the engine's Anthropic OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
   `Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.`
 
 ---
+
+## Local Runtime Resolution & Quirks
+
+### LM Studio Host and Instance Resolution
+
+LM Studio lists downloadable model keys alongside loaded model instances. When using LM Link, instances hosted on peer nodes also appear in discovery. To prevent duplicate instance loading (#113):
+- Clio resolves a requested model ID against the target host's currently loaded instances.
+- Bare keys that already have a resident instance are never sent as raw keys (avoiding duplicate GPU allocations).
+- Resolution prefers the target's `defaultModel`, then instances unique to that host.
+- Keys reported as loaded by multiple hosts are identified as LM Link peer projections and are excluded from auto-selection.
+- Unloaded keys trigger just-in-time loading as expected.
+
+### llama.cpp Residency and Sleep Handling
+
+To maintain router availability during model switches and idle states (#127, #134):
+- The residency reconciler refuses eviction if the requested replacement model is not present in the router catalog.
+- If a model load is rejected, the reconciler reloads the previously evicted model to keep the slot occupied.
+- When the llama.cpp router reports an idle model as `sleeping`, Clio recognizes it as resident rather than requesting another load (preventing `400 model is already running` errors).
+
+### Probed Context Window Precedence
+
+Loaded context window probe results take precedence over static or advertised catalog defaults (#129). When a local model server reports an active loaded context length via `/v1/models` or runtime probe, Clio adopts that measured window size for all subsequent token budgeting and compaction decisions.
+
+### Thinking Levels and vLLM Token Budgets
+
+- `--thinking max` resolves to the highest thinking budget or effort level supported by the active model runtime (#128, #130).
+- For vLLM targets, thinking token budgets are explicitly bounded (`thinking_token_budget`) to guarantee that reasoning tokens do not consume the complete response ceiling, reserving headroom for final answer generation.
+
+### `/model` Fuzzy Ranking
+
+Interactive `/model` search applies fuzzy matching across provider-qualified search strings. Direct `target/model` matches outrank proxy-carried model IDs while preserving availability, health status, and favorite marks.
 
 ## Promotion path
 
 1. Capture raw field notes in docs or a lab notebook.
 2. Add or update a user/project catalog overlay with capabilities and quirks.
 3. Add focused unit/integration coverage when behavior changes engine routing.
-4. Refresh `/models` with `R` and verify the selected row reports the expected source/caps.
+4. Refresh `/model` with `R` and verify the selected row reports the expected source/caps.
 5. Promote the cleaned overlay into the bundled catalog only when the model family is ready to bless for Clio users.
 6. Promote the cleaned field note into a cookbook, guideline, or community blog post.

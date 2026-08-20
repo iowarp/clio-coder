@@ -28,6 +28,8 @@ export interface OrphanRecoverySummary {
 	skipped: number;
 	/** Non-terminal rows whose worker process no longer exists, closed as stalled. */
 	abandoned: number;
+	/** Non-terminal rows whose worker process is gone but whose own receipt verified, sealed from it. */
+	sealed: number;
 }
 
 /**
@@ -129,11 +131,39 @@ function isProcessAlive(pid: number | null): boolean {
 const NON_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["queued", "running", "stale", "dead"]);
 
 /**
+ * The sealed receipt for a row that never made it to a persisted terminal
+ * state, or null when there is no receipt or it does not verify against a
+ * reconstructable envelope. A run writes its receipt before it persists the
+ * ledger, so this window is exactly where a crash or a clobbered persist leaves
+ * the truth on disk in the receipt and a lie in the row.
+ */
+function sealedEnvelopeFor(runId: string): RunEnvelope | null {
+	const path = join(receiptsDir(), `${runId}.json`);
+	if (!existsSync(path)) return null;
+	let receipt: RunReceipt;
+	try {
+		receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+	} catch {
+		return null;
+	}
+	if (receipt?.runId !== runId) return null;
+	if (!isReceiptIntegrity(receipt.integrity)) return null;
+	if (receipt.reproducibility?.cwd === undefined) return null;
+	return verifyOrphan(receipt, path);
+}
+
+/**
  * Close abandoned ledger rows: a non-terminal row whose recorded worker pid
- * no longer exists belongs to an orchestrator that died mid-run. There is no
- * receipt to seal (the run never finalized), so the row is closed in place
- * with outcome "stalled" rather than left as a permanent ghost in status
- * output.
+ * no longer exists belongs to an orchestrator that died mid-run.
+ *
+ * Such a row may still have a sealed receipt on disk. A run writes its receipt
+ * before it persists the settled row, so a crash or a clobbered persist in that
+ * window leaves a receipt saying `succeeded`/0 next to a row that still says
+ * `running`. Stamping the row dead without looking was how a finished dispatch
+ * came to be recorded as a failure, and the receipt pass below could not repair
+ * it afterwards because it only adopts receipts with no row at all. So the
+ * receipt decides when it verifies, and only a row with nothing to seal is
+ * closed as "stalled" rather than left as a permanent ghost in status output.
  *
  * `endedAt` is the last instant the run was observed alive, not the instant
  * recovery noticed it was gone. Stamping recovery time made every phase
@@ -142,8 +172,9 @@ const NON_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["queued", "running",
  * last heartbeat is the honest bound; a row that never heartbeat has only its
  * own start, which reads as a zero-length run rather than an invented one.
  */
-function closeAbandonedRows(ledger: Ledger): number {
+function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } {
 	let closed = 0;
+	let sealed = 0;
 	const localHost = hostname();
 	for (const row of ledger.list()) {
 		if (row.endedAt !== null || !NON_TERMINAL_STATUSES.has(row.status)) continue;
@@ -155,6 +186,15 @@ function closeAbandonedRows(ledger: Ledger): number {
 		// for that host's own recovery pass.
 		if (row.identity !== undefined && row.identity.host !== localHost) continue;
 		if (isProcessAlive(row.pid)) continue;
+		const envelope = sealedEnvelopeFor(row.id);
+		if (envelope !== null) {
+			// Patch rather than replace: the row carries phase timings and lineage
+			// the receipt does not, and pid/heartbeatAt are this row's own history.
+			const { id: _id, pid: _pid, heartbeatAt: _heartbeatAt, ...settled } = envelope;
+			ledger.update(row.id, settled);
+			sealed += 1;
+			continue;
+		}
 		ledger.update(row.id, {
 			status: "dead",
 			outcome: "stalled",
@@ -164,12 +204,14 @@ function closeAbandonedRows(ledger: Ledger): number {
 		});
 		closed += 1;
 	}
-	return closed;
+	return { closed, sealed };
 }
 
 export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
-	const summary: OrphanRecoverySummary = { recovered: 0, corrupt: 0, skipped: 0, abandoned: 0 };
-	summary.abandoned = closeAbandonedRows(ledger);
+	const summary: OrphanRecoverySummary = { recovered: 0, corrupt: 0, skipped: 0, abandoned: 0, sealed: 0 };
+	const abandoned = closeAbandonedRows(ledger);
+	summary.abandoned = abandoned.closed;
+	summary.sealed = abandoned.sealed;
 	const dir = receiptsDir();
 	if (!existsSync(dir)) return summary;
 	// Retention horizon: the ledger is a bounded ring, so a receipt older than

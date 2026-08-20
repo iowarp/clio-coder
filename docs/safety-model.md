@@ -1,11 +1,11 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.3.1).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.3.2).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
-Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/entry/orchestrator.ts`, `src/domains/dispatch/write-boundary.ts`, and `damage-control-rules.yaml`.
+Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/entry/orchestrator.ts`, `src/domains/dispatch/write-boundary.ts`, `src/interactive/view/artifacts.ts`, and `damage-control-rules.yaml`.
 
 ---
 
@@ -13,7 +13,7 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
 
-In Clio Coder v0.3.1, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
+In Clio Coder v0.3.2, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
 
 ### Autonomy levels
 
@@ -89,9 +89,13 @@ Clio operates under a single operating posture with a standard, unified visible 
 | INTERACT | `ask_user` | `read` |
 | ARTIFACT | `artifact` | `write` |
 
-`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane; `monitor` and `tasks` never mutate a run or the workspace, so they stay read class inside the ORCHESTRATE plane. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane. `monitor` does not mutate a run or the workspace. The model-facing `tasks` tool is an intentional bookkeeping exception to the everyday meaning of "read": board mutations append full `taskLedger` snapshots to Clio's session ledger, and any action may reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done` update its durable correlation. Those Clio-owned ledger and inbox mutations intentionally remain audited with `actionClass: "read"`, so task planning and pickup stay available at every autonomy level without an approval card. This classification grants no source-workspace, command-execution, or run-mutation authority; those operations still require their own tools and action classes. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
+
+### Workspace artifact reads
+
+The `/view` workspace category treats a recorded successful write as a durable fact, not as permanent read authority over that pathname. Immediately before every file load, the viewer resolves both the recorded workspace root and selected target through the live filesystem, checks canonical path-segment containment, and reads the canonical target. It does not cache the canonical workspace root between provider construction and load. A file or ancestor directory swapped to a symlink outside the current workspace is refused without reading the outside target. An `ENOENT` from re-resolution or loading keeps the durable `file no longer on disk (recorded at ...)` result instead of dropping the artifact row.
 
 ---
 
@@ -248,7 +252,7 @@ After step execution, the orchestrator compares the working checkout against the
 
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
-Dispatch workers can run the same HTTP, native, or pi-ai-backed runtimes as the orchestrator, driven through the [pi SDK family](https://www.npmjs.com/package/@earendil-works/pi-agent-core) (including `@earendil-works/pi-agent-core` and its TUI and AI wrappers). Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
+Dispatch workers can run the same HTTP or native runtimes as the orchestrator. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
 
 Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 

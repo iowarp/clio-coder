@@ -9,24 +9,25 @@ export type {
 	AutocompleteProvider,
 	AutocompleteSuggestions,
 	Component,
-	EditorOptions,
 	EditorTheme,
-	ImageTheme,
 	Keybinding,
 	KeybindingConflict,
 	KeybindingDefinitions,
-	Keybindings,
 	KeybindingsConfig,
 	KeyId,
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
+	ScrollViewScrollbar,
 	SelectItem,
 	SelectListLayoutOptions,
 	SettingItem,
 	SettingsListTheme,
 	SlashCommand,
 	Terminal,
+	Tokens,
+	TUI,
+	TuiMode,
 } from "@earendil-works/pi-tui";
 
 /**
@@ -35,7 +36,7 @@ export type {
  * module; consumers accept this narrower shape so the helper is unit-testable
  * without a real ProcessTerminal.
  */
-export interface AgentProgressSink {
+interface AgentProgressSink {
 	setProgress(active: boolean): void;
 }
 
@@ -75,22 +76,23 @@ export {
 	Container,
 	Editor,
 	fuzzyFilter,
-	fuzzyMatch,
-	getCapabilities,
 	getKeybindings,
-	Image,
 	Input,
 	isKeyRelease,
 	KeybindingsManager,
-	Loader,
 	Markdown,
+	Marked,
 	matchesKey,
 	ProcessTerminal,
+	ScrollView,
 	setKeybindings,
+	stripTerminalSequences,
 	Text,
-	TUI,
 	TUI_KEYBINDINGS,
+	TuiAltScreen,
+	TuiMainScreen,
 	truncateToWidth,
+	VStack,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";

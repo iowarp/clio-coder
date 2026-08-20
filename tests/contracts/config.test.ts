@@ -112,6 +112,64 @@ describe("contracts/config", () => {
 		strictEqual(settings.skills.trustProjectCompatRoots, false);
 	});
 
+	it("validates every LM Studio load and request setting strictly", () => {
+		const valid = validateSettings({
+			targets: [
+				{
+					id: "studio",
+					runtime: "lmstudio",
+					lmstudio: {
+						load: {
+							contextLength: 131_072,
+							flashAttention: true,
+							evalBatchSize: 512,
+							numExperts: 8,
+							offloadKvCacheToGpu: false,
+						},
+						request: { ttlSeconds: 600, draftModel: "draft", reasoning: "high" },
+					},
+				},
+			],
+		});
+		deepStrictEqual(valid.issues, []);
+		deepStrictEqual(valid.settings.targets[0]?.lmstudio, {
+			load: {
+				contextLength: 131_072,
+				flashAttention: true,
+				evalBatchSize: 512,
+				numExperts: 8,
+				offloadKvCacheToGpu: false,
+			},
+			request: { ttlSeconds: 600, draftModel: "draft", reasoning: "high" },
+		});
+
+		const invalid = validateSettings({
+			targets: [
+				{
+					id: "studio",
+					runtime: "lmstudio",
+					lmstudio: {
+						load: { contextLength: 0, flashAttention: "yes", unknown: true },
+						request: { ttlSeconds: -1, draftModel: 3, reasoning: "max" },
+					},
+				},
+			],
+		});
+		for (const path of [
+			"targets[0].lmstudio.load.unknown",
+			"targets[0].lmstudio.load.contextLength",
+			"targets[0].lmstudio.load.flashAttention",
+			"targets[0].lmstudio.request.ttlSeconds",
+			"targets[0].lmstudio.request.draftModel",
+			"targets[0].lmstudio.request.reasoning",
+		]) {
+			ok(
+				invalid.issues.some((issue) => issue.path === path),
+				`missing validation issue for ${path}`,
+			);
+		}
+	});
+
 	it("validates proactive-memory trigger settings and classifies them for the next turn", () => {
 		const result = validateSettings({
 			memory: {
@@ -182,9 +240,17 @@ describe("contracts/config", () => {
 			budget: { concurrency: 0 },
 			targets: [{ runtime: "openai-compat" }],
 			retry: { maxRetries: 1.5 },
+			terminal: { tuiMode: "windowed", fullscreenScrollbar: "sometimes" },
 		});
 		const paths = result.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["autonomy", "budget.concurrency", "retry.maxRetries", "targets[0].id"]);
+		deepStrictEqual(paths, [
+			"autonomy",
+			"budget.concurrency",
+			"retry.maxRetries",
+			"targets[0].id",
+			"terminal.fullscreenScrollbar",
+			"terminal.tuiMode",
+		]);
 		// Invalid fields fall back to defaults on the built settings.
 		strictEqual(result.settings.autonomy, DEFAULT_SETTINGS.autonomy);
 		strictEqual(result.settings.budget.concurrency, "auto");
@@ -406,6 +472,19 @@ describe("contracts/config", () => {
 		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
 	});
 
+	it("validates fullscreen terminal settings and applies them after restart", () => {
+		const result = validateSettings({
+			terminal: { tuiMode: "fullscreen", fullscreenScrollbar: "always" },
+		});
+		deepStrictEqual(result.issues, []);
+		strictEqual(result.settings.terminal.tuiMode, "fullscreen");
+		strictEqual(result.settings.terminal.fullscreenScrollbar, "always");
+		const diff = diffSettings(DEFAULT_SETTINGS, result.settings);
+		deepStrictEqual(diff.hotReload, []);
+		deepStrictEqual(diff.nextTurn, []);
+		deepStrictEqual(diff.restartRequired.sort(), ["terminal.fullscreenScrollbar", "terminal.tuiMode"]);
+	});
+
 	it("skips targets whose runtime is unregistered or non-http in scoped cycling", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [
@@ -485,10 +564,10 @@ describe("contracts/config", () => {
  * fixing keys. The reload now goes through formatSettingsFailure and the bus.
  */
 describe("contracts/config runtime reload failure", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-config-reload-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-config-reload-");
 		writeFileSync(settingsPath(), DEFAULT_SETTINGS_YAML, "utf8");
 	});
 
@@ -625,10 +704,10 @@ describe("contracts/config runtime reload failure", () => {
 });
 
 describe("contracts/config stale scope refs", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-config-scope-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-config-scope-");
 	});
 
 	afterEach(() => {

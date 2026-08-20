@@ -112,6 +112,8 @@ export interface FooterDashboardDeps {
 	getNotifications?: () => ReadonlyArray<Notification>;
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
+	/** Whether a Ctrl+C armed the double tap and its window is still open. */
+	getShutdownArmed?: () => boolean;
 	dismissKeyLabel?: string;
 	now?: () => number;
 	resolveCurrentBranch?: (cwd: string) => Promise<string | null>;
@@ -172,6 +174,7 @@ function renderFooterCompactLines(state: FooterDashboardRenderState, width: numb
 			state.sessionCost,
 			state.session.outputVerbosity,
 			state.session.leaderArmed ?? false,
+			state.session.shutdownArmed ?? false,
 		),
 	].map((line) => fitDashboardLine(line, safeWidth));
 }
@@ -435,6 +438,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				toolProfile,
 				outputVerbosity: settings?.terminal.outputVerbosity ?? "default",
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
+				shutdownArmed: deps.getShutdownArmed?.() ?? false,
 				memoryIntervention: taskMemory
 					? {
 							enabled: taskMemory.enabled,

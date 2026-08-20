@@ -12,6 +12,7 @@ const CLOSED_ACTION_ORDER = [
 	"clio.tool.liveOutput",
 	"clio.editor.external",
 	"clio.message.followUp",
+	"clio.message.interrupt",
 	"clio.message.dequeue",
 	"clio.thinking.expand",
 	"clio.thinking.expandAll",
@@ -22,6 +23,8 @@ const GLOBAL_ACTION_ORDER = [
 	"clio.thinking.cycle",
 	"clio.session.tree",
 	"clio.dispatchBoard.toggle",
+	"clio.tasks.open",
+	"clio.decisions.open",
 	"clio.dispatch.background",
 	"clio.model.select",
 	// Backward stays ahead of forward so prefix-overlapping user bindings keep
@@ -80,6 +83,8 @@ export interface ApplicationControllerDeps {
 	leaderKeys: LeaderKeyController;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
+	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
+	matchesEditorHistory: (data: string) => boolean;
 	matchesAction: (data: string, id: ClioKeybinding) => boolean;
 	dispatchAction: (id: ClioKeybinding) => boolean;
 	cancelActiveEditorBash: () => boolean;
@@ -88,6 +93,16 @@ export interface ApplicationControllerDeps {
 	getEditorText: () => string;
 	clearEditor: () => void;
 	requestRender: () => void;
+	/**
+	 * Ctrl+C armed the double-tap and is waiting for the second press, or the
+	 * window lapsed and it no longer is. Every other Ctrl+C outcome changes
+	 * something the operator can see; arming changed nothing at all, so the
+	 * 500ms window that quits was undiscoverable and a first press was
+	 * indistinguishable from a key the application never received (issue #108).
+	 * The footer's leader indicator exists for exactly this reason and this
+	 * rides beside it.
+	 */
+	onShutdownArmedChange?: (armed: boolean) => void;
 	closeOverlay: () => void;
 	listNotifications: () => ReadonlyArray<{ id: string }>;
 	dismissNotification: (id: string) => void;
@@ -150,6 +165,40 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 
 	const isDoubleTap = (lastAt: number, now: number): boolean => lastAt > 0 && now - lastAt <= APPLICATION_DOUBLE_TAP_MS;
 
+	let shutdownArmed = false;
+	let armedIndicator: ApplicationIntervalHandle | null = null;
+
+	const clearArmedIndicatorTimer = (): void => {
+		if (!armedIndicator) return;
+		deps.intervals.clearInterval(armedIndicator);
+		armedIndicator = null;
+	};
+
+	/**
+	 * Raise or drop the armed indicator. Arming schedules its own expiry because
+	 * nothing repaints an idle prompt on its own: the footer ticker returns early
+	 * when no turn is running, so a hint left standing would outlive the window
+	 * and promise a quit the next press no longer performs. The interval
+	 * coordinator is the only scheduler this boundary owns, so the callback
+	 * cancels its own handle and fires once.
+	 */
+	const setShutdownArmed = (armed: boolean): void => {
+		if (!armed && !shutdownArmed) return;
+		// Re-arming while an earlier expiry is still pending restarts the window
+		// rather than returning early: the clock and the timer are independent, so
+		// a press that lands after the window by the clock but before the late
+		// timer fires must not leave that timer to clear the hint mid-window.
+		clearArmedIndicatorTimer();
+		const changed = armed !== shutdownArmed;
+		shutdownArmed = armed;
+		if (armed) {
+			armedIndicator = deps.intervals.setInterval(() => setShutdownArmed(false), APPLICATION_DOUBLE_TAP_MS);
+			armedIndicator.unref?.();
+		}
+		if (changed) deps.onShutdownArmedChange?.(armed);
+		deps.requestRender();
+	};
+
 	/** Teardown steps that threw, held until the terminal is safe to write past. */
 	const failures: Array<{ step: string; error: unknown }> = [];
 
@@ -195,6 +244,13 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			// slow release still reaches a handler that exits the process.
 			release("signal handoff", () => restoreInterruptOwner());
 			release("keep-alive interval", () => deps.intervals.clearInterval(keepAlive));
+			// Quitting while the double-tap hint is up leaves a timer scheduled
+			// against a terminal that is about to stop. Released silently: there is
+			// no frame left to repaint it out of.
+			release("armed indicator", () => {
+				shutdownArmed = false;
+				clearArmedIndicatorTimer();
+			});
 			for (const interval of deps.intervalsToClear) {
 				release("owned interval", () => deps.intervals.clearInterval(interval));
 			}
@@ -243,18 +299,25 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			// works: once the run is cancelled, two presses inside the window do
 			// what they have always done.
 			lastCtrlCAt = 0;
+			setShutdownArmed(false);
 			deps.cancelActiveRun();
 			return;
 		}
 		if (action === "close-overlay") {
 			lastCtrlCAt = 0;
+			setShutdownArmed(false);
 			deps.closeOverlay();
 			return;
 		}
 		if (action === "clear-editor") {
+			setShutdownArmed(false);
 			deps.clearEditor();
 			deps.requestRender();
+			return;
 		}
+		// arm-shutdown. The one branch that used to fall off the end of this
+		// function with nothing to show for the press.
+		setShutdownArmed(true);
 	};
 
 	const dismissNotifications = (): void => {
@@ -304,6 +367,10 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.cancelActiveRun();
 			return { consume: true };
 		}
+		// pi-tui's dedicated history actions are editor actions even when an
+		// operator has rebound a Clio application action onto the same chord. Leave
+		// the input unconsumed so TuiBase delivers it to the focused Editor.
+		if (deps.getOverlayState() === "closed" && deps.matchesEditorHistory(data)) return undefined;
 
 		if (deps.getOverlayState() === "closed" && !isKeyRelease(data)) {
 			for (const id of CLOSED_ACTION_ORDER) {

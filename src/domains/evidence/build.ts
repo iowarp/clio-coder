@@ -53,6 +53,7 @@ import {
 const MAX_TASK_CHARS = 500;
 const TRANSCRIPT_TEXT_MAX_CHARS = 500;
 const TOOL_PREVIEW_MAX_CHARS = 240;
+const TASK_LEDGER_ROW_LIMIT = 200;
 
 export interface BuildEvidenceOptions {
 	/** Evidence bundles are written under <dataDir>/evidence/. */
@@ -1321,8 +1322,47 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 		];
 	}
 	if (entry.kind === "taskLedger") {
+		const userLinks = entry.subgoals
+			.filter((goal) => goal.origin === "user" && goal.userTaskId)
+			.map((goal) => `${goal.id}:${goal.userTaskId}`)
+			.join(",");
+		const boardId = entry.boardId ?? "legacy";
+		const provenance = userLinks ? ` userLinks=${userLinks}` : "";
+		const evidenceByTaskId = new Map(
+			entry.requiredValidationEvidence.map((item) => [
+				item.id.endsWith(".evidence") ? item.id.slice(0, -".evidence".length) : item.id,
+				item.description,
+			]),
+		);
+		const rows = entry.subgoals.slice(0, TASK_LEDGER_ROW_LIMIT).map((goal) => {
+			const userTaskId = goal.userTaskId ?? "none";
+			const reason = goal.description === undefined ? "none" : previewUnknown(goal.description);
+			const evidence = evidenceByTaskId.has(goal.id) ? previewUnknown(evidenceByTaskId.get(goal.id)) : "none";
+			return `  task board=${boardId} id=${goal.id} title=${previewUnknown(goal.title)} status=${goal.status} origin=${goal.origin ?? "agent"} userTaskId=${userTaskId} reason=${reason} evidence=${evidence}`;
+		});
+		if (entry.subgoals.length > TASK_LEDGER_ROW_LIMIT) {
+			rows.push(`  task rows omitted=${entry.subgoals.length - TASK_LEDGER_ROW_LIMIT}`);
+		}
 		return [
-			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length}`,
+			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length} board=${boardId}${provenance}`,
+			...rows,
+		];
+	}
+	if (entry.kind === "decisionLedger") {
+		const summary = entry.summary === undefined ? "" : ` summary=${previewUnknown(entry.summary)}`;
+		return [
+			`${prefix} decisionLedger anchor=${entry.parentTurnId ?? "none"} interview=${entry.interviewId} status=${entry.interviewStatus} startedAt=${entry.startedAt} endedAt=${entry.endedAt} rounds=${entry.roundCount} decisions=${entry.decisions.length}${summary}`,
+			...entry.decisions.map((decision) => {
+				const label = decision.label === undefined ? "" : ` label=${previewUnknown(decision.label)}`;
+				const sourceQuestion =
+					decision.source_question === undefined ? "" : ` sourceQuestion=${previewUnknown(decision.source_question)}`;
+				const revision = decision.revisedAt === undefined ? "" : ` revisedAt=${decision.revisedAt} revisionSource=operator`;
+				const correction =
+					decision.correction === undefined
+						? ""
+						: ` correctionSource=operator correction=${previewUnknown(decision.correction)}`;
+				return `  decision key=${decision.key} status=${decision.status} decidedAt=${decision.decidedAt}${revision}${label}${sourceQuestion} value=${previewUnknown(decision.value)}${correction}`;
+			}),
 		];
 	}
 	if (entry.kind === "workerRun") {

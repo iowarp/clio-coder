@@ -78,7 +78,7 @@ export interface WorkersSettings {
  *
  * Fields:
  *   - auto: master switch for the chat-loop's pre-request trigger. Manual
- *     /compact still runs when auto=false.
+ *     /context compact still runs when auto=false.
  *   - threshold: context pressure (estimated_tokens / context_window, 0..1)
  *     at which compaction acts: stale observations are masked first, and a
  *     full LLM summary runs if pressure stays above the threshold.
@@ -113,11 +113,17 @@ export interface RetrySettings {
 }
 
 export type OutputVerbosity = "minimal" | "default" | "verbose";
+export type TuiMode = "regular" | "fullscreen";
+export type FullscreenScrollbar = "hidden" | "auto" | "always";
 
 export interface TerminalSettings {
 	showTerminalProgress: boolean;
 	/** Transcript detail: collapsed, balanced, or fully transparent. */
 	outputVerbosity: OutputVerbosity;
+	/** Regular scrollback-preserving renderer or alternate-screen sticky layout. */
+	tuiMode: TuiMode;
+	/** Fullscreen transcript scrollbar visibility. */
+	fullscreenScrollbar: FullscreenScrollbar;
 }
 
 export interface ModelSelectorSettings {
@@ -314,6 +320,8 @@ export const DEFAULT_SETTINGS = {
 	terminal: {
 		showTerminalProgress: false,
 		outputVerbosity: "default",
+		tuiMode: "regular",
+		fullscreenScrollbar: "auto",
 	} as TerminalSettings,
 	skills: {
 		trustProjectCompatRoots: false,
@@ -391,7 +399,7 @@ autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto
 # directory next to this file).
 targets: []
 # Local runtime examples (uncomment/adapt one; replace your-model-id):
-#   clio-coder configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
+#   clio-coder configure --id local-lmstudio --runtime lmstudio --url http://localhost:1234 --model your-model-id --set-orchestrator --set-fleet-default
 #   clio-coder configure --id local-ollama --runtime ollama-native --url http://localhost:11434 --model your-model-id --set-orchestrator --set-fleet-default
 #   clio-coder configure --id local-llamacpp --runtime llamacpp --url http://127.0.0.1:8080 --model your-model-id --set-orchestrator --set-fleet-default
 #   clio-coder configure --id local-vllm --runtime vllm --url http://localhost:8000 --model your-model-id --set-orchestrator --set-fleet-default
@@ -402,7 +410,7 @@ targets: []
 # Example target block equivalent to one configured local runtime:
 # targets:
 #   - id: local-lmstudio
-#     runtime: lmstudio-native
+#     runtime: lmstudio
 #     url: http://localhost:1234
 #     defaultModel: your-model-id
 #     capabilities:
@@ -498,7 +506,7 @@ routing:
 # Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []
 
-# /models focused picker. Favorites are exact "target/model" refs shown before
+# /model focused picker. Favorites are exact "target/model" refs shown before
 # the full search catalog. Recently selected models are runtime state and live
 # in the state dir (recent-models.json), not in this file.
 modelSelector:
@@ -525,6 +533,11 @@ terminal:
   showTerminalProgress: false
   # Transcript detail: minimal, default, or verbose. Also changeable with /output.
   outputVerbosity: default
+  # regular preserves terminal scrollback; fullscreen keeps the editor/footer
+  # sticky above an independently scrollable alternate-screen transcript.
+  tuiMode: regular
+  # hidden, auto (visible while scrolling), or always in fullscreen mode.
+  fullscreenScrollbar: auto
 
 # Skills are local prompt resources. Project-local compatibility roots such as
 # .agents/skills, .claude/skills, .codex/skills, .github/skills, and
@@ -574,7 +587,7 @@ keybindings: {}
 
 # Context compaction controls.
 #   auto              master switch for the pre-request compaction trigger.
-#                     Manual /compact always runs the LLM summary.
+#                     Manual /context compact always runs the LLM summary.
 #   threshold         pressure = estimated_tokens / context_window. Crossing
 #                     it masks stale tool observations first, then runs a
 #                     full LLM summary if pressure stays above the threshold.

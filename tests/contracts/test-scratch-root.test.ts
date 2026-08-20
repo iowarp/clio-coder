@@ -10,7 +10,8 @@
  * the delete refuses anything that is not a root this harness made.
  */
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { after, describe, it } from "node:test";
@@ -53,5 +54,57 @@ describe("contracts/test scratch root", () => {
 		strictEqual(isRemovableRoot(dirname(tmpdir())), false, "the temp dir itself is never the root");
 		strictEqual(isRemovableRoot(join(outside, "absent")), false, "a path that is not there is not deleted");
 		strictEqual(isRemovableRoot(""), false);
+	});
+
+	it("keeps ambient config and state untouched when a child uses Clio paths", () => {
+		const canaryHome = mkdtempSync(join(tmpdir(), "clio-operator-canary-"));
+		strays.push(canaryHome);
+		const configDir = join(canaryHome, ".config", "clio-coder");
+		const stateDir = join(canaryHome, ".local", "state", "clio-coder");
+		const workspace = join(canaryHome, "workspace");
+		mkdirSync(configDir, { recursive: true });
+		mkdirSync(stateDir, { recursive: true });
+		mkdirSync(workspace, { recursive: true });
+		const settingsCanary = "version: operator-canary\n";
+		const stateCanary = "operator-state-canary\n";
+		writeFileSync(join(configDir, "settings.yaml"), settingsCanary, "utf8");
+		writeFileSync(join(stateDir, "canary"), stateCanary, "utf8");
+
+		const source = `
+			import { writeFileSync } from "node:fs";
+			import { join } from "node:path";
+			import { updateLayeredSettings } from "./src/core/settings-layers.ts";
+			import { clioStateDir } from "./src/core/xdg.ts";
+			updateLayeredSettings(${JSON.stringify(workspace)}, (settings) => {
+				settings.autonomy = "read-only";
+			});
+			writeFileSync(join(clioStateDir(), "child-probe"), "scratch state\\n", "utf8");
+		`;
+		const env: NodeJS.ProcessEnv = { ...process.env, HOME: canaryHome };
+		for (const key of [
+			"CLIO_CODER_HOME",
+			"CLIO_CODER_CONFIG_DIR",
+			"CLIO_CODER_DATA_DIR",
+			"CLIO_CODER_STATE_DIR",
+			"CLIO_CODER_CACHE_DIR",
+			"CLIO_CODER_REQUIRE_HOME_PREFIX",
+			"XDG_CONFIG_HOME",
+			"XDG_DATA_HOME",
+			"XDG_STATE_HOME",
+			"XDG_CACHE_HOME",
+		]) {
+			delete env[key];
+		}
+		const child = spawnSync(
+			process.execPath,
+			["--import", "tsx", "--import", "./tests/harness/tmp-root.ts", "--input-type=module", "--eval", source],
+			{ cwd: process.cwd(), env, encoding: "utf8" },
+		);
+
+		strictEqual(child.status, 0, child.stderr);
+		strictEqual(readFileSync(join(configDir, "settings.yaml"), "utf8"), settingsCanary);
+		strictEqual(readFileSync(join(stateDir, "canary"), "utf8"), stateCanary);
+		strictEqual(readdirSync(configDir).join("\n"), "settings.yaml");
+		strictEqual(readdirSync(stateDir).join("\n"), "canary");
 	});
 });

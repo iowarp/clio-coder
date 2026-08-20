@@ -27,8 +27,10 @@ Commands:
   clio-coder skills sync [--force]
   clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 
-search covers installed skills plus the local marketplace (a repo skills/
-catalog, CLIO_CODER_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
+search covers installed skills plus the local marketplace: CLIO_CODER_SKILL_CATALOG_DIR,
+a repo skills/ catalog, or the catalog and skill-marketplace.json index the
+installed clio-coder package carries. Installing from the shipped catalog copies
+local files and needs no network.
 
 install resolves a bare name through that marketplace; a path or GitHub URL
 installs directly, and an existing local path always wins over a same-named
@@ -198,6 +200,9 @@ function skillRows(skills: ReadonlyArray<Skill>): string[][] {
 		skill.trusted ? "trusted" : "untrusted",
 		skill.disableModelInvocation ? "manual" : "model",
 		skill.hash.slice(0, 12),
+		// Blank for the ordinary operator-installed case; a worker install is
+		// the anomaly worth a column, so it is the only value that ever prints.
+		skill.provenance?.installedBy ?? "",
 		skill.description,
 	]);
 }
@@ -208,7 +213,7 @@ function printList(skills: ReadonlyArray<Skill>): void {
 		return;
 	}
 	process.stdout.write(
-		formatColumns([["name", "scope", "source", "trust", "invoke", "hash", "description"], ...skillRows(skills)]),
+		formatColumns([["name", "scope", "source", "trust", "invoke", "hash", "by", "description"], ...skillRows(skills)]),
 	);
 }
 
@@ -222,6 +227,9 @@ function printInspect(skill: Skill): void {
 	process.stdout.write(`trusted: ${skill.trusted}\n`);
 	process.stdout.write(`disableModelInvocation: ${skill.disableModelInvocation}\n`);
 	process.stdout.write(`hash: ${skill.hash}\n`);
+	if (skill.provenance?.installedBy) {
+		process.stdout.write(`installed-by: ${skill.provenance.installedBy}\n`);
+	}
 	if (skill.diagnostics.length > 0) {
 		process.stdout.write("diagnostics:\n");
 		for (const diag of skill.diagnostics) process.stdout.write(`  ${diag.type}: ${diag.message}\n`);
@@ -249,9 +257,16 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		process.stderr.write(HELP);
 		return 2;
 	}
-	if (parsed.help || !parsed.command) {
+	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
+	}
+	// A bare `clio-coder skills` is a missing required argument, which the
+	// exit-code contract puts at 2 with the usage on stderr. See the same note in
+	// extensions.ts.
+	if (!parsed.command) {
+		process.stderr.write(HELP);
+		return 2;
 	}
 	switch (parsed.command) {
 		case "list": {

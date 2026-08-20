@@ -127,7 +127,7 @@ This document defines core architectural concepts and terminology used throughou
 - **Owning Type**: `DispatchRequest` in `src/domains/dispatch/contract.ts`.
 
 ### 31. Run Ledger
-- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `guardrails.maxDispatchRuns`. It is what the fleet board, `clio-coder runs`, and eval linking read.
+- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `guardrails.maxDispatchRuns`. It is what the fleet board, `clio-coder fleet status`, and eval linking read.
 - **Owning Type**: `RunEnvelope` in `src/domains/dispatch/types.ts`, persisted by `src/domains/dispatch/state.ts`.
 
 ### 32. Agent Ledger

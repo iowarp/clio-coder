@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { resolvePackageRoot } from "../../../core/package-root.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import {
 	type InstallSkillInput,
@@ -13,12 +14,21 @@ import { loadSkills, type Skill } from "./loader.js";
 /**
  * Local skill marketplace. Entries come from two real sources only:
  *
- *  1. A catalog directory of actual SKILL.md packages (for example the
- *     repo-level skills/ folder, or CLIO_CODER_SKILL_CATALOG_DIR). Metadata is read
- *     from the packages themselves via the normal skill loader.
- *  2. A JSON index file (CLIO_CODER_SKILL_MARKETPLACE_INDEX or
- *     <config>/skill-marketplace.json) whose entries point at installable
- *     sources.
+ *  1. A catalog directory of actual SKILL.md packages: CLIO_CODER_SKILL_CATALOG_DIR,
+ *     else a repo-level skills/ folder in the working tree, else the skills/
+ *     catalog the installed clio-coder package carries. Metadata is read from
+ *     the packages themselves via the normal skill loader.
+ *  2. A JSON index file: CLIO_CODER_SKILL_MARKETPLACE_INDEX, else
+ *     <config>/skill-marketplace.json, else the skill-marketplace.json the
+ *     package carries. Entries point at installable sources.
+ *
+ * The package fallbacks are what make a fresh npm install a marketplace at
+ * all: before them, an operator outside this repository with no env var set
+ * had no catalog and no index, so every bare-name install and every
+ * `/skill <name>` for a catalog skill failed. The package catalog is a
+ * marketplace source only, never a discovery root; catalog skills stay
+ * uninstalled until the operator asks, and install copies them out of the
+ * package into a Clio root without touching the network.
  *
  * There is no synthetic or hardcoded marketplace data; an empty result means
  * no marketplace is configured.
@@ -62,12 +72,43 @@ export interface DiscoverMarketplaceOptions {
 	catalogDir?: string | null;
 }
 
-function defaultIndexPath(): string | null {
+/**
+ * The catalog directory and index the installed package carries. Resolved
+ * lazily and defensively: a source checkout that has not built, or a package
+ * root the harness cannot locate, must degrade to "no package catalog" rather
+ * than throw out of a listing.
+ */
+function packageCatalogDir(): string | null {
 	try {
-		return path.join(clioConfigDir(), "skill-marketplace.json");
+		return path.join(resolvePackageRoot(), "skills");
 	} catch {
 		return null;
 	}
+}
+
+function packageIndexPath(): string | null {
+	try {
+		return path.join(resolvePackageRoot(), "skills", "skill-marketplace.json");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Index precedence when no explicit path is given: the operator's config-dir
+ * copy beats the package's, so a hand-curated index still wins, and the
+ * package's own index is what a fresh install falls back to.
+ */
+function defaultIndexPath(): string | null {
+	try {
+		const configured = path.join(clioConfigDir(), "skill-marketplace.json");
+		if (existsSync(configured)) return configured;
+	} catch {
+		// Fall through: no config dir is not "no marketplace" once the package
+		// carries an index of its own.
+	}
+	const bundled = packageIndexPath();
+	return bundled && existsSync(bundled) ? bundled : null;
 }
 
 function isIndexSkill(value: unknown): value is { name: string; description: string; sourceUrl: string } {
@@ -154,7 +195,12 @@ function resolveCatalogDir(options: DiscoverMarketplaceOptions): string | null {
 	const fromEnv = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
 	if (fromEnv && fromEnv.trim().length > 0) return path.resolve(fromEnv.trim());
 	const repoCatalog = path.join(options.cwd ?? process.cwd(), "skills");
-	return looksLikeSkillCatalog(repoCatalog) ? repoCatalog : null;
+	if (looksLikeSkillCatalog(repoCatalog)) return repoCatalog;
+	// The package's own catalog: rows resolve to local files, so a bare-name
+	// install copies out of the package and needs no network. From a checkout
+	// of this repository the two paths coincide.
+	const bundled = packageCatalogDir();
+	return bundled && looksLikeSkillCatalog(bundled) ? bundled : null;
 }
 
 /**

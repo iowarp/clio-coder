@@ -104,27 +104,31 @@ function remoteFrom(raw: string | null): string | null {
 export function probeGit(cwd: string): GitProbeResult {
 	const inside = gitOk(cwd, ["rev-parse", "--is-inside-work-tree"]);
 	if (inside !== "true") return EMPTY_PROBE;
+	const ignored = gitOk(cwd, ["check-ignore", "--quiet", "--", "."]);
+	if (ignored !== null) return EMPTY_PROBE;
 	const branch = branchFrom(gitOk(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]));
-	const dirty = dirtyFrom(gitOk(cwd, ["status", "--porcelain"]));
+	const dirty = dirtyFrom(gitOk(cwd, ["status", "--porcelain", "--", "."]));
 	const { ahead, behind } = aheadBehindFrom(gitOk(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{u}"]));
-	const recentCommits = recentCommitsFrom(gitOk(cwd, ["log", "-5", "--format=%H%x09%s"]));
+	const recentCommits = recentCommitsFrom(gitOk(cwd, ["log", "-5", "--format=%H%x09%s", "--", "."]));
 	const remoteUrl = remoteFrom(gitOk(cwd, ["remote", "get-url", "origin"]));
 	return { isGit: true, branch, dirty, ahead, behind, recentCommits, remoteUrl };
 }
 
 /**
- * The full probe without blocking the event loop. Six subprocesses cost 63-100 ms
- * of blocked loop on a large repository; the five that follow the work-tree gate
- * are independent, so they run concurrently and the caller waits on none of them.
+ * The full probe without blocking the event loop. Once Git confirms the exact
+ * workspace is both inside a work tree and not ignored, the remaining five
+ * subprocesses are independent and run concurrently.
  */
 export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
 	const inside = await gitOkAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
 	if (inside !== "true") return EMPTY_PROBE;
+	const ignored = await gitOkAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
+	if (ignored !== null) return EMPTY_PROBE;
 	const [branchRaw, status, aheadBehindRaw, log, remoteRaw] = await Promise.all([
 		gitOkAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
-		gitOkAsync(cwd, ["status", "--porcelain"]),
+		gitOkAsync(cwd, ["status", "--porcelain", "--", "."]),
 		gitOkAsync(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{u}"]),
-		gitOkAsync(cwd, ["log", "-5", "--format=%H%x09%s"]),
+		gitOkAsync(cwd, ["log", "-5", "--format=%H%x09%s", "--", "."]),
 		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
 	]);
 	const { ahead, behind } = aheadBehindFrom(aheadBehindRaw);
@@ -140,16 +144,18 @@ export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
 }
 
 /**
- * Branch, dirty flag, and remote only: four subprocesses instead of six, run
- * concurrently and off the loop. This is what the interactive footer polls on
- * its ticker and re-reads at the end of every turn.
+ * Branch, dirty flag, and remote only. After the work-tree and ignored-workspace
+ * gates, the three fact probes run concurrently and off the loop. This is what
+ * the interactive footer polls and re-reads at the end of every turn.
  */
 export async function probeGitStatusAsync(cwd: string): Promise<GitStatusProbeResult> {
 	const inside = await gitOkAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
 	if (inside !== "true") return EMPTY_STATUS_PROBE;
+	const ignored = await gitOkAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
+	if (ignored !== null) return EMPTY_STATUS_PROBE;
 	const [branchRaw, status, remoteRaw] = await Promise.all([
 		gitOkAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
-		gitOkAsync(cwd, ["status", "--porcelain"]),
+		gitOkAsync(cwd, ["status", "--porcelain", "--", "."]),
 		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
 	]);
 	return {

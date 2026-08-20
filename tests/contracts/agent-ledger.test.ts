@@ -336,10 +336,10 @@ describe("contracts/agent-ledger render", () => {
 // ---------------------------------------------------------------------------
 
 describe("contracts/agent-ledger store", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-agent-ledger-store-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-agent-ledger-store-");
 	});
 
 	afterEach(() => {
@@ -708,10 +708,10 @@ describe("contracts/agent-ledger stdin lane", () => {
 // ---------------------------------------------------------------------------
 
 describe("contracts/agent-ledger hub", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-agent-ledger-hub-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-agent-ledger-hub-");
 	});
 
 	afterEach(() => {

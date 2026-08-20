@@ -65,6 +65,40 @@ function grepReplayTurns(): SessionEntry[] {
 	];
 }
 
+function editReplayTurns(): SessionEntry[] {
+	const ts = "2026-07-02T12:00:00.000Z";
+	return [
+		{
+			kind: "message",
+			role: "tool_call",
+			turnId: "edit-call",
+			parentTurnId: null,
+			timestamp: ts,
+			payload: {
+				toolCallId: "edit-1",
+				toolName: "edit",
+				args: { path: "a.ts", edits: [{ oldText: "const old = one;", newText: "const new = two;" }] },
+			},
+		},
+		{
+			kind: "message",
+			role: "tool_result",
+			turnId: "edit-result",
+			parentTurnId: "edit-call",
+			timestamp: ts,
+			payload: {
+				toolCallId: "edit-1",
+				toolName: "edit",
+				result: {
+					content: [{ type: "text", text: "edited a.ts" }],
+					details: { diff: "-1 const old = one;\n+1 const new = two;" },
+				},
+				isError: false,
+			},
+		},
+	];
+}
+
 describe("contracts/resume replay ledger fidelity", () => {
 	it("replays a grep tool as the collapsed one-line ledger summary, not the expanded body", () => {
 		const panel = createChatPanel();
@@ -80,6 +114,17 @@ describe("contracts/resume replay ledger fidelity", () => {
 		// The expanded body and its UI middle-elision must not appear in replay.
 		ok(!rendered.includes("many.txt:1:"), "replay must not render the expanded grep body");
 		ok(!rendered.includes("lines hidden"), "replay must not carry the expanded body's middle-elision");
+	});
+
+	it("keeps a replayed edit diff plain when the operator expands it", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, editReplayTurns());
+		panel.toggleLastToolExpanded();
+		const rendered = panel.render(100).join("\n");
+
+		ok(strip(rendered).includes("-1 const old = one;"), rendered);
+		ok(strip(rendered).includes("+1 const new = two;"), rendered);
+		ok(!rendered.includes(`${String.fromCharCode(27)}[7m`), "replay must not carry live word emphasis");
 	});
 });
 

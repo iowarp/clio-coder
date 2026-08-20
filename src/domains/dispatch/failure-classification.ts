@@ -61,6 +61,12 @@ export function classifyFailure(
 	// healthy endpoint for every other run in the window. Deterministic ends the
 	// attempt here and leaves the caller free to redispatch without the schema.
 	if (isResponseSchemaRejection(diagnostic)) return "deterministic-task";
+	// The worker rejected the specification the orchestrator wrote. A retry sends
+	// a document built the same way from the same settings and earns the same
+	// rejection, so three attempts only tripled the cost of one configuration
+	// error. Ending it here surfaces the contract message the operator has to act
+	// on instead of burying it under two more identical failures.
+	if (/\[worker\] fatal: workerspec/.test(diagnostic)) return "deterministic-task";
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
 	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";

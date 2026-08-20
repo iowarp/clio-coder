@@ -11,9 +11,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
-import { resolvePackageRoot } from "../../../core/package-root.js";
+import { loadFragments } from "../../prompts/fragment-loader.js";
 import { renderCodewikiDigest } from "../codewiki/digest.js";
 import type { Codewiki } from "../codewiki/indexer.js";
 import { WIKI_PLAN_FILE } from "./layout.js";
@@ -23,12 +23,25 @@ export type WikiGenerateMode = "init" | "update";
 
 type WikiFragment = "plan" | "page";
 
-function fragmentPath(fragment: WikiFragment): string {
-	return join(resolvePackageRoot(), "src", "domains", "prompts", "fragments", "wiki", `${fragment}.md`);
-}
-
+/**
+ * `wiki.plan` and `wiki.page` load through the same fragment loader every
+ * other prompt fragment does (`prompts/fragments/wiki/*.md`), so their
+ * content participates in the same id/version/content-hash contract. What
+ * this module owns and the loader does not is `{{token}}` substitution: each
+ * fragment carries per-dispatch values (a page's path, title, relative path;
+ * the plan file's path) the loader has no way to supply, the same division
+ * `identity.self-awareness` uses for its own `{TOKEN}` placeholders in
+ * `prompts/compiler.ts`. Loaded fresh on every call rather than cached, so a
+ * fragment edit or config hot-reload is visible on the next dispatch with no
+ * separate subscription to wire.
+ */
 function readWikiFragment(fragment: WikiFragment, substitutions: Record<string, string>): string {
-	let text = readFileSync(fragmentPath(fragment), "utf8").trim();
+	const id = `wiki.${fragment}`;
+	const loaded = loadFragments().byId.get(id);
+	if (!loaded) {
+		throw new Error(`context/wiki: fragment "${id}" not found; check prompts/fragments/wiki/${fragment}.md frontmatter`);
+	}
+	let text = loaded.body.trim();
 	for (const [token, value] of Object.entries(substitutions)) {
 		text = text.split(`{{${token}}}`).join(value);
 	}

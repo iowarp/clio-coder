@@ -121,7 +121,8 @@ export function grantToCredentials(grant: GlobusTokenGrant, previousRefresh?: st
 	};
 }
 
-async function postForm(body: Record<string, string>): Promise<GlobusTokenResponse> {
+async function postForm(body: Record<string, string>, signal?: AbortSignal): Promise<GlobusTokenResponse> {
+	const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
 	const response = await fetch(TOKEN_URL, {
 		method: "POST",
 		headers: {
@@ -129,7 +130,7 @@ async function postForm(body: Record<string, string>): Promise<GlobusTokenRespon
 			Accept: "application/json",
 		},
 		body: new URLSearchParams(body).toString(),
-		signal: AbortSignal.timeout(30_000),
+		signal: requestSignal,
 	});
 	const text = await response.text();
 	if (!response.ok) {
@@ -145,23 +146,29 @@ async function postForm(body: Record<string, string>): Promise<GlobusTokenRespon
 	return parsed as GlobusTokenResponse;
 }
 
-async function exchangeCode(code: string, verifier: string): Promise<OAuthCredentials> {
-	const payload = await postForm({
-		grant_type: "authorization_code",
-		client_id: AUTH_CLIENT_ID,
-		code,
-		code_verifier: verifier,
-		redirect_uri: REDIRECT_URI,
-	});
+async function exchangeCode(code: string, verifier: string, signal?: AbortSignal): Promise<OAuthCredentials> {
+	const payload = await postForm(
+		{
+			grant_type: "authorization_code",
+			client_id: AUTH_CLIENT_ID,
+			code,
+			code_verifier: verifier,
+			redirect_uri: REDIRECT_URI,
+		},
+		signal,
+	);
 	return grantToCredentials(selectGatewayGrant(payload));
 }
 
-async function refreshGatewayToken(refreshToken: string): Promise<OAuthCredentials> {
-	const payload = await postForm({
-		grant_type: "refresh_token",
-		client_id: AUTH_CLIENT_ID,
-		refresh_token: refreshToken,
-	});
+async function refreshGatewayToken(refreshToken: string, signal: AbortSignal): Promise<OAuthCredentials> {
+	const payload = await postForm(
+		{
+			grant_type: "refresh_token",
+			client_id: AUTH_CLIENT_ID,
+			refresh_token: refreshToken,
+		},
+		signal,
+	);
 	return grantToCredentials(selectGatewayGrant(payload), refreshToken);
 }
 
@@ -179,7 +186,7 @@ export async function loginAlcf(callbacks: OAuthLoginCallbacks): Promise<OAuthCr
 	const code = parseAuthorizationInput(pasted);
 	if (!code) throw new Error("No authorization code was provided.");
 	callbacks.onProgress?.("Exchanging authorization code for an ALCF access token...");
-	return exchangeCode(code, verifier);
+	return exchangeCode(code, verifier, callbacks.signal);
 }
 
 export const alcfOAuthProvider: EngineOAuthProvider = {
@@ -189,8 +196,8 @@ export const alcfOAuthProvider: EngineOAuthProvider = {
 	login(callbacks) {
 		return loginAlcf(callbacks);
 	},
-	refreshToken(credentials) {
-		return refreshGatewayToken(credentials.refresh);
+	refreshToken(credentials, signal) {
+		return refreshGatewayToken(credentials.refresh, signal);
 	},
 	async getApiKey(credentials) {
 		return credentials.access;

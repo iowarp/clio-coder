@@ -25,8 +25,42 @@ export async function readRequestBody(req: IncomingMessage): Promise<string> {
 	});
 }
 
+/**
+ * Scripts one OpenAI `tool_calls` round trip out of the fixture. The first
+ * streaming completion of a turn answers with a single function tool call and
+ * `finish_reason:"tool_calls"`; every completion that already carries a tool
+ * result answers with the fixture's plain text reply, so a turn always
+ * terminates after exactly one tool call no matter how the agent loop is
+ * scheduled.
+ */
+export interface OpenAICompatToolCallScript {
+	/** Tool name the model asks for. */
+	name: string;
+	/** Arguments object; serialized into the `function.arguments` delta verbatim. */
+	arguments: Record<string, unknown>;
+	/** Wire id for the call. Defaults to `call-clio-tool-1`. */
+	id?: string;
+}
+
 export interface OpenAICompatFixtureOptions {
 	models?: Array<Record<string, unknown> & { id: string }>;
+	/**
+	 * When set, answer the tool-free completion of every turn with this tool
+	 * call instead of text. Absent, the fixture behaves exactly as before.
+	 */
+	toolCall?: OpenAICompatToolCallScript;
+}
+
+/** True once a request's message history carries a tool result or a tool call. */
+function hasToolExchange(request: Record<string, unknown>): boolean {
+	const messages = request.messages;
+	if (!Array.isArray(messages)) return false;
+	return messages.some((message) => {
+		if (typeof message !== "object" || message === null) return false;
+		const record = message as Record<string, unknown>;
+		if (record.role === "tool") return true;
+		return Array.isArray(record.tool_calls) && record.tool_calls.length > 0;
+	});
 }
 
 export interface OpenAICompatFixture {
@@ -77,6 +111,45 @@ export async function startOpenAICompatFixture(
 			"cache-control": "no-cache",
 			connection: "keep-alive",
 		});
+		if (options.toolCall !== undefined && !hasToolExchange(request)) {
+			const script = options.toolCall;
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-clio-tool",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "mock-model",
+					choices: [
+						{
+							index: 0,
+							delta: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: script.id ?? "call-clio-tool-1",
+										type: "function",
+										function: { name: script.name, arguments: JSON.stringify(script.arguments) },
+									},
+								],
+							},
+						},
+					],
+				})}\n\n`,
+			);
+			res.write(
+				`data: ${JSON.stringify({
+					id: "chatcmpl-clio-tool",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "mock-model",
+					choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+					usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 },
+				})}\n\n`,
+			);
+			res.end("data: [DONE]\n\n");
+			return;
+		}
 		res.write(
 			`data: ${JSON.stringify({
 				id: "chatcmpl-clio-print",
@@ -125,6 +198,33 @@ export function seedOpenAICompatOrchestrator(configDir: string, url: string): vo
 		)
 		.replace(/^ {2}target: null$/m, "  target: mock-chat")
 		.replace(/^ {2}model: null$/m, "  model: mock-model");
+	writeFileSync(p, patched, "utf8");
+}
+
+/**
+ * The orchestrator seed above plus the capability keys a tool-calling turn
+ * needs, and an optional autonomy level. `suggest` is the level at which a
+ * mutating built-in such as `write` parks for approval instead of running, so a
+ * test that wants to observe a permission request seeds it here rather than
+ * reaching into the running process.
+ */
+export function seedOpenAICompatToolOrchestrator(configDir: string, url: string, autonomy?: string): void {
+	seedOpenAICompatOrchestrator(configDir, url);
+	const p = join(configDir, "settings.yaml");
+	const yaml = readFileSync(p, "utf8");
+	let patched = yaml.replace(
+		["    capabilities:", "      vision: true"].join("\n"),
+		[
+			"    capabilities:",
+			"      chat: true",
+			"      tools: true",
+			"      toolCallFormat: openai",
+			"      vision: true",
+			"      contextWindow: 32768",
+			"      maxTokens: 4096",
+		].join("\n"),
+	);
+	if (autonomy !== undefined) patched = patched.replace(/^autonomy: .*$/m, `autonomy: ${autonomy}`);
 	writeFileSync(p, patched, "utf8");
 }
 

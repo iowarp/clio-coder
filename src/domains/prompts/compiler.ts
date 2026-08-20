@@ -77,6 +77,13 @@ export interface WorkerPromptInputs {
 	onPermission: "deny" | "fail" | "escalate";
 	/** One stable persona: the recipe body or bounded override, including bound-skill mechanics. */
 	persona: RenderedPromptFragment;
+	/**
+	 * The session's `additionalFragments` channel, mirrored for a worker: active
+	 * project rules scoped to this run's working context and the operator
+	 * profile, when either renders non-empty. Rendered last, after persona, the
+	 * same order `compile()` uses for its own `additionalFragments`.
+	 */
+	additionalFragments?: ReadonlyArray<RenderedPromptFragment>;
 }
 
 export interface FragmentManifestEntry {
@@ -111,6 +118,17 @@ export interface CompiledSessionPrompt {
 	 * selection; the pure compiler leaves it absent.
 	 */
 	projectPreload?: ProjectPreloadClass | null;
+	/**
+	 * Repo-relative `.clio-coder/rules/**` ids selected into this compile, in
+	 * load order. Set only by `compileWorkerPrompt`, which owns rule
+	 * selection; the pure compiler and `compileSessionPrompt` leave it absent.
+	 */
+	rulesApplied?: string[];
+	/**
+	 * Whether the operator profile rendered non-empty content into this
+	 * compile. Set only by `compileWorkerPrompt`.
+	 */
+	operatorProfileApplied?: boolean;
 }
 
 export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;
@@ -118,7 +136,7 @@ export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 320;
 // `agent:"auto"` baselines by task shape and can still land on a worker whose
 // capability class is wrong for the job, so a pinned id is the reliable path.
 export const FLEET_ROUTING_GUIDANCE =
-	'Fleet routing: pin the `agent` id from the Fleet section above; agent:"auto" baselines from the task text and is a fallback, not a router. Broad repo/codebase exploration goes to a worker before repo-wide reads. Give each dispatch a concrete handoff and synthesize its receipt.';
+	'Fleet routing: pin the `agent` id from the Fleet section; agent:"auto" baselines from the task text and is a fallback, not a router.';
 
 /**
  * Worker-side mirror of the parent's `SPOT_CHECK_GUIDANCE`. The parent sentence
@@ -161,10 +179,19 @@ export function safetyOneLiner(level: string): string {
 	}
 }
 
+/**
+ * What "approval-required" resolves to for the session: one operator
+ * confirmation per parked call. The level fragments say which calls park;
+ * this line says what parking means, and it is role text because a worker's
+ * parked call resolves through its `onPermission` routing instead.
+ */
+export const SESSION_APPROVAL_SEMANTICS =
+	"Approval-required calls pause for one operator confirmation, which grants only the parked action; cancellation cancels the parked call cleanly.";
+
 function renderSafetySection(safetyFragment: LoadedFragment, level: string): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
 	const body = safetyFragment.body.trim();
-	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
+	return body.length > 0 ? `${oneLine}\n${SESSION_APPROVAL_SEMANTICS}\n\n${body}` : oneLine;
 }
 
 function renderRuntimeBlock(inputs: SessionPromptInputs): string {
@@ -191,9 +218,29 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
  */
 function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
-	const names = new Set((inputs.toolNames ?? []).map((name) => name.trim()));
-	const hinted = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
-	return names.has("dispatch") || hinted.has("dispatch");
+	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "dispatch");
+}
+
+/**
+ * Whether `context` is on the session's surface. The Skills passage, the docs
+ * routing directive, and the Tool Contract's skills clause follow the same
+ * rule as dispatch: text that teaches a call to `context` renders only when
+ * `context` is there to be called.
+ */
+function sessionHasContext(inputs: SessionPromptInputs): boolean {
+	if (inputs.providerSupportsTools === false) return false;
+	return toolSurfaceHasTool(inputs.toolNames, inputs.toolPromptHints, "context");
+}
+
+/** One lookup for every "is this tool on the surface" predicate, over names and hints alike. */
+function toolSurfaceHasTool(
+	toolNames: ReadonlyArray<string> | undefined,
+	toolPromptHints: ReadonlyArray<ToolPromptHint> | undefined,
+	tool: string,
+): boolean {
+	const names = new Set((toolNames ?? []).map((name) => name.trim()));
+	const hinted = new Set((toolPromptHints ?? []).map((entry) => entry.tool.trim()));
+	return names.has(tool) || hinted.has(tool);
 }
 
 function renderFleetBlock(inputs: SessionPromptInputs): string {
@@ -212,16 +259,17 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	const names = [
 		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
 	].sort();
-	const hintedTools = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
 	const canDispatch = sessionCanDispatch(inputs);
-	const canListSkills = names.includes("context") || hintedTools.has("context");
+	const canListSkills = sessionHasContext(inputs);
 	const inventoryGuidance = [
 		// Asked twice in one session which tools it had, a live model gave two
 		// different answers and invented `web_find`. The authoritative list is one
 		// line above; pointing at it beats letting the model recall the schemas.
 		"When answering capability-inventory questions, copy the Direct tools line above verbatim rather than recalling the attached schemas, and make no calls",
 		...(canDispatch ? ["add dispatch(list:true) only if agents or the fleet are requested"] : []),
-		...(canListSkills ? ['add context(scope="skills") only if skills are requested'] : []),
+		...(canListSkills
+			? ['add context(scope="skills") only if skills are requested (it lists installed and marketplace skills)']
+			: []),
 	].join("; ");
 	const lines = [
 		"# Tool Contract",
@@ -230,10 +278,14 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
 		`${inventoryGuidance}.`,
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available, explicit broad repository/codebase exploration uses agent:"auto" before repo-wide reads.',
-		'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded agent:"auto" handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
+		// The tool-specific instantiation of the operating contract's "narrow
+		// work: inspect directly" rule; the contract cannot name tools.
+		// Delegation, the tasks board, and skills are not restated here: the
+		// Delegation and Skills passages and the registry hints carry them, and
+		// each renders exactly when its tool does.
+		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded.',
+		"Validate with verify or git diff before final claims.",
 		'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
-		'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface
@@ -267,32 +319,17 @@ function workerPermissionSentence(mode: WorkerPromptInputs["onPermission"]): str
 	}
 }
 
-function renderWorkerOperatingContract(operatingContract: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const skillsHeading = "\n# Skills\n";
-	const skillsAt = operatingContract.body.indexOf(skillsHeading);
-	const withoutSkills = skillsAt >= 0 ? operatingContract.body.slice(0, skillsAt) : operatingContract.body;
-	const skillAwareBody = inputs.hasCanonicalContext && !inputs.hasBoundSkills ? operatingContract.body : withoutSkills;
-	const operatingPermission =
-		inputs.autonomy === "read-only"
-			? "This read-only worker denies mutating calls without requesting approval."
-			: workerPermissionSentence(inputs.onPermission);
-	const workerBody = skillAwareBody.replace(
-		/Safety policy is authoritative[\s\S]*?Do not retry the same blocked\naction through another tool\./,
-		[
-			"Safety policy is authoritative for every tool call. Allow decisions run normally.",
-			operatingPermission,
-			"Hard blocks (destructive git, protected artifacts, project or path policy violations) remain hard blocks. When a call is blocked, pivot to a safer approach or explain the blocker. Do not retry the same blocked action through another tool.",
-		].join("\n"),
-	);
-	return [
-		workerBody.trim(),
-		"# Assigned Task Contract",
-		"The assigned task is authoritative. Role guidance is a persona, not a replacement task.",
-		"Do not invent a different task, source tree, file path, or implementation plan.",
-		"If the assigned task asks for an exact response, a direct answer, or no tool use, answer it directly without tool calls.",
-		"Use tools only when necessary for the assigned task and admitted by the worker tool contract.",
-		WORKER_CLAIM_GUIDANCE,
-	].join("\n\n");
+/**
+ * The constitutional contract renders byte-identical for session and worker.
+ * Role text is separate: the coordinator's `operating.delegation` and
+ * `operating.skills` never reach a worker (its reply goes to the
+ * orchestrator, it cannot suggest a skill to an operator, and no builtin
+ * admits `dispatch`), and the worker's `operating.worker` never reaches the
+ * session. What "approval-required" resolves to for a worker is stated once,
+ * in its safety section, by `workerPermissionSentence`.
+ */
+function renderWorkerOperatingContract(operatingContract: LoadedFragment, workerContract: LoadedFragment): string {
+	return [operatingContract.body.trim(), workerContract.body.trim(), WORKER_CLAIM_GUIDANCE].join("\n\n");
 }
 
 function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
@@ -359,41 +396,18 @@ export function workerSafetyOneLiner(level: AutonomyLevel, mode: WorkerPromptInp
 	}
 }
 
+/**
+ * The worker reads the same `safety.<level>` fragment the session does; the
+ * one-liner (with the run's permission routing) is the only role text. The
+ * level fragments speak in action classes and never name a tool, so nothing
+ * here can be false for a surface that lacks one; the earlier inline copy of
+ * the levels claimed a full-auto worker's "dispatches" ran when no builtin
+ * admits dispatch.
+ */
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const heading = safetyFragment.body.trim().split("\n", 1)[0] ?? "# Safety";
-	const lines = [
-		`Autonomy: ${inputs.autonomy}. ${workerSafetyOneLiner(inputs.autonomy, inputs.onPermission)}`,
-		"",
-		heading,
-	];
-	switch (inputs.autonomy) {
-		case "read-only":
-			lines.push(
-				"Admitted read-class tools run freely. Every mutating call is denied by the harness, and no approval prompt appears.",
-				"When a change is needed, propose it concretely instead of attempting it.",
-			);
-			break;
-		case "suggest":
-			lines.push(
-				"Admitted read-class tools run freely. Every non-read call is approval-required.",
-				workerPermissionSentence(inputs.onPermission),
-			);
-			break;
-		case "auto-edit":
-			lines.push(
-				"Workspace edits and recognized commands run. Other commands and system modifications are approval-required.",
-				workerPermissionSentence(inputs.onPermission),
-			);
-			break;
-		case "full-auto":
-			lines.push(
-				"Writes, dispatches, and ordinary commands run. System modifications and opaque command substitutions remain approval-required.",
-				workerPermissionSentence(inputs.onPermission),
-			);
-			break;
-	}
-	lines.push("Destructive git and other hard safety blocks remain denied at every autonomy level.");
-	return lines.join("\n");
+	const oneLine = `Autonomy: ${inputs.autonomy}. ${workerSafetyOneLiner(inputs.autonomy, inputs.onPermission)}`;
+	const body = safetyFragment.body.trim();
+	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }
 
 function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
@@ -404,10 +418,13 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 			"Use only facts present in the current turn and say what file-specific context would be needed for precise code work.",
 		].join("\n");
 	}
+	// Where to look for skills and when to delegate exploration live in the
+	// Skills and Delegation passages; this block only says what is and is not
+	// preloaded.
 	return [
 		"# Retrieval Hints",
 		"Compact CLIO-CODER.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		"For narrow questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For explicit broad repository exploration, hand the search to a reconnaissance worker with dispatch when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
+		"Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }
 
@@ -450,17 +467,30 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 
 	let identityBody = identity.body;
 	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
+	// The routing directive teaches a call to `context`, so like the Skills
+	// passage it renders only when `context` is on the surface. The paths and
+	// the code-outranks-docs rule name no tool and stay unconditional.
+	const docsRouting = selfAwareness && sessionHasContext(session) ? table.byId.get("identity.docs-routing") : undefined;
 	if (selfAwareness) {
 		const packageRoot = resolvePackageRoot();
 		const rendered = selfAwareness.body
 			.replace("{CLIO_DOCS_PATH}", join(packageRoot, "docs"))
 			.replace("{CLIO_SRC_PATH}", join(packageRoot, "src"))
 			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"));
-		identityBody = `${identity.body.trim()}\n\n${rendered.trim()}`;
+		identityBody = [identity.body.trim(), rendered.trim(), ...(docsRouting ? [docsRouting.body.trim()] : [])].join(
+			"\n\n",
+		);
 	}
+
+	// Role text gated on the surface, following the Fleet-block rule: text
+	// about a tool renders only when the tool is there to be called.
+	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
+	const skills = sessionHasContext(session) ? table.byId.get("operating.skills") : undefined;
 
 	push("identity", identityBody);
 	push("operating-contract", operatingContract.body);
+	if (delegation) push("delegation", delegation.body);
+	if (skills) push("skills", skills.body);
 	push("safety", renderSafetySection(safety, autonomyLevel));
 	push("runtime", renderRuntimeBlock(session));
 	push("tool-contract", renderToolContractBlock(session));
@@ -473,7 +503,15 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	}
 
 	const systemPrompt = parts.join("\n\n");
-	const baseFragments = [identity, ...(selfAwareness ? [selfAwareness] : []), operatingContract, safety];
+	const baseFragments = [
+		identity,
+		...(selfAwareness ? [selfAwareness] : []),
+		...(docsRouting ? [docsRouting] : []),
+		operatingContract,
+		...(delegation ? [delegation] : []),
+		...(skills ? [skills] : []),
+		safety,
+	];
 	const fragmentManifest: FragmentManifestEntry[] = baseFragments.map((f) => ({
 		id: f.id,
 		relPath: f.relPath,
@@ -501,7 +539,12 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 /**
  * Compile the canonical stable prompt for one mediated fleet worker.
  * Dynamic task, project, memory, pipeline, and per-run posture messages do
- * not belong here. The section order is a protocol invariant.
+ * not belong here; those ride in dispatch's `dynamicPromptMessages`. The one
+ * exception is `additionalFragments`: the operator-editable layer (project
+ * rules scoped to this run, the operator profile) that mirrors the session's
+ * own `additionalFragments` channel, so a worker whose task touches a ruled
+ * path reads the same rule the session would. The section order is a
+ * protocol invariant.
  */
 export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs): CompiledSessionPrompt {
 	if (inputs.persona.dynamic) {
@@ -519,6 +562,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	}
 	const identity = lookupFragment(table, "identity.clio-worker", "worker identity");
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
+	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
 	const safety = lookupFragment(table, `safety.${inputs.autonomy}`, "safety");
 
 	const parts: string[] = [];
@@ -531,20 +575,28 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	};
 
 	push("identity", identity.body);
-	push("operating-contract", renderWorkerOperatingContract(operatingContract, inputs));
+	push("operating-contract", renderWorkerOperatingContract(operatingContract, workerContract));
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
 	push("persona", inputs.persona.body);
+	for (const fragment of inputs.additionalFragments ?? []) {
+		push(fragment.id, fragment.body);
+	}
 
 	const systemPrompt = parts.join("\n\n");
-	const fragmentManifest: FragmentManifestEntry[] = [identity, operatingContract, safety, inputs.persona].map(
-		(fragment) => ({
-			id: fragment.id,
-			relPath: fragment.relPath,
-			contentHash: fragment.contentHash,
-			dynamic: fragment.dynamic,
-		}),
-	);
+	const fragmentManifest: FragmentManifestEntry[] = [
+		identity,
+		operatingContract,
+		workerContract,
+		safety,
+		inputs.persona,
+		...(inputs.additionalFragments ?? []),
+	].map((fragment) => ({
+		id: fragment.id,
+		relPath: fragment.relPath,
+		contentHash: fragment.contentHash,
+		dynamic: fragment.dynamic,
+	}));
 
 	return {
 		systemPrompt,

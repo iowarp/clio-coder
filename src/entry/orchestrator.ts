@@ -109,7 +109,12 @@ import {
 } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import { createResourcesDomainModule, modelVisibleSkills, type ResourcesContract } from "../domains/resources/index.js";
+import {
+	createResourcesDomainModule,
+	discoverMarketplaceSkills,
+	modelVisibleSkills,
+	type ResourcesContract,
+} from "../domains/resources/index.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
@@ -123,8 +128,10 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
-import { ceilChars, estimateAgentContextTokens } from "../domains/session/context-accounting.js";
+import { estimateTokens } from "../domains/session/compaction/tokens.js";
+import { ceilChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
+import { createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import {
@@ -139,7 +146,8 @@ import {
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import { serveClioAcpAgent } from "../engine/acp/server.js";
+import { createUserTasksStore } from "../domains/user-tasks/store.js";
+import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import {
 	type AcpJsonRpcPeerTransport,
 	createStdioServerTransport,
@@ -165,6 +173,7 @@ import {
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
 import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
+import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -334,6 +343,7 @@ const LOCAL_API_KEY_FALLBACK = "clio-local-target";
 export async function resolveApiKeyForTarget(
 	target: TargetDescriptor,
 	providers: ProvidersContract,
+	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) return undefined;
@@ -343,7 +353,7 @@ export async function resolveApiKeyForTarget(
 	// failed on exactly the local runtimes Clio is built for, while ordinary
 	// turns against the same target succeeded.
 	if (!targetRequiresAuth(target, runtime)) return LOCAL_API_KEY_FALLBACK;
-	const resolved = await providers.auth.resolveForTarget(target, runtime);
+	const resolved = await providers.auth.resolveForTarget(target, runtime, signal ? { signal } : undefined);
 	return resolved.apiKey;
 }
 
@@ -383,7 +393,7 @@ function createBackgroundMemoryModelClient(
 	return {
 		async complete(request) {
 			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
-				? (await providers.auth.resolveForTarget(refined.target, refined.runtime)).apiKey
+				? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 				: LOCAL_API_KEY_FALLBACK;
 			return completeEngineText({
 				model,
@@ -459,7 +469,7 @@ function backgroundSharesReasoningModelWithOrchestrator(
 	}
 }
 
-function synthesizeOrchestratorModel(
+export function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
 	target: TargetDescriptor,
 	wireModelId: string,
@@ -619,8 +629,11 @@ async function runCompactionFlow(
 	// Summarize only the active branch: after a /tree switch the raw file
 	// still holds abandoned sibling turns, and a summary that folds them in
 	// would persist abandoned content back into the active context. The full
-	// file read stays in place for the task board, protected artifacts, and
-	// the masking rewrite, which are session-global.
+	// file read stays in place for protected artifacts and the masking
+	// rewrite, which are session-global. The task board is not: it used to
+	// read the full file too (last taskLedger entry in file order, with no
+	// branch filter at all), which was a second, independent instance of this
+	// same bug. See the taskBoard wiring below for the fix.
 	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
 	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
@@ -674,22 +687,30 @@ function estimateTokensFromSummary(summary: string): number {
 	return Math.max(1, ceilChars(summary.length));
 }
 
+/**
+ * The post-compaction size, on the same scale as `tokensBefore`.
+ *
+ * `tokensBefore` is a whole-prompt figure: `calculateContextTokens` anchors it
+ * on the last assistant call's measured usage, so it carries the system prompt
+ * and tool schemas that compaction never touches. The after figure has to stay
+ * on that scale to be comparable, and the persistence layer has no model handle
+ * to re-measure with, so it is arithmetic on that same scale: drop what stops
+ * being replayed and add the summary that replaces it.
+ *
+ * Estimating it from the rebuilt message list instead reported `tokensBefore`
+ * back unchanged, which is what made /tree render "~16276 -> ~16276 tokens"
+ * beside a footer that said 16276 -> 11008 for the same compaction. That
+ * estimator anchors on the newest assistant usage, and the retained suffix
+ * still holds the assistant message whose usage describes the pre-compaction
+ * prompt. Anchoring on it reports precisely the number compaction removed.
+ */
 function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, result: CompactResult): number {
-	const synthetic: CompactionSummaryEntry = {
-		kind: "compactionSummary",
-		turnId: "__pending_compaction__",
-		parentTurnId: result.firstKeptTurnId ?? null,
-		timestamp: new Date(0).toISOString(),
-		summary: result.summary,
-		tokensBefore: result.tokensBefore,
-		firstKeptTurnId: result.firstKeptTurnId ?? "",
-		messagesSummarized: result.messagesSummarized,
-		isSplitTurn: result.isSplitTurn,
-		tokensAfter: estimateTokensFromSummary(result.summary),
-	};
-	const messages = buildReplayAgentMessagesFromTurns([...entries, synthetic]);
-	const tokens = estimateAgentContextTokens({ messages });
-	return tokens > 0 ? tokens : estimateTokensFromSummary(result.summary);
+	let droppedTokens = 0;
+	for (const entry of entries.slice(0, result.firstKeptEntryIndex)) droppedTokens += estimateTokens(entry);
+	const summaryTokens = estimateTokensFromSummary(result.summary);
+	// The summary alone is the floor: a session whose dropped estimate exceeds
+	// the measured anchor must not report a negative or sub-summary context.
+	return Math.max(summaryTokens, result.tokensBefore - droppedTokens + summaryTokens);
 }
 
 /**
@@ -793,6 +814,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		ExtensionsDomainModule,
 		InteropDomainModule,
 		createResourcesDomainModule({
+			reservedPromptNames: new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name)),
 			skills: () => ({
 				disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
 				...(options.skillPaths && options.skillPaths.length > 0
@@ -1051,6 +1073,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
+				// Same lookup context(scope="skills") lists under its Marketplace
+				// heading, minus what is already installed, so the count the
+				// reminder quotes is the count the listing will show.
+				countInstallableSkills: () => {
+					const installed = new Set(resources.skills(process.cwd()).items.map((skill) => skill.name));
+					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
+						.length;
+				},
 			}),
 		);
 	}
@@ -1167,18 +1197,57 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// interview fall back to their stated defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
+	const userTasks = createUserTasksStore({ cwd: process.cwd() });
 	// One task board per orchestrator: the tasks tool mutates it, the turn-end
 	// open-tasks nudge reads it, and the footer/overlay render it. Keyed on the
 	// current session id so resume/fork/new refolds it from taskLedger entries.
+	// Folding through filterEntriesToActivePath (not the raw file) is what
+	// keeps a /resume from picking up whichever branch happened to write its
+	// taskLedger entry last in file order; readEntries here used to skip that
+	// filter entirely (issue #94).
 	const taskBoard = createTaskBoardStore({
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session?.current();
-			return meta ? readSessionEntriesForCompact(meta.id) : [];
+			if (!meta) return [];
+			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
 		},
 		appendEntry: (entry) => {
 			session?.appendEntry(entry);
 		},
+	});
+	// Prime the projection once at composition. Interactive repaint paths use
+	// cachedSnapshot() below, so a first paint can never become a ledger read.
+	taskBoard.snapshot();
+	const decisionBoard = createDecisionBoardStore({
+		getSessionId: () => session?.current()?.id ?? null,
+		readEntries: () => {
+			const meta = session?.current();
+			if (!meta) return [];
+			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
+		},
+		getActiveLeafTurnId: () => {
+			const meta = session?.current();
+			return meta ? (session?.tree(meta.id).leafId ?? null) : null;
+		},
+		appendEntry: (entry) => {
+			if (!session) throw new Error("decision board: no session ledger is available");
+			session.appendEntry(entry);
+		},
+	});
+	// getSessionId alone never notices a /tree switch: it moves the active
+	// append point inside the same session, so the id-keyed cache above kept
+	// showing the abandoned branch's board (issue #94). SessionTurnSwitched is
+	// the signal that switch actually happened; invalidate() forces the next
+	// read to refold from the now-current leaf.
+	bus.on(BusChannels.SessionTurnSwitched, () => {
+		taskBoard.invalidate();
+		// The tree switch is the I/O boundary: refold eagerly here so the 250-ms
+		// island ticker remains a cache-only consumer after changing branches.
+		taskBoard.snapshot();
+		decisionBoard.invalidate();
 	});
 	// Link in-flight dispatch runs to the live board via the ledger's
 	// activeRunIds field: a run is tracked from the moment its child process is
@@ -1205,6 +1274,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		taskBoard,
+		userTasks,
 		dispatch,
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
@@ -1353,6 +1423,38 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mutateSaved?.(saved);
 		});
 	};
+	const readAcpSafeSettings = (): AcpSafeSettingsSnapshot => {
+		const settings = getCurrentSettings();
+		return {
+			target: settings.orchestrator.target,
+			model: settings.orchestrator.model,
+			thinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
+			autonomy: settings.autonomy,
+		};
+	};
+	/**
+	 * ACP safe settings are one atomic persisted mutation followed by infallible
+	 * in-process routing assignment. Persisting first avoids reporting a live
+	 * route that failed to become the future-session default.
+	 */
+	const commitAcpSafeSettings = (patch: AcpSafeSettingsPatch): AcpSafeSettingsSnapshot => {
+		const orchestrator: NonNullable<RoutingPatch["orchestrator"]> = {};
+		if (patch["orchestrator.target"] !== undefined) orchestrator.target = patch["orchestrator.target"];
+		if (patch["orchestrator.model"] !== undefined) orchestrator.model = patch["orchestrator.model"];
+		if (patch["orchestrator.thinkingLevel"] !== undefined) {
+			orchestrator.thinkingLevel = patch["orchestrator.thinkingLevel"];
+		}
+		const routingPatch: RoutingPatch | null = Object.keys(orchestrator).length > 0 ? { orchestrator } : null;
+		persistSavedMutation((saved) => {
+			if (routingPatch !== null) mergeRoutingPatchIntoSettings(saved, routingPatch);
+			if (patch.autonomy !== undefined) saved.autonomy = patch.autonomy;
+		});
+		if (routingPatch !== null) {
+			applyRoutingPatch(sessionRouting, routingPatch);
+			bumpSessionState();
+		}
+		return readAcpSafeSettings();
+	};
 	/**
 	 * Persist a whole-settings blob coming from the effective view (the
 	 * /settings overlay, favorites toggles). Routing edits in the blob are
@@ -1383,7 +1485,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 *     every other id becomes a session override. settings.yaml is untouched.
 	 *   - scope "global": apply live and persist just that leaf as the new
 	 *     default, clearing any prior session override for it.
-	 * Restart-required ids (budget.concurrency, runtimePlugins) cannot apply
+	 * Restart-required ids (budget.concurrency, runtimePlugins,
+	 * terminal.tuiMode, terminal.fullscreenScrollbar) cannot apply
 	 * live, so the overlay only offers "global" for them; the file write is what
 	 * a later restart picks up.
 	 */
@@ -1485,6 +1588,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;
 		},
+		onAskUserFinalized: (policy) => {
+			decisionBoard.recordFinalizedInterview(policy);
+		},
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
@@ -1492,6 +1598,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		toolRegistry,
+		hasAttachedDispatch: () => dispatchBackground.size() > 0,
 	});
 
 	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
@@ -1528,7 +1635,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				);
 			}
 			try {
-				chat.resetForSession(leafTurnId, buildReplayAgentMessagesFromTurns(readCurrentSessionEntries()));
+				// Scoped to the leaf resume landed on for the same reason the /resume
+				// overlay is (issue #107): with a /tree pin persisted, the file still
+				// holds the abandoned branch after the pinned turn, and replaying it
+				// unfiltered seeds the provider with turns the next append does not
+				// parent onto.
+				chat.resetForSession(
+					leafTurnId,
+					buildReplayAgentMessagesFromTurns(readCurrentSessionEntries(), leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+				);
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
 				process.stderr.write(
@@ -1575,19 +1690,50 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				transport,
 				chat,
 				...(session ? { session } : {}),
+				...(session
+					? {
+							readSessionEntries: readSessionEntriesForCompact,
+							buildReplayMessages: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) =>
+								buildReplayAgentMessagesFromTurns(entries, leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
+						}
+					: {}),
+				providers,
+				settings: {
+					read: readAcpSafeSettings,
+					commit: commitAcpSafeSettings,
+				},
 				toolRegistry,
 				bus,
 				autonomy: resolveBaselineAutonomy,
+				routing: () => {
+					const settings = getCurrentSettings();
+					return {
+						target: settings.orchestrator.target,
+						model: settings.orchestrator.model,
+					};
+				},
 				onActiveSessionAutonomyChange: (level) => {
 					activeAcpSessionAutonomy = level;
 				},
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
+				// Stdout belongs to JSON-RPC. Text this process did not author, such
+				// as a provider's failure body, is kept off the wire and written to
+				// the unstructured stderr tail instead.
+				diagnostics: (line) => {
+					process.stderr.write(`[clio:acp] ${line}\n`);
+				},
 				permissionTimeoutMs:
 					options.acp.permissionTimeoutMs ??
 					config?.get().delegation.defaults.permissionTimeoutMs ??
 					DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 			});
+			// Same ordering the termination drain hook relies on: an aborted turn's
+			// tool results still land and persist through the run's subscribers,
+			// and the session writer stops in result.stop() below. Awaiting
+			// settlement here makes a session append after session stop impossible
+			// by ordering rather than by timing.
+			await chat.whenSettled();
 			chat.dispose();
 			await dispatch.drain();
 			await result.stop();
@@ -1681,7 +1827,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
-		getTaskBoard: () => taskBoard.snapshot(),
+		getTaskBoard: () => taskBoard.cachedSnapshot(),
+		getDecisionBoard: () => decisionBoard.snapshot(),
+		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),
+		userTasks,
 		getTaskMemoryStatus: () => {
 			ensureTaskMemorySession();
 			const settings = getCurrentSettings();
@@ -1837,6 +1986,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						try {
 							const previousSessionId = session.current()?.id ?? null;
 							session.resume(sessionId);
+							taskBoard.snapshot();
 							if (previousSessionId !== sessionId) ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(
@@ -1845,12 +1995,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					},
 					onNewSession: () => {
-						session.create({ cwd: process.cwd() });
+						const settings = getCurrentSettings();
+						const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
+						if (settings.orchestrator.target) input.target = settings.orchestrator.target;
+						if (settings.orchestrator.model) input.model = settings.orchestrator.model;
+						session.create(input);
+						taskBoard.snapshot();
 						ensureTaskMemorySession();
 					},
 					onForkSession: (parentTurnId) => {
 						try {
 							session.fork(parentTurnId);
+							taskBoard.snapshot();
 							ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(

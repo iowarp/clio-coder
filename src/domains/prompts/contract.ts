@@ -11,7 +11,18 @@ export interface CompileSessionPromptInput {
 	workingContextPaths?: ReadonlyArray<string>;
 }
 
-export type CompileWorkerPromptInput = WorkerPromptInputs;
+export interface CompileWorkerPromptInput extends WorkerPromptInputs {
+	/** Working directory the rule loader and repo-awareness checks run against; defaults to `process.cwd()`. */
+	cwd?: string;
+	/**
+	 * Best-effort paths this worker's run actually touches (from `writeRoots`
+	 * and path-like tokens in the task/briefing text), used the same way the
+	 * session's `workingContextPaths` selects path-scoped project rules. There
+	 * is no structured path field on the model-facing dispatch tool, so this is
+	 * inference, not a guarantee: a rule can be missed, never fabricated.
+	 */
+	workingContextPaths?: ReadonlyArray<string>;
+}
 
 export interface PromptsContract {
 	/**
@@ -22,7 +33,12 @@ export interface PromptsContract {
 	 */
 	compileSessionPrompt(input: CompileSessionPromptInput): Promise<CompiledSessionPrompt>;
 
-	/** Compile the canonical stable harness for one mediated fleet worker. */
+	/**
+	 * Compile the canonical stable harness for one mediated fleet worker. The
+	 * result's `rulesApplied` and `operatorProfileApplied` are the receipt
+	 * provenance for this run's customization layer: dispatch reads them
+	 * straight off this return rather than re-deriving them.
+	 */
 	compileWorkerPrompt(input: CompileWorkerPromptInput): Promise<CompiledSessionPrompt>;
 
 	/** Reload fragment table (triggered by config.hotReload). */

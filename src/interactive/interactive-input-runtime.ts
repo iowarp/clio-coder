@@ -1,6 +1,6 @@
 import { getTerminationCoordinator } from "../core/termination.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import { isKeyRelease } from "../engine/tui.js";
+import { isKeyRelease, type Keybinding } from "../engine/tui.js";
 import {
 	type ApplicationClock,
 	type ApplicationController,
@@ -20,6 +20,8 @@ export interface InteractiveInputKeyActionDeps {
 	requestShutdown: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
+	openTasks: () => void;
+	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
 	openTree: () => void;
@@ -33,12 +35,13 @@ export interface InteractiveInputKeyActionDeps {
 	toggleAllThinkingExpansion: () => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
+	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 }
 
 export interface InteractiveInputRuntimeDeps {
 	keybindings: {
-		matches(data: string, id: ClioKeybinding): boolean;
+		matches(data: string, id: Keybinding): boolean;
 		leaderTargets(): ReadonlyArray<LeaderTarget>;
 	};
 	dispatchAction: (id: ClioKeybinding, deps: InteractiveInputKeyActionDeps) => boolean;
@@ -61,10 +64,14 @@ export interface InteractiveInputRuntimeDeps {
 		toggleDispatchBoardOverlay(): void;
 		openModelOverlayState(): void;
 		openTreeOverlayState(): void;
+		openTasksOverlayState(): void;
+		openDecisionsOverlayState(): void;
 	};
 	refreshFooter: () => void;
 	/** Armed/disarmed transitions of the Ctrl+G leader, for the footer indicator. */
 	onLeaderStateChange?: (pending: boolean) => void;
+	/** Armed/disarmed transitions of the Ctrl+C double tap, for the same indicator row. */
+	onShutdownArmedChange?: (armed: boolean) => void;
 	dispatchBoard: {
 		selectPrevious(): void;
 		selectNext(): void;
@@ -78,6 +85,7 @@ export interface InteractiveInputRuntimeDeps {
 	editorSubmit: {
 		openExternalEditorForInput(): void;
 		queueFollowUpFromEditor(): void;
+		interruptFromEditor(): void;
 		restoreQueuedFollowUpsToEditor(): void;
 	};
 	requestRender: () => void;
@@ -133,6 +141,8 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		requestShutdown: () => void controller.shutdown(),
 		toggleStatus: deps.overlay.toggleFooterDashboardState,
 		toggleDispatchBoard: deps.overlay.toggleDispatchBoardOverlay,
+		openTasks: deps.overlay.openTasksOverlayState,
+		openDecisions: deps.overlay.openDecisionsOverlayState,
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,
 		openModelSelector: deps.overlay.openModelOverlayState,
 		openTree: deps.overlay.openTreeOverlayState,
@@ -161,6 +171,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		openExternalEditor: deps.editorSubmit.openExternalEditorForInput,
 		queueFollowUp: deps.editorSubmit.queueFollowUpFromEditor,
+		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
 	});
 	const leaderKeys = createLeaderKeyController({
@@ -212,6 +223,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				},
 				(input, id) => deps.keybindings.matches(input, id),
 			),
+		matchesEditorHistory: (data) =>
+			deps.keybindings.matches(data, "tui.editor.historyPrevious") ||
+			deps.keybindings.matches(data, "tui.editor.historyNext"),
 		matchesAction: (data, id) => deps.keybindings.matches(data, id),
 		dispatchAction: (id) => deps.dispatchAction(id, keyActionDeps()),
 		cancelActiveEditorBash: deps.cancelActiveEditorBash,
@@ -220,6 +234,13 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		getEditorText: () => deps.editor.getText(),
 		clearEditor: () => deps.editor.setText(""),
 		requestRender: deps.requestRender,
+		// The footer pulls the flag when it refreshes, so the refresh has to land
+		// before the controller asks for the frame. The controller owns the render
+		// request on this path, which is why this hook does not make one.
+		onShutdownArmedChange: (armed) => {
+			deps.onShutdownArmedChange?.(armed);
+			deps.refreshFooter();
+		},
 		closeOverlay: () => deps.overlay.closeOverlay(),
 		listNotifications: () => deps.notifications.list(),
 		dismissNotification: (id) => deps.notifications.dismiss(id),

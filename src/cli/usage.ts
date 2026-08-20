@@ -203,9 +203,16 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		process.stderr.write(HELP);
 		return 2;
 	}
-	if (parsed.help || parsed.command === undefined) {
+	if (parsed.help) {
 		process.stdout.write(HELP);
-		return parsed.help ? 0 : 2;
+		return 0;
+	}
+	// A bare `clio-coder usage` already exited 2, but wrote its usage to stdout,
+	// which is where the report itself goes. Usage that stands in for output the
+	// caller asked for belongs on stderr.
+	if (parsed.command === undefined) {
+		process.stderr.write(HELP);
+		return 2;
 	}
 	if (parsed.command !== "report") {
 		printError(`unknown usage command: ${parsed.command}`);
@@ -352,7 +359,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		if (bareIds.length < 3) continue;
 		opportunities.push({
 			kind: "workflow-distiller",
-			suggestion: `bash shape "${shape}" recurs with no skill activation; consider /skill:workflow-distiller to distill it`,
+			suggestion: `bash shape "${shape}" recurs with no skill activation; consider /skill workflow-distiller to distill it`,
 			evidence: `${bareIds.length} sessions: ${bareIds.slice(0, 5).join(", ")}${bareIds.length > 5 ? ", ..." : ""}`,
 		});
 	}

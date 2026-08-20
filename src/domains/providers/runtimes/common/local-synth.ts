@@ -23,6 +23,7 @@ export interface ClioLocalModelMetadata {
 		family?: string;
 		quirks?: LocalModelQuirks;
 		chatTemplateKwargsUnsupported?: boolean;
+		lmstudio?: TargetDescriptor["lmstudio"];
 	};
 }
 
@@ -34,11 +35,6 @@ export interface LocalSynthesisInput {
 	apiFamily: RuntimeApiFamily;
 	provider: string;
 	baseUrlForTarget: (targetUrl: string) => string;
-}
-
-/** The target's explicit lifecycle choice; undefined when settings leave it unset. */
-export function targetLifecycle(target: TargetDescriptor): LocalModelLifecycle | undefined {
-	return target.lifecycle;
 }
 
 function openAIThinkingFormat(
@@ -58,13 +54,15 @@ function openAIThinkingFormat(
 	}
 }
 
-function localOpenAICompat(caps: CapabilityFlags): OpenAICompletionsCompat {
+function localOpenAICompat(caps: CapabilityFlags, runtimeId: string): OpenAICompletionsCompat {
 	const compat: OpenAICompletionsCompat = {
 		supportsStore: false,
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
 		supportsUsageInStreaming: true,
+		supportsFinishReason: false,
 		maxTokensField: "max_tokens",
+		supportsThinkingTokenBudget: runtimeId === "vllm",
 		supportsStrictMode: false,
 	};
 	const thinkingFormat = openAIThinkingFormat(caps);
@@ -110,11 +108,12 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 			...(target.gateway === true ? { gateway: true } : {}),
 			...(kb?.entry.family ? { family: kb.entry.family } : {}),
 			...(quirks ? { quirks } : {}),
+			...(target.lmstudio ? { lmstudio: target.lmstudio } : {}),
 		},
 	};
 	if (headers) model.headers = headers;
 	if (apiFamily === "openai-completions") {
-		(model as Model<"openai-completions">).compat = localOpenAICompat(caps);
+		(model as Model<"openai-completions">).compat = localOpenAICompat(caps, target.runtime);
 	}
 	if (apiFamily === "anthropic-messages") {
 		(model as Model<"anthropic-messages">).compat = localAnthropicCompat();

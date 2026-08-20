@@ -6,10 +6,6 @@ import { afterEach, describe, it } from "node:test";
 import { detectClioCoderRepo } from "../../src/core/clio-repo.js";
 
 const roots: string[] = [];
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 const SOURCE_MARKERS = [
 	"src/entry/orchestrator.ts",
 	"src/worker/entry.ts",
@@ -36,6 +32,14 @@ function makeClioRepoRoot(): string {
 }
 
 describe("contracts/clio-repo detection", () => {
+	// Nested inside the describe, not at module top level: under
+	// --experimental-test-isolation=none every file shares one root test
+	// context, so a top-level beforeEach/afterEach runs around every test in
+	// every file, not just this one's.
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
 	it("detects the clio-coder root from its own directory and plain subdirectories", () => {
 		const root = makeClioRepoRoot();
 		strictEqual(detectClioCoderRepo(root).isClioCoderRepo, true);

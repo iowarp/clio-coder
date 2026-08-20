@@ -57,6 +57,16 @@ describe("contracts/receipt-integrity", () => {
 		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
 	});
 
+	// #104 added rulesApplied / operatorProfileApplied without an integrity
+	// version bump: a receipt sealed before the fields existed carries neither
+	// and must still verify, because the digest skips absent fields.
+	it("verifies a pre-#104 receipt that carries neither rulesApplied nor operatorProfileApplied", () => {
+		const envelope = fixtureEnvelope("run-pre-104");
+		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
+		strictEqual("rulesApplied" in receipt || "operatorProfileApplied" in receipt, false);
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+	});
+
 	it("requires and integrity-covers the run-local quality block", () => {
 		const envelope = fixtureEnvelope("run-quality-required");
 		const draft = fixtureReceiptDraft(envelope);
@@ -248,6 +258,8 @@ describe("contracts/receipt-integrity", () => {
 				contentHash: "d".repeat(64),
 				sections: ["verification-expectations"],
 			},
+			rulesApplied: ["typescript.md"],
+			operatorProfileApplied: true,
 			failureMessage: "diagnostic retained for evidence",
 			costProvenance: "known",
 			upstreamResponses: [{ model: "model-a", responseModel: "model-a-2026", responseId: "response-1" }],

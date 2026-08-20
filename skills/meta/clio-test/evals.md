@@ -7,14 +7,14 @@ the gap (it cites the dead unit/integration/e2e taxonomy), then WITH it.
 Prompt: "I changed pure logic in `src/domains/dispatch/validation.ts`. What do I
 run and why?"
 Expected:
-- `npm run test:contracts` (and `check:boundaries` if imports changed).
+- `npm run test:file -- 'tests/contracts/**/*.test.ts'` (and `check:boundaries` if imports changed).
 - Explains contracts import `src` via tsx, so no build is needed.
 - Does NOT suggest `test:unit` / `test:e2e` (those don't exist).
 
 ## T2 — CLI change needs a build
 Prompt: "I edited `src/cli/skills.ts`. How do I verify end-to-end?"
 Expected:
-- Build (or rely on `npm run dev` watch), then `npm run test:smoke`.
+- Build (or rely on `npm run dev` watch), then `npm run test:file -- 'tests/smoke/**/*.test.ts'`.
 - Explains smoke spawns `dist/cli/index.js`, so it only sees built code.
 
 ## T3 — hot reload

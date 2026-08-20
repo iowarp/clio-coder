@@ -214,7 +214,10 @@ function baseSettings() {
 		autonomy: "full-auto",
 		targets: [structuredClone(liveTarget)],
 		orchestrator: { target: targetId, model, thinkingLevel: "off" },
-		workers: { default: { target: targetId, model, thinkingLevel: "off" }, profiles: {} },
+		workers: {
+			default: { target: targetId, model, thinkingLevel: "off" },
+			profiles: {},
+		},
 	};
 }
 
@@ -223,7 +226,11 @@ function writeSettings(settings) {
 }
 
 function git(args) {
-	return execFileSync("git", args, { cwd: workspaceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+	return execFileSync("git", args, {
+		cwd: workspaceDir,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 }
 
 writeFileSync(join(workspaceDir, "README.md"), "live dispatch routing verification workspace\n", "utf8");
@@ -300,7 +307,9 @@ function parseJsonLines(text) {
 		if (line.trim().length === 0) continue;
 		try {
 			const value = JSON.parse(line);
-			if (value && typeof value === "object" && !Array.isArray(value)) events.push(value);
+			if (value && typeof value === "object" && !Array.isArray(value)) {
+				events.push(value);
+			}
 		} catch {
 			// A main-agent JSONL stream may carry non-JSONL trailer lines; the raw
 			// artifact keeps them and the assertions below only need the events.
@@ -329,7 +338,10 @@ function dispatchCalls(events) {
 			(event) =>
 				event.type === "tool_execution_start" && event.toolName === "dispatch" && typeof event.toolCallId === "string",
 		)
-		.map((event) => ({ args: event.args ?? {}, result: results.get(event.toolCallId) ?? null }));
+		.map((event) => ({
+			args: event.args ?? {},
+			result: results.get(event.toolCallId) ?? null,
+		}));
 }
 
 function taskCount(args) {
@@ -380,7 +392,9 @@ function requireCall(calls, predicate, description) {
 	const call = matching.find((entry) => entry.result?.isError !== true) ?? matching[0];
 	if (!call) {
 		failures.push(
-			`[${currentScenario}] the model never authored ${description}; observed: ${describeCalls(calls) || "no dispatch calls"}`,
+			`[${currentScenario}] the model never authored ${description}; observed: ${
+				describeCalls(calls) || "no dispatch calls"
+			}`,
 		);
 		return null;
 	}
@@ -446,12 +460,26 @@ async function scenarioCapacity() {
 	// Global concurrency stays wide so the denial can only come from the node's
 	// own cap, and the node cap is the thing the plan has to reserve against.
 	settings.budget = { concurrency: 4 };
-	settings.fleet = { nodes: [{ id: "solo", host: fleetHost, maxWorkers: 1, clioEntry: remoteEntry }] };
+	settings.fleet = {
+		nodes: [
+			{
+				id: "solo",
+				host: fleetHost,
+				maxWorkers: 1,
+				clioEntry: remoteEntry,
+			},
+		],
+	};
 	// The node pin lives in settings, not in the prompt. What is under test is
 	// Clio's plan admission, so the harness must not depend on a model reliably
 	// repeating a `node` field; a dropped pin would silently run the scenario on
 	// the wrong node and report a Clio regression that did not happen.
-	const soloProfile = { target: targetId, model, thinkingLevel: "off", node: "solo" };
+	const soloProfile = {
+		target: targetId,
+		model,
+		thinkingLevel: "off",
+		node: "solo",
+	};
 	settings.workers.profiles = { solo: soloProfile };
 	settings.workers.agentBindings = Object.fromEntries(
 		["coder", "scout", "debugger", "verifier", "researcher", "architect", "tester", "documenter"].map((agent) => [
@@ -593,7 +621,15 @@ async function scenarioBudget() {
 function startDeadTarget() {
 	const server = createServer((_req, res) => {
 		res.writeHead(503, { "content-type": "application/json" });
-		res.end(JSON.stringify({ error: { message: "Service Unavailable", type: "server_error", code: 503 } }));
+		res.end(
+			JSON.stringify({
+				error: {
+					message: "Service Unavailable",
+					type: "server_error",
+					code: 503,
+				},
+			}),
+		);
 	});
 	return new Promise((resolvePromise, rejectPromise) => {
 		server.once("error", rejectPromise);
@@ -617,7 +653,11 @@ async function scenarioFailover() {
 		},
 		structuredClone(liveTarget),
 	];
-	settings.workers.default = { target: "dead-target", model, thinkingLevel: "off" };
+	settings.workers.default = {
+		target: "dead-target",
+		model,
+		thinkingLevel: "off",
+	};
 	settings.budget = { concurrency: 4 };
 	writeSettings(settings);
 
@@ -734,9 +774,17 @@ async function scenarioJointShadow() {
 		},
 		pinnedLiveTarget,
 	];
-	settings.orchestrator = { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	settings.orchestrator = {
+		target: ATTESTATION_NODE,
+		model: ATTESTATION_MODEL,
+		thinkingLevel: "off",
+	};
 	settings.workers = {
-		default: { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		default: {
+			target: ATTESTATION_NODE,
+			model: ATTESTATION_MODEL,
+			thinkingLevel: "off",
+		},
 		profiles: {},
 	};
 	writeSettings(settings);
@@ -766,7 +814,15 @@ async function scenarioJointShadow() {
 					executed.modelId === receipt.wireModelId &&
 					executed.runtimeId === receipt.runtimeId &&
 					executed.nodeId === (receipt.node?.id ?? "local"),
-				`executed route drifted from receipt identity: ${JSON.stringify({ executed, receipt: { targetId: receipt.targetId, wireModelId: receipt.wireModelId, runtimeId: receipt.runtimeId, node: receipt.node } })}`,
+				`executed route drifted from receipt identity: ${JSON.stringify({
+					executed,
+					receipt: {
+						targetId: receipt.targetId,
+						wireModelId: receipt.wireModelId,
+						runtimeId: receipt.runtimeId,
+						node: receipt.node,
+					},
+				})}`,
 			);
 			check(
 				executed.endpointIdentityHash === receipt.attestation?.endpointIdentityHash &&
@@ -818,9 +874,17 @@ async function scenarioAttestation() {
 	const baseUrlSettings = baseSettings();
 	const { url: _dropped, ...withoutUrl } = attestedTarget;
 	baseUrlSettings.targets = [{ ...withoutUrl, baseUrl: ATTESTATION_URL }];
-	baseUrlSettings.orchestrator = { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	baseUrlSettings.orchestrator = {
+		target: ATTESTATION_NODE,
+		model: ATTESTATION_MODEL,
+		thinkingLevel: "off",
+	};
 	baseUrlSettings.workers = {
-		default: { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		default: {
+			target: ATTESTATION_NODE,
+			model: ATTESTATION_MODEL,
+			thinkingLevel: "off",
+		},
 		profiles: {},
 	};
 	writeSettings(baseUrlSettings);
@@ -841,9 +905,17 @@ async function scenarioAttestation() {
 	clearState();
 	const settings = baseSettings();
 	settings.targets = [structuredClone(attestedTarget)];
-	settings.orchestrator = { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	settings.orchestrator = {
+		target: ATTESTATION_NODE,
+		model: ATTESTATION_MODEL,
+		thinkingLevel: "off",
+	};
 	settings.workers = {
-		default: { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		default: {
+			target: ATTESTATION_NODE,
+			model: ATTESTATION_MODEL,
+			thinkingLevel: "off",
+		},
 		profiles: {},
 	};
 	writeSettings(settings);
@@ -976,9 +1048,17 @@ function activeSettings(enabled) {
 			},
 		},
 	];
-	settings.orchestrator = { target: ACTIVE_TARGET, model: ACTIVE_MODEL, thinkingLevel: "off" };
+	settings.orchestrator = {
+		target: ACTIVE_TARGET,
+		model: ACTIVE_MODEL,
+		thinkingLevel: "off",
+	};
 	settings.workers = {
-		default: { target: ACTIVE_TARGET, model: ACTIVE_MODEL, thinkingLevel: "off" },
+		default: {
+			target: ACTIVE_TARGET,
+			model: ACTIVE_MODEL,
+			thinkingLevel: "off",
+		},
 		profiles: {},
 		maxRetries: 0,
 	};
@@ -1060,7 +1140,12 @@ async function seedActiveReadiness(calibration, count, probeDurationMs) {
 			toolSignature: calibration.route.toolSignature,
 		});
 		const endedAt = new Date(Date.now() + index + 1).toISOString();
-		const lineage = { parentRunId: null, rootRunId: created.id, attempt: 0, depth: 0 };
+		const lineage = {
+			parentRunId: null,
+			rootRunId: created.id,
+			attempt: 0,
+			depth: 0,
+		};
 		ledger.update(created.id, {
 			endedAt,
 			status: "completed",
@@ -1082,7 +1167,9 @@ async function seedActiveReadiness(calibration, count, probeDurationMs) {
 			toolSignature: calibration.route.toolSignature,
 		});
 		const terminal = ledger.get(created.id);
-		if (!terminal) throw new Error("active-readonly fixture ledger update disappeared");
+		if (!terminal) {
+			throw new Error("active-readonly fixture ledger update disappeared");
+		}
 		sealed.push(
 			ledger.recordReceipt(created.id, {
 				runId: created.id,
@@ -1218,7 +1305,11 @@ async function scenarioActiveReadonly() {
 			calibrationRoute.nodeId === "local",
 		`calibration route was not the pinned Scout capability: ${JSON.stringify(calibrationRoute)}`,
 	);
-	const calibration = { route: calibrationRoute, receipt: calibrationReceipt, envelope: calibrationEnvelope };
+	const calibration = {
+		route: calibrationRoute,
+		receipt: calibrationReceipt,
+		envelope: calibrationEnvelope,
+	};
 
 	clearState();
 	writeSettings(activeSettings(true));
@@ -1255,8 +1346,9 @@ async function scenarioActiveReadonly() {
 		(args) => args.agent === "scout" && args.routing?.failover === "approved" && taskCount(args) === 1,
 		"one six-source active Scout dispatch",
 	);
-	if (activeCall)
+	if (activeCall) {
 		check(activeCall.result?.isError !== true, `active Scout dispatch was refused: ${activeCall.result?.text}`);
+	}
 	const activeReceipt = workerReceipts().find((receipt) => receipt.agentId === "scout" && !sixIds.has(receipt.runId));
 	check(Boolean(activeReceipt), "six-source activation spawned no real Scout worker");
 	if (!activeReceipt) return;
@@ -1333,13 +1425,17 @@ const runners = {
 let passed = false;
 try {
 	console.log(
-		`Running dispatch routing live verification (target=${targetId}, model=${model}, fleetHost=${fleetHost}, scenarios=${scenarios.join(",")})...`,
+		`Running dispatch routing live verification (target=${targetId}, model=${model}, fleetHost=${fleetHost}, scenarios=${scenarios.join(
+			",",
+		)})...`,
 	);
 	for (const name of scenarios) {
 		console.log(`[dispatch-routing] scenario ${name}`);
 		await runners[name]();
 	}
-	if (failures.length > 0) throw new Error(`dispatch routing live verification failed:\n- ${failures.join("\n- ")}`);
+	if (failures.length > 0) {
+		throw new Error(`dispatch routing live verification failed:\n- ${failures.join("\n- ")}`);
+	}
 	passed = true;
 	console.log(`[dispatch-routing] PASS scenarios=${scenarios.join(",")}`);
 } catch (error) {

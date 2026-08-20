@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Configuration Blueprint (v0.3.1)</title>
+  <title>Clio Coder Configuration Blueprint (v0.3.2)</title>
   
   <style>
     :root {
@@ -497,7 +497,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.1</span>
+        <span class="version-badge">Clio Coder v0.3.2</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -525,12 +525,12 @@
           <div class="glass-card">
             <h2>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-              settings.yaml Validator (v0.3.1 Schema)
+              settings.yaml Validator (v0.3.2 Schema)
             </h2>
             <p>Paste or edit your <code>settings.yaml</code> configuration file below. The validator checks schema version, target mapping links, target IDs, budget structures, and flags legacy properties such as <code>defaultMode</code> or misplaced state fields.</p>
             
             <div class="presets-list">
-              <span class="preset-btn" onclick="loadYamlPreset('valid')">Load Valid v0.3.1 Config</span>
+              <span class="preset-btn" onclick="loadYamlPreset('valid')">Load Valid v0.3.2 Config</span>
               <span class="preset-btn" onclick="loadYamlPreset('stale')">Load Legacy Config (Triggers Warnings)</span>
               <span class="preset-btn" onclick="loadYamlPreset('invalid')">Load Invalid Config</span>
             </div>
@@ -566,7 +566,7 @@
                 <label for="cliRuntime">Runtime Descriptor</label>
                 <select id="cliRuntime" onchange="onCliRuntimeChange()">
                   <option value="ollama-native">ollama-native</option>
-                  <option value="lmstudio-native">lmstudio-native</option>
+                  <option value="lmstudio">lmstudio</option>
                   <option value="llamacpp">llamacpp</option>
                   <option value="vllm">vllm</option>
                   <option value="openai-compat">openai-compat</option>
@@ -670,7 +670,7 @@
           <strong>Interactive Spec Available:</strong> Use the <strong>Interactive Config Studio</strong> tab above to validate YAML schemas, resolve targets, and generate CLI configurations.
         </div>
 
-        <p>Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in <code>settings.yaml</code>, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native/pi-ai-backed runtimes.</p>
+        <p>Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in <code>settings.yaml</code>, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native-backed runtimes.</p>
         <p>Source of truth: <code>src/core/defaults.ts</code>, <code>src/core/config.ts</code>, <code>src/domains/providers/**</code>, <code>src/cli/configure.ts</code>, <code>src/cli/targets.ts</code>, and <code>src/cli/auth.ts</code>.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">State Locations</h3>
@@ -706,7 +706,7 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial</h3>
-        <p>Clio v0.3.1 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. Settings are validated directly against the current schema; <code>clio-coder doctor --fix</code> does not transform removed keys into this shape.</p>
+        <p>Clio v0.3.2 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. Settings are validated directly against the current schema; <code>clio-coder doctor --fix</code> does not transform removed keys into this shape.</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
           <li style="margin-bottom: 0.3rem;"><strong><code>read-only</code></strong>: Clio inspects and answers. Write/execute tools are auto-denied.</li>
           <li style="margin-bottom: 0.3rem;"><strong><code>suggest</code></strong>: Every mutating action parks for operator confirmation.</li>
@@ -734,13 +734,47 @@ clio-coder</code></pre>
         <p>Routing properties (<code>orchestrator.*</code>, <code>workers.default.*</code>) in <code>settings.yaml</code> are <strong>defaults</strong> that seed a TUI session on launch. Once running, Alt+L or <code>/model</code> modifications only apply to the current active terminal session and are serialized back for next-session setups without affecting other concurrent running TUI instances.</p>
         <p>Writes from multiple processes are synchronized under an advisory lock file (<code>settings.yaml.lock</code>) and saved atomically.</p>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Terminal Settings (`terminal.*`)</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Setting Key</th>
+              <th>Type / Options</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>terminal.tuiMode</code></td>
+              <td><code>"regular" | "fullscreen"</code></td>
+              <td><code>"regular"</code></td>
+              <td>Enables fullscreen alternate-screen renderer with docked composer and footer (restart required).</td>
+            </tr>
+            <tr>
+              <td><code>terminal.fullscreenScrollbar</code></td>
+              <td><code>"hidden" | "auto" | "always"</code></td>
+              <td><code>"auto"</code></td>
+              <td>Controls visibility of the mouse-draggable scrollbar in fullscreen TUI mode.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Local Runtime Resolution &amp; Residency</h3>
+        <ul>
+          <li><strong>LM Studio Instance Resolution (#113):</strong> Model IDs resolve against loaded instances on the target host. Bare keys are never dispatched when resident instances exist, preventing duplicate GPU allocations. Dual-host models are flagged as LM Link peer projections.</li>
+          <li><strong>llama.cpp Residency (#127, #134):</strong> Router unloads are refused when the replacement model is not in the catalog. Idle models reported as <code>sleeping</code> are recognized as resident, eliminating <code>400 model is already running</code> errors.</li>
+          <li><strong>Probed Context Window Precedence (#129):</strong> Live server context window sizes dynamically override static catalog defaults (e.g. server serving 131,072 tokens overrides catalog 262,144 tokens), preventing context overrun and triggering timely auto-compaction.</li>
+          <li><strong>Thinking Token Budgeting (#128, #130):</strong> <code>--thinking max</code> maps monotonically across all 7 levels. vLLM uses <code>thinking_token_budget</code> to reserve space for final answer completion.</li>
+        </ul>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Measured Dispatch Activation</h3>
         <p>The <code>routing</code> block is a separate fail-closed activation boundary. Joint route selection becomes active only when both the execution role and posture are explicitly listed; empty lists keep the resolver in shadow mode. Agent automation requires exact <code>{agentId, executionRole}</code> pairs under <code>routing.agentAutomation.activeAgentRoles</code>. Manual pins never drift, and hard constraints remove candidates before ranking.</p>
       </div>
     </main>
 
     <footer>
-      <p>Clio Coder Configuration Specification Dashboard &bull; Version 0.3.1</p>
+      <p>Clio Coder Configuration Specification Dashboard &bull; Version 0.3.2</p>
     </footer>
   </div>
 
@@ -923,7 +957,7 @@ orchestrator:
           }
 
           if (key === 'runtime') {
-            const validRuntimes = ['ollama-native', 'lmstudio-native', 'llamacpp', 'vllm', 'sglang', 'openai-compat', 'anthropic-compat', 'google', 'openai', 'anthropic', 'bedrock', 'mistral', 'openrouter', 'lemonade'];
+            const validRuntimes = ['ollama-native', 'lmstudio', 'llamacpp', 'vllm', 'sglang', 'openai-compat', 'anthropic-compat', 'google', 'openai', 'anthropic', 'bedrock', 'mistral', 'openrouter', 'lemonade'];
             if (!validRuntimes.includes(cleanVal)) {
               errors.push(`[Line ${idx+1}] Unknown runtime "${cleanVal}". Valid options include: ollama-native, llamacpp, openai-compat, etc.`);
             }
@@ -954,14 +988,14 @@ orchestrator:
           warnings.map(warn => `<li>${warn}</li>`).join('') + `</ul>`;
       } else {
         output.className = 'status-panel success';
-        output.innerHTML = `<strong>Validation Success:</strong> settings.yaml is structurally valid and fully conforms to the Clio Coder v0.3.1 schema settings constraints.`;
+        output.innerHTML = `<strong>Validation Success:</strong> settings.yaml is structurally valid and fully conforms to the Clio Coder v0.3.2 schema settings constraints.`;
       }
     }
 
     // Command Generator and Resolver logic
     const runtimeSpecs = {
       'ollama-native': { port: '11434', cLimit: 32768, tLimit: 2048, r: true, badges: ['chat', 'tools', 'reasoning'] },
-      'lmstudio-native': { port: '1234', cLimit: 16384, tLimit: 1024, r: true, badges: ['chat', 'tools', 'reasoning'] },
+      'lmstudio': { port: '1234', cLimit: 16384, tLimit: 1024, r: true, badges: ['chat', 'tools', 'reasoning'] },
       'llamacpp': { port: '8080', cLimit: 131072, tLimit: 4096, r: false, badges: ['chat', 'tools'] },
       'vllm': { port: '8000', cLimit: 65536, tLimit: 2048, r: false, badges: ['chat', 'tools'] },
       'openai-compat': { port: '5000', cLimit: 8192, tLimit: 1024, r: false, badges: ['chat'] },

@@ -8,6 +8,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
@@ -45,6 +46,8 @@ export interface ToolBootstrapDeps {
 	 * gets a private in-memory board without ledger persistence.
 	 */
 	taskBoard?: TaskBoardStore;
+	/** Project-scoped operator task inbox; interactive orchestrators share it with `/tasks`. */
+	userTasks?: UserTasksStore;
 	/**
 	 * The run's agent-ledger port. The ledger tool is registered unconditionally
 	 * because attestedToolSignature signs the names a bare registry produces and
@@ -72,6 +75,8 @@ export interface ToolBootstrapDeps {
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	>;
+	/** False in worker registries: context(scope=skills) lists installed skills only. */
+	skillMarketplace?: boolean;
 }
 
 function withSourceInfo<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {
@@ -163,7 +168,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		),
 		costLatency: "local_fast",
 		promptHint:
-			'Call context with scope="skills" to list available skills; when one matches the task, suggest the operator run /skill:<name> and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+			'Call context with scope="skills" to list installed and marketplace skills; when one matches the task, or the operator names a skill or asks how one works, suggest the operator run /skill <name> (a marketplace skill is offered for install) and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 	},
 	[ToolNames.CredentialPresent]: {
 		objective: "Check whether a credential key is present without returning its value.",
@@ -383,6 +388,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
+		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
 	};
 	if (deps.askUser) {
 		registry.register({
@@ -427,10 +433,17 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		}),
 	});
 	registry.register({
-		...builtin(createTasksTool({ board: deps.taskBoard ?? createTaskBoardStore() }), {
-			path: "src/tools/tasks.ts",
-			scope: "core",
-		}),
+		...builtin(
+			createTasksTool({
+				board: deps.taskBoard ?? createTaskBoardStore(),
+				...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
+				getSessionId: () => deps.session?.current()?.id ?? null,
+			}),
+			{
+				path: "src/tools/tasks.ts",
+				scope: "core",
+			},
+		),
 	});
 	if (deps.dispatch) {
 		const dispatchRunEvents = createDispatchRunEventRegistry();

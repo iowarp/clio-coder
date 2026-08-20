@@ -1,9 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
 import { resetLlamaCppResidencyState } from "../../src/engine/apis/llamacpp-residency.js";
 import {
 	applyOpenAICompatReasoningEstimate,
@@ -22,10 +23,10 @@ function usage(overrides: Record<string, unknown> = {}): AssistantMessage["usage
 	} as AssistantMessage["usage"];
 }
 
-function thinkingMessage(messageUsage: AssistantMessage["usage"]): AssistantMessage {
+function thinkingMessage(messageUsage: AssistantMessage["usage"], thinking = "abcdefgh"): AssistantMessage {
 	return {
 		role: "assistant",
-		content: [{ type: "thinking", thinking: "abcdefgh" }],
+		content: [{ type: "thinking", thinking }],
 		api: "openai-completions",
 		provider: "llamacpp",
 		model: "qwen3.6-27b",
@@ -54,6 +55,52 @@ function jsonResponse(payload: unknown): Response {
 }
 
 describe("openai-completions thinking preservation", () => {
+	it("accepts local streams that omit finish_reason through pi's compatibility flag", async () => {
+		const model = {
+			id: "local-no-finish-reason",
+			name: "local-no-finish-reason",
+			api: "openai-completions",
+			provider: "openai-compat",
+			baseUrl: "http://local.invalid/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 8192,
+			maxTokens: 1024,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				supportsFinishReason: false,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+			},
+			clio: { targetId: "local", runtimeId: "openai-compat" },
+		} as unknown as Model<"openai-completions">;
+		const responseBody = ['data: {"choices":[{"index":0,"delta":{"content":"hello"}}]}', "", "data: [DONE]", ""].join(
+			"\n",
+		);
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const events: AssistantMessageEvent[] = [];
+
+		for await (const event of openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "fake-key",
+			fetch: async () =>
+				new Response(responseBody, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				}),
+		})) {
+			events.push(event);
+		}
+
+		const done = events.find((event) => event.type === "done");
+		ok(done && done.type === "done", "pi should infer a completed local stream");
+		strictEqual(done.reason, "stop");
+		deepStrictEqual(done.message.content, [{ type: "text", text: "hello" }]);
+	});
+
 	it("keeps fallback reasoning usage estimates for local openai-compatible servers", () => {
 		const message = thinkingMessage(usage());
 
@@ -76,6 +123,16 @@ describe("openai-completions thinking preservation", () => {
 
 			strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, expectedReasoningTokens);
 		}
+	});
+
+	it("bounds fallback reasoning usage by the reported completion count", () => {
+		const message = thinkingMessage(usage({ output: 40 }), "x".repeat(900));
+		applyOpenAICompatReasoningEstimate(message);
+		strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, 40);
+
+		const empty = thinkingMessage(usage({ output: 0 }), "reasoning without reported completion tokens");
+		applyOpenAICompatReasoningEstimate(empty);
+		strictEqual((empty.usage as { reasoningTokens?: number }).reasoningTokens, undefined);
 	});
 
 	it("replays a prior assistant thinking block as reasoning_content (no strip)", async () => {
@@ -340,6 +397,180 @@ describe("openai-completions thinking preservation", () => {
 		ok(captured, "onPayload should have captured the body");
 		strictEqual(captured.reasoning_effort, "medium");
 		strictEqual(Object.hasOwn(captured, "chat_template_kwargs"), false);
+	});
+
+	it("maps every Clio thinking level to Qwen3.8-safe wire fields and sampling", async () => {
+		const model = {
+			id: "Qwen3.8-27B",
+			name: "Qwen3.8-27B",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: "qwen-chat-template",
+			},
+			clio: {
+				targetId: "mini",
+				runtimeId: "llamacpp",
+				lifecycle: "user-managed",
+				quirks: {
+					thinking: {
+						mechanism: "effort-levels",
+						effortByLevel: { low: "low", medium: "medium", high: "xhigh", xhigh: "xhigh" },
+					},
+					sampling: {
+						thinking: {
+							temperature: 1,
+							topP: 0.95,
+							topK: 20,
+							minP: 0,
+							presencePenalty: 0,
+							repeatPenalty: 1,
+						},
+						instruct: {
+							temperature: 0.7,
+							topP: 0.8,
+							topK: 20,
+							minP: 0,
+							presencePenalty: 1.5,
+							repeatPenalty: 1,
+						},
+					},
+				},
+			},
+		} as unknown as Model<"openai-completions">;
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const cases: ReadonlyArray<{ level: ThinkingLevel; effort?: "low" | "medium" | "xhigh" }> = [
+			{ level: "off" },
+			{ level: "minimal", effort: "low" },
+			{ level: "low", effort: "low" },
+			{ level: "medium", effort: "medium" },
+			{ level: "high", effort: "xhigh" },
+			{ level: "xhigh", effort: "xhigh" },
+			{ level: "max", effort: "xhigh" },
+		];
+
+		for (const expected of cases) {
+			const controller = new AbortController();
+			let captured: Record<string, unknown> | undefined;
+			const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+				apiKey: "fake-key",
+				...(expected.level === "off" ? {} : { reasoning: expected.level }),
+				samplingParams: { seed: 17 },
+				signal: controller.signal,
+				onPayload: (payload) => {
+					captured = payload as Record<string, unknown>;
+					controller.abort();
+					return undefined;
+				},
+			});
+			try {
+				for await (const _event of stream) {
+					// Drain; the request aborts after the fully composed payload is captured.
+				}
+			} catch {
+				// An aborted request may surface as an error/throw assertion.
+			}
+
+			ok(captured, `${expected.level} should reach onPayload`);
+			strictEqual(captured.reasoning_effort, expected.effort, `${expected.level} reasoning_effort`);
+			deepStrictEqual(
+				captured.chat_template_kwargs,
+				expected.level === "off"
+					? { enable_thinking: false, preserve_thinking: true }
+					: { enable_thinking: true, preserve_thinking: true },
+				`${expected.level} chat_template_kwargs`,
+			);
+			const thinkingActive = expected.level !== "off";
+			strictEqual(captured.temperature, thinkingActive ? 1 : 0.7, `${expected.level} temperature`);
+			strictEqual(captured.top_p, thinkingActive ? 0.95 : 0.8, `${expected.level} top_p`);
+			strictEqual(captured.top_k, 20, `${expected.level} top_k`);
+			strictEqual(captured.min_p, 0, `${expected.level} min_p`);
+			strictEqual(captured.presence_penalty, thinkingActive ? 0 : 1.5, `${expected.level} presence_penalty`);
+			strictEqual(captured.repeat_penalty, 1, `${expected.level} repeat_penalty`);
+			strictEqual(captured.seed, 17, `${expected.level} arbitrary pi sampling parameter`);
+		}
+	});
+
+	it("uses pi's vLLM thinking budget while preserving room for the answer", async () => {
+		const model = {
+			id: "AgenticQwen-14B",
+			name: "AgenticQwen-14B",
+			api: "openai-completions",
+			provider: "vllm",
+			baseUrl: "http://127.0.0.1:1/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				supportsThinkingTokenBudget: true,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: "qwen-chat-template",
+			},
+			clio: {
+				targetId: "gpu",
+				runtimeId: "vllm",
+				quirks: {
+					thinking: {
+						mechanism: "budget-tokens",
+						budgetByLevel: { low: 1024, medium: 4096, high: 16384 },
+					},
+				},
+			},
+		} as unknown as Model<"openai-completions">;
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const cases = [
+			{ reasoning: "low", expectedBudget: 1024 },
+			{ reasoning: "medium", expectedBudget: 4096 },
+			{ reasoning: "high", expectedBudget: 16384 },
+			{ reasoning: "xhigh", expectedBudget: 16384 },
+		] as const;
+
+		for (const expected of cases) {
+			const controller = new AbortController();
+			let captured: Record<string, unknown> | undefined;
+			const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+				apiKey: "fake-key",
+				maxTokens: 32768,
+				reasoning: expected.reasoning,
+				signal: controller.signal,
+				onPayload: (payload) => {
+					captured = payload as Record<string, unknown>;
+					controller.abort();
+					return undefined;
+				},
+			});
+			try {
+				for await (const _event of stream) {
+					// Drain; the request aborts after pi has built the payload.
+				}
+			} catch {
+				// An aborted request may surface as an error/throw assertion.
+			}
+
+			ok(captured, `${expected.reasoning} should reach onPayload`);
+			strictEqual(captured.thinking_token_budget, expected.expectedBudget);
+			strictEqual(captured.thinking, undefined, "vLLM uses pi's top-level budget instead of a vendor object");
+			strictEqual(captured.max_tokens, 32768, "the shared ceiling retains answer headroom beyond the budget");
+		}
 	});
 
 	it("awaits llama.cpp router residency before constructing the chat payload", async () => {

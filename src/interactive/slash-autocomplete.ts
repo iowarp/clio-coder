@@ -84,45 +84,6 @@ function argumentCompletionItems(
 	});
 }
 
-/**
- * The alias spellings tab-completion offers as commands of their own.
- *
- * An alias is a real invocation: `/exit`, `/ctx`, `/compact`, and `/models` all
- * run. Completion built its list from canonical names only, so typing `/exi`
- * offered nothing and the spelling the operator was taught by `/help` looked
- * like it did not exist. Colon aliases stay out: `/skill:` and `/skills:` are
- * routed by the dedicated skill branch, which offers skill names after the
- * colon, and listing the bare prefixes beside `/skill` would put three near
- * identical rows in front of that.
- */
-function aliasCompletionEntries(): SlashAutocompleteCommand[] {
-	const entries: SlashAutocompleteCommand[] = [];
-	for (const ref of commandReference()) {
-		for (const alias of ref.aliases) {
-			if (alias.includes(":")) continue;
-			const standsFor = ref.aliasArgs?.[alias];
-			const argumentHint = standsFor === undefined ? compactArgumentHint(ref.args) : undefined;
-			const args = standsFor === undefined ? ref.args : undefined;
-			entries.push({
-				name: alias,
-				// An alias that stands for a subcommand takes that subcommand's
-				// arguments, not the command's, so it gets neither hint nor argument
-				// completions: offering `/context`'s siblings after `/compact` would
-				// name subcommands that cannot follow it.
-				description: `${ref.description} (alias of /${ref.name}${standsFor === undefined ? "" : ` ${standsFor}`})`,
-				...(argumentHint ? { argumentHint } : {}),
-				...(args
-					? {
-							getArgumentCompletions: (argumentText: string) =>
-								argumentCompletionItems(args, argumentText, ref.subcommandDescriptions),
-						}
-					: {}),
-			});
-		}
-	}
-	return entries;
-}
-
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 	const reference = commandReference();
 	return SLASH_COMMAND_GROUPS.flatMap((group) => reference.filter((ref) => ref.group === group)).map((ref) => {
@@ -142,40 +103,10 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 	});
 }
 
-function commandCompletionItem(command: SlashAutocompleteCommand): AutocompleteItem {
-	const hint = command.argumentHint;
-	const description = compactCompletionDescription(hint ? `${hint} — ${command.description}` : command.description);
-	return {
-		value: command.name,
-		label: command.name,
-		...(description ? { description } : {}),
-	};
-}
-
 function compactCompletionDescription(description: string | undefined): string | undefined {
 	if (!description || visibleWidth(description) <= COMPLETION_DESCRIPTION_BUDGET) return description;
 	const clipped = truncateToWidth(description, COMPLETION_DESCRIPTION_BUDGET - 1, "", false).trimEnd();
 	return `${clipped}…`;
-}
-
-/**
- * Alias spellings that parse like their canonical command, e.g. /ctx for
- * /context. The /skill: family stays out: it is routed by the dedicated skill
- * branch and never reaches argument completion. So does an alias that stands
- * for a subcommand, e.g. /compact: its arguments are the tail of `/context
- * compact`, so completing them against `/context` would offer the sibling
- * subcommands where free-form instructions go.
- */
-function commandAliasMap(): Map<string, string> {
-	const map = new Map<string, string>();
-	for (const ref of commandReference()) {
-		for (const alias of ref.aliases) {
-			if (alias.includes(":")) continue;
-			if (ref.aliasArgs?.[alias] !== undefined) continue;
-			map.set(alias, ref.name);
-		}
-	}
-	return map;
 }
 
 function isSlashCommandPrefix(lines: string[], cursorLine: number, cursorCol: number): string | null {
@@ -195,49 +126,15 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 
 	private readonly provider: CombinedAutocompleteProvider;
 	private readonly listSkills: (() => { installed: Skill[]; marketplace: MarketplaceSkill[] }) | undefined;
-	private readonly aliases: Map<string, string>;
-	private readonly aliasCommands: SlashAutocompleteCommand[];
 
 	constructor(
 		commands: SlashAutocompleteCommand[],
 		basePath: string,
 		fdPath: string | null,
 		listSkills?: () => { installed: Skill[]; marketplace: MarketplaceSkill[] },
-		aliases: Map<string, string> = commandAliasMap(),
-		aliasCommands: SlashAutocompleteCommand[] = aliasCompletionEntries(),
 	) {
 		this.provider = new CombinedAutocompleteProvider(commands, basePath, fdPath);
 		this.listSkills = listSkills;
-		this.aliases = aliases;
-		this.aliasCommands = aliasCommands;
-	}
-
-	/**
-	 * An alias invocation parses exactly like its canonical command, so it must
-	 * complete like it too. The combined provider looks argument completions up
-	 * by exact command name, so the line it sees swaps the alias token for the
-	 * canonical name with the cursor shifted by the length delta. Completion
-	 * application still runs against the user's original spelling because
-	 * argument prefixes never include the command token.
-	 */
-	private canonicalizeAlias(
-		lines: string[],
-		cursorLine: number,
-		cursorCol: number,
-	): { lines: string[]; cursorCol: number } {
-		const line = lines[cursorLine] ?? "";
-		const match = line.match(/^(\s*)\/(\S+)\s/);
-		const lead = match?.[1];
-		const typed = match?.[2];
-		if (lead === undefined || typed === undefined) return { lines, cursorCol };
-		const canonical = this.aliases.get(typed);
-		if (!canonical) return { lines, cursorCol };
-		const nameStart = lead.length + 1;
-		const nameEnd = nameStart + typed.length;
-		if (cursorCol <= nameEnd) return { lines, cursorCol };
-		const next = [...lines];
-		next[cursorLine] = `${line.slice(0, nameStart)}${canonical}${line.slice(nameEnd)}`;
-		return { lines: next, cursorCol: cursorCol + (canonical.length - typed.length) };
 	}
 
 	async getSuggestions(
@@ -257,7 +154,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		// submit, so submitting the bare selector would silently commit
 		// whichever skill happened to sort first instead of opening the Skills
 		// Hub (see FINDINGS.md F1).
-		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)([a-zA-Z0-9_-]*)$/i);
+		const skillMatch = textBeforeCursor.match(/^\s*\/skill\s+([a-zA-Z0-9_-]*)$/i);
 		if (skillMatch && this.listSkills) {
 			const typedPrefix = skillMatch[1]?.toLowerCase() ?? "";
 			const { installed, marketplace } = this.listSkills();
@@ -291,8 +188,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			if (items.length > 0) return { items, prefix: typedPrefix };
 		}
 
-		const canonical = this.canonicalizeAlias(lines, cursorLine, cursorCol);
-		const suggestions = await this.provider.getSuggestions(canonical.lines, cursorLine, canonical.cursorCol, options);
+		const suggestions = await this.provider.getSuggestions(lines, cursorLine, cursorCol, options);
 		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
 		if (commandPrefix !== null) {
 			const canonicalItems = (suggestions?.items ?? [])
@@ -302,11 +198,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					if (description === item.description || description === undefined) return item;
 					return { ...item, description };
 				});
-			const aliasItems =
-				commandPrefix.length === 0
-					? []
-					: this.aliasCommands.filter((command) => command.name.startsWith(commandPrefix)).map(commandCompletionItem);
-			const items = [...canonicalItems, ...aliasItems];
+			const items = canonicalItems;
 			if (items.length === 0) return null;
 			return { items, prefix: suggestions?.prefix ?? textBeforeCursor };
 		}
@@ -333,16 +225,16 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const textBeforeCursor = currentLine.slice(0, cursorCol);
 		const textAfterCursor = currentLine.slice(cursorCol);
 
-		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)[a-zA-Z0-9_-]*$/i);
+		const skillMatch = textBeforeCursor.match(/^\s*\/skill\s+[a-zA-Z0-9_-]*$/i);
 		if (skillMatch && (item.value.startsWith("skill:") || item.value.startsWith("marketplace:"))) {
 			const skillName = item.value.slice(item.value.indexOf(":") + 1);
-			const newLine = `/skill:${skillName} ${textAfterCursor}`;
+			const newLine = `/skill ${skillName} ${textAfterCursor}`;
 			const newLines = [...lines];
 			newLines[cursorLine] = newLine;
 			return {
 				lines: newLines,
 				cursorLine,
-				cursorCol: `/skill:${skillName} `.length,
+				cursorCol: `/skill ${skillName} `.length,
 			};
 		}
 

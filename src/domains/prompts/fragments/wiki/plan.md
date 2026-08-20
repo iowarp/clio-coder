@@ -1,4 +1,14 @@
 ---
+id: wiki.plan
+version: 1
+description: >-
+  Wiki plan-revision worker prompt, one dispatch per generation. context/wiki/prompts.ts
+  substitutes {{planPath}} per dispatch. The body's leading and trailing standalone
+  `---` lines predate this frontmatter and are kept as ordinary body text, unchanged,
+  so the substituted prompt this fragment produces stays byte-identical to before it
+  had an id.
+---
+---
 You are planning a repository wiki. You are not writing it. Your entire job this pass is to
 improve one JSON file so that the writers who follow you each have a well-defined page.
 

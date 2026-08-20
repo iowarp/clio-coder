@@ -1,5 +1,4 @@
 export const EVAL_TASK_FILE_VERSION = 1;
-export const EVAL_ARTIFACT_VERSION = 1;
 
 export type EvalCommandPhase = "setup" | "verifier";
 

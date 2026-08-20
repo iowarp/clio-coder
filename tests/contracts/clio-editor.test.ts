@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type TUI, visibleWidth } from "../../src/engine/tui.js";
+import { CLIO_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
+import { KeybindingsManager, setKeybindings, type TUI, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
@@ -172,5 +173,23 @@ describe("contracts/clio-editor", () => {
 		editor.handleInput("\x1b[200~/model\x1b[201~");
 		deepStrictEqual(submitted, []);
 		deepStrictEqual(editor.getText(), "/model");
+	});
+
+	it("browses accepted prompt history with Ctrl+P and Ctrl+N while preserving the draft", () => {
+		setKeybindings(new KeybindingsManager(CLIO_KEYBINDINGS));
+		const { editor } = createEditor();
+		editor.addToHistory("first prompt");
+		editor.addToHistory("second prompt");
+		editor.addToHistory("  second prompt  ");
+		editor.setText("unfinished draft");
+
+		editor.handleInput("\x10");
+		strictEqual(editor.getText(), "second prompt");
+		editor.handleInput("\x10");
+		strictEqual(editor.getText(), "first prompt");
+		editor.handleInput("\x0e");
+		strictEqual(editor.getText(), "second prompt");
+		editor.handleInput("\x0e");
+		strictEqual(editor.getText(), "unfinished draft");
 	});
 });

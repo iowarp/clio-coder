@@ -22,7 +22,7 @@ import {
 import { clioTheme, fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import type { AskUserQuestion } from "../../src/tools/ask-user.js";
-import { createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
+import { createAskUserTool, finalizeAskUserInterviewForHost, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { type AskUserToolPolicy, createRegistry } from "../../src/tools/registry.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
@@ -196,6 +196,40 @@ describe("contracts/ask_user", () => {
 		strictEqual(policy.callCount, 2);
 		strictEqual(third.kind, "ok");
 		ok(third.output.includes("ask_user result: round_limit_reached"));
+	});
+
+	it("carries action=complete summaries through the host finalizer to one decision producer", async () => {
+		const policy = askUserPolicy();
+		policy.sessionId = "session-1";
+		policy.turnId = "user-1";
+		const tool = createAskUserTool({
+			askUser: async (questions) => ({
+				answers: questions.map((question) => ({ question: question.question, answer: "Focused" })),
+			}),
+		});
+		await tool.run(
+			{
+				questions: [{ header: "Scope", question: "Which scope?" }],
+			},
+			{ askUserPolicy: policy, sessionId: "session-1", turnId: "user-1" },
+		);
+		const completed = await tool.run(
+			{
+				action: "complete",
+				summary: "Use focused scope for this release.",
+				decisions: [{ key: "release_gate", value: "Focused contracts" }],
+			},
+			{ askUserPolicy: policy, sessionId: "session-1", turnId: "user-1" },
+		);
+		strictEqual(completed.kind, "ok");
+		strictEqual(policy.summary, "Use focused scope for this release.");
+
+		const produced: AskUserToolPolicy[] = [];
+		await finalizeAskUserInterviewForHost(policy, "turn_finished", undefined, (settled) => produced.push(settled));
+		strictEqual(produced.length, 1);
+		strictEqual(produced[0], policy);
+		strictEqual(produced[0]?.summary, "Use focused scope for this release.");
+		strictEqual(produced[0]?.status, "complete");
 	});
 
 	it("direct fallback handler returns cancelled without blocking", async () => {

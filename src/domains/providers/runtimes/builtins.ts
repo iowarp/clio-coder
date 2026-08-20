@@ -31,7 +31,7 @@ import llamacppAnthropic from "./local-native/llamacpp-anthropic.js";
 import llamacppCompletion from "./local-native/llamacpp-completion.js";
 import llamacppEmbed from "./local-native/llamacpp-embed.js";
 import llamacppRerank from "./local-native/llamacpp-rerank.js";
-import lmstudioNative from "./local-native/lmstudio-native.js";
+import lmstudio from "./local-native/lmstudio.js";
 import ollamaNative from "./local-native/ollama-native.js";
 import sglang from "./local-native/sglang.js";
 import vllm from "./local-native/vllm.js";
@@ -57,7 +57,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	llamacppCompletion,
 	llamacppEmbed,
 	llamacppRerank,
-	lmstudioNative,
+	lmstudio,
 	ollamaNative,
 	anthropicCompat,
 	openaiCompat,

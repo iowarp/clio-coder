@@ -97,9 +97,12 @@ describe("contracts/headless-json-stream", () => {
 		}
 	});
 
-	it("passes terminal and lifecycle events through unchanged", () => {
+	it("passes tool and notice events through unchanged", () => {
+		// `message_end` is deliberately absent. It used to pass through by
+		// identity, which is what made the stream carry every assistant token
+		// twice, once as a delta and again inside the completed message. Its
+		// projection is covered by cli-json-stream-dedup.test.ts.
 		for (const event of [
-			{ type: "message_end", message: assistantMessage("done") },
 			{ type: "tool_execution_start", toolCallId: "1", toolName: "read", args: { path: "a.ts" } },
 			{ type: "tool_execution_end", toolCallId: "1", toolName: "read", result: { content: [] }, isError: false },
 			{ type: "notice", surface: "transcript", level: "warning", key: "turn.interrupted", text: "cancelled" },

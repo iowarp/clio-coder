@@ -12,12 +12,12 @@ export function runCompactWithNotice(
 	instructions: string | undefined,
 ): void {
 	if (!onCompact) {
-		emitCommandNotice(notice, "error", "compact", "compaction not wired; pass onCompact to startInteractive");
+		emitCommandNotice(notice, "error", "context compact", "compaction not wired; pass onCompact to startInteractive");
 		return;
 	}
 	const task = onCompact(instructions);
 	void task.catch((err) => {
 		const msg = err instanceof Error ? err.message : String(err);
-		emitCommandNotice(notice, "error", "compact", msg);
+		emitCommandNotice(notice, "error", "context compact", msg);
 	});
 }

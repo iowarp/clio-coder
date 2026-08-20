@@ -455,8 +455,8 @@ describe("milestone 08 overlay polish regressions", () => {
 			{ level: "error", text: "[/resume] session contract unavailable" },
 			{ level: "error", text: "[/new] session contract unavailable" },
 			{ level: "warn", text: "[/fork] no current session to fork from; start one with /new or /resume first" },
-			{ level: "error", text: "[/compact] compaction not wired; pass onCompact to startInteractive" },
-			{ level: "error", text: "[/compact] boom" },
+			{ level: "error", text: "[/context compact] compaction not wired; pass onCompact to startInteractive" },
+			{ level: "error", text: "[/context compact] boom" },
 		]);
 	});
 

@@ -40,8 +40,8 @@ import { createEngineAgent } from "../engine/agent.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentEvent, AgentMessage, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
-import { finalizeAskUserInterview } from "../tools/ask-user.js";
-import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
+import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
+import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import {
 	createAskUserToolPolicy,
 	createPendingSkillToolPolicy,
@@ -53,17 +53,29 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
+import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import { createTurnPersistence } from "./turn-persistence.js";
-import { createTurnQueues, type QueuedChatMessage, type QueuedMessagesSnapshot } from "./turn-queues.js";
-import { createTurnRecovery, type RetryStatusEvent, reclassifyStallAbort } from "./turn-recovery.js";
-import { type AssistantDeltaEvent, createTurnRuntime } from "./turn-runtime.js";
+import {
+	createTurnQueues,
+	DEFAULT_STEERING_MODE,
+	type QueuedChatMessage,
+	type QueuedMessagesSnapshot,
+	type SteeringMode,
+} from "./turn-queues.js";
+import {
+	createTurnRecovery,
+	type RetryStatusEvent,
+	reclassifyStallAbort,
+	rewriteStallAbortMessage,
+} from "./turn-recovery.js";
+import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError } from "./turn-runtime.js";
 import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
-export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot } from "./turn-queues.js";
+export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot, SteeringMode } from "./turn-queues.js";
 export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
 export type { ChatLoopRunSnapshot } from "./turn-state.js";
@@ -83,7 +95,8 @@ export interface QueueUpdateEvent {
 export interface QueuedUserTurnEvent {
 	type: "queued_user_turn";
 	text: string;
-	kind: QueuedChatMessage["kind"];
+	/** `interrupt` marks a message that cancelled the run and was submitted as a fresh prompt. */
+	kind: QueuedChatMessage["kind"] | "interrupt";
 }
 
 /**
@@ -100,6 +113,13 @@ export interface ChatNoticeEvent {
 	surface: "footer" | "transcript";
 	text: string;
 	key?: string;
+	/**
+	 * Present only on a notice that reports a turn Clio refused to start. The
+	 * `reason` is a closed-set code, not prose: protocol surfaces (the ACP
+	 * server) fail the turn with it instead of returning an empty success, and
+	 * every other surface renders the notice exactly as before.
+	 */
+	admission?: { reason: string };
 }
 
 /**
@@ -112,11 +132,24 @@ export interface ChatNoticeEvent {
  * state here: the parked promise resolves blocked and the segment settles
  * through its ordinary `tool_execution_end`.
  */
-export interface ToolApprovalStateEvent {
-	type: "tool_approval_state";
-	toolCallId: string;
-	state: "awaiting-approval" | "resumed";
-}
+export type ToolApprovalStateEvent =
+	| {
+			type: "tool_approval_state";
+			toolCallId: string;
+			state: "awaiting-approval";
+			/**
+			 * Already-redacted facts shown by the permission overlay. This payload
+			 * exists only on the live event and is never written to the session
+			 * ledger; the transcript renderer must not reconstruct safety facts
+			 * from raw tool arguments.
+			 */
+			view: ApprovalRequestView;
+	  }
+	| {
+			type: "tool_approval_state";
+			toolCallId: string;
+			state: "resumed";
+	  };
 
 export type ChatLoopEvent =
 	| AgentEvent
@@ -136,14 +169,25 @@ export interface ChatSubmitOptions {
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	/** Internal middleware resubmit; does not reset the per-user-prompt stalled-turn nudge cap. */
 	requestContinuation?: boolean;
+	/**
+	 * Delivery mode when a run is active; ignored when idle. Defaults to
+	 * `next-slot`. `interrupt` cancels the run, waits for it to settle, and
+	 * submits the text as a fresh prompt; see {@link ChatLoop.interruptRefusal}
+	 * for the two states in which it degrades to `next-slot` instead.
+	 */
+	steering?: SteeringMode;
 }
+
+/** Closing notice an operator interrupt leaves in the transcript and the ledger. */
+const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";
 
 /**
  * Options for {@link ChatLoop.cancel}. A bare cancel is an operator Esc/Ctrl+C
  * that ends the in-flight turn as an empty aborted message. Passing a `reason`
- * marks the cancel as a system-initiated interrupt (the loop guard): the chat
- * loop persists a durable, visible assistant turn carrying that reason in place
- * of the empty aborted turn, and tags the audit trail with `source`.
+ * marks the cancel as an explained interrupt (the loop guard, or an operator
+ * interrupt-with-message): the chat loop persists a durable, visible assistant
+ * turn carrying that reason in place of the empty aborted turn, and tags the
+ * audit trail with `source`.
  */
 export interface ChatCancelOptions {
 	/** Operator-facing explanation for a system-initiated stop. */
@@ -158,6 +202,15 @@ export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	steer(text: string): boolean;
 	queueFollowUp(text: string): boolean;
+	/**
+	 * Why an interrupt would be refused right now, or null when it would
+	 * cancel the run. An attached dispatch is refused because the parent's abort
+	 * kills the worker's run and discards its work with no receipt; a parked
+	 * permission ask is refused because it is already waiting on the operator.
+	 * In both cases `submit(text, { steering: "interrupt" })` says so and
+	 * queues the text for the next slot instead.
+	 */
+	interruptRefusal(): string | null;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
 	cancel(options?: ChatCancelOptions): void;
@@ -176,11 +229,11 @@ export interface ChatLoop {
 	/**
 	 * Force-run the compaction flow for the current session, swap the agent's
 	 * in-memory `state.messages` for a single bridge message carrying the
-	 * summary, and emit the standard summary notice. Used by the `/compact`
+	 * summary, and emit the standard summary notice. Used by `/context compact`
 	 * slash command so the next user turn ships only the bridge plus the new
 	 * text to the provider (slice 12.5b bug 4). Silent no-op when no session
 	 * or no compaction deps are wired; in both cases emits a user-visible
-	 * notice so the `/compact` handler does not have to mirror the logic.
+	 * notice so the `/context compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;
 	/**
@@ -302,6 +355,17 @@ export interface CreateChatLoopDeps {
 	 * composition; the loop owns the buffer the reminder lands in.
 	 */
 	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
+	/**
+	 * Host-finalizer seam for branch-anchored interview snapshots. Called once,
+	 * after the ask-user host finalizer has settled the policy and its transcript.
+	 */
+	onAskUserFinalized?: (policy: AskUserToolPolicy) => void;
+	/**
+	 * True while an attached `dispatch` call is running. An interrupt is refused
+	 * in that state; the composition root wires this from the dispatch
+	 * background registry, which holds exactly the attached calls.
+	 */
+	hasAttachedDispatch?: () => boolean;
 }
 
 export function reloadProtectedArtifactsForSession(
@@ -345,6 +409,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 */
 	const emitNotice = (text: string, level: ChatNoticeEvent["level"] = "info", key?: string): void => {
 		emit({ type: "notice", level, surface: "transcript", text, ...(key === undefined ? {} : { key }) });
+	};
+
+	/**
+	 * The same transcript notice every admission exit already emitted, carrying
+	 * the reason the turn never started. Text, level, and surface are unchanged,
+	 * so the TUI and headless paths render exactly what they rendered before.
+	 */
+	const emitAdmissionNotice = (text: string, reason: string): void => {
+		emit({ type: "notice", level: "info", surface: "transcript", text, admission: { reason } });
+	};
+
+	/**
+	 * Which of the two settings is actually missing when the runtime resolves to
+	 * null. Both halves produce the same operator-facing notice, but a machine
+	 * consumer of the reason (the ACP server reports it as `data.reason`) needs
+	 * to tell "no orchestrator at all" from "a target that names no model", and
+	 * collapsing them sent a client with a configured target to the wrong fix.
+	 */
+	const nullRuntimeAdmissionReason = (): string => {
+		const orchestrator = deps.getSettings().orchestrator;
+		const target = orchestrator.target?.trim() ?? "";
+		const model = orchestrator.model?.trim() ?? "";
+		return target.length > 0 && model.length === 0 ? "model-not-configured" : "orchestrator-not-configured";
 	};
 
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().retry);
@@ -424,6 +511,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFailureMessage: (message) => emit({ type: "message_end", message }),
 		emitNotice,
 	});
+	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
+		if (event.type === "message_end") rewriteStallAbortMessage(state, event.message);
+		emit(event as ChatLoopEvent);
+	};
 
 	const turnRuntime = createTurnRuntime({
 		state,
@@ -437,7 +528,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		context,
 		middleware,
 		retrySettings,
-		emit,
+		emit: emitRuntimeEvent,
 		emitNotice,
 		toolStartTimes,
 	});
@@ -462,30 +553,78 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// --- the state machine --------------------------------------------------
 
 	// Settlement tracking for whenSettled(): the latest submit's promise,
-	// coerced to never reject so shutdown ordering cannot throw.
+	// coerced to never reject so shutdown ordering cannot throw. `priorSubmit`
+	// is the promise `activeSubmit` held before the latest submit replaced it,
+	// which is the run an interrupt has to wait out.
 	let activeSubmit: Promise<void> = Promise.resolve();
+	let priorSubmit: Promise<void> = Promise.resolve();
+
+	const interruptRefusalReason = (): string | null => {
+		if (deps.hasAttachedDispatch?.() === true) {
+			return "an attached dispatch is running and the interrupt would kill the worker's run with no receipt; use @<agent> to steer it or Esc to cancel it";
+		}
+		if (deps.toolRegistry?.hasParkedCalls() === true) {
+			return "a permission ask is parked and already waiting on you; answer it or press Esc";
+		}
+		return null;
+	};
 
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text),
 		queueFollowUp: (text) => queues.queueFollowUp(text),
+		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
+			let interrupted = false;
 			if (state.streaming) {
-				const hasImages = options.images !== undefined && options.images.length > 0;
+				let mode: SteeringMode = options.steering ?? DEFAULT_STEERING_MODE;
 				const trimmed = text.trim();
-				if (!hasImages && trimmed.length > 0 && state.runtime) {
-					// Enter while streaming means "correct it now": the engine
-					// steering queue drains after every tool batch, so the text
-					// lands as a user message before the next model turn.
-					// alt+enter (queueFollowUp) keeps the after-this-run intent.
-					if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
-					queues.steer(trimmed);
+				if (mode === "interrupt" && trimmed.length > 0) {
+					const refusal = interruptRefusalReason();
+					if (refusal !== null) {
+						emitNotice(`[Clio Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
+						mode = "next-slot";
+					} else {
+						// Cancel, then wait for the cancelled run to settle (its in-flight
+						// tool results and closing ledger turn), then fall through to the
+						// fresh-prompt path below. `priorSubmit` is the run being cancelled;
+						// `activeSubmit` already points at this call.
+						const prior = priorSubmit;
+						api.cancel({
+							reason: INTERRUPT_CANCEL_REASON,
+							auditReason: "operator interrupted the run with a message",
+						});
+						await prior;
+						if (!state.streaming) {
+							interrupted = true;
+						} else {
+							// Something restarted a run while the cancel settled (a
+							// continuation resubmit); do not fight it, deliver at the next slot.
+							emitNotice(
+								"[Clio Coder] a run restarted before the interrupt landed. Queued for the next slot instead.",
+								"warning",
+							);
+							mode = "next-slot";
+						}
+					}
+				}
+				if (!interrupted) {
+					const hasImages = options.images !== undefined && options.images.length > 0;
+					if (!hasImages && trimmed.length > 0 && state.runtime) {
+						// Enter while streaming means "correct it now": the engine
+						// steering queue drains after every tool batch, so the text
+						// lands as a user message before the next model turn.
+						// alt+enter (queueFollowUp) keeps the after-this-run intent.
+						if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
+						if (mode === "end-of-turn") queues.queueFollowUp(trimmed);
+						else queues.steer(trimmed);
+						return;
+					}
+					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
 					return;
 				}
-				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
-				return;
 			}
 
 			state.lastRunSnapshot = null;
@@ -494,11 +633,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
 				agentRuntime = turnRuntime.ensureRuntime();
 			} catch (err) {
-				emitNotice(err instanceof Error ? err.message : String(err));
+				emitAdmissionNotice(
+					err instanceof Error ? err.message : String(err),
+					err instanceof TurnAdmissionError ? err.reason : "admission-failed",
+				);
 				return;
 			}
 			if (!agentRuntime) {
-				emitNotice(notConfiguredNotice());
+				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
 				return;
 			}
 
@@ -613,6 +755,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				options.requestContinuation === true,
 				text,
 			);
+			// An interrupt was submitted while a run was active, so no caller drew
+			// it in the transcript; render it here, after the cancel notice and the
+			// cancelled run's leftovers, which is the order the ledger has.
+			if (interrupted) emit({ type: "queued_user_turn", text, kind: "interrupt" });
 			context.logPromptCompileIfPending();
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 			context.setCurrentSnapshot(turnSnapshot);
@@ -620,6 +766,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const promptHash = compiledPrompt?.systemPromptHash ?? null;
 			state.lastRunSnapshot = {
 				targetId: agentRuntime.targetId,
+				targetUrl: agentRuntime.runtimeResolution.target.url ?? null,
 				runtimeId: agentRuntime.runtimeId,
 				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
 				wireModelId: agentRuntime.wireModelId,
@@ -703,7 +850,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 			} finally {
 				if (askUserPolicy) {
-					await finalizeAskUserInterview(askUserPolicy, "turn_finished", currentToolInvokeOptions());
+					try {
+						await finalizeAskUserInterviewForHost(
+							askUserPolicy,
+							"turn_finished",
+							currentToolInvokeOptions(),
+							deps.onAskUserFinalized,
+						);
+					} catch (error) {
+						emitNotice(
+							`[Clio Coder] interview decisions could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+							"warning",
+							`decision-ledger:${askUserPolicy.id}`,
+						);
+					}
 				}
 				state.streaming = false;
 				if (state.activeInterruptReason !== null) {
@@ -826,7 +986,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// current session" message rather than the "not configured"
 			// banner.
 			if (!deps.session?.current()) {
-				emitNotice("[/compact] no current session to compact; start one with /new or /resume first");
+				emitNotice("[/context compact] no current session to compact; start one with /new or /resume first");
 				return;
 			}
 			let agentRuntime: AgentRuntime | null;
@@ -834,28 +994,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
 				agentRuntime = turnRuntime.ensureRuntime();
 			} catch (err) {
-				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
+				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
 			}
 			if (!agentRuntime) {
-				emitNotice(`[/compact] ${notConfiguredNotice()}`);
+				emitNotice(`[/context compact] ${notConfiguredNotice()}`);
 				return;
 			}
 			let compacted = false;
 			try {
 				compacted = await context.runAutoCompact(agentRuntime, true, instructions, "force");
 			} catch (err) {
-				emitNotice(`[/compact] ${err instanceof Error ? err.message : String(err)}`);
+				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
 			}
 			if (!compacted) {
-				emitNotice("[/compact] nothing to compact; session is empty or no cut crossed");
+				emitNotice("[/context compact] nothing to compact; session is empty or no cut crossed");
 			}
 		},
 	};
 
 	const submitInner = api.submit.bind(api);
 	api.submit = (text, options) => {
+		priorSubmit = activeSubmit;
 		const run = submitInner(text, options);
 		activeSubmit = run.catch(() => {});
 		return run;

@@ -62,11 +62,11 @@ function draftFor(envelope: RunEnvelope): RunReceiptDraft {
 }
 
 describe("contracts/dispatch state after an uninstall", () => {
-	let scratch: ReturnType<typeof isolateClioEnv>;
+	let scratch: Awaited<ReturnType<typeof isolateClioEnv>>;
 	let stateDir: string;
 
-	beforeEach(() => {
-		scratch = isolateClioEnv("clio-dispatch-uninstall-");
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-dispatch-uninstall-");
 		stateDir = join(scratch.dir, "state");
 	});
 

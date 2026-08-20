@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Documentation Hub (v0.3.1)</title>
+  <title>Clio Coder Documentation Hub (v0.3.2)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Unique homepage layouts */
@@ -269,7 +269,7 @@
       <div class="meta-badges">
         <span class="meta-badge version">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          v0.3.1
+          v0.3.2
         </span>
         <span class="meta-badge" style="border-color: rgba(255,255,255,0.08); color: var(--text-muted);">
           CLI command: <code style="color: var(--color-orange); margin-left: 0.35rem;">clio-coder docs [topic]</code>
@@ -750,93 +750,158 @@
       </a>
 
       <!-- Card: Session Lifecycle -->
-      <a href="../session-lifecycle.md" class="doc-card" data-categories="operate,reference" data-title="Session Lifecycle" data-tags="session ledger tree jsonl fork resume checkpoint active path migrations">
+      <a href="session_lifecycle_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Session Lifecycle" data-tags="session ledger tree jsonl fork resume checkpoint active path migrations settlement">
         <div class="card-top">
           <h3 class="card-title">Session Lifecycle</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Session ledger v3, conversation tree graph, active-path lineage selection, /fork, /resume, checkpoints, and write-ahead protected artifact journal.</p>
+        <p class="card-desc">Session ledger v3, conversation tree graph, active-path lineage selection, /fork, /resume, turn settlement, and write-ahead protected artifact journal.</p>
         <div class="card-footer">
           <span class="path">session-lifecycle.md</span>
-          <span class="feature" style="color: #a5b4fc;">Ledger Format v3 ↗</span>
+          <span class="feature">Tree Sim</span>
         </div>
       </a>
 
       <!-- Card: ACP Server -->
-      <a href="../acp.md" class="doc-card" data-categories="operate,reference" data-title="ACP Protocol Server" data-tags="acp agent client protocol jsonrpc stdio permissions mediator zed errors">
+      <a href="acp_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="ACP Protocol Server" data-tags="acp agent client protocol jsonrpc stdio permissions mediator zed errors">
         <div class="card-top">
           <h3 class="card-title">ACP Protocol Server</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
         <p class="card-desc">Agent Client Protocol (ACP v1 / schema 0.4.5) JSON-RPC server over stdio, tool mediation, non-stall permission handling, and error taxonomy.</p>
         <div class="card-footer">
           <span class="path">acp.md</span>
-          <span class="feature" style="color: #a5b4fc;">JSON-RPC 2.0 ↗</span>
+          <span class="feature">Protocol Spec</span>
         </div>
       </a>
 
       <!-- Card: Artifact Versions -->
-      <a href="../artifact-versions.md" class="doc-card" data-categories="reference" data-title="Artifact Versions" data-tags="versions receipt integrity session format workerspec fleet eval trace schema migration">
+      <a href="artifact_versions_blueprint.html" class="doc-card" data-categories="reference" data-title="Artifact Versions" data-tags="versions receipt integrity session format workerspec fleet eval trace schema migration">
         <div class="card-top">
           <h3 class="card-title">Artifact Versions</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
         <p class="card-desc">Authoritative registry and migration policies for all 9 serialized artifact schemas across Clio Coder.</p>
         <div class="card-footer">
           <span class="path">artifact-versions.md</span>
-          <span class="feature" style="color: #a5b4fc;">Version Registry ↗</span>
+          <span class="feature">Version Registry</span>
         </div>
       </a>
 
       <!-- Card: Exit Codes & Output Contracts -->
-      <a href="../exit-codes-and-output.md" class="doc-card" data-categories="operate,reference" data-title="Exit Codes &amp; Output Contracts" data-tags="exit codes status help json streaming stdout stderr format cli">
+      <a href="exit_codes_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Exit Codes &amp; Output Contracts" data-tags="exit codes status help json streaming stdout stderr format cli">
         <div class="card-top">
           <h3 class="card-title">Exit Codes &amp; Output</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
         <p class="card-desc">Deterministic process exit code taxonomy (0, 1, 2, 3), --help standard on stdout, and machine-readable JSON streaming contracts.</p>
         <div class="card-footer">
           <span class="path">exit-codes-and-output.md</span>
-          <span class="feature" style="color: #a5b4fc;">Exit Taxonomy ↗</span>
+          <span class="feature">Exit Taxonomy</span>
         </div>
       </a>
 
       <!-- Card: Capacity Leases & Scheduling -->
-      <a href="../capacity-and-scheduling.md" class="doc-card" data-categories="fleet,reference" data-title="Capacity Leases &amp; Scheduling" data-tags="capacity leases scheduling drain lock ttl admission cluster dispatch">
+      <a href="capacity_scheduling_blueprint.html" class="doc-card" data-categories="fleet,reference" data-title="Capacity Leases &amp; Scheduling" data-tags="capacity leases scheduling drain lock ttl admission cluster dispatch">
         <div class="card-top">
           <h3 class="card-title">Capacity &amp; Scheduling</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
         <p class="card-desc">Multi-process capacity leasing (dispatch-admission.json), heartbeat TTLs, cross-process transaction locks, and cluster drain control.</p>
         <div class="card-footer">
           <span class="path">capacity-and-scheduling.md</span>
-          <span class="feature" style="color: #a5b4fc;">Leasing Protocol ↗</span>
+          <span class="feature">Leasing Protocol</span>
         </div>
       </a>
 
       <!-- Card: Glossary -->
-      <a href="../glossary.md" class="doc-card" data-categories="reference" data-title="Glossary" data-tags="glossary terms assignment run attempt batch plan receipt topology types">
+      <a href="glossary_blueprint.html" class="doc-card" data-categories="reference" data-title="Glossary" data-tags="glossary terms assignment run attempt batch plan receipt topology types">
         <div class="card-top">
           <h3 class="card-title">Glossary</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
         <p class="card-desc">Authoritative definitions of 40 core architectural concepts mapped to their owning TypeScript types in src/.</p>
         <div class="card-footer">
           <span class="path">glossary.md</span>
-          <span class="feature" style="color: #a5b4fc;">17 Core Terms ↗</span>
+          <span class="feature">Terms Index</span>
         </div>
       </a>
 
       <!-- Card: Troubleshooting -->
-      <a href="../troubleshooting.md" class="doc-card" data-categories="operate,reference" data-title="Troubleshooting" data-tags="troubleshooting errors remedies diagnostics doctor probe repair warnings">
+      <a href="troubleshooting_blueprint.html" class="doc-card" data-categories="operate,reference" data-title="Troubleshooting" data-tags="troubleshooting errors remedies diagnostics doctor probe repair warnings">
         <div class="card-top">
           <h3 class="card-title">Troubleshooting</h3>
-          <span class="card-badge badge-markdown">Markdown Spec</span>
+          <span class="card-badge badge-ref">Ref</span>
         </div>
         <p class="card-desc">Actionable error remediation and diagnostics catalog keyed by exact user-facing messages and failure codes.</p>
         <div class="card-footer">
           <span class="path">troubleshooting.md</span>
-          <span class="feature" style="color: #a5b4fc;">Error Matrix ↗</span>
+          <span class="feature">Error Matrix</span>
+        </div>
+      </a>
+
+      <!-- Card: Pi SDK Boundary -->
+      <a href="pi_boundary_blueprint.html" class="doc-card" data-categories="reference" data-title="Pi SDK Boundary" data-tags="sdk boundary upstream primitives keep route attribution">
+        <div class="card-top">
+          <h3 class="card-title">Pi SDK Boundary</h3>
+          <span class="card-badge badge-ref">Ref</span>
+        </div>
+        <p class="card-desc">Explicit architectural boundary defining which primitives route upstream and which behaviors are owned by Clio.</p>
+        <div class="card-footer">
+          <span class="path">pi-boundary.md</span>
+          <span class="feature">Boundary Table</span>
+        </div>
+      </a>
+
+      <!-- Card: Dispatch Architecture Rationale -->
+      <a href="dispatch_rationale_blueprint.html" class="doc-card" data-categories="fleet,reference" data-title="Dispatch Architecture Rationale" data-tags="dispatch rationale cohesion invariants waves scheduler">
+        <div class="card-top">
+          <h3 class="card-title">Dispatch Rationale</h3>
+          <span class="card-badge badge-ref">Ref</span>
+        </div>
+        <p class="card-desc">Cohesion invariants, wave scheduling constraints, and single-owner reducers across the dispatch domain.</p>
+        <div class="card-footer">
+          <span class="path">dispatch-architecture-rationale.md</span>
+          <span class="feature">Rationale Spec</span>
+        </div>
+      </a>
+
+      <!-- Card: Time Conventions -->
+      <a href="time_conventions_blueprint.html" class="doc-card" data-categories="reference" data-title="Time Conventions" data-tags="time clock monotonic wall utc formatters instants durations">
+        <div class="card-top">
+          <h3 class="card-title">Time &amp; Clock Conventions</h3>
+          <span class="card-badge badge-ref">Ref</span>
+        </div>
+        <p class="card-desc">Monotonic clocks for durations, wall clocks for anchor instants, UTC storage, and render-boundary formatters.</p>
+        <div class="card-footer">
+          <span class="path">time-conventions.md</span>
+          <span class="feature">Clock Rules</span>
+        </div>
+      </a>
+
+      <!-- Card: Artifact Placement -->
+      <a href="artifact_placement_blueprint.html" class="doc-card" data-categories="reference" data-title="Artifact Placement" data-tags="artifact placement workspace transient state storage">
+        <div class="card-top">
+          <h3 class="card-title">Artifact Placement</h3>
+          <span class="card-badge badge-ref">Ref</span>
+        </div>
+        <p class="card-desc">Clear separation of files by audience: human deliverables in workspace, transient outputs in .clio-coder/, and state in XDG roots.</p>
+        <div class="card-footer">
+          <span class="path">artifact-placement.md</span>
+          <span class="feature">Placement Contract</span>
+        </div>
+      </a>
+
+      <!-- Card: Prompt Envelope -->
+      <a href="prompt_envelope_blueprint.html" class="doc-card" data-categories="operate,safety" data-title="Prompt Envelope &amp; Tools" data-tags="prompt envelope templates override subtree tool planes">
+        <div class="card-top">
+          <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
+          <span class="card-badge badge-ref">Ref</span>
+        </div>
+        <p class="card-desc">Layered system prompts, shell-style template parameter expansion, handbook subtree boundaries, and seven tool planes.</p>
+        <div class="card-footer">
+          <span class="path">prompt-envelope-and-tools.md</span>
+          <span class="feature">Prompt Architecture</span>
         </div>
       </a>
 
@@ -860,7 +925,7 @@ clio-coder docs --no-open</code></pre>
     </div>
 
     <footer>
-      <p>Clio Coder Visual Documentation Center &bull; Version 0.3.1</p>
+      <p>Clio Coder Visual Documentation Center &bull; Version 0.3.2</p>
       <p>Maintainer: Illinois Institute of Technology / Gnosis Research Center &bull; iowarp.ai</p>
     </footer>
   </div>

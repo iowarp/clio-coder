@@ -4,6 +4,10 @@ import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/inde
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
+import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
+import { foldSessionTaskHistory } from "../domains/session/task-board.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
 import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
@@ -20,7 +24,8 @@ import {
 	contextResetOptions,
 	openContextResetOverlay,
 } from "./overlays/context-reset.js";
-import type { ContextClearCommandOptions } from "./slash-commands.js";
+import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
+import { type ContextClearCommandOptions, formatUserTaskHandoff } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { type ArtifactProviderDeps, createDefaultArtifactProviders } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
@@ -40,6 +45,10 @@ export interface OverlayGeneralOpenersDeps {
 	renderTaskIsland: () => void;
 	requestRender: () => void;
 	getTaskBoard?: Parameters<typeof openTasksOverlay>[1];
+	userTasks?: UserTasksStore;
+	getDecisionBoard?: Parameters<typeof openDecisionsOverlay>[1];
+	supersedeDecision?: (interviewId: string, key: string, correction?: string) => unknown;
+	submitChat: (text: string) => void;
 	getTaskMemoryStatus?: Parameters<typeof openMemoryOverlay>[1];
 	dataDir: string;
 	notify: (level: "info" | "success" | "warning" | "error", text: string, key?: string) => void;
@@ -56,6 +65,7 @@ export interface OverlayGeneralOpenersDeps {
 	openContextOverlay?: typeof openContextOverlay;
 	openContextResetOverlay?: typeof openContextResetOverlay;
 	openTasksOverlay?: typeof openTasksOverlay;
+	openDecisionsOverlay?: typeof openDecisionsOverlay;
 	openMemoryOverlay?: typeof openMemoryOverlay;
 	openViewOverlay?: typeof openViewOverlay;
 }
@@ -66,6 +76,7 @@ export interface OverlayGeneralOpeners {
 	openContextReset(): void;
 	toggleFooter(): void;
 	openTasks(): void;
+	openDecisions(): void;
 	openMemory(): void;
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
@@ -76,6 +87,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const openContextOverlayFactory = deps.openContextOverlay ?? openContextOverlay;
 	const openContextResetOverlayFactory = deps.openContextResetOverlay ?? openContextResetOverlay;
 	const openTasksOverlayFactory = deps.openTasksOverlay ?? openTasksOverlay;
+	const openDecisionsOverlayFactory = deps.openDecisionsOverlay ?? openDecisionsOverlay;
 	const openMemoryOverlayFactory = deps.openMemoryOverlay ?? openMemoryOverlay;
 	const openViewOverlayFactory = deps.openViewOverlay ?? openViewOverlay;
 	const showOverlayFrameFactory = deps.showOverlayFrame ?? showClioOverlayFrame;
@@ -136,6 +148,50 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "tasks";
 		deps.transitions.handle = openTasksOverlayFactory(deps.tui, () => deps.getTaskBoard?.() ?? null, {
+			onClose: deps.closeOverlay,
+			getSessionSnapshot: () => {
+				const meta = deps.getSessionMeta();
+				const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], meta?.pinnedLeafTurnId ?? undefined);
+				const workspace = meta?.cwd ?? process.cwd();
+				return {
+					history: foldSessionTaskHistory(entries),
+					artifacts: foldSessionArtifacts(entries, { workspace }),
+				};
+			},
+			...(deps.userTasks
+				? {
+						getUserTasks: () => deps.userTasks?.snapshot() ?? [],
+						onAddUserTask: (title: string) => void deps.userTasks?.add(title),
+						onHandUserTask: (id: string) => {
+							const task = deps.userTasks?.hand(id, deps.getSessionId?.() ?? undefined);
+							if (!task) throw new Error("operator task inbox is unavailable");
+							deps.submitChat(formatUserTaskHandoff(task));
+						},
+						onDoneUserTask: (id: string) => void deps.userTasks?.done(id),
+						onDropUserTask: (id: string) => void deps.userTasks?.drop(id),
+					}
+				: {}),
+			onOpenArtifact: (path: string) => openView(`workspace:${path}`),
+			requestRender: deps.requestRender,
+			workspace: deps.getSessionMeta()?.cwd ?? process.cwd(),
+		});
+		deps.requestRender();
+	};
+
+	const openDecisions = (): void => {
+		if (deps.transitions.state !== "closed") return;
+		deps.transitions.state = "decisions";
+		deps.transitions.handle = openDecisionsOverlayFactory(deps.tui, () => deps.getDecisionBoard?.() ?? [], {
+			onSupersede: (selection) => {
+				if (!deps.supersedeDecision) throw new Error("decision board is unavailable in this session");
+				deps.supersedeDecision(selection.interviewId, selection.key);
+			},
+			onCorrection: (selection, correction) => {
+				if (!deps.supersedeDecision) throw new Error("decision board is unavailable in this session");
+				deps.supersedeDecision(selection.interviewId, selection.key, correction);
+				deps.closeOverlay();
+				deps.submitChat(formatDecisionCorrectionTurn(selection, correction));
+			},
 			onClose: deps.closeOverlay,
 		});
 		deps.requestRender();
@@ -210,6 +266,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openContextReset,
 		toggleFooter,
 		openTasks,
+		openDecisions,
 		openMemory,
 		openView,
 		toggleDispatchBoard,
