@@ -2452,6 +2452,35 @@ describe("contracts/tools", () => {
 	});
 
 	describe("contracts/tools prompt hints", () => {
+		it("preserves the canonical built-in registration order across the core/orchestrator split", () => {
+			const registry = testRegistryWithTools([]);
+			registerAllTools(registry, { dispatch: {} as DispatchContract });
+			deepStrictEqual(
+				registry.listAll().map((spec) => spec.name),
+				[
+					"read",
+					"write",
+					"edit",
+					"bash",
+					"grep",
+					"find",
+					"ls",
+					"web_fetch",
+					"git",
+					"verify",
+					"code_nav",
+					"credential_present",
+					"context",
+					"artifact",
+					"ledger",
+					"tasks",
+					"dispatch",
+					"monitor",
+					"steer",
+				],
+			);
+		});
+
 		it("carries promptHint metadata on exactly the five hinted tools, verbatim", () => {
 			const registry = testRegistryWithTools([]);
 			registerAllTools(registry, {
