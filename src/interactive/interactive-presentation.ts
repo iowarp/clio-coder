@@ -9,7 +9,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { getMarketplaceSkills } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { Component, TUI } from "../engine/tui.js";
-import type { ChatLoop } from "./chat-loop.js";
+import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { type CoalescingChatRenderer, createCoalescingChatRenderer } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
@@ -83,6 +83,7 @@ export interface InteractivePresentationDeps {
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
 	getShutdownArmed?: () => boolean;
 	getCwd?: () => string;
+	resolveVisibleEventSequence?: (event: ChatLoopEvent) => number | null;
 	scheduleInterval?: (callback: () => void, intervalMs: number) => PresentationTickerHandle;
 	clearScheduledInterval?: (handle: PresentationTickerHandle) => void;
 	factories?: Partial<InteractivePresentationFactories>;
@@ -338,7 +339,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const chatRenderer = factories.createChatRenderer({
 		chatPanel,
 		requestRender,
-		...(renderTrace ? { onDelta: () => renderTrace.recordDelta() } : {}),
+		...(renderTrace
+			? {
+					visibleEventSequence: (event) => deps.resolveVisibleEventSequence?.(event) ?? null,
+					onQueue: (eventSeq, action) => renderTrace.recordQueue(eventSeq, action),
+					onPanelApplied: (eventSeq) => renderTrace.recordPanelApplied(eventSeq),
+				}
+			: {}),
 	});
 	const io = factories.createIo({
 		appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),

@@ -70,7 +70,7 @@ These two take a path, not `1`. Setting either to `1` writes a file named `1` in
 
 | Variable | Contents | Controls |
 | --- | --- | --- |
-| `CLIO_CODER_RENDER_TRACE` | timing only | Per-frame render timing for the interactive TUI, truncated on open so one file is one session. Records frame durations and counts and no conversation text, which makes it the instrument for reproducing a frame-cost claim at a given terminal size (`src/interactive/render-trace.ts`). |
+| `CLIO_CODER_RENDER_TRACE` | timing only | Versioned JSONL for the full interactive render pipeline, truncated on open so one file is one session. Records event/input sequence ranges, queue and panel high-water marks, explicit frames, grouped stdout commits, write return values, backpressure, and drain—but no conversation text. Output is bounded and asynchronous after the initial pre-TUI file open; trace failure is nonfatal. See [performance-methodology.md](performance-methodology.md) for endpoint definitions (`src/interactive/render-trace.ts`). |
 | `CLIO_CODER_MEMORY_TRACE` | conversation text | Proactive task-memory step envelopes, including up to 8000 characters of the text each step saw. This is content-bearing by construction, so the file carries whatever the session carried. Do not enable it on work you would not paste, and do not attach the file to a bug report without reading it first (`src/domains/memory/task-memory-trace.ts`). |
 
 Example:

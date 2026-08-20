@@ -12,6 +12,7 @@ import {
 } from "./application-controller.js";
 import { createLeaderKeyController, type LeaderTarget } from "./leader-key.js";
 import { type OverlayState, routeOverlayKey } from "./overlay-lifecycle.js";
+import type { RenderInputAction } from "./render-trace.js";
 
 export interface InteractiveInputKeyActionDeps {
 	matches: (data: string, id: ClioKeybinding) => boolean;
@@ -120,6 +121,7 @@ export interface InteractiveInputRuntimeDeps {
 	/** Defaults to the process termination coordinator's drain phase. */
 	registerTerminalTeardown?: (teardown: () => void) => void;
 	registerInputListener: (listener: (data: string) => ApplicationInputResult) => void;
+	onInputIngress?: (action: RenderInputAction, data: string) => void;
 	intervalsToClear?: ReadonlyArray<ApplicationIntervalHandle>;
 	clock?: ApplicationClock;
 	signals?: ApplicationSignalCoordinator;
@@ -277,6 +279,27 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				);
 			}),
 	});
-	deps.registerInputListener(controller.handleInput);
+	deps.registerInputListener((data) => {
+		deps.onInputIngress?.(classifyInputAction(data, deps), data);
+		return controller.handleInput(data);
+	});
 	return controller;
+}
+
+function classifyInputAction(data: string, deps: InteractiveInputRuntimeDeps): RenderInputAction {
+	if (data.length === 0 || isKeyRelease(data)) return "no-visual-change";
+	if (deps.keybindings.matches(data, "tui.input.submit")) return "submit";
+	const sgrMousePrefix = `${String.fromCharCode(27)}[<`;
+	if (
+		data.startsWith(`${sgrMousePrefix}64;`) ||
+		data.startsWith(`${sgrMousePrefix}65;`) ||
+		deps.keybindings.matches(data, "tui.altScreen.pageUp") ||
+		deps.keybindings.matches(data, "tui.altScreen.pageDown") ||
+		deps.keybindings.matches(data, "tui.editor.pageUp") ||
+		deps.keybindings.matches(data, "tui.editor.pageDown")
+	) {
+		return "scroll";
+	}
+	if (deps.overlay.getState() !== "closed") return "overlay";
+	return "editor";
 }

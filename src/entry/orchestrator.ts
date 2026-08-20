@@ -1811,7 +1811,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
-	timer.mark("first TUI paint");
 	await startInteractive({
 		bus,
 		providers,
@@ -1819,6 +1818,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(agents ? { agents } : {}),
 		observability,
 		chat,
+		onFirstFrameCommit: () => timer.mark("first TUI paint"),
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
