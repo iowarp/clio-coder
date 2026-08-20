@@ -9,6 +9,12 @@ export interface ProjectPromptContext {
 	text: string;
 	clioMd: ParsedClioMd | null;
 	warnings: string[];
+	/**
+	 * Absolute paths of the effective project handbooks, ancestor to nearest.
+	 * An override resets the inherited chain, so this names exactly the files
+	 * whose content is in `text`; empty when no selected handbook parsed.
+	 */
+	handbookFiles: string[];
 }
 
 /**

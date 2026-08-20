@@ -771,6 +771,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				memoryTokens: currentContextSnapshot.categories.memory,
 				projectTokens: currentContextSnapshot.categories.project,
 				projectPreload: sessionPrompt?.projectPreload?.label ?? null,
+				projectHandbookFiles: sessionPrompt?.projectHandbookFiles ?? null,
 				pendingTokens,
 				streamingTokens: streamingOutput,
 				liveTotalTokens: totalUsed > 0 ? totalUsed : null,

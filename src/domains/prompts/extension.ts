@@ -85,6 +85,7 @@ export function createPromptsBundle(
 			const cwd = input.cwd ?? process.cwd();
 			let contextFiles = "";
 			let projectPreload: ProjectPreloadClass | null = null;
+			let projectHandbookFiles: string[] = [];
 			if (!suppressContextFiles) {
 				const projectContext = contextDomain()?.renderPromptContext(cwd);
 				contextFiles = projectContext
@@ -95,6 +96,7 @@ export function createPromptsBundle(
 						hasClioMd: projectContext.clioMd !== null,
 						text: projectContext.text,
 					});
+					projectHandbookFiles = projectContext.handbookFiles;
 				}
 				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
@@ -115,7 +117,7 @@ export function createPromptsBundle(
 					...customizationFragments(cwd, input.workingContextPaths ?? []).fragments,
 				],
 			});
-			return { ...compiled, projectPreload };
+			return { ...compiled, projectPreload, projectHandbookFiles };
 		},
 		async compileWorkerPrompt(input: CompileWorkerPromptInput) {
 			if (!table) throw new Error("prompts domain not started");

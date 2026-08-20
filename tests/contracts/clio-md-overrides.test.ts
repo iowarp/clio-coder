@@ -68,6 +68,7 @@ describe("contracts/CLIO-CODER.override.md", () => {
 			ok(!prompt.text.includes("Root boundary identity."));
 			ok(!prompt.text.includes("Workspace identity."));
 			ok(!prompt.text.includes("Shadowed app base identity."));
+			deepStrictEqual(prompt.handbookFiles, [appOverride, childBase], "the effective chain is reported by path");
 
 			const structured = createContextBundle(domainContext()).contract.projectStructuredContext(child);
 			strictEqual(structured?.projectName, "Child");
@@ -108,6 +109,7 @@ describe("contracts/CLIO-CODER.override.md", () => {
 			const prompt = renderPromptContext(app);
 			strictEqual(prompt.clioMd, null);
 			ok(prompt.warnings.some((warning) => warning.includes(override)));
+			deepStrictEqual(prompt.handbookFiles, [], "a failed-closed override names no effective handbook");
 			ok(!prompt.text.includes("Root boundary identity."));
 			ok(!prompt.text.includes("App base identity."));
 

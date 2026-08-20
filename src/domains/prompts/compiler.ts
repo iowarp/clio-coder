@@ -119,6 +119,12 @@ export interface CompiledSessionPrompt {
 	 */
 	projectPreload?: ProjectPreloadClass | null;
 	/**
+	 * Absolute paths of the effective project handbooks that produced the
+	 * project context, ancestor to nearest. Set by the prompts extension
+	 * alongside `projectPreload`; the pure compiler leaves it absent.
+	 */
+	projectHandbookFiles?: string[];
+	/**
 	 * Repo-relative `.clio-coder/rules/**` ids selected into this compile, in
 	 * load order. Set only by `compileWorkerPrompt`, which owns rule
 	 * selection; the pure compiler and `compileSessionPrompt` leave it absent.

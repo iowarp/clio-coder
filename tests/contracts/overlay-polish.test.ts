@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { CostEntry, ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
@@ -12,6 +13,7 @@ import { buildContextLedger } from "../../src/domains/session/context-ledger.js"
 import { type Component, type OverlayHandle, type TUI, visibleWidth } from "../../src/engine/tui.js";
 import { emitCommandNotice, runCompactWithNotice } from "../../src/interactive/command-fallbacks.js";
 import type { NoticeLevel } from "../../src/interactive/command-output.js";
+import { renderContextLedgerLines } from "../../src/interactive/context-overlay.js";
 import { openCostOverlay } from "../../src/interactive/cost-overlay.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import {
@@ -521,6 +523,44 @@ describe("milestone 08 overlay polish regressions", () => {
 		ok(stripAnsi(dashboard.render(80).join("\n")).includes("target-a"));
 		active = "target-b";
 		ok(stripAnsi(dashboard.render(80).join("\n")).includes("target-b"));
+	});
+
+	it("names the winning handbook file(s) in the /context overlay (#136)", () => {
+		const cwd = process.cwd();
+		const base = {
+			provider: "mock",
+			model: "model-a",
+			contextWindow: 4000,
+			systemPromptTokens: 200,
+			projectTokens: 50,
+			projectPreload: "full (0.3kB, 11 lines)",
+		};
+
+		const single = buildContextLedger({ ...base, projectHandbookFiles: [join(cwd, "CLIO-CODER.md")] });
+		const singleLines = stripAnsi(renderContextLedgerLines(single, 68).join("\n"));
+		ok(singleLines.includes("project preload: full (0.3kB, 11 lines)"), singleLines);
+		ok(singleLines.includes("handbook: CLIO-CODER.md"), `the winning file is named workspace-relative:\n${singleLines}`);
+
+		const layered = buildContextLedger({
+			...base,
+			projectHandbookFiles: [join(cwd, "app", "CLIO-CODER.override.md"), join(cwd, "app", "child", "CLIO-CODER.md")],
+		});
+		const layeredLines = stripAnsi(renderContextLedgerLines(layered, 68).join("\n"));
+		ok(layeredLines.includes("handbooks (ancestor → nearest):"), layeredLines);
+		ok(layeredLines.includes("app/CLIO-CODER.override.md"), layeredLines);
+		ok(layeredLines.includes("app/child/CLIO-CODER.md"), layeredLines);
+
+		const outside = buildContextLedger({ ...base, projectHandbookFiles: ["/srv/elsewhere/CLIO-CODER.md"] });
+		ok(
+			stripAnsi(renderContextLedgerLines(outside, 68).join("\n")).includes("handbook: /srv/elsewhere/CLIO-CODER.md"),
+			"a handbook above the workspace keeps an unambiguous path",
+		);
+
+		const unknown = buildContextLedger({ ...base, projectHandbookFiles: null });
+		ok(
+			!stripAnsi(renderContextLedgerLines(unknown, 68).join("\n")).includes("handbook"),
+			"no handbook line before a prompt has compiled",
+		);
 	});
 
 	it("compact footer renders ledger context percentage with one decimal", () => {

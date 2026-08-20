@@ -84,6 +84,12 @@ export interface BuildContextLedgerInput {
 	 * a prompt has compiled.
 	 */
 	projectPreload?: string | null;
+	/**
+	 * Absolute paths of the effective project handbooks the compiled prompt
+	 * selected, ancestor to nearest. Null before a prompt has compiled; empty
+	 * when the workspace has no parseable handbook.
+	 */
+	projectHandbookFiles?: ReadonlyArray<string> | null;
 	lastCompaction?: {
 		stage: string;
 		tokensBefore: number;
@@ -152,6 +158,11 @@ export interface ContextLedger {
 	compactionAuto: boolean;
 	/** Preload class label for the project category detail line; null when unknown. */
 	projectPreload: string | null;
+	/**
+	 * Which handbook files won for this session, ancestor to nearest (an
+	 * override resets the inherited chain). Null before a prompt has compiled.
+	 */
+	projectHandbookFiles: ReadonlyArray<string> | null;
 	toolCount: number;
 	/** Non-empty content categories in display order (excludes reserve/free). */
 	groups: ReadonlyArray<ContextLedgerGroup>;
@@ -341,6 +352,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		compactionThreshold: effectiveThreshold,
 		compactionAuto: input.compactionAuto === true,
 		projectPreload: input.projectPreload ?? null,
+		projectHandbookFiles: input.projectHandbookFiles ?? null,
 		toolCount: Math.max(0, Math.floor(input.toolCount ?? 0)),
 		groups,
 		meter,
