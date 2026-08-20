@@ -3,18 +3,90 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, parse } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { closeServer, seedOpenAICompatToolOrchestrator, startOpenAICompatFixture } from "./openai-compat-fixture.js";
 import { emittedJavaScriptContaining, runCliWithCoverage } from "./runtime-module-graph.js";
 
 const IMPLEMENTATION_MARKERS = {
+	dispatch: "dispatch: pending gate evidence recovery failed closed",
+	monitor: "collect never blocks; timeout_ms is ignored",
+	steer: "steer queued for run",
 	web_fetch: "web_fetch: binary or unsupported content type",
 	verify: "frontend validation:",
 	code_nav: "code_nav: no wiki page matches",
 	context: "context: scope must be workspace, docs, or skills",
 } as const;
 
+const ORCHESTRATOR_RUNNER_SURFACE_MARKERS = {
+	dispatch: "// src/tools/dispatch.ts",
+	monitor: "// src/tools/monitor-surface.ts",
+	steer: "// src/tools/steer-surface.ts",
+} as const;
+
 type LazyToolName = keyof typeof IMPLEMENTATION_MARKERS;
+type OrchestratorRunnerName = keyof typeof ORCHESTRATOR_RUNNER_SURFACE_MARKERS;
+
+interface LazyImplementationGraph {
+	/** Emitted dynamic-import target(s) carrying the implementation provenance. */
+	roots: Set<string>;
+	/** Every emitted module reached through a static import from roots. */
+	closure: Set<string>;
+	/** Stable surface/startup modules intentionally shared with discovery. */
+	sharedSurface: Set<string>;
+	/** The full runner closure after removing the explicitly shared surface closure. */
+	exclusive: Set<string>;
+}
+
+function staticEmittedImports(path: string): string[] {
+	const source = readFileSync(path, "utf8");
+	const specifiers = new Set<string>();
+	const pattern = /(?:\bfrom\s*|\bimport\s*)["'](\.[^"']+\.js)["']/gu;
+	for (const match of source.matchAll(pattern)) {
+		const specifier = match[1];
+		if (specifier !== undefined) specifiers.add(specifier);
+	}
+	return [...specifiers]
+		.map((specifier) => resolve(dirname(path), specifier))
+		.filter((candidate) => existsSync(candidate))
+		.map((candidate) => realpathSync(candidate));
+}
+
+/** Follow emitted ESM static imports only; dynamic imports are lazy roots of their own. */
+function staticEmittedClosure(roots: ReadonlySet<string>): Set<string> {
+	const closure = new Set<string>();
+	const pending = [...roots];
+	while (pending.length > 0) {
+		const path = pending.pop();
+		if (path === undefined || closure.has(path)) continue;
+		closure.add(path);
+		for (const imported of staticEmittedImports(path)) {
+			if (!closure.has(imported)) pending.push(imported);
+		}
+	}
+	return closure;
+}
+
+function difference(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> {
+	return new Set([...left].filter((path) => !right.has(path)));
+}
+
+function intersection(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> {
+	return new Set([...left].filter((path) => right.has(path)));
+}
+
+function union(...sets: ReadonlyArray<ReadonlySet<string>>): Set<string> {
+	return new Set(sets.flatMap((set) => [...set]));
+}
+
+function assertFilesAbsent(actual: ReadonlySet<string>, expected: ReadonlySet<string>, message: string): void {
+	const eager = [...expected].filter((path) => actual.has(path));
+	strictEqual(eager.length, 0, `${message}: ${eager.join(", ")}`);
+}
+
+function assertFilesPresent(actual: ReadonlySet<string>, expected: ReadonlySet<string>, message: string): void {
+	const missing = [...expected].filter((path) => !actual.has(path));
+	strictEqual(missing.length, 0, `${message}: ${missing.join(", ")}`);
+}
 
 interface PiGraphFiles {
 	compat: string;
@@ -104,7 +176,7 @@ async function invokeTool(input: {
 	bin: string;
 	workRoot: string;
 	env: NodeJS.ProcessEnv;
-	implementationFiles: Readonly<Record<LazyToolName, Set<string>>>;
+	implementationGraphs: Readonly<Record<LazyToolName, LazyImplementationGraph>>;
 	baseSettings: string;
 	pi: PiGraphFiles;
 	expectedResult?: string;
@@ -134,25 +206,165 @@ async function invokeTool(input: {
 		});
 		strictEqual(result.code, 0, `tool=${input.name} stdout=${result.stdout} stderr=${result.stderr}`);
 		assertNarrowPiRuntimeGraph(result.files, input.pi);
+		const invokedGraph = input.implementationGraphs[input.name];
 		ok(
-			includesAny(result.files, input.implementationFiles[input.name]),
+			includesAny(result.files, invokedGraph.roots),
 			`${input.name} must evaluate its implementation chunk on first invocation`,
 		);
+		if (input.name in ORCHESTRATOR_RUNNER_SURFACE_MARKERS) {
+			assertFilesPresent(
+				result.files,
+				invokedGraph.exclusive,
+				`${input.name} must evaluate its entire runner-exclusive emitted closure on first invocation`,
+			);
+		}
 		for (const other of Object.keys(IMPLEMENTATION_MARKERS) as LazyToolName[]) {
 			if (other === input.name) continue;
 			strictEqual(
-				includesAny(result.files, input.implementationFiles[other]),
+				includesAny(result.files, input.implementationGraphs[other].roots),
 				false,
 				`${input.name} must not pull the unrelated ${other} implementation into its runtime graph`,
 			);
 		}
 		ok(fixture.requests.length >= 2, `${input.name} must return its real result to the model`);
 		if (input.expectedResult) {
+			const providerHistory = JSON.stringify(fixture.requests);
+			const toolHistory = fixture.requests.flatMap((request) => {
+				const messages = Array.isArray(request.messages) ? request.messages : [];
+				return messages.filter(
+					(message): message is Record<string, unknown> =>
+						typeof message === "object" && message !== null && (message as Record<string, unknown>).role === "tool",
+				);
+			});
 			ok(
-				fixture.requests.some((request) => JSON.stringify(request).includes(input.expectedResult as string)),
-				`${input.name} provider history must contain the implementation result`,
+				providerHistory.includes(input.expectedResult),
+				`${input.name} provider history must contain the implementation result; tool-history=${JSON.stringify(toolHistory)}`,
 			);
 		}
+	} finally {
+		rmSync(coverageDir, { recursive: true, force: true });
+		fixture.server.closeAllConnections();
+		await closeServer(fixture.server);
+	}
+}
+
+async function assertWorkerGraphExcludesOrchestratorTools(input: {
+	packageRoot: string;
+	workRoot: string;
+	env: NodeJS.ProcessEnv;
+	implementationGraphs: Readonly<Record<LazyToolName, LazyImplementationGraph>>;
+}): Promise<void> {
+	const coverageDir = mkdtempSync(join(tmpdir(), "clio-worker-tool-graph-"));
+	try {
+		const result = await runCliWithCoverage({
+			bin: join(input.packageRoot, "dist", "worker", "entry.js"),
+			args: [],
+			cwd: input.workRoot,
+			env: input.env,
+			coverageDir,
+			timeoutMs: 10_000,
+		});
+		strictEqual(result.code, 2, `worker EOF contract changed: stdout=${result.stdout} stderr=${result.stderr}`);
+		for (const name of ["dispatch", "monitor", "steer"] as const) {
+			assertFilesAbsent(
+				result.files,
+				input.implementationGraphs[name].roots,
+				`worker bootstrap must never evaluate the orchestrator-only ${name} runner root`,
+			);
+			assertFilesAbsent(
+				result.files,
+				input.implementationGraphs[name].exclusive,
+				`worker bootstrap must never evaluate the orchestrator-only ${name} runner-exclusive closure`,
+			);
+		}
+	} finally {
+		rmSync(coverageDir, { recursive: true, force: true });
+	}
+}
+
+function emittedImplementationGraphs(packageRoot: string): Record<LazyToolName, LazyImplementationGraph> {
+	const rootClosures = Object.fromEntries(
+		Object.entries(IMPLEMENTATION_MARKERS).map(([name, marker]) => {
+			const roots = emittedJavaScriptContaining(packageRoot, marker);
+			ok(roots.size > 0, `${name} implementation must be discoverable in emitted JavaScript`);
+			return [name, { roots, closure: staticEmittedClosure(roots) }];
+		}),
+	) as Record<LazyToolName, Pick<LazyImplementationGraph, "roots" | "closure">>;
+	const orchestratorSurfaceClosures = Object.fromEntries(
+		Object.entries(ORCHESTRATOR_RUNNER_SURFACE_MARKERS).map(([name, marker]) => {
+			const surfaceRoots = emittedJavaScriptContaining(packageRoot, marker);
+			ok(surfaceRoots.size > 0, `${name} stable surface must be discoverable separately from its runner`);
+			const closure = staticEmittedClosure(surfaceRoots);
+			assertFilesAbsent(
+				closure,
+				rootClosures[name as OrchestratorRunnerName].roots,
+				`${name} runner root must not become a static dependency of its stable startup surface`,
+			);
+			return [name, closure];
+		}),
+	) as Record<OrchestratorRunnerName, Set<string>>;
+	// Dispatch-domain startup is intentionally shared by all three surfaces. A
+	// worker also shares generic engine/core chunks with these runners. Neither
+	// set is runner-exclusive, so classify it explicitly instead of pretending
+	// every file reachable from monitor/steer belongs to that lazy tool.
+	const orchestratorShared = union(...Object.values(orchestratorSurfaceClosures));
+	const workerShared = staticEmittedClosure(new Set([realpathSync(join(packageRoot, "dist", "worker", "entry.js"))]));
+	const sharedRuntime = union(orchestratorShared, workerShared);
+	const graphs = Object.fromEntries(
+		(Object.keys(IMPLEMENTATION_MARKERS) as LazyToolName[]).map((name) => {
+			const { roots, closure } = rootClosures[name];
+			const sharedSurface =
+				name in ORCHESTRATOR_RUNNER_SURFACE_MARKERS ? intersection(closure, orchestratorShared) : new Set<string>();
+			const exclusive =
+				name in ORCHESTRATOR_RUNNER_SURFACE_MARKERS ? difference(closure, sharedRuntime) : new Set(closure);
+			ok(exclusive.size > 0, `${name} must retain a non-empty runner-exclusive emitted closure`);
+			assertFilesPresent(exclusive, roots, `${name} runner roots must remain runner-exclusive`);
+			return [name, { roots, closure, sharedSurface, exclusive }];
+		}),
+	) as Record<LazyToolName, LazyImplementationGraph>;
+	return graphs;
+}
+
+async function assertAdmissionRejectionDoesNotLoadDispatch(input: {
+	bin: string;
+	workRoot: string;
+	env: NodeJS.ProcessEnv;
+	baseSettings: string;
+	implementationGraphs: Readonly<Record<LazyToolName, LazyImplementationGraph>>;
+}): Promise<void> {
+	const fixture = await startOpenAICompatFixture("dispatch rejection observed without runner loading", {
+		toolCall: { name: "dispatch", arguments: { list: true } },
+	});
+	const configDir = input.env.CLIO_CODER_CONFIG_DIR;
+	ok(configDir, "lazy graph harness requires CLIO_CODER_CONFIG_DIR");
+	writeFileSync(join(configDir, "settings.yaml"), input.baseSettings, "utf8");
+	seedOpenAICompatToolOrchestrator(configDir, fixture.url, "read-only");
+	const cwd = join(input.workRoot, "rejected-dispatch");
+	mkdirSync(cwd, { recursive: true });
+	const coverageDir = mkdtempSync(join(tmpdir(), "clio-lazy-dispatch-rejected-coverage-"));
+	try {
+		const result = await runCliWithCoverage({
+			bin: input.bin,
+			args: ["--no-context-files", "--no-skills", "run", "attempt a dispatch that policy will reject"],
+			cwd,
+			env: input.env,
+			coverageDir,
+			timeoutMs: 45_000,
+		});
+		strictEqual(result.code, 0, `stdout=${result.stdout} stderr=${result.stderr}`);
+		assertFilesAbsent(
+			result.files,
+			input.implementationGraphs.dispatch.exclusive,
+			"an admission-known read-only rejection must not evaluate any dispatch runner-exclusive module",
+		);
+		assertFilesAbsent(
+			result.files,
+			input.implementationGraphs.dispatch.roots,
+			"an admission-known read-only rejection must not evaluate the dispatch runner root",
+		);
+		const history = JSON.stringify(fixture.requests);
+		ok(history.includes("autonomy level is read-only"), "the provider must observe the real admission rejection");
+		ok(fixture.requests.length >= 2, "the rejected tool result must return to the model");
 	} finally {
 		rmSync(coverageDir, { recursive: true, force: true });
 		fixture.server.closeAllConnections();
@@ -170,13 +382,13 @@ export async function assertLazyToolLoading(input: {
 	mkdirSync(input.workRoot, { recursive: true });
 	const env = configuredEnv(input);
 	const pi = piGraphFiles(input.packageRoot);
-	const implementationFiles = Object.fromEntries(
-		Object.entries(IMPLEMENTATION_MARKERS).map(([name, marker]) => {
-			const files = emittedJavaScriptContaining(input.packageRoot, marker);
-			ok(files.size > 0, `${name} implementation must be discoverable in emitted JavaScript`);
-			return [name, files];
-		}),
-	) as Record<LazyToolName, Set<string>>;
+	const implementationGraphs = emittedImplementationGraphs(input.packageRoot);
+	await assertWorkerGraphExcludesOrchestratorTools({
+		packageRoot: input.packageRoot,
+		workRoot: input.workRoot,
+		env,
+		implementationGraphs,
+	});
 
 	const initCoverage = mkdtempSync(join(tmpdir(), "clio-lazy-tool-init-coverage-"));
 	try {
@@ -213,10 +425,22 @@ export async function assertLazyToolLoading(input: {
 		assertProviderAdvertisedAllTools(discovery.requests);
 		for (const name of Object.keys(IMPLEMENTATION_MARKERS) as LazyToolName[]) {
 			strictEqual(
-				includesAny(result.files, implementationFiles[name]),
+				includesAny(result.files, implementationGraphs[name].roots),
 				false,
 				`${name} implementation must remain absent through registration and provider serialization`,
 			);
+			if (name in ORCHESTRATOR_RUNNER_SURFACE_MARKERS) {
+				assertFilesPresent(
+					result.files,
+					implementationGraphs[name].sharedSurface,
+					`${name} shared dispatch/surface startup closure must remain distinguishable and evaluated`,
+				);
+				assertFilesAbsent(
+					result.files,
+					implementationGraphs[name].exclusive,
+					`${name} entire runner-exclusive emitted closure must remain absent through discovery`,
+				);
+			}
 		}
 	} finally {
 		rmSync(discoveryCoverage, { recursive: true, force: true });
@@ -224,10 +448,48 @@ export async function assertLazyToolLoading(input: {
 		await closeServer(discovery.server);
 	}
 
+	await assertAdmissionRejectionDoesNotLoadDispatch({
+		bin: input.bin,
+		workRoot: input.workRoot,
+		env,
+		baseSettings,
+		implementationGraphs,
+	});
+
 	await invokeTool({
 		...input,
 		env,
-		implementationFiles,
+		implementationGraphs,
+		baseSettings,
+		pi,
+		name: "dispatch",
+		args: { list: true },
+		expectedResult: "Clio manages a small fleet of coding agents.",
+	});
+	await invokeTool({
+		...input,
+		env,
+		implementationGraphs,
+		baseSettings,
+		pi,
+		name: "monitor",
+		args: { mode: "list" },
+		expectedResult: "dispatched runs (",
+	});
+	await invokeTool({
+		...input,
+		env,
+		implementationGraphs,
+		baseSettings,
+		pi,
+		name: "steer",
+		args: { run_id: "missing-lazy-run", action: "cancel" },
+		expectedResult: "unknown run or assignment",
+	});
+	await invokeTool({
+		...input,
+		env,
+		implementationGraphs,
 		baseSettings,
 		pi,
 		name: "context",
@@ -237,7 +499,7 @@ export async function assertLazyToolLoading(input: {
 	await invokeTool({
 		...input,
 		env,
-		implementationFiles,
+		implementationGraphs,
 		baseSettings,
 		pi,
 		name: "verify",
@@ -248,7 +510,7 @@ export async function assertLazyToolLoading(input: {
 	await invokeTool({
 		...input,
 		env,
-		implementationFiles,
+		implementationGraphs,
 		baseSettings,
 		pi,
 		name: "code_nav",
@@ -269,7 +531,7 @@ export async function assertLazyToolLoading(input: {
 		await invokeTool({
 			...input,
 			env,
-			implementationFiles,
+			implementationGraphs,
 			baseSettings,
 			pi,
 			name: "web_fetch",

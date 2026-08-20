@@ -35,8 +35,8 @@ import {
 import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
 import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
-import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-tools.js";
-import { toolPromptHintsForNames } from "../../tools/bootstrap.js";
+import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
+import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";

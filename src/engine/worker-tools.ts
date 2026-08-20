@@ -28,10 +28,12 @@ import {
 } from "../domains/safety/protected-artifacts.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
-import { registerAllTools } from "../tools/bootstrap.js";
+import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
 import { type AgentLedgerPort, toolSignatureOf } from "../worker/protocol.js";
+
+export { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "./worker-runtime-capabilities.js";
 
 /**
  * Build a worker-local SafetyContract that owns its own loop-detector state.
@@ -154,7 +156,7 @@ export function createWorkerToolRegistry(
 	// names a bare registry produces, so a conditional registration would drift
 	// the signature and fail admission; only the injected port varies, and a run
 	// without one answers that it has no coordination ledger.
-	registerAllTools(registry, {
+	const registration = registerCoreTools(registry, {
 		...(agentLedger ? { agentLedger } : {}),
 		// A worker cannot install a skill or reach the operator who could, so
 		// its skill listing carries installed (or bound) skills only; the
@@ -168,6 +170,7 @@ export function createWorkerToolRegistry(
 				: {}),
 		}),
 	});
+	assertRegisteredBuiltinTools(registry, registration, false);
 	return registry;
 }
 
@@ -176,8 +179,6 @@ export function createWorkerToolRegistry(
  * mediates nested Clio dispatch. A constant, not a lookup: there is nothing to
  * vary by runtime, and a parameter would imply otherwise.
  */
-export const WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH = false;
-
 export interface AttestedToolIdentityInput {
 	allowedTools: ReadonlyArray<ToolName>;
 	/** False when the resolved runtime mediates no tool calls at all. */
