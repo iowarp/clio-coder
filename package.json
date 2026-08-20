@@ -52,7 +52,6 @@
 		"src/**",
 		"skills/**",
 		"docs/*.md",
-		"docs/html/**",
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",

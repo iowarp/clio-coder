@@ -7,7 +7,7 @@
 		"src/domains/prompts/fragments/identity/clio.md",
 		"src/domains/prompts/fragments/identity/clio-worker.md",
 		"assets/clio-coder-logo-128.webp",
-		"docs/html/index.html",
+		"docs/README.md",
 		"damage-control-rules.yaml",
 		"skills/skill-marketplace.json",
 		"skills/registry.yaml",
@@ -21,7 +21,6 @@
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",
 		"skills/",
-		"src/domains/providers/models/",
-		"docs/html/"
+		"src/domains/providers/models/"
 	]
 }

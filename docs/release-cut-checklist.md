@@ -45,9 +45,9 @@ Run against the exact final candidate with `NO_COLOR` unset and
     whose model is already resident; report it separately when no such target
     is available.
 11. `npm pack --dry-run`, then a real `npm pack` into a temporary directory.
-    Inspect the complete file list: `skills/`, `docs/*.md`, `docs/html/`, the
-    builtin agents, the model catalogs, and `damage-control-rules.yaml` are
-    present; `apps/workbench`, `.superpowers`, `tests/`, `scripts/`,
+    Inspect the complete file list: `skills/`, `docs/*.md`, the builtin
+    agents, the model catalogs, and `damage-control-rules.yaml` are present;
+    `docs/html/`, `apps/workbench`, `.superpowers`, `tests/`, `scripts/`,
     `benchmarks/`, scratch files, and source maps are absent. Record the
     filename, packed and unpacked sizes, integrity, and shasum.
 12. Install that tarball into a clean temporary prefix with empty XDG roots and
