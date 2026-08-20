@@ -44,6 +44,37 @@ export interface PtyRunResult {
 	matched: boolean;
 }
 
+export interface PtySessionOptions {
+	cols: number;
+	rows: number;
+	cwd: string;
+	env: Record<string, string>;
+}
+
+export interface PtyExitResult {
+	exitCode: number;
+	signal: number;
+}
+
+export type PtyOutputMatcher = string | RegExp | ((output: string) => boolean);
+
+/**
+ * A controllable real PTY. Every wait is bounded, and cleanup resolves only
+ * after node-pty reports that the child has exited.
+ */
+export interface PtySession {
+	readonly pid: number;
+	readonly output: string;
+	readonly exited: boolean;
+	write(data: string | Buffer): void;
+	resize(cols: number, rows: number): void;
+	pauseOutput(): void;
+	resumeOutput(): void;
+	waitForOutput(matcher: PtyOutputMatcher, timeoutMs?: number): Promise<string>;
+	waitForExit(timeoutMs?: number): Promise<PtyExitResult>;
+	killAndWaitForExit(timeoutMs?: number): Promise<PtyExitResult>;
+}
+
 const ANSI_PATTERN = new RegExp(
 	[
 		// CSI. The parameter-byte class is 0x30-0x3F, which includes `<=>` and not
@@ -91,11 +122,21 @@ export function visibleLines(output: string): string[] {
 
 export const ptySupported = platform !== "win32";
 
-export async function runInPty(
+function outputMatches(output: string, matcher: PtyOutputMatcher): boolean {
+	if (typeof matcher === "string") return output.includes(matcher);
+	if (matcher instanceof RegExp) {
+		matcher.lastIndex = 0;
+		return matcher.test(output);
+	}
+	return matcher(output);
+}
+
+/** Open a PTY whose input, dimensions, output flow, and lifetime the test controls. */
+export async function openPty(
 	command: string,
 	args: ReadonlyArray<string>,
-	options: PtyRunOptions,
-): Promise<PtyRunResult> {
+	options: PtySessionOptions,
+): Promise<PtySession> {
 	const { spawn } = await import("node-pty");
 	const child = spawn(command, [...args], {
 		name: "xterm-256color",
@@ -104,27 +145,128 @@ export async function runInPty(
 		cwd: options.cwd,
 		env: options.env,
 	});
+	let output = "";
+	let exitResult: PtyExitResult | null = null;
+	let killStarted = false;
+	let resolveExit: ((result: PtyExitResult) => void) | null = null;
+	const exit = new Promise<PtyExitResult>((resolve) => {
+		resolveExit = resolve;
+	});
+	const outputListeners = new Set<() => void>();
+
+	const dataDisposable = child.onData((chunk) => {
+		output += chunk;
+		for (const listener of [...outputListeners]) listener();
+	});
+	const exitDisposable = child.onExit(({ exitCode, signal }) => {
+		if (exitResult) return;
+		exitResult = { exitCode, signal: signal ?? 0 };
+		resolveExit?.(exitResult);
+		for (const listener of [...outputListeners]) listener();
+		outputListeners.clear();
+		dataDisposable.dispose();
+		exitDisposable.dispose();
+	});
+
+	const bounded = async <T>(promise: Promise<T>, timeoutMs: number, description: string): Promise<T> => {
+		let timeout: NodeJS.Timeout | null = null;
+		try {
+			return await Promise.race([
+				promise,
+				new Promise<T>((_resolve, reject) => {
+					timeout = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
+				}),
+			]);
+		} finally {
+			if (timeout) clearTimeout(timeout);
+		}
+	};
+
+	return {
+		pid: child.pid,
+		get output(): string {
+			return output;
+		},
+		get exited(): boolean {
+			return exitResult !== null;
+		},
+		write(data): void {
+			if (exitResult) throw new Error(`PTY ${child.pid} has already exited`);
+			child.write(data);
+		},
+		resize(cols, rows): void {
+			if (exitResult) throw new Error(`PTY ${child.pid} has already exited`);
+			child.resize(cols, rows);
+		},
+		pauseOutput(): void {
+			if (!exitResult) child.pause();
+		},
+		resumeOutput(): void {
+			if (!exitResult) child.resume();
+		},
+		async waitForOutput(matcher, timeoutMs = 10_000): Promise<string> {
+			if (outputMatches(output, matcher)) return output;
+			if (exitResult) throw new Error(`PTY ${child.pid} exited before the expected output appeared`);
+			let listener: (() => void) | null = null;
+			const matched = new Promise<string>((resolve, reject) => {
+				listener = (): void => {
+					if (outputMatches(output, matcher)) {
+						if (listener) outputListeners.delete(listener);
+						resolve(output);
+					} else if (exitResult) {
+						if (listener) outputListeners.delete(listener);
+						reject(new Error(`PTY ${child.pid} exited before the expected output appeared`));
+					}
+				};
+				outputListeners.add(listener);
+			});
+			try {
+				return await bounded(matched, timeoutMs, "PTY output wait");
+			} finally {
+				if (listener) outputListeners.delete(listener);
+			}
+		},
+		waitForExit(timeoutMs = 10_000): Promise<PtyExitResult> {
+			return bounded(exit, timeoutMs, "PTY exit wait");
+		},
+		async killAndWaitForExit(timeoutMs = 10_000): Promise<PtyExitResult> {
+			if (!exitResult && !killStarted) {
+				killStarted = true;
+				try {
+					child.kill();
+				} catch {
+					// The exit event may be crossing this call; settlement below is canonical.
+				}
+			}
+			return await bounded(exit, timeoutMs, "PTY cleanup");
+		},
+	};
+}
+
+export async function runInPty(
+	command: string,
+	args: ReadonlyArray<string>,
+	options: PtyRunOptions,
+): Promise<PtyRunResult> {
+	const child = await openPty(command, args, options);
 	return await new Promise<PtyRunResult>((resolve) => {
-		let output = "";
 		let settled = false;
+		let matched = false;
 		const inputTimers: NodeJS.Timeout[] = [];
 		const finish = (exitCode: number, signal: number, timedOut: boolean, matched: boolean): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
 			for (const handle of inputTimers) clearTimeout(handle);
-			resolve({ output, exitCode, signal, timedOut, matched });
+			resolve({ output: child.output, exitCode, signal, timedOut, matched });
 		};
-		const kill = (): void => {
+		const timer = setTimeout(async () => {
 			try {
-				child.kill();
+				const result = await child.killAndWaitForExit();
+				finish(result.exitCode, result.signal, true, false);
 			} catch {
-				// Already gone. The exit handler will not fire twice.
+				finish(-1, 0, true, false);
 			}
-		};
-		const timer = setTimeout(() => {
-			kill();
-			finish(-1, 0, true, false);
 		}, options.timeoutMs ?? 20_000);
 		const scheduleInput = (): void => {
 			for (const step of options.input ?? []) {
@@ -141,18 +283,30 @@ export async function runInPty(
 		};
 		let inputScheduled = options.readyWhen === undefined;
 		if (inputScheduled) scheduleInput();
-		child.onData((chunk) => {
-			output += chunk;
-			const visible = stripAnsi(output);
-			if (!inputScheduled && options.readyWhen?.test(visible)) {
+		const observeOutput = async (): Promise<void> => {
+			const visible = stripAnsi(child.output);
+			if (!inputScheduled && options.readyWhen && outputMatches(visible, options.readyWhen)) {
 				inputScheduled = true;
 				scheduleInput();
 			}
-			if (options.until?.test(visible)) {
-				kill();
-				finish(0, 0, false, true);
+			if (!matched && options.until && outputMatches(visible, options.until)) {
+				matched = true;
+				const result = await child.killAndWaitForExit();
+				finish(result.exitCode, result.signal, false, true);
 			}
-		});
-		child.onExit(({ exitCode, signal }) => finish(exitCode, signal ?? 0, false, false));
+		};
+		void child
+			.waitForExit(options.timeoutMs ?? 20_000)
+			.then(({ exitCode, signal }) => finish(exitCode, signal, false, matched))
+			.catch(() => {});
+		const poll = (): void => {
+			if (settled) return;
+			void observeOutput()
+				.catch(() => {})
+				.finally(() => {
+					if (!settled) setTimeout(poll, 10);
+				});
+		};
+		poll();
 	});
 }

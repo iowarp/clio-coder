@@ -89,7 +89,11 @@ export interface CreateCoalescingChatRendererDeps {
 	setTimer?: (cb: () => void, ms: number) => unknown;
 	/** Override for tests. Mirrors the clearTimeout signature. */
 	clearTimer?: (id: unknown) => void;
-	/** Opt-in instrument; counts deltas so a frame row can report how many it absorbed. */
+	/** Sequence captured at canonical projection ingress before this panel consumer runs. */
+	visibleEventSequence?: (event: ChatLoopEvent) => number | null;
+	onQueue?: (eventSeq: number, action: "admit" | "dequeue") => void;
+	onPanelApplied?: (eventSeq: number) => void;
+	/** Legacy aggregate callback retained for non-text cumulative tool-update observations. */
 	onDelta?: () => void;
 }
 
@@ -125,7 +129,13 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 	return {
 		applyEvent(event) {
 			if (isTransparentAssistantWrapper(event)) return;
+			const visibleEventSeq = deps.visibleEventSequence?.(event) ?? null;
+			if (visibleEventSeq !== null) deps.onQueue?.(visibleEventSeq, "admit");
 			deps.chatPanel.applyEvent(event);
+			if (visibleEventSeq !== null) {
+				deps.onPanelApplied?.(visibleEventSeq);
+				deps.onQueue?.(visibleEventSeq, "dequeue");
+			}
 			if (DELTA_TYPES.has(event.type)) {
 				deps.onDelta?.();
 				if (pendingTimer !== null) return;
