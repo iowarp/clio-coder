@@ -555,21 +555,33 @@ export function toolResultSummary(result: unknown): Record<string, unknown> {
 	const bytes = Buffer.byteLength(text, "utf8");
 	const details = recordValue(obj?.details);
 	const size = recordValue(details?.resultSize);
+	const disposition = recordValue(details?.resultDisposition);
 	const truncation = recordValue(details?.truncation);
 	const observation = recordValue(details?.observation);
 	const offloadPath =
-		typeof observation?.offloadPath === "string"
-			? observation.offloadPath
-			: typeof size?.offloadPath === "string"
-				? size.offloadPath
-				: null;
+		typeof disposition?.offloadPath === "string"
+			? disposition.offloadPath
+			: typeof observation?.offloadPath === "string"
+				? observation.offloadPath
+				: typeof size?.offloadPath === "string"
+					? size.offloadPath
+					: null;
+	const displayedBytes =
+		typeof disposition?.displayedBytes === "number" && Number.isFinite(disposition.displayedBytes)
+			? disposition.displayedBytes
+			: bytes;
 	return {
-		bytes,
+		bytes: displayedBytes,
 		truncated:
+			disposition?.presentationTruncated === true ||
 			size?.truncated === true ||
 			truncation?.truncated === true ||
 			observation?.truncated === true ||
 			text.includes("[tool result truncated]"),
+		...(typeof disposition?.capturedBytes === "number" ? { capturedBytes: disposition.capturedBytes } : {}),
+		...(typeof disposition?.displayedBytes === "number" ? { displayedBytes: disposition.displayedBytes } : {}),
+		...(typeof disposition?.contextBytes === "number" ? { contextBytes: disposition.contextBytes } : {}),
+		...(disposition?.contextTruncated === true ? { contextTruncated: true } : {}),
 		...(typeof size?.policy === "string" ? { policy: size.policy } : {}),
 		...(typeof size?.followUpHint === "string" ? { followUpHint: size.followUpHint } : {}),
 		...(offloadPath !== null ? { offloadPath } : {}),

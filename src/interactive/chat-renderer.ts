@@ -42,6 +42,7 @@ import {
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import { toolPresentationPolicy } from "../tools/presentation.js";
+import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { isSelfExplainingAbort } from "./chat-loop-messages.js";
 import type { ChatPanel } from "./chat-panel.js";
@@ -484,7 +485,11 @@ function toolResultContent(result: unknown, unbounded = false): unknown[] {
 }
 
 function displayReplayToolResult(result: unknown, unbounded = false): unknown {
-	const content = toolResultContent(result, unbounded);
+	const presentationText = toolResultPresentationText(result);
+	const content =
+		presentationText === null
+			? toolResultContent(result, unbounded)
+			: [{ type: "text", text: unbounded ? presentationText : truncateReplayText(presentationText) }];
 	// Preserve the details record (observation envelope, exec records) so the
 	// replayed ledger line carries the same outcome facts as the live one.
 	const details = payloadObject(result)?.details;

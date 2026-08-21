@@ -105,6 +105,7 @@ function stringField(record: Record<string, unknown> | null, key: string): strin
 export function offloadPathOf(payload: ToolResultPayload): string | undefined {
 	const details = nestedRecord(isRecord(payload.result) ? payload.result : null, "details");
 	return (
+		stringField(nestedRecord(details, "resultDisposition"), "offloadPath") ??
 		stringField(nestedRecord(details, "observation"), "offloadPath") ??
 		stringField(nestedRecord(details, "resultSize"), "offloadPath") ??
 		stringField(nestedRecord(payload.obj, "resultSummary"), "offloadPath")

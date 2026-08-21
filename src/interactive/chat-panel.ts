@@ -5,6 +5,7 @@ import { rawDurationMs } from "../core/timers.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import { toolPresentationPolicy } from "../tools/presentation.js";
+import { toolResultPresentationPolicy } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -841,7 +842,7 @@ function styleStatusVerb(text: string, toneHint: VerbRender["toneHint"]): string
 function policySegmentFold(seg: ToolSegment, detail: TranscriptDetailPolicy): Fold {
 	if (!seg.finished) return policyRunningToolFold(detail);
 	if (seg.isError && detail.errors === "body") return "expanded";
-	return policyToolFold(detail, toolPresentationPolicy(seg.name, seg.args));
+	return policyToolFold(detail, toolResultPresentationPolicy(seg.result) ?? toolPresentationPolicy(seg.name, seg.args));
 }
 
 /** Effective state of a tool segment: the operator's override, else the policy. */

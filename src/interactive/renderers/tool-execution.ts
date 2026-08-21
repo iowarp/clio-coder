@@ -16,6 +16,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
+import { toolResultPresentationPolicy, toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
@@ -481,7 +482,9 @@ const FAILURE_EXCERPT_LIMIT = 80;
  * its failures carry one; the renderer never names a tool here.
  */
 function failureExcerpt(finished: ToolExecutionFinished, width: number): string {
-	if (!finished.isError || !toolPresentationPolicy(finished.toolName, finished.args).failureExcerpt) return "";
+	const presentation =
+		toolResultPresentationPolicy(finished.result) ?? toolPresentationPolicy(finished.toolName, finished.args);
+	if (!finished.isError || !presentation.failureExcerpt) return "";
 	if (isNonExecutedOutcome(finished.outcome)) return "";
 	const text = unwrapResultEnvelope(finished.result);
 	if (typeof text !== "string") return "";
@@ -879,6 +882,8 @@ function renderArgsBody(toolName: string, args: unknown, width: number, isError:
  */
 function unwrapResultEnvelope(result: unknown): unknown {
 	if (typeof result === "string" || result === null || result === undefined) return result;
+	const presentationText = toolResultPresentationText(result);
+	if (presentationText !== null) return presentationText;
 	const blocks = Array.isArray(result)
 		? result
 		: isPlainObject(result) && Array.isArray(result.content)
@@ -1183,7 +1188,9 @@ export interface ToolSublineRenderOptions {
 function foldedDiffRows(finished: ToolExecutionFinished, width: number, opts: ToolSublineRenderOptions): string[] {
 	if (opts.foldedExtras === "none") return [];
 	if (finished.isError || isNonExecutedOutcome(finished.outcome)) return [];
-	if (!toolPresentationPolicy(finished.toolName, finished.args).showDiffWhenFolded) return [];
+	const presentation =
+		toolResultPresentationPolicy(finished.result) ?? toolPresentationPolicy(finished.toolName, finished.args);
+	if (!presentation.showDiffWhenFolded) return [];
 	const diff = resultDiff(finished.result);
 	if (diff === null) return [];
 	return truncateRowsMiddle(
