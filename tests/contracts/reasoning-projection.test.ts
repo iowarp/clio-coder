@@ -126,6 +126,15 @@ describe("contracts/reasoning-projection", () => {
 			assistant({ content: [{ type: "thinking", thinking: "x".repeat(4000) }] }),
 		);
 		strictEqual(unreported.reasoningTokens, 1000);
+
+		// An explicit zero is still a provider report and therefore a real ceiling,
+		// not the same thing as an absent output field.
+		const reportedZero = foldMessageIntoRunTally(
+			emptyRunTally(),
+			assistant({ content: [{ type: "thinking", thinking: "x".repeat(4000) }], usage: { input: 100, output: 0 } }),
+		);
+		strictEqual(reportedZero.hadEstimatedReasoning, true);
+		strictEqual(reportedZero.reasoningTokens, 0);
 	});
 
 	it("folds a multi-call turn that mixes attested and estimated reasoning", () => {
