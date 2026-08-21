@@ -10,7 +10,11 @@ import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-
 import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { isTurnStart } from "../../src/domains/context/working-set/horizon.js";
-import { buildPathIndex } from "../../src/domains/context/working-set/path-index.js";
+import {
+	buildPathIndex,
+	type PathIndex,
+	type PathObservation,
+} from "../../src/domains/context/working-set/path-index.js";
 import { resolveWorkingSetPolicy } from "../../src/domains/context/working-set/policies/index.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
 import {
@@ -176,11 +180,83 @@ describe("contracts/working-set replay-lite", () => {
 		};
 		const metrics = measureReplayTrace({ trace, index, graph, replay });
 		assert.equal(metrics.retention, 0);
+		assert.equal(metrics.retentionCovered, 0);
 		assert.equal(metrics.retentionAt10, 0);
 		assert.equal(metrics.evictionPrecision, 0);
 		assert.equal(metrics.tokensEvicted, 250);
 		assert.equal(metrics.evictionEvents, 1);
 		assert.equal(metrics.saturatedEvents, 1);
+	});
+
+	it("credits only a newer covering read that survives until the future reference", async () => {
+		const { trace } = await fixture();
+		const original: PathObservation = {
+			ref: { entry: "original" },
+			toolCallId: "call-original",
+			toolName: "read",
+			op: "read",
+			path: "/repo/src/a.ts",
+			range: { offset: 20, limit: 10 },
+			surfaced: [],
+			isError: false,
+			isBlocked: false,
+			turnIndex: 0,
+			entryIndex: 0,
+			argsKey: "",
+		};
+		const newer: PathObservation = {
+			...original,
+			ref: { entry: "newer" },
+			toolCallId: "call-newer",
+			range: { offset: 10, limit: 40 },
+			turnIndex: 2,
+			entryIndex: 1,
+		};
+		const index: PathIndex = {
+			observations: [original, newer],
+			byRef: new Map([
+				["original", original],
+				["newer", newer],
+			]),
+			byPath: new Map([[original.path, [original, newer]]]),
+			turnIndexOf: new Map(),
+			turnCount: 5,
+		};
+		const graph: ReferenceGraph = {
+			edges: [{ from: "original", toTurnIndex: 4, kind: "file_reread" }],
+			futureTurnsOf: new Map([["original", [4]]]),
+		};
+		const replay: ReplayTraceResult = {
+			traceId: trace.id,
+			policyId: "hand-computed",
+			budgetTokens: 1_000,
+			turnCount: 5,
+			events: [],
+			evictedAtTurn: new Map([["original", 1]]),
+			turnsToFirstSummary: null,
+			entries: trace.entries,
+		};
+
+		const covered = measureReplayTrace({ trace, index, graph, replay });
+		assert.equal(covered.retention, 0);
+		assert.equal(covered.retentionCovered, 1);
+		const aggregate = aggregateReplayMetrics([{ trace, index, graph, replay }]);
+		assert.equal(aggregate.pooledRetention, 0);
+		assert.equal(aggregate.pooledRetentionCovered, 1);
+
+		const newerAlsoEvicted = measureReplayTrace({
+			trace,
+			index,
+			graph,
+			replay: {
+				...replay,
+				evictedAtTurn: new Map([
+					["original", 1],
+					["newer", 3],
+				]),
+			},
+		});
+		assert.equal(newerAlsoEvicted.retentionCovered, 0);
 	});
 
 	it("pools saturated events by event count rather than by trace", async () => {
@@ -283,6 +359,7 @@ describe("contracts/working-set replay-lite", () => {
 		assert.equal(markdown.match(/^## Budget /gm)?.length, budgets.length);
 		assert.equal(markdown.match(/\(n=\d+\)/g)?.length, policies.length * budgets.length);
 		assert.match(markdown, /\| saturated events \|/);
+		assert.match(markdown, /\| retention covered \(mean\) \| retention covered \(pooled\) \|/);
 
 		const json = renderReplayJson(input);
 		assert.equal(renderReplayJson(input), json, "stable input must render byte-identically");
@@ -290,7 +367,9 @@ describe("contracts/working-set replay-lite", () => {
 			provenance: { gitSha: string; commandLine: string[] };
 			results: Array<{
 				metrics: {
+					pooledRetentionCovered: number;
 					mean: {
+						retentionCovered: number;
 						saturatedEvents: number;
 						turnsToFirstSummary: number | null;
 						turnsToFirstSummaryCount: number;
@@ -302,6 +381,8 @@ describe("contracts/working-set replay-lite", () => {
 		assert.deepEqual(parsed.provenance.commandLine, input.commandLine);
 		assert.equal(parsed.results.length, policies.length * budgets.length);
 		for (const result of parsed.results) {
+			assert.equal(typeof result.metrics.mean.retentionCovered, "number");
+			assert.equal(typeof result.metrics.pooledRetentionCovered, "number");
 			assert.equal(typeof result.metrics.mean.saturatedEvents, "number");
 			assert.equal(result.metrics.mean.turnsToFirstSummaryCount, result.metrics.mean.turnsToFirstSummary === null ? 0 : 1);
 		}

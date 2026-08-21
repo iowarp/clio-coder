@@ -24,39 +24,13 @@
 import type { EvictionCandidate, EvictionReason, PolicyInput, WorkingSetPolicy } from "../contract.js";
 import { tokensFreedByEviction } from "../engine.js";
 import { protectionCutoffIndex } from "../horizon.js";
-import {
-	buildPathIndex,
-	callPathsByToolCallId,
-	type PathIndex,
-	type PathObservation,
-	type PathRange,
-} from "../path-index.js";
+import { buildPathIndex, callPathsByToolCallId, covers, type PathIndex, type PathObservation } from "../path-index.js";
 import { hasThinking } from "../payload.js";
 import { findLaterSuccess, isProtected } from "../protect.js";
 
 /** Ops that observe content rather than change it. */
 const READ_CLASS = new Set<PathObservation["op"]>(["read", "grep", "find", "ls", "code_nav"]);
 const MUTATING = new Set<PathObservation["op"]>(["write", "edit"]);
-
-function rangeEnd(range: PathRange): number {
-	return range.limit === null ? Number.POSITIVE_INFINITY : range.offset + range.limit;
-}
-
-function isFullRead(range: PathRange | null): boolean {
-	return range !== null && range.offset === 0 && range.limit === null;
-}
-
-/**
- * Does the later read make the earlier one redundant? A full read covers
- * everything, including a `tail` read whose coverage is unknown. Any other read
- * covers only an identical or containing range, and an unknown range covers
- * nothing, which is what keeps partial reads from evicting each other.
- */
-function covers(later: PathRange | null, earlier: PathRange | null): boolean {
-	if (isFullRead(later)) return true;
-	if (later === null || earlier === null) return false;
-	return later.offset <= earlier.offset && rangeEnd(later) >= rangeEnd(earlier);
-}
 
 /**
  * The mutation that invalidated this observation: the first successful one
