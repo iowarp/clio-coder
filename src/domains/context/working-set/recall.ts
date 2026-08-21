@@ -5,7 +5,10 @@
  * and leaves a marker naming the ref. Recall is the reverse move: given a ref
  * on the active path whose key the fold still lists as evicted, hand back the
  * original body byte-exact and describe the `contextRecall` entry the caller
- * appends so the next fold readmits it. Pure over entries: nothing here reads
+ * appends. The ref stays evicted in the fold: the body rides the recall tool
+ * result at the tail of the working set, so the marker and the prefix cache
+ * are untouched and a repeat recall is the churn signal. Pure over entries:
+ * nothing here reads
  * the session, writes the ledger, or calls a model.
  *
  * The body is read the way `compaction/mask-observations.ts` reads a

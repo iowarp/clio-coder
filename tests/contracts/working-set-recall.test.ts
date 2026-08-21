@@ -121,18 +121,18 @@ test("recall: buildRecallFields carries trigger, tokens, and the tool call id", 
 	assert.equal("toolCallId" in operator, false);
 });
 
-test("recall: a recalled ref folds out of the view and the body can be appended back", () => {
+test("recall: a recalled ref stays evicted; a second recall succeeds and counts as churn", () => {
 	const entries = fixture();
 	const outcome = resolveRecall(entries, foldWorkingSet(entries), "t1");
 	assert.ok(outcome.ok);
 	const fields = buildRecallFields(outcome.result, { trigger: "tool", toolCallId: "c" });
 	const next: SessionEntry[] = [...entries, { ...fields, turnId: "r1", parentTurnId: "u2", timestamp: stamp() }];
 	const view = foldWorkingSet(next);
-	assert.deepEqual([...view.evicted.keys()], ["t2"]);
+	assert.deepEqual([...view.evicted.keys()], ["t1", "t2"]);
 	assert.equal(view.recalls, 1);
 	const again = resolveRecall(next, view, "t1");
-	assert.ok(!again.ok);
-	assert.equal(again.error.kind, "not_evicted");
+	assert.ok(again.ok);
+	assert.equal(again.result.body, outcome.result.body);
 });
 
 test("recall: invalid refs", () => {

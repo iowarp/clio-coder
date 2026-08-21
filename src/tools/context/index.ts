@@ -506,7 +506,8 @@ function runSkillsScope(
  * pointer. A body whose original result was itself offloaded already ends in
  * that tool's own `full: <path>` pointer, which is what the model gets back;
  * the file is never inlined. The `contextRecall` entry is appended before the
- * result returns so the next fold readmits the ref.
+ * result returns; it is the churn record, not an un-eviction, so the marker
+ * and the prefix cache stay where they are.
  */
 function runRecallScope(
 	deps: ContextToolDeps,
