@@ -28,6 +28,7 @@ import { validateEngineToolArguments } from "../engine/ai.js";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../engine/types.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
+import { isDispositionedToolResultError, toolResultContextText } from "./result-disposition.js";
 
 /**
  * Lightweight per-call observability hook. Default no-op so unused
@@ -99,10 +100,10 @@ type WorkerToolOkDetails = { kind: "ok" } & Record<string, unknown>;
 function projectToolResult(result: ToolResult): WorkerAgentToolResult {
 	const details = { ...(result.details ?? {}), kind: result.kind } as { kind: "ok" } | { kind: "error" };
 	if (result.kind === "error") {
-		return { content: [{ type: "text", text: result.message }], details };
+		return { content: [{ type: "text", text: toolResultContextText(result) }], details };
 	}
 	return {
-		content: [{ type: "text", text: result.output }],
+		content: [{ type: "text", text: toolResultContextText(result) }],
 		details,
 		...(result.terminate === true ? { terminate: true } : {}),
 	};
@@ -119,6 +120,8 @@ interface RunValidatedToolCallInput {
 	signal?: AbortSignal;
 	telemetry?: ToolTelemetry;
 	invokeOptions?: Partial<ToolInvokeOptions>;
+	/** Agent loops can preserve canonical failure envelopes and classify them after execution. */
+	returnDispositionedErrors?: boolean;
 }
 
 async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<WorkerAgentToolResult> {
@@ -183,13 +186,16 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			reason: verdict.result.message,
 			decision: verdict.decision,
 		});
-		throw new Error(verdict.result.message);
+		if (input.returnDispositionedErrors === true && isDispositionedToolResultError(verdict.result)) {
+			return projectToolResult(verdict.result);
+		}
+		throw new Error(toolResultContextText(verdict.result));
 	}
 	const toolDetails = isRecord(verdict.result.details) ? verdict.result.details : {};
 	const skillActivation =
 		spec.name === ToolNames.Context ? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId) : null;
 	const result: AgentToolResult<WorkerToolOkDetails> = {
-		content: [{ type: "text", text: verdict.result.output }],
+		content: [{ type: "text", text: toolResultContextText(verdict.result) }],
 		details: { ...toolDetails, kind: "ok" },
 	};
 	if (verdict.result.terminate === true) {
@@ -291,6 +297,7 @@ function toAgentTool(
 				spec,
 				args: params as Record<string, unknown>,
 				registry,
+				returnDispositionedErrors: true,
 			};
 			if (signal) callInput.signal = signal;
 			if (telemetry) callInput.telemetry = telemetry;
