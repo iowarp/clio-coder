@@ -25,8 +25,13 @@ import type {
 } from "./contract.js";
 import { refKey } from "./fold.js";
 import { renderMarker } from "./marker.js";
+import { callPathsByToolCallId } from "./path-index.js";
 import { hasThinking, offloadPathOf, primaryPathOf, toolResultPayload, toolResultText } from "./payload.js";
 import { projectWorkingSet } from "./project.js";
+
+/** Paths of the tool calls whose results may be evicted: `callPathsByToolCallId` over the policy input. */
+export type CallPaths = ReadonlyMap<string, string>;
+const NO_CALL_PATHS: CallPaths = new Map();
 
 /**
  * The event has no turnId until `session.appendEntry` gives it one, and the
@@ -40,11 +45,12 @@ const PENDING_EVENT_TURN_ID = "";
  * evict. Thinking eviction renders no marker at all: the reasoning simply
  * stops being replayed.
  */
-function markerFor(entry: SessionEntry, candidate: EvictionCandidate): string | null {
+function markerFor(entry: SessionEntry, candidate: EvictionCandidate, callPaths: CallPaths): string | null {
 	if (entry.kind !== "message") return null;
 	if (entry.role === "assistant") return hasThinking(entry.payload) ? "" : null;
 	if (entry.role !== "tool_result") return null;
 	const payload = toolResultPayload(entry.payload);
+	const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
 	return renderMarker({
 		ref: candidate.ref,
 		reason: candidate.reason,
@@ -52,7 +58,7 @@ function markerFor(entry: SessionEntry, candidate: EvictionCandidate): string | 
 		toolName: payload.toolName,
 		text: toolResultText(payload.result),
 		offloadPath: offloadPathOf(payload),
-		path: primaryPathOf(payload),
+		path: primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId)),
 	});
 }
 
@@ -117,14 +123,16 @@ function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: Sessi
  * Exported so a policy can do headroom arithmetic (`structural-v1` rung 6 needs
  * to know when to stop) against the same numbers `planEviction` will record.
  * A policy that priced evictions its own way would report headroom the ledger
- * then contradicts.
+ * then contradicts. Pass the same `callPaths` the plan will use, or the marker
+ * priced here is a few bytes shorter than the one recorded.
  */
 export function tokensFreedByEviction(
 	estimateTokens: (entry: SessionEntry) => number,
 	entry: SessionEntry,
 	candidate: EvictionCandidate,
+	callPaths: CallPaths = NO_CALL_PATHS,
 ): number {
-	const marker = markerFor(entry, candidate);
+	const marker = markerFor(entry, candidate, callPaths);
 	if (marker === null) return 0;
 	const key = refKey(candidate.ref);
 	const projected = projectWorkingSet([entry], soloView(key, pendingState(candidate, marker, "")))[0] ?? entry;
@@ -137,6 +145,7 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 
 	const byTurnId = new Map<string, SessionEntry>();
 	for (const entry of input.entries) byTurnId.set(entry.turnId, entry);
+	const callPaths = callPathsByToolCallId(input.entries);
 
 	const items: EvictedItem[] = [];
 	const claimed = new Set<string>();
@@ -148,12 +157,12 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		if (input.view.evicted.has(key) || claimed.has(key)) continue;
 		const entry = byTurnId.get(key);
 		if (entry === undefined) continue;
-		const marker = markerFor(entry, candidate);
+		const marker = markerFor(entry, candidate, callPaths);
 		if (marker === null) continue;
 		// A marker at least as long as the body it replaces is a cold turn bought
 		// for nothing, whatever the policy's reason. Refused here so no policy can
 		// record an eviction that freed nothing.
-		const tokensFreed = tokensFreedByEviction(input.estimateTokens, entry, candidate);
+		const tokensFreed = tokensFreedByEviction(input.estimateTokens, entry, candidate, callPaths);
 		if (tokensFreed <= 0) continue;
 		claimed.add(key);
 		items.push({

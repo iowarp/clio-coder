@@ -196,6 +196,21 @@ function collectToolCalls(entries: ReadonlyArray<SessionEntry>): Map<string, Too
 }
 
 /**
+ * The one path argument of every tool call, as the model wrote it, keyed by
+ * toolCallId. Markers read this so a `read` that left the working set still
+ * says which file it was; the canonical, cwd-resolved form the rules key on
+ * would show the model an absolute path it never typed.
+ */
+export function callPathsByToolCallId(entries: ReadonlyArray<SessionEntry>): ReadonlyMap<string, string> {
+	const paths = new Map<string, string>();
+	for (const [id, call] of collectToolCalls(entries)) {
+		const named = stringField(isRecord(call.args) ? call.args : null, "path", "file_path", "filePath");
+		if (named !== null) paths.set(id, named);
+	}
+	return paths;
+}
+
+/**
  * The path the call was about. Search tools default to the working directory,
  * which is what they actually searched, so a `grep` with no `path` argument is
  * an observation of the cwd rather than of nothing.

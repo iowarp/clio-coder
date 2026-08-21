@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { EMPTY_WORKING_SET_VIEW } from "../../src/domains/context/working-set/contract.js";
+import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { renderMarker } from "../../src/domains/context/working-set/marker.js";
+import { ageHorizonPolicy } from "../../src/domains/context/working-set/policies/age-horizon.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 
@@ -158,6 +160,31 @@ test("project: an assistant whose only content was thinking keeps it", () => {
 	assert.equal(payload.thinking, "payload-level reasoning");
 	// Usage invalidation is the event's, not the eviction's, and still applies.
 	assert.equal(payload.contextUsageInvalidated, true);
+});
+
+test("plan: a read result without details.paths takes its marker path from the call's argument", () => {
+	// The read tool records no `paths`; the model still needs to know which
+	// file a marker stands for to choose between recall and re-read.
+	const entries = ledger().filter((entry) => entry.kind !== "contextEviction");
+	const result = entries[3] as MessageEntry;
+	result.payload = {
+		toolCallId: "call-1",
+		toolName: "read",
+		result: { content: [{ type: "text", text: BODY }] },
+	};
+	const plan = planEviction(ageHorizonPolicy, {
+		entries,
+		view: EMPTY_WORKING_SET_VIEW,
+		cwd: null,
+		settings: { enabled: true, policy: "age-horizon", target: 0.6, protectLastTurns: 1, minEvictableTokens: 0 },
+		pressure: { tokens: 1, contextWindow: 1, threshold: 0.8, target: 0.6 },
+		estimateTokens: (entry) => JSON.stringify(entry).length / 4,
+	});
+	const item = plan?.items.find((candidate) => candidate.ref.entry === "t1");
+	assert.ok(item);
+	assert.match(item.marker, /^\[evicted ref=t1 reason=age_horizon tool=read path=src\/huge\.ts size=/);
+	// The recorded marker is the one that was priced.
+	assert.ok(item.tokensFreed > 0);
 });
 
 test("project: is idempotent", () => {

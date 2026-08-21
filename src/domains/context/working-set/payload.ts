@@ -114,9 +114,9 @@ export function offloadPathOf(payload: ToolResultPayload): string | undefined {
 /**
  * The one file this result was about, when the tool named exactly one.
  * `edit`, `write`, and `artifact` record `details.paths`; a result naming
- * several is left without a path rather than picking one arbitrarily. The
- * structural policy's path index (slice 2) replaces this with the call's own
- * arguments.
+ * several is left without a path rather than picking one arbitrarily. Read
+ * results carry no `paths`, so the marker falls back to the call's own
+ * argument (`callPathsByToolCallId` in path-index.ts).
  */
 export function primaryPathOf(payload: ToolResultPayload): string | undefined {
 	const details = nestedRecord(isRecord(payload.result) ? payload.result : null, "details");

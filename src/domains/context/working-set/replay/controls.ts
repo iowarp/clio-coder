@@ -2,7 +2,7 @@ import type { SessionEntry } from "../../../session/entries.js";
 import type { EvictionCandidate, PolicyInput, WorkingSetPolicy, WorkingSetPolicyId } from "../contract.js";
 import { tokensFreedByEviction } from "../engine.js";
 import { protectionCutoffIndex } from "../horizon.js";
-import { buildPathIndex } from "../path-index.js";
+import { buildPathIndex, callPathsByToolCallId } from "../path-index.js";
 import { isProtected } from "../protect.js";
 import type { ReferenceGraph } from "./reference-graph.js";
 import { countReplayTurns } from "./trace.js";
@@ -35,10 +35,11 @@ function takeToTarget(input: PolicyInput, entries: ReadonlyArray<SessionEntry>):
 	let tokensNeeded = Math.max(0, input.pressure.tokens - input.pressure.target * input.pressure.contextWindow);
 	if (tokensNeeded <= 0) return [];
 	const selected: EvictionCandidate[] = [];
+	const callPaths = callPathsByToolCallId(input.entries);
 	for (const entry of entries) {
 		const candidate: EvictionCandidate = { ref: { entry: entry.turnId }, reason: "age_horizon" };
 		selected.push(candidate);
-		tokensNeeded -= tokensFreedByEviction(input.estimateTokens, entry, candidate);
+		tokensNeeded -= tokensFreedByEviction(input.estimateTokens, entry, candidate, callPaths);
 		if (tokensNeeded <= 0) break;
 	}
 	return selected;
