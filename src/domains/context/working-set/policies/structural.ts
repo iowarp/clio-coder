@@ -24,7 +24,13 @@
 import type { EvictionCandidate, EvictionReason, PolicyInput, WorkingSetPolicy } from "../contract.js";
 import { tokensFreedByEviction } from "../engine.js";
 import { protectionCutoffIndex } from "../horizon.js";
-import { buildPathIndex, type PathIndex, type PathObservation, type PathRange } from "../path-index.js";
+import {
+	buildPathIndex,
+	callPathsByToolCallId,
+	type PathIndex,
+	type PathObservation,
+	type PathRange,
+} from "../path-index.js";
 import { hasThinking } from "../payload.js";
 import { findLaterSuccess, isProtected } from "../protect.js";
 
@@ -92,6 +98,7 @@ export const structuralPolicy: WorkingSetPolicy = {
 	select(input: PolicyInput): ReadonlyArray<EvictionCandidate> {
 		const { entries, view, settings, pressure, estimateTokens } = input;
 		const index = buildPathIndex(entries, { cwd: input.cwd });
+		const callPaths = callPathsByToolCallId(entries);
 		const cutoffIndex = protectionCutoffIndex(entries, settings.protectLastTurns);
 		const candidates: EvictionCandidate[] = [];
 		const claimed = new Set<string>();
@@ -113,7 +120,7 @@ export const structuralPolicy: WorkingSetPolicy = {
 			const candidate: EvictionCandidate = { ref: { entry: turnId }, reason, ...(by === undefined ? {} : { by }) };
 			claimed.add(turnId);
 			candidates.push(candidate);
-			freed += tokensFreedByEviction(estimateTokens, entry, candidate);
+			freed += tokensFreedByEviction(estimateTokens, entry, candidate, callPaths);
 			return true;
 		};
 
