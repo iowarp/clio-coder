@@ -1,7 +1,15 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
+import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
+import {
+	buildRecallFields,
+	recallErrorMessage,
+	recallParentTurnId,
+	resolveRecall,
+} from "../../domains/context/working-set/recall.js";
 import {
 	checkSkillDrift,
 	discoverMarketplaceSkills,
@@ -11,6 +19,8 @@ import {
 	modelVisibleSkills,
 	type Skill,
 } from "../../domains/resources/index.js";
+import type { SessionEntryInput } from "../../domains/session/contract.js";
+import type { SessionEntry } from "../../domains/session/entries.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import {
 	finalizeObservation,
@@ -30,7 +40,8 @@ import { contextToolSurface } from "./surface.js";
  * workspace snapshot, scope=docs retrieves cited sections from Clio's bundled
  * documentation, scope=skills lists available skills or loads a requested
  * skill body (the skill-activation and pending-request contracts are
- * unchanged from the absorbed read_skill tool).
+ * unchanged from the absorbed read_skill tool), scope=recall readmits an
+ * evicted tool-result body by ref and records the `contextRecall` entry.
  */
 
 const DEFAULT_TREE_ENTRIES = 50;
@@ -42,6 +53,17 @@ export interface ContextWorkspaceDeps {
 	saveSnapshot(snapshot: WorkspaceSnapshot): void;
 }
 
+/** Ledger access for scope=recall: read the full ledger, fold it at the live leaf, append the recall record. */
+export interface ContextSessionDeps {
+	hasSession(): boolean;
+	readEntries(): ReadonlyArray<SessionEntry>;
+	/** The live append point (`/tree` pin or tree leaf); undefined lets the fold infer it. */
+	activeLeafTurnId(): string | undefined;
+	appendEntry(entry: SessionEntryInput): SessionEntry;
+	/** Called after the recall entry is recorded; the orchestrator publishes it as BusChannels.ContextRecalled. */
+	onRecalled?: (payload: ContextRecalledPayload) => void;
+}
+
 export interface ContextToolDeps {
 	getCwd?: () => string;
 	getSkillLoaderOptions?: () => Pick<
@@ -50,6 +72,8 @@ export interface ContextToolDeps {
 	>;
 	/** Absent in worker registries without a session; scope=workspace errors cleanly. */
 	workspace?: ContextWorkspaceDeps;
+	/** Absent in worker registries without a session; scope=recall errors cleanly. */
+	session?: ContextSessionDeps;
 	/**
 	 * Whether scope=skills may list marketplace entries beside installed
 	 * skills. Worker registries set false: a worker can neither install a
@@ -482,13 +506,90 @@ function runSkillsScope(
 	});
 }
 
+/**
+ * scope=recall: the body goes back through the observation envelope like any
+ * OBSERVE result, so the per-turn pool and the self cap still apply; an
+ * oversize body is offloaded by the envelope and the notice carries the
+ * pointer. A body whose original result was itself offloaded already ends in
+ * that tool's own `full: <path>` pointer, which is what the model gets back;
+ * the file is never inlined. The `contextRecall` entry is appended before the
+ * result returns; it is the churn record, not an un-eviction, so the marker
+ * and the prefix cache stay where they are.
+ */
+function runRecallScope(
+	deps: ContextToolDeps,
+	args: Record<string, unknown>,
+	reservation: ObservationReservation,
+	options: ToolInvokeOptions | undefined,
+): ToolResult {
+	const session = deps.session;
+	if (!session?.hasSession()) {
+		return { kind: "error", message: "context: recall scope requires a bound session; none is active here" };
+	}
+	const ref = typeof args.ref === "string" ? args.ref.trim() : "";
+	if (ref.length === 0) {
+		return {
+			kind: "error",
+			message: "context: recall scope requires ref=<turnId>, the ref named in the [evicted ...] marker",
+		};
+	}
+	const entries = session.readEntries();
+	const leaf = session.activeLeafTurnId();
+	const view = foldWorkingSet(entries, leaf);
+	const resolved = resolveRecall(entries, view, ref, leaf);
+	if (!resolved.ok) return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries, view)}` };
+	const { result } = resolved;
+	const fields = buildRecallFields(result, {
+		trigger: "tool",
+		...(options?.toolCallId ? { toolCallId: options.toolCallId } : {}),
+	});
+	// The recall record parents onto the live leaf so the fold sees it on
+	// this branch and only this branch.
+	const parentTurnId = recallParentTurnId(entries, leaf);
+	let recorded: SessionEntry;
+	try {
+		recorded = session.appendEntry({ ...fields, parentTurnId });
+	} catch (err) {
+		return {
+			kind: "error",
+			message: `context: recall of ${result.ref.entry} could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
+	session.onRecalled?.({ ref: result.ref.entry, trigger: "tool", tokensReadmitted: result.tokens, at: Date.now() });
+	const evictedState = view.evicted.get(result.ref.entry);
+	const truncation = truncateHead(result.body, {
+		maxBytes: reservation.callCapBytes,
+		maxLines: Number.MAX_SAFE_INTEGER,
+	});
+	return finalizeObservation({
+		tool: ToolNames.Context,
+		unit: "results",
+		output: truncation.content,
+		...(truncation.truncated ? { fullOutput: result.body } : {}),
+		shownCount: 1,
+		totalCount: 1,
+		truncated: truncation.truncated,
+		details: {
+			recall: {
+				ref: result.ref.entry,
+				tokensReadmitted: result.tokens,
+				recallTurnId: recorded.turnId,
+				...(evictedState ? { reason: evictedState.reason, evictedAtTurnId: evictedState.evictedAtTurnId } : {}),
+				...(result.offloadPath !== undefined ? { offloadPath: result.offloadPath } : {}),
+			},
+		},
+		reservation,
+		...(options ? { options } : {}),
+	});
+}
+
 export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 	return {
 		...contextToolSurface,
 		async run(args, options): Promise<ToolResult> {
 			const scope = typeof args.scope === "string" ? args.scope : "";
-			if (scope !== "workspace" && scope !== "docs" && scope !== "skills") {
-				return { kind: "error", message: `context: scope must be workspace, docs, or skills; got '${scope}'` };
+			if (scope !== "workspace" && scope !== "docs" && scope !== "skills" && scope !== "recall") {
+				return { kind: "error", message: `context: scope must be workspace, docs, skills, or recall; got '${scope}'` };
 			}
 			const selfCap =
 				scope === "docs"
@@ -508,6 +609,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 			}
 			if (scope === "workspace") return runWorkspaceScope(deps, reservation, options);
 			if (scope === "docs") return runDocsScope(args, reservation, options);
+			if (scope === "recall") return runRecallScope(deps, args, reservation, options);
 			return runSkillsScope(deps, args, reservation, options);
 		},
 	};

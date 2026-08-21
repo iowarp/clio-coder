@@ -56,6 +56,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"skills",
 	"delegation",
 	"compaction",
+	"context",
 	"retry",
 ]);
 

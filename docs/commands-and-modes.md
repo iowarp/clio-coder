@@ -78,6 +78,8 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder context wiki [--update] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
+| `clio-coder context replay --sessions <path>... [--format clio\|claude-code\|auto] [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio or Claude Code session ledgers and report retention, precision, token savings, saturation, and summary headroom. |
+| `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ## Headless Run Flags
 
@@ -152,7 +154,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/agents` | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |
-| `/context` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
@@ -169,9 +171,13 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
-`/context` with no arguments opens the context-window ledger overlay. The
-subcommands own the durable project-context noun: `compact` summarizes older
-turns in the session window, `init` bootstraps or updates `CLIO-CODER.md` and the
+`/context` with no arguments opens the context-window ledger overlay, including
+the working-set section (policy, evicted items and tokens, events, recalls, churn).
+The subcommands own the durable project-context noun: `compact` summarizes older
+turns in the session window, `recall <ref>` prints an evicted tool-result body
+back into the transcript by the ref its `[evicted ...]` marker names (it never
+enters model context; the model recalls with `context(scope="recall", ref=...)`),
+`init` bootstraps or updates `CLIO-CODER.md` and the
 codewiki, `refresh` re-indexes the codewiki and refreshes `.clio-coder/state.json`
 without touching `CLIO-CODER.md`, and `reset` deletes accumulated
 context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`,
@@ -518,6 +524,34 @@ writes `.clio-coder/codewiki.json` plus
 structural hash. The same builder is used by `clio-coder context init`, `clio-coder context
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
+
+### Working-set replay
+
+`clio-coder context replay --sessions <path>...` accepts individual session directories,
+Clio sessions roots, Claude Code project roots, and JSONL files. `--format auto` is the
+default and distinguishes a Clio session header from the first semantic Claude Code
+user, assistant, or summary record after metadata; `--format clio` and
+`--format claude-code` force a loader. Clio traces remove prior eviction/recall sidecars
+and select the active branch. Claude Code traces skip sidechain/subagent and summary-only
+files, normalize tool calls and results into Clio's message shapes, and retain the recorded
+cwd for path indexing. Both drive the live fold, projection, policy, and eviction planner at
+deterministic turn boundaries. The default inclusion cascade requires at least eight turns,
+eight tool results, and one file re-read; `--no-filter` retains every otherwise-readable
+trace. Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable
+report including the configuration, git revision when available, and exact command line.
+`--protect-last-turns` and `--min-evictable-tokens` override those two working-set settings
+for the replay only; they never update saved settings. Saturated events is pooled over
+applied eviction events and reports how often a policy exhausted its usable candidates,
+which distinguishes a budget that measures policy choice from one that simply runs out of
+evictable material.
+The summary-headroom mean always carries its contributing trace count because traces that
+never require summary compaction do not enter that nullable mean.
+
+`clio-coder context working-set --session <id|path>` is a read-only inspection command for
+one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate
+event, recall, and churn facts; path-observation counts by operation; and paths whose earlier
+reads were followed by writes or edits. A persisted `/tree` pin is honored when the session
+metadata is available, so the report does not resurrect an abandoned branch.
 
 The current artifact is schema v5. It records files with path, language, line
 count, role, content hash, imports, and optional summary; declaration-only

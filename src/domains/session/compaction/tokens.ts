@@ -78,6 +78,10 @@ export function estimateTokens(entry: SessionEntry): number {
 		case "taskLedger":
 		case "decisionLedger":
 		case "workerRun":
+		// Working-set bookkeeping: refs and markers, never bodies. The
+		// projection accounts for marker cost on the projected messages.
+		case "contextEviction":
+		case "contextRecall":
 			return 0;
 	}
 }

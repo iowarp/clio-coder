@@ -44,6 +44,8 @@ type SlashCommandVariant =
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
 	| { kind: "context-refresh" }
+	/** `ref` is the turnId an `[evicted ...]` marker names. */
+	| { kind: "context-recall"; ref: string }
 	| { kind: "skill-selector" }
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
@@ -343,6 +345,13 @@ export interface SlashCommandContext {
 	 * Optional until the host wires onContextRefresh.
 	 */
 	runContextRefresh?: () => void;
+	/**
+	 * Read an evicted tool-result body back into the transcript by ref, and
+	 * record the `contextRecall` entry. Transcript-only: an operator recall
+	 * answers the person, so the body never becomes model context. Optional
+	 * until the host wires a session.
+	 */
+	runContextRecall?: (ref: string) => void;
 	openSkillsHub?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	/**
@@ -480,6 +489,13 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 const COMPACT_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [
 	{ name: "instructions", required: false, rest: true },
 ];
+
+/**
+ * `/context recall <ref>` takes exactly one ref, not a rest tail: a ref is a
+ * single turnId, and a second token is a mistake worth reporting rather than
+ * text to fold into the first.
+ */
+const RECALL_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [{ name: "ref", required: true }];
 
 /**
  * A registered command whose arguments do not parse is a mistake to report,
@@ -859,11 +875,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "context",
-		description: "Context hub: window overlay plus compact, init, refresh, and reset",
+		description: "Context hub: window overlay plus compact, recall, init, refresh, and reset",
 		group: "Inspect",
-		kinds: ["context-view", "compact", "init", "context-clear", "context-refresh"],
+		kinds: ["context-view", "compact", "context-recall", "init", "context-clear", "context-refresh"],
 		subcommandDescriptions: {
 			compact: "Compact session context",
+			recall: "Recall an evicted result",
 			init: "Initialize project context",
 			refresh: "Refresh project context",
 			reset: "Reset project context",
@@ -871,6 +888,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {
 			subcommands: {
 				compact: { positionals: [...COMPACT_POSITIONALS] },
+				recall: { positionals: [...RECALL_POSITIONALS] },
 				init: {},
 				refresh: {},
 				reset: {},
@@ -881,6 +899,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			switch (parsed.subcommand) {
 				case "compact":
 					return { kind: "compact", instructions: parsed.rest };
+				case "recall":
+					return { kind: "context-recall", ref: parsed.positionals[0] ?? "" };
 				case "init":
 					return { kind: "init", options: {} };
 				case "refresh":
@@ -898,6 +918,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return;
 				case "compact":
 					ctx.runCompact(command.instructions);
+					return;
+				case "context-recall":
+					if (ctx.runContextRecall) {
+						ctx.runContextRecall(command.ref);
+					} else {
+						ctx.notice("error", "context recall is not wired; no session is bound to this process");
+					}
 					return;
 				case "init":
 					ctx.runInit(command.options);

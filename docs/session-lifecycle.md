@@ -39,11 +39,11 @@ export interface ClioSessionMeta {
   piMonoVersion: string;
   platform: string;
   nodeVersion: string;
-  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 3
+  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 4
 }
 ```
 
-Format version `CURRENT_SESSION_FORMAT_VERSION = 3` (`src/engine/session.ts:66`) is stamped on all sessions created in `v0.3.3`. Sessions with missing or earlier format versions trigger schema migrations in `src/domains/session/migrations/` on `/resume`.
+Format version `CURRENT_SESSION_FORMAT_VERSION = 4` (`src/engine/session.ts`) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` rejects both directions on `/resume`: a missing or earlier version names the remedy (remove the session directory), and a version from the future says the session was written by a newer Clio and must not be read by this build.
 
 ---
 

@@ -202,6 +202,12 @@ type ToolSegment = {
 	 * was refused and leaves the operator no way to learn why.
 	 */
 	blockReason?: string | undefined;
+	/**
+	 * Working-set eviction reason for a replayed result whose body the
+	 * projection has replaced. Set only on rehydrate, from the folded ledger;
+	 * a live call is never evicted while it is still being rendered.
+	 */
+	evictedReason?: string | undefined;
 	/** View-only marker: historical calls render mutation diffs without live color. */
 	replayed?: true;
 };
@@ -884,6 +890,7 @@ function renderToolSegmentLines(
 						resultSummary: seg.resultSummary,
 						outcome: seg.settlement,
 						blockReason: seg.blockReason,
+						evictedReason: seg.evictedReason,
 					}
 				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase },
 			width,
@@ -916,6 +923,7 @@ function renderToolSegmentLines(
 			resultSummary: seg.resultSummary,
 			outcome: seg.settlement,
 			blockReason: seg.blockReason,
+			evictedReason: seg.evictedReason,
 		},
 		width,
 		{ unbounded: unboundedToolBodies, diffStyle: seg.replayed === true ? "plain" : "color" },
@@ -1936,7 +1944,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						resultSummary?: unknown;
 						outcome?: unknown;
 						blockReason?: unknown;
+						evictedReason?: unknown;
 					};
+					// Replay-only: the rehydrator reads the working-set fold and tags
+					// the rows whose bodies the projection has replaced for the model.
+					tool.evictedReason =
+						typeof enriched.evictedReason === "string" && enriched.evictedReason.length > 0
+							? enriched.evictedReason
+							: undefined;
 					// Settlement is that verdict, never an inference from result text.
 					// The text of a tool result is the tool's own output: `node --test`
 					// prints `cancelled 0` on every run and a linter can print

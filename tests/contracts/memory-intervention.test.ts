@@ -476,6 +476,19 @@ describe("contracts/memory intervention rules tier", () => {
 		strictEqual(calls, 0);
 	});
 
+	it("does not treat working-set recall as context loss that needs memory reactivation", () => {
+		const bank = new TaskMemoryBank();
+		bank.saveKnowledge("Keep the operator's required branch.");
+		const registration = createMemoryInterventionRegistration({ bank });
+
+		registration.evaluate({
+			hook: "on_compaction",
+			metadata: { stage: "working_set_recall", trigger: "tool" },
+		});
+
+		deepStrictEqual(registration.evaluate({ hook: "turn_start", text: "resume task" }), []);
+	});
+
 	it("reads next-turn trigger settings from the live settings layer", async () => {
 		const bank = new TaskMemoryBank();
 		let calls = 0;

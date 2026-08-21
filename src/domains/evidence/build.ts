@@ -1372,6 +1372,19 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 		];
 	}
 	if (entry.kind === "custom") return [`${prefix} custom:${entry.customType} ${previewUnknown(entry.data)}`];
+	if (entry.kind === "contextEviction") {
+		const pressure = entry.pressureBefore === null ? "" : ` pressure=${entry.pressureBefore.toFixed(3)}`;
+		return [
+			`${prefix} contextEviction policy=${entry.policyId} trigger=${entry.trigger} items=${entry.evicted.length} tokens=${entry.tokensBefore}->${entry.tokensAfter}${pressure}`,
+			...entry.evicted.map(
+				(item) =>
+					`  evicted ref=${item.ref.entry} reason=${item.reason}${item.by === undefined ? "" : ` by=${item.by}`} freed=${item.tokensFreed}`,
+			),
+		];
+	}
+	if (entry.kind === "contextRecall") {
+		return [`${prefix} contextRecall ref=${entry.ref.entry} trigger=${entry.trigger} tokens=${entry.tokensReadmitted}`];
+	}
 	const _exhaustive: never = entry;
 	return [`${prefix} ${String(_exhaustive)}`];
 }

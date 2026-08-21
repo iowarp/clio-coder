@@ -10,11 +10,16 @@ import {
 	BusChannels,
 	type ContextActivityStatus,
 	type ContextPrunedPayload,
+	type ContextRecalledPayload,
 	type ContextWarningPayload,
 } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { ToolName } from "../core/tool-names.js";
+import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
+import { foldWorkingSet } from "../domains/context/working-set/fold.js";
+import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
+import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -27,6 +32,7 @@ import {
 } from "../domains/session/compaction/auto.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
+import { estimateTokens } from "../domains/session/compaction/tokens.js";
 import {
 	appendContextSnapshot,
 	type CaptureContextSnapshotInput,
@@ -57,7 +63,7 @@ import {
 	sumRunUsage,
 	toolNamesFromAgentState,
 } from "./chat-loop-messages.js";
-import { buildReplayAgentMessagesFromTurns } from "./chat-renderer.js";
+import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
 import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -73,6 +79,8 @@ export interface TurnContextDeps {
 	bus?: SafeEventBus | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	autoCompact?: ((instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null>) | undefined;
+	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
+	planEviction?: typeof planEviction;
 	getMemorySection?: (() => string) | undefined;
 	middleware: TurnMiddleware;
 	emitNotice: (text: string) => void;
@@ -167,20 +175,41 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// its first assistant entry, and shows one dim notice.
 	const pendingColdReasons = new Set<string>();
 	let runExpectedColdReasons: string[] = [];
-	let stampColdReasonsPending = false;
+	let nextAssistantColdReasons: string[] = [];
+	// A working-set eviction changes the prefix itself, so it cools every
+	// tier's cache, not only a single-slot local one. Dispatch and compaction
+	// disturbances keep the local-native gate below.
+	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<string> = new Set(["working_set_evict"]);
+	const stampsOnTier = (reason: string, runtimeId: string | undefined): boolean =>
+		TIER_INDEPENDENT_COLD_REASONS.has(reason) ||
+		(runtimeId !== undefined && deps.providers.getRuntime(runtimeId)?.tier === "local-native");
+	const noteColdReason = (reason: string): void => {
+		if (!state.streaming) {
+			pendingColdReasons.add(reason);
+			return;
+		}
+		if (!stampsOnTier(reason, state.runtime?.runtimeId)) return;
+		if (!runExpectedColdReasons.includes(reason)) runExpectedColdReasons.push(reason);
+		if (nextAssistantColdReasons.includes(reason)) return;
+		nextAssistantColdReasons.push(reason);
+		deps.emitNotice(`[context engine] backend prefix cache likely cold this turn: ${reason}`);
+	};
 	const unsubscribeColdReasonSources = [
 		...[BusChannels.DispatchStarted, BusChannels.DispatchCompleted, BusChannels.DispatchFailed].map(
 			(channel) =>
 				deps.bus?.on(channel, () => {
-					pendingColdReasons.add("dispatch");
+					noteColdReason("dispatch");
 				}) ?? null,
 		),
 		...[BusChannels.CompactionBegin, BusChannels.CompactionEnd].map(
 			(channel) =>
 				deps.bus?.on(channel, () => {
-					pendingColdReasons.add("compaction");
+					noteColdReason("compaction");
 				}) ?? null,
 		),
+		deps.bus?.on(BusChannels.ContextRecalled, (payload: ContextRecalledPayload) => {
+			middleware.fireCompactionHook("working_set_recall", payload.trigger);
+		}) ?? null,
 	];
 
 	/**
@@ -292,7 +321,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
-		agentRuntime.agent.state.messages = buildReplayAgentMessagesFromTurns(refreshedEntries, {
+		agentRuntime.agent.state.messages = buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
 			...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
 		});
 		state.replayedContextMessages = [];
@@ -339,12 +368,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	/**
 	 * Two-mechanism context protection. When pressure crosses the single
-	 * threshold, first mask the bodies of tool observations older than
-	 * `excludeLastTurns` (cheap, no LLM call). If pressure stays above the
-	 * threshold, delegate to the pi-style LLM compaction path: append a
-	 * compaction summary entry, then replay from the session view.
+	 * threshold, first apply a non-destructive working-set eviction. If pressure
+	 * stays above the threshold, delegate to the pi-style LLM compaction path:
+	 * append a compaction summary entry, then replay from the session view. The
+	 * destructive observation mask remains only as a one-release escape hatch.
 	 *
-	 * `force = true` skips the pressure check and the mask pre-stage and runs
+	 * `force = true` skips the pressure check and every pre-stage and runs
 	 * the LLM summary directly. Used for `/context compact`, CLIO_CODER_FORCE_COMPACT=1,
 	 * and overflow recovery.
 	 */
@@ -355,7 +384,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		triggerOverride?: CompactionTrigger,
 		pendingUserText?: string,
 	): Promise<boolean> => {
-		if (!deps.autoCompact || !deps.readSessionEntries) return false;
+		if (!deps.readSessionEntries) return false;
 		const settings = deps.getSettings();
 		const cfg = settings.compaction;
 		const autoEnabled = cfg?.auto !== false;
@@ -369,74 +398,164 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const verdict = shouldCompact(estimate.tokens, compactionThreshold, estimate.contextWindow);
 			if (!verdict.shouldCompact) return false;
 
-			// Mechanism B pre-stage: mask stale observations before paying for
-			// an LLM summary. History rewrites here invalidate the backend
-			// prefix cache; the "compaction" expectedColdReasons stamp from the
-			// CompactionBegin/End subscription explains the next cold turn.
+			// One-release compatibility escape hatch. This is the destructive
+			// pre-stage that working-set eviction replaces; keep it byte-for-byte
+			// reachable only when explicitly requested.
 			if (deps.session?.current()) {
 				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
-				let masked: ReturnType<typeof maskStaleObservations>;
-				try {
-					masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
-				} catch (error) {
-					middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
-					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
-					emitCompactionActivity("started", "compacting context (mask stage)");
-					emitCompactionActivity("failed", compactionFailureMessage(error));
-					deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
-					throw error;
-				}
-				if (masked.changed) {
-					middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
-					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
-					emitCompactionActivity("started", "compacting context (mask stage)");
-					deps.session.replaceEntries(masked.entries);
-					refreshAgentMessagesFromSession(agentRuntime);
-					deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+				if (process.env.CLIO_CODER_LEGACY_MASK === "1") {
+					let masked: ReturnType<typeof maskStaleObservations>;
+					try {
+						masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
+					} catch (error) {
+						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
+						deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+						emitCompactionActivity("started", "compacting context (mask stage)");
+						emitCompactionActivity("failed", compactionFailureMessage(error));
+						deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+						throw error;
+					}
+					if (masked.changed) {
+						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
+						deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+						emitCompactionActivity("started", "compacting context (mask stage)");
+						deps.session.replaceEntries(masked.entries);
+						refreshAgentMessagesFromSession(agentRuntime);
+						deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
-					const postMaskSnapshot = captureRuntimeContextSnapshot(
-						agentRuntime,
-						state.activeUserTurnId || "compaction",
-						compactionThreshold,
-					);
-					currentContextSnapshot = postMaskSnapshot;
-					persistContextSnapshot(postMaskSnapshot);
+						const postMaskSnapshot = captureRuntimeContextSnapshot(
+							agentRuntime,
+							state.activeUserTurnId || "compaction",
+							compactionThreshold,
+						);
+						currentContextSnapshot = postMaskSnapshot;
+						persistContextSnapshot(postMaskSnapshot);
 
-					const tokensAfterMask = snapshotInputTokens(postMaskSnapshot);
-					lastCompactionEvent = {
-						stage: "mask_observations",
-						tokensBefore: estimate.tokens,
-						tokensAfter: tokensAfterMask,
-						trigger,
-					};
-					deps.bus?.emit(BusChannels.ContextPruned, {
-						stage: "mask_observations",
-						pressure: verdict.pressure,
-						tokensBefore: estimate.tokens,
-						tokensAfter: tokensAfterMask,
-						maskedObservations: masked.maskedObservations,
-						maskedThinkingBlocks: masked.maskedThinkingBlocks,
-						maskedThinkingChars: masked.maskedThinkingChars,
-						trigger,
-						snapshotIdBefore: beforeSnapshotId,
-						snapshotIdAfter: postMaskSnapshot.snapshotId,
-						at: Date.now(),
-					} satisfies ContextPrunedPayload);
-					emitCompactionActivity("completed", `${masked.maskedObservations} observations masked`);
-					const thinkingNote =
-						masked.maskedThinkingBlocks > 0
-							? `, ${masked.maskedThinkingBlocks} thinking blocks dropped (~${masked.maskedThinkingChars} chars)`
-							: "";
-					deps.emitNotice(
-						`[context engine] mask_observations: ${masked.maskedObservations} observations masked${thinkingNote}; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
-					);
+						const tokensAfterMask = snapshotInputTokens(postMaskSnapshot);
+						lastCompactionEvent = {
+							stage: "mask_observations",
+							tokensBefore: estimate.tokens,
+							tokensAfter: tokensAfterMask,
+							trigger,
+						};
+						deps.bus?.emit(BusChannels.ContextPruned, {
+							stage: "mask_observations",
+							pressure: verdict.pressure,
+							tokensBefore: estimate.tokens,
+							tokensAfter: tokensAfterMask,
+							maskedObservations: masked.maskedObservations,
+							maskedThinkingBlocks: masked.maskedThinkingBlocks,
+							maskedThinkingChars: masked.maskedThinkingChars,
+							trigger,
+							snapshotIdBefore: beforeSnapshotId,
+							snapshotIdAfter: postMaskSnapshot.snapshotId,
+							at: Date.now(),
+						} satisfies ContextPrunedPayload);
+						emitCompactionActivity("completed", `${masked.maskedObservations} observations masked`);
+						const thinkingNote =
+							masked.maskedThinkingBlocks > 0
+								? `, ${masked.maskedThinkingBlocks} thinking blocks dropped (~${masked.maskedThinkingChars} chars)`
+								: "";
+						deps.emitNotice(
+							`[context engine] mask_observations: ${masked.maskedObservations} observations masked${thinkingNote}; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
+						);
 
-					const after = liveContextEstimate(agentRuntime, pendingUserText);
-					if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
+						const after = liveContextEstimate(agentRuntime, pendingUserText);
+						if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
+					}
+				} else if (settings.context.workingSet.enabled) {
+					let planned: ReturnType<typeof planEviction>;
+					try {
+						const entries = deps.readSessionEntries() ?? [];
+						const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
+						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
+						planned = (deps.planEviction ?? planEviction)(policy, {
+							entries: selectVisibleEntries(entries, state.lastTurnId ?? undefined),
+							view,
+							cwd: deps.session.current()?.cwd ?? null,
+							settings: settings.context.workingSet,
+							pressure: {
+								tokens: estimate.tokens,
+								contextWindow: estimate.contextWindow,
+								threshold: compactionThreshold,
+								target: settings.context.workingSet.target,
+							},
+							estimateTokens,
+						});
+					} catch (error) {
+						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
+						emitCompactionActivity("started", "compacting context (working-set eviction)");
+						emitCompactionActivity("failed", compactionFailureMessage(error));
+						throw error;
+					}
+					if (planned) {
+						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
+						emitCompactionActivity("started", "compacting context (working-set eviction)");
+						try {
+							deps.session.appendEntry({
+								...buildEvictionFields(planned, {
+									trigger: "pressure",
+									pressureBefore: verdict.pressure,
+									snapshotIdBefore: beforeSnapshotId,
+								}),
+								// appendEntry does not infer this anchor; the interactive
+								// cursor is the leaf the next message will extend.
+								parentTurnId: state.lastTurnId,
+							});
+							noteColdReason("working_set_evict");
+							refreshAgentMessagesFromSession(agentRuntime);
+
+							const postEvictionSnapshot = captureRuntimeContextSnapshot(
+								agentRuntime,
+								state.activeUserTurnId || "compaction",
+								compactionThreshold,
+							);
+							currentContextSnapshot = postEvictionSnapshot;
+							persistContextSnapshot(postEvictionSnapshot);
+
+							// Every surface that describes this event (the notice, the toast
+							// ContextPruned feeds, the overlay's last-compaction line, the
+							// ledger entry) quotes the plan: the same chars/4 pricing over the
+							// same visible slice. The live estimate prices the agent message
+							// list and differs by the tool schemas and replay text; it stays
+							// what the meter and the re-check below read, not what the event
+							// reports about itself.
+							lastCompactionEvent = {
+								stage: "working_set",
+								tokensBefore: planned.tokensBefore,
+								tokensAfter: planned.tokensAfter,
+								trigger,
+							};
+							deps.bus?.emit(BusChannels.ContextPruned, {
+								stage: "working_set",
+								pressure: verdict.pressure,
+								tokensBefore: planned.tokensBefore,
+								tokensAfter: planned.tokensAfter,
+								trigger,
+								snapshotIdBefore: beforeSnapshotId,
+								snapshotIdAfter: postEvictionSnapshot.snapshotId,
+								policyId: planned.policyId,
+								evictedItems: planned.items.length,
+								at: Date.now(),
+							} satisfies ContextPrunedPayload);
+							const itemsWord = planned.items.length === 1 ? "item" : "items";
+							emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
+							deps.emitNotice(
+								`[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
+							);
+
+							const after = liveContextEstimate(agentRuntime, pendingUserText);
+							if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
+						} catch (error) {
+							emitCompactionActivity("failed", compactionFailureMessage(error));
+							throw error;
+						}
+					}
 				}
 			}
 		}
 
+		if (!deps.autoCompact) return false;
 		middleware.fireCompactionHook("llm_summary", trigger);
 		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 		emitCompactionActivity("started", "compacting context (summary)");
@@ -790,16 +909,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		consumeExpectedColdReasons(runtimeId: string): void {
 			// Cache-disturbance honesty (T3.3): consume disturbances since
 			// the last settled run. Only single-slot local backends lose their
-			// prefix cache to interleaved work, so only local-native targets
-			// stamp reasons and notify; other tiers just clear the set.
+			// prefix cache to interleaved work, so dispatch and compaction
+			// stamp only on local-native targets; a working-set eviction moved
+			// the prefix itself and stamps on every tier (see stampsOnTier).
 			runExpectedColdReasons = [];
-			stampColdReasonsPending = false;
+			nextAssistantColdReasons = [];
 			if (pendingColdReasons.size > 0) {
-				const reasons = [...pendingColdReasons];
+				const reasons = [...pendingColdReasons].filter((reason) => stampsOnTier(reason, runtimeId));
 				pendingColdReasons.clear();
-				if (deps.providers.getRuntime(runtimeId)?.tier === "local-native") {
+				if (reasons.length > 0) {
 					runExpectedColdReasons = reasons;
-					stampColdReasonsPending = true;
+					nextAssistantColdReasons = reasons;
 					deps.emitNotice(`[context engine] backend prefix cache likely cold this turn: ${reasons.join(", ")}`);
 				}
 			}
@@ -818,9 +938,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				cacheWrite,
 				backendVerdict: backendCacheVerdict(input, cacheRead),
 			};
-			if (stampColdReasonsPending && runExpectedColdReasons.length > 0) {
-				promptCache.expectedColdReasons = [...runExpectedColdReasons];
-				stampColdReasonsPending = false;
+			if (nextAssistantColdReasons.length > 0) {
+				promptCache.expectedColdReasons = [...nextAssistantColdReasons];
+				nextAssistantColdReasons = [];
 			}
 			return promptCache;
 		},
@@ -834,6 +954,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					cacheWriteTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheWrite : null,
 					uncachedInputTokens: cacheSummary.input,
 					backendVerdict: runFirstCallVerdict,
+					...(runExpectedColdReasons.length > 0 ? { expectedColdReasons: [...runExpectedColdReasons] } : {}),
 				};
 			}
 		},

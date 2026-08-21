@@ -14,7 +14,7 @@ const IMPLEMENTATION_MARKERS = {
 	web_fetch: "web_fetch: binary or unsupported content type",
 	verify: "frontend validation:",
 	code_nav: "code_nav: no wiki page matches",
-	context: "context: scope must be workspace, docs, or skills",
+	context: "context: scope must be workspace, docs, skills, or recall",
 } as const;
 
 const ORCHESTRATOR_RUNNER_SURFACE_MARKERS = {

@@ -122,6 +122,8 @@ export interface PromptCacheStats {
 	 * combination the overlay renders as a warning.
 	 */
 	backendVerdict: "hot" | "partial" | "cold" | "small" | null;
+	/** Cache disturbances Clio expected before the last settled run. */
+	expectedColdReasons?: ReadonlyArray<string>;
 }
 
 export interface ContextLedgerGroup {

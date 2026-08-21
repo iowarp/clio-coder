@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
@@ -28,6 +29,7 @@ import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorCommand } from "./command-output.js";
+import { runOperatorRecall } from "./context-recall-command.js";
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
@@ -100,8 +102,10 @@ export interface InteractiveSlashRuntimeDeps {
 	 * Leaf lookup for `/export`, so the export follows the branch the session
 	 * is actually on. current.jsonl still holds the abandoned turns after a
 	 * `/tree` pin, and an unscoped rehydrate reproduced them (issue #109).
+	 * `/context recall` uses the same leaf for its fold, plus `appendEntry` for
+	 * the `contextRecall` record.
 	 */
-	session?: Pick<SessionContract, "tree">;
+	session?: Pick<SessionContract, "tree" | "current" | "appendEntry">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
 	openSkillsHub: () => void;
@@ -512,6 +516,38 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			}
 			deps.openContextReset();
 		},
+		...(deps.session
+			? {
+					runContextRecall: (ref: string) => {
+						const session = deps.session;
+						if (!session) return;
+						const outcome = runOperatorRecall(ref, {
+							hasSession: () => session.current() !== null,
+							readEntries: () => {
+								const sessionId = deps.chat.getSessionId();
+								return sessionId ? deps.readStructuredEntries(sessionId) : [];
+							},
+							activeLeafTurnId: () => {
+								const meta = session.current();
+								return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+							},
+							appendEntry: (entry) => session.appendEntry(entry),
+							onRecalled: (payload) => deps.bus.emit(BusChannels.ContextRecalled, payload),
+							...(deps.now ? { now: () => (deps.now?.() ?? new Date()).getTime() } : {}),
+						});
+						if (!outcome.ok) {
+							appendCommandNotice("error", outcome.message);
+							return;
+						}
+						appendCommandNotice("success", outcome.headline);
+						// The body is transcript output, not a notice: notices collapse
+						// newlines, and a recalled build log is worth nothing on one line.
+						// It is a replay block either way, so it never enters model context.
+						deps.io.stdout(`${outcome.body}\n`);
+						deps.requestRender();
+					},
+				}
+			: {}),
 		runContextRefresh: () => {
 			if (!deps.onContextRefresh) {
 				deps.io.stderr("[/context refresh] context refresh not wired; pass onContextRefresh to startInteractive\n");
