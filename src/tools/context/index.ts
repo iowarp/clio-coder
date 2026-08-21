@@ -534,11 +534,13 @@ function runRecallScope(
 	const view = foldWorkingSet(entries, leaf);
 	const resolved = resolveRecall(entries, view, ref, leaf);
 	if (!resolved.ok) {
+		// The listing is what lets the next call succeed; the nearest-ref guess is
+		// a prefix match over time-ordered ids and is usually an unrelated result.
 		const evictedRefs = [...view.evicted.keys()];
 		const listing =
-			"nearest" in resolved.error && resolved.error.nearest === null && evictedRefs.length > 0
+			evictedRefs.length > 0
 				? ` Evicted refs on the active path: ${evictedRefs.slice(0, 8).join(", ")}${evictedRefs.length > 8 ? ", …" : ""}.`
-				: "";
+				: " No refs are evicted on the active path.";
 		return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries)}${listing}` };
 	}
 	const { result } = resolved;
