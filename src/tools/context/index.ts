@@ -1,5 +1,6 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
+import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
@@ -55,6 +56,8 @@ export interface ContextSessionDeps {
 	/** The live append point (`/tree` pin or tree leaf); undefined lets the fold infer it. */
 	activeLeafTurnId(): string | undefined;
 	appendEntry(entry: SessionEntryInput): SessionEntry;
+	/** Called after the recall entry is recorded; the orchestrator publishes it as BusChannels.ContextRecalled. */
+	onRecalled?: (payload: ContextRecalledPayload) => void;
 }
 
 export interface ContextToolDeps {
@@ -563,7 +566,7 @@ function runRecallScope(
 			message: `context: recall of ${result.ref.entry} could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
-	// TODO(ws/wiring): emit BusChannels.ContextRecalled { ref, trigger: "tool", tokensReadmitted, at } once worker B lands the channel.
+	session.onRecalled?.({ ref: result.ref.entry, trigger: "tool", tokensReadmitted: result.tokens, at: Date.now() });
 	const evictedState = view.evicted.get(result.ref.entry);
 	const truncation = truncateHead(result.body, {
 		maxBytes: reservation.callCapBytes,

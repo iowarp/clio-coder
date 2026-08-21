@@ -1,3 +1,4 @@
+import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
@@ -31,6 +32,8 @@ export interface CoreToolBootstrapDeps {
 	session?: SessionContract;
 	/** Full ledger of the current session; context(scope=recall) folds it. Absent in worker registries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
+	/** Publishes a successful context(scope=recall) on the bus; absent where no bus is wired. */
+	onContextRecalled?: (payload: ContextRecalledPayload) => void;
 	askUser?: AskUserHandler;
 	taskBoard?: TaskBoardStore;
 	userTasks?: UserTasksStore;
@@ -130,6 +133,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 										return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
 									},
 									appendEntry: (entry) => session.appendEntry(entry),
+									...(deps.onContextRecalled ? { onRecalled: deps.onContextRecalled } : {}),
 								},
 							}
 						: {}),

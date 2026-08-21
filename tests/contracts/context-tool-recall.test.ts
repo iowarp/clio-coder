@@ -54,7 +54,12 @@ function eviction(turnId: string, parentTurnId: string, refs: string[]): Session
 
 const BODY = "alpha\n\tbeta  \nγάμμα\n";
 
-function fakeSession(entries: SessionEntry[]): { deps: ContextSessionDeps; entries: SessionEntry[] } {
+function fakeSession(entries: SessionEntry[]): {
+	deps: ContextSessionDeps;
+	entries: SessionEntry[];
+	recalled: Array<{ ref: string; trigger: string; tokensReadmitted: number }>;
+} {
+	const recalled: Array<{ ref: string; trigger: string; tokensReadmitted: number }> = [];
 	const deps: ContextSessionDeps = {
 		hasSession: () => true,
 		readEntries: () => entries,
@@ -64,8 +69,11 @@ function fakeSession(entries: SessionEntry[]): { deps: ContextSessionDeps; entri
 			entries.push(entry);
 			return entry;
 		},
+		onRecalled: (payload) => {
+			recalled.push({ ref: payload.ref, trigger: payload.trigger, tokensReadmitted: payload.tokensReadmitted });
+		},
 	};
-	return { deps, entries };
+	return { deps, entries, recalled };
 }
 
 function baseEntries(): SessionEntry[] {
@@ -80,7 +88,7 @@ function baseEntries(): SessionEntry[] {
 
 describe("contracts/context recall scope", () => {
 	it("returns the body byte-exact and appends a contextRecall entry with the tool call id", async () => {
-		const { deps, entries } = fakeSession(baseEntries());
+		const { deps, entries, recalled } = fakeSession(baseEntries());
 		const tool = createContextTool({ session: deps });
 		const result = await tool.run(
 			{ scope: "recall", ref: "t1" },
@@ -110,6 +118,13 @@ describe("contracts/context recall scope", () => {
 		// The ref stays evicted after a recall; a second recall is churn, not an error.
 		const again = await tool.run({ scope: "recall", ref: "t1" }, { toolCallId: "call-2" });
 		assert.equal(again.kind, "ok");
+		// Each successful recall is published once for the bus.
+		assert.deepEqual(
+			recalled.map((r) => r.ref),
+			["t1", "t1"],
+		);
+		assert.equal(recalled[0]?.trigger, "tool");
+		assert.equal(recalled[0]?.tokensReadmitted, Math.ceil(BODY.length / 4));
 	});
 
 	it("errors name the nearest valid ref", async () => {
