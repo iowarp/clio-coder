@@ -1,6 +1,6 @@
 # Clio Coder Documentation Coverage Matrix
 
-This matrix maps every top-level directory in `src/` and every domain directory under `src/domains/` to its authoritative documentation page. It records coverage status (`documented`, `partial`, `undocumented`), missing concepts, and key source contracts for `v0.3.2`.
+This matrix maps every top-level directory in `src/` and every domain directory under `src/domains/` to its authoritative documentation page. It records coverage status (`documented`, `partial`, `undocumented`), missing concepts, and key source contracts for `v0.3.3`.
 
 ## Coverage Matrix
 
@@ -35,7 +35,7 @@ This matrix maps every top-level directory in `src/` and every domain directory 
 | `src/domains/scheduling/` | Capacity lease acquisition, heartbeats, expiry, cross-process locks, cluster scheduling | [capacity-and-scheduling.md](capacity-and-scheduling.md), [fleet-dispatch.md](fleet-dispatch.md) | `documented` | Dedicated capacity leasing, heartbeat TTL, and cross-process lock reference. |
 | `src/domains/session/` | Context ledger v3, tree branching (`/tree`), `/fork`, `/resume`, checkpoints, protected-artifact journal | [session-lifecycle.md](session-lifecycle.md) | `documented` | Dedicated session lifecycle guide covering ledger format v3, branching, journal, and recovery. |
 | `src/domains/share/` | Portable share archive bundles, manifest verification, import/export flows | [extensions-and-sharing.md](extensions-and-sharing.md) | `documented` | Share archives and portable bundle formats documented in extensions guide. |
-| `src/domains/webhook/` | Empty directory | None (Inert) | `inert` | Directory contains no active modules or exports in v0.3.2. |
+| `src/domains/webhook/` | Empty directory | None (Inert) | `inert` | Directory contains no active modules or exports in v0.3.3. |
 
 ## Cross-Cutting Reference Guides
 

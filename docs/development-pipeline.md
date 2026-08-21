@@ -80,7 +80,7 @@ New `area:*` labels are proposed in an issue, not created ad hoc.
 
 ## Milestones are releases
 
-Each open milestone is the next version (`v0.3.2`, `v0.4.0`). Triage means
+Each open milestone is the next version (`v0.3.3`, `v0.4.0`). Triage means
 assigning an issue to a milestone or explicitly leaving it in the backlog.
 A release cut requires every issue in its milestone to be closed
 or bumped; the milestone closes when the tag is published.

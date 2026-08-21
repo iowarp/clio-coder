@@ -101,7 +101,7 @@ chunk name. Every lazy-graph contract must prove the heavyweight marker absent
 before first use and present after a real invocation, then repeat from a packed
 installation in a foreign working directory.
 
-## Corrected 0.3.2 baseline
+## Corrected 0.3.3 baseline
 
 These observations were recorded on 2026-08-19 in WSL2 Linux
 `6.18.33.2-microsoft-standard-WSL2`, x86-64, with an 80x24 `xterm-256color`
@@ -384,7 +384,7 @@ and the dispatch reservation, approval, gate, detach, monitor, and steer suites.
 ## Adaptive stream-pacer observations
 
 `terminal.smoothStreaming` is presentation-only. `off` is the exact existing
-16 ms coalescer and remains the 0.3.2 default. `auto` uses the pacer only on a
+16 ms coalescer and remains the 0.3.3 default. `auto` uses the pacer only on a
 capable local TTY with no accessibility, remote/multiplexer, CI, or observed
 backpressure signal. `on` requests pacing, but frame construction still stops
 behind stdout backpressure. The pacer never republishes slices on the public

@@ -1,6 +1,6 @@
 # Capacity Leases & Fleet Scheduling
 
-This document specifies the multi-process capacity leasing protocols, node scheduling models, cross-process transaction locks, and failure recovery mechanics implemented in Clio Coder `v0.3.2`.
+This document specifies the multi-process capacity leasing protocols, node scheduling models, cross-process transaction locks, and failure recovery mechanics implemented in Clio Coder `v0.3.3`.
 
 Source implementations: `src/domains/scheduling/` and `src/domains/dispatch/capacity-lease.ts`.
 
