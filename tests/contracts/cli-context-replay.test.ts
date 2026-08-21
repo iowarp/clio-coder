@@ -31,6 +31,15 @@ describe("contracts/cli context replay overrides", () => {
 		});
 	}
 
+	it("fails instead of printing an empty table when nothing is kept", async () => {
+		const result = await runCli(["context", "replay", "--sessions", join(tmpdir(), "clio-replay-missing-input")], {
+			env: scratch.env,
+		});
+		assert.equal(result.code, 1, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+		assert.match(result.stderr, /no traces to replay \(cascade found=0 unreadable=1/);
+		assert.equal(result.stdout, "");
+	});
+
 	it("records valid replay-only overrides and the saturation metric", async () => {
 		const output = await mkdtemp(join(tmpdir(), "clio-context-replay-output-"));
 		outputs.push(output);
