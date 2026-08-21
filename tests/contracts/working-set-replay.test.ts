@@ -99,6 +99,7 @@ describe("contracts/working-set replay-lite", () => {
 		assert.equal(replay.events.length, 1, "fixture budget should isolate one append-only eviction event");
 		const event = replay.events[0];
 		assert.ok(event);
+		assert.equal(event.saturated, true, "age-horizon drains every eligible candidate");
 
 		const prefix = prefixBeforeTurn(trace, event.turnIndex);
 		const leaf = lastMessage(prefix);
@@ -161,6 +162,7 @@ describe("contracts/working-set replay-lite", () => {
 					],
 					tokensBefore: 900,
 					tokensAfter: 650,
+					saturated: true,
 				},
 			],
 			evictedAtTurn: new Map([["result-01", 1]]),
@@ -177,7 +179,27 @@ describe("contracts/working-set replay-lite", () => {
 		assert.equal(metrics.evictionPrecision, 0);
 		assert.equal(metrics.tokensEvicted, 250);
 		assert.equal(metrics.evictionEvents, 1);
+		assert.equal(metrics.saturatedEvents, 1);
 		assert.equal(metrics.churn, 1);
+	});
+
+	it("pools saturated events by event count rather than by trace", async () => {
+		const { trace, graph } = await fixture();
+		const index = buildPathIndex(trace.entries);
+		const base = replayTrace(trace, nonePolicy, config("none"));
+		const event = (saturated: boolean) => ({
+			turnIndex: 1,
+			items: [],
+			tokensBefore: 900,
+			tokensAfter: 900,
+			saturated,
+		});
+		const aggregate = aggregateReplayMetrics([
+			{ trace, index, graph, replay: { ...base, events: [event(true), event(false)] } },
+			{ trace, index, graph, replay: { ...base, events: [event(true)] } },
+			{ trace, index, graph, replay: base },
+		]);
+		assert.equal(aggregate.mean.saturatedEvents, 2 / 3);
 	});
 
 	it("oracle never evicts a critical ref before its final reference", async () => {
@@ -260,17 +282,27 @@ describe("contracts/working-set replay-lite", () => {
 		}
 		assert.equal(markdown.match(/^## Budget /gm)?.length, budgets.length);
 		assert.equal(markdown.match(/\(n=\d+\)/g)?.length, policies.length * budgets.length);
+		assert.match(markdown, /\| saturated events \|/);
 
 		const json = renderReplayJson(input);
 		assert.equal(renderReplayJson(input), json, "stable input must render byte-identically");
 		const parsed = JSON.parse(json) as {
 			provenance: { gitSha: string; commandLine: string[] };
-			results: Array<{ metrics: { mean: { turnsToFirstSummary: number | null; turnsToFirstSummaryCount: number } } }>;
+			results: Array<{
+				metrics: {
+					mean: {
+						saturatedEvents: number;
+						turnsToFirstSummary: number | null;
+						turnsToFirstSummaryCount: number;
+					};
+				};
+			}>;
 		};
 		assert.equal(parsed.provenance.gitSha, "abc123");
 		assert.deepEqual(parsed.provenance.commandLine, input.commandLine);
 		assert.equal(parsed.results.length, policies.length * budgets.length);
 		for (const result of parsed.results) {
+			assert.equal(typeof result.metrics.mean.saturatedEvents, "number");
 			assert.equal(result.metrics.mean.turnsToFirstSummaryCount, result.metrics.mean.turnsToFirstSummary === null ? 0 : 1);
 		}
 	});

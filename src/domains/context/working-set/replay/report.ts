@@ -35,6 +35,7 @@ function metricObject(metrics: ReplayMetrics, turnsToFirstSummaryCount: number):
 		evictionPrecision: metrics.evictionPrecision,
 		tokensEvicted: metrics.tokensEvicted,
 		evictionEvents: metrics.evictionEvents,
+		saturatedEvents: metrics.saturatedEvents,
 		churn: metrics.churn,
 		turnsToFirstSummary: metrics.turnsToFirstSummary,
 		turnsToFirstSummaryCount,
@@ -116,15 +117,15 @@ export function renderReplayMarkdown(input: ReplayReportInput): string {
 			"",
 			`## Budget ${budget}`,
 			"",
-			"| policy | n | retention (mean) | retention (pooled) | retention@10 (mean) | eviction precision (mean) | tokens evicted (mean) | eviction events (mean) | churn (mean) | turns to first summary (mean) |",
-			"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+			"| policy | n | retention (mean) | retention (pooled) | retention@10 (mean) | eviction precision (mean) | tokens evicted (mean) | eviction events (mean) | saturated events | churn (mean) | turns to first summary (mean) |",
+			"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 		);
 		for (const policy of input.config.policies) {
 			const result = input.results.find((entry) => entry.budgetTokens === budget && entry.policyId === policy);
 			if (result === undefined) continue;
 			const metrics = result.metrics.mean;
 			lines.push(
-				`| ${policy} | ${metrics.traces} | ${ratio(metrics.retention)} | ${ratio(result.metrics.pooledRetention)} | ${ratio(metrics.retentionAt10)} | ${ratio(metrics.evictionPrecision)} | ${quantity(metrics.tokensEvicted)} | ${quantity(metrics.evictionEvents)} | ${ratio(metrics.churn)} | ${metrics.turnsToFirstSummary === null ? "—" : quantity(metrics.turnsToFirstSummary)} (n=${result.metrics.turnsToFirstSummaryCount}) |`,
+				`| ${policy} | ${metrics.traces} | ${ratio(metrics.retention)} | ${ratio(result.metrics.pooledRetention)} | ${ratio(metrics.retentionAt10)} | ${ratio(metrics.evictionPrecision)} | ${quantity(metrics.tokensEvicted)} | ${quantity(metrics.evictionEvents)} | ${ratio(metrics.saturatedEvents)} | ${ratio(metrics.churn)} | ${metrics.turnsToFirstSummary === null ? "—" : quantity(metrics.turnsToFirstSummary)} (n=${result.metrics.turnsToFirstSummaryCount}) |`,
 			);
 		}
 	}

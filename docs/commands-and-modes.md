@@ -78,7 +78,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder context wiki [--update] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
-| `clio-coder context replay --sessions <path>... [--format clio\|claude-code\|auto] [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio or Claude Code session ledgers and report retention, precision, token savings, churn, and summary headroom. |
+| `clio-coder context replay --sessions <path>... [--format clio\|claude-code\|auto] [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio or Claude Code session ledgers and report retention, precision, token savings, saturation, churn, and summary headroom. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ## Headless Run Flags
@@ -535,6 +535,11 @@ deterministic turn boundaries. The default inclusion cascade requires at least e
 eight tool results, and one file re-read; `--no-filter` retains every otherwise-readable
 trace. Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable
 report including the configuration, git revision when available, and exact command line.
+`--protect-last-turns` and `--min-evictable-tokens` override those two working-set settings
+for the replay only; they never update saved settings. Saturated events is pooled over
+applied eviction events and reports how often a policy exhausted its usable candidates,
+which distinguishes a budget that measures policy choice from one that simply runs out of
+evictable material.
 The summary-headroom mean always carries its contributing trace count because traces that
 never require summary compaction do not enter that nullable mean.
 

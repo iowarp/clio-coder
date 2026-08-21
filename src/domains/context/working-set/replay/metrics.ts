@@ -10,6 +10,8 @@ export interface ReplayMetrics {
 	evictionPrecision: number;
 	tokensEvicted: number;
 	evictionEvents: number;
+	/** Fraction of applied events that exhausted the policy's usable candidates. */
+	saturatedEvents: number;
 	churn: number;
 	turnsToFirstSummary: number | null;
 }
@@ -37,6 +39,7 @@ interface MeasuredTrace {
 	retainedPairs: number;
 	pairsAt10: number;
 	retainedPairsAt10: number;
+	saturatedEventCount: number;
 }
 
 function safeFraction(numerator: number, denominator: number, empty: number): number {
@@ -66,7 +69,9 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 	let safelyEvictedItems = 0;
 	let churnedItems = 0;
 	let tokensEvicted = 0;
+	let saturatedEventCount = 0;
 	for (const event of input.replay.events) {
+		if (event.saturated) saturatedEventCount += 1;
 		for (const item of event.items) {
 			evictedItems += 1;
 			tokensEvicted += item.tokensFreed;
@@ -85,6 +90,7 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 			evictionPrecision: safeFraction(safelyEvictedItems, evictedItems, 1),
 			tokensEvicted,
 			evictionEvents: input.replay.events.length,
+			saturatedEvents: safeFraction(saturatedEventCount, input.replay.events.length, 0),
 			churn: safeFraction(churnedItems, evictedItems, 0),
 			turnsToFirstSummary: input.replay.turnsToFirstSummary,
 		},
@@ -92,6 +98,7 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 		retainedPairs,
 		pairsAt10,
 		retainedPairsAt10,
+		saturatedEventCount,
 	};
 }
 
@@ -110,6 +117,8 @@ export function aggregateReplayMetrics(inputs: ReadonlyArray<ReplayMeasurement>)
 		.filter((value): value is number => value !== null);
 	const sum = (field: "pairs" | "retainedPairs" | "pairsAt10" | "retainedPairsAt10"): number =>
 		measured.reduce((total, entry) => total + entry[field], 0);
+	const totalEvents = measured.reduce((total, entry) => total + entry.metrics.evictionEvents, 0);
+	const saturatedEvents = measured.reduce((total, entry) => total + entry.saturatedEventCount, 0);
 	return {
 		mean: {
 			traces: measured.length,
@@ -118,6 +127,8 @@ export function aggregateReplayMetrics(inputs: ReadonlyArray<ReplayMeasurement>)
 			evictionPrecision: measured.length === 0 ? 1 : mean(measured.map((entry) => entry.metrics.evictionPrecision)),
 			tokensEvicted: mean(measured.map((entry) => entry.metrics.tokensEvicted)),
 			evictionEvents: mean(measured.map((entry) => entry.metrics.evictionEvents)),
+			// Event-pooled: zero-event traces must not dilute the saturation rate.
+			saturatedEvents: safeFraction(saturatedEvents, totalEvents, 0),
 			churn: mean(measured.map((entry) => entry.metrics.churn)),
 			turnsToFirstSummary: summaries.length === 0 ? null : mean(summaries),
 		},
