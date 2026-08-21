@@ -14,6 +14,7 @@
  */
 
 import { ToolNames } from "../core/tool-names.js";
+import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -1085,6 +1086,11 @@ export function rehydrateChatPanelFromTurns(
 	const pendingToolIds: string[] = [];
 	let runAssistantMessages: AgentMessage[] = [];
 	const selected = selectReplayEntries(turns, options);
+	// The transcript shows the ledger, never the projection: an evicted result
+	// still renders its full body here, tagged with the reason it left the
+	// model's working set. Folded once over the same active path the replay
+	// uses, so a /tree switch cannot tag a row from an abandoned branch.
+	const workingSet = foldWorkingSet(turns, options.activeLeafTurnId ?? options.uptoTurnId);
 	// One block per assignment, drawn where its first attempt started. Later
 	// attempts of the same assignment fold into that block as `↻` rail lines, so
 	// a failover replays as the one run it was rather than as two.
@@ -1132,6 +1138,7 @@ export function rehydrateChatPanelFromTurns(
 				}
 				if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
+					const evictedReason = workingSet.evicted.get(entry.turnId)?.reason;
 					const fallbackId = result.id ?? pendingToolIds.pop() ?? null;
 					if (fallbackId) {
 						const pendingIndex = pendingToolIds.indexOf(fallbackId);
@@ -1146,6 +1153,7 @@ export function rehydrateChatPanelFromTurns(
 							...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
 							...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
 							...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
+							...(evictedReason !== undefined ? { evictedReason } : {}),
 						} as ChatLoopEvent);
 					} else {
 						chatPanel.appendReplayBlock((width) =>
@@ -1159,6 +1167,7 @@ export function rehydrateChatPanelFromTurns(
 									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
 									...(result.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
 									...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
+									...(evictedReason !== undefined ? { evictedReason } : {}),
 								},
 								width,
 								{ unbounded: options.unboundedToolBodies === true },

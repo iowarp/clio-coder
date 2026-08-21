@@ -57,13 +57,19 @@ export interface ClioSessionMeta {
 	platform: string;
 	nodeVersion: string;
 	/**
-	 * Version 3 on every new session. Readers reject earlier versions and
-	 * sessions that omit this field.
+	 * Version 4 on every new session. Readers reject earlier versions, sessions
+	 * that omit this field, and versions from the future.
 	 */
 	sessionFormatVersion?: number;
 }
 
-export const CURRENT_SESSION_FORMAT_VERSION = 3;
+/**
+ * Version 4 adds the working-set ledger kinds (`contextEviction`,
+ * `contextRecall`). A version-3 reader would parse those entries as unknown
+ * kinds and replay a session as if nothing had been evicted, so the bump is
+ * what makes an older Clio refuse the file instead of misreading it.
+ */
+export const CURRENT_SESSION_FORMAT_VERSION = 4;
 
 export interface ClioSessionJsonlHeader {
 	type: "session";
