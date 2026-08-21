@@ -52,10 +52,15 @@ function covers(later: PathRange | null, earlier: PathRange | null): boolean {
 	return later.offset <= earlier.offset && rangeEnd(later) >= rangeEnd(earlier);
 }
 
-/** The mutation that invalidated this observation: the first one after it. */
+/**
+ * The mutation that invalidated this observation: the first successful one
+ * after it. A failed edit (`oldText not found`, permission denied) changed
+ * nothing, and the read it was aimed at is exactly what the model needs to fix
+ * the edit.
+ */
 function firstMutationAfter(observation: PathObservation, index: PathIndex): PathObservation | null {
 	for (const other of index.byPath.get(observation.path) ?? []) {
-		if (other.entryIndex > observation.entryIndex && MUTATING.has(other.op)) return other;
+		if (other.entryIndex > observation.entryIndex && MUTATING.has(other.op) && !other.isError) return other;
 	}
 	return null;
 }
