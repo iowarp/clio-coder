@@ -321,6 +321,46 @@ describe("contracts/resume replay transcript notices", () => {
 });
 
 describe("contracts/resume replay transcript detail policy", () => {
+	it("restores a multi-call turn's aggregate receipt", () => {
+		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
+		const timestamp = "2026-07-02T12:00:00.000Z";
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "message",
+				role: "user",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp,
+				payload: { text: "work" },
+			},
+			{
+				kind: "message",
+				role: "assistant",
+				turnId: "a1",
+				parentTurnId: "u1",
+				timestamp,
+				payload: {
+					content: [{ type: "thinking", thinking: "first reasoning" }],
+					usage: { input: 10, output: 20, reasoning: 5 },
+				},
+			},
+			{
+				kind: "message",
+				role: "assistant",
+				turnId: "a2",
+				parentTurnId: "a1",
+				timestamp,
+				payload: { text: "done", usage: { input: 30, output: 40, reasoning: 7 } },
+			},
+		]);
+
+		const rendered = strip(panel.render(120).join("\n"));
+		ok(rendered.includes("turn · in 40"), rendered);
+		ok(rendered.includes("· out 60"), rendered);
+		ok(rendered.includes("over 2 calls"), rendered);
+		ok(rendered.includes("reasoning 12 provider-reported"), rendered);
+	});
+
 	it("renders a replayed transcript from the policy alone: folded under default, open under verbose with no toggle", () => {
 		const folded = createChatPanel({ getOutputVerbosity: () => "default" });
 		rehydrateChatPanelFromTurns(folded, [...grepReplayTurns(), ...editReplayTurns()]);
