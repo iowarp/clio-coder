@@ -299,6 +299,7 @@ describe("interactive dispatch subscriptions", () => {
 
 		const rendered = h.render();
 		const rows = rendered.split("\n");
+		const callRow = rows.findIndex((row) => row.includes("tool action"));
 		const cardRows = [1, 2, 3].map((index) =>
 			rows.findIndex((row) => row.includes(`${GLYPH.workerAgent} scout-${index}`)),
 		);
@@ -307,10 +308,8 @@ describe("interactive dispatch subscriptions", () => {
 			[cardRows[0], (cardRows[0] ?? 0) + 1, (cardRows[0] ?? 0) + 2],
 			`three cards, three consecutive rows, in spawn order:\n${rendered}`,
 		);
-		ok(
-			rows.findIndex((row) => row.includes("dispatch(")) < (cardRows[0] ?? -1),
-			`cards sit under the call:\n${rendered}`,
-		);
+		ok(callRow >= 0 && callRow < (cardRows[0] ?? -1), `cards sit under the call:\n${rendered}`);
+		ok(!rendered.includes("dispatch("), `the live header stays tool-neutral:\n${rendered}`);
 		ok(!rendered.includes("answer from s1"), `folded by default:\n${rendered}`);
 		// One chord, one target. The tool segment stops advertising the key once a
 		// worker card behind it is what the key would reach.

@@ -71,9 +71,8 @@ describe("contracts/tool subline rows identify the actual call", () => {
 
 /**
  * A call the permission gate blocked never ran. The collapsed row said
- * "ran `id` · 667B ✗ blocked" while the expanded header for the same node said
- * "bash(id) ✗ blocked", so the one line an operator skims claimed a command had
- * executed and produced 667 bytes. Those bytes are the denial text.
+ * "ran `id` · 667B ✗ blocked", so the one line an operator skims claimed a
+ * command had executed and produced 667 bytes. Those bytes are the denial text.
  */
 describe("contracts/tool subline rows do not claim a blocked call ran", () => {
 	const blockedBash = {
@@ -87,11 +86,14 @@ describe("contracts/tool subline rows do not claim a blocked call ran", () => {
 		outcome: "blocked" as const,
 	};
 
-	it("uses the call-signature form the expanded header uses", () => {
-		const text = strip(renderToolSubline(blockedBash, 120));
-		ok(text.includes("bash(id)"), text);
-		ok(!text.includes("ran "), `a blocked call must not read as one that ran: ${text}`);
-		ok(text.includes("blocked"), text);
+	it("uses a tool-neutral command description at responsive widths", () => {
+		for (const width of [40, 80, 120]) {
+			const text = strip(renderToolSubline(blockedBash, width));
+			ok(text.includes("command `id`"), text);
+			ok(!text.includes("bash("), text);
+			ok(!text.includes("ran "), `a blocked call must not read as one that ran: ${text}`);
+			ok(text.includes("blocked"), text);
+		}
 	});
 
 	it("drops the byte count, which measures the denial text and not any output", () => {
