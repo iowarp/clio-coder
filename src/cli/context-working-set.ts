@@ -8,7 +8,8 @@ import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { buildPathIndex } from "../domains/context/working-set/path-index.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { makeOraclePolicy, makeRandomPolicy, nonePolicy } from "../domains/context/working-set/replay/controls.js";
-import { loadClioTraces, type ReplayLoadCascade } from "../domains/context/working-set/replay/load-clio.js";
+import { loadReplayTraces, type ReplayInputFormat } from "../domains/context/working-set/replay/load-claude-code.js";
+import type { ReplayLoadCascade } from "../domains/context/working-set/replay/load-clio.js";
 import { aggregateReplayMetrics, type ReplayMeasurement } from "../domains/context/working-set/replay/metrics.js";
 import { buildReferenceGraph, type ReferenceGraph } from "../domains/context/working-set/replay/reference-graph.js";
 import {
@@ -28,10 +29,11 @@ const REPLAY_HELP = `Usage:
 Options:
   --policies <ids>    comma-separated none,random,age-horizon,structural-v1,oracle
   --budgets <tokens>  comma-separated budgets (default: 16000,32000,64000)
+  --format <format>    clio, claude-code, or auto (default: auto)
   --threshold <ratio> pressure threshold (default: 0.8)
   --target <ratio>    post-eviction pressure target (default: 0.6)
   --seed <integer>    deterministic random-policy seed (default: 0)
-  --no-filter         include every readable Clio ledger
+  --no-filter         include every readable transcript
   --json <path>       write the stable JSON report
   --md <path>         write Markdown instead of printing it
 `;
@@ -54,6 +56,7 @@ interface ReplayArgs {
 	threshold: number;
 	target: number;
 	seed: number;
+	format: ReplayInputFormat;
 	noFilter: boolean;
 	jsonPath?: string;
 	markdownPath?: string;
@@ -102,6 +105,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		threshold: 0.8,
 		target: 0.6,
 		seed: 0,
+		format: "auto",
 		noFilter: false,
 	};
 	let policiesExplicit = false;
@@ -121,7 +125,14 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 			if (consumed === 0) throw new CliUsageError("--sessions requires at least one path");
 			continue;
 		}
-		if (arg === "--policies" || arg === "--budgets" || arg === "--threshold" || arg === "--target" || arg === "--seed") {
+		if (
+			arg === "--policies" ||
+			arg === "--budgets" ||
+			arg === "--format" ||
+			arg === "--threshold" ||
+			arg === "--target" ||
+			arg === "--seed"
+		) {
 			const value = requiredValue(args, index, arg);
 			index += 1;
 			if (arg === "--policies") {
@@ -138,6 +149,11 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 					}
 					return budget;
 				});
+			} else if (arg === "--format") {
+				if (value !== "clio" && value !== "claude-code" && value !== "auto") {
+					throw new CliUsageError("--format must be clio, claude-code, or auto");
+				}
+				parsed.format = value;
 			} else if (arg === "--threshold") {
 				parsed.threshold = numberValue(value, arg);
 				if (parsed.threshold <= 0 || parsed.threshold > 1) {
@@ -226,7 +242,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	try {
-		const loaded = await loadClioTraces(parsed.sessions, { filter: parsed.noFilter ? false : {} });
+		const loaded = await loadReplayTraces(parsed.sessions, parsed.format, { filter: !parsed.noFilter });
 		const indexed = loaded.traces.map((trace) => {
 			const index = buildPathIndex(trace.entries, { cwd: trace.cwd });
 			return { trace, index, graph: buildReferenceGraph(trace, index) };
@@ -258,6 +274,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 				threshold: parsed.threshold,
 				target: parsed.target,
 				seed: parsed.seed,
+				format: parsed.format,
 				filter: parsed.noFilter ? "none" : "default",
 				settings,
 			},
