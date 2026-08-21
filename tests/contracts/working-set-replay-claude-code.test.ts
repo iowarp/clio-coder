@@ -15,9 +15,10 @@ import {
 import { buildReferenceGraph } from "../../src/domains/context/working-set/replay/reference-graph.js";
 import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
 import type { Trace } from "../../src/domains/context/working-set/replay/trace.js";
-import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import type { MessageEntry } from "../../src/domains/session/entries.js";
 
 const FIXTURE = fileURLToPath(new URL("../fixtures/context-replay/claude-code-01.jsonl", import.meta.url));
+const CLIO_FIXTURE = fileURLToPath(new URL("../fixtures/context-replay/fixture-01.jsonl", import.meta.url));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,13 +68,10 @@ describe("contracts/working-set Claude Code replay loader", () => {
 	it("converts provider records into stable, linearly chained Clio messages", async () => {
 		const trace = await fixture();
 		assert.equal(trace.id, "claude-code-replay-fixture-01");
+		assert.equal(trace.cwd, "/fixture/claude-code-repo");
 		assert.equal(trace.turnCount, 15);
-		assert.equal(trace.entries.length, 57);
-
-		const header = trace.entries[0] as SessionEntry & Record<string, unknown>;
-		assert.equal(header.kind, "custom");
-		assert.equal(header.type, "session");
-		assert.equal(header.cwd, "/fixture/claude-code-repo");
+		assert.equal(trace.entries.length, 56);
+		assert.equal(trace.entries[0]?.kind, "message");
 		for (let index = 0; index < trace.entries.length; index += 1) {
 			const entry = trace.entries[index];
 			assert.ok(entry);
@@ -154,7 +152,7 @@ describe("contracts/working-set Claude Code replay loader", () => {
 
 	it("feeds cwd-aware normalized calls into the unchanged path index", async () => {
 		const trace = await fixture();
-		const index = buildPathIndex(trace.entries);
+		const index = buildPathIndex(trace.entries, { cwd: trace.cwd });
 		const read = index.byRef.get(resultById(trace, "tool-read-a").turnId);
 		assert.deepEqual(read, {
 			ref: { entry: resultById(trace, "tool-read-a").turnId },
@@ -165,6 +163,7 @@ describe("contracts/working-set Claude Code replay loader", () => {
 			range: { offset: 1, limit: 40 },
 			surfaced: [],
 			isError: false,
+			isBlocked: false,
 			turnIndex: 1,
 			entryIndex: trace.entries.indexOf(resultById(trace, "tool-read-a")),
 			argsKey: '{"__claudeCodeTool":"Read","limit":40,"offset":2,"path":"src/a.ts"}',
@@ -178,7 +177,7 @@ describe("contracts/working-set Claude Code replay loader", () => {
 
 	it("labels the normalized reread, discovery, and rewrite edges", async () => {
 		const trace = await fixture();
-		const graph = buildReferenceGraph(trace, buildPathIndex(trace.entries));
+		const graph = buildReferenceGraph(trace, buildPathIndex(trace.entries, { cwd: trace.cwd }));
 		assert.deepEqual(graph.edges, [
 			{ from: resultById(trace, "tool-read-a").turnId, toTurnIndex: 5, kind: "file_rewrite" },
 			{ from: resultById(trace, "tool-read-a").turnId, toTurnIndex: 6, kind: "file_reread" },
@@ -203,6 +202,176 @@ describe("contracts/working-set Claude Code replay loader", () => {
 			assert.equal(loaded.cascade.filtered.sidechain_or_subagent, 1);
 			assert.equal(loaded.cascade.filtered.summary_only, 1);
 			assert.equal(loaded.cascade.kept, 0);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("normalizes every declared Claude Code tool mapping", async () => {
+		const root = await mkdtemp(join(tmpdir(), "clio-cc-tools-"));
+		const transcript = join(root, "tools.jsonl");
+		const cases = [
+			{
+				id: "multi",
+				original: "MultiEdit",
+				input: { file_path: "a.ts", edits: [{ old_string: "a", new_string: "b" }] },
+				name: "edit",
+				args: {
+					path: "a.ts",
+					edits: [{ oldText: "a", newText: "b" }],
+					__claudeCodeTool: "MultiEdit",
+				},
+			},
+			{
+				id: "write",
+				original: "Write",
+				input: { file_path: "b.ts", content: "body" },
+				name: "write",
+				args: { path: "b.ts", content: "body", __claudeCodeTool: "Write" },
+			},
+			{
+				id: "glob",
+				original: "Glob",
+				input: { pattern: "**/*.ts", path: "src" },
+				name: "find",
+				args: { pattern: "**/*.ts", path: "src", __claudeCodeTool: "Glob" },
+			},
+			{
+				id: "ls",
+				original: "LS",
+				input: { path: "src" },
+				name: "ls",
+				args: { path: "src", __claudeCodeTool: "LS" },
+			},
+			{
+				id: "bash",
+				original: "Bash",
+				input: { command: "npm test", timeout: 1234 },
+				name: "bash",
+				args: { command: "npm test", timeout_ms: 1234, __claudeCodeTool: "Bash" },
+			},
+			{
+				id: "web",
+				original: "WebFetch",
+				input: { url: "https://example.test", prompt: "extract" },
+				name: "web_fetch",
+				args: { url: "https://example.test", prompt: "extract", __claudeCodeTool: "WebFetch" },
+			},
+			{
+				id: "task",
+				original: "Task",
+				input: { prompt: "inspect", subagent_type: "scout", description: "map" },
+				name: "dispatch",
+				args: { task: "inspect", agent: "scout", briefing: "map", __claudeCodeTool: "Task" },
+			},
+			{
+				id: "todos",
+				original: "TodoWrite",
+				input: {
+					todos: [
+						{ content: "one", status: "pending" },
+						{ content: "two", status: "done" },
+					],
+				},
+				name: "tasks",
+				args: {
+					action: "plan",
+					title: "Claude Code todos",
+					tasks: ["one", "two"],
+					__claudeCodeTool: "TodoWrite",
+				},
+			},
+			{
+				id: "notebook",
+				original: "NotebookEdit",
+				input: { notebook_path: "notes.ipynb", new_source: "print(1)", edit_mode: "replace" },
+				name: "edit",
+				args: {
+					path: "notes.ipynb",
+					new_source: "print(1)",
+					edit_mode: "replace",
+					__claudeCodeTool: "NotebookEdit",
+				},
+			},
+			{
+				id: "unknown",
+				original: "FutureTool",
+				input: { opaque: 7 },
+				name: "futuretool",
+				args: { opaque: 7, __claudeCodeTool: "FutureTool" },
+			},
+		] as const;
+		try {
+			const records = [
+				{
+					type: "assistant",
+					sessionId: "tool-mapping",
+					cwd: "/fixture/tools",
+					timestamp: "2026-08-21T00:00:00.000Z",
+					message: {
+						content: cases.map((item) => ({ type: "tool_use", id: item.id, name: item.original, input: item.input })),
+					},
+				},
+				{
+					type: "user",
+					timestamp: "2026-08-21T00:00:01.000Z",
+					message: {
+						content: cases.map((item) => ({
+							type: "tool_result",
+							tool_use_id: item.id,
+							content: `${item.id} result`,
+						})),
+					},
+				},
+			];
+			await writeFile(transcript, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+			const loaded = await loadClaudeCodeTraces([transcript], { filter: false });
+			const trace = loaded.traces[0];
+			assert.ok(trace);
+			for (const item of cases) {
+				assert.deepEqual(payload(callById(trace, item.id)), {
+					toolCallId: item.id,
+					name: item.name,
+					args: item.args,
+				});
+				assert.deepEqual(payload(resultById(trace, item.id)), {
+					toolCallId: item.id,
+					toolName: item.name,
+					result: { content: [{ type: "text", text: `${item.id} result` }] },
+					isError: false,
+				});
+			}
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("auto discovery ignores Clio sidecars and rejects mid-file corruption", async () => {
+		const root = await mkdtemp(join(tmpdir(), "clio-replay-auto-"));
+		try {
+			const session = join(root, "session");
+			await mkdir(session, { recursive: true });
+			await writeFile(join(session, "current.jsonl"), await readFile(CLIO_FIXTURE, "utf8"), "utf8");
+			await writeFile(join(session, "context-snapshots.jsonl"), '{"snapshot":true}\n', "utf8");
+			await writeFile(join(session, "prompt-manifest.jsonl"), '{"manifest":true}\n', "utf8");
+			const clio = await loadReplayTraces([root], "auto", { filter: false });
+			assert.equal(clio.cascade.found, 1);
+			assert.equal(clio.cascade.unreadable, 0);
+			assert.equal(clio.cascade.kept, 1);
+
+			const fixtureRaw = await readFile(FIXTURE, "utf8");
+			const fixtureLines = fixtureRaw.trimEnd().split("\n");
+			const corrupt = join(root, "corrupt.jsonl");
+			await writeFile(corrupt, `${fixtureLines[0]}\nnot-json\n${fixtureLines[1]}\n`, "utf8");
+			const rejected = await loadClaudeCodeTraces([corrupt], { filter: false });
+			assert.equal(rejected.cascade.unreadable, 1);
+			assert.equal(rejected.cascade.kept, 0);
+
+			const partial = join(root, "partial-final.jsonl");
+			await writeFile(partial, `${fixtureRaw}{"type":"assistant"`, "utf8");
+			const recovered = await loadClaudeCodeTraces([partial], { filter: false });
+			assert.equal(recovered.cascade.unreadable, 0);
+			assert.equal(recovered.cascade.kept, 1);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

@@ -9,14 +9,8 @@
 
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, extname, resolve, sep } from "node:path";
-import {
-	type CustomEntry,
-	isSessionHeader,
-	type MessageEntry,
-	type SessionEntry,
-	type SessionHeader,
-} from "../../../session/entries.js";
+import { basename, extname, join, resolve, sep } from "node:path";
+import { isSessionHeader, type MessageEntry, type SessionEntry } from "../../../session/entries.js";
 import { buildPathIndex } from "../path-index.js";
 import { loadClioTraces, type ReplayLoadCascade } from "./load-clio.js";
 import { buildReferenceGraph } from "./reference-graph.js";
@@ -41,7 +35,7 @@ interface ClaudeRecord {
 
 interface ParsedRecords {
 	records: ClaudeRecord[];
-	malformed: number;
+	corrupt: boolean;
 }
 
 interface Discovery {
@@ -85,6 +79,19 @@ async function collectJsonlFiles(input: string, out: Set<string>): Promise<boole
 	}
 	if (!facts.isDirectory()) return true;
 
+	// A Clio session directory owns several JSONL sidecars, but only the
+	// current ledger is a replay trace. Stop here instead of recursively
+	// admitting context snapshots and prompt manifests as unreadable inputs.
+	const currentLedger = join(path, "current.jsonl");
+	try {
+		if ((await stat(currentLedger)).isFile()) {
+			out.add(currentLedger);
+			return true;
+		}
+	} catch {
+		// Claude Code project roots and Clio sessions roots have no direct ledger.
+	}
+
 	let children: Dirent[];
 	try {
 		children = await readdir(path, { withFileTypes: true });
@@ -99,7 +106,7 @@ async function collectJsonlFiles(input: string, out: Set<string>): Promise<boole
 	return true;
 }
 
-export async function discoverReplayJsonlFiles(paths: ReadonlyArray<string>): Promise<Discovery> {
+async function discoverReplayJsonlFiles(paths: ReadonlyArray<string>): Promise<Discovery> {
 	const files = new Set<string>();
 	let missingInputs = 0;
 	for (const path of paths) {
@@ -110,25 +117,27 @@ export async function discoverReplayJsonlFiles(paths: ReadonlyArray<string>): Pr
 
 function parseRecords(raw: string): ParsedRecords {
 	const records: ClaudeRecord[] = [];
-	let malformed = 0;
-	for (const line of raw.split("\n")) {
-		if (line.trim().length === 0) continue;
+	const lines = raw.split("\n").filter((line) => line.trim().length > 0);
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index];
+		if (line === undefined) continue;
 		try {
 			const value = JSON.parse(line) as unknown;
 			if (isRecord(value)) records.push(value as ClaudeRecord);
-			else malformed += 1;
+			else throw new TypeError("JSONL record is not an object");
 		} catch {
-			// Claude Code can leave a partial final line after a crash. Match the
-			// research loader's lenience: retain the readable event prefix.
-			malformed += 1;
+			// Claude Code can leave a partial final line after a crash. Retain that
+			// readable prefix, but never stitch records across mid-file corruption.
+			return { records, corrupt: index < lines.length - 1 };
 		}
 	}
-	return { records, malformed };
+	return { records, corrupt: false };
 }
 
 /** Detect the first semantic record after metadata such as `mode`. */
 export function detectReplayInputFormat(raw: string): Exclude<ReplayInputFormat, "auto"> | null {
-	const { records } = parseRecords(raw);
+	const { records, corrupt } = parseRecords(raw);
+	if (corrupt) return null;
 	for (const record of records) {
 		if (isSessionHeader(record)) return "clio";
 		if ((record.type === "user" || record.type === "assistant") && isRecord(record.message)) {
@@ -284,6 +293,7 @@ function normalizeTool(originalName: string, input: unknown): NormalizedTool {
 			args.tasks = todos
 				.map((todo) => (isRecord(todo) && typeof todo.content === "string" ? todo.content : null))
 				.filter((todo): todo is string => todo !== null);
+			delete args.todos;
 			return { name: "tasks", args };
 		}
 		case "NotebookEdit":
@@ -342,27 +352,7 @@ function normalizeTranscript(records: ReadonlyArray<ClaudeRecord>, source: strin
 	};
 
 	const id = sessionIdOf(records, source);
-	const cwd = cwdOf(records);
-	const firstRecord =
-		records.find((record) => record.isSidechain !== true && stringValue(record.cwd) !== undefined) ??
-		records.find((record) => record.isSidechain !== true);
-	if (cwd !== undefined) {
-		const turnId = nextTurnId();
-		const header: CustomEntry & Omit<SessionHeader, "parentTurnId"> = {
-			type: "session",
-			version: 4,
-			id,
-			cwd,
-			timestamp: timestampOf(firstRecord),
-			kind: "custom",
-			customType: "claude-code-session-header",
-			turnId,
-			parentTurnId,
-			display: false,
-		};
-		entries.push(header);
-		parentTurnId = turnId;
-	}
+	const cwd = cwdOf(records) ?? null;
 
 	for (const record of records) {
 		if (record.isSidechain === true) continue;
@@ -429,7 +419,7 @@ function normalizeTranscript(records: ReadonlyArray<ClaudeRecord>, source: strin
 		appendMessage("user", { text: userText.join("\n") }, timestamp);
 	}
 
-	return { id, source, entries, turnCount: countReplayTurns(entries) };
+	return { id, source, cwd, entries, turnCount: countReplayTurns(entries) };
 }
 
 function toolResultCount(entries: ReadonlyArray<SessionEntry>): number {
@@ -474,6 +464,10 @@ export async function loadClaudeCodeTraces(
 			continue;
 		}
 		const parsed = parseRecords(raw);
+		if (parsed.corrupt) {
+			cascade.unreadable += 1;
+			continue;
+		}
 		const mainRecords = parsed.records.filter((record) => record.isSidechain !== true);
 		const conversation = mainRecords.filter((record) => record.type === "user" || record.type === "assistant");
 		if (conversation.length === 0) {
@@ -498,7 +492,7 @@ export async function loadClaudeCodeTraces(
 				increment(cascade, "tool_results_lt_8");
 				continue;
 			}
-			const graph = buildReferenceGraph(trace, buildPathIndex(trace.entries));
+			const graph = buildReferenceGraph(trace, buildPathIndex(trace.entries, { cwd: trace.cwd }));
 			if (!graph.edges.some((edge) => edge.kind === "file_reread")) {
 				increment(cascade, "no_file_reread");
 				continue;
