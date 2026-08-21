@@ -174,7 +174,7 @@ test("project: usage recorded before the event stops anchoring the estimate", ()
 	assert.equal(payloadOf(entries[1]).contextUsageInvalidated, undefined);
 });
 
-test("project: a recall puts the body back without touching the marker path", () => {
+test("project: a recall leaves the marker in place; the body rides the recall tool result", () => {
 	const entries = ledger();
 	entries.push({
 		kind: "contextRecall",
@@ -183,9 +183,11 @@ test("project: a recall puts the body back without touching the marker path", ()
 		trigger: "tool",
 		tokensReadmitted: 260,
 	});
+	const before = projectWorkingSet(ledger(), foldWorkingSet(ledger()));
 	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
-	assert.equal(projected[3], entries[3]);
-	assert.equal(JSON.stringify(projected[3]).includes("final secret body"), true);
+	// Same marker bytes before and after the recall: the prefix stays cache-stable.
+	assert.equal(JSON.stringify(projected[3]), JSON.stringify(before[3]));
+	assert.equal(JSON.stringify(projected[3]).includes("final secret body"), false);
 	// The thinking eviction is unaffected by a recall of a different ref.
 	assert.equal(payloadOf(projected[1]).thinking, undefined);
 });
