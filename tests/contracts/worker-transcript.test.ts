@@ -348,7 +348,7 @@ describe("worker transcript blocks", () => {
 		ok(rendered.includes(`${GLYPH.workerAgent} judge · mini/Nemo-3.5-Lightning · run j1 ${GLYPH.ok}`), rendered);
 		ok(!rendered.includes(GLYPH.workerHuman), `nothing here is the operator's own run:\n${rendered}`);
 		ok(!rendered.includes("successor findings") && !rendered.includes("candidate 2 wins"), `folded:\n${rendered}`);
-		h.panel.collapseAllTools();
+		h.panel.clearFoldOverrides();
 		ok(!h.render().includes("successor findings"), `the settled view stays folded too:\n${h.render()}`);
 	});
 
@@ -379,11 +379,12 @@ describe("worker transcript blocks", () => {
 		}
 	});
 
-	it("restores the origin default fold on replay collapse, not a blanket fold", () => {
+	it("restores the origin default fold when overrides clear, not a blanket fold", () => {
 		const h = harness();
 		h.push(h.worker.started(started()));
 		h.push(h.worker.started(started({ runId: "a1", assignmentId: "a1", requestOrigin: "agent", agentId: "scout" })));
-		h.panel.collapseAllTools();
+		strictEqual(h.panel.toggleAllToolsExpanded(), true);
+		h.panel.clearFoldOverrides();
 		const rendered = h.render();
 		ok(rendered.includes(`${GLYPH.workerHuman} coder`), rendered);
 		ok(rendered.includes("└ ● running"), `the operator's own run stays open:\n${rendered}`);

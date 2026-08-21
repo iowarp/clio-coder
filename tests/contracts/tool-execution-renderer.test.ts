@@ -216,3 +216,64 @@ describe("contracts/tool execution transcript", () => {
 		ok(aborted.includes("aborted"), aborted);
 	});
 });
+
+describe("contracts/tool presentation on the folded row", () => {
+	it("keeps a bounded mutation diff under a folded edit row and drops it for a failed edit", () => {
+		const diff = Array.from({ length: 40 }, (_, i) => `-${i + 1} old ${i + 1}\n+${i + 1} new ${i + 1}`).join("\n");
+		const finished = {
+			toolCallId: "edit-1",
+			toolName: "edit",
+			args: { path: "src/a.ts" },
+			result: { content: [{ type: "text", text: "edited src/a.ts" }], details: { diff } },
+			isError: false,
+			durationMs: 40,
+		};
+		const rendered = renderToolSubline(finished, 100);
+		const text = plain(rendered);
+		ok(text.startsWith("▸ editing src/a.ts"), text);
+		ok(text.includes("+1 new 1"), text);
+		ok(text.includes("+40 new 40"), text);
+		ok(text.includes("lines hidden"), "the folded diff is bounded");
+		ok(!text.includes("new 20"), "the middle is elided");
+		ok(!text.includes("edited src/a.ts"), "the result text stays in the body");
+		ok(rendered.join("\n").includes(`${String.fromCharCode(27)}[7m`), "live rows keep word emphasis");
+		ok(
+			!renderToolSubline(finished, 100, undefined, { diffStyle: "plain" })
+				.join("\n")
+				.includes(`${String.fromCharCode(27)}[7m`),
+			"replay rows ask for plain diffs",
+		);
+		for (const width of [40, 80, 120]) {
+			for (const line of renderToolSubline(finished, width)) ok(visibleWidth(line) <= width, line);
+		}
+		const failed = plain(renderToolSubline({ ...finished, isError: true, result: "edit failed: no match" }, 100));
+		ok(!failed.includes("new 1"), failed);
+		ok(failed.includes("edit failed: no match"), "a failed mutation row carries its excerpt instead");
+	});
+
+	it("carries a failure excerpt on any tool's folded row, not only bash", () => {
+		for (const [toolName, args, lead] of [
+			["read", { path: "missing.ts" }, "reading missing.ts"],
+			["grep", { pattern: "x" }, "searching for `x`"],
+			["web_fetch", { url: "https://example.test" }, "web_fetch("],
+			["custom_tool", { any: 1 }, "custom_tool("],
+		] as const) {
+			const rendered = renderToolSubline(
+				{
+					toolCallId: `${toolName}-fail`,
+					toolName,
+					args,
+					result: { content: [{ type: "text", text: "first line\nENOENT: no such file or directory\n" }] },
+					isError: true,
+					durationMs: 12,
+				},
+				120,
+			);
+			const text = plain(rendered);
+			ok(text.includes(lead), text);
+			ok(text.includes("ENOENT: no such file or directory"), `${toolName}: ${text}`);
+			ok(!text.includes("first line"), `${toolName}: only the last line`);
+			ok(rendered.join("\n").includes(errorSequence), `${toolName}: error color`);
+		}
+	});
+});

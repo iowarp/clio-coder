@@ -167,7 +167,7 @@ describe("contracts/session-switch-atomicity", () => {
 			},
 			chatPanel: {
 				appendUser() {},
-				collapseAllTools() {},
+				clearFoldOverrides() {},
 				applyEvent() {},
 				appendReplayBlock() {},
 				applyWorkerState() {},

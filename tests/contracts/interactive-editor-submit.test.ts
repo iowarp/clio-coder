@@ -3,12 +3,14 @@ import { describe, it } from "node:test";
 import type { BashCommandResult, RunBashCommandOptions } from "../../src/core/bash-exec.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import type { ReplayBlockFoldControl } from "../../src/interactive/chat-panel.js";
 import {
 	createEditorSubmitController,
 	type EditorSubmitDeps,
 	type EditorSubmitEditor,
 } from "../../src/interactive/editor-submit.js";
 import type { SlashCommandDispatchResult } from "../../src/interactive/slash-commands.js";
+import { type TranscriptDetailPolicy, transcriptDetail } from "../../src/interactive/transcript-detail.js";
 
 const flushAsync = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -48,8 +50,8 @@ function createHarness(
 	let clearQueuedCalls = 0;
 	const steers: Array<{ runId: string; text: string }> = [];
 	const notices: Array<{ level: string; text: string; key: string }> = [];
-	const replayBlocks: Array<(width: number) => string[]> = [];
-	const replayFolds: Array<{ isFolded(): boolean; setFolded(folded: boolean): void } | undefined> = [];
+	const replayBlocks: Array<(width: number, detail: TranscriptDetailPolicy) => string[]> = [];
+	const replayFolds: Array<ReplayBlockFoldControl | undefined> = [];
 	const editor: EditorSubmitEditor = {
 		getText: () => text,
 		setText: (next) => {
@@ -601,30 +603,34 @@ describe("contracts/interactive editor submit", () => {
 		strictEqual(harness.replayBlocks.length, 1);
 		const fold = harness.replayFolds[0];
 		ok(fold !== undefined, "the local bash block hands the panel a fold control");
-		strictEqual(fold.isFolded(), true, "local bash starts folded");
+		const detail = transcriptDetail("default");
+		strictEqual(fold.fold(), undefined, "local bash starts with no operator override");
+		strictEqual(fold.policyFold(detail), "folded", "the policy folds a running local bash row");
+		strictEqual(fold.policyFold(transcriptDetail("verbose")), "expanded", "verbose opens the running body");
 
 		// Folded: the row carries the command and the live elapsed, not the body.
-		let rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		let rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, detail).join("\n") ?? "");
 		ok(rendered.includes("running `npm run typecheck`"), rendered);
 		ok(rendered.includes("running"), rendered);
 
 		receivedOptions?.onUpdate?.({ stdout: "checking src\n", stderr: "", outputBytes: 13 });
-		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, detail).join("\n") ?? "");
 		ok(!rendered.includes("checking src"), `the folded running row keeps the body closed, got: ${rendered}`);
 		strictEqual(harness.replayBlocks.length, 1, "progress replaces the same replay block");
 
 		// Expanded on operator request: the live body appears in place.
-		fold.setFolded(false);
-		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		fold.setFold("expanded");
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, detail).join("\n") ?? "");
 		ok(rendered.includes("bash(npm run typecheck)"), rendered);
 		ok(rendered.includes("live output"), rendered);
 		ok(rendered.includes("checking src"), rendered);
 		ok(rendered.includes("excluded from model context"), rendered);
-		fold.setFolded(true);
+		fold.setFold(undefined);
 
 		resolveBash({ ...bashResult(), stdout: "checking src\nclean\n" });
 		await flushAsync();
-		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		strictEqual(fold.policyFold(detail), "folded", "bash's presentation folds the settled row");
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, detail).join("\n") ?? "");
 		ok(rendered.includes("✓"), rendered);
 		ok(rendered.includes("ran `npm run typecheck`"), rendered);
 		ok(rendered.includes("exit 0"), rendered);
@@ -632,10 +638,14 @@ describe("contracts/interactive editor submit", () => {
 		ok(!rendered.includes("clean"), `the settled row stays folded, got: ${rendered}`);
 		strictEqual(harness.replayBlocks.length, 1, "settlement keeps the original transcript position");
 
-		fold.setFolded(false);
-		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		fold.setFold("expanded");
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, detail).join("\n") ?? "");
 		ok(rendered.includes("output · exit 0"), rendered);
 		ok(rendered.includes("clean"), rendered);
+		// Without an override the verbose policy opens the same settled body.
+		fold.setFold(undefined);
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, transcriptDetail("verbose")).join("\n") ?? "");
+		ok(rendered.includes("clean"), `verbose opens the settled local bash body, got: ${rendered}`);
 	});
 
 	it("records an accepted local bash submission but restores refusals without history", async () => {

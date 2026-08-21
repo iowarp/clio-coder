@@ -15,7 +15,7 @@
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { classifyResourceRead } from "../../tools/presentation.js";
+import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
@@ -43,6 +43,8 @@ const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
 const STREAMING_RESULT_ROW_LIMIT = 20;
 const ARGS_BODY_LINE_LIMIT = 24;
+/** Rows of mutation diff a folded edit/write row keeps visible before it defers to the body. */
+const FOLDED_DIFF_ROW_LIMIT = 24;
 const STATUS_OK_GLYPH = GLYPH.ok;
 const STATUS_ERROR_GLYPH = GLYPH.error;
 
@@ -470,12 +472,13 @@ const FAILURE_EXCERPT_LIMIT = 80;
 const FAILURE_EXCERPT_MIN_WIDTH = 60;
 
 /**
- * Last non-empty output line of a failed bash call, bounded so the folded row
- * stays diagnostically useful without opening the body. Sanitized to one line:
- * the source is raw command output.
+ * Last non-empty output line of a failed call, bounded so the folded row stays
+ * diagnostically useful without opening the body. Sanitized to one line: the
+ * source is raw tool output. The tool's presentation policy decides whether
+ * its failures carry one; the renderer never names a tool here.
  */
 function failureExcerpt(finished: ToolExecutionFinished, width: number): string {
-	if (finished.toolName !== "bash" || !finished.isError) return "";
+	if (!finished.isError || !toolPresentationPolicy(finished.toolName, finished.args).failureExcerpt) return "";
 	if (isNonExecutedOutcome(finished.outcome)) return "";
 	if (width < FAILURE_EXCERPT_MIN_WIDTH) return "";
 	const text = unwrapResultEnvelope(finished.result);
@@ -1149,10 +1152,40 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
  * imports the keybindings manager directly; the caller resolves the key string
  * and passes it in to keep this module pure.
  */
+export interface ToolSublineRenderOptions {
+	/** Live rows color the folded mutation diff; replay and export request plain rows. */
+	diffStyle?: "color" | "plain";
+	/**
+	 * Whether the folded row carries the extras its tool's presentation asks
+	 * for (today the bounded mutation diff). The bare subline level drops them;
+	 * the failure excerpt is not one of them and always rides the row.
+	 */
+	foldedExtras?: "per-tool" | "none";
+}
+
+/**
+ * The bounded diff a folded mutation row keeps under itself, when the tool's
+ * presentation asks for one and the result carries one. A folded `edit` that
+ * hid its change told the operator nothing they could act on.
+ */
+function foldedDiffRows(finished: ToolExecutionFinished, width: number, opts: ToolSublineRenderOptions): string[] {
+	if (opts.foldedExtras === "none") return [];
+	if (finished.isError || isNonExecutedOutcome(finished.outcome)) return [];
+	if (!toolPresentationPolicy(finished.toolName, finished.args).showDiffWhenFolded) return [];
+	const diff = resultDiff(finished.result);
+	if (diff === null) return [];
+	return truncateRowsMiddle(
+		renderMutationDiffBlock(diff, width, opts.diffStyle !== "plain"),
+		FOLDED_DIFF_ROW_LIMIT,
+		false,
+	);
+}
+
 export function renderToolSubline(
 	call: ToolExecutionStart | ToolExecutionFinished,
 	width: number,
 	expandKey?: string,
+	opts: ToolSublineRenderOptions = {},
 ): string[] {
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
@@ -1168,7 +1201,9 @@ export function renderToolSubline(
 	const excerpt = "result" in call ? failureExcerpt(call, width) : "";
 	const showHint = "result" in call && expandKey !== undefined && expandKey.length > 0;
 	const tail = showHint ? `${parts.tail}${dim(` (${expandKey})`)}` : parts.tail;
-	return wrapSublineWithTail(`${parts.lead}${excerpt}`, tail, width);
+	const lines = wrapSublineWithTail(`${parts.lead}${excerpt}`, tail, width);
+	if ("result" in call) lines.push(...foldedDiffRows(call, width, opts));
+	return lines;
 }
 
 /**
@@ -1329,9 +1364,10 @@ export interface BashTranscriptExecution {
 	excludeFromContext?: boolean | undefined;
 	error?: string | undefined;
 	/**
-	 * Whether the block draws its one-line row instead of the full body. Local
-	 * bash folds by default for the same reason model bash does; the operator
-	 * opens it with the expand key. Omitted means folded.
+	 * Whether the block draws its one-line row instead of the full body. The
+	 * caller resolves this from the transcript detail policy and the operator's
+	 * override, the same way the panel resolves a model bash call. Omitted means
+	 * folded.
 	 */
 	folded?: boolean | undefined;
 }
