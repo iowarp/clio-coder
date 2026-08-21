@@ -4,6 +4,7 @@ import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
+import { toolPresentationPolicy } from "../tools/presentation.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -12,7 +13,6 @@ import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
-	classifyResourceRead,
 	renderToolAwaitingApproval,
 	renderToolCallHeader,
 	renderToolExecution,
@@ -250,9 +250,24 @@ type TranscriptEntry =
 	 * declares `isLive`, which keeps it out of the frozen prefix and keeps the
 	 * panel's time-keyed tick running while it is unsettled.
 	 */
-	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer; isLive?: (() => boolean) | undefined };
+	| {
+			role: "replayBlock";
+			renderBlock: ReplayBlockRenderer;
+			isLive?: (() => boolean) | undefined;
+			fold?: ReplayBlockFoldControl | undefined;
+	  };
 
 type WorkerTranscriptEntry = Extract<TranscriptEntry, { role: "worker" }>;
+
+/**
+ * Fold state a caller-rendered block owns. The panel never stores the flag: the
+ * block's closure reads it when rendering, so the panel only needs to read and
+ * flip it when the operator uses an expand/collapse key.
+ */
+export interface ReplayBlockFoldControl {
+	isFolded(): boolean;
+	setFolded(folded: boolean): void;
+}
 
 export interface ChatPanel extends Component {
 	appendUser(text: string): void;
@@ -261,7 +276,7 @@ export interface ChatPanel extends Component {
 	 * that keeps changing after the append, so the panel keeps re-rendering it
 	 * instead of treating the first frame as final.
 	 */
-	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void;
+	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean, fold?: ReplayBlockFoldControl): void;
 	applyEvent(event: ChatLoopEvent): void;
 	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
 	markToolReplayed?(toolCallId: string): void;
@@ -1373,8 +1388,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.push({ role: "user", text });
 			markDirty();
 		},
-		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
-			transcript.push({ role: "replayBlock", renderBlock, isLive });
+		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean, fold?: ReplayBlockFoldControl): void {
+			transcript.push({ role: "replayBlock", renderBlock, isLive, fold });
 			markDirty();
 		},
 		applyWorkerState(state: WorkerEntryState): void {
@@ -1408,6 +1423,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// that", not the tool call two screens up that spawned it.
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
+				// A caller-rendered block that owns fold state (the operator's own
+				// `!` bash row) is foldable too, and it is usually the newest thing
+				// on screen when Ctrl+O is pressed.
+				if (entry?.role === "replayBlock" && entry.fold !== undefined) {
+					entry.fold.setFolded(!entry.fold.isFolded());
+					clearRenderCaches();
+					markDirty();
+					return true;
+				}
 				if (entry?.role === "worker") {
 					entry.folded = !entry.folded;
 					clearRenderCaches();
@@ -1429,7 +1453,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		toggleAllToolsExpanded(): boolean {
 			const tools: ToolSegment[] = [];
 			const workers: WorkerTranscriptEntry[] = [];
+			const blocks: ReplayBlockFoldControl[] = [];
 			for (const entry of transcript) {
+				if (entry.role === "replayBlock") {
+					if (entry.fold !== undefined) blocks.push(entry.fold);
+					continue;
+				}
 				if (entry.role === "worker") {
 					workers.push(entry);
 					continue;
@@ -1439,16 +1468,24 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					if (seg.kind === "tool") tools.push(seg);
 				}
 			}
-			if (tools.length === 0 && workers.length === 0) return false;
-			const expand = tools.some((seg) => !seg.expanded) || workers.some((entry) => entry.folded);
+			if (tools.length === 0 && workers.length === 0 && blocks.length === 0) return false;
+			const expand =
+				tools.some((seg) => !seg.expanded) ||
+				workers.some((entry) => entry.folded) ||
+				blocks.some((fold) => fold.isFolded());
 			for (const seg of tools) seg.expanded = expand;
 			for (const entry of workers) entry.folded = !expand;
+			for (const fold of blocks) fold.setFolded(!expand);
 			clearRenderCaches();
 			markDirty();
 			return true;
 		},
 		collapseAllTools(): void {
 			for (const entry of transcript) {
+				if (entry.role === "replayBlock") {
+					entry.fold?.setFolded(true);
+					continue;
+				}
 				if (entry.role === "worker") {
 					// The settled view for a worker is its origin default, not
 					// universally folded: the operator's own run is the one block
@@ -1614,7 +1651,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					streamed.executionStarted = true;
 					streamed.argsComplete = true;
 					streamed.startedAtMs = now();
-					streamed.expanded = classifyResourceRead(event.toolName, event.args) === null;
+					streamed.expanded = toolPresentationPolicy(event.toolName, event.args).foldDefault === "expanded";
 					markDirty();
 					return;
 				}
@@ -1629,9 +1666,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 				}
 				const assistant = ensureAssistant();
-				// Compact resource reads (SKILL.md, CLIO-CODER.md, AGENTS.md, docs/) stay
-				// collapsed to one labeled line until explicitly expanded.
-				const expanded = classifyResourceRead(event.toolName, event.args) === null;
+				// The tool's registered presentation policy owns this: resource reads
+				// (SKILL.md, CLIO-CODER.md, AGENTS.md, docs/) and bash start folded to
+				// their one-line row until the operator expands them.
+				const expanded = toolPresentationPolicy(event.toolName, event.args).foldDefault === "expanded";
 				assistant.pending = true;
 				assistant.segments.push({
 					kind: "tool",

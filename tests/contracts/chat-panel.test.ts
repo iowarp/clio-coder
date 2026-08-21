@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SKILL_SUGGESTION_ANCHOR, SKILL_SUGGESTION_PREFIX } from "../../src/core/skill-activation.js";
-import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { ApprovalRequestView } from "../../src/interactive/permission-overlay.js";
@@ -391,17 +391,19 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 	it("routes tool_execution_update to a segment stranded behind a notice entry", () => {
 		const clock = 1000;
 		const panel = createChatPanel({ now: () => clock });
+		// grep, not bash: bash folds by default, and this test is about routing a
+		// streamed body to a stranded segment, not about the fold policy.
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "s1",
-			toolName: "bash",
-			args: { command: "sleep 5" },
+			toolName: "grep",
+			args: { pattern: "sleep" },
 		} as ChatLoopEvent);
 		panel.appendReplayBlock(() => ["context-engine notice"]);
 		panel.applyEvent({
 			type: "tool_execution_update",
 			toolCallId: "s1",
-			toolName: "bash",
+			toolName: "grep",
 			partialResult: "streamed tail line",
 		} as ChatLoopEvent);
 		const rendered = strip(panel.render(100).join("\n"));
@@ -1813,8 +1815,8 @@ describe("chat-panel render caching", () => {
 			built.applyEvent({
 				type: "tool_execution_start",
 				toolCallId: "old-tool",
-				toolName: "bash",
-				args: { command: "echo old" },
+				toolName: "grep",
+				args: { pattern: "old" },
 			} as ChatLoopEvent);
 			built.applyEvent({
 				type: "tool_execution_end",
@@ -1851,5 +1853,146 @@ describe("chat-panel render caching", () => {
 		strictEqual(collapsed, fresh.render(80).join("\n"));
 		fresh.toggleAllToolsExpanded();
 		strictEqual(reExpanded, fresh.render(80).join("\n"));
+	});
+});
+
+describe("chat-panel bash fold policy", () => {
+	const runBash = (panel: ReturnType<typeof createChatPanel>, command: string, output: string): void => {
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "bash-1",
+			toolName: "bash",
+			args: { command },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "bash-1",
+			toolName: "bash",
+			result: output,
+			isError: false,
+		} as ChatLoopEvent);
+	};
+
+	it("folds a model bash call by default and keeps other tools expanded", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		runBash(panel, "npm test", "suite line one\nsuite line two");
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("ran `npm test`"), rendered);
+		ok(!rendered.includes("suite line two"), `the bash body stays closed until asked for, got: ${rendered}`);
+		ok(!rendered.includes("$ npm test"), rendered);
+
+		const other = createChatPanel({ now: frozen.now });
+		other.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "grep-1",
+			toolName: "grep",
+			args: { pattern: "needle" },
+		} as ChatLoopEvent);
+		other.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "grep-1",
+			toolName: "grep",
+			result: "src/a.ts:1: needle",
+			isError: false,
+		} as ChatLoopEvent);
+		ok(strip(other.render(100).join("\n")).includes("src/a.ts:1: needle"), "non-bash tools keep the expanded default");
+	});
+
+	it("keeps resource reads folded through the same policy", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "read-1",
+			toolName: "read",
+			args: { path: "docs/architecture.md" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "read-1",
+			toolName: "read",
+			result: "handbook body text",
+			isError: false,
+		} as ChatLoopEvent);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("docs"), rendered);
+		ok(!rendered.includes("handbook body text"), rendered);
+	});
+
+	it("shows a live elapsed on the folded running bash row and settles it in place", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "bash-live",
+			toolName: "bash",
+			args: { command: "sleep 30" },
+		} as ChatLoopEvent);
+		clock = 3_400;
+		const running = strip(panel.render(100).join("\n"));
+		ok(running.includes("running `sleep 30`"), running);
+		ok(running.includes("2.4s"), running);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "bash-live",
+			toolName: "bash",
+			result: "done",
+			isError: false,
+		} as ChatLoopEvent);
+		const settled = strip(panel.render(100).join("\n"));
+		ok(settled.includes("ran `sleep 30`"), settled);
+		ok(settled.includes("exit 0"), settled);
+		ok(!settled.includes("running"), settled);
+	});
+
+	it("expands and re-collapses the folded bash row on one operator action", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		runBash(panel, "npm test", "suite line one\nsuite line two");
+		ok(panel.toggleLastToolExpanded());
+		ok(strip(panel.render(100).join("\n")).includes("suite line two"), "the toggle opens the bounded body");
+		ok(panel.toggleLastToolExpanded());
+		ok(!strip(panel.render(100).join("\n")).includes("suite line two"), "the same key folds it again");
+	});
+
+	it("respects output verbosity over the fold policy", () => {
+		let verbosity: "default" | "verbose" | "minimal" = "verbose";
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => verbosity });
+		runBash(panel, "npm test", "suite line one\nsuite line two");
+		ok(strip(panel.render(100).join("\n")).includes("suite line two"), "/output verbose expands bash");
+		verbosity = "minimal";
+		ok(!strip(panel.render(100).join("\n")).includes("suite line two"), "/output minimal folds it");
+	});
+
+	it("renders the folded bash row inside 40 and 120 columns", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		runBash(panel, "npm run typecheck -- --pretty false", "type error in src/a.ts");
+		for (const width of [40, 120]) {
+			for (const line of panel.render(width)) {
+				ok(visibleWidth(line) <= width, `line overflows ${width}: ${JSON.stringify(strip(line))}`);
+			}
+		}
+	});
+
+	it("includes a fold-owning replay block in the tool expand and collapse keys", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		let folded = true;
+		panel.appendReplayBlock(
+			(_width) => (folded ? ["ran `pwd` ✓"] : ["ran `pwd` ✓", "/home/operator"]),
+			() => false,
+			{
+				isFolded: () => folded,
+				setFolded: (next: boolean) => {
+					folded = next;
+				},
+			},
+		);
+		ok(!strip(panel.render(100).join("\n")).includes("/home/operator"));
+		ok(panel.toggleLastToolExpanded(), "Ctrl+O owns the newest local bash block");
+		strictEqual(folded, false);
+		ok(strip(panel.render(100).join("\n")).includes("/home/operator"), "the panel re-renders the opened block");
+		panel.collapseAllTools();
+		strictEqual(folded, true);
+		ok(!strip(panel.render(100).join("\n")).includes("/home/operator"));
+		ok(panel.toggleAllToolsExpanded(), "expand-all reaches the block too");
+		strictEqual(folded, false);
 	});
 });
