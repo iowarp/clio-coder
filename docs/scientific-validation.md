@@ -5,9 +5,11 @@
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
-Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.3, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
+Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.3, the session rigor resolver does not parse or enforce a scientific contract schema. The presence of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
 
-This advisory convention is separate from the executable project verifier catalog at `.clio-coder/verifiers.yaml`. The verifier catalog has a strict version-1 schema and admits exact argv vectors to the `verify` tool. Scientific validation contracts and handbook expectations do not grant command authority: prose such as `validators: ["python tools/check_grid.py"]` remains guidance until the project owner declares the equivalent argv, cwd, timeout, and tags in `verifiers.yaml`. The executable catalog does not interpret numerical tolerances or artifact expectations; it only runs the explicitly declared process vector through safe-exec.
+This advisory convention is separate from the executable project verifier catalog at `.clio-coder/verifiers.yaml`. The verifier catalog has a strict version-1 schema and admits exact argv vectors to the `verify` tool. Scientific validation contracts and handbook expectations do not grant command authority: prose such as `validators: ["python tools/check_grid.py"]` remains guidance until the project owner confirms the equivalent argv, cwd, timeout, and tags in `verifiers.yaml`. The executable catalog does not interpret numerical tolerances or artifact expectations; it only runs the explicitly declared process vector through safe-exec.
+
+`clio-coder verifiers author` can inspect top-level `validators` entries in the YAML contract filenames above and propose catalog checks. It labels those vectors as project-declared and shows their source index, exact argv, cwd, timeout, tags, catalog path, and resulting execution authority. This inspection is read-only. A command string with sound quoting and no shell operator can be represented as argv for review; shell expansion, pipes, redirection, environment assignments, incomplete quoting, and Markdown prose receive a manual JSON-argv diagnostic. Nothing becomes executable and nothing is dry-run until the operator confirms the catalog write with `--yes`.
 
 The convention below is a recommended shape for scientific projects that need to document expected dimensions, attributes, numerical tolerances, scheduler context, and verification commands for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), this convention links execution metadata with physical output checks without claiming that the current harness executes those checks automatically.
 
@@ -53,7 +55,7 @@ notes: |
   Re-run check_grid.py after job completion is observed.
 ```
 
-The `validators` values above are intentionally advisory shell-like prose. To make the Python validator executable through Clio without granting free-form shell interpretation, declare it separately:
+The `validators` values above are intentionally advisory shell-like prose. Preview the exact catalog proposal with `clio-coder verifiers author`, or declare the Python validator manually without granting free-form shell interpretation:
 
 ```yaml
 # .clio-coder/verifiers.yaml

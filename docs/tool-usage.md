@@ -266,7 +266,7 @@ dispatch(tasks=["Refactor step 1", "Refactor step 2"], mode="sequential", timeou
 
 ## verify: run declared verification checks
 
-One EXECUTE entry point for declared verification. Sources: `src/tools/verify/index.ts`, `src/tools/verify/catalog.ts`, `src/tools/verify/scripts.ts`, `src/tools/verify/frontend.ts`.
+One EXECUTE entry point for declared verification. Sources: `src/tools/verify/index.ts`, `src/tools/verify/catalog.ts`, `src/tools/verify/scripts.ts`, `src/tools/verify/authoring.ts`, `src/tools/verify/frontend.ts`.
 
 Arguments:
 
@@ -300,6 +300,43 @@ Version 1 is strict. Every root and check field shown above is required, unknown
 Provider IDs share one namespace. If a catalog ID collides with a discovered package script, listing and execution fail and identify both source files. Catalog parsing also fails closed before any package or project check runs.
 
 `verify(check="rust-workspace")` spawns exactly `cargo` with `test` and `--workspace`; it does not interpolate model text or invoke a shell. Model-supplied `args`, `cwd`, `timeout_ms`, `max_output_bytes`, or undeclared environment fields cannot widen or replace the catalog entry. Safe execution passes only Clio's small environment allowlist, applies cancellation and the declared timeout, and shapes output at the standard 600000-byte cap. Execution details retain the compatible command string plus exact `argv`, `cwd`, `exitCode`, `durationMs`, `aborted`, `timedOut`, and `outputCapped` evidence, along with the check's declared source, command, cwd, timeout, description, and tags.
+
+### Guided catalog authoring
+
+An empty `verify()` result points to `clio-coder verifiers author`. The authoring command inspects only command-bearing files at the workspace root:
+
+- verification-family package scripts, projected exactly as `npm run <script>` and shown as already active rather than duplicated into the catalog;
+- `Cargo.toml`, projected to Cargo's package or workspace test vector;
+- visible build and test entries in `CMakePresets.json`, projected to the corresponding `cmake --build --preset` or `ctest --preset` vector;
+- declared Python runners in `pyproject.toml`, `pytest.ini`, `tox.ini`, `noxfile.py`, or the pytest section of `setup.cfg`;
+- a module directive in `go.mod`, projected to `go test ./...`;
+- top-level `validators` entries in the documented YAML scientific-validation files.
+
+Every proposal records its source path and location and labels the command origin as `project-declared` or `toolchain-defined`. Project-declared examples include a package script, a Python entry point, and an exact validation-contract command. Toolchain-defined examples include Cargo's test command, a named CMake preset invocation, a configured Python runner, and Go's module test command. Validation command strings are converted to argv only when their quoting is complete and they contain no shell operators, expansion, redirection, or environment assignment. Ambiguous entries and `VALIDATION.md` prose receive a manual-entry diagnostic. Directory names such as `build`, `tests`, `python`, or `cargo` never imply a command.
+
+`discover` and every mutating command first print an authority preview. Each check shows the destination or active source path, source provenance, exact JSON argv vector, repository-relative cwd, timeout, tags, and effective execution authority. Preview and discovery do not create `.clio-coder`, write a file, or run a check. A mutating command without `--yes` ends after the preview. Repeating the reviewed command with `--yes` is the explicit write decision; the serialized YAML must pass the production catalog parser before the atomic write is reachable.
+
+```text
+clio-coder verifiers discover
+clio-coder verifiers author
+clio-coder verifiers author --exclude cmake-build-debug --rename go-test=go-suite
+clio-coder verifiers author --dry-run go-suite --yes
+clio-coder verifiers validate
+```
+
+`validate` reads the committed file with the same parser used by `verify()`. `dry-run <id>` is an explicit request to execute one admitted check through the production `verify` path. `author --dry-run <id> --yes` writes only after confirmation and starts the selected dry run only after the write is accepted by production discovery.
+
+Later changes use the same preview and confirmation boundary. `edit` preserves the ID unless `rename` is requested. Renames and additions reject collisions with catalog IDs and active package-script IDs. Removals state that the deleted command will no longer be executable through catalog authority. Generated IDs are stable for a stable ordered signal set; a collision receives the first available deterministic `-2`, `-3`, and later suffix.
+
+```text
+clio-coder verifiers add --id validate-grid --description "Validate the regional grid" --command '["python","tools/check_grid.py","out/region_west.nc"]'
+clio-coder verifiers add --id validate-grid --description "Validate the regional grid" --command '["python","tools/check_grid.py","out/region_west.nc"]' --tags scientific,netcdf --yes
+clio-coder verifiers edit validate-grid --timeout-ms 300000
+clio-coder verifiers rename validate-grid validate-regional-grid --yes
+clio-coder verifiers remove validate-regional-grid --yes
+```
+
+The `add` command is the explicit path for an unsupported or ambiguous project. `--command` must be a JSON argv array, so manual entry still cannot turn a shell command string into executable catalog authority.
 
 `verify(check="frontend", path=<file>)` validates an HTML, CSS, or JavaScript artifact without shell access. The path must stay inside the workspace root and end in `.html`, `.htm`, `.css`, `.js`, `.mjs`, or `.cjs`. Checks per type: HTML tag balance (comment-aware, HTML5 optional end tags honored), inline and referenced script syntax (classic scripts parsed in-process, modules via `node --check`), inline and linked CSS brace/string/comment balance, local script and stylesheet references resolved and existence-checked (external and root-relative references are skipped), and an optional headless browser load. `browser="auto"` warns when no chromium/chrome/edge executable is on PATH, `"required"` fails, `"off"` skips. Each check reports pass, warn, fail, or skip; any fail makes the whole result an error. `details = {action: "verify", check: "frontend", path, browserMode, status, checks}`.
 
