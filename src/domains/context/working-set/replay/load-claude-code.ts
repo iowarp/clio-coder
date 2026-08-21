@@ -354,13 +354,43 @@ function normalizeTranscript(records: ReadonlyArray<ClaudeRecord>, source: strin
 	const id = sessionIdOf(records, source);
 	const cwd = cwdOf(records) ?? null;
 
-	for (const record of records) {
-		if (record.isSidechain === true) continue;
+	for (let index = 0; index < records.length; index += 1) {
+		const record = records[index];
+		if (record === undefined || record.isSidechain === true) continue;
 		if (record.type !== "user" && record.type !== "assistant") continue;
 		if (!isRecord(record.message)) continue;
 		const timestamp = timestampOf(record);
 		if (record.type === "assistant") {
-			const { content, toolUses } = assistantBlocks(record.message);
+			// Claude Code writes one record per content block, all carrying the
+			// same message.id. Clio persists one assistant entry per message, and
+			// the thinking rule is written for that shape: a thinking block beside
+			// the answer it produced leaves, a turn that is only thinking stays.
+			// Split records would make every thinking block look like the latter.
+			const messages: Array<Record<string, unknown>> = [record.message];
+			const messageId = stringValue(record.message.id);
+			while (messageId !== undefined) {
+				const next = records[index + 1];
+				if (
+					next === undefined ||
+					next.isSidechain === true ||
+					next.type !== "assistant" ||
+					!isRecord(next.message) ||
+					stringValue(next.message.id) !== messageId
+				) {
+					break;
+				}
+				messages.push(next.message);
+				index += 1;
+			}
+			const content: Array<Record<string, unknown>> = [];
+			const toolUses: Array<Record<string, unknown>> = [];
+			let usage: Record<string, unknown> | undefined;
+			for (const message of messages) {
+				const blocks = assistantBlocks(message);
+				content.push(...blocks.content);
+				toolUses.push(...blocks.toolUses);
+				usage = usagePayload(message.usage) ?? usage;
+			}
 			const text = content
 				.filter((block) => block.type === "text")
 				.map((block) => block.text)
@@ -369,7 +399,6 @@ function normalizeTranscript(records: ReadonlyArray<ClaudeRecord>, source: strin
 				.filter((block) => block.type === "thinking")
 				.map((block) => block.thinking)
 				.join("");
-			const usage = usagePayload(record.message.usage);
 			appendMessage(
 				"assistant",
 				{
