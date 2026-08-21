@@ -73,7 +73,7 @@ When the ledger is replayed to the model, compaction summaries, branch summaries
 
 Compaction and eviction both change the replayed history. On a local backend with a single prefix-cache slot, the next turn after either one is expected to be cold because the byte prefix moved. Dispatch traffic can disturb the same slot.
 
-Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The recorded reasons are `working_set_evict` for an applied eviction event, `compaction` for the summary path, and `dispatch` for interleaved worker traffic. Only `local-native` targets stamp reasons and notify, because they are the tier a single interleaved run actually costs. The user sees one dim notice, and the same reasons persist on that entry in the session ledger next to the per-call cache data.
+Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The recorded reasons are `working_set_evict` for an applied eviction event, `compaction` for the summary path, and `dispatch` for interleaved worker traffic. `compaction` and `dispatch` are stamped only on `local-native` targets, because a single-slot local cache is the one an interleaved run actually disturbs. `working_set_evict` is stamped on every tier: the eviction moved the byte prefix itself, so the cloud prefix cache is cold for the same reason. The user sees one dim notice, and the same reasons persist on that entry in the session ledger next to the per-call cache data.
 
 Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are derived from provider usage and persisted with `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }` when available.
 

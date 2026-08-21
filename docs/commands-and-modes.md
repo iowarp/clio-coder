@@ -171,9 +171,13 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
-`/context` with no arguments opens the context-window ledger overlay. The
-subcommands own the durable project-context noun: `compact` summarizes older
-turns in the session window, `init` bootstraps or updates `CLIO-CODER.md` and the
+`/context` with no arguments opens the context-window ledger overlay, including
+the working-set section (policy, evicted items and tokens, events, recalls, churn).
+The subcommands own the durable project-context noun: `compact` summarizes older
+turns in the session window, `recall <ref>` prints an evicted tool-result body
+back into the transcript by the ref its `[evicted ...]` marker names (it never
+enters model context; the model recalls with `context(scope="recall", ref=...)`),
+`init` bootstraps or updates `CLIO-CODER.md` and the
 codewiki, `refresh` re-indexes the codewiki and refreshes `.clio-coder/state.json`
 without touching `CLIO-CODER.md`, and `reset` deletes accumulated
 context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`,

@@ -8,15 +8,16 @@
  * skip conditions. The difference is that the bodies stay in the ledger and
  * come back with `context(scope="recall", ref=...)`.
  *
- * It ships as the default so slice 1 changes one thing at a time: the ledger
- * stops being rewritten, while what the model sees on the next request stays
- * what it saw before. `structural-v1` replaces the age rule with typed
- * structural ones once replay-lite shows it ahead on retention.
+ * It shipped as the default for one slice so the ledger could stop being
+ * rewritten without changing what the model saw; `structural-v1` is the default
+ * now and this policy stays as the recorded form of the old selection. It has
+ * no target stop on purpose: everything beyond the horizon leaves in one event,
+ * as the mask did, and `pressure.target` is ignored.
  *
- * Age is not a quality signal, which is the whole reason for slice 2: a file
- * read twenty turns ago and never touched since is more useful than a
- * directory listing from two turns ago. Nothing here scores candidates by size
- * or recency beyond that ordering; the only token input is the
+ * Age is not a quality signal, which is the whole reason `structural-v1`
+ * exists: a file read twenty turns ago and never touched since is more useful
+ * than a directory listing from two turns ago. Nothing here scores candidates
+ * by size or recency beyond that ordering; the only token input is the
  * `minEvictableTokens` floor, below which the marker costs more than the body.
  */
 

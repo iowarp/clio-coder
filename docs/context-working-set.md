@@ -50,7 +50,7 @@ Adding those kinds bumps the session format to version 4 (`CURRENT_SESSION_FORMA
 
 A marker is one line, its fields are in fixed order, and it carries no timestamp and no counter. That is not cosmetic. The marker is persisted inside the `contextEviction` entry and replayed on every subsequent request, so a marker whose bytes drifted between renders would cold-start the provider prefix cache on a turn that evicted nothing new. It would also make two replays of the same recorded ledger disagree.
 
-Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall`, then the body tail. Undefined fields are omitted rather than rendered empty. Real output from `renderMarker` in `src/domains/context/working-set/marker.ts`:
+Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall`, then the body tail. Undefined fields are omitted rather than rendered empty. `path` is the one file the result was about: `details.paths` when the tool recorded exactly one (`edit`, `write`, `artifact`), otherwise the `path` argument of the call as the model wrote it, which is how a `read` marker names its file. Real output from `renderMarker` in `src/domains/context/working-set/marker.ts`:
 
 ```text
 [evicted ref=0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3 reason=stale_after_mutation by=0198f3c2-9b02-7f55-8e10-6d21ac9e4471 tool=read path=src/domains/context/working-set/engine.ts size=41 lines/3.8KB recall=context(scope="recall", ref="0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3") preview="export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null { export function planEv"]
@@ -90,9 +90,9 @@ The rule `maskStaleObservations` applied, recorded instead of destroyed. Every `
 
 One skip condition is new, so this is today's selection minus small results rather than a byte-identical reproduction of it: a result whose estimated body is below `minEvictableTokens` (200 tokens by default) stays, whatever its age, because the marker would cost more than the body it replaces. The old mask had no such floor and masked those results too. Thinking has no size floor either way, because dropping it renders no marker.
 
-Candidates arrive newest-safe-first, so a caller that stops early has evicted the newest safe unit rather than the oldest one. It ships as the default so this release changes one thing at a time: the ledger stops being rewritten while what the model receives stays what it received before.
+`age-horizon` has no target stop. It evicts everything beyond the horizon in one event, exactly as the mask did, and ignores `context.workingSet.target`; the replay tables show this as `saturated events = 1.000` on every row. That is deliberate: the policy exists to reproduce the old selection through the ledger, and an operator who wants batching to a target wants `structural-v1`. Candidates arrive newest-safe-first, so a caller that stops early has evicted the newest safe unit rather than the oldest one.
 
-Age is not a quality signal. A file read twenty turns ago and never touched since is more useful than a directory listing from two turns ago, which is the whole reason `structural-v1` exists.
+Age is not a quality signal. A file read twenty turns ago and never touched since is more useful than a directory listing from two turns ago, which is the whole reason `structural-v1` exists and is the default.
 
 ### `structural-v1` (default)
 
@@ -121,6 +121,8 @@ Recall is explicit and by ref. There is no auto-readmission: the marker tells th
 - `not_on_active_path` when the session has no such turn on this branch, which includes a ref from a branch `/tree` abandoned.
 - `not_evicted` when the unit is still in context. An assistant turn reports separately that thinking is not recallable.
 
+Both messages end with the refs that are evicted on the active path (up to eight, then a count), because a failed recall is usually a mistyped ref and the listing is what the next call needs.
+
 **A recall does not un-evict.** The key stays in `view.evicted`, the marker stays byte-identical at its original position, and the recalled body arrives at the tail of the working set inside the recall result. Readmitting it in place would duplicate the bytes and invalidate the provider prefix cache for everything after that point, which costs more than the recall saved.
 
 That also makes recall the churn signal. `churn = recalls / itemsEvicted` over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.
@@ -142,7 +144,7 @@ Both publish `BusChannels.ContextRecalled`, and both route through the middlewar
 context:
   workingSet:
     enabled: true
-    policy: age-horizon
+    policy: structural-v1
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
@@ -151,8 +153,8 @@ context:
 | Key | Default | Accepted | Meaning |
 | --- | --- | --- | --- |
 | `context.workingSet.enabled` | `true` | boolean | Master switch. `false` skips eviction and goes straight to summary compaction. It does not restore the destructive mask. |
-| `context.workingSet.policy` | `age-horizon` | `age-horizon`, `structural-v1` | Candidate selection rule set. |
-| `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | Used-over-window ratio an applied event batches down to. |
+| `context.workingSet.policy` | `structural-v1` | `age-horizon`, `structural-v1` | Candidate selection rule set. |
+| `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | Used-over-window ratio an applied `structural-v1` event batches down to. `age-horizon` ignores it. |
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | Recent turns whose observations and thinking are never evicted. |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this estimate are never evicted. |
 
@@ -166,7 +168,7 @@ context:
 - **Transcript.** An evicted tool row keeps its full body and gains a dim `evicted · <reason>` tag. The transcript shows the ledger, never the projection, so `/resume`, `/tree`, `/fork`, and the HTML export are unaffected by eviction.
 - **`/context recall <ref>`.** Prints the ref, why it was evicted, the token count, and the offload pointer when there is one, followed by the original body. Transcript only.
 - **Prompt cache line.** Every applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`. When the last settled run came back cold for that reason, the overlay adds `last cold turn: working-set eviction (expected)` and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.
-- **Notice.** One line per applied event: `[context engine] working_set: N items evicted by <policy>; ~X tokens -> ~Y tokens`.
+- **Notice.** One line per applied event: `[context engine] working set: N items evicted by <policy>; ~X -> ~Y tokens, recall by ref with context(scope="recall")`. The numbers are the plan's, priced over the visible ledger slice, and they are the same numbers the `contextEviction` entry, the `[Compaction] Reclaimed context` toast, and the overlay's `last compaction` line carry. The footer meter is a separate live estimate over the agent message list and can differ from them by the tool schemas and replay text it includes.
 
 ## Not in this release
 
@@ -174,11 +176,13 @@ These are tracked follow-ups, not available behavior:
 
 - **Auto-readmission.** Nothing brings an evicted body back on its own. There are no path fingerprints and no registry of what the model is likely to need next.
 - **Cost model and deferred scheduling.** Pressure is the only trigger. There is no break-even horizon, no deferred eviction plan, and no piggybacking beyond the fact that the working-set stage already runs first inside `runAutoCompact`.
-- **Claude Code transcript replay.** Replay reads Clio session ledgers only. There is no loader for other harnesses' transcript formats.
+- **Intra-turn eviction.** Eviction runs before a request is sent. A single turn whose tool results overflow the window is handled by the observation envelope's caps and by summary compaction, not by this layer.
+- **Worker runtimes.** Dispatched workers replay their own ledgers without the working-set stage.
 - **Digests.** A marker carries tool, size, and a first-line preview. The generated summaries from #165 are not embedded in it.
 
 ## See also
 
+- `clio-coder context replay --sessions <path>...` replays Clio ledgers and Claude Code transcripts through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](commands-and-modes.md#working-set-replay), and the committed tables with the default-policy rule are under `benchmarks/results/context-replay/`.
 - [context-engine.md](context-engine.md) for context window resolution, token accounting, and how this stage sits ahead of summary compaction.
 - [session-lifecycle.md](session-lifecycle.md) for the ledger format, active-path lineage, and branching.
 - [glossary.md](glossary.md) for the one-line definitions of these terms.
