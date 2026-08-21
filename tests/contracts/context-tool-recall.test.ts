@@ -133,11 +133,11 @@ describe("contracts/context recall scope", () => {
 		const notEvicted = await tool.run({ scope: "recall", ref: "t2" }, undefined);
 		assert.equal(notEvicted.kind, "error");
 		if (notEvicted.kind === "error")
-			assert.match(notEvicted.message, /not evicted.*Evicted refs on the active path: t1\.$/);
+			assert.match(notEvicted.message, /not evicted.*Recallable refs on the active path: t1\.$/);
 		const offPath = await tool.run({ scope: "recall", ref: "nope" }, undefined);
 		assert.equal(offPath.kind, "error");
 		if (offPath.kind === "error")
-			assert.match(offPath.message, /not on the active path.*Evicted refs on the active path: t1\./);
+			assert.match(offPath.message, /not on the active path.*Recallable refs on the active path: t1\./);
 		const missing = await tool.run({ scope: "recall" }, undefined);
 		assert.equal(missing.kind, "error");
 		if (missing.kind === "error") assert.match(missing.message, /requires ref=<turnId>/);

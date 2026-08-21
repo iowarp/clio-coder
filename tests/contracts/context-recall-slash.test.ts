@@ -234,7 +234,7 @@ describe("contracts//context recall", () => {
 		h.runtime.dispatchCommand("/context recall zzz");
 		const transcript = h.transcript();
 		ok(transcript.includes("is not on the active path"), transcript);
-		ok(transcript.includes("Evicted refs on the active path: t1."), transcript);
+		ok(transcript.includes("Recallable refs on the active path: t1."), transcript);
 
 		deepStrictEqual(h.appended, []);
 		deepStrictEqual(h.recalled, []);

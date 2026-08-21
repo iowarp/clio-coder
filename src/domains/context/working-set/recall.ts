@@ -106,29 +106,35 @@ export function buildRecallFields(
 const MAX_LISTED_REFS = 8;
 
 /**
- * The refs that are actually out, so the next call can name one of them. A
- * guessed "nearest" ref was tried first and dropped: over time-ordered ids a
- * prefix match names an unrelated result, and the listing is what helps.
+ * The refs a recall can actually bring back, so the next call can name one of
+ * them. Thinking refs are evicted too but are not recallable, so listing them
+ * would hand the caller a ref that fails for a different reason. A guessed
+ * "nearest" ref was tried first and dropped: over time-ordered ids a prefix
+ * match names an unrelated result, and the listing is what helps.
  */
-function evictedRefListing(view: WorkingSetView): string {
-	const refs = [...view.evicted.keys()];
-	if (refs.length === 0) return "No refs are evicted on the active path.";
+function recallableRefListing(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): string {
+	const refs = [...view.evicted.keys()].filter((key) => {
+		const entry = entries.find((candidate) => candidate.turnId === key);
+		return entry !== undefined && isToolResultEntry(entry);
+	});
+	if (refs.length === 0) return "No recallable refs on the active path.";
 	const shown = refs.slice(0, MAX_LISTED_REFS).join(", ");
 	const more = refs.length > MAX_LISTED_REFS ? `, and ${refs.length - MAX_LISTED_REFS} more` : "";
-	return `Evicted refs on the active path: ${shown}${more}.`;
+	return `Recallable refs on the active path: ${shown}${more}.`;
 }
 
 /**
  * One-line operator/model-facing message for a recall failure. Says why an
  * assistant turn is refused instead of calling it "not evicted", and ends with
- * the refs that can be recalled.
+ * the refs that can be recalled. `entries` is the active path the view was
+ * folded over; without it the listing is empty.
  */
 export function recallErrorMessage(
 	error: RecallError,
 	entries: ReadonlyArray<SessionEntry> = [],
 	view: WorkingSetView = EMPTY_WORKING_SET_VIEW,
 ): string {
-	const listing = ` ${evictedRefListing(view)}`;
+	const listing = ` ${recallableRefListing(entries, view)}`;
 	switch (error.kind) {
 		case "invalid_ref":
 			return `recall ref must be a single turnId without whitespace; got '${error.ref}'.`;
