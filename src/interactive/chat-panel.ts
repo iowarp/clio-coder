@@ -1065,6 +1065,18 @@ function renderEntryLines(
 			lines.push(...hangProseLines(rendered));
 		}
 	}
+	// A thinking stretch closes when text or a tool follows it so the historical
+	// marker stays in stream order. The turn-level reasoning projection is still
+	// live, though, and must remain beside the current tail instead of scrolling
+	// away with that marker. An open tail stretch already rendered this line.
+	if (entry.pending && hasThinking(entry) && !liveIndicatorShown) {
+		lines.push(
+			detail.thinking === "marker" && !thinkingExpandedNow
+				? dimLine(THINKING_HIDDEN_LABEL, width)
+				: renderLiveReasoningLine(liveReasoning, undefined, width),
+		);
+		liveIndicatorShown = true;
+	}
 	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, detail.receipt));
 	// The open thinking segment's line is the one that speaks for reasoning while
 	// the turn runs. The generic thinking verb is suppressed while it shows so

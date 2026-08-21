@@ -1215,13 +1215,21 @@ describe("chat-panel live reasoning indicator", () => {
 		ok(first.index < prose && prose < second.index && second.index < tool && tool < live.index, JSON.stringify(rows));
 	});
 
-	it("closes a stretch when text follows it, so no live line survives below the prose", () => {
+	it("keeps live reasoning progress at the tail after text closes the stretch", () => {
 		const panel = pendingTurnWithTool();
 		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
-		const rows = rowsOf(panel, 80);
-		strictEqual(rows[0], "Thinking…", JSON.stringify(rows));
-		ok(!rows.some((row) => row.includes("Thinking ·")), `no live line once the model moved on: ${JSON.stringify(rows)}`);
-		ok(indexOfRow(rows, "a.ts") < indexOfRow(rows, "answering now"), JSON.stringify(rows));
+		for (const width of [40, 80, 120]) {
+			const rows = rowsOf(panel, width);
+			strictEqual(rows[0], "Thinking…", JSON.stringify(rows));
+			ok(indexOfRow(rows, "a.ts") < indexOfRow(rows, "answering now"), JSON.stringify(rows));
+			const last = rows[rows.length - 1] ?? "";
+			ok(last.includes("Thinking · r≈1.2k estimated"), `live progress follows the current tail: ${JSON.stringify(rows)}`);
+			strictEqual(
+				rows.filter((row) => row.includes("Thinking ·")).length,
+				1,
+				`one live reasoning indicator: ${JSON.stringify(rows)}`,
+			);
+		}
 	});
 
 	it("settles the interleaved turn in order with the count chip on the last marker", () => {
