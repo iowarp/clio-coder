@@ -18,6 +18,7 @@ interface UsageLike {
 	output?: number;
 	cacheRead?: number;
 	cacheWrite?: number;
+	estimated?: boolean;
 }
 
 function assistantThinkingText(message: AgentMessage): string {
@@ -91,7 +92,10 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 		cacheReadTokens: tally.cacheReadTokens + (usage ? finite(usage.cacheRead) : 0),
 		cacheWriteTokens: tally.cacheWriteTokens + (usage ? finite(usage.cacheWrite) : 0),
 	};
-	const reasoning = usage ? extractReasoningTokens(usage) : null;
+	// Interrupted turns carry Clio's own estimated usage object. It retains the
+	// completed-record shape, including `reasoning: 0`, but that zero is not a
+	// provider attestation and must not suppress the thinking-text fallback.
+	const reasoning = usage && usage.estimated !== true ? extractReasoningTokens(usage) : null;
 	if (reasoning !== null) {
 		next.reasoningTokens += reasoning;
 		next.hadProviderReasoning = true;
