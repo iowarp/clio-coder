@@ -81,7 +81,7 @@ export function renderReplayJson(input: ReplayReportInput): string {
 			},
 		})),
 	};
-	return `${JSON.stringify(artifact, null, 2)}\n`;
+	return `${JSON.stringify(artifact, null, "\t")}\n`;
 }
 
 function ratio(value: number): string {
