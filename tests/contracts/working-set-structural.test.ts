@@ -297,6 +297,19 @@ test("structural: an unresolved failure is protected", () => {
 	assert.equal(byRef(select(ledger.entries)).has(failure), false);
 });
 
+test("structural: a blocked repeat of a failed call does not resolve the failure", () => {
+	const ledger = new Ledger();
+	ledger.user();
+	const failure = ledger.bash("rm -rf build", `rm: cannot remove 'build': Permission denied\n${body("stack")}`, {
+		isError: true,
+	});
+	ledger.user();
+	ledger.call("bash", { command: "rm -rf build" }, body("refused"), { blocked: true });
+	ledger.pad();
+
+	assert.equal(byRef(select(ledger.entries)).has(failure), false, "a refusal is a verdict, not a success");
+});
+
 test("structural: range reads only supersede ranges they contain", () => {
 	// A property sweep over deterministic offset/limit pairs: an earlier read is
 	// evicted only when the later read's lines contain it.
