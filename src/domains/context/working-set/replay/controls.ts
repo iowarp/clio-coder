@@ -1,34 +1,25 @@
 import type { SessionEntry } from "../../../session/entries.js";
 import type { EvictionCandidate, PolicyInput, WorkingSetPolicy, WorkingSetPolicyId } from "../contract.js";
-import { hasLegacyCompactionMarker } from "../payload.js";
+import { tokensFreedByEviction } from "../engine.js";
+import { protectionCutoffIndex } from "../horizon.js";
+import { buildPathIndex } from "../path-index.js";
+import { isProtected } from "../protect.js";
 import type { ReferenceGraph } from "./reference-graph.js";
-import { countReplayTurns, isReplayTurnStart } from "./trace.js";
+import { countReplayTurns } from "./trace.js";
 
 function controlId(id: string): WorkingSetPolicyId {
 	return id as WorkingSetPolicyId;
 }
 
-function recentTurnCutoff(entries: ReadonlyArray<SessionEntry>, protectLastTurns: number): number {
-	const horizon = Math.max(1, Math.floor(protectLastTurns));
-	let seen = 0;
-	for (let index = entries.length - 1; index >= 0; index -= 1) {
-		const entry = entries[index];
-		if (entry === undefined || !isReplayTurnStart(entry)) continue;
-		seen += 1;
-		if (seen >= horizon) return index;
-	}
-	return 0;
-}
-
 function eligibleToolResults(input: PolicyInput): SessionEntry[] {
-	const cutoff = recentTurnCutoff(input.entries, input.settings.protectLastTurns);
+	const cutoff = protectionCutoffIndex(input.entries, input.settings.protectLastTurns);
+	const index = buildPathIndex(input.entries);
 	const out: SessionEntry[] = [];
-	for (let index = cutoff - 1; index >= 0; index -= 1) {
-		const entry = input.entries[index];
+	for (let entryIndex = cutoff - 1; entryIndex >= 0; entryIndex -= 1) {
+		const entry = input.entries[entryIndex];
 		if (entry?.kind !== "message" || entry.role !== "tool_result") continue;
 		if (input.view.evicted.has(entry.turnId)) continue;
-		if (hasLegacyCompactionMarker(entry.payload)) continue;
-		if (input.estimateTokens(entry) < input.settings.minEvictableTokens) continue;
+		if (isProtected(entry, { entryIndex, cutoffIndex: cutoff, input, index })) continue;
 		out.push(entry);
 	}
 	return out;
@@ -39,8 +30,9 @@ function takeToTarget(input: PolicyInput, entries: ReadonlyArray<SessionEntry>):
 	if (tokensNeeded <= 0) return [];
 	const selected: EvictionCandidate[] = [];
 	for (const entry of entries) {
-		selected.push({ ref: { entry: entry.turnId }, reason: "age_horizon" });
-		tokensNeeded -= input.estimateTokens(entry);
+		const candidate: EvictionCandidate = { ref: { entry: entry.turnId }, reason: "age_horizon" };
+		selected.push(candidate);
+		tokensNeeded -= tokensFreedByEviction(input.estimateTokens, entry, candidate);
 		if (tokensNeeded <= 0) break;
 	}
 	return selected;
