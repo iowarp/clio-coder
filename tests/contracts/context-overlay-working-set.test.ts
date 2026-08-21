@@ -82,8 +82,8 @@ describe("context overlay working-set section", () => {
 	it("renders policy, evicted items and tokens, events, recalls, and churn", () => {
 		const text = strip(renderContextLedgerLines(ledger(), 68, view()).join("\n"));
 		ok(text.includes("working set · policy age-horizon"), text);
-		ok(text.includes("2 evicted items · 1,000 tokens · 1 event · 1 recall · churn 0.33"), text);
-		ok(text.includes("evicted (outside window) 1,000 tokens"), text);
+		ok(text.includes("3 evicted items · 1,500 tokens · 1 event · 1 recall · churn 0.33"), text);
+		ok(text.includes("evicted (outside window) 1,500 tokens"), text);
 	});
 
 	it("evicted tokens are one line after the legend, not a meter category", () => {

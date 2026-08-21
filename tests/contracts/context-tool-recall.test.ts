@@ -107,11 +107,9 @@ describe("contracts/context recall scope", () => {
 		assert.equal(appended.parentTurnId, "u2");
 		assert.equal(details.recall.recallTurnId, appended.turnId);
 
-		// The second call sees the fold with the recall applied.
+		// The ref stays evicted after a recall; a second recall is churn, not an error.
 		const again = await tool.run({ scope: "recall", ref: "t1" }, { toolCallId: "call-2" });
-		assert.equal(again.kind, "error");
-		if (again.kind !== "error") return;
-		assert.match(again.message, /^context: ref t1 is not evicted/);
+		assert.equal(again.kind, "ok");
 	});
 
 	it("errors name the nearest valid ref", async () => {
