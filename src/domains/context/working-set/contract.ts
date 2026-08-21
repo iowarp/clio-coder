@@ -107,6 +107,8 @@ export interface PressureInput {
 export interface PolicyInput {
 	entries: ReadonlyArray<SessionEntry>;
 	view: WorkingSetView;
+	/** Session working directory for the path index; null when unknown (paths stay relative). */
+	cwd: string | null;
 	settings: WorkingSetSettings;
 	pressure: PressureInput;
 	/** chars/4 estimator shared with `context-accounting.ts`, so replay and live agree. */

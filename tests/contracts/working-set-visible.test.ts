@@ -87,6 +87,7 @@ function input(ledger: Ledger, protectLastTurns: number): PolicyInput {
 	return {
 		entries: selectVisibleEntries(ledger.entries, ledger.leaf()),
 		view: foldWorkingSet(ledger.entries, ledger.leaf()),
+		cwd: null,
 		settings: { ...DEFAULT_WORKING_SET_SETTINGS, protectLastTurns },
 		pressure: { tokens: 90_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
 		estimateTokens,

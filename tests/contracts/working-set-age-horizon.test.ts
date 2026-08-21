@@ -123,6 +123,7 @@ function policyInput(entries: ReadonlyArray<SessionEntry>, overrides: Partial<Wo
 	return {
 		entries,
 		view: EMPTY_WORKING_SET_VIEW,
+		cwd: null,
 		settings: { ...DEFAULT_WORKING_SET_SETTINGS, protectLastTurns: PROTECT_LAST_TURNS, ...overrides },
 		pressure: { tokens: 90_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
 		estimateTokens,

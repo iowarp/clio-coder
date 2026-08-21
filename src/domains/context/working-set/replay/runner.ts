@@ -77,6 +77,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 				const plan = planEviction(policy, {
 					entries: selectVisibleEntries(soFar, leaf ?? undefined),
 					view,
+					cwd: trace.cwd,
 					settings: config.settings,
 					pressure: {
 						tokens,
