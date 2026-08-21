@@ -99,6 +99,30 @@ export interface CompactionSettings {
 }
 
 /**
+ * Working-set layer settings (`context.workingSet`). The layer decides which
+ * tool-result bodies and thinking blocks leave the model's working set when
+ * pressure crosses `compaction.threshold`; it records evictions as ledger
+ * entries and never rewrites history. Defaults and prose live in
+ * src/domains/context/working-set/defaults.ts.
+ *
+ *   - enabled: master switch. Off restores the legacy destructive mask stage.
+ *   - policy: candidate selection rule set.
+ *   - target: used/window ratio an applied event batches down to.
+ *   - protectLastTurns: recent user turns whose observations are never evicted.
+ *   - minEvictableTokens: results below this estimate are never evicted; the
+ *     marker would cost more than it saves.
+ */
+export type WorkingSetPolicyId = "age-horizon" | "structural-v1";
+
+export interface WorkingSetSettings {
+	enabled: boolean;
+	policy: WorkingSetPolicyId;
+	target: number;
+	protectLastTurns: number;
+	minEvictableTokens: number;
+}
+
+/**
  * Transient provider retry controls for the interactive chat loop. These are
  * intentionally small and mirror the session retry helper defaults. Dispatched
  * worker runs are governed by `workers.maxRetries` instead; the two never meet.

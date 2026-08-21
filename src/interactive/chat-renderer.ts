@@ -1043,6 +1043,11 @@ export function buildReplayAgentMessagesFromTurns(
 			// It reaches the model only when an operator shares it, and a share
 			// is already a user message by the time it lands in the ledger.
 			case "workerRun":
+			// Working-set entries are folded into a view by the context domain
+			// and applied as a projection before this builder runs; the
+			// entries themselves never become messages.
+			case "contextEviction":
+			case "contextRecall":
 				break;
 		}
 	}
@@ -1239,6 +1244,8 @@ export function rehydrateChatPanelFromTurns(
 			case "label":
 			case "taskLedger":
 			case "decisionLedger":
+			case "contextEviction":
+			case "contextRecall":
 				break;
 		}
 	}
