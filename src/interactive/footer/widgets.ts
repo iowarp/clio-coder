@@ -19,7 +19,13 @@ import {
 	dispatchStatusPresentation,
 } from "../dispatch-board.js";
 import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
-import { type AgentStatus, spinnerFrame, type TurnSummary } from "../status/index.js";
+import {
+	type AgentStatus,
+	formatReasoningChip,
+	reasoningFromSummary,
+	spinnerFrame,
+	type TurnSummary,
+} from "../status/index.js";
 import {
 	type ClioTheme,
 	type ClioToken,
@@ -706,11 +712,8 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 	];
 	// Zero suppresses the chip, the same rule the chat panel's turn line follows:
 	// a turn that spent no reasoning tokens states nothing by printing `r0`.
-	if (typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0) {
-		const marker =
-			summary.reasoningTokenProvenance === "estimated" || summary.reasoningTokenProvenance === "mixed" ? "≈" : "";
-		parts.push(theme.fg("reason", `r${marker}${summary.reasoningTokens}`));
-	}
+	const chip = formatReasoningChip(reasoningFromSummary(summary), String);
+	if (chip !== null) parts.push(theme.fg("reason", chip));
 	if (summary.cacheReadTokens > 0 || summary.cacheWriteTokens > 0) {
 		parts.push(theme.fg("dim", `cache ${summary.cacheReadTokens}/${summary.cacheWriteTokens}`));
 	}
@@ -802,6 +805,17 @@ function liveTokenValue(
 	return joined.length > 0 ? joined : null;
 }
 
+/**
+ * The last turn's reasoning chip, or null when the turn spent none. Every
+ * surface that shows reasoning reads the same projection, so the transcript,
+ * this footer, and the receipt cannot disagree about the count or whether it
+ * is provider-attested.
+ */
+function reasoningChip(theme: ClioTheme, lastTurn: TurnSummary): string | null {
+	const chip = formatReasoningChip(reasoningFromSummary(lastTurn), formatFooterTokens);
+	return chip === null ? null : theme.fg("reason", chip);
+}
+
 function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
 	return theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(lastTurn.elapsedMs)}`);
@@ -813,12 +827,7 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
 			"muted",
 			`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
 		),
-		lastTurn.reasoningTokens !== undefined && lastTurn.reasoningTokens > 0
-			? theme.fg(
-					"reason",
-					`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens)}`,
-				)
-			: null,
+		reasoningChip(theme, lastTurn),
 		lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
 			? theme.fg(
 					"dim",
@@ -1202,14 +1211,7 @@ export function buildMetricStrip(
 				`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
 			),
 		);
-		candidates.push(
-			lastTurn.reasoningTokens !== undefined && lastTurn.reasoningTokens > 0
-				? theme.fg(
-						"reason",
-						`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens)}`,
-					)
-				: null,
-		);
+		candidates.push(reasoningChip(theme, lastTurn));
 		// Held back so the session totals below outrank them. The chip list is cut
 		// to `maxChipsCount` before it is measured, and with cache and tools ahead
 		// of the totals an 80-column terminal spent the whole budget on per-turn

@@ -2,7 +2,6 @@ import { performance } from "node:perf_hooks";
 import type { OutputVerbosity } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
-import { estimateReasoningTextTokens, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
@@ -22,7 +21,20 @@ import {
 	renderToolSubline,
 } from "./renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
-import { INLINE_STATUS_INDENT_COLS, type StatusPhase, type VerbRender } from "./status/index.js";
+import {
+	compactReasoningTokens,
+	emptyRunTally,
+	foldMessageIntoRunTally,
+	formatReasoningChip,
+	formatReasoningLabel,
+	INLINE_STATUS_INDENT_COLS,
+	type ReasoningTokenProvenance,
+	type ReasoningUsageView,
+	reasoningFromTally,
+	type StatusPhase,
+	UNMEASURED_REASONING,
+	type VerbRender,
+} from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
 import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
 
@@ -69,7 +81,7 @@ const USER_GLYPH = GLYPH.user;
  * through the Markdown renderer. Partial markdown (unclosed fence, half-typed
  * bullet) would otherwise paint garbage at ~60 fps under streaming.
  */
-export type ReasoningTokenProvenance = "provider" | "estimated" | "mixed";
+export type { ReasoningTokenProvenance } from "./status/index.js";
 
 export interface ChatPanelTurnUsage {
 	inputTokens: number;
@@ -214,6 +226,11 @@ type TranscriptEntry =
 			 * visibility mode until Ctrl+T toggles it again.
 			 */
 			expandedThinking?: boolean;
+			/**
+			 * When this turn's reasoning first arrived, so the live line can state
+			 * how long the model has been thinking. Panel clock, set once per entry.
+			 */
+			thinkingStartedAtMs?: number;
 			pending: boolean;
 			statusLine?: AssistantStatusLine | null | undefined;
 			isError: boolean;
@@ -262,6 +279,12 @@ export interface ChatPanel extends Component {
 	 */
 	workerStates(): ReadonlyArray<WorkerEntryState>;
 	setStatusLine(line: AssistantStatusLine | null): void;
+	/**
+	 * Publish the live run tally's reasoning projection. The pending entry's
+	 * tail line reads this; passing null returns it to unmeasured, which is what
+	 * an idle or just-started turn is.
+	 */
+	setLiveReasoning(view: ReasoningUsageView | null): void;
 	toggleLastToolExpanded(): boolean;
 	toggleAllToolsExpanded(): boolean;
 	/**
@@ -360,37 +383,40 @@ function extractAssistantThinking(message: unknown): string {
 		.join("");
 }
 
-function finiteToken(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
+/**
+ * The panel's view of one assistant message's spend, folded through the same
+ * `foldMessageIntoRunTally` the status machine uses. The panel used to
+ * re-derive reasoning here with its own provider-lookup-then-estimate rule, so
+ * the transcript receipt and the footer could report the same turn differently.
+ */
 function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
-	const record = message as Record<string, unknown>;
-	const usage = record.usage && typeof record.usage === "object" ? (record.usage as Record<string, unknown>) : undefined;
-	const thinking = extractAssistantThinking(message);
-	const reportedReasoning = usage ? extractReasoningTokens(usage) : null;
-	const estimatedReasoning = reportedReasoning === null ? estimateReasoningTextTokens(thinking) : null;
-	const inputTokens = finiteToken(usage?.input);
-	const outputTokens = finiteToken(usage?.output);
-	const cacheReadTokens = finiteToken(usage?.cacheRead);
-	const cacheWriteTokens = finiteToken(usage?.cacheWrite);
+	const tally = foldMessageIntoRunTally(emptyRunTally(), message as AgentMessage);
+	const reasoning = reasoningFromTally(tally);
 	if (
-		inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens === 0 &&
-		reportedReasoning === null &&
-		estimatedReasoning === null
+		tally.inputTokens + tally.outputTokens + tally.cacheReadTokens + tally.cacheWriteTokens === 0 &&
+		reasoning.provenance === "unmeasured"
 	) {
 		return undefined;
 	}
-	const turnUsage: ChatPanelTurnUsage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, modelCalls: 1 };
-	if (reportedReasoning !== null) {
-		turnUsage.reasoningTokens = reportedReasoning;
-		turnUsage.reasoningTokenProvenance = "provider";
-	} else if (estimatedReasoning !== null) {
-		turnUsage.reasoningTokens = estimatedReasoning;
-		turnUsage.reasoningTokenProvenance = "estimated";
+	const turnUsage: ChatPanelTurnUsage = {
+		inputTokens: tally.inputTokens,
+		outputTokens: tally.outputTokens,
+		cacheReadTokens: tally.cacheReadTokens,
+		cacheWriteTokens: tally.cacheWriteTokens,
+		modelCalls: 1,
+	};
+	if (reasoning.provenance !== "unmeasured") {
+		turnUsage.reasoningTokens = reasoning.tokens;
+		turnUsage.reasoningTokenProvenance = reasoning.provenance;
 	}
 	return turnUsage;
+}
+
+/** Settled-turn adapter onto the shared projection; the panel's own summary shape. */
+function reasoningFromTurnUsage(usage: ChatPanelTurnUsage | undefined): ReasoningUsageView {
+	if (!usage || usage.reasoningTokenProvenance === undefined) return UNMEASURED_REASONING;
+	return { tokens: Math.max(0, usage.reasoningTokens ?? 0), provenance: usage.reasoningTokenProvenance };
 }
 
 function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefined {
@@ -590,46 +616,51 @@ function hangProseLines(lines: string[], firstPrefix?: string): string[] {
  */
 const THINKING_HIDDEN_LABEL = `Thinking${GLYPH.ellipsis}`;
 const THINKING_LINE_LIMIT = 12;
-const REASONING_CHARS_PER_TOKEN = 4;
 
-function estimateThinkingTokens(thinking: string): number {
-	return estimateReasoningTextTokens(thinking) ?? Math.max(1, Math.round(thinking.length / REASONING_CHARS_PER_TOKEN));
-}
-
-function reasoningDisplay(usage: ChatPanelTurnUsage | undefined, thinking: string): { tokens: number; marker: string } {
-	if (usage?.reasoningTokens !== undefined) {
-		return {
-			tokens: usage.reasoningTokens,
-			marker: usage.reasoningTokenProvenance === "provider" ? "provider-reported" : "mixed/estimated",
-		};
-	}
-	return { tokens: estimateThinkingTokens(thinking), marker: "estimated" };
+function dimLine(text: string, width: number): string {
+	return `${DIM}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
 
 /**
- * Render the assistant turn's thinking block. Collapsed (default) returns a
- * single dim `Thinking...` marker. Expanded returns the full body dimmed and
- * prefixed with a dim `│ ` rail, capped at `THINKING_LINE_LIMIT` lines with a
- * tail `... N more lines hidden` overflow message. Mirrors the tool toggle's
+ * The settled turn's folded marker, at the head of the entry: history reads
+ * reasoning first, then the response. The count comes from the turn's settled
+ * usage, never from measuring the excerpt the panel happens to be holding.
+ */
+function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): string {
+	const chip = formatReasoningChip(view, compactReasoningTokens);
+	return dimLine(
+		chip === null ? THINKING_HIDDEN_LABEL : `${THINKING_HIDDEN_LABEL} · ${chip} ${formatReasoningLabel(view)}`,
+		width,
+	);
+}
+
+/**
+ * The live turn's one reasoning line, rendered at the TAIL of the pending entry
+ * where the status verb goes. Anchoring it at the head put it above every
+ * streamed segment, so on a long turn the only progress indicator scrolled off
+ * the top while text and tools kept arriving below it.
+ *
+ * The count is whatever the run tally has folded so far, so between model calls
+ * the line states elapsed and nothing else. Visible thinking text is never
+ * counted: that number moved with how much reasoning the provider chose to
+ * display, not with what the turn spent.
+ */
+function renderLiveReasoningLine(view: ReasoningUsageView, elapsedMs: number | undefined, width: number): string {
+	const chip = formatReasoningChip(view, compactReasoningTokens);
+	const head = chip === null ? THINKING_HIDDEN_LABEL : `Thinking · ${chip} ${formatReasoningLabel(view)}`;
+	const seconds = elapsedMs === undefined ? 0 : Math.floor(Math.max(0, elapsedMs) / 1000);
+	return dimLine(seconds > 0 ? `${head} · ${seconds}s` : head, width);
+}
+
+/**
+ * Render the expanded thinking body: the text dimmed behind a dim `│ ` rail,
+ * capped at `THINKING_LINE_LIMIT` lines. A streaming turn keeps the tail (the
+ * reasoning still arriving); a settled one keeps the head with a
+ * `... N more lines hidden` overflow message. Mirrors the tool toggle's
  * lab-notebook minimalism: no colored glyphs, no boxes.
  */
-function renderThinkingLines(
-	thinking: string,
-	expanded: boolean,
-	width: number,
-	streaming: boolean,
-	usage?: ChatPanelTurnUsage,
-): string[] {
+function renderThinkingRail(thinking: string, width: number, streaming: boolean): string[] {
 	if (thinking.length === 0) return [];
-	const dimWrap = (s: string): string => `${DIM}${s}${RESET}`;
-	if (!expanded) {
-		const lineBudget = Math.max(1, width);
-		const display = reasoningDisplay(usage, thinking);
-		const label = streaming
-			? `Thinking (${display.tokens} tokens)${display.marker === "provider-reported" ? "" : " ≈ estimated"}…`
-			: THINKING_HIDDEN_LABEL;
-		return [dimWrap(truncateToWidth(label, lineBudget, GLYPH.ellipsis, false))];
-	}
 	const splitLines = thinking.split("\n");
 	let visible: string[];
 	if (streaming) {
@@ -686,9 +717,10 @@ function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number, verbosity
 	// provenance of zero, and at narrow widths `reasoning 0 provider` orphaned
 	// the word `provider` on its own line. Zero suppresses the whole suffix, the
 	// same rule the caveat below already follows.
+	const view = reasoningFromTurnUsage(usage);
 	const reason =
-		usage.reasoningTokens !== undefined && usage.reasoningTokens > 0
-			? ` reasoning ${usage.reasoningTokenProvenance === "provider" ? `${usage.reasoningTokens} provider` : `≈${usage.reasoningTokens} estimated`}`
+		view.tokens > 0 && view.provenance !== "unmeasured"
+			? ` reasoning ${view.provenance === "provider" ? "" : "≈"}${view.tokens} ${formatReasoningLabel(view)}`
 			: "";
 	const cache =
 		usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0
@@ -697,10 +729,7 @@ function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number, verbosity
 	// The caveat is about reasoning text the panel displayed. A turn that spent
 	// no reasoning tokens displayed none, so appending it there warned about
 	// something absent and cost a wrapped line per turn at narrow widths.
-	const caveat =
-		usage.reasoningTokens !== undefined && usage.reasoningTokens > 0
-			? " · reasoning text is a UI excerpt, not a verification"
-			: "";
+	const caveat = view.tokens > 0 ? " · reasoning text is a UI excerpt, not a verification" : "";
 	return wrapTextWithAnsi(
 		`${DIM}  turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason}${caveat}${RESET}`,
 		width,
@@ -813,6 +842,7 @@ function renderEntryLines(
 	unboundedToolBodies: boolean,
 	verbosity: OutputVerbosity,
 	liveToolOutput: boolean,
+	liveReasoning: ReasoningUsageView,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
@@ -849,23 +879,14 @@ function renderEntryLines(
 		return [];
 	}
 	const lines: string[] = [];
-	// Thinking renders BEFORE assistant text/tool segments so the folded marker
-	// or expanded rail sits above the response, matching the order the
-	// pi-coding-agent reference uses. It streams live while `pending === true`
-	// (folded shows a dynamic token count; expanded tail-anchors the tail) and
-	// collapses to a static marker / head-anchored rail once the turn settles.
-	// The generic "thinking" status verb is suppressed while this marker is
-	// active so only one indicator shows (see `shouldRenderStatus` below).
-	if (entry.thinking.length > 0) {
-		lines.push(
-			...renderThinkingLines(
-				entry.thinking,
-				verbosity === "verbose" || (verbosity !== "minimal" && entry.expandedThinking === true),
-				width,
-				entry.pending,
-				entry.turnUsage,
-			),
-		);
+	const thinkingExpandedNow = verbosity === "verbose" || (verbosity !== "minimal" && entry.expandedThinking === true);
+	// A settled turn's reasoning renders BEFORE its text and tool segments,
+	// because that is the order it happened in and the order history reads.
+	// While the turn is live it renders at the TAIL instead (below), where the
+	// operator is actually looking.
+	if (entry.thinking.length > 0 && !entry.pending) {
+		if (thinkingExpandedNow) lines.push(...renderThinkingRail(entry.thinking, width, false));
+		else lines.push(renderSettledThinkingMarker(reasoningFromTurnUsage(entry.turnUsage), width));
 	}
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
@@ -914,22 +935,33 @@ function renderEntryLines(
 		}
 	}
 	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, verbosity));
+	// The live turn's reasoning indicator, at the tail, is the one line that
+	// speaks for reasoning while the turn runs. The generic thinking verb is
+	// suppressed beneath it so the entry never carries two indicators for the
+	// same thing.
+	const showsLiveReasoning = entry.pending && entry.thinking.length > 0;
 	const shouldRenderStatus =
 		entry.pending &&
 		entry.statusLine !== null &&
 		entry.statusLine !== undefined &&
 		!(entry.statusLine.phase === "writing" && hasStreamingText(entry)) &&
-		!(entry.statusLine.phase === "thinking" && entry.thinking.length > 0);
-	if (!labeled && !hasVisibleOutput(entry)) {
-		lines.push(clioPrefix.trimEnd());
-		if (shouldRenderStatus) {
-			lines.push(
-				`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`,
-			);
-		}
-	} else if (shouldRenderStatus) {
-		lines.push(`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
+		!(entry.statusLine.phase === "thinking" && showsLiveReasoning);
+	const tail: string[] = [];
+	if (showsLiveReasoning) {
+		if (thinkingExpandedNow) tail.push(...renderThinkingRail(entry.thinking, width, true));
+		tail.push(
+			renderLiveReasoningLine(
+				liveReasoning,
+				entry.thinkingStartedAtMs === undefined ? undefined : Math.max(0, nowMs - entry.thinkingStartedAtMs),
+				width,
+			),
+		);
 	}
+	if (shouldRenderStatus) {
+		tail.push(`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
+	}
+	if (!labeled && !hasVisibleOutput(entry)) lines.push(clioPrefix.trimEnd());
+	for (const line of tail) lines.push(line);
 	return lines;
 }
 
@@ -976,6 +1008,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let frozen: { lines: string[]; through: number; key: string } | null = null;
 	let thinkingExpanded = false;
 	let liveToolOutput = true;
+	/**
+	 * The run tally's reasoning, projected. It is panel-level rather than
+	 * per-entry because only the pending tail entry ever renders it, and that
+	 * entry is by definition unfrozen and uncached.
+	 */
+	let liveReasoning: ReasoningUsageView = UNMEASURED_REASONING;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
 
 	const markDirty = (): void => {
@@ -1187,9 +1225,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	/** True when the entry renders at least one counting elapsed line this frame. */
 	const entryHasRunningTool = (entry: TranscriptEntry): boolean =>
 		(entry.role === "assistant" &&
-			entry.segments.some(
+			(entry.segments.some(
 				(segment) => segment.kind === "tool" && !segment.finished && segment.startedAtMs !== undefined,
-			)) ||
+				// The live reasoning line counts its own elapsed, so a turn that is
+				// only thinking still needs the time-keyed render key.
+			) ||
+				(entry.pending && entry.thinking.length > 0 && entry.thinkingStartedAtMs !== undefined))) ||
 		(entry.role === "replayBlock" && entry.isLive?.() === true);
 
 	/**
@@ -1295,6 +1336,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					unboundedToolBodies,
 					verbosity,
 					liveToolOutput,
+					liveReasoning,
 				);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
@@ -1461,6 +1503,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		reset(): void {
 			transcript.length = 0;
 			workerEntries.clear();
+			liveReasoning = UNMEASURED_REASONING;
 			clearRenderCaches();
 			markDirty();
 		},
@@ -1551,6 +1594,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
 				assistant.thinking += event.delta;
+				assistant.thinkingStartedAtMs ??= now();
 				assistant.expandedThinking = thinkingExpanded;
 				markDirty();
 				return;
@@ -1718,6 +1762,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (terminalError.length > 0) assistant.isError = true;
 				if (thinking.length > 0) {
 					assistant.thinking = thinking;
+					assistant.thinkingStartedAtMs ??= now();
 					assistant.expandedThinking = thinkingExpanded;
 				}
 				// The chat loop marks messages it sanitized after streaming (dead
@@ -1796,6 +1841,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				}
 				markDirty();
 			}
+		},
+		setLiveReasoning(view: ReasoningUsageView | null): void {
+			const next = view ?? UNMEASURED_REASONING;
+			if (next.tokens === liveReasoning.tokens && next.provenance === liveReasoning.provenance) return;
+			liveReasoning = next;
+			// The line lives on the pending tail entry, which the freeze may already
+			// cover if nothing has mutated since the last settle.
+			unfreezeTail();
+			const last = transcript[transcript.length - 1];
+			if (last !== undefined) invalidateEntryCache(last);
+			markDirty();
 		},
 		setStatusLine(line): void {
 			if (line) {

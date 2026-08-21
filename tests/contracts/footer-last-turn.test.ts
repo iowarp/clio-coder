@@ -55,6 +55,21 @@ describe("footer last-turn metrics", () => {
 		strictEqual(out, "✓ 4.0s · ↑11 ↓339 · r315 · 2 tools");
 	});
 
+	// Every footer surface reads the same projection as the transcript, so an
+	// inferred count is marked `≈` wherever it appears and an attested one is not.
+	it("marks an inferred reasoning count on every footer surface", () => {
+		const estimated = makeSummary({ reasoningTokenProvenance: "estimated" });
+		ok(strip(formatLastTurn(clioTheme(), estimated)).includes("r≈315"));
+		ok(strip(activityQuadrant(idleAgent(estimated)).join("\n")).includes("r≈315"));
+		ok(strip(buildMetricStrip(clioTheme(), INITIAL_STATUS, null, estimated, null, null, null, 117)).includes("r≈315"));
+
+		const mixed = makeSummary({ reasoningTokenProvenance: "mixed" });
+		ok(strip(formatLastTurn(clioTheme(), mixed)).includes("r≈315"), "a mixed turn is inferred in part");
+
+		const provider = makeSummary({ reasoningTokenProvenance: "provider" });
+		ok(!strip(formatLastTurn(clioTheme(), provider)).includes("≈"), "an attested count carries no marker");
+	});
+
 	it("omits the model id (the editor rail already carries it)", () => {
 		const out = strip(formatLastTurn(clioTheme(), makeSummary()));
 		ok(!out.includes("qwen3-coder"));

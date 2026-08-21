@@ -1,6 +1,7 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
+import { formatReasoningChip } from "./status/reasoning.js";
 import { type ClioTheme, formatCompactMs, formatContextPercent, GLYPH } from "./theme/index.js";
 
 /**
@@ -37,7 +38,11 @@ export function tokensSegment(usage: UsageBreakdown | null | undefined): string 
 	const reasoning = Math.max(0, usage.reasoningTokens ?? 0);
 	const total = Math.max(0, usage.totalTokens ?? input + output);
 	if (input + output + reasoning + total === 0) return null;
-	const reasoningPart = reasoning > 0 ? ` r${formatFooterTokens(reasoning)}` : "";
+	// Session totals are summed from provider usage payloads, so the chip carries
+	// no `≈`. It is built by the same formatter every other reasoning surface
+	// uses rather than by a fourth copy of the marker rule.
+	const reasoningChip = formatReasoningChip({ tokens: reasoning, provenance: "provider" }, formatFooterTokens);
+	const reasoningPart = reasoningChip === null ? "" : ` ${reasoningChip}`;
 	const totalPart = total > 0 ? ` Σ${formatFooterTokens(total)}` : "";
 	return `${GLYPH.up}${formatFooterTokens(input)} ${GLYPH.down}${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
 }
