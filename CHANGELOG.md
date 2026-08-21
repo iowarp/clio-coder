@@ -2,6 +2,24 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased (0.3.4)
+
+### Added
+- Non-destructive working-set eviction. When context pressure crosses `compaction.threshold`, Clio now records which tool-result bodies and closed-turn thinking blocks leave the model's working set instead of rewriting them out of the session. The bodies stay in the ledger, the transcript keeps showing them, and each one is replaced in model replay by a one-line marker naming the ref, the reason, the size, and the exact call that brings it back.
+- Exact recall by ref. The model reads an evicted body back with `context(scope="recall", ref="<turnId>")`; the operator reads one into the transcript with `/context recall <ref>`, which never enters model context. A recall does not un-evict: the marker stays byte-identical so the provider prefix cache is untouched, and repeated recalls of one ref are the churn signal.
+- Two eviction policies. `age-horizon` is the default and reproduces the previous age-based selection, minus results whose body is below `context.workingSet.minEvictableTokens`. The opt-in `structural-v1` selects by what the session did since (`stale_after_mutation`, `superseded_read`, `failure_resolved`, `listing_consumed`, `thinking_turn_closed`) and falls back to age only under pressure.
+- `/context` reports the working set: policy, evicted items, evicted tokens, events, recalls, and churn. Evicted tool rows carry a dim `evicted · <reason>` tag in the transcript.
+- Cache-honesty attribution for eviction. An applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`, and `/context` reports `last cold turn: working-set eviction (expected)` instead of warning about a cold backend it caused itself.
+- New guide: `docs/context-working-set.md`.
+
+### Changed
+- Session format version 4. The bump is additive: it adds the `contextEviction` and `contextRecall` records and changes no existing entry, so a version 3 session migrates to 4 in place on open with nothing rewritten. Only a session written by a newer build is refused. The bump is one-way for the operator, and a 0.3.3 binary cannot open a session this release wrote.
+- New settings under `context.workingSet`: `enabled` (default `true`), `policy` (default `age-horizon`), `target` (default `0.6`), `protectLastTurns` (default `6`), and `minEvictableTokens` (default `200`). `compaction.excludeLastTurns` now governs only the legacy mask path.
+- Compaction reports a `working_set` stage on `ContextPruned`, and the middleware `on_compaction` hook gains the `working_set_evict` and `working_set_recall` stages.
+
+### Fixed
+- Auto-compaction no longer destroys observations. The stale-observation mask rewrote persisted bodies through `session.replaceEntries`, so masked content was gone from `/resume`, `/tree`, `/fork`, and the HTML export as well as from the model. `CLIO_CODER_LEGACY_MASK=1` restores that stage for one release as a compatibility escape hatch; it is removed in the next release.
+
 ## 0.3.3 - 2026-08-21
 
 ### Changed
