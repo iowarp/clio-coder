@@ -592,6 +592,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatPanel: {
 			appendReplayBlock: (...args) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(...args), "slash-output"),
 			appendUser: (text) => chatRenderer.mutate(() => chatPanel.appendUser(text), "user-submit"),
+			clearFoldOverrides: () => chatRenderer.mutate(() => chatPanel.clearFoldOverrides(), "output-detail"),
 		},
 		beforeSemanticSubmit: () => chatRenderer.flush(),
 		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),

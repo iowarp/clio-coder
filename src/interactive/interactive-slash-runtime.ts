@@ -54,7 +54,7 @@ export interface InteractiveSlashSubmitExpansion {
 }
 
 type SlashChat = Pick<ChatLoop, "getSessionId" | "isStreaming" | "submit">;
-type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
+type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser" | "clearFoldOverrides">;
 type SlashResources = Pick<ResourcesContract, "prompts" | "expandPromptTemplate" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
 type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
@@ -398,6 +398,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			// alone. Saving it as the default is what Settings → Terminal is for.
 			if (deps.commitSetting) deps.commitSetting("terminal.outputVerbosity", next, "session");
 			else deps.writeSettings?.(next);
+			// `/output` is also the explicit reset action for transcript folds. Do
+			// this even when the requested level already matches the current one;
+			// the render-time change detector cannot observe a same-value command.
+			deps.chatPanel.clearFoldOverrides();
 			return { status: "applied", verbosity: match };
 		},
 		openModel: deps.openModel,
