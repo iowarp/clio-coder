@@ -17,7 +17,6 @@ import { isSessionEntry, type SessionEntry } from "../../src/domains/session/ent
 
 const CWD = "/repo";
 const TS = "2026-08-21T00:00:00.000Z";
-const HEADER = { type: "session", version: 4, id: "s1", timestamp: TS, cwd: CWD } as unknown as SessionEntry;
 
 /** Big enough to clear the default 200-token floor. */
 function body(label: string, lines = 100): string {
@@ -30,7 +29,7 @@ function body(label: string, lines = 100): string {
  * is the ref a policy names.
  */
 class Ledger {
-	readonly entries: SessionEntry[] = [HEADER];
+	readonly entries: SessionEntry[] = [];
 	private seq = 0;
 
 	private id(prefix: string): string {
@@ -128,12 +127,12 @@ function policyInput(entries: ReadonlyArray<SessionEntry>, overrides: Partial<Po
 	return {
 		entries,
 		view: EMPTY_WORKING_SET_VIEW,
+		// The live ledger readers strip the JSONL header; the cwd arrives explicitly.
+		cwd: CWD,
 		settings,
 		// Far below threshold: rungs 1-5 run, rung 6 does not.
 		pressure: { tokens: 1_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
-		// The fixtures keep the JSONL header so paths resolve against the session
-		// cwd; it is not a ledger entry and carries no context tokens.
-		estimateTokens: (entry) => (isSessionEntry(entry) ? estimateTokens(entry) : 0),
+		estimateTokens,
 		...overrides,
 	};
 }
@@ -237,6 +236,23 @@ test("structural: a listing whose surfaced paths were all read is consumed", () 
 	ledger.pad();
 
 	assert.equal(byRef(select(ledger.entries)).get(listing)?.reason, "listing_consumed");
+});
+
+test("structural: a listing under a relative root is consumed without any cwd at all (live shape)", () => {
+	// find prints paths relative to the directory it searched; the model then
+	// reads them relative to the workspace. Before the join-onto-root fix this
+	// never matched unless the root was ".", so listing_consumed was dead live.
+	const surfaced = Array.from({ length: 12 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
+	const ledger = new Ledger();
+	ledger.user();
+	const listing = ledger.find("src", surfaced);
+	for (const path of surfaced) {
+		ledger.user();
+		ledger.read(`./src/${path}`);
+	}
+	ledger.pad();
+
+	assert.equal(byRef(select(ledger.entries, { cwd: null })).get(listing)?.reason, "listing_consumed");
 });
 
 test("structural: a listing that surfaced nothing is never consumed", () => {
@@ -391,7 +407,7 @@ test("structural: a mutation in the active turn is protected even without the ho
 	assert.ok(entry);
 
 	const input = policyInput(entries);
-	const index = buildPathIndex(entries);
+	const index = buildPathIndex(entries, { cwd: CWD });
 	// cutoffIndex past the end takes the horizon out of the answer, leaving the
 	// active-turn predicate as the only thing that can protect this write.
 	assert.equal(isProtected(entry, { entryIndex, cutoffIndex: entries.length, input, index }), true);

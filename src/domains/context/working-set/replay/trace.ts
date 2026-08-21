@@ -5,6 +5,8 @@ import { isTurnStart } from "../horizon.js";
 export interface Trace {
 	id: string;
 	source: string;
+	/** Session working directory the ledger's relative paths resolve against; null when the source did not record one. */
+	cwd: string | null;
 	entries: ReadonlyArray<SessionEntry>;
 	turnCount: number;
 }

@@ -466,6 +466,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						planned = (deps.planEviction ?? planEviction)(policy, {
 							entries: selectVisibleEntries(entries, state.lastTurnId ?? undefined),
 							view,
+							cwd: deps.session.current()?.cwd ?? null,
 							settings: settings.context.workingSet,
 							pressure: {
 								tokens: estimate.tokens,

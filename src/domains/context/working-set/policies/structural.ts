@@ -91,7 +91,7 @@ export const structuralPolicy: WorkingSetPolicy = {
 	id: "structural-v1",
 	select(input: PolicyInput): ReadonlyArray<EvictionCandidate> {
 		const { entries, view, settings, pressure, estimateTokens } = input;
-		const index = buildPathIndex(entries);
+		const index = buildPathIndex(entries, { cwd: input.cwd });
 		const cutoffIndex = protectionCutoffIndex(entries, settings.protectLastTurns);
 		const candidates: EvictionCandidate[] = [];
 		const claimed = new Set<string>();

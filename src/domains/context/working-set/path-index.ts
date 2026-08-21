@@ -13,16 +13,18 @@
  * what the session did.
  *
  * Pure, deterministic, single pass. No filesystem access: paths are resolved
- * lexically against the session cwd when the entries carry the session header,
- * and left as written when they do not. No `process.cwd()` fallback, because a
- * replay run and a live run would then index the same ledger differently.
+ * lexically against the session cwd the caller passes (`options.cwd`), and only
+ * normalized when it does not. The cwd is never sniffed from the entries and
+ * never defaulted to `process.cwd()`: the live ledger readers strip the JSONL
+ * header, and a replay run and a live run must index the same ledger the same
+ * way.
  *
  * This is `extractFileOps` in `compaction/compact.ts` generalized: same
  * `path | file_path | filePath` argument reading, same tool-call pairing as
  * `chat-renderer.ts`, plus ranges, listings, failures, and turn positions.
  */
 
-import { basename, isAbsolute, normalize, resolve } from "node:path";
+import { basename, isAbsolute, join, normalize, resolve } from "node:path";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { WorkingSetRef } from "./contract.js";
 import { isRecord, toolResultText } from "./payload.js";
@@ -120,28 +122,27 @@ function isTurnStart(entry: SessionEntry): boolean {
 	return entry.kind === "message" && entry.role === "user";
 }
 
-/**
- * The session cwd, when the caller kept the JSONL header in the slice. The
- * header is a `SessionFileEntry`, not a `SessionEntry`, so this is a runtime
- * shape check rather than a `kind` test; without it every relative path stays
- * exactly as the call wrote it.
- */
-function sessionCwd(entries: ReadonlyArray<SessionEntry>): string | null {
-	for (const entry of entries) {
-		const record = entry as unknown as Record<string, unknown>;
-		if (record.type !== "session") continue;
-		const cwd = record.cwd;
-		if (typeof cwd === "string" && cwd.length > 0 && isAbsolute(cwd)) return normalize(cwd);
-	}
-	return null;
+export interface PathIndexOptions {
+	/** Session working directory; relative arguments resolve against it. Null leaves them relative (normalized). */
+	cwd?: string | null;
 }
 
-/** Lexical canonicalization only: no realpath, no `process.cwd()`, no `~` expansion. */
+/**
+ * Lexical canonicalization only: no realpath, no `process.cwd()`, no `~`
+ * expansion. With a cwd, `src/a.ts`, `./src/a.ts`, and `/cwd/src/a.ts` all key
+ * the same file; without one the first two still do.
+ */
 function canonicalize(value: string, cwd: string | null): string {
 	const trimmed = value.trim();
 	if (trimmed.length === 0) return "";
 	if (isAbsolute(trimmed)) return normalize(trimmed);
-	return cwd === null ? trimmed : resolve(cwd, trimmed);
+	return cwd === null ? normalize(trimmed) : resolve(cwd, trimmed);
+}
+
+function usableCwd(options: PathIndexOptions | undefined): string | null {
+	const cwd = options?.cwd;
+	if (typeof cwd !== "string" || cwd.trim().length === 0 || !isAbsolute(cwd)) return null;
+	return normalize(cwd);
 }
 
 function stableStringify(value: unknown): string {
@@ -300,16 +301,16 @@ function commandVerb(args: Record<string, unknown> | null): string | null {
 }
 
 /**
- * A listing prints paths relative to what it searched, so they resolve against
- * the observation's own path. A single-file search root surfaces its own
- * basename, which resolves back to the root rather than to a child of it.
+ * A listing prints paths relative to what it searched, so they join onto the
+ * observation's own path before canonicalizing, whether that root is absolute
+ * or still relative. A single-file search root surfaces its own basename,
+ * which resolves back to the root rather than to a child of it.
  */
 function resolveSurfaced(value: string, root: string, cwd: string | null): string {
 	if (isAbsolute(value)) return normalize(value);
-	if (root.length > 0 && isAbsolute(root)) {
-		return basename(root) === value ? root : resolve(root, value);
-	}
-	return canonicalize(value, cwd);
+	if (root.length === 0) return canonicalize(value, cwd);
+	if (basename(root) === value) return canonicalize(root, cwd);
+	return canonicalize(join(root, value), cwd);
 }
 
 /** A listing result only surfaces paths when the call was a listing in the first place. */
@@ -357,8 +358,8 @@ function toolResultObservation(
 	};
 }
 
-export function buildPathIndex(entries: ReadonlyArray<SessionEntry>): PathIndex {
-	const cwd = sessionCwd(entries);
+export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: PathIndexOptions): PathIndex {
+	const cwd = usableCwd(options);
 	const calls = collectToolCalls(entries);
 	const observations: PathObservation[] = [];
 	const byRef = new Map<string, PathObservation>();
