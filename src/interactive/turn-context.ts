@@ -167,6 +167,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let sessionPromptKey: string | null = null;
 	const sessionWorkingContextPaths = new Set<string>();
 	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
+	// A post-tool guard can run after every tool result in one model turn. Once
+	// both automatic stages report that they have nothing to do, remember that
+	// stable user-turn id so the remaining results do not repeat the same plan
+	// and summary probes. A new submitted user turn gets a new id naturally.
+	let emptyAutoCompactTurnId: string | null = null;
 
 	// Cache-disturbance honesty (T3.3). Dispatch traffic and history
 	// compaction invalidate a single-slot local backend's prefix cache.
@@ -385,10 +390,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		pendingUserText?: string,
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
+		const activeAutoTurnId = force ? null : state.activeUserTurnId;
+		if (activeAutoTurnId && emptyAutoCompactTurnId === activeAutoTurnId) return false;
 		const settings = deps.getSettings();
 		const cfg = settings.compaction;
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
+		let preSummaryStageActed = false;
+		const rememberEmptyAutomaticAttempt = (): void => {
+			if (!force && !preSummaryStageActed && activeAutoTurnId) emptyAutoCompactTurnId = activeAutoTurnId;
+		};
 
 		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
@@ -416,6 +427,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						throw error;
 					}
 					if (masked.changed) {
+						preSummaryStageActed = true;
 						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
 						deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 						emitCompactionActivity("started", "compacting context (mask stage)");
@@ -489,6 +501,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						throw error;
 					}
 					if (planned) {
+						preSummaryStageActed = true;
 						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
 						emitCompactionActivity("started", "compacting context (working-set eviction)");
 						try {
@@ -555,24 +568,39 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		}
 
-		if (!deps.autoCompact) return false;
-		middleware.fireCompactionHook("llm_summary", trigger);
-		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
-		emitCompactionActivity("started", "compacting context (summary)");
+		if (!deps.autoCompact) {
+			rememberEmptyAutomaticAttempt();
+			return false;
+		}
+		let summaryLifecycleStarted = false;
+		const startSummaryLifecycle = (): void => {
+			middleware.fireCompactionHook("llm_summary", trigger);
+			deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+			emitCompactionActivity("started", "compacting context (summary)");
+			summaryLifecycleStarted = true;
+		};
+		if (force) startSummaryLifecycle();
 		let result: CompactResult | null = null;
 		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 		try {
 			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
 		} catch (error) {
+			if (!summaryLifecycleStarted) startSummaryLifecycle();
 			emitCompactionActivity("failed", compactionFailureMessage(error));
-			throw error;
-		} finally {
 			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+			throw error;
 		}
 		if (!result || result.summary.length === 0) {
-			emitCompactionActivity("completed", "nothing to compact");
+			if (summaryLifecycleStarted) {
+				deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+				emitCompactionActivity("completed", "nothing to compact");
+			} else {
+				rememberEmptyAutomaticAttempt();
+			}
 			return false;
 		}
+		if (!summaryLifecycleStarted) startSummaryLifecycle();
+		deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
 		// The summarization call spends tokens on the same target the turn would
 		// have. The ledger entry carries its usage for a later reseed; this is the
@@ -965,6 +993,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			sessionPromptKey = null;
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
+			emptyAutoCompactTurnId = null;
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
 		},
