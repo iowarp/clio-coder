@@ -4,7 +4,12 @@ import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
-import { buildRecallFields, recallErrorMessage, resolveRecall } from "../../domains/context/working-set/recall.js";
+import {
+	buildRecallFields,
+	recallErrorMessage,
+	recallParentTurnId,
+	resolveRecall,
+} from "../../domains/context/working-set/recall.js";
 import {
 	checkSkillDrift,
 	discoverMarketplaceSkills,
@@ -16,7 +21,6 @@ import {
 } from "../../domains/resources/index.js";
 import type { SessionEntryInput } from "../../domains/session/contract.js";
 import type { SessionEntry } from "../../domains/session/entries.js";
-import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import {
 	finalizeObservation,
@@ -548,15 +552,7 @@ function runRecallScope(
 	});
 	// The recall record parents onto the live leaf so the fold sees it on
 	// this branch and only this branch.
-	const active = filterEntriesToActivePath(entries, leaf);
-	let parentTurnId: string | null = null;
-	for (let i = active.length - 1; i >= 0; i -= 1) {
-		const candidate = active[i];
-		if (candidate?.kind === "message") {
-			parentTurnId = candidate.turnId;
-			break;
-		}
-	}
+	const parentTurnId = recallParentTurnId(entries, leaf);
 	let recorded: SessionEntry;
 	try {
 		recorded = session.appendEntry({ ...fields, parentTurnId });
