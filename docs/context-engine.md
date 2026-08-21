@@ -5,7 +5,9 @@
 
 Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.
 
-Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, `src/domains/session/migrations/index.ts`, and the chat-loop integration in `src/interactive/chat-loop.ts`.
+Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, `src/domains/context/working-set/`, `src/domains/session/migrations/index.ts`, and the chat-loop integration in `src/interactive/chat-loop.ts`.
+
+The non-destructive eviction layer has its own guide: [context-working-set.md](context-working-set.md).
 
 ## Context window resolution
 
@@ -23,7 +25,7 @@ The estimator in `context-accounting.ts` uses a four-characters-per-token family
 
 At submit time, Clio captures a context snapshot and persists a slim JSONL record under the session directory as `context-snapshots.jsonl`. The slim record keeps token counts, segment metadata, signatures, and hashes, not the heavy prompt or transcript text. When provider usage arrives, `reconcileSnapshot` folds actual input and output counts back into the ledger.
 
-Session metadata enforces session format version 3 (`CURRENT_SESSION_FORMAT_VERSION = 3`). Before resuming any session, Clio checks `sessionFormatVersion`; earlier formats are rejected outright with an error rather than silently migrated.
+Session metadata enforces session format version 4 (`CURRENT_SESSION_FORMAT_VERSION = 4`). Version 4 is additive: it adds the `contextEviction` and `contextRecall` records and changes no existing entry. A version 3 session therefore migrates to 4 in place when Clio opens it, and no entry is rewritten. Only a session written by a newer build is refused, with an error naming the version it read and pointing at upgrading. The bump is one-way for the operator: a 0.3.3 binary cannot open a session this release wrote.
 
 The `/context` overlay and footer meter read the same ledger categories: `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
 
@@ -31,31 +33,55 @@ The `/context` overlay and footer meter read the same ledger categories: `system
 
 Auto-compaction is controlled by one pressure threshold. Pressure is `estimated_tokens / context_window`. The default threshold is `0.8`.
 
-When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio first masks stale tool observations and stale thinking older than `excludeLastTurns`. This is a cheap local rewrite. Tool call and result structure remain present, but the observation body is replaced with a marker and stale assistant thinking content is dropped from replay.
+Crossing that threshold engages three mechanisms in a fixed order. The first two are cheap, reversible, and call no model. Only the third rewrites what the session says about itself.
 
-Marker format:
+### 1. Working-set eviction
+
+When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio applies the configured working-set policy first. The policy selects tool-result bodies and closed-turn thinking blocks, `runAutoCompact` appends one `contextEviction` ledger entry, and `refreshAgentMessagesFromSession` projects those units out of model replay behind a one-line marker. Nothing is deleted: the ledger keeps the original bodies, the transcript keeps showing them, and `/resume`, `/tree`, `/fork`, and the HTML export are unaffected.
+
+Already-evicted units are never selected again. Recent turns keep their full observations and thinking, governed by `context.workingSet.protectLastTurns`. Results whose estimated body is below `context.workingSet.minEvictableTokens` (200 tokens by default) are kept whatever their age, because a marker would cost more than the body it replaces. The `age-horizon` policy is therefore the selection the old destructive mask made minus those small results, not a byte-identical reproduction of it; the default `structural-v1` policy applies its structural rules before any age rule.
+
+If the projection drops pressure below the threshold, Clio sends the request and no summary runs. The policies, the protection predicates, the marker format, and the ledger records are documented in [context-working-set.md](context-working-set.md).
+
+### 2. Recall
+
+An evicted body comes back on demand and only on demand. The marker names the exact call: `context(scope="recall", ref="<turnId>")` returns the original body byte-exact through the observation envelope and appends a `contextRecall` entry. Operators use `/context recall <ref>`, which prints the body to the transcript without putting it into model context.
+
+A recall does not un-evict. The marker stays byte-identical where it was, so the provider prefix cache is untouched, and repeated recalls of the same ref are the churn signal the `/context` overlay reports.
+
+### 3. LLM summary, as a last resort
+
+If pressure remains above the threshold after eviction, Clio runs the summary compaction path: it calls the summarization model, appends a `compactionSummary` entry, refreshes projected replay messages from the session, and continues. This is the only mechanism that spends tokens and the only one whose output is a lossy paraphrase, which is why it runs last.
+
+Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the summary path directly and skip every pre-stage. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
+
+### The legacy mask escape hatch
+
+`CLIO_CODER_LEGACY_MASK=1` restores the destructive pre-stage working-set eviction replaced. It calls `session.replaceEntries` and rewrites the persisted bodies, so masked content is gone for the operator as well as the model. It uses the old marker format:
 
 ```text
 [Observation masked: <tool> output was <lines> lines, <chars> chars - contents masked to save context. Re-run the tool for current content.] Preview: <preview>
 ```
 
-Already-compacted entries are not masked again. Recent turns keep their full observations and thinking. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
+It exists for one release as a compatibility diagnosis path and is removed in the next.
 
-When the ledger is replayed to the model, compaction summaries, branch summaries, and bash executions become standardized user-role message text. Clio imports `COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, their suffixes, and `bashExecutionToText` through `src/engine/messages.ts`; `src/interactive/chat-renderer.ts` maps Clio's entry shapes onto them and applies replay truncation.
+### Replay text
 
-Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
+When the ledger is replayed to the model, compaction summaries, branch summaries, and bash executions become standardized user-role message text. Clio imports `COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, their suffixes, and `bashExecutionToText` through `src/engine/messages.ts`; `src/interactive/chat-renderer.ts` maps Clio's entry shapes onto them and applies replay truncation. The working-set projection runs before that builder, so markers are what the replay text is built from.
 
 ## Cache-divergence honesty
 
-Compaction rewrites the replayed history. On a local backend with a single prefix-cache slot, the next turn after compaction is expected to be cold because the byte prefix changed. Dispatch traffic can disturb the same slot.
+Compaction and eviction both change the replayed history. On a local backend with a single prefix-cache slot, the next turn after either one is expected to be cold because the byte prefix moved. Dispatch traffic can disturb the same slot.
 
-Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The user sees one dim notice, and the same reasons persist on that entry in the session ledger next to the per-call cache data.
+Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The recorded reasons are `working_set_evict` for an applied eviction event, `compaction` for the summary path, and `dispatch` for interleaved worker traffic. `compaction` and `dispatch` are stamped only on `local-native` targets, because a single-slot local cache is the one an interleaved run actually disturbs. `working_set_evict` is stamped on every tier: the eviction moved the byte prefix itself, so the cloud prefix cache is cold for the same reason. The user sees one dim notice, and the same reasons persist on that entry in the session ledger next to the per-call cache data.
 
 Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are derived from provider usage and persisted with `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }` when available.
 
+The `/context` overlay closes the loop. When the last settled run came back `cold` and Clio had recorded a reason for it, the overlay adds a line naming that reason, for example `last cold turn: working-set eviction (expected)`, and reports the cache line without the warning token. A reused prompt shell with a cold backend and no recorded reason stays a warning: Clio kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.
+
 ## Settings
 
-The public settings block has one threshold and one recent-turn horizon:
+The public settings use one compaction threshold plus a non-destructive working-set stage:
 
 ```yaml
 compaction:
@@ -64,9 +90,27 @@ compaction:
   excludeLastTurns: 6
   # model: provider/summary-model-id
   # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
+
+context:
+  workingSet:
+    enabled: true
+    policy: structural-v1
+    target: 0.6
+    protectLastTurns: 6
+    minEvictableTokens: 200
 ```
 
-`auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
+`compaction.auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `compaction.model` optionally selects a dedicated summarization model, and `compaction.systemPrompt` optionally points at a prompt override file. `compaction.excludeLastTurns` only governs the temporary legacy mask path; working-set protection uses `context.workingSet.protectLastTurns`.
+
+| Key | Default | Accepted | Meaning |
+| --- | --- | --- | --- |
+| `context.workingSet.enabled` | `true` | boolean | `false` skips eviction and goes directly to summary compaction. It does not restore the destructive mask. |
+| `context.workingSet.policy` | `structural-v1` | `age-horizon`, `structural-v1` | Candidate selection rule set. `age-horizon` is the pre-layer age selection. |
+| `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | Used-over-window ratio an applied eviction event batches down to. |
+| `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | Recent turns whose observations and thinking are never evicted. |
+| `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this estimate are never evicted, because the marker would cost more than the body. |
+
+Set `CLIO_CODER_LEGACY_MASK=1` only as a temporary compatibility escape hatch for the old destructive mask stage. See [context-working-set.md](context-working-set.md) for what each policy selects and why.
 
 Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Edit removed or unknown keys deliberately; `clio-coder doctor --fix` does not transform settings into the current schema.
 

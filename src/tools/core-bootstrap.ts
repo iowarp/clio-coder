@@ -1,5 +1,7 @@
+import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import type { SessionEntry } from "../domains/session/entries.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
@@ -28,6 +30,10 @@ import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
 	session?: SessionContract;
+	/** Full ledger of the current session; context(scope=recall) folds it. Absent in worker registries. */
+	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
+	/** Publishes a successful context(scope=recall) on the bus; absent where no bus is wired. */
+	onContextRecalled?: (payload: ContextRecalledPayload) => void;
 	askUser?: AskUserHandler;
 	taskBoard?: TaskBoardStore;
 	userTasks?: UserTasksStore;
@@ -108,6 +114,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		...builtin(credentialPresentTool, { path: "src/tools/credential-present.ts", scope: "core" }),
 	});
 	const session = deps.session;
+	const readSessionEntries = deps.readSessionEntries;
 	registry.register({
 		...builtin(
 			lazyTool(contextToolSurface, async () => {
@@ -116,6 +123,20 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 				const { probeWorkspace } = await import("../domains/session/workspace/index.js");
 				return createContextTool({
 					...skillToolDeps,
+					...(readSessionEntries
+						? {
+								session: {
+									hasSession: () => session.current() !== null,
+									readEntries: readSessionEntries,
+									activeLeafTurnId: () => {
+										const meta = session.current();
+										return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+									},
+									appendEntry: (entry) => session.appendEntry(entry),
+									...(deps.onContextRecalled ? { onRecalled: deps.onContextRecalled } : {}),
+								},
+							}
+						: {}),
 					workspace: {
 						hasSession: () => session.current() !== null,
 						getSnapshot: () => session.current()?.workspace ?? null,

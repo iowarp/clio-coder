@@ -1,0 +1,242 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { EMPTY_WORKING_SET_VIEW } from "../../src/domains/context/working-set/contract.js";
+import { planEviction } from "../../src/domains/context/working-set/engine.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { renderMarker } from "../../src/domains/context/working-set/marker.js";
+import { ageHorizonPolicy } from "../../src/domains/context/working-set/policies/age-horizon.js";
+import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
+import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+
+const BODY = `${"observation line\n".repeat(60)}final secret body`;
+
+const TOOL_MARKER = renderMarker({
+	ref: { entry: "t1" },
+	reason: "age_horizon",
+	toolName: "read",
+	text: BODY,
+});
+
+function base(
+	turnId: string,
+	parentTurnId: string | null,
+): { turnId: string; parentTurnId: string | null; timestamp: string } {
+	return { turnId, parentTurnId, timestamp: `2026-08-08T00:00:${turnId.slice(-2).padStart(2, "0")}.000Z` };
+}
+
+function user(turnId: string, parentTurnId: string | null): MessageEntry {
+	return { kind: "message", ...base(turnId, parentTurnId), role: "user", payload: { text: `ask ${turnId}` } };
+}
+
+function assistant(turnId: string, parentTurnId: string, content: unknown[], usageTokens: number): MessageEntry {
+	return {
+		kind: "message",
+		...base(turnId, parentTurnId),
+		role: "assistant",
+		payload: {
+			content,
+			thinking: "payload-level reasoning",
+			stopReason: "stop",
+			usage: { input: usageTokens, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: usageTokens },
+		},
+	};
+}
+
+function toolCall(turnId: string, parentTurnId: string): MessageEntry {
+	return {
+		kind: "message",
+		...base(turnId, parentTurnId),
+		role: "tool_call",
+		payload: { toolCallId: "call-1", name: "read", args: { path: "src/huge.ts" } },
+	};
+}
+
+function toolResult(turnId: string, parentTurnId: string): MessageEntry {
+	return {
+		kind: "message",
+		...base(turnId, parentTurnId),
+		role: "tool_result",
+		payload: {
+			toolCallId: "call-1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: BODY }], details: { paths: ["src/huge.ts"], kind: "file" } },
+			isError: false,
+			resultSummary: { bytes: BODY.length, truncated: false },
+		},
+	};
+}
+
+function eviction(turnId: string, parentTurnId: string): SessionEntry {
+	return {
+		kind: "contextEviction",
+		...base(turnId, parentTurnId),
+		policyId: "age-horizon",
+		trigger: "pressure",
+		evicted: [
+			{ ref: { entry: "t1" }, reason: "age_horizon", tokensFreed: 260, marker: TOOL_MARKER },
+			{ ref: { entry: "a1" }, reason: "thinking_turn_closed", tokensFreed: 40, marker: "" },
+		],
+		tokensBefore: 1000,
+		tokensAfter: 700,
+		pressureBefore: 0.86,
+		snapshotIdBefore: null,
+	};
+}
+
+/** u1 a1 c1 t1 u2 e1 a2: the event sits between the two assistant turns. */
+function ledger(): SessionEntry[] {
+	return [
+		user("u1", null),
+		assistant(
+			"a1",
+			"u1",
+			[
+				{ type: "thinking", thinking: "long reasoning" },
+				{ type: "text", text: "reading it" },
+			],
+			90_000,
+		),
+		toolCall("c1", "a1"),
+		toolResult("t1", "c1"),
+		user("u2", "t1"),
+		eviction("e1", "u2"),
+		assistant("a2", "u2", [{ type: "text", text: "done" }], 12_000),
+	];
+}
+
+function payloadOf(entry: SessionEntry | undefined): Record<string, unknown> {
+	assert.ok(entry && entry.kind === "message");
+	return entry.payload as Record<string, unknown>;
+}
+
+test("project: an evicted tool result keeps its pairing and carries the marker", () => {
+	const entries = ledger();
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	const payload = payloadOf(projected[3]) as {
+		toolCallId?: string;
+		toolName?: string;
+		result?: {
+			content?: Array<{ text?: string }>;
+			details?: { paths?: unknown; kind?: unknown; workingSet?: unknown };
+		};
+	};
+	assert.equal(payload.toolCallId, "call-1");
+	assert.equal(payload.toolName, "read");
+	assert.equal(payload.result?.content?.[0]?.text, TOOL_MARKER);
+	assert.deepEqual(payload.result?.details?.paths, ["src/huge.ts"]);
+	assert.equal(payload.result?.details?.kind, "file");
+	assert.deepEqual(payload.result?.details?.workingSet, { evicted: true, reason: "age_horizon", ref: "t1" });
+	assert.equal(JSON.stringify(payload).includes("final secret body"), false);
+	// The ledger entry itself is untouched: eviction is a projection.
+	assert.equal(JSON.stringify(entries[3]).includes("final secret body"), true);
+});
+
+test("project: an evicted assistant loses both thinking shapes", () => {
+	const entries = ledger();
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	const payload = payloadOf(projected[1]) as { content?: unknown[]; thinking?: unknown };
+	assert.deepEqual(payload.content, [{ type: "text", text: "reading it" }]);
+	assert.equal(payload.thinking, undefined);
+	assert.equal(payloadOf(entries[1]).thinking, "payload-level reasoning");
+});
+
+test("project: an assistant whose only content was thinking keeps it", () => {
+	// Local reasoning models close a turn with reasoning and no answer text.
+	// Projected to content: [] the provider would reject the message, and
+	// dropped entirely the replay would show two user turns back to back.
+	const entries = ledger();
+	const onlyThinking = entries[1] as MessageEntry;
+	onlyThinking.payload = {
+		...(onlyThinking.payload as object),
+		content: [{ type: "thinking", thinking: "only reasoning" }],
+	};
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	const payload = payloadOf(projected[1]) as {
+		content?: unknown[];
+		thinking?: unknown;
+		contextUsageInvalidated?: unknown;
+	};
+	assert.deepEqual(payload.content, [{ type: "thinking", thinking: "only reasoning" }]);
+	assert.equal(payload.thinking, "payload-level reasoning");
+	// Usage invalidation is the event's, not the eviction's, and still applies.
+	assert.equal(payload.contextUsageInvalidated, true);
+});
+
+test("plan: a read result without details.paths takes its marker path from the call's argument", () => {
+	// The read tool records no `paths`; the model still needs to know which
+	// file a marker stands for to choose between recall and re-read.
+	const entries = ledger().filter((entry) => entry.kind !== "contextEviction");
+	const result = entries[3] as MessageEntry;
+	result.payload = {
+		toolCallId: "call-1",
+		toolName: "read",
+		result: { content: [{ type: "text", text: BODY }] },
+	};
+	const plan = planEviction(ageHorizonPolicy, {
+		entries,
+		view: EMPTY_WORKING_SET_VIEW,
+		cwd: null,
+		settings: { enabled: true, policy: "age-horizon", target: 0.6, protectLastTurns: 1, minEvictableTokens: 0 },
+		pressure: { tokens: 1, contextWindow: 1, threshold: 0.8, target: 0.6 },
+		estimateTokens: (entry) => JSON.stringify(entry).length / 4,
+	});
+	const item = plan?.items.find((candidate) => candidate.ref.entry === "t1");
+	assert.ok(item);
+	assert.match(item.marker, /^\[evicted ref=t1 reason=age_horizon tool=read path=src\/huge\.ts size=/);
+	// The recorded marker is the one that was priced.
+	assert.ok(item.tokensFreed > 0);
+});
+
+test("project: is idempotent", () => {
+	const entries = ledger();
+	const view = foldWorkingSet(entries);
+	const once = projectWorkingSet(entries, view);
+	const twice = projectWorkingSet(once, view);
+	assert.deepEqual(twice, once);
+	assert.equal(JSON.stringify(twice), JSON.stringify(once));
+});
+
+test("project: entries the view does not name are returned by reference", () => {
+	const entries = ledger();
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	assert.equal(projected[0], entries[0]);
+	assert.equal(projected[2], entries[2]);
+	assert.equal(projected[4], entries[4]);
+	assert.equal(projected[5], entries[5]);
+	assert.equal(projected[6], entries[6]);
+});
+
+test("project: an empty view is a no-op", () => {
+	const entries = ledger();
+	const projected = projectWorkingSet(entries, EMPTY_WORKING_SET_VIEW);
+	assert.equal(projected.length, entries.length);
+	for (let i = 0; i < entries.length; i += 1) assert.equal(projected[i], entries[i]);
+});
+
+test("project: usage recorded before the event stops anchoring the estimate", () => {
+	const entries = ledger();
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	assert.equal(payloadOf(projected[1]).contextUsageInvalidated, true);
+	// The assistant turn after the event measured the projected prompt, so its
+	// usage is still the honest anchor.
+	assert.equal(payloadOf(projected[6]).contextUsageInvalidated, undefined);
+	assert.equal(payloadOf(entries[1]).contextUsageInvalidated, undefined);
+});
+
+test("project: a recall leaves the marker in place; the body rides the recall tool result", () => {
+	const entries = ledger();
+	entries.push({
+		kind: "contextRecall",
+		...base("r1", "u2"),
+		ref: { entry: "t1" },
+		trigger: "tool",
+		tokensReadmitted: 260,
+	});
+	const before = projectWorkingSet(ledger(), foldWorkingSet(ledger()));
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	// Same marker bytes before and after the recall: the prefix stays cache-stable.
+	assert.equal(JSON.stringify(projected[3]), JSON.stringify(before[3]));
+	assert.equal(JSON.stringify(projected[3]).includes("final secret body"), false);
+	// The thinking eviction is unaffected by a recall of a different ref.
+	assert.equal(payloadOf(projected[1]).thinking, undefined);
+});

@@ -52,6 +52,8 @@ Usage:
   clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
   clio-coder context reset [--all] [--yes]  clear accumulated project context artifacts
   clio-coder context index [--json]  build the codewiki index without model calls
+  clio-coder context replay --sessions <path>...  compare working-set policies over Clio ledgers
+  clio-coder context working-set --session <id|path>  inspect one session's working-set state
   clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
   clio-coder agents               list discovered agent recipes

@@ -276,6 +276,75 @@ export interface WorkerRunEntry extends BaseSessionEntry {
 	parentToolCallId?: string;
 }
 
+/**
+ * Working-set layer (context domain) ledger records. Eviction is a projection:
+ * these entries say what left the model's working set and what came back; the
+ * original bodies stay in the ledger untouched. The context domain owns the
+ * semantics (`src/domains/context/working-set/contract.ts`); the session
+ * domain owns the wire shape because it owns the ledger format.
+ */
+export const EVICTION_REASONS = [
+	"superseded_read",
+	"stale_after_mutation",
+	"listing_consumed",
+	"failure_resolved",
+	"thinking_turn_closed",
+	"age_horizon",
+	"operator",
+] as const;
+export type EvictionReason = (typeof EVICTION_REASONS)[number];
+
+export const EVICTION_TRIGGERS = ["pressure", "operator"] as const;
+export type EvictionTrigger = (typeof EVICTION_TRIGGERS)[number];
+
+export const RECALL_TRIGGERS = ["tool", "operator"] as const;
+export type RecallTrigger = (typeof RECALL_TRIGGERS)[number];
+
+/**
+ * Identity of an evictable unit: the `turnId` of a ledger entry. For a
+ * `tool_result` message the unit is the result body; for an `assistant`
+ * message the unit is every thinking block it carries. Partial (per-block)
+ * eviction is deliberately not modelled; add a `block` field here when it is.
+ */
+export interface WorkingSetRef {
+	entry: string;
+}
+
+export interface EvictedItem {
+	ref: WorkingSetRef;
+	reason: EvictionReason;
+	/** Estimated tokens the projection removes for this item (marker cost already subtracted). */
+	tokensFreed: number;
+	/**
+	 * Byte-stable one-line stub the projection renders in place of the body.
+	 * Empty for thinking-block eviction, which removes without a marker.
+	 */
+	marker: string;
+	/** Ref key of the entry that superseded or resolved this one, when the reason names one. */
+	by?: string;
+}
+
+export interface ContextEvictionEntry extends BaseSessionEntry {
+	kind: "contextEviction";
+	policyId: string;
+	trigger: EvictionTrigger;
+	evicted: ReadonlyArray<EvictedItem>;
+	tokensBefore: number;
+	tokensAfter: number;
+	/** Used/window ratio that fired the event; null for operator-triggered events. */
+	pressureBefore: number | null;
+	snapshotIdBefore: string | null;
+}
+
+export interface ContextRecallEntry extends BaseSessionEntry {
+	kind: "contextRecall";
+	ref: WorkingSetRef;
+	trigger: RecallTrigger;
+	tokensReadmitted: number;
+	/** The tool call that performed the recall, when `trigger` is `tool`. */
+	toolCallId?: string;
+}
+
 export type SessionEntry =
 	| MessageEntry
 	| BashExecutionEntry
@@ -291,7 +360,9 @@ export type SessionEntry =
 	| SkillActivationEntry
 	| TaskLedgerEntry
 	| DecisionLedgerEntry
-	| WorkerRunEntry;
+	| WorkerRunEntry
+	| ContextEvictionEntry
+	| ContextRecallEntry;
 
 export type SessionFileEntry = SessionHeader | SessionEntry;
 
@@ -317,6 +388,8 @@ export const SESSION_ENTRY_KINDS = [
 	"taskLedger",
 	"decisionLedger",
 	"workerRun",
+	"contextEviction",
+	"contextRecall",
 ] as const;
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];
@@ -477,6 +550,21 @@ export function isSessionHeader(value: unknown): value is SessionHeader {
 	);
 }
 
+function isWorkingSetRef(value: unknown): value is WorkingSetRef {
+	return isRecord(value) && isString(value.entry);
+}
+
+function isEvictedItem(value: unknown): value is EvictedItem {
+	return (
+		isRecord(value) &&
+		isWorkingSetRef(value.ref) &&
+		isOneOf(value.reason, EVICTION_REASONS) &&
+		isNumber(value.tokensFreed) &&
+		isString(value.marker) &&
+		isOptionalString(value.by)
+	);
+}
+
 export function isSessionEntry(value: unknown): value is SessionEntry {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
@@ -566,6 +654,24 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isString(v.agentId) &&
 				isWorkerRunRuntime(v.runtime) &&
 				isOptionalString(v.parentToolCallId)
+			);
+		case "contextEviction":
+			return (
+				isString(v.policyId) &&
+				isOneOf(v.trigger, EVICTION_TRIGGERS) &&
+				Array.isArray(v.evicted) &&
+				v.evicted.every(isEvictedItem) &&
+				isNumber(v.tokensBefore) &&
+				isNumber(v.tokensAfter) &&
+				(v.pressureBefore === null || isNumber(v.pressureBefore)) &&
+				(v.snapshotIdBefore === null || isString(v.snapshotIdBefore))
+			);
+		case "contextRecall":
+			return (
+				isWorkingSetRef(v.ref) &&
+				isOneOf(v.trigger, RECALL_TRIGGERS) &&
+				isNumber(v.tokensReadmitted) &&
+				isOptionalString(v.toolCallId)
 			);
 	}
 	return false;

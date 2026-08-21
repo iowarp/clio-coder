@@ -15,7 +15,7 @@ import {
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { CompactionTrigger } from "../domains/session/entries.js";
+import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -42,8 +42,8 @@ export interface TurnMiddleware {
 		terminalToolResult?: { toolCallId: string; toolName: string },
 	): Promise<void>;
 	fireCompactionHook(
-		stage: "mask_observations" | "llm_summary",
-		trigger: CompactionTrigger,
+		stage: "mask_observations" | "working_set_evict" | "working_set_recall" | "llm_summary",
+		trigger: CompactionTrigger | EvictionTrigger | RecallTrigger,
 		tokensBefore?: number,
 	): void;
 	flushPendingReminders(): string;
@@ -240,9 +240,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		},
 
 		/**
-		 * Observe-only lifecycle point fired before each compaction stage, at the
-		 * existing CompactionBegin emit sites. Consumers record telemetry or state
-		 * ahead of context loss; returned effects are discarded by design.
+		 * Observe-only lifecycle point fired before each compaction or working-set
+		 * stage. Consumers record telemetry or state around projected context
+		 * changes; returned effects are discarded by design.
 		 */
 		fireCompactionHook(stage, trigger, tokensBefore): void {
 			if (!deps.middleware) return;

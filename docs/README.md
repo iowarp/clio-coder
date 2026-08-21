@@ -15,6 +15,7 @@ current source, tests, and `CHANGELOG.md`.
 | --- | --- |
 | Commands, slash commands, operating posture, keybindings, dispatch, verification, and troubleshooting | [commands-and-modes.md](commands-and-modes.md) ([Interactive Blueprint](html/commands_blueprint.html)) |
 | Context window resolution, per-model probe capabilities, token accounting, per-turn snapshots, compaction, and context priming | [context-engine.md](context-engine.md) ([Interactive Blueprint](html/context_blueprint.html)) |
+| Non-destructive working-set eviction, markers, eviction policies, recall by ref, and the `contextEviction` / `contextRecall` records | [context-working-set.md](context-working-set.md) |
 | Runtime targets, local model configuration, fleet profiles, and auth | [configuration-and-targets.md](configuration-and-targets.md) ([Interactive Blueprint](html/configuration_blueprint.html)) |
 | Every environment variable the runtime reads: guardrail overrides, directory layout, debug toggles, and internal plumbing | [environment-variables.md](environment-variables.md) ([Interactive Blueprint](html/environment_blueprint.html)) |
 | Argonne ALCF Sophia/Metis inference targets over Globus OAuth | [alcf-provider.md](alcf-provider.md) ([Interactive Blueprint](html/alcf_blueprint.html)) |
@@ -43,12 +44,12 @@ current source, tests, and `CHANGELOG.md`.
 | Multi-node fleet dispatch: process-safe admission, attested workers, measured routing, activation, agent automation, topologies, and receipts | [fleet-dispatch.md](fleet-dispatch.md) ([Interactive Blueprint](html/fleet_dispatch_blueprint.html)) |
 | Multi-process capacity leases, heartbeat TTLs, cross-process locks, and cluster drain controls | [capacity-and-scheduling.md](capacity-and-scheduling.md) ([Interactive Blueprint](html/capacity_scheduling_blueprint.html)) |
 | Executable multi-node demo with reviewer gate and receipt provenance walkthrough | [fleet-demo-runbook.md](fleet-demo-runbook.md) |
-| Session lifecycle, on-disk ledger format v3, `/tree` active-path lineage, `/fork`, `/resume`, checkpoints, and recovery | [session-lifecycle.md](session-lifecycle.md) ([Interactive Blueprint](html/session_lifecycle_blueprint.html)) |
+| Session lifecycle, on-disk ledger format v4, `/tree` active-path lineage, `/fork`, `/resume`, checkpoints, and recovery | [session-lifecycle.md](session-lifecycle.md) ([Interactive Blueprint](html/session_lifecycle_blueprint.html)) |
 | Agent Client Protocol (ACP) server over stdio, tool mediation, non-stall permissions, and error taxonomy | [acp.md](acp.md) ([Interactive Blueprint](html/acp_blueprint.html)) |
 | Version registry and migration policies for all 9 serialized artifact schemas | [artifact-versions.md](artifact-versions.md) ([Interactive Blueprint](html/artifact_versions_blueprint.html)) |
 | Process exit code taxonomy, `--help` standard, machine-readable JSON streaming, and headless output contracts | [exit-codes-and-output.md](exit-codes-and-output.md) ([Interactive Blueprint](html/exit_codes_blueprint.html)) |
 | Actionable error remediation and diagnostics keyed by exact user-facing messages | [troubleshooting.md](troubleshooting.md) ([Interactive Blueprint](html/troubleshooting_blueprint.html)) |
-| Canonical definitions of 40 core architectural concepts mapped to `src/` types | [glossary.md](glossary.md) ([Interactive Blueprint](html/glossary_blueprint.html)) |
+| Canonical definitions of 45 core architectural concepts mapped to `src/` types | [glossary.md](glossary.md) ([Interactive Blueprint](html/glossary_blueprint.html)) |
 | Complete source-to-documentation mapping matrix and subsystem coverage status | [documentation-coverage.md](documentation-coverage.md) |
 | Issue-driven development lifecycle: file-ticket through release, label taxonomy, and dogfooding setup | [development-pipeline.md](development-pipeline.md) |
 | Proactive task memory architecture, session task bank, intervention rules, and handoff carrying | [proactive-memory.md](proactive-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |

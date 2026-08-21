@@ -14,6 +14,8 @@
  */
 
 import { ToolNames } from "../core/tool-names.js";
+import { foldWorkingSet } from "../domains/context/working-set/fold.js";
+import { compactionCut } from "../domains/context/working-set/visible.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -835,13 +837,6 @@ function truncateAtTurn(entries: ReadonlyArray<SessionEntry>, uptoTurnId?: strin
 	return entries.slice(0, index + 1);
 }
 
-function latestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (entries[i]?.kind === "compactionSummary") return i;
-	}
-	return -1;
-}
-
 function toolCallIdsInEntry(entry: SessionEntry): string[] {
 	if (entry.kind !== "message") return [];
 	if (entry.role === "tool_call") return [extractToolCall(entry).id];
@@ -919,19 +914,13 @@ export function selectReplayEntries(
 ): SessionEntry[] {
 	const active = filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId);
 	const entries = truncateAtTurn(active, options.uptoTurnId);
-	const compactionIndex = latestCompactionIndex(entries);
-	if (compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
-
-	const compaction = entries[compactionIndex] as CompactionSummaryEntry;
-	const selected: SessionEntry[] = [compaction];
-	const firstKeptIndex = compaction.firstKeptTurnId
-		? entries.findIndex((entry) => entry.turnId === compaction.firstKeptTurnId)
-		: -1;
-	if (firstKeptIndex >= 0 && firstKeptIndex < compactionIndex) {
-		selected.push(...entries.slice(firstKeptIndex, compactionIndex));
-	}
-	selected.push(...entries.slice(compactionIndex + 1));
-	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, compactionIndex));
+	// The cut itself is the working-set layer's definition of "what the model
+	// can see", shared with the eviction policy input so the two cannot drift.
+	const cut = compactionCut(entries);
+	if (cut.compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
+	const compaction = entries[cut.compactionIndex] as CompactionSummaryEntry;
+	const selected: SessionEntry[] = [compaction, ...cut.visible];
+	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, cut.compactionIndex));
 }
 
 function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {
@@ -1043,6 +1032,11 @@ export function buildReplayAgentMessagesFromTurns(
 			// It reaches the model only when an operator shares it, and a share
 			// is already a user message by the time it lands in the ledger.
 			case "workerRun":
+			// Working-set entries are folded into a view by the context domain
+			// and applied as a projection before this builder runs; the
+			// entries themselves never become messages.
+			case "contextEviction":
+			case "contextRecall":
 				break;
 		}
 	}
@@ -1080,6 +1074,11 @@ export function rehydrateChatPanelFromTurns(
 	const pendingToolIds: string[] = [];
 	let runAssistantMessages: AgentMessage[] = [];
 	const selected = selectReplayEntries(turns, options);
+	// The transcript shows the ledger, never the projection: an evicted result
+	// still renders its full body here, tagged with the reason it left the
+	// model's working set. Folded once over the same active path the replay
+	// uses, so a /tree switch cannot tag a row from an abandoned branch.
+	const workingSet = foldWorkingSet(turns, options.activeLeafTurnId ?? options.uptoTurnId);
 	// One block per assignment, drawn where its first attempt started. Later
 	// attempts of the same assignment fold into that block as `↻` rail lines, so
 	// a failover replays as the one run it was rather than as two.
@@ -1127,6 +1126,7 @@ export function rehydrateChatPanelFromTurns(
 				}
 				if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
+					const evictedReason = workingSet.evicted.get(entry.turnId)?.reason;
 					const fallbackId = result.id ?? pendingToolIds.pop() ?? null;
 					if (fallbackId) {
 						const pendingIndex = pendingToolIds.indexOf(fallbackId);
@@ -1141,6 +1141,7 @@ export function rehydrateChatPanelFromTurns(
 							...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
 							...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
 							...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
+							...(evictedReason !== undefined ? { evictedReason } : {}),
 						} as ChatLoopEvent);
 					} else {
 						chatPanel.appendReplayBlock((width) =>
@@ -1154,6 +1155,7 @@ export function rehydrateChatPanelFromTurns(
 									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
 									...(result.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
 									...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
+									...(evictedReason !== undefined ? { evictedReason } : {}),
 								},
 								width,
 								{ unbounded: options.unboundedToolBodies === true },
@@ -1239,6 +1241,8 @@ export function rehydrateChatPanelFromTurns(
 			case "label":
 			case "taskLedger":
 			case "decisionLedger":
+			case "contextEviction":
+			case "contextRecall":
 				break;
 		}
 	}

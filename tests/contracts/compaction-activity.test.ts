@@ -528,6 +528,8 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 	});
 
 	it("a mask-stage auto compaction emits its own started -> completed pair", async () => {
+		const previousLegacyMask = process.env.CLIO_CODER_LEGACY_MASK;
+		process.env.CLIO_CODER_LEGACY_MASK = "1";
 		const bus = createSafeEventBus();
 		const activities = compactionActivities(bus);
 		// A stale, maskable tool observation followed by a recent protected turn.
@@ -604,7 +606,12 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 			}, seedMessages),
 		} as never);
 
-		await loop.submit("recent protected turn");
+		try {
+			await loop.submit("recent protected turn");
+		} finally {
+			if (previousLegacyMask === undefined) delete process.env.CLIO_CODER_LEGACY_MASK;
+			else process.env.CLIO_CODER_LEGACY_MASK = previousLegacyMask;
+		}
 
 		const started = activities.find((a) => a.status === "started" && a.message.includes("mask stage"));
 		ok(started, "the mask stage emits a started activity");

@@ -202,6 +202,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						return effects;
 					}
 					case "on_compaction":
+						// Recall grows the working set; it is an observability point, not
+						// context loss that should reactivate compacted task memory.
+						if (input.metadata?.stage === "working_set_recall") return NO_EFFECTS;
 						reactivateAfterCompaction = true;
 						return NO_EFFECTS;
 					case "turn_start": {

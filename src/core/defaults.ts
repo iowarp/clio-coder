@@ -4,6 +4,7 @@
  * exist. Users edit the file directly or through TUI overlays.
  */
 
+import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { GUARDRAIL_DEFAULTS, type GuardrailValues } from "./guardrails.js";
@@ -96,6 +97,32 @@ export interface CompactionSettings {
 	excludeLastTurns: number;
 	model?: string;
 	systemPrompt?: string;
+}
+
+/**
+ * Working-set layer settings (`context.workingSet`). The layer decides which
+ * tool-result bodies and thinking blocks leave the model's working set when
+ * pressure crosses `compaction.threshold`; it records evictions as ledger
+ * entries and never rewrites history. Defaults and prose live in
+ * src/domains/context/working-set/defaults.ts.
+ *
+ *   - enabled: master switch. Off skips eviction and goes straight to summary
+ *     compaction (the legacy destructive mask is only reachable through
+ *     CLIO_CODER_LEGACY_MASK=1).
+ *   - policy: candidate selection rule set.
+ *   - target: used/window ratio an applied event batches down to.
+ *   - protectLastTurns: recent user turns whose observations are never evicted.
+ *   - minEvictableTokens: results below this estimate are never evicted; the
+ *     marker would cost more than it saves.
+ */
+export type WorkingSetPolicyId = "age-horizon" | "structural-v1";
+
+export interface WorkingSetSettings {
+	enabled: boolean;
+	policy: WorkingSetPolicyId;
+	target: number;
+	protectLastTurns: number;
+	minEvictableTokens: number;
 }
 
 /**
@@ -357,6 +384,9 @@ export const DEFAULT_SETTINGS = {
 		threshold: 0.8,
 		excludeLastTurns: 6,
 	} as CompactionSettings,
+	context: {
+		workingSet: DEFAULT_WORKING_SET_SETTINGS,
+	},
 	retry: {
 		enabled: true,
 		maxRetries: 3,
@@ -610,9 +640,9 @@ keybindings: {}
 #   auto              master switch for the pre-request compaction trigger.
 #                     Manual /context compact always runs the LLM summary.
 #   threshold         pressure = estimated_tokens / context_window. Crossing
-#                     it masks stale tool observations first, then runs a
-#                     full LLM summary if pressure stays above the threshold.
-#   excludeLastTurns  recent user turns protected from observation masking.
+#                     it evicts from the working set first, then runs a full
+#                     LLM summary if pressure stays above the threshold.
+#   excludeLastTurns  recent turns protected only by the temporary legacy mask.
 #   model             optional pattern (e.g. provider/summary-model-id) for a
 #                     dedicated summarization model. Absent ⇒ orchestrator target.
 #   systemPrompt      optional path to a prompt-override file.
@@ -622,6 +652,23 @@ compaction:
   excludeLastTurns: 6
   # model: provider/summary-model-id
   # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
+
+# Non-destructive working-set eviction before summary compaction.
+#   enabled             false skips eviction and goes directly to the summary stage.
+#   policy              structural-v1 evicts by what the session did since
+#                       (re-reads, edits, resolved failures, consumed listings)
+#                       and falls back to age only under pressure;
+#                       age-horizon is the previous age-based selection.
+#   target              pressure ratio an applied eviction batches down to.
+#   protectLastTurns    recent user turns whose observations remain in the working set.
+#   minEvictableTokens  entries below this estimate remain in the working set.
+context:
+  workingSet:
+    enabled: true
+    policy: structural-v1
+    target: 0.6
+    protectLastTurns: 6
+    minEvictableTokens: 200
 
 # Transient provider/stream retry controls for interactive chat.
 # Retryable errors include overloads, rate limits, 5xx responses, network

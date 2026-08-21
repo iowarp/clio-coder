@@ -3,9 +3,10 @@ import type { SessionContract, SessionEntry } from "../domains/session/index.js"
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
-import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "./chat-renderer.js";
+import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
+import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
@@ -159,7 +160,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const replayOptions = leafTurnId ? { activeLeafTurnId: leafTurnId } : {};
 					deps.resetTranscript();
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns, replayOptions);
+					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
 					deps.chat.resetForSession(leafTurnId, replayMessages);
 					rescopeToBranch(session, turns, leafTurnId);
 				} catch (error) {
@@ -209,7 +210,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const turns = deps.readStructuredEntries(sessionId);
 					deps.resetTranscript();
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns, { uptoTurnId: turnId });
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
+					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
 					deps.chat.resetForSession(turnId, replayMessages);
 					// The same branch the transcript above was just scoped to. Without the
 					// leaf, /cost, the footer Σ, and the last-turn line kept reporting the
@@ -287,8 +288,11 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		try {
 			const turns = deps.readStructuredEntries(forkedSessionId);
 			rehydrateChatPanelFromTurns(deps.chatPanel, turns);
-			const replayMessages = buildReplayAgentMessagesFromTurns(turns);
 			const leafTurnId = session.tree(forkedSessionId).leafId ?? parentTurnId;
+			const replayMessages = buildModelReplayAgentMessagesFromTurns(
+				turns,
+				leafTurnId ? { activeLeafTurnId: leafTurnId } : {},
+			);
 			deps.chat.resetForSession(leafTurnId, replayMessages);
 			rescopeToBranch(session, turns, leafTurnId);
 		} catch (error) {
