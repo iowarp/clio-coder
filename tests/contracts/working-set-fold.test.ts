@@ -50,7 +50,7 @@ function recall(turnId: string, parentTurnId: string, ref: string): SessionEntry
 	};
 }
 
-test("fold: eviction then recall removes the key and counts churn", () => {
+test("fold: a recall counts churn and leaves the key evicted", () => {
 	const entries: SessionEntry[] = [
 		message("u1", null, "user"),
 		message("a1", "u1", "assistant"),
@@ -60,7 +60,7 @@ test("fold: eviction then recall removes the key and counts churn", () => {
 		recall("r1", "t2", "t1"),
 	];
 	const view = foldWorkingSet(entries);
-	assert.deepEqual([...view.evicted.keys()], ["t2"]);
+	assert.deepEqual([...view.evicted.keys()], ["t1", "t2"]);
 	assert.equal(view.evicted.get("t2")?.evictedAtTurnId, "e1");
 	assert.equal(view.evictionEvents, 1);
 	assert.equal(view.itemsEvicted, 2);

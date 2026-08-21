@@ -50,10 +50,13 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 			}
 			continue;
 		}
-		if (entry.kind === "contextRecall") {
-			recalls += 1;
-			evicted.delete(refKey(entry.ref));
-		}
+		// A recall does not un-evict. The recalled body rides the recall tool
+		// result at the tail of the working set, which is where the model asked
+		// for it and where it costs no cold prefix; readmitting it at the
+		// original position would duplicate the bytes and invalidate the cache
+		// for everything after it. The marker stays, byte-stable, and a second
+		// recall of the same ref is the churn signal.
+		if (entry.kind === "contextRecall") recalls += 1;
 	}
 	return { evicted, evictionEvents, itemsEvicted, recalls, lastPolicyId, lastEvictionTurnId };
 }
