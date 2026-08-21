@@ -197,7 +197,10 @@ test("age-horizon: the floor measures the body the marker replaces, not the payl
 	assert.ok(fat && fat.kind === "message");
 	const payload = fat.payload as { result: Record<string, unknown> };
 	payload.result = { ...payload.result, details: { exec: { env: "x".repeat(1_500), argv: ["true"] } } };
-	assert.ok(estimateTokens(fat) > DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens, "the envelope alone clears the floor");
+	assert.ok(
+		estimateTokens(fat) > DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens,
+		"the envelope alone clears the floor",
+	);
 
 	const selected = new Set(agePolicy.select(policyInput(entries)).map((c) => c.ref.entry));
 	assert.equal(selected.has("t3"), false);
