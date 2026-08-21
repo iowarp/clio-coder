@@ -179,6 +179,23 @@ test("structural: an edit makes the earlier read stale and names the mutation (c
 	assert.equal(candidates.has(edit), false);
 });
 
+test("structural: a failed edit changes nothing, so the read it targeted is not stale", () => {
+	const ledger = new Ledger();
+	ledger.user();
+	const read = ledger.read("src/b.ts");
+	ledger.user();
+	ledger.call("edit", { path: "src/b.ts", edits: [{ oldText: "missing", newText: "b" }] }, "edit: oldText not found", {
+		isError: true,
+	});
+	ledger.pad();
+	assert.equal(byRef(select(ledger.entries)).has(read), false, "the failed edit is not a mutation");
+
+	ledger.user();
+	const edit = ledger.edit("src/b.ts");
+	ledger.pad();
+	assert.equal(byRef(select(ledger.entries)).get(read)?.by, edit, "the first successful edit names the staleness");
+});
+
 test("structural: staleness outranks supersession when both apply", () => {
 	const ledger = new Ledger();
 	ledger.user();
