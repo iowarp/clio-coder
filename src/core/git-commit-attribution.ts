@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	accessSync,
+	chmodSync,
+	existsSync,
+	constants as fsConstants,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import { CLIO_COMMIT_TRAILERS, type CommitAttributionEvidence } from "./commit-attribution.js";
@@ -260,11 +270,22 @@ function installManagedHook(directory: string, name: string): void {
 	}
 }
 
+function managedHooksDirectoryIsIntact(directory: string): boolean {
+	try {
+		for (const name of MANAGED_HOOK_NAMES) {
+			const hook = join(directory, name);
+			if (readFileSync(hook, "utf8") !== MANAGED_HOOK_SCRIPT) return false;
+			accessSync(hook, fsConstants.X_OK);
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function managedHooksDirectory(): string {
 	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}`);
-	// Installed once per process; one stat afterwards confirms the Clio-owned
-	// directory is still there rather than re-reading all of its wrappers.
-	if (installedHooksDirectory === directory && existsSync(join(directory, "prepare-commit-msg"))) return directory;
+	if (installedHooksDirectory === directory && managedHooksDirectoryIsIntact(directory)) return directory;
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	for (const name of MANAGED_HOOK_NAMES) installManagedHook(directory, name);
 	installedHooksDirectory = directory;

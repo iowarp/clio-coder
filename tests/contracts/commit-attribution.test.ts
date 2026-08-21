@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -54,6 +54,14 @@ function commit(
 
 function message(root: string): string {
 	return execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" });
+}
+
+function managedHooksPath(env: NodeJS.ProcessEnv): string | undefined {
+	const count = Number(env.GIT_CONFIG_COUNT ?? "0");
+	for (let index = 0; index < count; index += 1) {
+		if (env[`GIT_CONFIG_KEY_${index}`] === "core.hooksPath") return env[`GIT_CONFIG_VALUE_${index}`];
+	}
+	return undefined;
 }
 
 describe("commit attribution message policy", () => {
@@ -270,6 +278,32 @@ describe("managed prepare-commit-msg attribution", () => {
 		strictEqual(message(target).includes(CLIO_COMMIT_IDENTITY), false, "the target repository is not attributed");
 	});
 
+	it("repairs every cached managed hook wrapper before reuse", () => {
+		resetGitCommitAttributionCachesForTests();
+		const root = initRepository();
+		const first = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
+		const hooks = managedHooksPath(first.env);
+		ok(hooks);
+
+		const corrupted = join(hooks, "pre-commit");
+		const deleted = join(hooks, "commit-msg");
+		writeFileSync(corrupted, "#!/bin/sh\nexit 23\n");
+		rmSync(deleted);
+		const repaired = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
+
+		ok(readFileSync(corrupted, "utf8").includes("Clio Coder managed Git hook"));
+		ok(existsSync(deleted), "a missing sibling wrapper is recreated");
+		stage(root, "a.txt", "a\n");
+		strictEqual(
+			spawnSync("git", ["-C", root, "commit", "-q", "-m", "Repaired wrappers"], {
+				env: repaired.env,
+				encoding: "utf8",
+			}).status,
+			0,
+		);
+		ok(message(root).includes(CLIO_COMMIT_TRAILERS.assisted));
+	});
+
 	it("runs under --no-verify, skips amend and cherry-pick history replay, and honors disable", () => {
 		const root = initRepository();
 		stage(root, "seed.txt", "seed\n");
@@ -343,32 +377,25 @@ describe("managed prepare-commit-msg attribution", () => {
 	});
 
 	it("reuses the repository probe per cwd within the cache window and re-probes after it is dropped", () => {
-		const hooksPathOf = (env: NodeJS.ProcessEnv): string | undefined => {
-			const count = Number(env.GIT_CONFIG_COUNT ?? "0");
-			for (let index = 0; index < count; index += 1) {
-				if (env[`GIT_CONFIG_KEY_${index}`] === "core.hooksPath") return env[`GIT_CONFIG_VALUE_${index}`];
-			}
-			return undefined;
-		};
 		resetGitCommitAttributionCachesForTests();
 		const root = mkdtempSync(join(tmpdir(), "clio attribution plain "));
 		const outside = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
-		strictEqual(hooksPathOf(outside.env), undefined, "a plain directory gets no managed hooks");
+		strictEqual(managedHooksPath(outside.env), undefined, "a plain directory gets no managed hooks");
 		strictEqual(outside.diagnostic, null);
 
 		execFileSync("git", ["init", "-q", root]);
 		const cached = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
-		strictEqual(hooksPathOf(cached.env), undefined, "the probe taken moments ago is reused for the same cwd");
+		strictEqual(managedHooksPath(cached.env), undefined, "the probe taken moments ago is reused for the same cwd");
 
 		resetGitCommitAttributionCachesForTests();
 		const fresh = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
-		match(hooksPathOf(fresh.env) ?? "", /git-hooks\/v2$/u, "a fresh probe sees the new repository");
+		match(managedHooksPath(fresh.env) ?? "", /git-hooks\/v2$/u, "a fresh probe sees the new repository");
 		const again = withManagedGitCommitAttributionEnvironment(process.env, { cwd: root, enabled: true });
-		strictEqual(hooksPathOf(again.env), hooksPathOf(fresh.env), "the installed hooks directory is reused");
+		strictEqual(managedHooksPath(again.env), managedHooksPath(fresh.env), "the installed hooks directory is reused");
 
 		const elsewhere = mkdtempSync(join(tmpdir(), "clio attribution elsewhere "));
 		const other = withManagedGitCommitAttributionEnvironment(process.env, { cwd: elsewhere, enabled: true });
-		strictEqual(hooksPathOf(other.env), undefined, "a different cwd is probed on its own");
+		strictEqual(managedHooksPath(other.env), undefined, "a different cwd is probed on its own");
 	});
 
 	it("works in a worktree whose paths contain spaces", () => {
