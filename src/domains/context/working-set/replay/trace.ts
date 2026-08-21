@@ -1,4 +1,5 @@
 import type { SessionEntry } from "../../../session/entries.js";
+import { isTurnStart } from "../horizon.js";
 
 /** One active-path Clio ledger prepared for deterministic replay. */
 export interface Trace {
@@ -10,8 +11,7 @@ export interface Trace {
 
 /** Turn boundaries shared by the live age horizon and replay runner. */
 export function isReplayTurnStart(entry: SessionEntry): boolean {
-	if (entry.kind === "bashExecution" || entry.kind === "branchSummary") return true;
-	return entry.kind === "message" && entry.role === "user";
+	return isTurnStart(entry);
 }
 
 export function countReplayTurns(entries: ReadonlyArray<SessionEntry>): number {

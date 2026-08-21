@@ -41,7 +41,9 @@ async function collectLedgerFiles(input: string, out: Set<string>): Promise<void
 		return;
 	}
 	if (facts.isFile()) {
-		if (basename(path) === "current.jsonl") out.add(path);
+		// Directory discovery is intentionally limited to current.jsonl below;
+		// an explicit JSONL path may also be a frozen synthetic fixture.
+		if (path.endsWith(".jsonl")) out.add(path);
 		return;
 	}
 	if (!facts.isDirectory()) return;
