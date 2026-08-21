@@ -102,7 +102,13 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	// reported as mixed rather than silently dropping the unreported block.
 	const estimated = estimateReasoningTextTokens(assistantThinkingText(message));
 	if (estimated !== null) {
-		next.reasoningTokens += estimated;
+		// A chars/4 estimate over displayed thinking text can outrun what the
+		// provider says the call generated (summarized reasoning, a rail that
+		// re-renders the same block). Reported output is the ceiling for anything
+		// inferred: reasoning is part of that output, never more than it. No
+		// clamp exists upstream in the adapters, so it lives here, once.
+		const reportedOutput = usage ? finite(usage.output) : 0;
+		next.reasoningTokens += reportedOutput > 0 ? Math.min(estimated, reportedOutput) : estimated;
 		next.hadEstimatedReasoning = true;
 	}
 	return next;

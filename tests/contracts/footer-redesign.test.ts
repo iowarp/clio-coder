@@ -320,6 +320,38 @@ describe("IT3: Metric strip", () => {
 		ok(stripped.includes("$5.50"), `should have cost, got "${stripped}"`);
 	});
 
+	// The strip builds its chip from the same projection the transcript uses, so
+	// an estimated turn cannot read `r120` here and `r≈120` two lines above.
+	it("carries the reasoning provenance marker into the idle chips", () => {
+		const estimated = strip(
+			buildMetricStrip(
+				theme,
+				idleStatus,
+				mockThroughput,
+				{ ...mockLastTurn, reasoningTokenProvenance: "estimated" },
+				mockSessionTokens,
+				knownCost,
+				500,
+				100,
+			),
+		);
+		ok(estimated.includes("r≈120"), `an inferred count is marked, got "${estimated}"`);
+
+		const attested = strip(
+			buildMetricStrip(
+				theme,
+				idleStatus,
+				mockThroughput,
+				{ ...mockLastTurn, reasoningTokenProvenance: "provider" },
+				mockSessionTokens,
+				knownCost,
+				500,
+				100,
+			),
+		);
+		ok(attested.includes("r120") && !attested.includes("r≈120"), `an attested count is not, got "${attested}"`);
+	});
+
 	/**
 	 * Cost used to sit last and so was the first chip cut, which is how an
 	 * 80-column footer spent its whole budget on per-turn detail and dropped the
