@@ -1,6 +1,6 @@
 # Clio Coder Glossary
 
-This document defines core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
+This document defines the 45 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
 
 ---
 
@@ -165,3 +165,23 @@ This document defines core architectural concepts and terminology used throughou
 ### 40. Delegate
 - **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `delegation.agents` and invoked with `/delegate`. A delegate is a foreign harness, not a model target.
 - **Owning Type**: `DelegationAgentConfig` in `src/core/defaults.ts`.
+
+### 41. Working Set
+- **Definition**: The part of the session ledger the model receives on the next request. It is the ledger with the current eviction projection applied, and it exists only in memory; the ledger itself is never narrowed. Not to be confused with the context ledger, which is the accounting of how the window is spent.
+- **Owning Type**: `WorkingSetView` in `src/domains/context/working-set/contract.ts`.
+
+### 42. Projection
+- **Definition**: The pure, idempotent transform from ledger entries to the entries the replay builder hands the model. It substitutes markers for evicted bodies and drops thinking from closed turns, returning unaffected entries by reference. Nothing about it is persisted.
+- **Owning Type**: `projectWorkingSet` in `src/domains/context/working-set/project.ts`.
+
+### 43. Eviction
+- **Definition**: The decision that a tool-result body or an assistant turn's thinking leaves the working set, recorded as an append-only ledger entry with a typed reason. It removes nothing: the original entry stays in the ledger and stays visible in the transcript, `/resume`, `/fork`, and the HTML export.
+- **Owning Type**: `ContextEvictionEntry` in `src/domains/session/entries.ts`.
+
+### 44. Recall
+- **Definition**: Readmitting an evicted body by ref, through `context(scope="recall", ref=...)` for the model or `/context recall <ref>` for the operator. A recall does not un-evict: the marker stays where it was so the provider prefix cache is untouched, and repeated recalls of one ref are the churn signal.
+- **Owning Type**: `ContextRecallEntry` in `src/domains/session/entries.ts`; resolution in `resolveRecall` in `src/domains/context/working-set/recall.ts`.
+
+### 45. Marker
+- **Definition**: The byte-stable one-line stub the projection renders in place of an evicted body, naming the ref, the reason, the tool, the size, and the exact recall call. It carries no timestamp and no counter, because a marker whose bytes drifted between renders would cold-start the prefix cache on a turn that evicted nothing new.
+- **Owning Type**: `renderMarker` in `src/domains/context/working-set/marker.ts`.
