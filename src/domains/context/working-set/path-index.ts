@@ -48,6 +48,26 @@ export interface PathRange {
 	limit: number | null;
 }
 
+function rangeEnd(range: PathRange): number {
+	return range.limit === null ? Number.POSITIVE_INFINITY : range.offset + range.limit;
+}
+
+function isFullRead(range: PathRange | null): boolean {
+	return range !== null && range.offset === 0 && range.limit === null;
+}
+
+/**
+ * Whether a later read makes the earlier range redundant. A full read covers
+ * everything, including a tail read whose coverage is unknown. Any other read
+ * covers only an identical or containing range, and an unknown range covers
+ * nothing.
+ */
+export function covers(later: PathRange | null, earlier: PathRange | null): boolean {
+	if (isFullRead(later)) return true;
+	if (later === null || earlier === null) return false;
+	return later.offset <= earlier.offset && rangeEnd(later) >= rangeEnd(earlier);
+}
+
 export interface PathObservation {
 	/** The evictable unit: the tool_result entry, or the fileEntry entry for write/edit evidence. */
 	ref: WorkingSetRef;

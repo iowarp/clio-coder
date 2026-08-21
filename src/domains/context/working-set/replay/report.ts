@@ -31,6 +31,7 @@ function metricObject(metrics: ReplayMetrics, turnsToFirstSummaryCount: number):
 	return {
 		traces: metrics.traces,
 		retention: metrics.retention,
+		retentionCovered: metrics.retentionCovered,
 		retentionAt10: metrics.retentionAt10,
 		evictionPrecision: metrics.evictionPrecision,
 		tokensEvicted: metrics.tokensEvicted,
@@ -77,6 +78,7 @@ export function renderReplayJson(input: ReplayReportInput): string {
 			metrics: {
 				mean: metricObject(result.metrics.mean, result.metrics.turnsToFirstSummaryCount),
 				pooledRetention: result.metrics.pooledRetention,
+				pooledRetentionCovered: result.metrics.pooledRetentionCovered,
 				pooledRetentionAt10: result.metrics.pooledRetentionAt10,
 			},
 		})),
@@ -116,15 +118,15 @@ export function renderReplayMarkdown(input: ReplayReportInput): string {
 			"",
 			`## Budget ${budget}`,
 			"",
-			"| policy | n | retention (mean) | retention (pooled) | retention@10 (mean) | eviction precision (mean) | tokens evicted (mean) | eviction events (mean) | saturated events | turns to first summary (mean) |",
-			"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+			"| policy | n | retention (mean) | retention (pooled) | retention covered (mean) | retention covered (pooled) | retention@10 (mean) | eviction precision (mean) | tokens evicted (mean) | eviction events (mean) | saturated events | turns to first summary (mean) |",
+			"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 		);
 		for (const policy of input.config.policies) {
 			const result = input.results.find((entry) => entry.budgetTokens === budget && entry.policyId === policy);
 			if (result === undefined) continue;
 			const metrics = result.metrics.mean;
 			lines.push(
-				`| ${policy} | ${metrics.traces} | ${ratio(metrics.retention)} | ${ratio(result.metrics.pooledRetention)} | ${ratio(metrics.retentionAt10)} | ${ratio(metrics.evictionPrecision)} | ${quantity(metrics.tokensEvicted)} | ${quantity(metrics.evictionEvents)} | ${ratio(metrics.saturatedEvents)} | ${metrics.turnsToFirstSummary === null ? "—" : quantity(metrics.turnsToFirstSummary)} (n=${result.metrics.turnsToFirstSummaryCount}) |`,
+				`| ${policy} | ${metrics.traces} | ${ratio(metrics.retention)} | ${ratio(result.metrics.pooledRetention)} | ${ratio(metrics.retentionCovered)} | ${ratio(result.metrics.pooledRetentionCovered)} | ${ratio(metrics.retentionAt10)} | ${ratio(metrics.evictionPrecision)} | ${quantity(metrics.tokensEvicted)} | ${quantity(metrics.evictionEvents)} | ${ratio(metrics.saturatedEvents)} | ${metrics.turnsToFirstSummary === null ? "—" : quantity(metrics.turnsToFirstSummary)} (n=${result.metrics.turnsToFirstSummaryCount}) |`,
 			);
 		}
 	}
