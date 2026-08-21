@@ -1078,6 +1078,7 @@ export function rehydrateChatPanelFromTurns(
 	options: RehydrateChatPanelOptions = {},
 ): void {
 	const pendingToolIds: string[] = [];
+	let runAssistantMessages: AgentMessage[] = [];
 	const selected = selectReplayEntries(turns, options);
 	// One block per assignment, drawn where its first attempt started. Later
 	// attempts of the same assignment fold into that block as `↻` rail lines, so
@@ -1091,6 +1092,7 @@ export function rehydrateChatPanelFromTurns(
 		switch (entry.kind) {
 			case "message": {
 				if (entry.role === "user") {
+					runAssistantMessages = [];
 					const text = truncateReplayText(replayedUserText(entry));
 					if (text.length > 0) chatPanel.appendUser(text);
 					break;
@@ -1106,7 +1108,8 @@ export function rehydrateChatPanelFromTurns(
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
 						}
 						chatPanel.applyEvent({ type: "message_end", message });
-						chatPanel.applyEvent({ type: "agent_end", messages: [message] });
+						runAssistantMessages.push(message);
+						chatPanel.applyEvent({ type: "agent_end", messages: runAssistantMessages });
 					}
 					break;
 				}
