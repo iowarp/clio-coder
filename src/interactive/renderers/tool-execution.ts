@@ -1375,6 +1375,7 @@ export function renderBashTranscriptExecution(
 	execution: BashTranscriptExecution,
 	width: number,
 	expandKey?: string,
+	bodyOptions: ToolBodyRenderOptions = {},
 ): string[] {
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
 	const totalBytes = execution.totalBytes ?? shownBytes;
@@ -1438,5 +1439,5 @@ export function renderBashTranscriptExecution(
 			...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
 		},
 	};
-	return folded ? renderToolSubline(finished, width, expandKey) : renderToolExecution(finished, width);
+	return folded ? renderToolSubline(finished, width, expandKey) : renderToolExecution(finished, width, bodyOptions);
 }

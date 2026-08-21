@@ -13,6 +13,7 @@
  * `isTransparentAssistantWrapper`.
  */
 
+import { ToolNames } from "../core/tool-names.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -38,6 +39,7 @@ import {
 } from "../engine/messages.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
+import { toolPresentationPolicy } from "../tools/presentation.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { isSelfExplainingAbort } from "./chat-loop-messages.js";
 import type { ChatPanel } from "./chat-panel.js";
@@ -53,6 +55,7 @@ import {
 	type StreamPacer,
 	type StreamPacerSlice,
 } from "./stream-pacer.js";
+import { type FoldOverride, policyToolFold, resolveFold, type TranscriptDetailPolicy } from "./transcript-detail.js";
 import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
 import { workerEntriesFromRunEntries } from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
@@ -468,18 +471,18 @@ function toolCallMessageFromEntry(entry: MessageEntry): AgentMessage {
 	} as unknown as AgentMessage;
 }
 
-function toolResultContent(result: unknown): unknown[] {
+function toolResultContent(result: unknown, unbounded = false): unknown[] {
 	const obj = payloadObject(result);
 	if (Array.isArray(obj?.content)) {
-		return cloneContentBlocks(obj.content, MAX_REPLAY_TEXT_CHARS) ?? [];
+		return cloneContentBlocks(obj.content, unbounded ? undefined : MAX_REPLAY_TEXT_CHARS) ?? [];
 	}
-	if (isTextResult(result)) return [{ type: "text", text: truncateReplayText(result.text) }];
-	if (typeof result === "string") return [{ type: "text", text: truncateReplayText(result) }];
-	return [{ type: "text", text: stringifyPreview(result, 10_000) }];
+	if (isTextResult(result)) return [{ type: "text", text: unbounded ? result.text : truncateReplayText(result.text) }];
+	if (typeof result === "string") return [{ type: "text", text: unbounded ? result : truncateReplayText(result) }];
+	return [{ type: "text", text: stringifyPreview(result, unbounded ? Number.POSITIVE_INFINITY : 10_000) }];
 }
 
-function displayReplayToolResult(result: unknown): unknown {
-	const content = toolResultContent(result);
+function displayReplayToolResult(result: unknown, unbounded = false): unknown {
+	const content = toolResultContent(result, unbounded);
 	// Preserve the details record (observation envelope, exec records) so the
 	// replayed ledger line carries the same outcome facts as the live one.
 	const details = payloadObject(result)?.details;
@@ -704,22 +707,28 @@ function appendReplayLine(chatPanel: ChatPanel, text: string): void {
 	chatPanel.appendReplayBlock((width) => renderReplayLine(truncateReplayText(text), width));
 }
 
-function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): string[] {
+function renderBashExecutionEntry(
+	entry: BashExecutionEntry,
+	width: number,
+	folded: boolean,
+	unbounded: boolean,
+): string[] {
+	const normalizedOutput = entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "");
 	return renderBashTranscriptExecution(
 		{
 			command: entry.command,
-			output: truncateReplayText(entry.output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "")),
+			output: unbounded ? normalizedOutput : truncateReplayText(normalizedOutput),
 			running: false,
 			exitCode: entry.exitCode,
 			cancelled: entry.cancelled,
 			truncated: entry.truncated,
 			fullOutputPath: entry.fullOutputPath,
 			excludeFromContext: entry.excludeFromContext,
-			// Replayed local bash is history: it renders as the same folded row a
-			// live `!` run settles into, with no toggle attached.
-			folded: true,
+			folded,
 		},
 		width,
+		undefined,
+		{ unbounded, diffStyle: "plain" },
 	);
 }
 
@@ -1123,7 +1132,7 @@ export function rehydrateChatPanelFromTurns(
 							type: "tool_execution_end",
 							toolCallId: fallbackId,
 							toolName: result.name,
-							result: displayReplayToolResult(result.result),
+							result: displayReplayToolResult(result.result, options.unboundedToolBodies === true),
 							isError: result.isError,
 							...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
 							...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
@@ -1136,7 +1145,7 @@ export function rehydrateChatPanelFromTurns(
 								{
 									toolCallId: result.id ?? "",
 									toolName: result.name,
-									result: displayReplayToolResult(result.result),
+									result: displayReplayToolResult(result.result, options.unboundedToolBodies === true),
 									isError: result.isError,
 									...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
 									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
@@ -1162,9 +1171,25 @@ export function rehydrateChatPanelFromTurns(
 				}
 				break;
 			}
-			case "bashExecution":
-				chatPanel.appendReplayBlock((width) => renderBashExecutionEntry(entry, width));
+			case "bashExecution": {
+				let fold: FoldOverride;
+				const presentation = toolPresentationPolicy(ToolNames.Bash, undefined);
+				const policyFold = (detail: TranscriptDetailPolicy) => policyToolFold(detail, presentation);
+				const unbounded = options.unboundedToolBodies === true;
+				chatPanel.appendReplayBlock(
+					(width, detail) =>
+						renderBashExecutionEntry(entry, width, resolveFold(fold, policyFold(detail)) === "folded", unbounded),
+					undefined,
+					{
+						policyFold,
+						fold: () => fold,
+						setFold: (next: FoldOverride) => {
+							fold = next;
+						},
+					},
+				);
 				break;
+			}
 			case "custom":
 				if (rendersCustomEntry(entry)) chatPanel.appendReplayBlock((width) => renderCustomEntry(entry, width));
 				break;

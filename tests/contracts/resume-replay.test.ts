@@ -99,6 +99,20 @@ function editReplayTurns(): SessionEntry[] {
 	];
 }
 
+function localBashReplayTurn(output: string): SessionEntry {
+	return {
+		kind: "bashExecution",
+		turnId: "local-bash",
+		parentTurnId: null,
+		timestamp: "2026-07-02T12:00:00.000Z",
+		command: "printf local",
+		output,
+		exitCode: 0,
+		cancelled: false,
+		truncated: false,
+	};
+}
+
 describe("contracts/resume replay ledger fidelity", () => {
 	it("replays a grep tool as the collapsed one-line ledger summary, not the expanded body", () => {
 		const panel = createChatPanel();
@@ -331,5 +345,44 @@ describe("contracts/resume replay transcript detail policy", () => {
 		ok(strip(folded.render(100).join("\n")).includes("many.txt:1:"));
 		folded.clearFoldOverrides();
 		ok(!strip(folded.render(100).join("\n")).includes("many.txt:1:"), "clear returns to the folded policy view");
+	});
+
+	it("applies policy and operator overrides to replayed local bash", () => {
+		const folded = createChatPanel({ getOutputVerbosity: () => "default" });
+		rehydrateChatPanelFromTurns(folded, [localBashReplayTurn("LOCAL-BASH-BODY")]);
+		let rendered = strip(folded.render(100).join("\n"));
+		ok(!rendered.includes("LOCAL-BASH-BODY"), rendered);
+		ok(folded.toggleLastToolExpanded(), "Alt+O reaches the replayed local bash block");
+		rendered = strip(folded.render(100).join("\n"));
+		ok(rendered.includes("LOCAL-BASH-BODY"), rendered);
+
+		const verbose = createChatPanel({ getOutputVerbosity: () => "verbose" });
+		rehydrateChatPanelFromTurns(verbose, [localBashReplayTurn("LOCAL-BASH-BODY")]);
+		ok(strip(verbose.render(100).join("\n")).includes("LOCAL-BASH-BODY"), "verbose policy opens replayed local bash");
+	});
+
+	it("keeps complete model-tool and local-bash bodies in unbounded export replay", () => {
+		const modelLines = Array.from({ length: 700 }, (_, index) => `MODEL-EXPORT-${String(index + 1).padStart(4, "0")}`);
+		const toolTurns = grepReplayTurns();
+		const result = toolTurns.find(
+			(entry): entry is Extract<SessionEntry, { kind: "message" }> =>
+				entry.kind === "message" && entry.role === "tool_result",
+		);
+		ok(result);
+		result.payload = {
+			...(result.payload as Record<string, unknown>),
+			result: { content: [{ type: "text", text: modelLines.join("\n") }] },
+		};
+		const localLines = Array.from({ length: 300 }, (_, index) => `LOCAL-EXPORT-${String(index + 1).padStart(4, "0")}`);
+		const exported = createChatPanel({ getOutputVerbosity: () => "verbose", unboundedToolBodies: true });
+		rehydrateChatPanelFromTurns(exported, [...toolTurns, localBashReplayTurn(localLines.join("\n"))], {
+			unboundedToolBodies: true,
+		});
+
+		const rendered = strip(exported.render(100).join("\n"));
+		ok(rendered.includes("MODEL-EXPORT-0700"), "the paired model-tool tail survives export replay");
+		ok(rendered.includes("LOCAL-EXPORT-0300"), "the local-bash tail survives export replay");
+		ok(!rendered.includes("truncated from replay context"), rendered);
+		ok(!rendered.includes("lines hidden"), rendered);
 	});
 });
