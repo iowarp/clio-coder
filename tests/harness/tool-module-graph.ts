@@ -192,7 +192,9 @@ async function invokeTool(input: {
 	const cwd = join(input.workRoot, `invoke-${input.name}`);
 	mkdirSync(cwd, { recursive: true });
 	for (const [path, content] of Object.entries(input.seedFiles ?? {})) {
-		writeFileSync(join(cwd, path), content, "utf8");
+		const target = join(cwd, path);
+		mkdirSync(dirname(target), { recursive: true });
+		writeFileSync(target, content, "utf8");
 	}
 	const coverageDir = mkdtempSync(join(tmpdir(), `clio-lazy-${input.name}-coverage-`));
 	try {
@@ -503,9 +505,21 @@ export async function assertLazyToolLoading(input: {
 		baseSettings,
 		pi,
 		name: "verify",
-		args: {},
-		seedFiles: { "package.json": '{"scripts":{"test":"node --test"}}\n' },
-		expectedResult: "Declared verification checks:",
+		args: { check: "installed-catalog" },
+		seedFiles: {
+			".clio-coder/verifiers.yaml": [
+				"version: 1",
+				"checks:",
+				"  - id: installed-catalog",
+				"    description: Exercise the packed project verifier catalog",
+				`    command: [${JSON.stringify(process.execPath)}, -e, ${JSON.stringify("process.stdout.write('installed catalog lane\\n')")}]`,
+				"    cwd: .",
+				"    timeoutMs: 10000",
+				"    tags: [test, installed]",
+				"",
+			].join("\n"),
+		},
+		expectedResult: "installed catalog lane",
 	});
 	await invokeTool({
 		...input,

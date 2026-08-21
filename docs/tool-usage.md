@@ -107,7 +107,7 @@ Workspace containment: commands whose filesystem targets resolve outside the ses
 
 Output shaping is tail-biased: the display keeps the LAST 16KB / 2000 lines, because the failing assertion, compiler error, and exit summary live at the end. Before truncating, the full output is spilled to the per-session scratch file and the appended note names the path; read it with offset/limit. A command producing more than 16MB of output is stopped with an error. A timeout or nonzero exit returns the shaped output plus a status line (`bash: command timed out after <ms>ms`, `bash: command failed (exit N)`).
 
-Reach for bash for builds, git, package managers, and anything without a dedicated tool. Prefer the dedicated tools over their shell equivalents: grep/find/read/ls get envelope truncation, exact continuation hints, and the shared ignore policy that `cat`, shell `grep`, and shell `find` do not. Prefer `verify` over bash for declared package.json verification scripts, since verify produces typed evidence.
+Reach for bash for builds, git, package managers, and anything without a dedicated tool. Prefer the dedicated tools over their shell equivalents: grep/find/read/ls get envelope truncation, exact continuation hints, and the shared ignore policy that `cat`, shell `grep`, and shell `find` do not. Prefer `verify` over bash for declared package scripts and project-catalog entries, since verify produces typed evidence.
 
 ```text
 bash(command="git status --short")
@@ -266,27 +266,50 @@ dispatch(tasks=["Refactor step 1", "Refactor step 2"], mode="sequential", timeou
 
 ## verify: run declared verification checks
 
-One EXECUTE entry point for declared verification. Sources: `src/tools/verify/index.ts`, `src/tools/verify/scripts.ts`, `src/tools/verify/frontend.ts`.
+One EXECUTE entry point for declared verification. Sources: `src/tools/verify/index.ts`, `src/tools/verify/catalog.ts`, `src/tools/verify/scripts.ts`, `src/tools/verify/frontend.ts`.
 
 Arguments:
 
-- `check` (optional). A declared package.json script name or `"frontend"`. Omit to list available checks.
+- `check` (optional). A declared project-catalog ID, package.json script name, or `"frontend"`. Omit to list available checks.
 - `path` (check=frontend). Artifact file under the workspace root.
-- `args` (optional). Extra arguments passed to the script after `--`. A JSON-string array is tolerated and parsed.
+- `args` (package scripts only). Extra arguments passed after `--`. A JSON-string array is tolerated and parsed. Project-catalog checks ignore this field.
 - `browser` (check=frontend). `auto` (default), `required`, or `off`.
-- `cwd` (optional). Working directory.
-- `timeout_ms` (optional). Default 120000.
+- `cwd` (package scripts only). Package working directory. Project catalogs are always discovered at the session workspace root, and a project check uses its declared `cwd`.
+- `timeout_ms` (package scripts and frontend only). Default 120000. A project check uses its declared `timeoutMs`.
+- `max_output_bytes` (package scripts and frontend only). Default 600000. Project checks retain the safe-exec default cap.
 
-`verify()` with no check lists declared checks grouped by source; today the only source is package.json scripts whose names match the verification family `test*/lint*/build*/typecheck*/check*/format*/ci*` (a family prefix, optionally followed by `:`, `.`, or `-` and a suffix, e.g. `test:unit`). `verify(check="typecheck")` runs `npm run typecheck` through the safe-exec spine with no shell; output is capped at 600000 bytes and `details = {command, cwd, exitCode, durationMs, timedOut, outputCapped}`. A script name outside the family is rejected with a pointer to run it through bash.
+`verify()` lists checks grouped as `package.json` and `.clio-coder/verifiers.yaml`. Both providers project through the same canonical metadata: `{id, description, command, cwd, timeoutMs, tags, source}`. Package scripts must match the verification family `test*/lint*/build*/typecheck*/check*/format*/ci*` (a family prefix, optionally followed by `:`, `.`, or `-` and a suffix, e.g. `test:unit`). `verify(check="typecheck")` runs `npm run typecheck` through the safe-exec spine with no shell. A package script name outside the family is rejected with a pointer to run it through bash.
+
+### Project verifier catalog
+
+Projects may commit a versioned executable catalog at `.clio-coder/verifiers.yaml`:
+
+```yaml
+version: 1
+checks:
+  - id: rust-workspace
+    description: Run the Rust workspace tests
+    command: [cargo, test, --workspace]
+    cwd: .
+    timeoutMs: 600000
+    tags: [rust, test]
+```
+
+Version 1 is strict. Every root and check field shown above is required, unknown fields fail, and duplicate IDs fail. A project ID uses lowercase letters, digits, `.`, `_`, `:`, or `-`, begins with a letter or digit, and is at most 64 UTF-8 bytes. `frontend` is reserved. Descriptions are trimmed single-line text capped at 512 bytes. `command` is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as `sh`, `bash`, `pwsh`, and `cmd` are rejected. `cwd` is a repository-relative existing directory capped at 512 bytes; absolute paths, `..` escapes, and symbolic-link escapes fail. `timeoutMs` is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.
+
+Provider IDs share one namespace. If a catalog ID collides with a discovered package script, listing and execution fail and identify both source files. Catalog parsing also fails closed before any package or project check runs.
+
+`verify(check="rust-workspace")` spawns exactly `cargo` with `test` and `--workspace`; it does not interpolate model text or invoke a shell. Model-supplied `args`, `cwd`, `timeout_ms`, `max_output_bytes`, or undeclared environment fields cannot widen or replace the catalog entry. Safe execution passes only Clio's small environment allowlist, applies cancellation and the declared timeout, and shapes output at the standard 600000-byte cap. Execution details retain the compatible command string plus exact `argv`, `cwd`, `exitCode`, `durationMs`, `aborted`, `timedOut`, and `outputCapped` evidence, along with the check's declared source, command, cwd, timeout, description, and tags.
 
 `verify(check="frontend", path=<file>)` validates an HTML, CSS, or JavaScript artifact without shell access. The path must stay inside the workspace root and end in `.html`, `.htm`, `.css`, `.js`, `.mjs`, or `.cjs`. Checks per type: HTML tag balance (comment-aware, HTML5 optional end tags honored), inline and referenced script syntax (classic scripts parsed in-process, modules via `node --check`), inline and linked CSS brace/string/comment balance, local script and stylesheet references resolved and existence-checked (external and root-relative references are skipped), and an optional headless browser load. `browser="auto"` warns when no chromium/chrome/edge executable is on PATH, `"required"` fails, `"off"` skips. Each check reports pass, warn, fail, or skip; any fail makes the whole result an error. `details = {action: "verify", check: "frontend", path, browserMode, status, checks}`.
 
-Prefer verify over bash for the verification family: the typed result feeds the finish contract as validation evidence.
+Prefer verify over bash for the verification family and project catalog: the typed result feeds the finish contract as validation evidence.
 
 ```text
 verify()
 verify(check="typecheck")
 verify(check="test", args=["tests/contracts/dispatch.test.ts"])
+verify(check="rust-workspace")
 verify(check="frontend", path="site/index.html", browser="off")
 ```
 
