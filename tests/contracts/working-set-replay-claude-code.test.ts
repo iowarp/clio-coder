@@ -377,6 +377,89 @@ describe("contracts/working-set Claude Code replay loader", () => {
 		}
 	});
 
+	it("merges the per-block assistant records of one message into one assistant entry", async () => {
+		// Real transcripts write thinking, text, and tool_use as separate records
+		// sharing message.id; only a record without an id stays on its own.
+		const root = await mkdtemp(join(tmpdir(), "clio-replay-merge-"));
+		try {
+			const base = { sessionId: "merge-fixture", cwd: "/fixture/merge", timestamp: "2026-08-21T00:00:00.000Z" };
+			const lines = [
+				{ ...base, type: "user", uuid: "u1", message: { role: "user", content: "read it" } },
+				{
+					...base,
+					type: "assistant",
+					uuid: "a1",
+					message: {
+						id: "msg_1",
+						role: "assistant",
+						content: [{ type: "thinking", thinking: "plan" }],
+						usage: { input_tokens: 10 },
+					},
+				},
+				{
+					...base,
+					type: "assistant",
+					uuid: "a2",
+					message: {
+						id: "msg_1",
+						role: "assistant",
+						content: [{ type: "text", text: "reading" }],
+						usage: { input_tokens: 12 },
+					},
+				},
+				{
+					...base,
+					type: "assistant",
+					uuid: "a3",
+					message: {
+						id: "msg_1",
+						role: "assistant",
+						content: [{ type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/fixture/merge/a.ts" } }],
+					},
+				},
+				{
+					...base,
+					type: "user",
+					uuid: "u2",
+					message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "body" }] },
+				},
+				{
+					...base,
+					type: "assistant",
+					uuid: "a4",
+					message: { role: "assistant", content: [{ type: "thinking", thinking: "only reasoning" }] },
+				},
+				{
+					...base,
+					type: "assistant",
+					uuid: "a5",
+					message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+				},
+			];
+			const file = join(root, "merge.jsonl");
+			await writeFile(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+			const loaded = await loadClaudeCodeTraces([file], { filter: false });
+			const trace = loaded.traces[0];
+			assert.ok(trace);
+			const assistants = messages(trace, "assistant");
+			assert.equal(assistants.length, 3);
+			const merged = payload(assistants[0] as MessageEntry);
+			assert.deepEqual(merged.content, [
+				{ type: "thinking", thinking: "plan" },
+				{ type: "text", text: "reading" },
+			]);
+			assert.equal(merged.text, "reading");
+			assert.equal(merged.thinking, "plan");
+			assert.equal(isRecord(merged.usage) && merged.usage.input, 12);
+			assert.equal(messages(trace, "tool_call").length, 1);
+			// Records without message.id are not merged, whatever their neighbours are.
+			assert.deepEqual(payload(assistants[1] as MessageEntry).content, [{ type: "thinking", thinking: "only reasoning" }]);
+			assert.deepEqual(payload(assistants[2] as MessageEntry).content, [{ type: "text", text: "done" }]);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("auto-detects Claude Code and drives one live age-horizon eviction", async () => {
 		const raw = await readFile(FIXTURE, "utf8");
 		assert.equal(detectReplayInputFormat(raw), "claude-code");

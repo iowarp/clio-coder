@@ -1,356 +1,351 @@
 {
-	"schema": "clio-context-replay-v1",
-	"config": {
-		"policies": ["none", "random", "age-horizon", "structural-v1", "oracle"],
-		"budgets": [32000, 64000, 128000],
-		"threshold": 0.8,
-		"target": 0.6,
-		"seed": 0,
-		"format": "auto",
-		"filter": "default",
-		"settings": {
-			"enabled": true,
-			"policy": "age-horizon",
-			"target": 0.6,
-			"protectLastTurns": 6,
-			"minEvictableTokens": 200
-		}
-	},
-	"provenance": {
-		"gitSha": "cb4d7a07b58344e8f8ece2a92990a12cfdccac45",
-		"commandLine": [
-			"/home/akougkas/.nvm/versions/node/v24.9.0/bin/node",
-			"--import",
-			"tsx",
-			"/home/akougkas/iowarp/clio-coder-ws-wiring/src/cli/index.ts",
-			"context",
-			"replay",
-			"--sessions",
-			"/home/akougkas/.claude/projects/-home-akougkas-iowarp-clio-coder",
-			"--policies",
-			"none,random,age-horizon,structural-v1,oracle",
-			"--budgets",
-			"32000,64000,128000",
-			"--protect-last-turns",
-			"6",
-			"--md",
-			"/tmp/cc-project-p6.md",
-			"--json",
-			"/tmp/cc-project-p6.json"
-		]
-	},
-	"cascade": {
-		"found": 302,
-		"unreadable": 2,
-		"filtered": {
-			"no_file_reread": 100,
-			"sidechain_or_subagent": 17,
-			"summary_only": 0,
-			"tool_results_lt_8": 4,
-			"turns_lt_8": 14
-		},
-		"kept": 165
-	},
-	"results": [
-		{
-			"budgetTokens": 32000,
-			"policyId": "none",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 1,
-					"retentionAt10": 1,
-					"evictionPrecision": 1,
-					"tokensEvicted": 0,
-					"evictionEvents": 0,
-					"saturatedEvents": 0,
-					"churn": 0,
-					"turnsToFirstSummary": 18.426829268292682,
-					"turnsToFirstSummaryCount": 164
-				},
-				"pooledRetention": 1,
-				"pooledRetentionAt10": 1
-			}
-		},
-		{
-			"budgetTokens": 32000,
-			"policyId": "random",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.4833177066874543,
-					"retentionAt10": 0.9261196589198183,
-					"evictionPrecision": 0.9473257732807969,
-					"tokensEvicted": 66849.2787878788,
-					"evictionEvents": 57.7939393939394,
-					"saturatedEvents": 0.9826971476510067,
-					"churn": 0.052674226719202966,
-					"turnsToFirstSummary": 31.90740740740741,
-					"turnsToFirstSummaryCount": 162
-				},
-				"pooledRetention": 0.431244153414406,
-				"pooledRetentionAt10": 0.875882946518668
-			}
-		},
-		{
-			"budgetTokens": 32000,
-			"policyId": "age-horizon",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.4869686158647096,
-					"retentionAt10": 0.9351686139077687,
-					"evictionPrecision": 0.9725388619474085,
-					"tokensEvicted": 101707.84848484848,
-					"evictionEvents": 83.76969696969697,
-					"saturatedEvents": 1,
-					"churn": 0.02746113805259143,
-					"turnsToFirstSummary": 40.745222929936304,
-					"turnsToFirstSummaryCount": 157
-				},
-				"pooledRetention": 0.43358278765201125,
-				"pooledRetentionAt10": 0.8779011099899092
-			}
-		},
-		{
-			"budgetTokens": 32000,
-			"policyId": "structural-v1",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.48781054300941923,
-					"retentionAt10": 0.9273801344446482,
-					"evictionPrecision": 0.9729190426257791,
-					"tokensEvicted": 101485.41818181818,
-					"evictionEvents": 86.83636363636364,
-					"saturatedEvents": 0.9286711334450027,
-					"churn": 0.027080957374220775,
-					"turnsToFirstSummary": 38.80379746835443,
-					"turnsToFirstSummaryCount": 158
-				},
-				"pooledRetention": 0.4345182413470533,
-				"pooledRetentionAt10": 0.8789101917255298
-			}
-		},
-		{
-			"budgetTokens": 32000,
-			"policyId": "oracle",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 1,
-					"retentionAt10": 1,
-					"evictionPrecision": 1,
-					"tokensEvicted": 66884.45454545454,
-					"evictionEvents": 58.842424242424244,
-					"saturatedEvents": 0.9907302502832424,
-					"churn": 0,
-					"turnsToFirstSummary": 28.641975308641975,
-					"turnsToFirstSummaryCount": 162
-				},
-				"pooledRetention": 1,
-				"pooledRetentionAt10": 1
-			}
-		},
-		{
-			"budgetTokens": 64000,
-			"policyId": "none",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 1,
-					"retentionAt10": 1,
-					"evictionPrecision": 1,
-					"tokensEvicted": 0,
-					"evictionEvents": 0,
-					"saturatedEvents": 0,
-					"churn": 0,
-					"turnsToFirstSummary": 37.57324840764331,
-					"turnsToFirstSummaryCount": 157
-				},
-				"pooledRetention": 1,
-				"pooledRetentionAt10": 1
-			}
-		},
-		{
-			"budgetTokens": 64000,
-			"policyId": "random",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.5882949630186936,
-					"retentionAt10": 0.9574288301148334,
-					"evictionPrecision": 0.9576639856600655,
-					"tokensEvicted": 65689.54545454546,
-					"evictionEvents": 41.83030303030303,
-					"saturatedEvents": 0.9588525065198493,
-					"churn": 0.04233601433993452,
-					"turnsToFirstSummary": 74.8972602739726,
-					"turnsToFirstSummaryCount": 146
-				},
-				"pooledRetention": 0.5346117867165575,
-				"pooledRetentionAt10": 0.9233097880928355
-			}
-		},
-		{
-			"budgetTokens": 64000,
-			"policyId": "age-horizon",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.5838286020312077,
-					"retentionAt10": 0.9722075189873377,
-					"evictionPrecision": 0.9772436541772238,
-					"tokensEvicted": 99935.21212121213,
-					"evictionEvents": 53.26060606060606,
-					"saturatedEvents": 1,
-					"churn": 0.02275634582277612,
-					"turnsToFirstSummary": 102.97692307692307,
-					"turnsToFirstSummaryCount": 130
-				},
-				"pooledRetention": 0.5280636108512629,
-				"pooledRetentionAt10": 0.9475277497477296
-			}
-		},
-		{
-			"budgetTokens": 64000,
-			"policyId": "structural-v1",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.604976770513591,
-					"retentionAt10": 0.9671820141891055,
-					"evictionPrecision": 0.9795901302078288,
-					"tokensEvicted": 99347.78787878787,
-					"evictionEvents": 58.121212121212125,
-					"saturatedEvents": 0.8663190823774766,
-					"churn": 0.02040986979217111,
-					"turnsToFirstSummary": 98.46969696969697,
-					"turnsToFirstSummaryCount": 132
-				},
-				"pooledRetention": 0.5594013096351731,
-				"pooledRetentionAt10": 0.9475277497477296
-			}
-		},
-		{
-			"budgetTokens": 64000,
-			"policyId": "oracle",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 1,
-					"retentionAt10": 1,
-					"evictionPrecision": 1,
-					"tokensEvicted": 65534.44242424242,
-					"evictionEvents": 42.68484848484849,
-					"saturatedEvents": 0.9752946187704103,
-					"churn": 0,
-					"turnsToFirstSummary": 68.71428571428571,
-					"turnsToFirstSummaryCount": 147
-				},
-				"pooledRetention": 1,
-				"pooledRetentionAt10": 1
-			}
-		},
-		{
-			"budgetTokens": 128000,
-			"policyId": "none",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 1,
-					"retentionAt10": 1,
-					"evictionPrecision": 1,
-					"tokensEvicted": 0,
-					"evictionEvents": 0,
-					"saturatedEvents": 0,
-					"churn": 0,
-					"turnsToFirstSummary": 86.14285714285714,
-					"turnsToFirstSummaryCount": 140
-				},
-				"pooledRetention": 1,
-				"pooledRetentionAt10": 1
-			}
-		},
-		{
-			"budgetTokens": 128000,
-			"policyId": "random",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.7785849994792741,
-					"retentionAt10": 0.9898164966346785,
-					"evictionPrecision": 0.9768056012832772,
-					"tokensEvicted": 59476.357575757575,
-					"evictionEvents": 20.587878787878786,
-					"saturatedEvents": 0.9449514277303503,
-					"churn": 0.023194398716723085,
-					"turnsToFirstSummary": 151.2164948453608,
-					"turnsToFirstSummaryCount": 97
-				},
-				"pooledRetention": 0.7422825070159027,
-				"pooledRetentionAt10": 0.9818365287588294
-			}
-		},
-		{
-			"budgetTokens": 128000,
-			"policyId": "age-horizon",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.7805842537890286,
-					"retentionAt10": 0.9976396894846092,
-					"evictionPrecision": 0.9886698447282122,
-					"tokensEvicted": 89686.7696969697,
-					"evictionEvents": 18.915151515151514,
-					"saturatedEvents": 1,
-					"churn": 0.011330155271787852,
-					"turnsToFirstSummary": 206.03508771929825,
-					"turnsToFirstSummaryCount": 57
-				},
-				"pooledRetention": 0.7502338634237605,
-				"pooledRetentionAt10": 0.992936427850656
-			}
-		},
-		{
-			"budgetTokens": 128000,
-			"policyId": "structural-v1",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 0.8308409632691356,
-					"retentionAt10": 0.9972609016058214,
-					"evictionPrecision": 0.989808384521122,
-					"tokensEvicted": 84848.4303030303,
-					"evictionEvents": 22.44242424242424,
-					"saturatedEvents": 0.7709964893329733,
-					"churn": 0.010191615478877817,
-					"turnsToFirstSummary": 194.88524590163934,
-					"turnsToFirstSummaryCount": 61
-				},
-				"pooledRetention": 0.7694106641721234,
-				"pooledRetentionAt10": 0.9919273461150353
-			}
-		},
-		{
-			"budgetTokens": 128000,
-			"policyId": "oracle",
-			"metrics": {
-				"mean": {
-					"traces": 165,
-					"retention": 1,
-					"retentionAt10": 1,
-					"evictionPrecision": 1,
-					"tokensEvicted": 59886.63636363636,
-					"evictionEvents": 21.315151515151516,
-					"saturatedEvents": 0.9550753483082173,
-					"churn": 0,
-					"turnsToFirstSummary": 146.659793814433,
-					"turnsToFirstSummaryCount": 97
-				},
-				"pooledRetention": 1,
-				"pooledRetentionAt10": 1
-			}
-		}
-	]
+  "schema": "clio-context-replay-v1",
+  "config": {
+    "policies": [
+      "none",
+      "random",
+      "age-horizon",
+      "structural-v1",
+      "oracle"
+    ],
+    "budgets": [
+      32000,
+      64000,
+      128000
+    ],
+    "threshold": 0.8,
+    "target": 0.6,
+    "seed": 0,
+    "format": "auto",
+    "filter": "default",
+    "settings": {
+      "enabled": true,
+      "policy": "structural-v1",
+      "target": 0.6,
+      "protectLastTurns": 6,
+      "minEvictableTokens": 200
+    }
+  },
+  "provenance": {
+    "gitSha": "a3d5d69a7aa34a8dcf3a7abdc58c53bc6b42074e",
+    "commandLine": [
+      "/home/akougkas/.nvm/versions/node/v24.9.0/bin/node",
+      "--import",
+      "tsx",
+      "/home/akougkas/iowarp/clio-coder/src/cli/index.ts",
+      "context",
+      "replay",
+      "--sessions",
+      "/home/akougkas/.claude/projects/-home-akougkas-iowarp-clio-coder",
+      "--policies",
+      "none,random,age-horizon,structural-v1,oracle",
+      "--budgets",
+      "32000,64000,128000",
+      "--protect-last-turns",
+      "6",
+      "--md",
+      "benchmarks/results/context-replay/claude-code-2026-08-21-protect-6.md",
+      "--json",
+      "benchmarks/results/context-replay/claude-code-2026-08-21-protect-6.json"
+    ]
+  },
+  "cascade": {
+    "found": 303,
+    "unreadable": 2,
+    "filtered": {
+      "no_file_reread": 102,
+      "sidechain_or_subagent": 17,
+      "summary_only": 0,
+      "tool_results_lt_8": 3,
+      "turns_lt_8": 14
+    },
+    "kept": 165
+  },
+  "results": [
+    {
+      "budgetTokens": 32000,
+      "policyId": "none",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 1,
+          "retentionAt10": 1,
+          "evictionPrecision": 1,
+          "tokensEvicted": 0,
+          "evictionEvents": 0,
+          "saturatedEvents": 0,
+          "turnsToFirstSummary": 18.426829268292682,
+          "turnsToFirstSummaryCount": 164
+        },
+        "pooledRetention": 1,
+        "pooledRetentionAt10": 1
+      }
+    },
+    {
+      "budgetTokens": 32000,
+      "policyId": "random",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.4833177066874543,
+          "retentionAt10": 0.9261196589198183,
+          "evictionPrecision": 0.9473257732807969,
+          "tokensEvicted": 66521.02424242425,
+          "evictionEvents": 57.92121212121212,
+          "saturatedEvents": 0.9830490739771895,
+          "turnsToFirstSummary": 31.64814814814815,
+          "turnsToFirstSummaryCount": 162
+        },
+        "pooledRetention": 0.431244153414406,
+        "pooledRetentionAt10": 0.875882946518668
+      }
+    },
+    {
+      "budgetTokens": 32000,
+      "policyId": "age-horizon",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.4792350637937497,
+          "retentionAt10": 0.9234988075489672,
+          "evictionPrecision": 0.9475340393836018,
+          "tokensEvicted": 66678.89090909091,
+          "evictionEvents": 58.02424242424242,
+          "saturatedEvents": 1,
+          "turnsToFirstSummary": 31.641975308641975,
+          "turnsToFirstSummaryCount": 162
+        },
+        "pooledRetention": 0.42656688493919553,
+        "pooledRetentionAt10": 0.8698284561049445
+      }
+    },
+    {
+      "budgetTokens": 32000,
+      "policyId": "structural-v1",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.481872499653399,
+          "retentionAt10": 0.9222500762165038,
+          "evictionPrecision": 0.9479608131999118,
+          "tokensEvicted": 66484.24848484849,
+          "evictionEvents": 58.018181818181816,
+          "saturatedEvents": 0.9708555311814479,
+          "turnsToFirstSummary": 31.333333333333332,
+          "turnsToFirstSummaryCount": 162
+        },
+        "pooledRetention": 0.42516370439663237,
+        "pooledRetentionAt10": 0.8657921291624622
+      }
+    },
+    {
+      "budgetTokens": 32000,
+      "policyId": "oracle",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 1,
+          "retentionAt10": 1,
+          "evictionPrecision": 1,
+          "tokensEvicted": 66556.03636363636,
+          "evictionEvents": 58.90909090909091,
+          "saturatedEvents": 0.9907407407407407,
+          "turnsToFirstSummary": 28.469135802469136,
+          "turnsToFirstSummaryCount": 162
+        },
+        "pooledRetention": 1,
+        "pooledRetentionAt10": 1
+      }
+    },
+    {
+      "budgetTokens": 64000,
+      "policyId": "none",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 1,
+          "retentionAt10": 1,
+          "evictionPrecision": 1,
+          "tokensEvicted": 0,
+          "evictionEvents": 0,
+          "saturatedEvents": 0,
+          "turnsToFirstSummary": 37.57324840764331,
+          "turnsToFirstSummaryCount": 157
+        },
+        "pooledRetention": 1,
+        "pooledRetentionAt10": 1
+      }
+    },
+    {
+      "budgetTokens": 64000,
+      "policyId": "random",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.58807049612756,
+          "retentionAt10": 0.9574288301148334,
+          "evictionPrecision": 0.9577194857155654,
+          "tokensEvicted": 65388.933333333334,
+          "evictionEvents": 41.878787878787875,
+          "saturatedEvents": 0.9593342981186685,
+          "turnsToFirstSummary": 74.5958904109589,
+          "turnsToFirstSummaryCount": 146
+        },
+        "pooledRetention": 0.5341440598690365,
+        "pooledRetentionAt10": 0.9233097880928355
+      }
+    },
+    {
+      "budgetTokens": 64000,
+      "policyId": "age-horizon",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.5689079008098213,
+          "retentionAt10": 0.9536157130606094,
+          "evictionPrecision": 0.9557283400464567,
+          "tokensEvicted": 65568.99393939394,
+          "evictionEvents": 41.43636363636364,
+          "saturatedEvents": 1,
+          "turnsToFirstSummary": 74.6917808219178,
+          "turnsToFirstSummaryCount": 146
+        },
+        "pooledRetention": 0.5060804490177736,
+        "pooledRetentionAt10": 0.9182643794147326
+      }
+    },
+    {
+      "budgetTokens": 64000,
+      "policyId": "structural-v1",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.56992623135722,
+          "retentionAt10": 0.9579578355845503,
+          "evictionPrecision": 0.9553262382608974,
+          "tokensEvicted": 65073.42424242424,
+          "evictionEvents": 42.35757575757576,
+          "saturatedEvents": 0.9429102875947918,
+          "turnsToFirstSummary": 73.92567567567568,
+          "turnsToFirstSummaryCount": 148
+        },
+        "pooledRetention": 0.5079513564078578,
+        "pooledRetentionAt10": 0.9212916246215943
+      }
+    },
+    {
+      "budgetTokens": 64000,
+      "policyId": "oracle",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 1,
+          "retentionAt10": 1,
+          "evictionPrecision": 1,
+          "tokensEvicted": 65221.06060606061,
+          "evictionEvents": 42.74545454545454,
+          "saturatedEvents": 0.9754714305969091,
+          "turnsToFirstSummary": 68.26530612244898,
+          "turnsToFirstSummaryCount": 147
+        },
+        "pooledRetention": 1,
+        "pooledRetentionAt10": 1
+      }
+    },
+    {
+      "budgetTokens": 128000,
+      "policyId": "none",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 1,
+          "retentionAt10": 1,
+          "evictionPrecision": 1,
+          "tokensEvicted": 0,
+          "evictionEvents": 0,
+          "saturatedEvents": 0,
+          "turnsToFirstSummary": 86.14285714285714,
+          "turnsToFirstSummaryCount": 140
+        },
+        "pooledRetention": 1,
+        "pooledRetentionAt10": 1
+      }
+    },
+    {
+      "budgetTokens": 128000,
+      "policyId": "random",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.7787533496476242,
+          "retentionAt10": 0.9898164966346785,
+          "evictionPrecision": 0.9769049554809919,
+          "tokensEvicted": 59286.70303030303,
+          "evictionEvents": 20.666666666666668,
+          "saturatedEvents": 0.9460410557184751,
+          "turnsToFirstSummary": 150.43298969072166,
+          "turnsToFirstSummaryCount": 97
+        },
+        "pooledRetention": 0.7427502338634238,
+        "pooledRetentionAt10": 0.9818365287588294
+      }
+    },
+    {
+      "budgetTokens": 128000,
+      "policyId": "age-horizon",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.7643536981681742,
+          "retentionAt10": 0.9891090786812711,
+          "evictionPrecision": 0.9758884223172307,
+          "tokensEvicted": 60445.684848484845,
+          "evictionEvents": 20.24848484848485,
+          "saturatedEvents": 1,
+          "turnsToFirstSummary": 150.79166666666666,
+          "turnsToFirstSummaryCount": 96
+        },
+        "pooledRetention": 0.7160898035547241,
+        "pooledRetentionAt10": 0.9798183652875883
+      }
+    },
+    {
+      "budgetTokens": 128000,
+      "policyId": "structural-v1",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 0.7791585352246793,
+          "retentionAt10": 0.9876244076778837,
+          "evictionPrecision": 0.9754222828389132,
+          "tokensEvicted": 59430.57575757576,
+          "evictionEvents": 21.618181818181817,
+          "saturatedEvents": 0.897112419400056,
+          "turnsToFirstSummary": 142.76,
+          "turnsToFirstSummaryCount": 100
+        },
+        "pooledRetention": 0.7184284377923292,
+        "pooledRetentionAt10": 0.9757820383451059
+      }
+    },
+    {
+      "budgetTokens": 128000,
+      "policyId": "oracle",
+      "metrics": {
+        "mean": {
+          "traces": 165,
+          "retention": 1,
+          "retentionAt10": 1,
+          "evictionPrecision": 1,
+          "tokensEvicted": 59667.357575757575,
+          "evictionEvents": 21.375757575757575,
+          "saturatedEvents": 0.9554862489367735,
+          "turnsToFirstSummary": 146.17525773195877,
+          "turnsToFirstSummaryCount": 97
+        },
+        "pooledRetention": 1,
+        "pooledRetentionAt10": 1
+      }
+    }
+  ]
 }
