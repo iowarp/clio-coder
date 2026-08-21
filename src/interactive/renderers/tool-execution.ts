@@ -465,11 +465,6 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 
 /** Longest diagnostic excerpt a folded failure row may carry. */
 const FAILURE_EXCERPT_LIMIT = 80;
-/**
- * Below this width the row has no room for both the exit code and an excerpt,
- * and the exit code is the fact worth keeping.
- */
-const FAILURE_EXCERPT_MIN_WIDTH = 60;
 
 /**
  * Last non-empty output line of a failed call, bounded so the folded row stays
@@ -480,7 +475,6 @@ const FAILURE_EXCERPT_MIN_WIDTH = 60;
 function failureExcerpt(finished: ToolExecutionFinished, width: number): string {
 	if (!finished.isError || !toolPresentationPolicy(finished.toolName, finished.args).failureExcerpt) return "";
 	if (isNonExecutedOutcome(finished.outcome)) return "";
-	if (width < FAILURE_EXCERPT_MIN_WIDTH) return "";
 	const text = unwrapResultEnvelope(finished.result);
 	if (typeof text !== "string") return "";
 	let excerpt: string | undefined;

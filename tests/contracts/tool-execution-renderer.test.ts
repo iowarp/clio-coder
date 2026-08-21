@@ -173,11 +173,12 @@ describe("contracts/tool execution transcript", () => {
 		ok(wide.join("\n").includes(errorSequence), "the failed row uses the theme's error color");
 		for (const line of wide) ok(visibleWidth(line) <= 120, line);
 
-		// At 40 columns the excerpt is dropped before the exit code.
+		// At 40 columns the bounded excerpt may wrap, but it remains visible and
+		// the atomic exit-code tail survives intact.
 		const narrow = renderToolSubline(finished, 40);
 		const plainNarrow = plain(narrow);
 		ok(plainNarrow.includes("(exit 1)"), plainNarrow);
-		ok(!plainNarrow.includes("auth.spec.ts"), plainNarrow);
+		ok(plainNarrow.includes("Error: 3 tests"), plainNarrow);
 		for (const line of narrow) ok(visibleWidth(line) <= 40, line);
 	});
 
