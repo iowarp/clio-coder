@@ -1236,7 +1236,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// one object the dispatch tool and the keypress both hold.
 	const dispatchBackground = createDispatchBackgroundRegistry();
 	registerAllTools(toolRegistry, {
-		...(session ? { session } : {}),
+		...(session
+			? {
+					session,
+					readSessionEntries: () => {
+						const meta = session.current();
+						return meta ? readSessionEntriesForCompact(meta.id) : [];
+					},
+				}
+			: {}),
 		taskBoard,
 		userTasks,
 		dispatch,

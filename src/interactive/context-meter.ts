@@ -156,6 +156,16 @@ export function renderContextMeterGrid(
 	return lines;
 }
 
+/**
+ * Evicted tokens live outside the window: the working-set projection removed
+ * them from what the model sees, so they are not a meter category and must
+ * not claim cells or a legend row. One line after the legend names them.
+ */
+export function renderEvictedTokensLine(evictedTokens: number, theme: ClioTheme = clioTheme()): string {
+	const tokens = Math.round(Math.max(0, evictedTokens)).toLocaleString("en-US");
+	return `${theme.fg("dim", GLYPH.contextReserve)} ${theme.fg("muted", "evicted (outside window)")} ${theme.fg("dim", `${tokens} tokens`)}`;
+}
+
 /** A small colored swatch for a category, for inline legends. */
 export function contextCategorySwatch(category: ContextLedgerCategory, theme: ClioTheme = clioTheme()): string {
 	return theme.fg(CONTEXT_CATEGORY_TOKEN[category], contextCategoryGlyph(category));
