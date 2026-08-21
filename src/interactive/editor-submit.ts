@@ -153,6 +153,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			running: true,
 			totalBytes: 0,
 			excludeFromContext: parsed.excludeFromContext,
+			folded: true,
 		};
 		deps.chatPanel.appendReplayBlock(
 			(width) =>
@@ -164,6 +165,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					width,
 				),
 			() => execution.running,
+			{
+				isFolded: () => execution.folded !== false,
+				setFolded: (folded: boolean) => {
+					execution.folded = folded;
+					deps.ui.requestRender();
+				},
+			},
 		);
 		deps.ui.requestRender();
 

@@ -26,6 +26,7 @@ import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
+import type { ToolPresentationPolicy } from "./presentation.js";
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
@@ -76,6 +77,11 @@ export interface ToolMetadata {
 	 * need none; the schema description covers them.
 	 */
 	promptHint?: string;
+	/**
+	 * How transcript surfaces present this tool's block. Optional: tools that
+	 * declare nothing keep the renderer's expanded default.
+	 */
+	presentation?: ToolPresentationPolicy;
 }
 
 export interface ToolSpec {

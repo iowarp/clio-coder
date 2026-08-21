@@ -49,6 +49,7 @@ function createHarness(
 	const steers: Array<{ runId: string; text: string }> = [];
 	const notices: Array<{ level: string; text: string; key: string }> = [];
 	const replayBlocks: Array<(width: number) => string[]> = [];
+	const replayFolds: Array<{ isFolded(): boolean; setFolded(folded: boolean): void } | undefined> = [];
 	const editor: EditorSubmitEditor = {
 		getText: () => text,
 		setText: (next) => {
@@ -102,9 +103,10 @@ function createHarness(
 			recordSubmittedTurn: () => events.push("record-turn"),
 		},
 		chatPanel: {
-			appendReplayBlock: (renderBlock) => {
+			appendReplayBlock: (renderBlock, _isLive, fold) => {
 				events.push("append-bash");
 				replayBlocks.push(renderBlock);
+				replayFolds.push(fold);
 			},
 		},
 		dispatchCommand: (command) => {
@@ -125,6 +127,7 @@ function createHarness(
 		steers,
 		notices,
 		replayBlocks,
+		replayFolds,
 		setText: (next: string) => {
 			text = next;
 		},
@@ -596,25 +599,43 @@ describe("contracts/interactive editor submit", () => {
 
 		strictEqual(controller.runEditorBash("!! npm run typecheck"), true);
 		strictEqual(harness.replayBlocks.length, 1);
+		const fold = harness.replayFolds[0];
+		ok(fold !== undefined, "the local bash block hands the panel a fold control");
+		strictEqual(fold.isFolded(), true, "local bash starts folded");
+
+		// Folded: the row carries the command and the live elapsed, not the body.
 		let rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
-		ok(rendered.includes("bash(npm run typecheck)"), rendered);
+		ok(rendered.includes("running `npm run typecheck`"), rendered);
 		ok(rendered.includes("running"), rendered);
-		ok(rendered.includes("excluded from model context"), rendered);
 
 		receivedOptions?.onUpdate?.({ stdout: "checking src\n", stderr: "", outputBytes: 13 });
 		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		ok(!rendered.includes("checking src"), `the folded running row keeps the body closed, got: ${rendered}`);
+		strictEqual(harness.replayBlocks.length, 1, "progress replaces the same replay block");
+
+		// Expanded on operator request: the live body appears in place.
+		fold.setFolded(false);
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
+		ok(rendered.includes("bash(npm run typecheck)"), rendered);
 		ok(rendered.includes("live output"), rendered);
 		ok(rendered.includes("checking src"), rendered);
-		strictEqual(harness.replayBlocks.length, 1, "progress replaces the same replay block");
+		ok(rendered.includes("excluded from model context"), rendered);
+		fold.setFolded(true);
 
 		resolveBash({ ...bashResult(), stdout: "checking src\nclean\n" });
 		await flushAsync();
 		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
 		ok(rendered.includes("✓"), rendered);
+		ok(rendered.includes("ran `npm run typecheck`"), rendered);
+		ok(rendered.includes("exit 0"), rendered);
+		ok(rendered.includes("excluded from context"), rendered);
+		ok(!rendered.includes("clean"), `the settled row stays folded, got: ${rendered}`);
+		strictEqual(harness.replayBlocks.length, 1, "settlement keeps the original transcript position");
+
+		fold.setFolded(false);
+		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100).join("\n") ?? "");
 		ok(rendered.includes("output · exit 0"), rendered);
 		ok(rendered.includes("clean"), rendered);
-		ok(!rendered.includes("running"), rendered);
-		strictEqual(harness.replayBlocks.length, 1, "settlement keeps the original transcript position");
 	});
 
 	it("records an accepted local bash submission but restores refusals without history", async () => {

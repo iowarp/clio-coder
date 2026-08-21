@@ -715,6 +715,9 @@ function renderBashExecutionEntry(entry: BashExecutionEntry, width: number): str
 			truncated: entry.truncated,
 			fullOutputPath: entry.fullOutputPath,
 			excludeFromContext: entry.excludeFromContext,
+			// Replayed local bash is history: it renders as the same folded row a
+			// live `!` run settles into, with no toggle attached.
+			folded: true,
 		},
 		width,
 	);
