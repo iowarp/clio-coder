@@ -138,6 +138,28 @@ test("project: an evicted assistant loses both thinking shapes", () => {
 	assert.equal(payloadOf(entries[1]).thinking, "payload-level reasoning");
 });
 
+test("project: an assistant whose only content was thinking keeps it", () => {
+	// Local reasoning models close a turn with reasoning and no answer text.
+	// Projected to content: [] the provider would reject the message, and
+	// dropped entirely the replay would show two user turns back to back.
+	const entries = ledger();
+	const onlyThinking = entries[1] as MessageEntry;
+	onlyThinking.payload = {
+		...(onlyThinking.payload as object),
+		content: [{ type: "thinking", thinking: "only reasoning" }],
+	};
+	const projected = projectWorkingSet(entries, foldWorkingSet(entries));
+	const payload = payloadOf(projected[1]) as {
+		content?: unknown[];
+		thinking?: unknown;
+		contextUsageInvalidated?: unknown;
+	};
+	assert.deepEqual(payload.content, [{ type: "thinking", thinking: "only reasoning" }]);
+	assert.equal(payload.thinking, "payload-level reasoning");
+	// Usage invalidation is the event's, not the eviction's, and still applies.
+	assert.equal(payload.contextUsageInvalidated, true);
+});
+
 test("project: is idempotent", () => {
 	const entries = ledger();
 	const view = foldWorkingSet(entries);
