@@ -159,6 +159,62 @@ whether applicable validation evidence was observed. Briefing provenance is
 also distinct from bounded project-context provenance: both can be absent or
 present independently, and neither hash is evidence for the other.
 
+### Canonical trust status
+
+`src/domains/evidence/trust-status.ts` defines the version 1 canonical trust
+status. It is a six-axis algebra, not an overall trust verdict, confidence
+percentage, or pass/fail score. Consumers project only the axes needed for a
+decision and preserve every other axis unchanged.
+
+| Axis | Closed states | Question answered |
+|---|---|---|
+| Artifact integrity | `verified`, `failed`, `absent`, `unknown`, `not_applicable` | Did the integrity verifier authenticate the referenced artifact? |
+| Validation grounding | `validated`, `failed`, `ungrounded`, `absent`, `unknown`, `not_applicable` | What correctness-bearing validation was observed and grounded? |
+| Independent review | `passed`, `failed`, `inconclusive`, `not_independent`, `absent`, `unknown`, `not_applicable` | What outcome did an authenticated independent reviewer or judge record? |
+| Context provenance | `recorded`, `invalid`, `absent`, `unknown`, `not_applicable` | Is the origin of briefing, project context, or linked evidence recorded consistently? |
+| Autonomy enforcement | `enforced`, `approximated`, `bypassed`, `absent`, `unknown`, `not_applicable` | How faithfully did the runtime enforce the selected authority? |
+| Completion evidence | `evidenced`, `incomplete`, `limited`, `absent`, `unknown`, `not_applicable` | What did the finish contract observe at the completion boundary? |
+
+`absent` means no fact was recorded and carries a reason but no invented
+attribution. `unknown` means a named source exists but cannot establish the
+answer. `not_applicable` means a named authority determined that the axis does
+not apply. Every non-absent state names both its source and its authority.
+Sources may retain up to 16 typed artifact references. References contain an
+artifact kind, identifier, and optional SHA-256 digest; they never embed the
+artifact body. Normalization sorts the references and rejects duplicates,
+unbounded lists, unknown fields, invalid identifiers, and sources that are not
+permitted to speak for an axis.
+
+The composition rules prohibit cross-axis promotion:
+
+- Verified artifact integrity never promotes validation grounding.
+- Recorded context provenance never promotes validation or correctness.
+- A passing review never establishes authorship or context origin.
+- Enforced autonomy never promotes completion evidence.
+
+The current adapters apply the following persisted-format compatibility rules.
+They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
+
+| Existing persisted fact | Canonical mapping |
+|---|---|
+| Missing receipt | Every receipt-owned axis is `absent` with `artifact_missing`. |
+| Receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never authenticates itself. |
+| Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A historical receipt missing its integrity block remains `unknown` even if a caller presents a contradictory positive result. |
+| Receipt `verification.state: verified` | Validation grounding is `validated` unless a stronger typed failure or ungrounded claim is present. |
+| Receipt `verification.state: unverified` | Validation grounding is `absent` with `not_observed`; lack of a validation tool is not a failed validation. |
+| Receipt verification `unknown` or `not_applicable` | Validation grounding preserves `unknown` or `not_applicable`. A missing historical verification field maps to `unknown`. |
+| Typed receipt validation or result-contract quality | A passing correctness-bearing fact maps to `validated`; a failing fact maps to `failed`; an ungrounded passing claim maps to `ungrounded`. |
+| Valid bounded project context or valid briefing hash | Context provenance is `recorded`. Explicit project-context tier `none` with no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block is `invalid`. |
+| Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`. Correlated review maps to `not_independent`. Unauthenticated artifacts map to `unknown`; operator or full-auto confirmation alone is `not_applicable` to independent review. |
+| Evidence findings and links | Failure and proxy-validation findings map to `failed` and `ungrounded`; `no-validation` maps to `absent`. Exact links record provenance, while best-effort links remain `unknown`. No clean bundle is promoted to validated merely because negative findings are absent. |
+| Receipt autonomy grade | `mediated`, `approximated`, and `bypassed` map to `enforced`, `approximated`, and `bypassed`. A dangerous-bypass flag always normalizes to `bypassed`; a missing historical block is `unknown`. |
+| Finish-contract assessment | `validation_evidence`, `unvalidated_mutation`, `explicit_limitation`, and `no_mutation` map to `evidenced`, `incomplete`, `limited`, and `not_applicable`. |
+
+The canonical aggregate is an additive projection for downstream work. Receipt
+integrity remains version 15, evidence bundles remain version 1, gate decisions
+remain version 2, and no persisted receipt field or cryptographic algorithm
+changes in this foundation.
+
 ### Mutation-Report Grounding
 
 Mutation-report receipts are grounded directly against observed tool events recorded in the run ledger:

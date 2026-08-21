@@ -579,6 +579,19 @@ basis unknown/not applicable). A read-only Scout can therefore report `receipt_i
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 
+The canonical terminology for these facts is the six-axis trust status in
+[`evidence-and-memory.md`](evidence-and-memory.md#canonical-trust-status).
+Receipt integrity projects onto artifact integrity; receipt verification,
+typed quality, and validation grounding project onto validation grounding;
+gate decisions project onto independent review; briefing and project context
+project onto context provenance; and `autonomyEnforcement` projects onto
+autonomy enforcement. A receipt does not contain independent-review or
+completion-evidence outcomes merely because it is sealed. Those axes remain
+`absent` until an authenticated gate artifact or finish assessment is composed.
+In particular, verified integrity cannot validate claims, known provenance
+cannot establish correctness, and a review verdict cannot establish
+authorship.
+
 Gate references point backward: a reviewer references the builder it
 reviewed, a revise builder references the reviewer whose findings it
 received, and a judge references every candidate. Because a worker receipt
