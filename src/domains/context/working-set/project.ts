@@ -55,18 +55,30 @@ function projectToolResult(entry: MessageEntry, state: EvictedState): MessageEnt
  * marker would spend tokens to say that something the model cannot act on is
  * gone. Both persisted shapes go: `thinking` content blocks and the
  * payload-level string the local engine adapters write.
+ *
+ * A turn that was nothing but reasoning keeps it. Projected, it would reach
+ * the provider as an assistant message with no content, or vanish from the
+ * replay and leave two user messages adjacent; either is worse than the
+ * tokens. `planEviction` then prices such a turn at zero and records nothing.
  */
 function projectAssistant(entry: MessageEntry): MessageEntry {
 	const obj = isRecord(entry.payload) ? entry.payload : null;
 	if (obj === null || !hasThinking(obj)) return entry;
-	const next = cloneEntry(entry);
 	const content = withoutThinkingBlocks(obj.content);
+	if (!hasVisibleContent(obj, content)) return entry;
+	const next = cloneEntry(entry);
 	next.payload = {
 		...obj,
 		...(content !== undefined ? { content } : {}),
 		thinking: undefined,
 	};
 	return next;
+}
+
+/** What the replay builder would still send: a payload-level text or at least one surviving block. */
+function hasVisibleContent(obj: Record<string, unknown>, content: unknown[] | undefined): boolean {
+	if (typeof obj.text === "string" && obj.text.length > 0) return true;
+	return content !== undefined && content.length > 0;
 }
 
 /**
