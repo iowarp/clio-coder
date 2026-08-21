@@ -17,7 +17,7 @@
 		}
 	},
 	"provenance": {
-		"gitSha": "ca3f49b6ef14a27e4b67dfe6c7b060246e9be414",
+		"gitSha": "0acbe6d6674eb61ec7ec66ec9ae0f17d9a4e5635",
 		"commandLine": [
 			"/home/akougkas/.nvm/versions/node/v24.9.0/bin/node",
 			"--import",
@@ -59,6 +59,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 1,
+					"retentionCovered": 1,
 					"retentionAt10": 1,
 					"evictionPrecision": 1,
 					"tokensEvicted": 0,
@@ -68,6 +69,7 @@
 					"turnsToFirstSummaryCount": 164
 				},
 				"pooledRetention": 1,
+				"pooledRetentionCovered": 1,
 				"pooledRetentionAt10": 1
 			}
 		},
@@ -78,6 +80,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.39736045282440036,
+					"retentionCovered": 0.39778999743999144,
 					"retentionAt10": 0.7796271806042483,
 					"evictionPrecision": 0.9420574036904985,
 					"tokensEvicted": 67237.44848484849,
@@ -87,6 +90,7 @@
 					"turnsToFirstSummaryCount": 158
 				},
 				"pooledRetention": 0.3246024321796071,
+				"pooledRetentionCovered": 0.32600561272217027,
 				"pooledRetentionAt10": 0.6437941473259334
 			}
 		},
@@ -97,6 +101,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.38734720867396777,
+					"retentionCovered": 0.38777675328955896,
 					"retentionAt10": 0.7630094420606726,
 					"evictionPrecision": 0.9481324810379269,
 					"tokensEvicted": 76253.64242424243,
@@ -106,6 +111,7 @@
 					"turnsToFirstSummaryCount": 158
 				},
 				"pooledRetention": 0.3086997193638915,
+				"pooledRetentionCovered": 0.3101028999064546,
 				"pooledRetentionAt10": 0.6135216952573158
 			}
 		},
@@ -116,6 +122,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.3885318187107285,
+					"retentionCovered": 0.38896136332631964,
 					"retentionAt10": 0.7501152403028344,
 					"evictionPrecision": 0.9485123933274446,
 					"tokensEvicted": 76032.92121212122,
@@ -125,6 +132,7 @@
 					"turnsToFirstSummaryCount": 158
 				},
 				"pooledRetention": 0.3086997193638915,
+				"pooledRetentionCovered": 0.3101028999064546,
 				"pooledRetentionAt10": 0.6044399596367306
 			}
 		},
@@ -135,6 +143,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 1,
+					"retentionCovered": 1,
 					"retentionAt10": 1,
 					"evictionPrecision": 1,
 					"tokensEvicted": 67216.38181818182,
@@ -144,6 +153,7 @@
 					"turnsToFirstSummaryCount": 158
 				},
 				"pooledRetention": 1,
+				"pooledRetentionCovered": 1,
 				"pooledRetentionAt10": 1
 			}
 		},
@@ -154,6 +164,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 1,
+					"retentionCovered": 1,
 					"retentionAt10": 1,
 					"evictionPrecision": 1,
 					"tokensEvicted": 0,
@@ -163,6 +174,7 @@
 					"turnsToFirstSummaryCount": 156
 				},
 				"pooledRetention": 1,
+				"pooledRetentionCovered": 1,
 				"pooledRetentionAt10": 1
 			}
 		},
@@ -173,6 +185,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.5458401662289053,
+					"retentionCovered": 0.5462697108444964,
 					"retentionAt10": 0.8690588780573669,
 					"evictionPrecision": 0.9544114724418871,
 					"tokensEvicted": 65668.67878787879,
@@ -182,6 +195,7 @@
 					"turnsToFirstSummaryCount": 142
 				},
 				"pooledRetention": 0.4644527595884004,
+				"pooledRetentionCovered": 0.46585594013096354,
 				"pooledRetentionAt10": 0.7699293642785066
 			}
 		},
@@ -192,6 +206,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.5290339282445672,
+					"retentionCovered": 0.5294634728601584,
 					"retentionAt10": 0.8798954909394343,
 					"evictionPrecision": 0.9595138223923505,
 					"tokensEvicted": 74726.32121212121,
@@ -201,6 +216,7 @@
 					"turnsToFirstSummaryCount": 140
 				},
 				"pooledRetention": 0.44200187090739007,
+				"pooledRetentionCovered": 0.44340505144995324,
 				"pooledRetentionAt10": 0.7729566094853683
 			}
 		},
@@ -211,6 +227,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.5237889755623402,
+					"retentionCovered": 0.5242185201779314,
 					"retentionAt10": 0.8612024561890871,
 					"evictionPrecision": 0.9589541485392247,
 					"tokensEvicted": 74391.9696969697,
@@ -220,6 +237,7 @@
 					"turnsToFirstSummaryCount": 141
 				},
 				"pooledRetention": 0.44480823199251635,
+				"pooledRetentionCovered": 0.4462114125350795,
 				"pooledRetentionAt10": 0.7507568113017155
 			}
 		},
@@ -230,6 +248,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 1,
+					"retentionCovered": 1,
 					"retentionAt10": 1,
 					"evictionPrecision": 1,
 					"tokensEvicted": 65699.73333333334,
@@ -239,6 +258,7 @@
 					"turnsToFirstSummaryCount": 142
 				},
 				"pooledRetention": 1,
+				"pooledRetentionCovered": 1,
 				"pooledRetentionAt10": 1
 			}
 		},
@@ -249,6 +269,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 1,
+					"retentionCovered": 1,
 					"retentionAt10": 1,
 					"evictionPrecision": 1,
 					"tokensEvicted": 0,
@@ -258,6 +279,7 @@
 					"turnsToFirstSummaryCount": 137
 				},
 				"pooledRetention": 1,
+				"pooledRetentionCovered": 1,
 				"pooledRetentionAt10": 1
 			}
 		},
@@ -268,6 +290,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.7810314888232291,
+					"retentionCovered": 0.7814610334388203,
 					"retentionAt10": 0.9590172833831285,
 					"evictionPrecision": 0.9787066458508404,
 					"tokensEvicted": 58993.32121212121,
@@ -277,6 +300,7 @@
 					"turnsToFirstSummaryCount": 86
 				},
 				"pooledRetention": 0.7174929840972872,
+				"pooledRetentionCovered": 0.7188961646398503,
 				"pooledRetentionAt10": 0.9283551967709385
 			}
 		},
@@ -287,6 +311,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.7589941116539988,
+					"retentionCovered": 0.7594236562695899,
 					"retentionAt10": 0.9596122128149566,
 					"evictionPrecision": 0.9798995775797211,
 					"tokensEvicted": 68054.01212121212,
@@ -296,6 +321,7 @@
 					"turnsToFirstSummaryCount": 80
 				},
 				"pooledRetention": 0.7137511693171188,
+				"pooledRetentionCovered": 0.715154349859682,
 				"pooledRetentionAt10": 0.9334006054490414
 			}
 		},
@@ -306,6 +332,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 0.7870428546660476,
+					"retentionCovered": 0.7874723992816386,
 					"retentionAt10": 0.9581048194359052,
 					"evictionPrecision": 0.9771884835906713,
 					"tokensEvicted": 65938.32121212121,
@@ -315,6 +342,7 @@
 					"turnsToFirstSummaryCount": 82
 				},
 				"pooledRetention": 0.7104770813844715,
+				"pooledRetentionCovered": 0.7118802619270346,
 				"pooledRetentionAt10": 0.9243188698284561
 			}
 		},
@@ -325,6 +353,7 @@
 				"mean": {
 					"traces": 165,
 					"retention": 1,
+					"retentionCovered": 1,
 					"retentionAt10": 1,
 					"evictionPrecision": 1,
 					"tokensEvicted": 59018.721212121214,
@@ -334,6 +363,7 @@
 					"turnsToFirstSummaryCount": 86
 				},
 				"pooledRetention": 1,
+				"pooledRetentionCovered": 1,
 				"pooledRetentionAt10": 1
 			}
 		}

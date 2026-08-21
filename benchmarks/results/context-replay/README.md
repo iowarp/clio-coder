@@ -2,7 +2,7 @@
 
 Replay of the eviction policies in `src/domains/context/working-set/policies/` over the 165 Claude Code transcripts of this repository that pass the default inclusion filter, driven by `clio-coder context replay` through the same fold, projection, and planner the live session uses. The command line is the first comment of each Markdown table; the JSON beside it carries the configuration, the git revision, and the exact command.
 
-Source revision for every table in this directory: `ca3f49b6`.
+Source revision for every table in this directory: `0acbe6d6`.
 
 | File | `protectLastTurns` | Budgets |
 | --- | ---: | --- |
@@ -16,6 +16,7 @@ Source revision for every table in this directory: `ca3f49b6`.
 ## Metrics
 
 - **retention**: of the (tool result, later turn that re-read or discovered the same file) pairs in the trace, the share whose result was still in the working set at that later turn. `mean` averages per trace; `pooled` counts pairs across all traces. Higher is better.
+- **retention covered**: the same pairs, also counted when a newer successful read of the same path covers the original range and that newer copy remains in the working set at the reference turn. The reference read cannot credit itself. `mean` and `pooled` aggregate exactly as retention does. Higher is better.
 - **eviction precision**: share of evicted items the session never referenced again. Its complement is what live churn (recalls over items evicted) would count.
 - **saturated events**: share of applied eviction events in which the policy exhausted its candidates before reaching `target`. `age-horizon` has no target stop by design, so it reads 1.000; a value below 1.0 means the policy chose, rather than ran out.
 - **turns to first summary**: turns until the projection still exceeded the threshold after an eviction and the summary path would have run; `n` is the number of traces that ever reached that point.
@@ -43,11 +44,24 @@ Source revision for every table in this directory: `ca3f49b6`.
 | 64000 | 0.529 | **0.524** | 0.546 | 0.442 | **0.445** | 0.954 | **0.959** | 0.911 | fails: (a) |
 | 128000 | 0.759 | **0.787** | 0.781 | 0.714 | **0.710** | 0.979 | **0.977** | 0.849 | fails: (b) |
 
+## Retention covered by surviving newer reads
+
+| `protectLastTurns` | budget | age-horizon mean raw → covered | structural-v1 mean raw → covered | random mean raw → covered | structural-v1 pooled raw → covered |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 6 | 32000 | 0.479 → **0.479** | 0.480 → **0.481** | 0.485 → **0.485** | 0.426 → **0.427** |
+| 6 | 64000 | 0.582 → **0.582** | 0.590 → **0.590** | 0.603 → **0.604** | 0.526 → **0.528** |
+| 6 | 128000 | 0.788 → **0.788** | 0.812 → **0.812** | 0.798 → **0.799** | 0.741 → **0.742** |
+| 2 | 32000 | 0.387 → **0.388** | 0.389 → **0.389** | 0.397 → **0.398** | 0.309 → **0.310** |
+| 2 | 64000 | 0.529 → **0.529** | 0.524 → **0.524** | 0.546 → **0.546** | 0.445 → **0.446** |
+| 2 | 128000 | 0.759 → **0.759** | 0.787 → **0.787** | 0.781 → **0.781** | 0.710 → **0.712** |
+
 ## Reading the grid
 
 At the shipped `protectLastTurns: 6` the rule holds at 32k and 64k and fails one cell at 128k: `structural-v1` precision 0.979 against random 0.980, a difference of one thousandth on the budget where its retention lead is largest (+0.024 over `age-horizon`, +0.014 over random). Retention (mean), the primary metric, is at or above `age-horizon` on all six cells of both tables except 64k at `protectLastTurns: 2` (0.524 vs 0.529). The default stays `structural-v1` on that basis, and the cell is recorded here rather than the rule being rewritten around it.
 
-Two things the grid says that the rule did not ask about. First, random eviction to target retains more than either real policy at 32k and 64k (0.485 and 0.603 against 0.480 and 0.590 at `protectLastTurns: 6`); both real policies evict about 13 percent more tokens than random because `age-horizon` has no target stop and `structural-v1` runs rungs 1 to 5 whatever the pressure, and every extra eviction is a chance to lose a pair. Second, the retention metric counts every (result, later re-read) pair without asking whether a newer copy of the same file was still in the working set, so a `superseded_read` eviction is charged when the file is read a third time even though the model held the second copy. Both are follow-ups on #179: a cost model that decides whether rungs 1 to 5 should run below threshold, and a retention variant that credits a surviving newer copy.
+One result the default-policy rule did not ask about is that random eviction to target retains more than either real policy at 32k and 64k (0.485 and 0.603 against 0.480 and 0.590 at `protectLastTurns: 6`). Both real policies evict about 13 percent more tokens than random because `age-horizon` has no target stop and `structural-v1` runs rungs 1 to 5 whatever the pressure, and every extra eviction is a chance to lose a pair. This remains a cost-model follow-up on #179.
+
+The surviving-copy variant shows how often raw retention understates usable file context. At `protectLastTurns: 6`, `structural-v1` mean retention changes by budget as 32k 0.480 → 0.481, 64k 0.590 → 0.590, 128k 0.812 → 0.812; pooled retention changes as 32k 0.426 → 0.427, 64k 0.526 → 0.528, 128k 0.741 → 0.742. The column credits only a newer covering read that survives to the reference turn, so it measures the benefit of supersession without changing the policy, the default-policy rule, or any eviction decision.
 
 Tables committed before `ca3f49b6` were produced with a loader that emitted one assistant entry per Claude Code JSONL record, three per message, and priced each with the per-message overhead; those numbers (0.831 / 0.781 / 0.779 at 128k) are superseded by this directory.
 
