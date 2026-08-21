@@ -74,6 +74,17 @@ export function toolResultText(result: unknown): string {
 	return stringifyBody(result);
 }
 
+/**
+ * Estimated tokens of the body the marker would replace: the text the model
+ * reads, not the payload JSON. `details`, `resultSummary`, and the observation
+ * envelope never reach the model, so a floor measured on the whole payload
+ * would let a two-byte result with a fat envelope through and buy a marker
+ * longer than the body it replaced.
+ */
+export function toolResultBodyTokens(payload: unknown): number {
+	return Math.ceil(toolResultText(toolResultPayload(payload).result).length / 4);
+}
+
 function nestedRecord(parent: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
 	if (parent === null) return null;
 	const value = parent[key];

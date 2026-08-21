@@ -209,8 +209,8 @@ test("structural: staleness outranks supersession when both apply", () => {
 });
 
 test("structural: a listing with unread surfaced paths stays (charter scenario 5)", () => {
-	// Long enough that the listing itself clears the minEvictableTokens floor.
-	const surfaced = Array.from({ length: 12 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
+	// Long enough that the listing body itself clears the minEvictableTokens floor.
+	const surfaced = Array.from({ length: 16 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
 	const ledger = new Ledger();
 	ledger.user();
 	const listing = ledger.find("src", surfaced);
@@ -220,12 +220,12 @@ test("structural: a listing with unread surfaced paths stays (charter scenario 5
 	}
 	ledger.pad();
 
-	assert.equal(byRef(select(ledger.entries)).has(listing), false, "7 surfaced paths are still unread");
+	assert.equal(byRef(select(ledger.entries)).has(listing), false, "11 surfaced paths are still unread");
 });
 
 test("structural: a listing whose surfaced paths were all read is consumed", () => {
-	// Long enough that the listing itself clears the minEvictableTokens floor.
-	const surfaced = Array.from({ length: 12 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
+	// Long enough that the listing body itself clears the minEvictableTokens floor.
+	const surfaced = Array.from({ length: 16 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
 	const ledger = new Ledger();
 	ledger.user();
 	const listing = ledger.find("src", surfaced);
@@ -242,7 +242,7 @@ test("structural: a listing under a relative root is consumed without any cwd at
 	// find prints paths relative to the directory it searched; the model then
 	// reads them relative to the workspace. Before the join-onto-root fix this
 	// never matched unless the root was ".", so listing_consumed was dead live.
-	const surfaced = Array.from({ length: 12 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
+	const surfaced = Array.from({ length: 16 }, (_, i) => `domains/context/working-set/generated/component_${i}/index.ts`);
 	const ledger = new Ledger();
 	ledger.user();
 	const listing = ledger.find("src", surfaced);
@@ -575,7 +575,7 @@ test("structural: the same ledger selects identically twice", () => {
 });
 
 test("structural: planEviction turns a mixed selection into a valid ledger entry", () => {
-	const surfaced = Array.from({ length: 12 }, (_, i) => `domains/context/working-set/generated/surfaced_${i}/index.ts`);
+	const surfaced = Array.from({ length: 16 }, (_, i) => `domains/context/working-set/generated/surfaced_${i}/index.ts`);
 	const ledger = new Ledger();
 	ledger.user();
 	const staleRead = ledger.read("src/m.ts");

@@ -22,12 +22,12 @@
 
 import type { EvictionCandidate, PolicyInput, WorkingSetPolicy } from "../contract.js";
 import { protectionCutoffIndex } from "../horizon.js";
-import { hasLegacyCompactionMarker, hasThinking } from "../payload.js";
+import { hasLegacyCompactionMarker, hasThinking, toolResultBodyTokens } from "../payload.js";
 
 export const ageHorizonPolicy: WorkingSetPolicy = {
 	id: "age-horizon",
 	select(input: PolicyInput): ReadonlyArray<EvictionCandidate> {
-		const { entries, view, settings, estimateTokens } = input;
+		const { entries, view, settings } = input;
 		const cutoff = protectionCutoffIndex(entries, settings.protectLastTurns);
 		const candidates: EvictionCandidate[] = [];
 		// Newest-safe-first: the entry closest to the protection horizon is the
@@ -39,7 +39,7 @@ export const ageHorizonPolicy: WorkingSetPolicy = {
 			if (view.evicted.has(entry.turnId)) continue;
 			if (entry.role === "tool_result") {
 				if (hasLegacyCompactionMarker(entry.payload)) continue;
-				if (estimateTokens(entry) < settings.minEvictableTokens) continue;
+				if (toolResultBodyTokens(entry.payload) < settings.minEvictableTokens) continue;
 				candidates.push({ ref: { entry: entry.turnId }, reason: "age_horizon" });
 				continue;
 			}
