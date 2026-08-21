@@ -65,6 +65,7 @@ Usage:
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder skills               list, inspect, validate, or install skills
+  clio-coder verifiers            discover, author, validate, edit, or dry-run project checks
   clio-coder docs [topic]         serve the HTML docs of a source checkout on 127.0.0.1 (--no-open to skip browser)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
   clio-coder --help, -h           this message
@@ -245,6 +246,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["ext", extensionsCommand],
 	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],
 	["skills", async (subArgs) => (await import("./skills.js")).runSkillsCommand(subArgs)],
+	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
 	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],
