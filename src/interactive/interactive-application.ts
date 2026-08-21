@@ -560,6 +560,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		recordToolEnd: (_toolName, toolCallId, isError, truncated) =>
 			presentation.recordToolEnd({ toolCallId, isError, truncated }),
 		setStatusLine: (line) => chatPanel.setStatusLine(line),
+		setLiveReasoning: (view) => chatPanel.setLiveReasoning(view),
 		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
