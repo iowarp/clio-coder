@@ -244,6 +244,32 @@ describe("managed prepare-commit-msg attribution", () => {
 		);
 	});
 
+	it("rechecks custom hooks after a prepared child changes repositories", () => {
+		const origin = initRepository();
+		execFileSync("git", ["-C", origin, "config", "core.hooksPath", join(origin, ".git", "hooks")]);
+		const prepared = withManagedGitCommitAttributionEnvironment(process.env, { cwd: origin, enabled: true });
+
+		const target = initRepository();
+		const hooks = join(target, "custom hooks");
+		mkdirSync(hooks);
+		const marker = join(target, "custom-called-after-cd");
+		const hook = join(hooks, "prepare-commit-msg");
+		writeFileSync(hook, `#!/bin/sh\nprintf called > '${marker}'\n`);
+		chmodSync(hook, 0o755);
+		execFileSync("git", ["-C", target, "config", "core.hooksPath", hooks]);
+		stage(target, "a.txt", "a\n");
+
+		strictEqual(
+			spawnSync("git", ["-C", target, "commit", "-q", "-m", "Changed repository"], {
+				env: prepared.env,
+				encoding: "utf8",
+			}).status,
+			0,
+		);
+		strictEqual(readFileSync(marker, "utf8"), "called", "the target repository's custom hook runs");
+		strictEqual(message(target).includes(CLIO_COMMIT_IDENTITY), false, "the target repository is not attributed");
+	});
+
 	it("runs under --no-verify, skips amend and cherry-pick history replay, and honors disable", () => {
 		const root = initRepository();
 		stage(root, "seed.txt", "seed\n");
