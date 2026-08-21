@@ -19,36 +19,18 @@
 import { ceilChars } from "../../session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import { filterEntriesToActivePath } from "../../session/tree/active-path.js";
-import type { ContextRecallFields, RecallError, RecallResult, RecallTrigger, WorkingSetView } from "./contract.js";
+import {
+	type ContextRecallFields,
+	EMPTY_WORKING_SET_VIEW,
+	type RecallError,
+	type RecallResult,
+	type RecallTrigger,
+	type WorkingSetView,
+} from "./contract.js";
 import { parseRefKey, refKey } from "./fold.js";
 import { offloadPathOf, toolResultPayload, toolResultText } from "./payload.js";
 
 export type RecallOutcome = { ok: true; result: RecallResult } | { ok: false; error: RecallError };
-
-function commonPrefixLength(a: string, b: string): number {
-	const limit = Math.min(a.length, b.length);
-	let i = 0;
-	while (i < limit && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
-	return i;
-}
-
-/**
- * The evicted ref key sharing the longest non-empty common prefix with `key`,
- * or null when no evicted key shares a prefix. Ties keep fold order, which is
- * ledger order of the eviction events.
- */
-function nearestEvictedRef(view: WorkingSetView, key: string): string | null {
-	let best: string | null = null;
-	let bestLength = 0;
-	for (const candidate of view.evicted.keys()) {
-		const length = commonPrefixLength(candidate, key);
-		if (length > bestLength) {
-			best = candidate;
-			bestLength = length;
-		}
-	}
-	return best;
-}
 
 function isThinkingEntry(entry: SessionEntry): boolean {
 	return entry.kind === "message" && entry.role === "assistant";
@@ -70,12 +52,12 @@ export function resolveRecall(
 	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
 	const entry = active.find((candidate) => candidate.turnId === key);
 	if (entry === undefined) {
-		return { ok: false, error: { kind: "not_on_active_path", ref: key, nearest: nearestEvictedRef(view, key) } };
+		return { ok: false, error: { kind: "not_on_active_path", ref: key } };
 	}
 	// Thinking leaves the working set without a marker and is not recallable
 	// in this slice; `recallErrorMessage` names that case from the entry.
 	if (isThinkingEntry(entry) || !view.evicted.has(key) || !isToolResultEntry(entry)) {
-		return { ok: false, error: { kind: "not_evicted", ref: key, nearest: nearestEvictedRef(view, key) } };
+		return { ok: false, error: { kind: "not_evicted", ref: key } };
 	}
 	const payload = toolResultPayload(entry.payload);
 	const body = toolResultText(payload.result);
@@ -120,24 +102,44 @@ export function buildRecallFields(
 	};
 }
 
+/** Refs listed in a recall failure before the list is cut with an ellipsis. */
+const MAX_LISTED_REFS = 8;
+
 /**
- * One-line operator/model-facing message for a recall failure. Names the
- * nearest valid ref when one exists so the next call can succeed, and says
- * why an assistant turn is refused instead of calling it "not evicted".
+ * The refs that are actually out, so the next call can name one of them. A
+ * guessed "nearest" ref was tried first and dropped: over time-ordered ids a
+ * prefix match names an unrelated result, and the listing is what helps.
  */
-export function recallErrorMessage(error: RecallError, entries: ReadonlyArray<SessionEntry> = []): string {
-	const nearest = "nearest" in error && error.nearest !== null ? ` Nearest evicted ref: ${error.nearest}.` : "";
+function evictedRefListing(view: WorkingSetView): string {
+	const refs = [...view.evicted.keys()];
+	if (refs.length === 0) return "No refs are evicted on the active path.";
+	const shown = refs.slice(0, MAX_LISTED_REFS).join(", ");
+	const more = refs.length > MAX_LISTED_REFS ? `, and ${refs.length - MAX_LISTED_REFS} more` : "";
+	return `Evicted refs on the active path: ${shown}${more}.`;
+}
+
+/**
+ * One-line operator/model-facing message for a recall failure. Says why an
+ * assistant turn is refused instead of calling it "not evicted", and ends with
+ * the refs that can be recalled.
+ */
+export function recallErrorMessage(
+	error: RecallError,
+	entries: ReadonlyArray<SessionEntry> = [],
+	view: WorkingSetView = EMPTY_WORKING_SET_VIEW,
+): string {
+	const listing = ` ${evictedRefListing(view)}`;
 	switch (error.kind) {
 		case "invalid_ref":
 			return `recall ref must be a single turnId without whitespace; got '${error.ref}'.`;
 		case "not_on_active_path":
-			return `ref ${error.ref} is not on the active path of this session (unknown or on an abandoned branch).${nearest}`;
+			return `ref ${error.ref} is not on the active path of this session (unknown or on an abandoned branch).${listing}`;
 		case "not_evicted": {
 			const entry = entries.find((candidate) => candidate.turnId === error.ref);
 			if (entry !== undefined && isThinkingEntry(entry)) {
-				return `ref ${error.ref} is an assistant turn; thinking is not recallable.${nearest}`;
+				return `ref ${error.ref} is an assistant turn; thinking is not recallable.${listing}`;
 			}
-			return `ref ${error.ref} is not evicted; its content is already in context.${nearest}`;
+			return `ref ${error.ref} is not evicted; its content is already in context.${listing}`;
 		}
 	}
 }

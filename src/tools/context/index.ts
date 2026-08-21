@@ -537,16 +537,7 @@ function runRecallScope(
 	const leaf = session.activeLeafTurnId();
 	const view = foldWorkingSet(entries, leaf);
 	const resolved = resolveRecall(entries, view, ref, leaf);
-	if (!resolved.ok) {
-		// The listing is what lets the next call succeed; the nearest-ref guess is
-		// a prefix match over time-ordered ids and is usually an unrelated result.
-		const evictedRefs = [...view.evicted.keys()];
-		const listing =
-			evictedRefs.length > 0
-				? ` Evicted refs on the active path: ${evictedRefs.slice(0, 8).join(", ")}${evictedRefs.length > 8 ? ", …" : ""}.`
-				: " No refs are evicted on the active path.";
-		return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries)}${listing}` };
-	}
+	if (!resolved.ok) return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries, view)}` };
 	const { result } = resolved;
 	const fields = buildRecallFields(result, {
 		trigger: "tool",
