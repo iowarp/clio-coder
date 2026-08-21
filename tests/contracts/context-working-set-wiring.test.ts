@@ -142,7 +142,12 @@ function fakePlan(): EvictionPlan {
 	};
 }
 
-function harness(enabled = true, withSummary = true, tier: "local-native" | "cloud" = "local-native") {
+function harness(
+	enabled = true,
+	withSummary = true,
+	tier: "local-native" | "cloud" = "local-native",
+	plan: EvictionPlan | null = fakePlan(),
+) {
 	const entries = fixtureEntries();
 	const session = fakeSession(entries);
 	const settings = testSettings(enabled);
@@ -175,7 +180,7 @@ function harness(enabled = true, withSummary = true, tier: "local-native" | "clo
 			: {}),
 		planEviction: () => {
 			plannerCalls += 1;
-			return fakePlan();
+			return plan;
 		},
 		bus,
 		middleware: {
@@ -328,7 +333,7 @@ describe("contracts/context working-set compaction wiring", () => {
 		ok(h.hookStages.includes("mask_observations"));
 	});
 
-	it("skips eviction and masking when disabled and reaches summary compaction", async () => {
+	it("skips eviction and masking when disabled and probes summary compaction", async () => {
 		delete process.env.CLIO_CODER_LEGACY_MASK;
 		const h = harness(false);
 
@@ -338,6 +343,35 @@ describe("contracts/context working-set compaction wiring", () => {
 		strictEqual(h.session.replaceCalls(), 0);
 		deepStrictEqual(h.session.appended, []);
 		strictEqual(h.summaryCalls(), 1);
-		deepStrictEqual(h.hookStages, ["llm_summary"]);
+		deepStrictEqual(h.hookStages, [], "an empty automatic summary probe does not publish a lifecycle");
+	});
+
+	it("does not publish or repeat an empty automatic attempt within one turn", async () => {
+		delete process.env.CLIO_CODER_LEGACY_MASK;
+		const h = harness(true, true, "local-native", null);
+		h.state.activeUserTurnId = "user-recent";
+		let compactionBegins = 0;
+		h.bus.on(BusChannels.CompactionBegin, () => {
+			compactionBegins += 1;
+		});
+
+		await h.context.runAutoCompact(h.runtime, false);
+		await h.context.runAutoCompact(h.runtime, false);
+
+		strictEqual(h.plannerCalls(), 1, "the empty planner is probed once per user turn");
+		strictEqual(h.summaryCalls(), 1, "the empty summary path is probed once per user turn");
+		strictEqual(compactionBegins, 0, "an empty automatic probe is not a compaction lifecycle");
+		deepStrictEqual(h.hookStages, []);
+
+		h.context.consumeExpectedColdReasons("test-runtime");
+		const usage = {
+			input: 1_000,
+			output: 10,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_010,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		strictEqual(h.context.promptCachePayloadForAssistant(usage).expectedColdReasons, undefined);
 	});
 });

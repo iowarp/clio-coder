@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { BusChannels, type ContextActivityPayload } from "../../src/core/bus-events.js";
@@ -525,6 +525,55 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 		const completed = activities.find((a) => a.status === "completed");
 		ok(completed, "a no-op compaction still reports completed");
 		ok(completed?.message.includes("nothing to compact"));
+	});
+
+	it("an empty automatic pressure probe emits no compaction lifecycle", async () => {
+		const bus = createSafeEventBus();
+		const activities = compactionActivities(bus);
+		let compactionBegins = 0;
+		let summaryCalls = 0;
+		bus.on(BusChannels.CompactionBegin, () => {
+			compactionBegins += 1;
+		});
+		const entries: SessionEntry[] = [];
+		const session = createSession(entries);
+		session.create({ cwd: process.cwd(), model: "model", target: "test-target" });
+		const seedMessages = (): AgentMessage[] => [
+			{
+				role: "user",
+				content: [{ type: "text", text: "protected current turn ".repeat(100) }],
+				timestamp: Date.now(),
+			} as AgentMessage,
+		];
+		const loop = createChatLoop({
+			getSettings: () => settings({ threshold: 0.5 }),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session,
+			readSessionEntries: () => entries,
+			bus,
+			autoCompact: async (): Promise<CompactResult | null> => {
+				summaryCalls += 1;
+				return null;
+			},
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					stopReason: "stop",
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				await agent.emit({ type: "message_end", message });
+				await agent.emit({ type: "agent_end", messages: [message] });
+			}, seedMessages),
+		} as never);
+
+		await loop.submit("continue");
+
+		strictEqual(summaryCalls, 1, "the over-threshold turn reaches the empty summary probe");
+		strictEqual(compactionBegins, 0);
+		deepStrictEqual(activities, []);
 	});
 
 	it("a mask-stage auto compaction emits its own started -> completed pair", async () => {
