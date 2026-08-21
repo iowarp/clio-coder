@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { listSessionsForCwd } from "../../src/domains/session/history.js";
 import { resumeSessionState } from "../../src/domains/session/manager.js";
-import { createSession, openSession, resumeSession, sessionPaths } from "../../src/engine/session.js";
+import {
+	CURRENT_SESSION_FORMAT_VERSION,
+	createSession,
+	openSession,
+	resumeSession,
+	sessionPaths,
+} from "../../src/engine/session.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 // BUG-013: session ids are identifiers, not paths. findSessionDir joined a
@@ -104,7 +110,7 @@ describe("contracts/session-boundary", () => {
 		});
 	});
 
-	for (const version of [1, 2] as const) {
+	for (const version of [1, 2, 3] as const) {
 		it(`rejects session format version ${version} with an operator remedy`, async () => {
 			const { meta, writer } = createSession({ cwd: scratch });
 			await writer.close();
@@ -112,8 +118,29 @@ describe("contracts/session-boundary", () => {
 			writeFileSync(paths.meta, JSON.stringify({ ...meta, sessionFormatVersion: version }));
 
 			throws(() => resumeSessionState(meta.id), {
-				message: `session metadata has an unsupported format version (expected version 3, got ${version}): ${paths.meta}. Remove the session directory to start a new session.`,
+				message: `session metadata has an unsupported format version (expected version ${CURRENT_SESSION_FORMAT_VERSION}, got ${version}): ${paths.meta}. Remove the session directory to start a new session.`,
 			});
 		});
 	}
+
+	// A newer Clio may have written kinds this build does not know. Reading the
+	// file anyway would drop them silently, and the next append would write that
+	// truncated reading back over the operator's session.
+	it("rejects a session written by a newer Clio instead of downgrading it", async () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		await writer.close();
+		const paths = sessionPaths(meta);
+		const newer = CURRENT_SESSION_FORMAT_VERSION + 1;
+		writeFileSync(paths.meta, JSON.stringify({ ...meta, sessionFormatVersion: newer }));
+
+		throws(() => resumeSessionState(meta.id), {
+			message: `session was written by a newer Clio (format version ${newer}, this build reads version ${CURRENT_SESSION_FORMAT_VERSION}): ${paths.meta}. Upgrade clio-coder to resume this session.`,
+		});
+	});
+
+	it("stamps the current format version on a new session", () => {
+		const { meta } = createSession({ cwd: scratch });
+		strictEqual(meta.sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
+		strictEqual(CURRENT_SESSION_FORMAT_VERSION, 4);
+	});
 });
