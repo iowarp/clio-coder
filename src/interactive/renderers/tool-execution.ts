@@ -561,8 +561,8 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 }
 
 function headerLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
-	const summary = summarizeArgs(toolName, args);
-	const head = `${dim(HEADER_PREFIX_PLAIN)}${cyanBold(toolName)}${dim("(")}${cyan(summary)}${dim(")")}`;
+	const body = styleSublineBody(buildSublineBody(toolName, args, status, undefined, meta.outcome));
+	const head = `${dim(HEADER_PREFIX_PLAIN)}${body}`;
 	return `${head}${statusGlyph(status, meta)}`;
 }
 
@@ -576,8 +576,9 @@ function styleSublineBody(body: string): string {
 	return sublineLead(match.groups.lead, match.groups.rest);
 }
 
-function buildUnknownToolBody(toolName: string, args: unknown): string {
-	return `${toolName}(${summarizeArgs(toolName, args)})`;
+function buildGenericToolBody(toolName: string, args: unknown): string {
+	const summary = summarizeArgs(toolName, args);
+	return summary.length > 0 ? `tool action ${summary}` : "tool action";
 }
 
 function buildFieldSublineBody(
@@ -634,6 +635,7 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
+	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
 	git: (args) => buildFieldSublineBody(args, "op", "git "),
 	verify: (args) => buildFieldSublineBody(args, "check", "verifying "),
 	code_nav: (args) => {
@@ -705,21 +707,21 @@ function buildSublineBody(
 	result?: unknown,
 	outcome?: ToolExecutionFinished["outcome"],
 ): string {
-	if (isNonExecutedOutcome(outcome)) return buildUnknownToolBody(toolName, args);
-	if (status === "forming" || status === "ready") return buildUnknownToolBody(toolName, args);
+	if (isNonExecutedOutcome(outcome)) return buildGenericToolBody(toolName, args);
 	if (toolName === "web_fetch") {
 		const meta = status === undefined ? null : webFetchMeta(result);
-		return `${buildUnknownToolBody(toolName, args)}${meta ? dim(` · ${meta}`) : ""}`;
+		const body = SUBLINE_BODY_BUILDERS.web_fetch?.(args) ?? buildGenericToolBody(toolName, args);
+		return `${body}${meta ? dim(` · ${meta}`) : ""}`;
 	}
 	if (toolName === "bash") {
-		const lead = status === "running" || status === undefined ? "running " : "ran ";
+		const lead = status === "ok" || status === "error" ? "ran " : "running ";
 		return (
-			buildFieldSublineBody(args, "command", lead, { wrapInBackticks: true }) ?? buildUnknownToolBody(toolName, args)
+			buildFieldSublineBody(args, "command", lead, { wrapInBackticks: true }) ?? buildGenericToolBody(toolName, args)
 		);
 	}
 	const body = SUBLINE_BODY_BUILDERS[toolName]?.(args);
 	if (body !== null && body !== undefined) return body;
-	return buildUnknownToolBody(toolName, args);
+	return buildGenericToolBody(toolName, args);
 }
 
 interface SublineParts {

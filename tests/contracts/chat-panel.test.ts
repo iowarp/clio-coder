@@ -472,7 +472,8 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		} as unknown as ChatLoopEvent);
 		let rendered = strip(panel.render(110).join("\n"));
 		ok(rendered.includes("forming call"), rendered);
-		ok(rendered.includes("grep(AgentToolResult)"), rendered);
+		ok(rendered.includes("searching for `AgentToolResult`"), rendered);
+		ok(!rendered.includes("grep("), rendered);
 
 		panel.applyEvent({ type: "message_end", message: { ...partial, stopReason: "toolUse" } } as unknown as ChatLoopEvent);
 		rendered = strip(panel.render(110).join("\n"));
@@ -515,7 +516,8 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 			durationMs: 400,
 		} as ChatLoopEvent);
 		rendered = strip(panel.render(110).join("\n"));
-		strictEqual((rendered.match(/▸ grep\(/g) ?? []).length, 1, rendered);
+		strictEqual((rendered.match(/▸ searching for `AgentToolResult`/g) ?? []).length, 1, rendered);
+		ok(!rendered.includes("grep("), rendered);
 		ok(rendered.includes("✓ · 400ms"), rendered);
 		ok(rendered.includes("output · 1/3 matches · 22B"), rendered);
 	});
@@ -2298,6 +2300,9 @@ describe("chat-panel transcript detail policy", () => {
 			ok(text.includes("reasoning excerpt line two"), `thinking rail open at ${width}`);
 			ok(text.includes("walking src"), `the failed body is open at ${width}`);
 			ok(text.includes("cache 30/0"), `full receipt at ${width}`);
+			for (const toolName of ["read", "grep", "find", "ls", "web_fetch", "bash", "edit", "write"]) {
+				ok(!text.includes(`${toolName}(`), `internal ${toolName} name leaked at ${width}: ${text}`);
+			}
 			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
 		}
 		// Alt+O folds the newest block (the failed grep) and the fold sticks.
@@ -2451,7 +2456,8 @@ describe("chat-panel transcript detail policy", () => {
 		// The operator opens the running call: header, args, and the live body.
 		ok(panel.toggleLastToolExpanded());
 		let text = rows(panel, 100).join("\n");
-		ok(text.includes("grep(slow)"), text);
+		ok(text.includes("searching for `slow`"), text);
+		ok(!text.includes("grep("), text);
 		ok(text.includes("running · 2.5s"), text);
 		ok(text.includes("live output"), text);
 		ok(text.includes("src/a.ts:1: slow"), `the streaming body appears once expanded: ${text}`);
@@ -2475,7 +2481,8 @@ describe("chat-panel transcript detail policy", () => {
 			partialResult: "partial file",
 		} as ChatLoopEvent);
 		text = rows(verbose, 100).join("\n");
-		ok(text.includes("read(src/big.ts)"), text);
+		ok(text.includes("reading src/big.ts"), text);
+		ok(!text.includes("read("), text);
 		ok(text.includes("partial file"), text);
 		verbosity = "verbose";
 		ok(
