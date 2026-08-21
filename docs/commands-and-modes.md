@@ -78,7 +78,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder context wiki [--update] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
-| `clio-coder context replay --sessions <path>... [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers and report retention, precision, token savings, churn, and summary headroom. |
+| `clio-coder context replay --sessions <path>... [--format clio\|claude-code\|auto] [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio or Claude Code session ledgers and report retention, precision, token savings, churn, and summary headroom. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ## Headless Run Flags
@@ -524,12 +524,19 @@ incremental updates.
 ### Working-set replay
 
 `clio-coder context replay --sessions <path>...` accepts individual session directories,
-Clio sessions roots, and `current.jsonl` files. It removes prior eviction/recall sidecars,
-selects the active branch, and drives the live fold, projection, policy, and eviction planner
-at deterministic turn boundaries. The default inclusion cascade requires at least eight
-turns, eight tool results, and one file re-read; `--no-filter` retains every readable trace.
-Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable report
-including the configuration, git revision when available, and exact command line.
+Clio sessions roots, Claude Code project roots, and JSONL files. `--format auto` is the
+default and distinguishes a Clio session header from the first semantic Claude Code
+user, assistant, or summary record after metadata; `--format clio` and
+`--format claude-code` force a loader. Clio traces remove prior eviction/recall sidecars
+and select the active branch. Claude Code traces skip sidechain/subagent and summary-only
+files, normalize tool calls and results into Clio's message shapes, and retain the recorded
+cwd for path indexing. Both drive the live fold, projection, policy, and eviction planner at
+deterministic turn boundaries. The default inclusion cascade requires at least eight turns,
+eight tool results, and one file re-read; `--no-filter` retains every otherwise-readable
+trace. Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable
+report including the configuration, git revision when available, and exact command line.
+The summary-headroom mean always carries its contributing trace count because traces that
+never require summary compaction do not enter that nullable mean.
 
 `clio-coder context working-set --session <id|path>` is a read-only inspection command for
 one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate

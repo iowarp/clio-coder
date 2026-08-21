@@ -24,6 +24,8 @@ export interface ReplayMeasurement {
 export interface ReplayMetricAggregate {
 	/** Arithmetic mean of the per-trace metrics; `traces` is the sample size. */
 	mean: ReplayMetrics;
+	/** Number of traces contributing to the nullable `turnsToFirstSummary` mean. */
+	turnsToFirstSummaryCount: number;
 	/** Headline pair-level retention pooled across every critical future reference. */
 	pooledRetention: number;
 	pooledRetentionAt10: number;
@@ -119,6 +121,7 @@ export function aggregateReplayMetrics(inputs: ReadonlyArray<ReplayMeasurement>)
 			churn: mean(measured.map((entry) => entry.metrics.churn)),
 			turnsToFirstSummary: summaries.length === 0 ? null : mean(summaries),
 		},
+		turnsToFirstSummaryCount: summaries.length,
 		pooledRetention: safeFraction(sum("retainedPairs"), sum("pairs"), 1),
 		pooledRetentionAt10: safeFraction(sum("retainedPairsAt10"), sum("pairsAt10"), 1),
 	};
