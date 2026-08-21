@@ -263,6 +263,10 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 	}
 	try {
 		const loaded = await loadReplayTraces(parsed.sessions, parsed.format, { filter: !parsed.noFilter });
+		if (loaded.traces.length === 0) {
+			process.stderr.write(`clio-coder context replay: no traces to replay (${cascadeLine(loaded.cascade)})\n`);
+			return 1;
+		}
 		const indexed = loaded.traces.map((trace) => {
 			const index = buildPathIndex(trace.entries, { cwd: trace.cwd });
 			return { trace, index, graph: buildReferenceGraph(trace, index) };
