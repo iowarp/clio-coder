@@ -32,6 +32,10 @@ Options:
   --format <format>    clio, claude-code, or auto (default: auto)
   --threshold <ratio> pressure threshold (default: 0.8)
   --target <ratio>    post-eviction pressure target (default: 0.6)
+  --protect-last-turns <n>
+                      protected recent turns (default: ${DEFAULT_WORKING_SET_SETTINGS.protectLastTurns})
+  --min-evictable-tokens <n>
+                      minimum tool-result body tokens (default: ${DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens})
   --seed <integer>    deterministic random-policy seed (default: 0)
   --no-filter         include every readable transcript
   --json <path>       write the stable JSON report
@@ -55,6 +59,8 @@ interface ReplayArgs {
 	budgets: number[];
 	threshold: number;
 	target: number;
+	protectLastTurns: number;
+	minEvictableTokens: number;
 	seed: number;
 	format: ReplayInputFormat;
 	noFilter: boolean;
@@ -104,6 +110,8 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		budgets: [16_000, 32_000, 64_000],
 		threshold: 0.8,
 		target: 0.6,
+		protectLastTurns: DEFAULT_WORKING_SET_SETTINGS.protectLastTurns,
+		minEvictableTokens: DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens,
 		seed: 0,
 		format: "auto",
 		noFilter: false,
@@ -131,6 +139,8 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 			arg === "--format" ||
 			arg === "--threshold" ||
 			arg === "--target" ||
+			arg === "--protect-last-turns" ||
+			arg === "--min-evictable-tokens" ||
 			arg === "--seed"
 		) {
 			const value = requiredValue(args, index, arg);
@@ -163,6 +173,16 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 				parsed.target = numberValue(value, arg);
 				if (parsed.target <= 0 || parsed.target >= 1) {
 					throw new CliUsageError("--target must be greater than 0 and less than 1");
+				}
+			} else if (arg === "--protect-last-turns") {
+				parsed.protectLastTurns = numberValue(value, arg);
+				if (!Number.isInteger(parsed.protectLastTurns) || parsed.protectLastTurns < 1) {
+					throw new CliUsageError("--protect-last-turns must be an integer at least 1");
+				}
+			} else if (arg === "--min-evictable-tokens") {
+				parsed.minEvictableTokens = numberValue(value, arg);
+				if (!Number.isInteger(parsed.minEvictableTokens) || parsed.minEvictableTokens < 0) {
+					throw new CliUsageError("--min-evictable-tokens must be a non-negative integer");
 				}
 			} else {
 				parsed.seed = numberValue(value, arg);
@@ -247,7 +267,12 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 			const index = buildPathIndex(trace.entries, { cwd: trace.cwd });
 			return { trace, index, graph: buildReferenceGraph(trace, index) };
 		});
-		const settings = { ...DEFAULT_WORKING_SET_SETTINGS, target: parsed.target };
+		const settings = {
+			...DEFAULT_WORKING_SET_SETTINGS,
+			target: parsed.target,
+			protectLastTurns: parsed.protectLastTurns,
+			minEvictableTokens: parsed.minEvictableTokens,
+		};
 		const results: ReplayPolicyResult[] = [];
 		for (const budgetTokens of parsed.budgets) {
 			for (const policyId of parsed.policies) {

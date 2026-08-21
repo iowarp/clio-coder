@@ -7,6 +7,12 @@ import { isProtected } from "../protect.js";
 import type { ReferenceGraph } from "./reference-graph.js";
 import { countReplayTurns } from "./trace.js";
 
+/** Replay-only diagnostic surface; it does not widen the live policy contract. */
+export interface ReplayCandidatePoolPolicy extends WorkingSetPolicy {
+	/** Number of currently usable candidates before target-based truncation. */
+	replayCandidateCount(input: PolicyInput): number;
+}
+
 function controlId(id: string): WorkingSetPolicyId {
 	return id as WorkingSetPolicyId;
 }
@@ -38,18 +44,28 @@ function takeToTarget(input: PolicyInput, entries: ReadonlyArray<SessionEntry>):
 	return selected;
 }
 
-export function makeOraclePolicy(graph: ReferenceGraph): WorkingSetPolicy {
+export function makeOraclePolicy(graph: ReferenceGraph): ReplayCandidatePoolPolicy {
+	let lastInput: PolicyInput | null = null;
+	let lastCandidateCount = 0;
+	const safeEntries = (input: PolicyInput): SessionEntry[] => {
+		const currentTurn = countReplayTurns(input.entries) + 1;
+		return eligibleToolResults(input).filter((entry) => {
+			const futureTurns = graph.futureTurnsOf.get(entry.turnId) ?? [];
+			return futureTurns.every((turn) => turn < currentTurn);
+		});
+	};
 	return {
 		id: controlId("oracle"),
 		select(input): ReadonlyArray<EvictionCandidate> {
 			// Replay calls before the next turn-start entry is appended. A reference
 			// in that next turn is therefore still future from the model's view.
-			const currentTurn = countReplayTurns(input.entries) + 1;
-			const safe = eligibleToolResults(input).filter((entry) => {
-				const futureTurns = graph.futureTurnsOf.get(entry.turnId) ?? [];
-				return futureTurns.every((turn) => turn < currentTurn);
-			});
+			const safe = safeEntries(input);
+			lastInput = input;
+			lastCandidateCount = safe.length;
 			return takeToTarget(input, safe);
+		},
+		replayCandidateCount(input): number {
+			return input === lastInput ? lastCandidateCount : safeEntries(input).length;
 		},
 	};
 }
@@ -68,11 +84,15 @@ function mulberry32(seed: number): () => number {
 	};
 }
 
-export function makeRandomPolicy(seed: number): WorkingSetPolicy {
+export function makeRandomPolicy(seed: number): ReplayCandidatePoolPolicy {
+	let lastInput: PolicyInput | null = null;
+	let lastCandidateCount = 0;
 	return {
 		id: controlId("random"),
 		select(input): ReadonlyArray<EvictionCandidate> {
 			const entries = [...eligibleToolResults(input)];
+			lastInput = input;
+			lastCandidateCount = entries.length;
 			const random = mulberry32(seed);
 			for (let index = entries.length - 1; index > 0; index -= 1) {
 				const swap = Math.floor(random() * (index + 1));
@@ -81,6 +101,9 @@ export function makeRandomPolicy(seed: number): WorkingSetPolicy {
 				entries[swap] = value as SessionEntry;
 			}
 			return takeToTarget(input, entries);
+		},
+		replayCandidateCount(input): number {
+			return input === lastInput ? lastCandidateCount : eligibleToolResults(input).length;
 		},
 	};
 }
