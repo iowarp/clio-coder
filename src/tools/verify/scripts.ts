@@ -60,8 +60,10 @@ function providerCollision(sources: ReadonlyArray<DeclaredCheckSource>): string 
 	return null;
 }
 
-export function discoverDeclaredChecks(cwdArg: string | undefined): DeclaredCheckDiscoveryResult {
-	const workspaceRoot = process.cwd();
+export function discoverDeclaredChecksAtRoot(
+	workspaceRoot: string,
+	cwdArg: string | undefined,
+): DeclaredCheckDiscoveryResult {
 	let packageRoot: string;
 	try {
 		packageRoot = resolveSafeCwd(cwdArg, workspaceRoot);
@@ -77,6 +79,10 @@ export function discoverDeclaredChecks(cwdArg: string | undefined): DeclaredChec
 	const collision = providerCollision(sources);
 	if (collision !== null) return { ok: false, reason: collision };
 	return { ok: true, sources };
+}
+
+export function discoverDeclaredChecks(cwdArg: string | undefined): DeclaredCheckDiscoveryResult {
+	return discoverDeclaredChecksAtRoot(process.cwd(), cwdArg);
 }
 
 function clonedSources(sources: ReadonlyArray<DeclaredCheckSource>): DeclaredCheckSource[] {
@@ -99,6 +105,7 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 	if (discovery.sources.length === 0 || discovery.sources.every((source) => source.checks.length === 0)) {
 		lines.push(
 			`No declared verification checks found (no package.json verification scripts or ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} entries).`,
+			"Run `clio-coder verifiers author` to inspect declared project tooling, preview exact argv checks, and create the catalog after confirmation.",
 		);
 	} else {
 		lines.push("Declared verification checks:");

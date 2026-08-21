@@ -252,7 +252,15 @@ export function loadProjectVerifierCatalog(workspaceRoot: string): ProjectCatalo
 	} catch (error) {
 		return catalogDiagnostic(`cannot read catalog (${error instanceof Error ? error.message : String(error)})`);
 	}
+	return parseProjectVerifierCatalogText(text, workspaceRoot, catalogPath);
+}
 
+/** Parse catalog text through the production schema and canonical normalizer. */
+export function parseProjectVerifierCatalogText(
+	text: string,
+	workspaceRoot: string,
+	catalogPath = path.join(workspaceRoot, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH),
+): ProjectCatalogLoadResult {
 	const document = parseDocument(text, { prettyErrors: false, strict: true, uniqueKeys: true });
 	if (document.errors.length > 0) {
 		return catalogDiagnostic(`invalid YAML: ${document.errors.map((error) => error.message).join("; ")}`);
