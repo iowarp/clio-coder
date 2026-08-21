@@ -72,6 +72,8 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 		case "taskLedger":
 		case "decisionLedger":
 		case "workerRun":
+		case "contextEviction":
+		case "contextRecall":
 			return false;
 	}
 }
