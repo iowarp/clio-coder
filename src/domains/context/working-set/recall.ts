@@ -8,13 +8,12 @@
  * appends. The ref stays evicted in the fold: the body rides the recall tool
  * result at the tail of the working set, so the marker and the prefix cache
  * are untouched and a repeat recall is the churn signal. Pure over entries:
- * nothing here reads
- * the session, writes the ledger, or calls a model.
+ * nothing here reads the session, writes the ledger, or calls a model.
  *
- * The body is read the way `compaction/mask-observations.ts` reads a
- * tool_result payload (`resultText`), so what recall returns is exactly what
- * the projection would have rendered before eviction. No truncation happens
- * here; the observation envelope applies the per-turn caps.
+ * The body is read through the same `payload.ts` readers the projection and
+ * the marker use, so what recall returns is exactly what the model saw before
+ * eviction. No truncation happens here; the observation envelope applies the
+ * per-turn caps.
  */
 
 import { ceilChars } from "../../session/context-accounting.js";
@@ -22,61 +21,9 @@ import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import { filterEntriesToActivePath } from "../../session/tree/active-path.js";
 import type { ContextRecallFields, RecallError, RecallResult, RecallTrigger, WorkingSetView } from "./contract.js";
 import { parseRefKey, refKey } from "./fold.js";
+import { offloadPathOf, toolResultPayload, toolResultText } from "./payload.js";
 
 export type RecallOutcome = { ok: true; result: RecallResult } | { ok: false; error: RecallError };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function textFromContent(content: unknown): string {
-	if (!Array.isArray(content)) return "";
-	const parts: string[] = [];
-	for (const block of content) {
-		if (!isRecord(block)) continue;
-		if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
-	}
-	return parts.join("");
-}
-
-function stringifyWhole(value: unknown): string {
-	if (value === undefined || value === null) return "";
-	if (typeof value === "string") return value;
-	try {
-		return JSON.stringify(value) ?? "";
-	} catch {
-		return String(value);
-	}
-}
-
-/** Same field precedence as `resultText` in mask-observations.ts, without the preview cap. */
-function resultText(result: unknown): string {
-	if (typeof result === "string") return result;
-	if (!isRecord(result)) return stringifyWhole(result);
-	const contentText = textFromContent(result.content);
-	if (contentText.length > 0) return contentText;
-	if (typeof result.text === "string") return result.text;
-	if (typeof result.output === "string") return result.output;
-	if (typeof result.message === "string") return result.message;
-	return stringifyWhole(result);
-}
-
-function extractToolResult(payload: unknown): unknown {
-	const obj = isRecord(payload) ? payload : { result: payload };
-	return obj.result ?? obj.output ?? obj.out ?? obj.content ?? payload;
-}
-
-function offloadPathOf(result: unknown): string | undefined {
-	if (!isRecord(result) || !isRecord(result.details)) return undefined;
-	const details = result.details;
-	for (const key of ["resultSize", "observation"] as const) {
-		const record = details[key];
-		if (isRecord(record) && typeof record.offloadPath === "string" && record.offloadPath.length > 0) {
-			return record.offloadPath;
-		}
-	}
-	return undefined;
-}
 
 function commonPrefixLength(a: string, b: string): number {
 	const limit = Math.min(a.length, b.length);
@@ -130,9 +77,9 @@ export function resolveRecall(
 	if (isThinkingEntry(entry) || !view.evicted.has(key) || !isToolResultEntry(entry)) {
 		return { ok: false, error: { kind: "not_evicted", ref: key, nearest: nearestEvictedRef(view, key) } };
 	}
-	const result = extractToolResult(entry.payload);
-	const body = resultText(result);
-	const offloadPath = offloadPathOf(result);
+	const payload = toolResultPayload(entry.payload);
+	const body = toolResultText(payload.result);
+	const offloadPath = offloadPathOf(payload);
 	return {
 		ok: true,
 		result: {
