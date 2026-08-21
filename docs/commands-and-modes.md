@@ -1,7 +1,7 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.3.2).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.3.3).
 
 
 Clio Coder is a terminal-first alpha harness. This page keeps the command

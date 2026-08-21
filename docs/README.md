@@ -4,7 +4,7 @@
 
 # Clio Coder Documentation
 
-These pages document `v0.3.2` of Clio Coder, an open-source coding orchestrator within the [IOWarp](https://iowarp.ai) scientific computing platform, created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu).
+These pages document `v0.3.3` of Clio Coder, an open-source coding orchestrator within the [IOWarp](https://iowarp.ai) scientific computing platform, created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu).
 
 They are source-aligned guides: when prose and source disagree, prefer the
 current source, tests, and `CHANGELOG.md`.
@@ -56,7 +56,7 @@ current source, tests, and `CHANGELOG.md`.
 | Private context index determinism, target smoke matrices, and Clio machinery soak benchmark suite | [evals-internal.md](evals-internal.md) ([Blueprints: evals_internal](html/evals_internal_blueprint.html), [soak](html/soak_blueprint.html)) |
 | Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](config-knobs-audit.md) ([Interactive Blueprint](html/config_knobs_audit_blueprint.html)) |
 | Clock and timestamp conventions: durations, instants, ordering, and formatting | [time-conventions.md](time-conventions.md) ([Interactive Blueprint](html/time_conventions_blueprint.html)) |
-| Correct render, PTY, startup, compile-cache, and import-graph measurement endpoints and the 0.3.2 baseline | [performance-methodology.md](performance-methodology.md) |
+| Correct render, PTY, startup, compile-cache, and import-graph measurement endpoints and the 0.3.3 baseline | [performance-methodology.md](performance-methodology.md) |
 | Pi SDK boundary: upstream primitives, attribution, and Clio-owned product policies | [pi-boundary.md](pi-boundary.md) ([Interactive Blueprint](html/pi_boundary_blueprint.html)) |
 
 Every project Clio works in gets its context from a local `CLIO-CODER.md`,
@@ -82,7 +82,7 @@ under `src/`, run `npm run build` again or keep `npm run dev` running.
 ## Release Notes
 
 The release entry point is [../README.md](../README.md); detailed release
-history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.3.2 the supported
+history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.3.3 the supported
 install paths are `npm install -g @iowarp/clio-coder` and a source checkout
 through `npm run install:local`, the deterministic release gate is
 `npm run ci:release`, and live model smoke validation is local/manual and

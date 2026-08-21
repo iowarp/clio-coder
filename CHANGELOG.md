@@ -2,6 +2,21 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.3.3 - 2026-08-21
+
+### Changed
+- Unified transcript detail under `/output minimal|default|verbose`, with consistent per-block and all-block tool/thinking overrides that reset when the output level is reapplied.
+- Folded Bash execution bodies by default while retaining concise command, outcome, timing, size, and bounded failure evidence on the transcript row (#166, #177).
+- Rendered reasoning as stream-ordered thinking segments and made interview prompts true fullscreen workspaces (#171).
+
+### Fixed
+- Preserved live, interrupted, and replayed reasoning order and token provenance, including provider-reported zero-output turns.
+- Preserved complete replay bodies for HTML export and aggregated multi-call replay receipts.
+- Kept failure excerpts and mutation diffs inside narrow terminal frames, including at 40 columns.
+- Replaced internal tool-call labels such as `bash(...)` with operator-facing action descriptions in live, replayed, blocked, and exported transcript rows.
+- Refreshed the footer immediately after `/output` changes and kept explicit fold choices scoped to the intended tool or thinking stretch.
+- Rechecked commit-attribution repository state and repaired missing or damaged cached hook wrappers before reuse.
+
 ## 0.3.2 - 2026-08-20
 
 ### Added
