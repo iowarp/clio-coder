@@ -12,6 +12,8 @@
 
 import { stream } from "../../../engine/ai.js";
 import type { EngineModel, Usage } from "../../../engine/types.js";
+import { foldWorkingSet } from "../../context/working-set/fold.js";
+import { recallableRefListing } from "../../context/working-set/recall.js";
 import type { CompactionUsage, SessionEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
@@ -307,6 +309,23 @@ function formatFileOperations(fileOps: FileOperations): string {
 	return sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "";
 }
 
+function formatRecallableRefs(entries: ReadonlyArray<SessionEntry>, firstKeptEntryIndex: number): string {
+	const entryIndexes = new Map<string, number>();
+	for (let index = 0; index < entries.length; index += 1) {
+		const entry = entries[index];
+		if (entry) entryIndexes.set(entry.turnId, index);
+	}
+	const view = foldWorkingSet(entries);
+	const evictedBeforeCut = new Map(
+		[...view.evicted].filter(([ref]) => (entryIndexes.get(ref) ?? Number.POSITIVE_INFINITY) < firstKeptEntryIndex),
+	);
+	const listing = recallableRefListing(entries, { ...view, evicted: evictedBeforeCut });
+	if (listing.refs.length === 0) return "";
+	const rows = [...listing.refs];
+	if (listing.remaining > 0) rows.push(`and ${listing.remaining} more`);
+	return `\n\n<recallable-refs>\n${rows.join("\n")}\n</recallable-refs>`;
+}
+
 function numberOrZero(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -457,7 +476,10 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		}
 	}
 
-	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}`.trim();
+	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(
+		input.entries,
+		cut.firstKeptEntryIndex,
+	)}`.trim();
 
 	return {
 		summary,

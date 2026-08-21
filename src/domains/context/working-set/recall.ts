@@ -106,6 +106,13 @@ export function buildRecallFields(
 /** Refs listed in a recall failure before the list is cut with an ellipsis. */
 const MAX_LISTED_REFS = 8;
 
+export interface RecallableRefListing {
+	/** Already-rendered `ref (tool path)` rows, bounded for prompt use. */
+	refs: string[];
+	/** Recallable refs omitted after the bounded prefix. */
+	remaining: number;
+}
+
 /**
  * The refs a recall can actually bring back, so the next call can name one of
  * them. Thinking refs are evicted too but are not recallable, so listing them
@@ -113,7 +120,7 @@ const MAX_LISTED_REFS = 8;
  * "nearest" ref was tried first and dropped: over time-ordered ids a prefix
  * match names an unrelated result, and the listing is what helps.
  */
-function recallableRefListing(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): string {
+export function recallableRefListing(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): RecallableRefListing {
 	const byTurnId = new Map<string, SessionEntry>();
 	for (const entry of entries) byTurnId.set(entry.turnId, entry);
 	const callPaths = callPathsByToolCallId(entries);
@@ -129,10 +136,17 @@ function recallableRefListing(entries: ReadonlyArray<SessionEntry>, view: Workin
 		const path = primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId));
 		refs.push(`${key} (${payload.toolName}${path === undefined ? "" : ` ${path}`})`);
 	}
-	if (refs.length === 0) return "No recallable refs on the active path.";
-	const shown = refs.slice(0, MAX_LISTED_REFS).join(", ");
-	const more = refs.length > MAX_LISTED_REFS ? `, and ${refs.length - MAX_LISTED_REFS} more` : "";
-	return `Recallable refs on the active path: ${shown}${more}.`;
+	return {
+		refs: refs.slice(0, MAX_LISTED_REFS),
+		remaining: Math.max(0, refs.length - MAX_LISTED_REFS),
+	};
+}
+
+function recallableRefMessage(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): string {
+	const listing = recallableRefListing(entries, view);
+	if (listing.refs.length === 0) return "No recallable refs on the active path.";
+	const more = listing.remaining > 0 ? `, and ${listing.remaining} more` : "";
+	return `Recallable refs on the active path: ${listing.refs.join(", ")}${more}.`;
 }
 
 /**
@@ -146,7 +160,7 @@ export function recallErrorMessage(
 	entries: ReadonlyArray<SessionEntry> = [],
 	view: WorkingSetView = EMPTY_WORKING_SET_VIEW,
 ): string {
-	const listing = ` ${recallableRefListing(entries, view)}`;
+	const listing = ` ${recallableRefMessage(entries, view)}`;
 	switch (error.kind) {
 		case "invalid_ref":
 			return `recall ref must be a single turnId without whitespace; got '${error.ref}'.`;
