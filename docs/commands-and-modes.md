@@ -78,6 +78,8 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder context wiki [--update] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
+| `clio-coder context replay --sessions <path>... [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers and report retention, precision, token savings, churn, and summary headroom. |
+| `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ## Headless Run Flags
 
@@ -518,6 +520,22 @@ writes `.clio-coder/codewiki.json` plus
 structural hash. The same builder is used by `clio-coder context init`, `clio-coder context
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
+
+### Working-set replay
+
+`clio-coder context replay --sessions <path>...` accepts individual session directories,
+Clio sessions roots, and `current.jsonl` files. It removes prior eviction/recall sidecars,
+selects the active branch, and drives the live fold, projection, policy, and eviction planner
+at deterministic turn boundaries. The default inclusion cascade requires at least eight
+turns, eight tool results, and one file re-read; `--no-filter` retains every readable trace.
+Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable report
+including the configuration, git revision when available, and exact command line.
+
+`clio-coder context working-set --session <id|path>` is a read-only inspection command for
+one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate
+event, recall, and churn facts; path-observation counts by operation; and paths whose earlier
+reads were followed by writes or edits. A persisted `/tree` pin is honored when the session
+metadata is available, so the report does not resurrect an abandoned branch.
 
 The current artifact is schema v5. It records files with path, language, line
 count, role, content hash, imports, and optional summary; declaration-only
