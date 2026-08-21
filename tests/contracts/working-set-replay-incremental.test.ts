@@ -5,6 +5,7 @@ import type { WorkingSetPolicy, WorkingSetSettings } from "../../src/domains/con
 import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
 import { buildEvictionFields, planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { isTurnStart } from "../../src/domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../../src/domains/context/working-set/policies/index.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
 import { loadClaudeCodeTraces } from "../../src/domains/context/working-set/replay/load-claude-code.js";
@@ -15,7 +16,7 @@ import {
 	type ReplayTraceResult,
 	replayTrace,
 } from "../../src/domains/context/working-set/replay/runner.js";
-import { isReplayTurnStart, type Trace } from "../../src/domains/context/working-set/replay/trace.js";
+import type { Trace } from "../../src/domains/context/working-set/replay/trace.js";
 import { selectVisibleEntries } from "../../src/domains/context/working-set/visible.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import type { ContextEvictionEntry, SessionEntry } from "../../src/domains/session/entries.js";
@@ -58,7 +59,7 @@ function referenceReplay(trace: Trace, policy: WorkingSetPolicy, config: ReplayC
 	let turnsToFirstSummary: number | null = null;
 	const pressureLimit = config.threshold * config.budgetTokens;
 	for (const entry of trace.entries) {
-		if (isReplayTurnStart(entry)) {
+		if (isTurnStart(entry)) {
 			turnIndex += 1;
 			const leaf = [...soFar].reverse().find((candidate) => candidate.kind === "message")?.turnId ?? null;
 			const tokens = projectedTokens(soFar, leaf);

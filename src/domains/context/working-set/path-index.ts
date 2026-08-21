@@ -27,6 +27,7 @@
 import { basename, isAbsolute, join, normalize, resolve } from "node:path";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { WorkingSetRef } from "./contract.js";
+import { isTurnStart } from "./horizon.js";
 import { isRecord, toolResultText } from "./payload.js";
 
 /**
@@ -113,16 +114,6 @@ const CODE_NAV_PATH_MODES = new Set(["path", "outline", "deps", "dependents"]);
 
 /** Ops whose result is a list of other paths. */
 const LISTING_OPS = new Set<PathOp>(["grep", "find", "ls", "bash"]);
-
-/**
- * Turn starts, the same three kinds the protection horizon counts. A local `!`
- * bash execution and a branch summary each open a stretch of work the way an
- * operator message does.
- */
-function isTurnStart(entry: SessionEntry): boolean {
-	if (entry.kind === "bashExecution" || entry.kind === "branchSummary") return true;
-	return entry.kind === "message" && entry.role === "user";
-}
 
 export interface PathIndexOptions {
 	/** Session working directory; relative arguments resolve against it. Null leaves them relative (normalized). */

@@ -15,6 +15,7 @@
 
 import { ToolNames } from "../core/tool-names.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
+import { compactionCut } from "../domains/context/working-set/visible.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -836,13 +837,6 @@ function truncateAtTurn(entries: ReadonlyArray<SessionEntry>, uptoTurnId?: strin
 	return entries.slice(0, index + 1);
 }
 
-function latestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (entries[i]?.kind === "compactionSummary") return i;
-	}
-	return -1;
-}
-
 function toolCallIdsInEntry(entry: SessionEntry): string[] {
 	if (entry.kind !== "message") return [];
 	if (entry.role === "tool_call") return [extractToolCall(entry).id];
@@ -920,19 +914,13 @@ export function selectReplayEntries(
 ): SessionEntry[] {
 	const active = filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId);
 	const entries = truncateAtTurn(active, options.uptoTurnId);
-	const compactionIndex = latestCompactionIndex(entries);
-	if (compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
-
-	const compaction = entries[compactionIndex] as CompactionSummaryEntry;
-	const selected: SessionEntry[] = [compaction];
-	const firstKeptIndex = compaction.firstKeptTurnId
-		? entries.findIndex((entry) => entry.turnId === compaction.firstKeptTurnId)
-		: -1;
-	if (firstKeptIndex >= 0 && firstKeptIndex < compactionIndex) {
-		selected.push(...entries.slice(firstKeptIndex, compactionIndex));
-	}
-	selected.push(...entries.slice(compactionIndex + 1));
-	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, compactionIndex));
+	// The cut itself is the working-set layer's definition of "what the model
+	// can see", shared with the eviction policy input so the two cannot drift.
+	const cut = compactionCut(entries);
+	if (cut.compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
+	const compaction = entries[cut.compactionIndex] as CompactionSummaryEntry;
+	const selected: SessionEntry[] = [compaction, ...cut.visible];
+	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, cut.compactionIndex));
 }
 
 function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {

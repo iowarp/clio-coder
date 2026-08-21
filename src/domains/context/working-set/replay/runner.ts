@@ -4,10 +4,11 @@ import type { ContextEvictionEntry, EvictedItem, SessionEntry } from "../../../s
 import { EMPTY_WORKING_SET_VIEW, type PolicyInput, type WorkingSetPolicy, type WorkingSetView } from "../contract.js";
 import { buildEvictionFields, planEviction } from "../engine.js";
 import { foldWorkingSet } from "../fold.js";
+import { isTurnStart } from "../horizon.js";
 import { projectWorkingSet } from "../project.js";
 import { selectVisibleEntries } from "../visible.js";
 import type { ReplayCandidatePoolPolicy } from "./controls.js";
-import { isReplayTurnStart, type Trace } from "./trace.js";
+import type { Trace } from "./trace.js";
 
 export interface ReplayConfig {
 	policyId: string;
@@ -157,7 +158,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 	const pressureLimit = config.threshold * config.budgetTokens;
 
 	for (const entry of trace.entries) {
-		if (isReplayTurnStart(entry)) {
+		if (isTurnStart(entry)) {
 			turnIndex += 1;
 			const leaf = lastMessageTurnId;
 			const tokens = visible.tokens;

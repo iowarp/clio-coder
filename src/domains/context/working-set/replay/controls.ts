@@ -70,9 +70,6 @@ export function makeOraclePolicy(graph: ReferenceGraph): ReplayCandidatePoolPoli
 	};
 }
 
-/** Graph-free export for callers that need a registry-shaped control. */
-export const oraclePolicy: WorkingSetPolicy = makeOraclePolicy({ edges: [], futureTurnsOf: new Map() });
-
 function mulberry32(seed: number): () => number {
 	let value = seed >>> 0;
 	return () => {
