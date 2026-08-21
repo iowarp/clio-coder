@@ -10,11 +10,12 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Two eviction policies. `structural-v1` is the default: it selects by what the session did since (`stale_after_mutation`, `superseded_read`, `failure_resolved`, `listing_consumed`, `thinking_turn_closed`) and falls back to age only under pressure. `age-horizon` reproduces the previous age-based selection, minus results whose body is below `context.workingSet.minEvictableTokens`. Replayed over 165 Claude Code transcripts at a 128k budget, `structural-v1` retained 0.831 of later-referenced results against 0.781 for `age-horizon` and 0.779 for random eviction; the tables are under `benchmarks/results/context-replay/`.
 - `/context` reports the working set: policy, evicted items, evicted tokens, events, recalls, and churn. Evicted tool rows carry a dim `evicted · <reason>` tag in the transcript.
 - Cache-honesty attribution for eviction. An applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`, and `/context` reports `last cold turn: working-set eviction (expected)` instead of warning about a cold backend it caused itself.
+- `clio-coder context replay --sessions <path>...` replays Clio ledgers and Claude Code transcripts through the live eviction code with `none`, `random`, and `oracle` controls and reports retention, precision, tokens evicted, saturation, and turns to first summary; `clio-coder context working-set --session <id|path>` prints one session's working-set fold and path index.
 - New guide: `docs/context-working-set.md`.
 
 ### Changed
 - Session format version 4. The bump is additive: it adds the `contextEviction` and `contextRecall` records and changes no existing entry, so a version 3 session migrates to 4 in place on open with nothing rewritten. Only a session written by a newer build is refused. The bump is one-way for the operator, and a 0.3.3 binary cannot open a session this release wrote.
-- New settings under `context.workingSet`: `enabled` (default `true`), `policy` (default `age-horizon`), `target` (default `0.6`), `protectLastTurns` (default `6`), and `minEvictableTokens` (default `200`). `compaction.excludeLastTurns` now governs only the legacy mask path.
+- New settings under `context.workingSet`: `enabled` (default `true`), `policy` (default `structural-v1`), `target` (default `0.6`), `protectLastTurns` (default `6`), and `minEvictableTokens` (default `200`). `compaction.excludeLastTurns` now governs only the legacy mask path.
 - Compaction reports a `working_set` stage on `ContextPruned`, and the middleware `on_compaction` hook gains the `working_set_evict` and `working_set_recall` stages.
 
 ### Fixed
