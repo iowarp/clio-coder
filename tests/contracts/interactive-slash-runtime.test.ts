@@ -48,6 +48,7 @@ function createHarness() {
 		chatPanel: {
 			appendReplayBlock: () => events.push("notice"),
 			appendUser: (text) => events.push(`user:${text}`),
+			clearFoldOverrides: () => events.push("clear-folds"),
 		},
 		stateDir: "/tmp/clio-slash-runtime-test-state",
 		shutdown: () => {
@@ -501,6 +502,18 @@ describe("contracts/interactive slash runtime", () => {
 		]);
 		ok(!harness.events.includes("write-settings"), "/output wrote saved settings");
 		ok(!harness.events.includes("write-thinking"), "/thinking wrote saved settings");
+	});
+
+	it("clears transcript overrides when /output reapplies the current level", () => {
+		const harness = createHarness();
+		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+		harness.deps.getSettings = () => settings;
+		harness.deps.commitSetting = () => {};
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+
+		runtime.dispatchCommand(`/output ${settings.terminal.outputVerbosity}`);
+
+		strictEqual(harness.events.filter((event) => event === "clear-folds").length, 1);
 	});
 
 	it("submits a shared worker result as a user turn, and never expands it", async () => {
