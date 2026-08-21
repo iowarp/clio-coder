@@ -56,8 +56,10 @@ export interface EvictedState {
 
 /**
  * The fold of every `contextEviction` / `contextRecall` entry on the active
- * path. A recall removes its key; a later eviction of the same key re-adds it
- * and counts as churn.
+ * path. A recall does not remove its key: the recalled body lives in the
+ * recall tool result at the tail of the working set, the marker stays at the
+ * original position so the prefix cache is untouched, and repeated recalls of
+ * one ref are the churn signal.
  */
 export interface WorkingSetView {
 	evicted: ReadonlyMap<string, EvictedState>;
