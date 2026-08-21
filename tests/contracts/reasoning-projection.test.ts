@@ -135,6 +135,20 @@ describe("contracts/reasoning-projection", () => {
 		);
 		strictEqual(reportedZero.hadEstimatedReasoning, true);
 		strictEqual(reportedZero.reasoningTokens, 0);
+
+		// Clio's interrupted-turn estimate keeps a reasoning key for durable
+		// record-shape parity. Its zero is synthetic, so streamed thinking still
+		// contributes an estimate bounded by the estimated output total.
+		const interrupted = foldMessageIntoRunTally(
+			emptyRunTally(),
+			assistant({
+				content: [{ type: "thinking", thinking: "x".repeat(200) }],
+				usage: { input: 100, output: 20, reasoning: 0, estimated: true },
+			}),
+		);
+		strictEqual(interrupted.hadProviderReasoning, false);
+		strictEqual(interrupted.hadEstimatedReasoning, true);
+		strictEqual(interrupted.reasoningTokens, 20);
 	});
 
 	it("folds a multi-call turn that mixes attested and estimated reasoning", () => {
