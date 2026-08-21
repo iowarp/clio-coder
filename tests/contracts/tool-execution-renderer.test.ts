@@ -24,7 +24,7 @@ describe("contracts/tool execution transcript", () => {
 		ok(rendered.includes(`${String.fromCharCode(27)}[7mnew`), rendered);
 	});
 
-	it("presents a call signature, typed secondary arguments, and structured result facts", () => {
+	it("presents a verb-led header, typed secondary arguments, and structured result facts", () => {
 		const rendered = plain(
 			renderToolExecution(
 				{
@@ -50,7 +50,8 @@ describe("contracts/tool execution transcript", () => {
 			),
 		);
 
-		ok(rendered.includes("bash(npm test)"), rendered);
+		ok(rendered.includes("ran `npm test`"), rendered);
+		ok(!rendered.includes("bash("), rendered);
 		ok(rendered.includes("args · 2"), rendered);
 		ok(rendered.includes("cwd"), rendered);
 		ok(rendered.includes('"/work/project"'), rendered);
@@ -97,7 +98,8 @@ describe("contracts/tool execution transcript", () => {
 			folded: false,
 		};
 		const running = plain(renderBashTranscriptExecution(execution, 100));
-		ok(running.includes("bash(npm run typecheck)"), running);
+		ok(running.includes("running `npm run typecheck`"), running);
+		ok(!running.includes("bash("), running);
 		ok(running.includes("running · 4.2s"), running);
 		ok(running.includes("live output"), running);
 		ok(running.includes("checking src"), running);
@@ -256,8 +258,8 @@ describe("contracts/tool presentation on the folded row", () => {
 		for (const [toolName, args, lead] of [
 			["read", { path: "missing.ts" }, "reading missing.ts"],
 			["grep", { pattern: "x" }, "searching for `x`"],
-			["web_fetch", { url: "https://example.test" }, "web_fetch("],
-			["custom_tool", { any: 1 }, "custom_tool("],
+			["web_fetch", { url: "https://example.test" }, "fetching https://example.test"],
+			["custom_tool", { any: 1 }, "tool action"],
 		] as const) {
 			const rendered = renderToolSubline(
 				{

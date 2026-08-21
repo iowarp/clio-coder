@@ -326,7 +326,7 @@ describe("contracts/interactive slash runtime", () => {
 			const target = join(scratch, ".clio-coder", "exports", "session-html-2026-08-15.html");
 			const body = readFileSync(target, "utf8");
 			ok(body.startsWith("<!doctype html>"), body.slice(0, 80));
-			ok(body.includes('class="tool-row" data-tool="bash"'), body);
+			ok(body.includes('class="tool-row" data-tool="ran"'), body);
 			ok(body.includes("printf fixture"), body);
 			ok(body.includes("Fixture complete"), body);
 			ok(!body.includes("\x1b"), "raw terminal control sequences must not cross into HTML");
