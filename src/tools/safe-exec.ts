@@ -35,9 +35,11 @@ export function maxOutputArg(args: Record<string, unknown>): number {
 function resultDetails(result: SafeCommandResult): ToolResultDetails {
 	return {
 		command: [result.file, ...result.args].join(" "),
+		argv: [result.file, ...result.args],
 		cwd: result.cwd,
 		exitCode: result.exitCode,
 		durationMs: result.durationMs,
+		aborted: result.aborted,
 		timedOut: result.timedOut,
 		outputCapped: result.outputCapped,
 	};

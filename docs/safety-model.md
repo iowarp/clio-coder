@@ -230,8 +230,10 @@ Command entry notes:
 Prefer typed tools over Bash:
 
 - `git` (op=status/diff/log) uses fixed command vectors.
-- `verify(check="<script>")` runs a declared package.json verification script (the `test*/lint*/build*/typecheck*/check*/format*/ci*` family) through bounded execution helpers with no shell; `verify()` with no arguments lists the declared checks.
+- `verify(check="<id>")` runs either a declared package.json verification script (the `test*/lint*/build*/typecheck*/check*/format*/ci*` family) or an exact version-1 `.clio-coder/verifiers.yaml` argv vector through bounded execution helpers with no shell; `verify()` lists both sources through one canonical check projection.
 - `verify(check="frontend", path=...)` validates frontend artifacts without granting arbitrary shell access.
+
+The project verifier catalog is an executable authority supplied by the repository, not by model prose. Its schema rejects unknown fields, shell strings and shell executables, invalid or duplicate IDs, oversized values, absolute or escaping working directories, unsupported versions, and collisions with package-provider IDs. A catalog entry fixes argv, repository-relative cwd, and timeout. Tool-call `args`, `cwd`, timeout, output-cap, or environment-shaped fields cannot widen it. Safe-exec uses `spawn` without a shell, filters the child environment to the Clio allowlist, honors cancellation, and reports exact argv and termination evidence.
 
 The frontend check accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (`browser: auto|required|off`).
 
@@ -344,7 +346,7 @@ On every settled `turn_end`, the finish-contract assessor scans entries since th
 The assessor decision order is:
 
 1. If the window has no successful mutating receipt or settled mutating `!` bash execution, the contract passes with `no_mutation`.
-2. If the window has validation evidence, the contract passes with `validation_evidence`. Evidence includes successful validation commands, `verify` checks (declared verification scripts and the frontend check), passed dispatch receipts, and protected-artifact validation records.
+2. If the window has validation evidence, the contract passes with `validation_evidence`. Evidence includes successful validation commands, `verify` checks (declared package scripts, admitted project-catalog entries, and the frontend check), passed dispatch receipts, and protected-artifact validation records.
 3. If the assistant explicitly states what could not be verified and why, the contract passes with `explicit_limitation`.
 4. Otherwise, the contract engages with `unvalidated_mutation`.
 

@@ -7,6 +7,8 @@ Scientific software development cannot treat simple file presence as proof of co
 
 Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.3, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
 
+This advisory convention is separate from the executable project verifier catalog at `.clio-coder/verifiers.yaml`. The verifier catalog has a strict version-1 schema and admits exact argv vectors to the `verify` tool. Scientific validation contracts and handbook expectations do not grant command authority: prose such as `validators: ["python tools/check_grid.py"]` remains guidance until the project owner declares the equivalent argv, cwd, timeout, and tags in `verifiers.yaml`. The executable catalog does not interpret numerical tolerances or artifact expectations; it only runs the explicitly declared process vector through safe-exec.
+
 The convention below is a recommended shape for scientific projects that need to document expected dimensions, attributes, numerical tolerances, scheduler context, and verification commands for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), this convention links execution metadata with physical output checks without claiming that the current harness executes those checks automatically.
 
 ---
@@ -49,6 +51,20 @@ validators:
 notes: |
   The run is submitted with sbatch; queue exit status is not a completion check.
   Re-run check_grid.py after job completion is observed.
+```
+
+The `validators` values above are intentionally advisory shell-like prose. To make the Python validator executable through Clio without granting free-form shell interpretation, declare it separately:
+
+```yaml
+# .clio-coder/verifiers.yaml
+version: 1
+checks:
+  - id: validate-grid
+    description: Validate the generated regional grid
+    command: [python, tools/check_grid.py, out/region_west.nc]
+    cwd: .
+    timeoutMs: 120000
+    tags: [scientific, netcdf]
 ```
 
 ### Suggested Fields:
