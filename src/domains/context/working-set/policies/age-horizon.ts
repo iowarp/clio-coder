@@ -20,42 +20,15 @@
  * `minEvictableTokens` floor, below which the marker costs more than the body.
  */
 
-import type { SessionEntry } from "../../../session/entries.js";
 import type { EvictionCandidate, PolicyInput, WorkingSetPolicy } from "../contract.js";
+import { protectionCutoffIndex } from "../horizon.js";
 import { hasLegacyCompactionMarker, hasThinking } from "../payload.js";
-
-/**
- * What starts a turn, in the sense the protection horizon counts. A local `!`
- * bash execution and a branch summary both open a new stretch of work the same
- * way an operator message does.
- */
-function isTurnStart(entry: SessionEntry): boolean {
-	if (entry.kind === "bashExecution" || entry.kind === "branchSummary") return true;
-	return entry.kind === "message" && entry.role === "user";
-}
-
-/**
- * Index of the first protected entry: walk back until `protectLastTurns` turn
- * starts have been seen. Entries before it are candidates, entries from it on
- * are the recent window nothing touches.
- */
-function recentTurnCutoff(entries: ReadonlyArray<SessionEntry>, protectLastTurns: number): number {
-	const horizon = Math.max(1, Math.floor(protectLastTurns));
-	let seen = 0;
-	for (let i = entries.length - 1; i >= 0; i -= 1) {
-		const entry = entries[i];
-		if (!entry || !isTurnStart(entry)) continue;
-		seen += 1;
-		if (seen >= horizon) return i;
-	}
-	return 0;
-}
 
 export const ageHorizonPolicy: WorkingSetPolicy = {
 	id: "age-horizon",
 	select(input: PolicyInput): ReadonlyArray<EvictionCandidate> {
 		const { entries, view, settings, estimateTokens } = input;
-		const cutoff = recentTurnCutoff(entries, settings.protectLastTurns);
+		const cutoff = protectionCutoffIndex(entries, settings.protectLastTurns);
 		const candidates: EvictionCandidate[] = [];
 		// Newest-safe-first: the entry closest to the protection horizon is the
 		// least likely to be re-read, and a caller that stops early has then

@@ -199,8 +199,9 @@ test("age-horizon: an all-protected ledger selects nothing and plans nothing", (
 	assert.equal(planEviction(agePolicy, input), null);
 });
 
-test("policies: structural-v1 is not implemented in this slice", () => {
-	assert.throws(() => resolveWorkingSetPolicy("structural-v1"), /not implemented in this slice/);
+test("policies: every settings id resolves to the policy that owns it", () => {
+	assert.equal(resolveWorkingSetPolicy("age-horizon").id, "age-horizon");
+	assert.equal(resolveWorkingSetPolicy("structural-v1").id, "structural-v1");
 });
 
 test("planEviction: materializes markers, prices them, and shrinks the working set", () => {
