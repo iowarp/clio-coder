@@ -142,7 +142,7 @@ function fakePlan(): EvictionPlan {
 	};
 }
 
-function harness(enabled = true, withSummary = true) {
+function harness(enabled = true, withSummary = true, tier: "local-native" | "cloud" = "local-native") {
 	const entries = fixtureEntries();
 	const session = fakeSession(entries);
 	const settings = testSettings(enabled);
@@ -162,7 +162,7 @@ function harness(enabled = true, withSummary = true) {
 	const context = createTurnContext({
 		state,
 		getSettings: () => settings,
-		providers: { getRuntime: () => ({ tier: "local-native" }) } as never,
+		providers: { getRuntime: () => ({ tier }) } as never,
 		session: session.contract,
 		readSessionEntries: () => entries,
 		...(withSummary
@@ -241,6 +241,38 @@ describe("contracts/context working-set compaction wiring", () => {
 			"cold",
 		);
 		deepStrictEqual(h.context.contextLedger().promptCache?.expectedColdReasons, ["working_set_evict"]);
+	});
+
+	it("stamps working_set_evict on a cloud tier too: the prefix changed, whatever the backend", async () => {
+		delete process.env.CLIO_CODER_LEGACY_MASK;
+		const h = harness(true, false, "cloud");
+		await h.context.runAutoCompact(h.runtime, false);
+
+		h.context.consumeExpectedColdReasons("test-runtime");
+		const usage = {
+			input: 1_000,
+			output: 10,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_010,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		deepStrictEqual(h.context.promptCachePayloadForAssistant(usage).expectedColdReasons, ["working_set_evict"]);
+	});
+
+	it("keeps the dispatch disturbance gated to local-native tiers", async () => {
+		const h = harness(true, false, "cloud");
+		h.bus.emit(BusChannels.DispatchStarted, {} as never);
+		h.context.consumeExpectedColdReasons("test-runtime");
+		const usage = {
+			input: 1_000,
+			output: 10,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_010,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		strictEqual(h.context.promptCachePayloadForAssistant(usage).expectedColdReasons, undefined);
 	});
 
 	it("attributes an in-run post-tool eviction to the immediate continuation", async () => {

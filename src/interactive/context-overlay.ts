@@ -94,6 +94,25 @@ function formatChurn(view: WorkingSetView): string {
 }
 
 /**
+ * Prose for one cache-disturbance reason. The wire values are stamped by
+ * `noteColdReason` in turn-context.ts and persisted on the assistant entry's
+ * `promptCache.expectedColdReasons`; the overlay reads them back, so an unknown
+ * reason renders as itself rather than disappearing.
+ */
+function coldReasonLabel(reason: string): string {
+	switch (reason) {
+		case "working_set_evict":
+			return "working-set eviction";
+		case "compaction":
+			return "compaction";
+		case "dispatch":
+			return "dispatch traffic";
+		default:
+			return reason;
+	}
+}
+
+/**
  * The working-set section: what the projection has taken out of the window
  * and how often the model has asked for it back. Churn is recalls over items
  * evicted; a high number means the policy evicts what is still needed.
@@ -183,11 +202,21 @@ export function renderContextLedgerLines(
 		const uncached =
 			cache.uncachedInputTokens !== null ? `uncached input ${formatTokens(cache.uncachedInputTokens)}` : null;
 		const line = ["prompt cache:", shell, "·", backend, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
+		// Reasons Clio recorded before the run: working-set eviction, summary
+		// compaction, and dispatch traffic all move the byte prefix a local
+		// single-slot backend caches, so a cold turn after one of them is the
+		// expected outcome rather than a provider surprise.
+		const coldReasons = cache.backendVerdict === "cold" ? (cache.expectedColdReasons ?? []) : [];
 		// A reused shell with a cold backend means Clio kept the bytes stable
 		// but the provider re-prefilled anyway; surface that disagreement
-		// instead of hiding it.
-		const misleading = cache.shellReused && cache.backendVerdict === "cold";
+		// instead of hiding it. An expected reason explains the same numbers, so
+		// it is reported on its own line and not as a warning.
+		const misleading = cache.shellReused && cache.backendVerdict === "cold" && coldReasons.length === 0;
 		lines.push(theme.fg(misleading ? "warning" : "dim", line));
+		if (coldReasons.length > 0) {
+			const reasons = coldReasons.map(coldReasonLabel).join(", ");
+			lines.push(theme.fg("dim", `last cold turn: ${reasons} (expected)`));
+		}
 	}
 
 	if (ledger.lastCompaction) {

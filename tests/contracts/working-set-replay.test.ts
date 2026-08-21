@@ -106,6 +106,7 @@ describe("contracts/working-set replay-lite", () => {
 		const input: PolicyInput = {
 			entries: prefix,
 			view: foldWorkingSet(prefix, leaf),
+			cwd: trace.cwd,
 			settings: SETTINGS,
 			pressure: { tokens, contextWindow: 12_000, threshold: 0.8, target: 0.6 },
 			estimateTokens,

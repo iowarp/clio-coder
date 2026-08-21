@@ -13,7 +13,7 @@ function controlId(id: string): WorkingSetPolicyId {
 
 function eligibleToolResults(input: PolicyInput): SessionEntry[] {
 	const cutoff = protectionCutoffIndex(input.entries, input.settings.protectLastTurns);
-	const index = buildPathIndex(input.entries);
+	const index = buildPathIndex(input.entries, { cwd: input.cwd });
 	const out: SessionEntry[] = [];
 	for (let entryIndex = cutoff - 1; entryIndex >= 0; entryIndex -= 1) {
 		const entry = input.entries[entryIndex];

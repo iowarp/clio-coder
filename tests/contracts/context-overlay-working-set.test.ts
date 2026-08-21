@@ -98,6 +98,45 @@ describe("context overlay working-set section", () => {
 		ok(strip(renderEvictedTokensLine(12_345)).endsWith("12,345 tokens"));
 	});
 
+	// The reason is stamped by turn-context.ts, persisted on the assistant
+	// entry's promptCache, and folded back into the ledger by
+	// noteRunCacheSummary. This is the last hop: the overlay has to say the cold
+	// turn was expected, or an operator reads "backend cold" as a provider fault
+	// and goes looking for a bug in the prefix cache.
+	it("attributes an expected cold turn to working-set eviction instead of warning", () => {
+		const coldLedger = (expectedColdReasons?: string[]) =>
+			buildContextLedger({
+				provider: "mock",
+				model: "model-a",
+				contextWindow: 4000,
+				messageTokens: 1200,
+				promptCache: {
+					shellReused: true,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					uncachedInputTokens: 12_000,
+					backendVerdict: "cold",
+					...(expectedColdReasons ? { expectedColdReasons } : {}),
+				},
+			});
+		const cacheLineOf = (rendered: string[]): string =>
+			rendered.find((line) => strip(line).includes("prompt cache:")) ?? "";
+
+		const explained = renderContextLedgerLines(coldLedger(["working_set_evict"]), 68);
+		const explainedText = strip(explained.join("\n"));
+		ok(explainedText.includes("prompt cache: shell reused \u00b7 backend cold"), explainedText);
+		ok(explainedText.includes("last cold turn: working-set eviction (expected)"), explainedText);
+
+		const unexplained = renderContextLedgerLines(coldLedger(), 68);
+		const unexplainedText = strip(unexplained.join("\n"));
+		ok(!unexplainedText.includes("last cold turn:"), unexplainedText);
+
+		// Same words, different token: a cold turn Clio caused is explained, and a
+		// cold turn it cannot explain stays the warning it always was.
+		strictEqual(strip(cacheLineOf(explained)), strip(cacheLineOf(unexplained)));
+		ok(cacheLineOf(explained) !== cacheLineOf(unexplained), "an explained cold turn must drop the warning token");
+	});
+
 	it("churn is n/a with nothing evicted, and the section is absent without a fold", () => {
 		const empty = strip(renderContextLedgerLines(ledger(), 68, EMPTY_WORKING_SET_VIEW).join("\n"));
 		ok(empty.includes("working set · policy none"), empty);

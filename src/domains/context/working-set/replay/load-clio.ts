@@ -70,17 +70,18 @@ async function collectLedgerFiles(input: string, out: Set<string>): Promise<void
 	}
 }
 
-function sessionId(raw: string, source: string): string {
+function sessionFacts(raw: string, source: string): { id: string; cwd: string | null } {
+	const fallback = { id: basename(dirname(source)), cwd: null };
 	for (const line of raw.split("\n")) {
 		if (line.trim().length === 0) continue;
 		try {
 			const value = JSON.parse(line) as unknown;
-			if (isSessionHeader(value)) return value.id;
+			if (isSessionHeader(value)) return { id: value.id, cwd: value.cwd.length > 0 ? value.cwd : null };
 		} catch {
-			return basename(dirname(source));
+			return fallback;
 		}
 	}
-	return basename(dirname(source));
+	return fallback;
 }
 
 async function pinnedLeafTurnId(source: string): Promise<string | undefined> {
@@ -166,9 +167,11 @@ export async function loadClioTraces(
 			continue;
 		}
 		const entries = cleanActiveEntries(parsed.entries, await pinnedLeafTurnId(source));
+		const facts = sessionFacts(raw, source);
 		const trace: Trace = {
-			id: sessionId(raw, source),
+			id: facts.id,
 			source,
+			cwd: facts.cwd,
 			entries,
 			turnCount: countReplayTurns(entries),
 		};
@@ -182,7 +185,7 @@ export async function loadClioTraces(
 				continue;
 			}
 			if (filter.requireFileReread) {
-				const graph = buildReferenceGraph(trace, buildPathIndex(entries));
+				const graph = buildReferenceGraph(trace, buildPathIndex(entries, { cwd: trace.cwd }));
 				if (!graph.edges.some((edge) => edge.kind === "file_reread")) {
 					filtered.no_file_reread = (filtered.no_file_reread ?? 0) + 1;
 					continue;
