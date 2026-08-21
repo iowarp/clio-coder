@@ -621,7 +621,8 @@ describe("contracts/interactive editor submit", () => {
 		// Expanded on operator request: the live body appears in place.
 		fold.setFold("expanded");
 		rendered = stripTerminalSequences(harness.replayBlocks[0]?.(100, detail).join("\n") ?? "");
-		ok(rendered.includes("bash(npm run typecheck)"), rendered);
+		ok(rendered.includes("running `npm run typecheck`"), rendered);
+		ok(!rendered.includes("bash("), rendered);
 		ok(rendered.includes("live output"), rendered);
 		ok(rendered.includes("checking src"), rendered);
 		ok(rendered.includes("excluded from model context"), rendered);

@@ -673,7 +673,7 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 /**
  * Per-tool subline templates. Maps a tool name to a function that builds the
  * verb-led subline body without the leading glyph and without the trailing
- * status glyph. Unknown tools fall back to the existing `<name>(<arg>)` form.
+ * status glyph. Unknown tools fall back to a tool-neutral action summary.
  */
 function webFetchMeta(result: unknown): string | null {
 	if (!isPlainObject(result) || !isPlainObject(result.details)) return null;
@@ -690,11 +690,10 @@ function webFetchMeta(result: unknown): string | null {
 
 /**
  * A call the permission gate blocked never executed, so the collapsed row must
- * not claim it did. `ran \`id\` · 667B ✗ blocked` read as a command that ran and
- * produced 667 bytes, while the expanded header for the same node correctly said
- * `bash(id) ✗ blocked`. Blocked rows use that same call-signature form, and the
- * ledger byte count is suppressed because those bytes are the denial text, not
- * output.
+ * not claim it did. Blocked calls keep the ordinary operator-facing action
+ * description but use a neutral noun for commands; the status tail supplies the
+ * blocked outcome. The ledger byte count is suppressed elsewhere because those
+ * bytes are the denial text, not output.
  */
 function isNonExecutedOutcome(outcome: ToolExecutionFinished["outcome"]): boolean {
 	return outcome === "blocked";
@@ -707,7 +706,15 @@ function buildSublineBody(
 	result?: unknown,
 	outcome?: ToolExecutionFinished["outcome"],
 ): string {
-	if (isNonExecutedOutcome(outcome)) return buildGenericToolBody(toolName, args);
+	if (isNonExecutedOutcome(outcome)) {
+		if (toolName === "bash") {
+			return (
+				buildFieldSublineBody(args, "command", "command ", { wrapInBackticks: true }) ??
+				buildGenericToolBody(toolName, args)
+			);
+		}
+		return SUBLINE_BODY_BUILDERS[toolName]?.(args) ?? buildGenericToolBody(toolName, args);
+	}
 	if (toolName === "web_fetch") {
 		const meta = status === undefined ? null : webFetchMeta(result);
 		const body = SUBLINE_BODY_BUILDERS.web_fetch?.(args) ?? buildGenericToolBody(toolName, args);

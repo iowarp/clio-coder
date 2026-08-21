@@ -289,10 +289,11 @@ describe("worker block replay", () => {
 			durationMs: 41_000,
 		}));
 		const rows = rendered.split("\n");
-		const callRow = rows.findIndex((row) => row.includes("dispatch("));
+		const callRow = rows.findIndex((row) => row.includes("tool action"));
 		const cardRow = rows.findIndex((row) => row.includes(`${GLYPH.workerAgent} scout`));
 		const replyRow = rows.findIndex((row) => row.includes("The scout is back."));
 		ok(callRow >= 0 && cardRow > callRow && replyRow > cardRow, `card sits between call and reply:\n${rendered}`);
+		ok(!rendered.includes("dispatch("), `the replay header stays tool-neutral:\n${rendered}`);
 		// An agent-origin run replays folded, which is its settled view: the model
 		// already reported on it, and the card is there for the operator who wants
 		// to check that report against the worker's own words.
