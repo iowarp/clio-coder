@@ -5,10 +5,11 @@ import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from 
 import {
 	normalizeToolResultDisposition,
 	projectToolResultContext,
+	type ToolResultDisposition,
 	type ToolResultDispositionMetadata,
 	toolResultContextOmitsContent,
 } from "./result-disposition.js";
-import { DEFAULT_MAX_BYTES } from "./truncate.js";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // Backstop for tools without an explicit resultSizePolicy. Sits above the
@@ -18,6 +19,7 @@ import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 export const DEFAULT_TOOL_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES + 2 * 1024;
 const RESULT_TRUNCATION_MARKER = "\n[tool result truncated]";
 const RESULT_OFFLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const TAIL_NOTICE_RESERVE_BYTES = 512;
 
 type ToolResultShapeContext = Pick<ToolInvokeOptions, "sessionId" | "toolCallId">;
 
@@ -39,6 +41,13 @@ function followUpHint(spec: ToolSpec): string {
 	);
 }
 
+function offloadMaxBytesFor(spec: ToolSpec): number {
+	const configured = spec.metadata?.resultSizePolicy?.offloadMaxBytes;
+	return typeof configured === "number" && Number.isFinite(configured) && configured > 0
+		? Math.floor(configured)
+		: RESULT_OFFLOAD_MAX_BYTES;
+}
+
 function detailsRecord(details: ToolResultDetails | undefined, key: string): Record<string, unknown> | null {
 	const candidate = details?.[key];
 	return candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
@@ -47,10 +56,10 @@ function detailsRecord(details: ToolResultDetails | undefined, key: string): Rec
 }
 
 /**
- * A result that already spilled its full text to scratch (bash's tail-biased
- * shaping via `resultSize.offloadPath`, or an OBSERVE tool's envelope via
- * `observation.offloadPath`) is left alone; the tool shaped it deliberately
- * and the backstop would only cut the tool's own continuation notice.
+ * A result that already spilled its full text to scratch (the canonical
+ * tail-biased presentation path via `resultSize.offloadPath`, or an OBSERVE
+ * tool's envelope via `observation.offloadPath`) is left alone; a second pass
+ * would only cut the deliberate continuation notice.
  */
 function existingOffloadPath(details: ToolResultDetails | undefined): string | null {
 	const fromResultSize = detailsRecord(details, "resultSize")?.offloadPath;
@@ -87,10 +96,10 @@ function offloadBody(text: string, bytes: number, maxBytes: number): string {
 
 /**
  * Persist the full text of a tool result to a per-session scratch file and
- * return its path (or null if the write fails). Callers that truncate their own
- * display output (for example bash's tail-biased shaping) use this to spill the
- * complete output before truncating, then set `details.resultSize.offloadPath`
- * so the registry re-truncation pass leaves the already-shaped result alone.
+ * return its path (or null if the write fails). Self-shaping callers use this
+ * to spill complete output before truncating and set
+ * `details.resultSize.offloadPath`; canonical disposition shaping also uses it
+ * once when presentation or model context omits captured content.
  */
 export function writeToolOffload(
 	text: string,
@@ -158,9 +167,10 @@ function shapeJsonOverflow(
 	bytes: number,
 	maxBytes: number,
 	context: ToolResultShapeContext | undefined,
+	offloadMaxBytes: number,
 ): ToolResult {
 	const observation = detailsRecord(result.details, "observation");
-	const offloadPath = writeToolOffload(text, context);
+	const offloadPath = writeToolOffload(text, context, offloadMaxBytes);
 	const next =
 		typeof observation?.next === "string" && observation.next.length > 0 ? observation.next : followUpHint(spec);
 	const stub = JSON.stringify({
@@ -183,16 +193,64 @@ function shapeJsonOverflow(
 	return { ...result, message: stub, details: mergeDetails(result.details, resultSize) };
 }
 
-function shapeLegacyToolResult(spec: ToolSpec, result: ToolResult, context?: ToolResultShapeContext): ToolResult {
+function shapeTailOverflow(
+	spec: ToolSpec,
+	result: ToolResult,
+	text: string,
+	bytes: number,
+	maxBytes: number,
+	context: ToolResultShapeContext | undefined,
+	offloadMaxBytes: number,
+): ToolResult {
+	const truncation = truncateTail(text, {
+		maxLines: DEFAULT_MAX_LINES,
+		maxBytes: Math.max(1, maxBytes - TAIL_NOTICE_RESERVE_BYTES),
+	});
+	const offloadPath = writeToolOffload(text, context, offloadMaxBytes);
+	const startLine = truncation.totalLines - truncation.outputLines + 1;
+	const scope = truncation.lastLinePartial
+		? `last ${formatSize(truncation.outputBytes)} of line ${truncation.totalLines} (line is large)`
+		: `lines ${startLine}-${truncation.totalLines} of ${truncation.totalLines}`;
+	const location =
+		offloadPath === null
+			? ""
+			: ` Full output saved to ${offloadPath}; ${OFFLOAD_POINTER_NOTE}; read it with offset/limit.`;
+	const note = `[Output tail-truncated: showing ${scope} (${formatSize(maxBytes)} display limit).${location}]`;
+	const resultSize = {
+		bytes,
+		shownBytes: truncation.outputBytes,
+		maxBytes,
+		truncated: true,
+		policy: "tail",
+		followUpHint: followUpHint(spec),
+		...(offloadPath === null ? {} : { offloadPath }),
+	};
+	const displayed = `${truncation.content}\n\n${note}`;
+	if (result.kind === "ok") return { ...result, output: displayed, details: mergeDetails(result.details, resultSize) };
+	return { ...result, message: displayed, details: mergeDetails(result.details, resultSize) };
+}
+
+function shapeLegacyToolResult(
+	spec: ToolSpec,
+	result: ToolResult,
+	context?: ToolResultShapeContext,
+	overflow: "head" | "tail" = "head",
+): ToolResult {
 	if (existingOffloadPath(result.details) !== null) return result;
 	const maxBytes = maxBytesFor(spec);
+	const offloadMaxBytes = offloadMaxBytesFor(spec);
 	const text = result.kind === "ok" ? result.output : result.message;
 	const bytes = byteLength(text);
 	if (bytes <= maxBytes) return result;
 	const observation = detailsRecord(result.details, "observation");
-	if (observation?.format === "json") return shapeJsonOverflow(spec, result, text, bytes, maxBytes, context);
+	if (observation?.format === "json") {
+		return shapeJsonOverflow(spec, result, text, bytes, maxBytes, context, offloadMaxBytes);
+	}
+	if (overflow === "tail") {
+		return shapeTailOverflow(spec, result, text, bytes, maxBytes, context, offloadMaxBytes);
+	}
 	const truncated = truncateUtf8(text, maxBytes, RESULT_TRUNCATION_MARKER);
-	const offloadPath = writeToolOffload(text, context);
+	const offloadPath = writeToolOffload(text, context, offloadMaxBytes);
 	const resultSize = {
 		bytes,
 		shownBytes: byteLength(truncated),
@@ -272,15 +330,25 @@ function withOffloadMetadata(
  * Apply legacy shaping or one declared canonical disposition. Registry calls
  * this once, after middleware annotations have produced the terminal result.
  */
-export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: ToolResultShapeContext): ToolResult {
+export function shapeToolResult(
+	spec: ToolSpec,
+	result: ToolResult,
+	context?: ToolResultShapeContext,
+	requestedDisposition?: ToolResultDisposition,
+): ToolResult {
 	if (existingDisposition(result.details) !== null) return result;
 	const hardMaxBytes = maxBytesFor(spec);
-	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes);
+	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes, requestedDisposition);
 	if (disposition === null) return shapeLegacyToolResult(spec, result, context);
 
 	const capturedText = resultText(result);
 	const capturedBytes = capturedBytesFor(result, capturedText);
-	let displayed = shapeLegacyToolResult(specWithDisplayCap(spec, disposition.presentation.maxBytes), result, context);
+	let displayed = shapeLegacyToolResult(
+		specWithDisplayCap(spec, disposition.presentation.maxBytes),
+		result,
+		context,
+		disposition.presentation.overflow,
+	);
 	let displayedText = resultText(displayed);
 	let displayedBytes = byteLength(displayedText);
 	let offloadPath = existingOffloadPath(displayed.details);
@@ -295,7 +363,7 @@ export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: To
 		followUpHint: followUpHint(spec),
 	};
 	if (offloadPath === null && toolResultContextOmitsContent(projectionInput)) {
-		offloadPath = writeToolOffload(capturedText, context);
+		offloadPath = writeToolOffload(capturedText, context, offloadMaxBytesFor(spec));
 		if (offloadPath !== null) {
 			displayed = withOffloadMetadata(
 				displayed,
@@ -323,6 +391,15 @@ export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: To
 			requestedMode: disposition.context.mode,
 			appliedMode: projection.appliedMode,
 			maxBytes: disposition.context.maxBytes,
+			...(disposition.context.mode === "bounded" && disposition.context.excerpt !== undefined
+				? { excerpt: disposition.context.excerpt }
+				: {}),
+			...(disposition.context.mode === "full" && disposition.context.downgradeExcerpt !== undefined
+				? { excerpt: disposition.context.downgradeExcerpt }
+				: {}),
+			...(disposition.context.mode === "summary" && disposition.context.strategy !== undefined
+				? { summaryStrategy: disposition.context.strategy }
+				: {}),
 		},
 		capturedBytes,
 		displayedBytes,

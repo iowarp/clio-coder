@@ -23,6 +23,7 @@ const bashResult = (): BashCommandResult => ({
 	aborted: false,
 	timedOut: false,
 	outputCapped: false,
+	outputBytes: 7,
 });
 
 function createHarness(

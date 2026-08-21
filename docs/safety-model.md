@@ -132,6 +132,8 @@ Shell operators split two ways. Unrecognized sequencing and redirection (`||`, `
 
 Bash `cwd` is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.
 
+Bash `output_policy` changes only the canonical model-context disposition after execution; it never changes command classification, autonomy, cwd containment, environment filtering, process-group termination, or the 16 MiB capture ceiling. Omitted/`bounded` retains the diagnostic tail. `summary` uses a deterministic code path with repository secret redaction and bounded head, tail, and error-like lines. `metadata-only` retains success/failure, exit, signal, timeout, abort, output-cap, byte-size, and retrieval facts without stdout or stderr in model context. `full` is appropriate only for known-small results and records a typed downgrade plus retrieval when the hard result budget cannot admit it. Operator presentation remains independently tail-biased, and only the terminal result may write its single retained scratch artifact.
+
 ---
 
 ## Policy Engine Evaluation Order

@@ -1,4 +1,6 @@
+import { BASH_HARD_CAP_BYTES } from "../core/bash-exec.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { BASH_DEFAULT_RESULT_DISPOSITION } from "./bash.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import { readMaxBytes } from "./read.js";
@@ -121,15 +123,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: exactMutationPolicy,
 		costLatency: "local_fast",
 	},
-	// EXECUTE: the safe-exec spine (bash offloads its own overflow).
+	// EXECUTE: the safe-exec spine (canonical shaping offloads Bash overflow).
 	[ToolNames.Bash]: {
 		objective: "Execute an explicit shell command when narrower tools are insufficient.",
 		uiLabel: "Shell",
 		retrySafety: "unknown",
-		resultSizePolicy: summaryPolicy(
-			"Use a narrower command or a dedicated verification/read/search tool to inspect omitted output.",
-		),
+		resultSizePolicy: {
+			...summaryPolicy("Use a narrower command or a dedicated verification/read/search tool to inspect omitted output."),
+			offloadMaxBytes: BASH_HARD_CAP_BYTES,
+		},
+		resultDisposition: BASH_DEFAULT_RESULT_DISPOSITION,
 		costLatency: "local_slow",
+		promptHint:
+			"Bash output_policy defaults to bounded diagnostic tail. Use summary for noisy commands, metadata-only when only outcome and retrieval matter, and full only when output is known to fit the bounded result budget.",
 	},
 	[ToolNames.Git]: {
 		objective: "Read-only git inspection: status, diff, or log.",
