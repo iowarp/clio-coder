@@ -2,9 +2,10 @@ import { homedir } from "node:os";
 import { relative } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, visibleWidth } from "../engine/tui.js";
-import { contextCategorySwatch, renderContextMeterGrid } from "./context-meter.js";
+import { contextCategorySwatch, renderContextMeterGrid, renderEvictedTokensLine } from "./context-meter.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
 
@@ -81,7 +82,43 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("muted", right)}`;
 }
 
-export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: number): string[] {
+function evictedTokens(view: WorkingSetView): number {
+	let total = 0;
+	for (const state of view.evicted.values()) total += state.tokensFreed;
+	return total;
+}
+
+function formatChurn(view: WorkingSetView): string {
+	if (view.itemsEvicted === 0) return "n/a";
+	return (view.recalls / view.itemsEvicted).toFixed(2);
+}
+
+/**
+ * The working-set section: what the projection has taken out of the window
+ * and how often the model has asked for it back. Churn is recalls over items
+ * evicted; a high number means the policy evicts what is still needed.
+ */
+function renderWorkingSetLines(view: WorkingSetView): string[] {
+	const theme = clioTheme();
+	const items = view.evicted.size;
+	const summary = [
+		`${items} evicted item${items === 1 ? "" : "s"}`,
+		`${formatTokens(evictedTokens(view))} tokens`,
+		`${view.evictionEvents} event${view.evictionEvents === 1 ? "" : "s"}`,
+		`${view.recalls} recall${view.recalls === 1 ? "" : "s"}`,
+		`churn ${formatChurn(view)}`,
+	].join(" · ");
+	return [
+		`${theme.fg("muted", "working set")} ${theme.fg("dim", "·")} ${theme.fg("accent", `policy ${view.lastPolicyId ?? "none"}`)}`,
+		theme.fg("dim", summary),
+	];
+}
+
+export function renderContextLedgerLines(
+	ledger: ContextLedger,
+	contentWidth: number,
+	workingSet?: WorkingSetView | null,
+): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
 
@@ -110,8 +147,13 @@ export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: nu
 	lines.push("");
 
 	for (const group of ledger.meter) lines.push(legendRow(group, contentWidth));
+	if (workingSet && workingSet.evicted.size > 0) lines.push(renderEvictedTokensLine(evictedTokens(workingSet), theme));
 
 	lines.push("");
+	if (workingSet) {
+		for (const line of renderWorkingSetLines(workingSet)) lines.push(line);
+		lines.push("");
+	}
 	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
 		lines.push(theme.fg("dim", `project preload: ${ledger.projectPreload}`));
 	}
@@ -170,6 +212,8 @@ export interface OpenContextOverlayOptions {
 		onEvent(handler: (event: { type: string }) => void): () => void;
 		isStreaming(): boolean;
 	};
+	/** Working-set fold at the live leaf; null or absent hides the section. */
+	getWorkingSet?: () => WorkingSetView | null;
 }
 
 /**
@@ -183,7 +227,9 @@ export function openContextOverlay(
 	getLedger: () => ContextLedger,
 	options?: OpenContextOverlayOptions,
 ): OverlayHandle {
-	const text = new Text(renderContextLedgerLines(getLedger(), DEFAULT_CONTENT_WIDTH).join("\n"), 0, 0);
+	const render = (): string =>
+		renderContextLedgerLines(getLedger(), DEFAULT_CONTENT_WIDTH, options?.getWorkingSet?.() ?? null).join("\n");
+	const text = new Text(render(), 0, 0);
 	const handle = showClioOverlayFrame(tui, text, {
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
@@ -192,7 +238,7 @@ export function openContextOverlay(
 	});
 
 	const refresh = (): void => {
-		text.setText(renderContextLedgerLines(getLedger(), DEFAULT_CONTENT_WIDTH).join("\n"));
+		text.setText(render());
 		text.invalidate();
 		tui.requestRender();
 	};

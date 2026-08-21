@@ -1,4 +1,5 @@
 import type { SafeEventBus } from "../core/event-bus.js";
+import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -107,6 +108,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.handle = openContextOverlayFactory(deps.tui, deps.getContextLedger, {
 			bus: deps.bus,
 			chat: deps.contextChat,
+			getWorkingSet: () => {
+				const readSessionEntries = deps.readSessionEntries;
+				if (!readSessionEntries) return null;
+				return foldWorkingSet(readSessionEntries(), deps.getSessionMeta()?.pinnedLeafTurnId ?? undefined);
+			},
 		});
 		deps.requestRender();
 	};
