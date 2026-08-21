@@ -96,7 +96,7 @@ function createSessionHarness(options: {
 		dispatchBoard: {},
 		chatPanel: {
 			appendUser: (text: string) => events.push(`panel:user:${text}`),
-			collapseAllTools: () => events.push("panel:collapse-tools"),
+			clearFoldOverrides: () => events.push("panel:clear-fold-overrides"),
 			applyEvent: (event: { type: string; message?: { content?: unknown } }) => {
 				if (event.type !== "message_end") return;
 				const content = event.message?.content;
@@ -194,7 +194,7 @@ describe("contracts/interactive session overlay lifecycle", () => {
 			"session:tree:resumed",
 			"panel:reset",
 			"panel:user:resumed prompt",
-			"panel:collapse-tools",
+			"panel:clear-fold-overrides",
 			"chat:reset:leaf-resumed:1",
 			"memory-seed",
 			"footer",

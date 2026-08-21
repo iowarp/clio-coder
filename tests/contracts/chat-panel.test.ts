@@ -67,8 +67,6 @@ describe("chat-panel live thinking streaming", () => {
 
 	it("expanded render is tail-anchored when streaming and head-anchored when settled", () => {
 		const panel = createChatPanel({ now: frozen.now });
-		// Set expanded state to true
-		panel.toggleLastThinking();
 
 		// Generate 15 lines of thinking
 		let text = "";
@@ -83,6 +81,9 @@ describe("chat-panel live thinking streaming", () => {
 			partialThinking: text.trim(),
 		} as ChatLoopEvent);
 
+		// Open the stretch: an override over the policy's folded default. There is
+		// no panel-level sticky flag to arm beforehand; the key acts on a stretch.
+		ok(panel.toggleLastThinking());
 		let rendered = panel.render(80).join("\n");
 
 		// When streaming: it should show the last 12 lines and a leading hidden lines note
@@ -284,6 +285,8 @@ describe("chat-panel tool-body export rendering", () => {
 	it("bounded panel middle-elides a large expanded tool body (live-view default)", () => {
 		const panel = createChatPanel({ now: frozen.now });
 		feedLargeGrep(panel);
+		// The policy folds grep; the operator opens this one to read its body.
+		panel.toggleLastToolExpanded();
 		const rendered = panel.render(100).join("\n");
 		// Middle-elision keeps the head and the tail and drops the middle, so a
 		// central row disappears while the first and last survive.
@@ -305,7 +308,9 @@ describe("chat-panel tool-body export rendering", () => {
 	});
 
 	it("unboundedToolBodies renders the full expanded tool body with no middle-elision (for /export)", () => {
-		const panel = createChatPanel({ now: frozen.now, unboundedToolBodies: true });
+		// /export builds its panel this way: unbounded bodies under the verbose
+		// policy, with no operator overrides.
+		const panel = createChatPanel({ now: frozen.now, unboundedToolBodies: true, getOutputVerbosity: () => "verbose" });
 		feedLargeGrep(panel);
 		const rendered = panel.render(100).join("\n");
 		ok(!rendered.includes("lines hidden"), "export must not carry the UI middle-elision placeholder");
@@ -390,9 +395,9 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 
 	it("routes tool_execution_update to a segment stranded behind a notice entry", () => {
 		const clock = 1000;
-		const panel = createChatPanel({ now: () => clock });
-		// grep, not bash: bash folds by default, and this test is about routing a
-		// streamed body to a stranded segment, not about the fold policy.
+		// Verbose opens running bodies; this test is about routing a streamed body
+		// to a stranded segment, not about the fold policy.
+		const panel = createChatPanel({ now: () => clock, getOutputVerbosity: () => "verbose" });
 		panel.applyEvent({
 			type: "tool_execution_start",
 			toolCallId: "s1",
@@ -441,7 +446,8 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 
 	it("keeps one Pi tool row from streamed arguments through live output and settlement", () => {
 		let clock = 1_000;
-		const panel = createChatPanel({ now: () => clock });
+		// Verbose so the running body and the settled body both open.
+		const panel = createChatPanel({ now: () => clock, getOutputVerbosity: () => "verbose" });
 		const partial = {
 			role: "assistant",
 			content: [
@@ -1045,8 +1051,7 @@ describe("chat-panel agent voice", () => {
 
 describe("chat-panel tool ledger subline", () => {
 	function feedCollapsedRead(panel: ReturnType<typeof createChatPanel>): void {
-		// Rich non-resource calls expand consistently; explicitly fold this one
-		// to exercise the compact ledger contract without relying on event order.
+		// The policy folds a read; the compact ledger row is its default view.
 		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as ChatLoopEvent);
 		panel.applyEvent({
 			type: "tool_execution_start",
@@ -1065,7 +1070,6 @@ describe("chat-panel tool ledger subline", () => {
 			isError: false,
 			durationMs: 230,
 		} as ChatLoopEvent);
-		panel.toggleLastToolExpanded();
 		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 	}
 
@@ -1986,23 +1990,22 @@ describe("chat-panel render caching", () => {
 
 		// The freeze forms over the settled transcript, then each toggle mutates a
 		// frozen entry; every drop must produce the same bytes a fresh panel does.
-		// Live tools auto-expand, so the first toggle collapses and the second
-		// re-expands.
+		// The policy folds tools, so the first toggle opens and the second folds.
 		const panel = buildPanel();
+		const folded = panel.render(80).join("\n");
+		ok(!folded.includes("result row 7"), "the policy folds the body before any toggle");
+		panel.toggleAllToolsExpanded();
 		const expanded = panel.render(80).join("\n");
-		ok(expanded.includes("result row 7"), "the auto-expanded body must render before any toggle");
+		ok(expanded.includes("result row 7"), "the expand toggle must open the frozen folded body");
 		panel.toggleAllToolsExpanded();
-		const collapsed = panel.render(80).join("\n");
-		ok(!collapsed.includes("result row 7"), "the collapse toggle must drop the frozen expanded body");
-		panel.toggleAllToolsExpanded();
-		const reExpanded = panel.render(80).join("\n");
-		ok(reExpanded.includes("result row 7"), "the re-expand toggle must restore the body through the freeze drop");
+		const reFolded = panel.render(80).join("\n");
+		ok(!reFolded.includes("result row 7"), "the fold toggle must drop the body through the freeze drop");
 
 		const fresh = buildPanel();
 		fresh.toggleAllToolsExpanded();
-		strictEqual(collapsed, fresh.render(80).join("\n"));
+		strictEqual(expanded, fresh.render(80).join("\n"));
 		fresh.toggleAllToolsExpanded();
-		strictEqual(reExpanded, fresh.render(80).join("\n"));
+		strictEqual(reFolded, fresh.render(80).join("\n"));
 	});
 });
 
@@ -2023,7 +2026,7 @@ describe("chat-panel bash fold policy", () => {
 		} as ChatLoopEvent);
 	};
 
-	it("folds a model bash call by default and keeps other tools expanded", () => {
+	it("folds a model bash call and every other tool by default", () => {
 		const panel = createChatPanel({ now: frozen.now });
 		runBash(panel, "npm test", "suite line one\nsuite line two");
 		const rendered = strip(panel.render(100).join("\n"));
@@ -2045,7 +2048,9 @@ describe("chat-panel bash fold policy", () => {
 			result: "src/a.ts:1: needle",
 			isError: false,
 		} as ChatLoopEvent);
-		ok(strip(other.render(100).join("\n")).includes("src/a.ts:1: needle"), "non-bash tools keep the expanded default");
+		const grep = strip(other.render(100).join("\n"));
+		ok(grep.includes("searching for `needle`"), grep);
+		ok(!grep.includes("src/a.ts:1: needle"), `grep folds to its row like every other tool, got: ${grep}`);
 	});
 
 	it("keeps resource reads folded through the same policy", () => {
@@ -2124,25 +2129,433 @@ describe("chat-panel bash fold policy", () => {
 
 	it("includes a fold-owning replay block in the tool expand and collapse keys", () => {
 		const panel = createChatPanel({ now: frozen.now });
-		let folded = true;
+		let fold: "expanded" | "folded" | undefined;
 		panel.appendReplayBlock(
-			(_width) => (folded ? ["ran `pwd` ✓"] : ["ran `pwd` ✓", "/home/operator"]),
+			(_width) => (fold === "expanded" ? ["ran `pwd` ✓", "/home/operator"] : ["ran `pwd` ✓"]),
 			() => false,
 			{
-				isFolded: () => folded,
-				setFolded: (next: boolean) => {
-					folded = next;
+				policyFold: () => "folded",
+				fold: () => fold,
+				setFold: (next) => {
+					fold = next;
 				},
 			},
 		);
 		ok(!strip(panel.render(100).join("\n")).includes("/home/operator"));
-		ok(panel.toggleLastToolExpanded(), "Ctrl+O owns the newest local bash block");
-		strictEqual(folded, false);
+		ok(panel.toggleLastToolExpanded(), "Alt+O owns the newest local bash block");
+		strictEqual(fold, "expanded");
 		ok(strip(panel.render(100).join("\n")).includes("/home/operator"), "the panel re-renders the opened block");
-		panel.collapseAllTools();
-		strictEqual(folded, true);
+		panel.clearFoldOverrides();
+		strictEqual(fold, undefined, "clearing overrides hands the block back to the policy");
 		ok(!strip(panel.render(100).join("\n")).includes("/home/operator"));
 		ok(panel.toggleAllToolsExpanded(), "expand-all reaches the block too");
-		strictEqual(folded, false);
+		strictEqual(fold, "expanded");
+	});
+});
+
+describe("chat-panel transcript detail policy", () => {
+	type Verbosity = "minimal" | "default" | "verbose";
+	const WIDTHS = [40, 80, 120] as const;
+	const readBody = Array.from({ length: 6 }, (_, i) => `line ${i + 1} of the file body`).join("\n");
+	const diff = Array.from({ length: 40 }, (_, i) => `-${i + 1} old line ${i + 1}\n+${i + 1} new line ${i + 1}`).join(
+		"\n",
+	);
+
+	const tool = (
+		panel: ReturnType<typeof createChatPanel>,
+		id: string,
+		name: string,
+		args: Record<string, unknown>,
+		result: unknown,
+		isError = false,
+	): void => {
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName: name, args } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: id,
+			toolName: name,
+			result,
+			isError,
+			durationMs: 120,
+		} as ChatLoopEvent);
+	};
+
+	/** One turn touching every tool class in the table plus a failure. */
+	const feedMixedTurn = (panel: ReturnType<typeof createChatPanel>): void => {
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "reasoning excerpt line one\nreasoning excerpt line two",
+		} as ChatLoopEvent);
+		tool(panel, "t-read", "read", { path: "src/a.ts" }, readBody);
+		tool(panel, "t-grep", "grep", { pattern: "needle" }, "src/a.ts:3: needle found here");
+		tool(panel, "t-find", "find", { pattern: "*.ts" }, "src/a.ts\nsrc/b.ts");
+		tool(panel, "t-ls", "ls", { path: "src" }, "a.ts\nb.ts\nc.ts");
+		tool(panel, "t-web", "web_fetch", { url: "https://example.test/page" }, "<html>fetched page body</html>");
+		tool(panel, "t-bash", "bash", { command: "npm test" }, "suite line one\nsuite line two");
+		tool(
+			panel,
+			"t-edit",
+			"edit",
+			{ path: "src/a.ts" },
+			{
+				content: [{ type: "text", text: "edited src/a.ts" }],
+				details: { diff },
+			},
+		);
+		tool(panel, "t-fail", "grep", { pattern: "boom" }, "grep: walking src\ngrep: permission denied on src/secret", true);
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "all done" }],
+			usage: { input: 1200, output: 80, cacheRead: 30, cacheWrite: 0, reasoningTokens: 12 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+	};
+
+	const build = (verbosity: () => Verbosity, expandKey?: string) => {
+		const panel = createChatPanel({
+			now: frozen.now,
+			getOutputVerbosity: verbosity,
+			...(expandKey === undefined ? {} : { getToolExpandKey: () => expandKey }),
+		});
+		feedMixedTurn(panel);
+		return panel;
+	};
+	const rows = (panel: ReturnType<typeof createChatPanel>, width: number): string[] => panel.render(width).map(strip);
+	// A row whose lead cannot break (a bare web_fetch URL at 40 columns) wraps
+	// after its glyph; the glyph still opens exactly one row per call.
+	const toolRows = (lines: string[]): string[] => lines.filter((line) => line.startsWith("▸"));
+
+	it("renders one subline per tool under default, with the diff on the edit row and an excerpt on the failure", () => {
+		const panel = build(() => "default");
+		for (const width of WIDTHS) {
+			const lines = rows(panel, width);
+			strictEqual(toolRows(lines).length, 8, `one row per call at ${width}: ${JSON.stringify(lines)}`);
+			const text = lines.join("\n");
+			ok(!text.includes("line 3 of the file body"), `read body stays closed at ${width}`);
+			ok(!text.includes("needle found here"), `grep body stays closed at ${width}`);
+			ok(!text.includes("src/b.ts"), `find body stays closed at ${width}`);
+			ok(!text.includes("c.ts"), `ls body stays closed at ${width}`);
+			ok(!text.includes("fetched page body"), `web_fetch body stays closed at ${width}`);
+			ok(!text.includes("suite line two"), `bash body stays closed at ${width}`);
+			ok(!text.includes("edited src/a.ts"), `edit body stays closed at ${width}`);
+			// The mutation row keeps its diff, bounded: head and tail with the middle elided.
+			ok(text.includes("+1 new line 1"), `edit row keeps the diff head at ${width}: ${text}`);
+			ok(text.includes("+40 new line 40"), `edit row keeps the diff tail at ${width}: ${text}`);
+			ok(text.includes("lines hidden"), `the folded diff is bounded at ${width}: ${text}`);
+			ok(!text.includes("new line 20"), `the folded diff elides its middle at ${width}`);
+			// Thinking folds to its marker, the receipt is compact.
+			ok(text.includes("Thinking…"), text);
+			ok(!text.includes("reasoning excerpt"), text);
+			ok(text.includes("turn · in 1200 · out 80"), text);
+			ok(!text.includes("cache 30/0"), text);
+			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
+		}
+		// A failed grep is a red row with the last output line, no body.
+		const wide = panel.render(120);
+		const failure = wide.find((line) => strip(line).includes("searching for `boom`"));
+		ok(failure !== undefined, wide.map(strip).join("\n"));
+		ok(failure.includes(fgSequence("error")), "the failed row uses the error color");
+		ok(strip(failure).includes("permission denied on src/secret"), strip(failure));
+		ok(!strip(failure).includes("walking src"), "only the last non-empty line rides the row");
+	});
+
+	it("opens every body, rail, and receipt under verbose and folds only on operator request", () => {
+		const panel = build(() => "verbose");
+		for (const width of WIDTHS) {
+			const text = rows(panel, width).join("\n");
+			ok(text.includes("line 3 of the file body"), `read body open at ${width}`);
+			ok(text.includes("needle found here"), `grep body open at ${width}`);
+			ok(text.includes("fetched page body"), `web_fetch body open at ${width}`);
+			ok(text.includes("suite line two"), `bash body open at ${width}`);
+			ok(text.includes("$ npm test"), `bash body shows its command at ${width}`);
+			ok(text.includes("reasoning excerpt line two"), `thinking rail open at ${width}`);
+			ok(text.includes("walking src"), `the failed body is open at ${width}`);
+			ok(text.includes("cache 30/0"), `full receipt at ${width}`);
+			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
+		}
+		// Alt+O folds the newest block (the failed grep) and the fold sticks.
+		ok(panel.toggleLastToolExpanded());
+		let text = rows(panel, 120).join("\n");
+		ok(!text.includes("walking src"), `the newest body folded on request: ${text}`);
+		ok(text.includes("permission denied on src/secret"), "the folded failure keeps its excerpt");
+		ok(text.includes("suite line two"), "only the targeted block folded");
+		strictEqual(rows(panel, 120).join("\n"), text, "the fold is stable across frames");
+		// Alt+R folds the rail the same way.
+		ok(panel.toggleLastThinking());
+		text = rows(panel, 120).join("\n");
+		ok(!text.includes("reasoning excerpt"), text);
+		ok(text.includes("Thinking…"), text);
+	});
+
+	it("renders only sublines, markers, and error rows under minimal, and still opens one block on request", () => {
+		const panel = build(() => "minimal");
+		for (const width of WIDTHS) {
+			const lines = rows(panel, width);
+			strictEqual(toolRows(lines).length, 8, `one row per call at ${width}`);
+			const text = lines.join("\n");
+			ok(!text.includes("new line 1"), `minimal drops the folded diff at ${width}`);
+			ok(!text.includes("line 3 of the file body"), `no bodies at ${width}`);
+			ok(!text.includes("turn ·"), `no receipt at ${width}`);
+			ok(text.includes("Thinking…"), text);
+			// Below 60 columns the row keeps the exit status and drops the excerpt.
+			if (width >= 60) {
+				ok(text.includes("permission denied on src/secret"), `the error row keeps its excerpt at ${width}: ${text}`);
+			}
+			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
+		}
+		ok(panel.toggleLastToolExpanded());
+		const text = rows(panel, 120).join("\n");
+		ok(text.includes("walking src"), `Alt+O opens the newest block under minimal: ${text}`);
+		ok(!text.includes("line 3 of the file body"), "every other block stays folded");
+	});
+
+	it("keeps the diff under the folded edit row across every level only where the policy says so", () => {
+		let verbosity: Verbosity = "default";
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => verbosity });
+		tool(
+			panel,
+			"e1",
+			"edit",
+			{ path: "src/a.ts" },
+			{
+				content: [{ type: "text", text: "edited src/a.ts" }],
+				details: { diff: "-1 const old = one;\n+1 const new = two;" },
+			},
+		);
+		tool(
+			panel,
+			"w1",
+			"write",
+			{ path: "src/new.ts" },
+			{
+				content: [{ type: "text", text: "wrote src/new.ts" }],
+				details: { diff: "+1 export const fresh = true;" },
+			},
+		);
+		let text = rows(panel, 80).join("\n");
+		ok(text.includes("editing src/a.ts"), text);
+		ok(text.includes("+1 const new = two;"), text);
+		ok(text.includes("writing src/new.ts"), text);
+		ok(text.includes("+1 export const fresh = true;"), text);
+		ok(!text.includes("change ·"), "the folded row carries the diff without the expanded body's meta line");
+		verbosity = "minimal";
+		text = rows(panel, 80).join("\n");
+		ok(!text.includes("const new = two"), `minimal hides the diff: ${text}`);
+		verbosity = "verbose";
+		text = rows(panel, 80).join("\n");
+		ok(text.includes("change ·"), `verbose opens the full mutation body: ${text}`);
+		ok(text.includes("+1 const new = two;"), text);
+	});
+
+	it("clears every override when the verbosity changes", () => {
+		let verbosity: Verbosity = "default";
+		const panel = build(() => verbosity);
+		ok(panel.toggleLastToolExpanded(), "open the newest block under default");
+		ok(rows(panel, 120).join("\n").includes("walking src"));
+		verbosity = "minimal";
+		ok(!rows(panel, 120).join("\n").includes("walking src"), "the new level renders from its own baseline");
+		verbosity = "default";
+		ok(
+			!rows(panel, 120).join("\n").includes("walking src"),
+			"returning to the old level does not resurrect the override: /output cleared it",
+		);
+		// Expand-all sets overrides on every block; a verbosity change clears them too.
+		ok(panel.toggleAllToolsExpanded());
+		ok(rows(panel, 120).join("\n").includes("line 3 of the file body"));
+		verbosity = "verbose";
+		ok(rows(panel, 120).join("\n").includes("line 3 of the file body"));
+		ok(panel.toggleAllToolsExpanded(), "collapse-all under verbose folds everything by override");
+		ok(!rows(panel, 120).join("\n").includes("line 3 of the file body"));
+		verbosity = "default";
+		rows(panel, 120);
+		verbosity = "verbose";
+		ok(
+			rows(panel, 120).join("\n").includes("line 3 of the file body"),
+			"the collapse-all override went with the level change",
+		);
+	});
+
+	it("lets expand-all and collapse-all stamp an explicit override on every visible block", () => {
+		const panel = build(() => "default");
+		ok(panel.toggleAllToolsExpanded(), "one folded block means open everything");
+		let text = rows(panel, 120).join("\n");
+		for (const needle of ["line 3 of the file body", "needle found here", "fetched page body", "suite line two"]) {
+			ok(text.includes(needle), `${needle} opened: ${text}`);
+		}
+		ok(panel.toggleAllToolsExpanded(), "nothing folded means fold everything");
+		text = rows(panel, 120).join("\n");
+		for (const needle of ["line 3 of the file body", "needle found here", "fetched page body", "suite line two"]) {
+			ok(!text.includes(needle), `${needle} folded: ${text}`);
+		}
+		panel.clearFoldOverrides();
+		strictEqual(
+			rows(panel, 120).join("\n"),
+			rows(
+				build(() => "default"),
+				120,
+			).join("\n"),
+			"cleared means policy",
+		);
+	});
+
+	it("gives every running tool the same one-line row with elapsed, and a body only when expanded", () => {
+		let clock = 1_000;
+		let verbosity: Verbosity = "default";
+		const panel = createChatPanel({ now: () => clock, getOutputVerbosity: () => verbosity });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "run-grep",
+			toolName: "grep",
+			args: { pattern: "slow", path: "src" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "run-grep",
+			partialResult: "src/a.ts:1: slow",
+		} as ChatLoopEvent);
+		clock = 3_500;
+		for (const width of WIDTHS) {
+			const lines = rows(panel, width).filter((line) => line.length > 0);
+			const text = lines.join("\n");
+			ok(text.includes("searching for `slow`"), `running row grammar at ${width}: ${text}`);
+			ok(text.includes("running · 2.5s"), `live elapsed at ${width}: ${text}`);
+			ok(!text.includes("src/a.ts:1: slow"), `no streaming body on a folded running row at ${width}`);
+			ok(!text.includes("args ·"), `no header body at ${width}`);
+			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
+		}
+		// The operator opens the running call: header, args, and the live body.
+		ok(panel.toggleLastToolExpanded());
+		let text = rows(panel, 100).join("\n");
+		ok(text.includes("grep(slow)"), text);
+		ok(text.includes("running · 2.5s"), text);
+		ok(text.includes("live output"), text);
+		ok(text.includes("src/a.ts:1: slow"), `the streaming body appears once expanded: ${text}`);
+		// Alt+P pauses the body; the call keeps running.
+		strictEqual(panel.toggleLiveToolOutput(), false);
+		text = rows(panel, 100).join("\n");
+		ok(text.includes("live output paused · 2.5s"), text);
+		ok(!text.includes("src/a.ts:1: slow"), text);
+		strictEqual(panel.toggleLiveToolOutput(), true);
+		// Under verbose the running body is the policy, no override needed.
+		const verbose = createChatPanel({ now: () => clock, getOutputVerbosity: () => "verbose" });
+		verbose.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "run-read",
+			toolName: "read",
+			args: { path: "src/big.ts" },
+		} as ChatLoopEvent);
+		verbose.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "run-read",
+			partialResult: "partial file",
+		} as ChatLoopEvent);
+		text = rows(verbose, 100).join("\n");
+		ok(text.includes("read(src/big.ts)"), text);
+		ok(text.includes("partial file"), text);
+		verbosity = "verbose";
+		ok(
+			rows(panel, 100).join("\n").includes("src/a.ts:1: slow"),
+			"the level change cleared the override and verbose opens it",
+		);
+	});
+
+	it("keeps approval rows visible at every level and never folds them", () => {
+		for (const verbosity of ["minimal", "default", "verbose"] as const) {
+			const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => verbosity });
+			panel.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: "gate",
+				toolName: "bash",
+				args: { command: "rm -rf build" },
+			} as ChatLoopEvent);
+			panel.applyEvent({
+				type: "tool_approval_state",
+				toolCallId: "gate",
+				state: "awaiting-approval",
+				view: approvalView({ target: "rm -rf build" }),
+			} as ChatLoopEvent);
+			for (const width of WIDTHS) {
+				const text = rows(panel, width).join("\n");
+				ok(text.includes("awaiting approval"), `${verbosity} at ${width}: ${text}`);
+				ok(text.includes("action · execute"), `${verbosity} keeps the approval facts at ${width}: ${text}`);
+				for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
+			}
+		}
+	});
+
+	it("lets a new thinking stretch inherit the policy rather than the last keypress", () => {
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "default" });
+		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "first turn reasoning" } as ChatLoopEvent);
+		ok(panel.toggleLastThinking(), "Alt+R opens the first stretch");
+		ok(rows(panel, 80).join("\n").includes("first turn reasoning"));
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		panel.appendUser("again");
+		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "second turn reasoning" } as ChatLoopEvent);
+		const text = rows(panel, 80).join("\n");
+		ok(text.includes("first turn reasoning"), "the override on the first turn stays");
+		ok(!text.includes("second turn reasoning"), `the new stretch follows the policy: ${text}`);
+		strictEqual(panel.isThinkingExpanded(), false, "pacing sees the live stretch as folded");
+		ok(panel.toggleLastThinking());
+		strictEqual(panel.isThinkingExpanded(), true);
+		// With nothing to act on, the key reports no change instead of arming a sticky flag.
+		const empty = createChatPanel({ now: frozen.now });
+		strictEqual(empty.toggleLastThinking(), false);
+		strictEqual(empty.toggleAllThinking(), false);
+	});
+
+	it("states only that the model is thinking under minimal, with progress once opened", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock, getOutputVerbosity: () => "minimal" });
+		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "hidden reasoning" } as ChatLoopEvent);
+		panel.setLiveReasoning({ tokens: 900, provenance: "provider" });
+		clock = 4_000;
+		let text = rows(panel, 80).join("\n");
+		ok(text.includes("Thinking…"), text);
+		ok(!text.includes("r900"), `no count under minimal: ${text}`);
+		ok(!text.includes("3s"), `no elapsed under minimal: ${text}`);
+		ok(panel.toggleLastThinking());
+		text = rows(panel, 80).join("\n");
+		ok(text.includes("hidden reasoning"), text);
+		ok(text.includes("Thinking · r900 provider-reported · 3s"), `progress line once opened: ${text}`);
+		const balanced = createChatPanel({ now: () => clock, getOutputVerbosity: () => "default" });
+		balanced.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "hidden reasoning" } as ChatLoopEvent);
+		balanced.setLiveReasoning({ tokens: 900, provenance: "provider" });
+		ok(rows(balanced, 80).join("\n").includes("Thinking · r900 provider-reported"), "default keeps the live count");
+	});
+
+	it("advertises the expand key on the newest block whose effective state is folded, at every level", () => {
+		const hintRows = (panel: ReturnType<typeof createChatPanel>): string[] =>
+			rows(panel, 120).filter((line) => line.includes("(Alt+O)"));
+		const folded = build(() => "default", "Alt+O");
+		strictEqual(hintRows(folded).length, 1, JSON.stringify(rows(folded, 120)));
+		ok(hintRows(folded)[0]?.includes("searching for `boom`"), "the newest folded tool owns the hint");
+		const verbose = build(() => "verbose", "Alt+O");
+		strictEqual(hintRows(verbose).length, 0, "an open newest block invites nothing");
+		ok(verbose.toggleLastToolExpanded());
+		strictEqual(hintRows(verbose).length, 1, "once folded by override it advertises the key again");
+		const minimal = build(() => "minimal", "Alt+O");
+		strictEqual(hintRows(minimal).length, 1);
+	});
+
+	it("renders byte-identical frames for the same transcript and overrides", () => {
+		for (const verbosity of ["minimal", "default", "verbose"] as const) {
+			const a = build(() => verbosity);
+			const b = build(() => verbosity);
+			for (const width of WIDTHS)
+				strictEqual(a.render(width).join("\n"), b.render(width).join("\n"), `${verbosity}@${width}`);
+			ok(a.toggleLastToolExpanded());
+			ok(b.toggleLastToolExpanded());
+			ok(a.toggleLastThinking());
+			ok(b.toggleLastThinking());
+			for (const width of WIDTHS) {
+				const first = a.render(width).join("\n");
+				strictEqual(first, a.render(width).join("\n"), `re-render ${verbosity}@${width}`);
+				strictEqual(first, b.render(width).join("\n"), `fresh panel ${verbosity}@${width}`);
+			}
+		}
 	});
 });

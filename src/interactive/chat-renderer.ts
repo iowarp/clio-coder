@@ -1223,9 +1223,9 @@ export function rehydrateChatPanelFromTurns(
 			isError: true,
 		});
 	}
-	// Replay favors a compact historical ledger even though fresh non-resource
-	// calls auto-expand for live arguments and output. Collapse reconstructed
-	// tools explicitly; /export re-expands them afterward via
-	// toggleAllToolsExpanded, while /resume and /fork retain the compact form.
-	chatPanel.collapseAllTools();
+	// A rehydrated transcript starts from the transcript detail policy alone:
+	// whatever the operator had opened or folded before the switch belonged to
+	// the transcript they left. /export reaches the same policy with a verbose
+	// panel, so nothing here is terminal-only.
+	chatPanel.clearFoldOverrides();
 }

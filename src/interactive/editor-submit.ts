@@ -1,7 +1,9 @@
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import { toolPresentationPolicy } from "../tools/presentation.js";
 import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
@@ -14,6 +16,13 @@ import {
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 import { parseSlashCommand, type RunIo, type SlashCommand, type SlashCommandDispatchResult } from "./slash-commands.js";
+import {
+	type FoldOverride,
+	policyRunningToolFold,
+	policyToolFold,
+	resolveFold,
+	type TranscriptDetailPolicy,
+} from "./transcript-detail.js";
 
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
 
@@ -153,22 +162,30 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			running: true,
 			totalBytes: 0,
 			excludeFromContext: parsed.excludeFromContext,
-			folded: true,
 		};
+		// The operator's bash row follows the same rule as a model bash call: the
+		// transcript detail policy (through bash's presentation once settled)
+		// unless the operator overrode this one block with the expand key.
+		let fold: FoldOverride;
+		const bashPresentation = toolPresentationPolicy(ToolNames.Bash, undefined);
+		const policyFold = (detail: TranscriptDetailPolicy) =>
+			execution.running ? policyRunningToolFold(detail) : policyToolFold(detail, bashPresentation);
 		deps.chatPanel.appendReplayBlock(
-			(width) =>
+			(width, detail) =>
 				renderBashTranscriptExecution(
 					{
 						...execution,
+						folded: resolveFold(fold, policyFold(detail)) === "folded",
 						...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}),
 					},
 					width,
 				),
 			() => execution.running,
 			{
-				isFolded: () => execution.folded !== false,
-				setFolded: (folded: boolean) => {
-					execution.folded = folded;
+				policyFold,
+				fold: () => fold,
+				setFold: (next: FoldOverride) => {
+					fold = next;
 					deps.ui.requestRender();
 				},
 			},

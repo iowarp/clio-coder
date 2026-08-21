@@ -36,6 +36,18 @@ import {
 	type VerbRender,
 } from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
+import {
+	type Fold,
+	type FoldOverride,
+	policyRunningToolFold,
+	policyThinkingFold,
+	policyToolFold,
+	policyWorkerFold,
+	resolveFold,
+	type TranscriptDetailPolicy,
+	toggledFold,
+	transcriptDetail,
+} from "./transcript-detail.js";
 import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
 
 // Fenced code reaches the screen through pi-tui's Markdown component, which
@@ -151,8 +163,13 @@ type ToolSegment = {
 	settledWithoutResult?: boolean | undefined;
 	/** True when the finished result was an error. Meaningful only after `finished`. */
 	isError: boolean;
-	/** When true, render the full structured block instead of the collapsed subline. */
-	expanded: boolean;
+	/**
+	 * The operator's explicit fold for this block, or none. The effective state
+	 * is this override when set, else what the transcript detail policy gives
+	 * the call (through the tool's presentation once it has finished). Cleared
+	 * when `/output` changes and when a session is switched in.
+	 */
+	fold?: FoldOverride;
 	/** Wall-clock start time captured by the chat panel for live duration display. */
 	startedAtMs?: number;
 	/** Completed call duration in milliseconds (event-supplied or measured locally). */
@@ -163,7 +180,8 @@ type ToolSegment = {
 	 * Latest cumulative Pi result from `tool_execution_update`, including the
 	 * display content and structured progress details. Cleared
 	 * back to `undefined` on `tool_execution_end` so the finished `result`
-	 * takes over. Only consumed when `!finished && expanded`. The explicit
+	 * takes over. Only consumed while the call is in flight and its effective
+	 * state is expanded. The explicit
 	 * `| undefined` is required under `exactOptionalPropertyTypes: true` so
 	 * the clear path can re-assign `undefined` without a `delete`.
 	 */
@@ -216,7 +234,12 @@ type ThinkingSegment = {
 	startedAtMs?: number;
 };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
-type ReplayBlockRenderer = (width: number) => string[];
+/**
+ * A caller-rendered block receives the frame's transcript detail policy so a
+ * block that owns fold state (the operator's `!` bash row) resolves it the same
+ * way the panel resolves a model call. Blocks that ignore it are unaffected.
+ */
+type ReplayBlockRenderer = (width: number, detail: TranscriptDetailPolicy) => string[];
 type AssistantStatusLine = { phase: StatusPhase; verb: string; toneHint: VerbRender["toneHint"] };
 
 type TranscriptEntry =
@@ -226,12 +249,12 @@ type TranscriptEntry =
 			role: "assistant";
 			segments: AssistantSegment[];
 			/**
-			 * Whether this turn's thinking segments render as their full body
-			 * (true) or the one-line dim marker (false/undefined). Toggled by
-			 * `toggleLastThinking()`. New thinking inherits the panel-level
-			 * visibility mode until Ctrl+T toggles it again.
+			 * The operator's explicit fold for this turn's thinking stretches, or
+			 * none. Effective state is this override when set, else the transcript
+			 * detail policy. A new turn carries no override: it inherits the
+			 * policy, not the last keypress.
 			 */
-			expandedThinking?: boolean;
+			thinkingFold?: FoldOverride;
 			/**
 			 * `segments.length` when the current model call began, so `message_end`
 			 * can tell which segments belong to the message it is settling. A
@@ -247,11 +270,11 @@ type TranscriptEntry =
 	  }
 	/**
 	 * A dispatched worker's attributed block. The panel owns only the fold
-	 * state; `state` is the live object the worker-stream reducer mutates, so a
-	 * streaming delta reaches the screen without copying the entry per frame.
+	 * override; `state` is the live object the worker-stream reducer mutates, so
+	 * a streaming delta reaches the screen without copying the entry per frame.
 	 * The panel is told when that happened through `applyWorkerState`.
 	 */
-	| { role: "worker"; state: WorkerEntryState; folded: boolean }
+	| { role: "worker"; state: WorkerEntryState; fold?: FoldOverride }
 	/**
 	 * A block the caller renders itself. Most are settled the moment they are
 	 * appended, but a few (the operator's `!` bash row) keep mutating the state
@@ -269,13 +292,18 @@ type TranscriptEntry =
 type WorkerTranscriptEntry = Extract<TranscriptEntry, { role: "worker" }>;
 
 /**
- * Fold state a caller-rendered block owns. The panel never stores the flag: the
- * block's closure reads it when rendering, so the panel only needs to read and
- * flip it when the operator uses an expand/collapse key.
+ * Fold state a caller-rendered block owns. The panel never stores it: the
+ * block's closure reads it when rendering, so the panel only needs to resolve
+ * and flip it when the operator uses an expand/collapse key, and to clear it
+ * when `/output` changes. Same tri-state as a tool segment: an override, or
+ * none, over the fold the policy gives the block.
  */
 export interface ReplayBlockFoldControl {
-	isFolded(): boolean;
-	setFolded(folded: boolean): void;
+	/** The fold the policy gives this block when no override is set. */
+	policyFold(detail: TranscriptDetailPolicy): Fold;
+	/** The operator's override, or none. */
+	fold(): FoldOverride;
+	setFold(fold: FoldOverride): void;
 }
 
 export interface ChatPanel extends Component {
@@ -309,24 +337,30 @@ export interface ChatPanel extends Component {
 	 * an idle or just-started turn is.
 	 */
 	setLiveReasoning(view: ReasoningUsageView | null): void;
+	/**
+	 * Flip the newest foldable block (tool call, worker card, or fold-owning
+	 * replay block) away from its effective state. The flip is an override
+	 * over the transcript detail policy: under `/output verbose` it folds an
+	 * open block, under `/output minimal` it opens a folded one.
+	 */
 	toggleLastToolExpanded(): boolean;
+	/** Set an explicit override on every tool, worker, and fold-owning block at once. */
 	toggleAllToolsExpanded(): boolean;
 	/**
-	 * Force every tool segment into its collapsed one-line form. Replay
-	 * (`rehydrateChatPanelFromTurns`) calls this so a resumed or forked
-	 * transcript uses compact ledger summaries instead of auto-expanding every
-	 * historical non-resource call. Idempotent.
+	 * Drop every operator override so each block returns to what the transcript
+	 * detail policy gives it. `/output` changes and session switches do this:
+	 * the operator asked for a new baseline, and what they had opened belonged
+	 * to the transcript they left. Idempotent.
 	 */
-	collapseAllTools(): void;
+	clearFoldOverrides(): void;
 	/**
-	 * Flip thinking-bearing assistant turns between the one-line dim marker
-	 * and the full rail-prefixed body. The target visibility is panel-level
-	 * sticky state, then applied to current thinking history so Ctrl+T behaves
-	 * like a transcript-level thinking visibility toggle.
+	 * Flip the newest thinking-bearing turn between the one-line dim marker
+	 * and the full rail-prefixed body, as an override over the policy. A turn
+	 * with no thinking yet is left alone; a new stretch inherits the policy.
 	 */
 	toggleLastThinking(): boolean;
 	toggleAllThinking(): boolean;
-	/** Current panel-level live-thinking visibility used by presentation pacing. */
+	/** Whether live thinking would render open this frame, which presentation pacing consults. */
 	isThinkingExpanded(): boolean;
 	/** Toggle whether expanded live tool bodies include cumulative partial output. */
 	toggleLiveToolOutput(): boolean;
@@ -704,11 +738,14 @@ function renderLiveReasoningLine(view: ReasoningUsageView, elapsedMs: number | u
  * `... N more lines hidden` overflow message. Mirrors the tool toggle's
  * lab-notebook minimalism: no colored glyphs, no boxes.
  */
-function renderThinkingRail(thinking: string, width: number, streaming: boolean): string[] {
+function renderThinkingRail(thinking: string, width: number, streaming: boolean, unbounded = false): string[] {
 	if (thinking.length === 0) return [];
 	const splitLines = thinking.split("\n");
 	let visible: string[];
-	if (streaming) {
+	if (unbounded) {
+		// /export reproduces the whole transcript; the live cap is a screen budget.
+		visible = splitLines;
+	} else if (streaming) {
 		if (splitLines.length > THINKING_LINE_LIMIT) {
 			const hiddenCount = splitLines.length - THINKING_LINE_LIMIT;
 			visible = [`… ${hiddenCount} earlier lines hidden`, ...splitLines.slice(-THINKING_LINE_LIMIT)];
@@ -740,9 +777,13 @@ function renderThinkingRail(thinking: string, width: number, streaming: boolean)
  * reported 717676 input tokens against a 500k window; it was 65 calls of about
  * 11k, which the preceding one-call turns had already shown.
  */
-function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number, verbosity: OutputVerbosity): string[] {
-	if (verbosity === "minimal") return [];
-	if (verbosity === "default") {
+function renderTurnUsageLine(
+	usage: ChatPanelTurnUsage,
+	width: number,
+	receipt: TranscriptDetailPolicy["receipt"],
+): string[] {
+	if (receipt === "none") return [];
+	if (receipt === "compact") {
 		const receipt = truncateToWidth(
 			`  turn · in ${usage.inputTokens} · out ${usage.outputTokens}`,
 			width,
@@ -791,6 +832,22 @@ function styleStatusVerb(text: string, toneHint: VerbRender["toneHint"]): string
 	return `${DIM}${text}${RESET}`;
 }
 
+/**
+ * The fold the policy gives a tool segment this frame: the running-tool rule
+ * while in flight, the tool body rule (through the tool's own presentation)
+ * once finished, and the error rule for a finished failure.
+ */
+function policySegmentFold(seg: ToolSegment, detail: TranscriptDetailPolicy): Fold {
+	if (!seg.finished) return policyRunningToolFold(detail);
+	if (seg.isError && detail.errors === "body") return "expanded";
+	return policyToolFold(detail, toolPresentationPolicy(seg.name, seg.args));
+}
+
+/** Effective state of a tool segment: the operator's override, else the policy. */
+function toolSegmentExpanded(seg: ToolSegment, detail: TranscriptDetailPolicy): boolean {
+	return resolveFold(seg.fold, policySegmentFold(seg, detail)) === "expanded";
+}
+
 function renderToolSegmentLines(
 	seg: ToolSegment,
 	width: number,
@@ -798,11 +855,11 @@ function renderToolSegmentLines(
 	latestHintToolId: string | null,
 	nowMs: number,
 	unboundedToolBodies: boolean,
-	verbosity: OutputVerbosity,
+	detail: TranscriptDetailPolicy,
 	liveToolOutput: boolean,
 ): string[] {
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
-	const expanded = verbosity === "verbose" || (verbosity !== "minimal" && seg.expanded);
+	const expanded = toolSegmentExpanded(seg, detail);
 	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)) : undefined;
 	const phase: "forming" | "ready" | "running" = seg.executionStarted
 		? "running"
@@ -836,6 +893,10 @@ function renderToolSegmentLines(
 				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs, phase },
 			width,
 			hintKey,
+			{
+				diffStyle: seg.replayed === true ? "plain" : "color",
+				foldedExtras: detail.toolBody === "folded" ? "none" : "per-tool",
+			},
 		);
 	}
 	if (!seg.finished) {
@@ -867,14 +928,20 @@ function renderToolSegmentLines(
 }
 
 /**
- * Whether a worker block draws its one-line card this frame. `/output verbose`
- * opens every block and `/output minimal` folds every block, so the entry's own
- * fold decides only in between.
+ * Whether a worker block draws its one-line card this frame: the operator's
+ * override when set, else the policy's worker rule, which under the balanced
+ * level is the origin default (a run the model asked for folds).
  */
-function workerEntryFolded(entry: WorkerTranscriptEntry, verbosity: OutputVerbosity): boolean {
-	if (verbosity === "verbose") return false;
-	if (verbosity === "minimal") return true;
-	return entry.folded;
+function workerEntryFolded(entry: WorkerTranscriptEntry, detail: TranscriptDetailPolicy): boolean {
+	return resolveFold(entry.fold, policyWorkerFold(detail, workerAskedByModel(entry.state))) === "folded";
+}
+
+/** Effective state of a turn's thinking stretches: the operator's override, else the policy. */
+function thinkingExpanded(
+	entry: Extract<TranscriptEntry, { role: "assistant" }>,
+	detail: TranscriptDetailPolicy,
+): boolean {
+	return resolveFold(entry.thinkingFold, policyThinkingFold(detail)) === "expanded";
 }
 
 function renderEntryLines(
@@ -885,12 +952,12 @@ function renderEntryLines(
 	latestFoldedWorkerId: string | null,
 	nowMs: number,
 	unboundedToolBodies: boolean,
-	verbosity: OutputVerbosity,
+	detail: TranscriptDetailPolicy,
 	liveToolOutput: boolean,
 	liveReasoning: ReasoningUsageView,
 ): string[] {
 	if (entry.role === "replayBlock") {
-		return entry.renderBlock(width);
+		return entry.renderBlock(width, detail);
 	}
 	if (entry.role === "user") {
 		const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
@@ -905,7 +972,7 @@ function renderEntryLines(
 	}
 	if (entry.role === "worker") {
 		return renderWorkerEntryLines(entry.state, width, {
-			folded: workerEntryFolded(entry, verbosity),
+			folded: workerEntryFolded(entry, detail),
 			...(expandKey !== undefined && entry.state.assignmentId === latestFoldedWorkerId ? { expandKey } : {}),
 			unbounded: unboundedToolBodies,
 		});
@@ -918,7 +985,7 @@ function renderEntryLines(
 		return [];
 	}
 	const lines: string[] = [];
-	const thinkingExpandedNow = verbosity === "verbose" || (verbosity !== "minimal" && entry.expandedThinking === true);
+	const thinkingExpandedNow = thinkingExpanded(entry, detail);
 	// Reasoning renders in stream order, between the text and tool segments it
 	// came between. A closed stretch is a folded marker (or a head-anchored rail
 	// when expanded); the stretch still open while the turn is pending is the
@@ -935,15 +1002,20 @@ function renderEntryLines(
 		if (seg.kind === "thinking") {
 			if (seg.text.length === 0) continue;
 			const live = entry.pending && !seg.finalized;
-			if (thinkingExpandedNow) lines.push(...renderThinkingRail(seg.text, width, live));
+			if (thinkingExpandedNow) lines.push(...renderThinkingRail(seg.text, width, live, unboundedToolBodies));
 			if (live) {
 				liveIndicatorShown = true;
+				// The bare marker level states that the model is thinking and
+				// nothing else: no count, no elapsed. An operator who opened the
+				// stretch anyway gets the progress line under the rail.
 				lines.push(
-					renderLiveReasoningLine(
-						liveReasoning,
-						seg.startedAtMs === undefined ? undefined : Math.max(0, nowMs - seg.startedAtMs),
-						width,
-					),
+					detail.thinking === "marker" && !thinkingExpandedNow
+						? dimLine(THINKING_HIDDEN_LABEL, width)
+						: renderLiveReasoningLine(
+								liveReasoning,
+								seg.startedAtMs === undefined ? undefined : Math.max(0, nowMs - seg.startedAtMs),
+								width,
+							),
 				);
 			} else if (!thinkingExpandedNow) {
 				const view = segIndex === chipIndex ? reasoningFromTurnUsage(entry.turnUsage) : UNMEASURED_REASONING;
@@ -960,7 +1032,7 @@ function renderEntryLines(
 					latestHintToolId,
 					nowMs,
 					unboundedToolBodies,
-					verbosity,
+					detail,
 					liveToolOutput,
 				),
 			);
@@ -993,7 +1065,7 @@ function renderEntryLines(
 			lines.push(...hangProseLines(rendered));
 		}
 	}
-	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, verbosity));
+	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, detail.receipt));
 	// The open thinking segment's line is the one that speaks for reasoning while
 	// the turn runs. The generic thinking verb is suppressed while it shows so
 	// the entry never carries two indicators for the same thing.
@@ -1018,8 +1090,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
 	let cachedExpandKey: string | undefined;
-	let cachedVerbosity: OutputVerbosity | undefined;
+	let cachedDetail: TranscriptDetailPolicy | undefined;
 	let cachedLiveToolOutput: boolean | undefined;
+	/**
+	 * The verbosity the last frame rendered under, or null before any frame.
+	 * A change between frames is the operator asking for a new baseline
+	 * (`/output`, or Settings → Terminal), and every override goes with it.
+	 */
+	let lastVerbosity: OutputVerbosity | undefined | null = null;
 	let cachedTick = 0;
 	/**
 	 * Did the last executed render put a counting elapsed line on screen? It is
@@ -1051,7 +1129,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * the render key changes.
 	 */
 	let frozen: { lines: string[]; through: number; key: string } | null = null;
-	let thinkingExpanded = false;
 	let liveToolOutput = true;
 	/**
 	 * The run tally's reasoning, projected. It is panel-level rather than
@@ -1089,6 +1166,33 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	const now = (): number => options.now?.() ?? Date.now();
+
+	/** The policy for a frame or a keypress, from whatever the settings say right now. */
+	const currentDetail = (): TranscriptDetailPolicy => transcriptDetail(options.getOutputVerbosity?.());
+
+	/**
+	 * Drop every operator override. Shared by the panel method and the
+	 * verbosity-change path in render, so both leave the same state behind.
+	 */
+	const dropFoldOverrides = (): void => {
+		for (const entry of transcript) {
+			if (entry.role === "replayBlock") {
+				entry.fold?.setFold(undefined);
+				continue;
+			}
+			if (entry.role === "worker") {
+				entry.fold = undefined;
+				continue;
+			}
+			if (entry.role !== "assistant") continue;
+			entry.thinkingFold = undefined;
+			for (const seg of entry.segments) {
+				if (seg.kind === "tool") seg.fold = undefined;
+			}
+		}
+		clearRenderCaches();
+		markDirty();
+	};
 
 	/**
 	 * Force an in-flight tool segment to a settled error line. A call blocked at
@@ -1152,7 +1256,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const entry: Extract<TranscriptEntry, { role: "assistant" }> = {
 			role: "assistant",
 			segments: [],
-			expandedThinking: thinkingExpanded,
 			pending: false,
 			isError: false,
 		};
@@ -1268,25 +1371,30 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	/**
-	 * Who advertises the fold key this frame: the newest folded worker card, or
-	 * the newest finished collapsed tool subline with no worker card behind it.
+	 * Who advertises the fold key this frame: the newest worker card whose
+	 * effective state is folded, or the newest finished tool subline whose
+	 * effective state is folded with no worker card behind it. Effective means
+	 * override-or-policy, so the hint follows the block whatever the verbosity.
 	 * One surface at most, because the key reaches the newest foldable thing of
 	 * either kind, and a chord shown anywhere else would open something the
 	 * operator was not looking at. An already-open newest card advertises
 	 * nothing, since folding it again needs no invitation.
 	 */
-	const expandHintOwner = (): { toolId: string | null; workerId: string | null } => {
+	const expandHintOwner = (detail: TranscriptDetailPolicy): { toolId: string | null; workerId: string | null } => {
 		let workerMayOwn = true;
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 			const entry = transcript[entryIndex];
 			if (entry?.role === "worker") {
-				return { toolId: null, workerId: workerMayOwn && entry.folded ? entry.state.assignmentId : null };
+				return {
+					toolId: null,
+					workerId: workerMayOwn && workerEntryFolded(entry, detail) ? entry.state.assignmentId : null,
+				};
 			}
 			if (entry?.role !== "assistant") continue;
 			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
 				const seg = entry.segments[segIndex];
 				if (seg?.kind !== "tool") continue;
-				if (seg.finished && !seg.expanded) return { toolId: seg.id, workerId: null };
+				if (seg.finished && !toolSegmentExpanded(seg, detail)) return { toolId: seg.id, workerId: null };
 				workerMayOwn = false;
 			}
 		}
@@ -1348,7 +1456,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const render = (width: number): string[] => {
 		const startedAt = performance.now();
 		const expandKey = resolveExpandKey();
-		const verbosity = options.getOutputVerbosity?.() ?? "default";
+		const verbosity = options.getOutputVerbosity?.();
+		// A new verbosity is a new baseline: the operator's per-block overrides
+		// were answers to the old one, so they go before the frame is built.
+		if (lastVerbosity !== null && verbosity !== lastVerbosity) dropFoldOverrides();
+		lastVerbosity = verbosity;
+		const detail = transcriptDetail(verbosity);
 		const nowMs = now();
 		// `dirty` is set on mutation and never on a tick, so without time in the
 		// key a running tool's elapsed counter advanced only when something
@@ -1366,14 +1479,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			!dirty &&
 			cachedWidth === width &&
 			cachedExpandKey === expandKey &&
-			cachedVerbosity === verbosity &&
+			cachedDetail === detail &&
 			cachedLiveToolOutput === liveToolOutput &&
 			cachedTick === tick
 		) {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
 			return cachedLines;
 		}
-		const { toolId: latestHintToolId, workerId: latestFoldedWorkerId } = expandHintOwner();
+		const { toolId: latestHintToolId, workerId: latestFoldedWorkerId } = expandHintOwner(detail);
 		// The hint id is deliberately NOT part of the shared key: it changes on
 		// every finished collapsed tool, and keying every entry on it re-rendered
 		// the entire transcript per tool completion. Only the entry that contains
@@ -1382,7 +1495,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// bytes at every tick, and keying it on time would drop the entry cache
 		// and the frozen prefix ten times a second. Only the panel-level guard
 		// above is time-keyed, so a tick re-renders the live tail and nothing else.
-		const baseKey = `${width}|${expandKey ?? ""}|${verbosity}|${liveToolOutput}`;
+		const baseKey = `${width}|${expandKey ?? ""}|${detail.toolBody}:${detail.runningTool}:${detail.thinking}:${detail.worker}:${detail.receipt}:${detail.errors}|${liveToolOutput}`;
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey) frozen = null;
 		const out: string[] = frozen === null ? [] : frozen.lines.slice();
@@ -1408,8 +1521,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const stacksOnPrevious =
 				entry.role === "worker" &&
 				previous?.role === "worker" &&
-				workerEntryFolded(entry, verbosity) &&
-				workerEntryFolded(previous, verbosity);
+				workerEntryFolded(entry, detail) &&
+				workerEntryFolded(previous, detail);
 			if (i > 0 && !stacksOnPrevious) out.push("");
 			const containsHint =
 				entryContainsHint(entry, latestHintToolId) ||
@@ -1431,7 +1544,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					latestFoldedWorkerId,
 					nowMs,
 					unboundedToolBodies,
-					verbosity,
+					detail,
 					liveToolOutput,
 					liveReasoning,
 				);
@@ -1456,7 +1569,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		cachedLines = out;
 		cachedWidth = width;
 		cachedExpandKey = expandKey;
-		cachedVerbosity = verbosity;
+		cachedDetail = detail;
 		cachedLiveToolOutput = liveToolOutput;
 		cachedTick = tick;
 		renderedRunningTool = sawRunningTool;
@@ -1483,7 +1596,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
-			const entry: WorkerTranscriptEntry = { role: "worker", state, folded: workerAskedByModel(state) };
+			const entry: WorkerTranscriptEntry = { role: "worker", state };
 			workerEntries.set(state.assignmentId, entry);
 			const at = workerInsertionIndex(state);
 			if (at === null) {
@@ -1500,22 +1613,26 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return [...workerEntries.values()].map((entry) => entry.state);
 		},
 		toggleLastToolExpanded(): boolean {
-			// Ctrl+O owns the newest foldable thing, whichever kind it is. A worker
+			// The key owns the newest foldable thing, whichever kind it is. A worker
 			// block the operator just watched land is what they mean by "expand
-			// that", not the tool call two screens up that spawned it.
+			// that", not the tool call two screens up that spawned it. Every flip
+			// is an override away from the block's effective state, so the same
+			// key opens a folded block under minimal and folds an open one under
+			// verbose.
+			const detail = currentDetail();
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				// A caller-rendered block that owns fold state (the operator's own
 				// `!` bash row) is foldable too, and it is usually the newest thing
-				// on screen when Ctrl+O is pressed.
+				// on screen when the key is pressed.
 				if (entry?.role === "replayBlock" && entry.fold !== undefined) {
-					entry.fold.setFolded(!entry.fold.isFolded());
+					entry.fold.setFold(toggledFold(resolveFold(entry.fold.fold(), entry.fold.policyFold(detail))));
 					clearRenderCaches();
 					markDirty();
 					return true;
 				}
 				if (entry?.role === "worker") {
-					entry.folded = !entry.folded;
+					entry.fold = workerEntryFolded(entry, detail) ? "expanded" : "folded";
 					clearRenderCaches();
 					markDirty();
 					return true;
@@ -1524,7 +1641,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
 					const seg = entry.segments[segIndex];
 					if (seg?.kind !== "tool") continue;
-					seg.expanded = !seg.expanded;
+					seg.fold = toolSegmentExpanded(seg, detail) ? "folded" : "expanded";
 					clearRenderCaches();
 					markDirty();
 					return true;
@@ -1533,6 +1650,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return false;
 		},
 		toggleAllToolsExpanded(): boolean {
+			const detail = currentDetail();
 			const tools: ToolSegment[] = [];
 			const workers: WorkerTranscriptEntry[] = [];
 			const blocks: ReplayBlockFoldControl[] = [];
@@ -1551,69 +1669,57 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				}
 			}
 			if (tools.length === 0 && workers.length === 0 && blocks.length === 0) return false;
+			// One folded block anywhere means "open everything"; otherwise fold
+			// everything. Either way every block gets an explicit override.
 			const expand =
-				tools.some((seg) => !seg.expanded) ||
-				workers.some((entry) => entry.folded) ||
-				blocks.some((fold) => fold.isFolded());
-			for (const seg of tools) seg.expanded = expand;
-			for (const entry of workers) entry.folded = !expand;
-			for (const fold of blocks) fold.setFolded(!expand);
+				tools.some((seg) => !toolSegmentExpanded(seg, detail)) ||
+				workers.some((entry) => workerEntryFolded(entry, detail)) ||
+				blocks.some((fold) => resolveFold(fold.fold(), fold.policyFold(detail)) === "folded");
+			const next: Fold = expand ? "expanded" : "folded";
+			for (const seg of tools) seg.fold = next;
+			for (const entry of workers) entry.fold = next;
+			for (const fold of blocks) fold.setFold(next);
 			clearRenderCaches();
 			markDirty();
 			return true;
 		},
-		collapseAllTools(): void {
-			for (const entry of transcript) {
-				if (entry.role === "replayBlock") {
-					entry.fold?.setFolded(true);
-					continue;
-				}
-				if (entry.role === "worker") {
-					// The settled view for a worker is its origin default, not
-					// universally folded: the operator's own run is the one block
-					// /run exists to show them.
-					entry.folded = workerAskedByModel(entry.state);
-					continue;
-				}
-				if (entry.role !== "assistant") continue;
-				for (const seg of entry.segments) {
-					if (seg.kind === "tool") seg.expanded = false;
-				}
-			}
-			clearRenderCaches();
-			markDirty();
+		clearFoldOverrides(): void {
+			dropFoldOverrides();
 		},
 		toggleLastThinking(): boolean {
+			const detail = currentDetail();
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				if (entry?.role !== "assistant") continue;
 				if (!hasThinking(entry)) continue;
-				entry.expandedThinking = entry.expandedThinking !== true;
-				thinkingExpanded = entry.expandedThinking === true;
+				entry.thinkingFold = thinkingExpanded(entry, detail) ? "folded" : "expanded";
 				clearRenderCaches();
 				markDirty();
 				return true;
 			}
-			thinkingExpanded = !thinkingExpanded;
-			return true;
+			return false;
 		},
 		toggleAllThinking(): boolean {
+			const detail = currentDetail();
 			const entries: Array<Extract<TranscriptEntry, { role: "assistant" }>> = [];
 			for (const entry of transcript) {
 				if (entry.role === "assistant" && hasThinking(entry)) entries.push(entry);
 			}
-			if (entries.length === 0) {
-				thinkingExpanded = !thinkingExpanded;
-				return true;
-			}
-			const expand = entries.some((entry) => entry.expandedThinking !== true);
-			for (const entry of entries) entry.expandedThinking = expand;
-			thinkingExpanded = expand;
+			if (entries.length === 0) return false;
+			const expand = entries.some((entry) => !thinkingExpanded(entry, detail));
+			for (const entry of entries) entry.thinkingFold = expand ? "expanded" : "folded";
 			clearRenderCaches();
 			markDirty();
 			return true;
 		},
-		isThinkingExpanded: () => thinkingExpanded,
+		isThinkingExpanded(): boolean {
+			// The live stretch lives on the newest assistant entry; its override,
+			// if any, is the one that applies. Absent that, the policy answers.
+			const detail = currentDetail();
+			const index = lastAssistantIndex(transcript);
+			const entry = index === null ? undefined : transcript[index];
+			return entry?.role === "assistant" ? thinkingExpanded(entry, detail) : policyThinkingFold(detail) === "expanded";
+		},
 		toggleLiveToolOutput(): boolean {
 			liveToolOutput = !liveToolOutput;
 			markDirty();
@@ -1696,7 +1802,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						executionStarted: false,
 						argsComplete: assistantEvent.type === "toolcall_end",
 						isError: false,
-						expanded: false,
 					});
 				}
 				markDirty();
@@ -1715,7 +1820,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
 				appendThinkingDelta(assistant, event.delta);
-				assistant.expandedThinking = thinkingExpanded;
 				markDirty();
 				return;
 			}
@@ -1736,7 +1840,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					streamed.executionStarted = true;
 					streamed.argsComplete = true;
 					streamed.startedAtMs = now();
-					streamed.expanded = toolPresentationPolicy(event.toolName, event.args).foldDefault === "expanded";
 					markDirty();
 					return;
 				}
@@ -1751,10 +1854,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 				}
 				const assistant = ensureAssistant();
-				// The tool's registered presentation policy owns this: resource reads
-				// (SKILL.md, CLIO-CODER.md, AGENTS.md, docs/) and bash start folded to
-				// their one-line row until the operator expands them.
-				const expanded = toolPresentationPolicy(event.toolName, event.args).foldDefault === "expanded";
+				// No fold is stored here: the segment's effective state is resolved
+				// per frame from the transcript detail policy and the tool's
+				// registered presentation, with the operator's override on top.
 				assistant.pending = true;
 				closeOpenThinking(assistant);
 				assistant.segments.push({
@@ -1766,7 +1868,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					executionStarted: true,
 					argsComplete: true,
 					isError: false,
-					expanded,
 					startedAtMs: now(),
 				});
 				markDirty();
@@ -1898,7 +1999,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					if (!streamedThisMessage) {
 						assistant.segments.splice(messageStart, 0, { kind: "thinking", text: thinking, finalized: true });
 					}
-					assistant.expandedThinking = thinkingExpanded;
 				}
 				assistant.messageStartSegmentIndex = undefined;
 				// The chat loop marks messages it sanitized after streaming (dead

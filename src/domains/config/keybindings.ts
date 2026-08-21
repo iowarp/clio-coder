@@ -122,14 +122,14 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio.tool.expand": {
 		defaultKeys: "alt+o",
 		description:
-			"Fold or unfold the newest tool call or worker block between its one-line summary and full details (no effect while /output verbose pins them open)",
+			"Fold or unfold the newest tool call or worker block between its one-line summary and full details, overriding the /output level for that block",
 	},
 	"clio.tool.expandAll": {
 		// Alt+Shift+letter is commonly consumed by OS keyboard-layout switching.
 		// Keep it discoverable, but pair it with the legacy-safe Ctrl+Alt form.
 		defaultKeys: ["ctrl+alt+o", "alt+shift+o"],
 		description:
-			"Fold or unfold every tool call and worker block at once (no effect while /output verbose pins them open)",
+			"Fold or unfold every tool call and worker block at once, overriding the /output level; changing /output clears the overrides",
 	},
 	"clio.tool.liveOutput": {
 		defaultKeys: "alt+p",
@@ -145,7 +145,7 @@ export const CLIO_APP_KEYBINDINGS = {
 		// Alt+Shift+R as a distinct key event.
 		defaultKeys: ["ctrl+alt+r", "alt+shift+r"],
 		description:
-			"Toggle all thinking blocks between hidden markers and full bodies (no effect while /output verbose pins them open)",
+			"Toggle all thinking blocks between hidden markers and full bodies, overriding the /output level; changing /output clears the overrides",
 	},
 	"clio.editor.external": {
 		defaultKeys: "alt+g",

@@ -305,3 +305,31 @@ describe("contracts/resume replay transcript notices", () => {
 		ok(rendered.includes("[aborted] Request was aborted."), "a reported abort still says it was aborted");
 	});
 });
+
+describe("contracts/resume replay transcript detail policy", () => {
+	it("renders a replayed transcript from the policy alone: folded under default, open under verbose with no toggle", () => {
+		const folded = createChatPanel({ getOutputVerbosity: () => "default" });
+		rehydrateChatPanelFromTurns(folded, [...grepReplayTurns(), ...editReplayTurns()]);
+		let rendered = folded.render(100).join("\n");
+		ok(!strip(rendered).includes("many.txt:1:"), "default keeps the grep body closed");
+		ok(strip(rendered).includes("editing a.ts"), strip(rendered));
+		ok(strip(rendered).includes("+1 const new = two;"), "default keeps the edit diff on the folded row");
+		ok(!rendered.includes(`${String.fromCharCode(27)}[7m`), "the replayed folded diff is plain");
+
+		// /export builds exactly this panel: verbose policy, unbounded bodies, no toggles.
+		const exported = createChatPanel({ getOutputVerbosity: () => "verbose", unboundedToolBodies: true });
+		rehydrateChatPanelFromTurns(exported, [...grepReplayTurns(), ...editReplayTurns()], { unboundedToolBodies: true });
+		rendered = exported.render(100).join("\n");
+		ok(strip(rendered).includes("many.txt:1:"), "verbose opens the grep body");
+		ok(strip(rendered).includes("many.txt:150:"), "unbounded keeps the middle rows");
+		ok(!strip(rendered).includes("lines hidden"), "no terminal-only elision in the export");
+		ok(strip(rendered).includes("change ·"), "the edit body is open");
+		ok(!rendered.includes(`${String.fromCharCode(27)}[7m`), "nothing terminal-only leaks: replay diffs stay plain");
+
+		// Clearing overrides after a session switch leaves the policy's view.
+		folded.toggleAllToolsExpanded();
+		ok(strip(folded.render(100).join("\n")).includes("many.txt:1:"));
+		folded.clearFoldOverrides();
+		ok(!strip(folded.render(100).join("\n")).includes("many.txt:1:"), "clear returns to the folded policy view");
+	});
+});

@@ -130,7 +130,6 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use a narrower command or a dedicated verification/read/search tool to inspect omitted output.",
 		),
 		costLatency: "local_slow",
-		presentation: toolPresentationPolicy(ToolNames.Bash, undefined),
 	},
 	[ToolNames.Git]: {
 		objective: "Read-only git inspection: status, diff, or log.",
@@ -257,9 +256,14 @@ export function toolPromptHintsForNames(names: ReadonlyArray<ToolName>): Readonl
 	return hints;
 }
 
+// Every builtin carries its transcript presentation on its metadata, resolved
+// from the one declaration table in presentation.ts, so the registry and the
+// live panel (which has no registry) answer the fold question identically.
 function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
 	const metadata = TOOL_METADATA[spec.name];
-	return metadata ? withMetadata(spec, metadata) : spec;
+	return metadata
+		? withMetadata(spec, { ...metadata, presentation: toolPresentationPolicy(spec.name, undefined) })
+		: spec;
 }
 
 export function builtin<T extends ToolSpec>(spec: T, sourceInfo: ToolSourceInfo): T {

@@ -434,11 +434,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			try {
 				const turns = deps.readStructuredEntries(sessionId);
 				// Same pure render pipeline as the live panel and /resume replay: a
-				// throwaway panel is rehydrated from the ledger, every tool segment is
-				// expanded, and the transcript is rendered at a stable width. HTML
-				// converts the resulting ANSI presentation to inline styles; Markdown
-				// keeps the prior plain-text fenced transcript.
-				const exportPanel = createChatPanel({ unboundedToolBodies: true });
+				// throwaway panel is rehydrated from the ledger under the verbose
+				// transcript detail policy (every body open, full receipts) with no
+				// operator overrides, and rendered at a stable width. HTML converts
+				// the resulting ANSI presentation to inline styles; Markdown keeps the
+				// prior plain-text fenced transcript.
+				const exportPanel = createChatPanel({ unboundedToolBodies: true, getOutputVerbosity: () => "verbose" });
 				// Scoped to the leaf the session is on, the same way /resume replays
 				// (issue #107): with a /tree pin persisted and not yet extended, the
 				// file still holds the abandoned branch after the pin, and an unscoped
@@ -449,7 +450,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					unboundedToolBodies: true,
 					...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
 				});
-				exportPanel.toggleAllToolsExpanded();
 				const ansiLines = exportPanel.render(EXPORT_RENDER_WIDTH);
 				// The operator names this file by the day they ran the export, so the
 				// date in it is their calendar date. The header below keeps the ISO

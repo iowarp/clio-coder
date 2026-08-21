@@ -1,10 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import {
 	type ApplicationControllerDeps,
 	createApplicationController,
 } from "../../src/interactive/application-controller.js";
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import {
 	dispatchInteractiveAction,
 	isEscapeKey,
@@ -446,5 +449,81 @@ describe("list-overlay key routing", () => {
 			}),
 			true,
 		);
+	});
+});
+
+describe("Alt chord semantics per /output level", () => {
+	/** A settled grep turn plus one thinking stretch, driven through the real panel. */
+	const buildPanel = (verbosity: () => "minimal" | "default" | "verbose") => {
+		const panel = createChatPanel({ now: () => 1_000, getOutputVerbosity: verbosity });
+		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "why grep" } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "g1",
+			toolName: "grep",
+			args: { pattern: "needle" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "g1",
+			toolName: "grep",
+			result: "src/a.ts:1: needle body",
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		return panel;
+	};
+	const strip = (lines: string[]): string => lines.map(stripTerminalSequences).join("\n");
+	const wire = (panel: ReturnType<typeof createChatPanel>): KeyBindingDeps =>
+		({
+			toggleToolExpansion: () => panel.toggleLastToolExpanded(),
+			toggleAllToolExpansion: () => panel.toggleAllToolsExpanded(),
+			toggleThinkingExpansion: () => panel.toggleLastThinking(),
+			toggleAllThinkingExpansion: () => panel.toggleAllThinking(),
+		}) as unknown as KeyBindingDeps;
+
+	it("Alt+O opens a folded block under minimal and default, and folds an open one under verbose", () => {
+		for (const verbosity of ["minimal", "default"] as const) {
+			const panel = buildPanel(() => verbosity);
+			ok(!strip(panel.render(80)).includes("needle body"), verbosity);
+			strictEqual(dispatchInteractiveAction("clio.tool.expand", wire(panel)), true);
+			ok(strip(panel.render(80)).includes("needle body"), `${verbosity}: the chord opens the block`);
+			strictEqual(dispatchInteractiveAction("clio.tool.expand", wire(panel)), true);
+			ok(!strip(panel.render(80)).includes("needle body"), `${verbosity}: the same chord folds it again`);
+		}
+		const verbose = buildPanel(() => "verbose");
+		ok(strip(verbose.render(80)).includes("needle body"));
+		strictEqual(dispatchInteractiveAction("clio.tool.expand", wire(verbose)), true);
+		ok(!strip(verbose.render(80)).includes("needle body"), "verbose: the chord opts out of the open policy");
+		ok(!strip(verbose.render(80)).includes("needle body"), "and the fold sticks");
+	});
+
+	it("Alt+R mirrors Alt+O for thinking, and Ctrl+Alt+O stamps every block", () => {
+		const minimal = buildPanel(() => "minimal");
+		ok(!strip(minimal.render(80)).includes("why grep"));
+		strictEqual(dispatchInteractiveAction("clio.thinking.expand", wire(minimal)), true);
+		ok(strip(minimal.render(80)).includes("why grep"), "minimal: Alt+R opens the stretch");
+		const verbose = buildPanel(() => "verbose");
+		ok(strip(verbose.render(80)).includes("why grep"));
+		strictEqual(dispatchInteractiveAction("clio.thinking.expandAll", wire(verbose)), true);
+		ok(!strip(verbose.render(80)).includes("why grep"), "verbose: Ctrl+Alt+R folds the rail");
+		strictEqual(dispatchInteractiveAction("clio.tool.expandAll", wire(verbose)), true);
+		ok(!strip(verbose.render(80)).includes("needle body"), "verbose: Ctrl+Alt+O folds every open block");
+		strictEqual(dispatchInteractiveAction("clio.tool.expandAll", wire(verbose)), true);
+		ok(strip(verbose.render(80)).includes("needle body"), "and opens them again");
+	});
+
+	it("a /output change clears what the chords set", () => {
+		let verbosity: "minimal" | "default" | "verbose" = "verbose";
+		const panel = buildPanel(() => verbosity);
+		strictEqual(dispatchInteractiveAction("clio.tool.expand", wire(panel)), true);
+		strictEqual(dispatchInteractiveAction("clio.thinking.expand", wire(panel)), true);
+		const folded = strip(panel.render(80));
+		ok(!folded.includes("needle body") && !folded.includes("why grep"), folded);
+		verbosity = "default";
+		panel.render(80);
+		verbosity = "verbose";
+		const reopened = strip(panel.render(80));
+		ok(reopened.includes("needle body") && reopened.includes("why grep"), `overrides cleared: ${reopened}`);
 	});
 });

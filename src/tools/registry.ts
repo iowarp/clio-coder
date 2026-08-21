@@ -78,8 +78,8 @@ export interface ToolMetadata {
 	 */
 	promptHint?: string;
 	/**
-	 * How transcript surfaces present this tool's block. Optional: tools that
-	 * declare nothing keep the renderer's expanded default.
+	 * How transcript surfaces present this tool's block under `/output default`.
+	 * Optional: tools that declare nothing fold like every other tool.
 	 */
 	presentation?: ToolPresentationPolicy;
 }
