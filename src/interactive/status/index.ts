@@ -1,13 +1,24 @@
 export type { StatusController, StatusControllerDeps } from "./controller.js";
 export { createStatusController } from "./controller.js";
+export {
+	compactReasoningTokens,
+	formatReasoningChip,
+	formatReasoningLabel,
+	type ReasoningProvenance,
+	type ReasoningUsageView,
+	reasoningFromSummary,
+	reasoningFromTally,
+	UNMEASURED_REASONING,
+} from "./reasoning.js";
 export { type ReduceContext, reduceStatus, type StatusInputEvent } from "./state-machine.js";
-export { type BuildSummaryInput, buildSummary } from "./summary.js";
+export { type BuildSummaryInput, buildSummary, emptyRunTally, foldMessageIntoRunTally } from "./summary.js";
 export {
 	type AgentStatus,
 	type AgentStatusChangedPayload,
 	type AgentStatusEvent,
 	INITIAL_STATUS,
 	type ReasoningTokenProvenance,
+	type RunTally,
 	type StatusPhase,
 	type TurnStopReason,
 	type TurnSummary,

@@ -34,7 +34,7 @@ function approvalView(overrides: Partial<ApprovalRequestView> = {}): ApprovalReq
 }
 
 describe("chat-panel live thinking streaming", () => {
-	it("folded render shows token count when pending, shows static label when settled", () => {
+	it("counts no tokens from streamed thinking text and shows a static label when settled", () => {
 		const panel = createChatPanel({ now: frozen.now });
 
 		// Apply thinking_delta (pending = true)
@@ -45,8 +45,13 @@ describe("chat-panel live thinking streaming", () => {
 			partialThinking: "Thinking step 1. Thinking step 2.",
 		} as ChatLoopEvent);
 		let rendered = panel.render(80).join("\n");
-		ok(rendered.includes("Thinking ("));
-		ok(rendered.includes("tokens)"));
+		// Nothing has settled into the run tally yet, so the live line states that
+		// the model is thinking and nothing about how much it spent. The old
+		// marker measured the visible excerpt, which moved with how much reasoning
+		// the provider chose to display.
+		ok(rendered.includes("Thinking…"));
+		ok(!rendered.includes("tokens"));
+		ok(!rendered.includes("r≈"));
 		ok(!rendered.includes("Thinking step 1"));
 
 		// Apply agent_end (pending = false)
@@ -1101,6 +1106,230 @@ describe("chat-panel edit diff block", () => {
 		ok(rendered.includes("line TWO"), "the diff still renders the actual change");
 		ok(rendered.includes("line two"), "the diff keeps the removed text");
 		ok(!rendered.includes("edited a.txt"), "the confirmation does not replace the review surface");
+	});
+});
+
+describe("chat-panel live reasoning indicator", () => {
+	function pendingTurnWithTool(): ReturnType<typeof createChatPanel> {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "weighing options",
+			partialThinking: "weighing options",
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "read",
+			args: { path: "a.ts" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "ok" }] },
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "text_delta", contentIndex: 1, delta: "answering now" } as ChatLoopEvent);
+		return panel;
+	}
+
+	// The marker used to render above every segment, so on a long turn the only
+	// reasoning indicator scrolled off the top while text and tools streamed
+	// below it (issue #171).
+	it("renders the live line at the tail, below the turn's tool and text segments", () => {
+		const panel = pendingTurnWithTool();
+		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
+		const rows = panel
+			.render(80)
+			.map(strip)
+			.filter((row) => row.trim().length > 0);
+		const last = rows[rows.length - 1] ?? "";
+		ok(last.includes("Thinking · r≈1.2k estimated"), JSON.stringify(rows));
+		const thinkingRows = rows.filter((row) => row.includes("Thinking"));
+		strictEqual(thinkingRows.length, 1, `one reasoning indicator per entry: ${JSON.stringify(rows)}`);
+		ok(
+			rows.some((row) => row.includes("answering now")),
+			JSON.stringify(rows),
+		);
+		ok(rows.findIndex((row) => row.includes("answering now")) < rows.length - 1, "the line sits below the prose");
+	});
+
+	it("does not print a second thinking indicator from the status verb", () => {
+		const panel = pendingTurnWithTool();
+		panel.setLiveReasoning({ tokens: 900, provenance: "provider" });
+		panel.setStatusLine({ phase: "thinking", verb: "receiving thinking", toneHint: "muted" });
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("Thinking · r900 provider-reported"), rendered);
+		ok(!rendered.includes("receiving thinking"), rendered);
+	});
+
+	it("states no token count until something settles into the tally", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "a".repeat(4000),
+			partialThinking: "a".repeat(4000),
+		} as ChatLoopEvent);
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("Thinking…"), rendered);
+		ok(!/r[≈0-9]/.test(rendered), `no count is inferred from the visible excerpt: ${rendered}`);
+	});
+
+	it("counts elapsed thinking time off the panel clock", () => {
+		let clock = 1_000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "still going",
+			partialThinking: "still going",
+		} as ChatLoopEvent);
+		ok(!strip(panel.render(80).join("\n")).includes("· 0s"), "a fresh turn states no elapsed");
+		clock = 13_400;
+		panel.setLiveReasoning({ tokens: 3400, provenance: "provider" });
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("Thinking · r3.4k provider-reported · 12s"), rendered);
+	});
+
+	it("keeps the provider count after message_end instead of re-deriving it from text", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "b".repeat(4000),
+			partialThinking: "b".repeat(4000),
+		} as ChatLoopEvent);
+		const message = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "b".repeat(4000) }],
+			usage: { input: 30, output: 900, reasoningTokens: 42 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("Thinking… · r42 provider-reported"), rendered);
+		ok(!rendered.includes("≈"), `the estimate never overwrites an attested count: ${rendered}`);
+	});
+
+	it("folds to a head marker carrying the settled count once the turn ends", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "c".repeat(4800) },
+				{ type: "text", text: "done" },
+			],
+			usage: { input: 30, output: 5000 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const rows = panel
+			.render(80)
+			.map(strip)
+			.filter((row) => row.trim().length > 0);
+		strictEqual(rows[0], "Thinking… · r≈1.2k estimated", JSON.stringify(rows));
+		ok(
+			rows.some((row) => row.includes("done")),
+			JSON.stringify(rows),
+		);
+	});
+
+	it("keeps the expanded excerpt and its caveat on the settled receipt", () => {
+		const panel = createChatPanel({ now: frozen.now, getOutputVerbosity: () => "verbose" });
+		const message = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "first reasoning line\nsecond reasoning line" }],
+			usage: { input: 30, output: 900, reasoningTokens: 42 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("first reasoning line"), rendered);
+		ok(rendered.includes("second reasoning line"), rendered);
+		ok(rendered.replace(/\s+/g, " ").includes("reasoning text is a UI excerpt, not a verification"), rendered);
+	});
+
+	// A cancel mid-turn keeps whatever the run tally folded (commit 9b29c2ca), so
+	// the settled marker states the spend rather than dropping it.
+	it("settles a cancelled turn onto the head marker and stops showing the live line", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "planning",
+			partialThinking: "planning",
+		} as ChatLoopEvent);
+		panel.setLiveReasoning({ tokens: 42, provenance: "provider" });
+		const message = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "planning" }],
+			usage: { input: 30, output: 900, reasoningTokens: 42 },
+			stopReason: "aborted",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const rows = panel
+			.render(80)
+			.map(strip)
+			.filter((row) => row.trim().length > 0);
+		strictEqual(rows[0], "Thinking… · r42 provider-reported", JSON.stringify(rows));
+		ok(!rows.some((row) => row.includes("Thinking ·")), `no live line survives the settle: ${JSON.stringify(rows)}`);
+	});
+
+	// Replay rebuilds settled entries from persisted usage. A live projection
+	// arriving from a fresh turn must never retro-label that history.
+	it("never puts a live count on a settled entry", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "replayed reasoning" },
+				{ type: "text", text: "replayed answer" },
+			],
+			usage: { input: 30, output: 900, reasoningTokens: 7 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		panel.setLiveReasoning({ tokens: 9999, provenance: "estimated" });
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("Thinking… · r7 provider-reported"), rendered);
+		ok(!rendered.includes("9999"), rendered);
+		ok(!rendered.includes("9.9k"), rendered);
+	});
+
+	it("shows no reasoning line at all on a turn that never thought", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "straight to the answer" } as ChatLoopEvent);
+		panel.setLiveReasoning({ tokens: 500, provenance: "provider" });
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(!rendered.includes("Thinking"), rendered);
+		ok(!rendered.includes("r500"), rendered);
+	});
+
+	it("states the same reasoning text at 40, 80, and 120 columns and across bare re-renders", () => {
+		const panel = pendingTurnWithTool();
+		panel.setLiveReasoning({ tokens: 1234, provenance: "mixed" });
+		for (const width of [40, 80, 120]) {
+			const rows = panel.render(width).map(strip);
+			ok(
+				rows.some((row) => row.includes("Thinking · r≈1.2k mixed")),
+				`width ${width}: ${JSON.stringify(rows)}`,
+			);
+			ok(
+				rows.every((row) => row.length <= width),
+				`width ${width} never overflows`,
+			);
+		}
+		// Two renders with no events in between are byte-identical: the line reads
+		// the tally, not anything the render itself measures.
+		strictEqual(panel.render(80).join("\n"), panel.render(80).join("\n"));
 	});
 });
 

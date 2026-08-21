@@ -28,6 +28,8 @@ import {
 import {
 	type AgentStatus,
 	INLINE_STATUS_INDENT_COLS,
+	type ReasoningUsageView,
+	reasoningFromTally,
 	resolveInlineVerb,
 	type StatusPhase,
 	spinnerFrame,
@@ -67,6 +69,11 @@ export interface InteractiveEventProjectionDeps {
 	recordToolStart: (toolName: string, toolCallId: string) => void;
 	recordToolEnd: (toolName: string, toolCallId: string, isError: boolean, truncated: boolean) => void;
 	setStatusLine: (line: InteractiveStatusLine | null) => void;
+	/**
+	 * Publish the live turn's reasoning projection to the transcript. Optional so
+	 * a host without a chat panel still gets every other projection.
+	 */
+	setLiveReasoning?: (view: ReasoningUsageView | null) => void;
 	setLastTurnSummary: (summary: TurnSummary) => void;
 	startTerminalProgress: () => void;
 	stopTerminalProgress: () => void;
@@ -177,6 +184,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	let statusInlineFrame = 0;
 	primaryUnsubscribers.push(
 		deps.status.subscribe((status) => {
+			// One projection of the run tally reaches the transcript, so the live
+			// line, the turn receipt, and the footer state the same number.
+			deps.setLiveReasoning?.(
+				status.phase === "idle" || status.phase === "ended" ? null : reasoningFromTally(status.runTally),
+			);
 			if (status.phase === "idle") {
 				deps.setStatusLine(null);
 			} else if (status.phase === "ended") {
