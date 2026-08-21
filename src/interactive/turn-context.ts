@@ -79,7 +79,7 @@ export interface TurnContextDeps {
 	bus?: SafeEventBus | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	autoCompact?: ((instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null>) | undefined;
-	/** Test seam for the pure Worker A planner; production uses planEviction. */
+	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: (() => string) | undefined;
 	middleware: TurnMiddleware;
@@ -513,18 +513,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							currentContextSnapshot = postEvictionSnapshot;
 							persistContextSnapshot(postEvictionSnapshot);
 
-							const tokensAfterEviction = snapshotInputTokens(postEvictionSnapshot);
+							// Every surface that describes this event (the notice, the toast
+							// ContextPruned feeds, the overlay's last-compaction line, the
+							// ledger entry) quotes the plan: the same chars/4 pricing over the
+							// same visible slice. The live estimate prices the agent message
+							// list and differs by the tool schemas and replay text; it stays
+							// what the meter and the re-check below read, not what the event
+							// reports about itself.
 							lastCompactionEvent = {
 								stage: "working_set",
-								tokensBefore: estimate.tokens,
-								tokensAfter: tokensAfterEviction,
+								tokensBefore: planned.tokensBefore,
+								tokensAfter: planned.tokensAfter,
 								trigger,
 							};
 							deps.bus?.emit(BusChannels.ContextPruned, {
 								stage: "working_set",
 								pressure: verdict.pressure,
-								tokensBefore: estimate.tokens,
-								tokensAfter: tokensAfterEviction,
+								tokensBefore: planned.tokensBefore,
+								tokensAfter: planned.tokensAfter,
 								trigger,
 								snapshotIdBefore: beforeSnapshotId,
 								snapshotIdAfter: postEvictionSnapshot.snapshotId,
@@ -532,9 +538,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								evictedItems: planned.items.length,
 								at: Date.now(),
 							} satisfies ContextPrunedPayload);
-							emitCompactionActivity("completed", `${planned.items.length} working-set items evicted`);
+							const itemsWord = planned.items.length === 1 ? "item" : "items";
+							emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
 							deps.emitNotice(
-								`[context engine] working_set: ${planned.items.length} items evicted by ${planned.policyId}; ~${estimate.tokens} tokens -> ~${tokensAfterEviction} tokens`,
+								`[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
 							);
 
 							const after = liveContextEstimate(agentRuntime, pendingUserText);
@@ -902,8 +909,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		consumeExpectedColdReasons(runtimeId: string): void {
 			// Cache-disturbance honesty (T3.3): consume disturbances since
 			// the last settled run. Only single-slot local backends lose their
-			// prefix cache to interleaved work, so only local-native targets
-			// stamp reasons and notify; other tiers just clear the set.
+			// prefix cache to interleaved work, so dispatch and compaction
+			// stamp only on local-native targets; a working-set eviction moved
+			// the prefix itself and stamps on every tier (see stampsOnTier).
 			runExpectedColdReasons = [];
 			nextAssistantColdReasons = [];
 			if (pendingColdReasons.size > 0) {
