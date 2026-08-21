@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
-import { buildRecallFields, recallErrorMessage, resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import {
+	buildRecallFields,
+	recallableRefListing,
+	recallErrorMessage,
+	resolveRecall,
+} from "../../src/domains/context/working-set/recall.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 
 let clock = 0;
@@ -239,6 +244,10 @@ test("recall: the listing is cut after eight refs", () => {
 		recallErrorMessage(outcome.error, entries, view),
 		/t0 \(read\), t1 \(read\), .*t7 \(read\), and 2 more\.$/,
 	);
+	assert.deepEqual(recallableRefListing(entries, view), {
+		refs: refs.slice(0, 8).map((ref) => `${ref} (read)`),
+		remaining: 2,
+	});
 });
 
 test("recall: a ref on an abandoned branch is not_on_active_path after a fork", () => {

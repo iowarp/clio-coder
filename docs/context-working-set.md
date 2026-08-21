@@ -123,6 +123,8 @@ Recall is explicit and by ref. There is no auto-readmission: the marker tells th
 
 Both messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count), because a failed recall is usually a mistyped ref and the listing is what the next call needs.
 
+An LLM summary also preserves recall discovery across its cut. When an evicted tool result falls before `firstKeptTurnId`, the generated checkpoint carries a `<recallable-refs>` block with the same `ref (tool path)` rows used by recall failures, bounded to eight rows plus a remaining count. Results that stay after the cut keep their ordinary markers and are not repeated in the block.
+
 **A recall does not un-evict.** The key stays in `view.evicted`, the marker stays byte-identical at its original position, and the recalled body arrives at the tail of the working set inside the recall result. Readmitting it in place would duplicate the bytes and invalidate the provider prefix cache for everything after that point, which costs more than the recall saved.
 
 That also makes recall the churn signal. `churn = recalls / itemsEvicted` over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.

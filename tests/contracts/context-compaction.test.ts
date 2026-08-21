@@ -80,6 +80,27 @@ function toolResult(
 	};
 }
 
+function eviction(id: string, ref: string, parentTurnId: string | null): SessionEntry {
+	return {
+		kind: "contextEviction",
+		...entryBase(id, parentTurnId),
+		policyId: "structural-v1",
+		trigger: "pressure",
+		evicted: [
+			{
+				ref: { entry: ref },
+				reason: "superseded_read",
+				tokensFreed: 1_000,
+				marker: `[evicted ref=${ref}]`,
+			},
+		],
+		tokensBefore: 2_000,
+		tokensAfter: 1_000,
+		pressureBefore: 0.9,
+		snapshotIdBefore: null,
+	};
+}
+
 function compactionPromptText(context: unknown): string {
 	if (!context || typeof context !== "object") return "";
 	const messages = (context as { messages?: unknown }).messages;
@@ -159,6 +180,40 @@ describe("contracts/context compaction trigger", () => {
 });
 
 describe("contracts/context compaction cumulative replay", () => {
+	it("carries refs whose result markers fall before the summary cut", async () => {
+		const modelId = "recallable-ref-compaction-model";
+		const faux = registerFauxProvider({
+			provider: "recallable-ref-compaction-provider",
+			models: [{ id: modelId }],
+			tokensPerSecond: 0,
+		});
+		faux.setResponses([
+			fauxAssistantMessage("## Goal\nContinue after the summary cut."),
+			fauxAssistantMessage("Keep the live suffix of the current turn."),
+		]);
+
+		try {
+			const entries: SessionEntry[] = [
+				user("01", "Read the old file."),
+				toolCall("02", "call-old", "01"),
+				toolResult("03", "call-old", "old body", "02"),
+				eviction("04", "03", "03"),
+				user("05", "Continue with the newer turn.", "03"),
+				assistant("06", [{ type: "text", text: "The newer suffix remains live." }], "05", 10),
+			];
+			const result = await compact({
+				entries,
+				model: faux.getModel(modelId) as EngineModel,
+				keepRecentTokens: 1,
+			});
+
+			ok(result.firstKeptEntryIndex > 2, "the evicted result falls before the summary cut");
+			ok(result.summary.includes("<recallable-refs>\n03 (read src/huge.ts)\n</recallable-refs>"), result.summary);
+		} finally {
+			faux.unregister();
+		}
+	});
+
 	it("carries the prior checkpoint and retained suffix through both branches of a deterministic second pass", async () => {
 		const modelId = "cumulative-compaction-model";
 		const faux = registerFauxProvider({
