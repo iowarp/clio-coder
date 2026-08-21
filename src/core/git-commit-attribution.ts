@@ -30,7 +30,7 @@ const PROBE_CACHE_MAX_ENTRIES = 32;
 type RepositoryProbe =
 	| { kind: "outside" }
 	| { kind: "custom"; hooksPath: string }
-	| { kind: "default"; declaredDefault: boolean };
+	| { kind: "default"; declaredDefaultHooksPath: string | null };
 
 const probeCache = new Map<string, { at: number; probe: RepositoryProbe }>();
 let installedHooksDirectory: string | null = null;
@@ -171,26 +171,28 @@ case "$base_count" in
     ;;
 esac
 
-# A command may have moved into a different repository after Clio prepared the
-# environment. A repository with its own core.hooksPath gets its hook run and
-# is never attributed; composing an unknown setup is not attempted.
-if [ "$${DEFAULT_HOOKS_EQUIVALENT_ENV}" != '1' ] && git config --get core.hooksPath >/dev/null 2>&1; then
-  custom_hooks=$(git config --path --get core.hooksPath 2>/dev/null || true)
+# Resolve the current repository's default hooks directory before interpreting
+# the environment prepared for the originating repository. A command may have
+# moved into a different repository in between; an explicit default path is
+# composable only while it still names this same repository's default.
+common_dir=$(git rev-parse --git-common-dir 2>/dev/null || true)
+common_dir_absolute=$(cd "$common_dir" 2>/dev/null && pwd -P || true)
+case "$common_dir_absolute" in
+  '') default_hooks_directory=; default_hook= ;;
+  *) default_hooks_directory=$common_dir_absolute/hooks; default_hook=$default_hooks_directory/$hook_name ;;
+esac
+
+if git config --get core.hooksPath >/dev/null 2>&1 &&
+   [ "$${DEFAULT_HOOKS_EQUIVALENT_ENV}" != "$default_hooks_directory" ]; then
+	custom_hooks=$(git config --path --get core.hooksPath 2>/dev/null || true)
   case "$custom_hooks" in
     '') ;;
     /*) custom_hook=$custom_hooks/$hook_name ;;
     *) custom_hook=$PWD/$custom_hooks/$hook_name ;;
   esac
   if [ -n "$custom_hooks" ] && [ -x "$custom_hook" ]; then exec "$custom_hook" "$@"; fi
-  exit 0
+	exit 0
 fi
-
-common_dir=$(git rev-parse --git-common-dir 2>/dev/null || true)
-case "$common_dir" in
-  '') default_hook= ;;
-  /*) default_hook=$common_dir/hooks/$hook_name ;;
-  *) default_hook=$PWD/$common_dir/hooks/$hook_name ;;
-esac
 
 if [ "$hook_name" != 'prepare-commit-msg' ]; then
   if [ -n "$default_hook" ] && [ -x "$default_hook" ]; then exec "$default_hook" "$@"; fi
@@ -281,13 +283,13 @@ function gitEnvironmentFingerprint(env: NodeJS.ProcessEnv): string {
 function probeRepositoryUncached(cwd: string, env: NodeJS.ProcessEnv): RepositoryProbe {
 	if (gitOutput(cwd, env, ["rev-parse", "--is-inside-work-tree"]) !== "true") return { kind: "outside" };
 	const customHooksPath = gitOutput(cwd, env, ["config", "--path", "--get", "core.hooksPath"]);
-	if (customHooksPath === null) return { kind: "default", declaredDefault: false };
+	if (customHooksPath === null) return { kind: "default", declaredDefaultHooksPath: null };
 	const commonDirectory = gitOutput(cwd, env, ["rev-parse", "--git-common-dir"]);
 	const defaultHooksPath = commonDirectory === null ? null : resolve(cwd, commonDirectory, "hooks");
 	if (customHooksPath.length === 0 || resolve(cwd, customHooksPath) !== defaultHooksPath) {
 		return { kind: "custom", hooksPath: customHooksPath };
 	}
-	return { kind: "default", declaredDefault: true };
+	return { kind: "default", declaredDefaultHooksPath: defaultHooksPath };
 }
 
 function probeRepository(cwd: string, env: NodeJS.ProcessEnv, now = Date.now()): RepositoryProbe {
@@ -342,7 +344,9 @@ export function withManagedGitCommitAttributionEnvironment(
 			diagnostic: boundedDiagnostic(`core.hooksPath is set to '${probe.hooksPath}'; Clio commit attribution skipped`),
 		};
 	}
-	if (probe.declaredDefault) env[DEFAULT_HOOKS_EQUIVALENT_ENV] = "1";
+	if (probe.declaredDefaultHooksPath !== null) {
+		env[DEFAULT_HOOKS_EQUIVALENT_ENV] = probe.declaredDefaultHooksPath;
+	}
 
 	let hooksDirectory: string;
 	try {
