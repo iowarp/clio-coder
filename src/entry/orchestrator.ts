@@ -1243,6 +1243,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						const meta = session.current();
 						return meta ? readSessionEntriesForCompact(meta.id) : [];
 					},
+					onContextRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
 				}
 			: {}),
 		taskBoard,
