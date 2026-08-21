@@ -2481,7 +2481,7 @@ describe("contracts/tools", () => {
 			);
 		});
 
-		it("carries promptHint metadata on exactly the five hinted tools, verbatim", () => {
+		it("carries promptHint metadata on exactly the six hinted tools, verbatim", () => {
 			const registry = testRegistryWithTools([]);
 			registerAllTools(registry, {
 				askUser: async () => ({ answers: [] }),
@@ -2494,7 +2494,11 @@ describe("contracts/tools", () => {
 				if (typeof hint === "string") hinted.set(spec.name, hint);
 			}
 
-			deepStrictEqual([...hinted.keys()].sort(), ["ask_user", "code_nav", "context", "dispatch", "tasks"]);
+			deepStrictEqual([...hinted.keys()].sort(), ["ask_user", "bash", "code_nav", "context", "dispatch", "tasks"]);
+			strictEqual(
+				hinted.get("bash"),
+				"Bash output_policy defaults to bounded diagnostic tail. Use summary for noisy commands, metadata-only when only outcome and retrieval matter, and full only when output is known to fit the bounded result budget.",
+			);
 			strictEqual(
 				hinted.get("code_nav"),
 				"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents, wiki).",

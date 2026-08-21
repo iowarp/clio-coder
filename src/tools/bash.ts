@@ -3,87 +3,124 @@ import { BASH_HARD_CAP_BYTES, combineBashOutput, runBashCommand } from "../core/
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
 import { expandPath } from "./path-utils.js";
-import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
-import { writeToolOffload } from "./result-shaping.js";
-import { DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
+import { toolPresentationPolicy } from "./presentation.js";
+import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import {
+	deterministicDiagnosticSummary,
+	type NormalizedToolResultDisposition,
+	type ToolResultContextDisposition,
+	type ToolResultDisposition,
+} from "./result-disposition.js";
+import { DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
+import { byteLength } from "./truncate-utf8.js";
 
-// What the model sees inline. The tail is where the failing assertion, compiler
-// error, and exit summary live, so we keep the LAST lines/bytes. The full
-// output is spilled to an offload file before truncating, so nothing is lost.
+// The registry's bounded model projection and operator presentation share this
+// cap. Both are tail-biased for Bash because diagnostics usually land last.
 const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
-// Slack reserved so the continuation notice appended after truncation still
-// fits under the registry's per-tool bash budget without a second (head-first)
-// re-truncation cutting the tail we just preserved.
-const BASH_TAIL_NOTE_RESERVE = 512;
+export type BashOutputPolicy = "full" | "bounded" | "summary" | "metadata-only";
 
-interface ShapedBashOutput {
-	text: string;
-	details?: ToolResultDetails;
+const BASH_OUTPUT_POLICIES = new Set<BashOutputPolicy>(["full", "bounded", "summary", "metadata-only"]);
+
+function bashContextDisposition(policy: BashOutputPolicy): ToolResultContextDisposition & { maxBytes: number } {
+	if (policy === "full") {
+		return { mode: "full", maxBytes: BASH_DISPLAY_MAX_BYTES, downgradeExcerpt: "tail" };
+	}
+	if (policy === "summary") {
+		return {
+			mode: "summary",
+			maxBytes: BASH_DISPLAY_MAX_BYTES,
+			strategy: "diagnostic",
+			redact: true,
+		};
+	}
+	if (policy === "metadata-only") return { mode: "metadata-only", maxBytes: BASH_DISPLAY_MAX_BYTES };
+	return { mode: "bounded", maxBytes: BASH_DISPLAY_MAX_BYTES, excerpt: "tail" };
+}
+
+/** Canonical default attached by the builtin catalog and reused by direct registries. */
+export const BASH_DEFAULT_RESULT_DISPOSITION: ToolResultDisposition = {
+	presentation: {
+		...toolPresentationPolicy(ToolNames.Bash, undefined),
+		maxBytes: BASH_DISPLAY_MAX_BYTES,
+		overflow: "tail",
+	},
+	context: bashContextDisposition("bounded"),
+};
+
+/** Pure, idempotent normalization used by registry admission and direct calls. */
+export function normalizeBashArguments(args: Record<string, unknown>): Record<string, unknown> {
+	return args.output_policy === undefined ? { ...args, output_policy: "bounded" } : args;
+}
+
+function bashOutputPolicy(args: Record<string, unknown>): BashOutputPolicy | null {
+	const value = args.output_policy;
+	return typeof value === "string" && BASH_OUTPUT_POLICIES.has(value as BashOutputPolicy)
+		? (value as BashOutputPolicy)
+		: null;
+}
+
+function resolveBashResultDisposition(
+	args: Record<string, unknown>,
+	declared: ToolResultDisposition | undefined = BASH_DEFAULT_RESULT_DISPOSITION,
+): ToolResultDisposition {
+	const policy = bashOutputPolicy(args) ?? "bounded";
+	const base = declared ?? BASH_DEFAULT_RESULT_DISPOSITION;
+	return { presentation: base.presentation, context: bashContextDisposition(policy) };
+}
+
+function normalizedBashDisposition(policy: BashOutputPolicy): NormalizedToolResultDisposition {
+	return {
+		presentation: { ...BASH_DEFAULT_RESULT_DISPOSITION.presentation, maxBytes: BASH_DISPLAY_MAX_BYTES },
+		context: bashContextDisposition(policy),
+	};
 }
 
 /** Bound a cumulative live snapshot without writing an offload file per tick. */
-function shapeBashProgress(rawOutput: string): ToolResult {
-	const truncation = truncateTail(rawOutput, {
-		maxLines: DEFAULT_MAX_LINES,
-		maxBytes: BASH_DISPLAY_MAX_BYTES - BASH_TAIL_NOTE_RESERVE,
-	});
-	const bytes = Buffer.byteLength(rawOutput, "utf8");
+function shapeBashProgress(rawOutput: string, outputBytes: number, policy: BashOutputPolicy): ToolResult {
+	const disposition = normalizedBashDisposition(policy);
+	let output: string;
+	if (policy === "metadata-only") {
+		output = `bash: running; captured ${outputBytes} bytes; stdout/stderr omitted by metadata-only policy`;
+	} else if (policy === "summary") {
+		output = deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text;
+	} else {
+		output = truncateTail(rawOutput, {
+			maxLines: DEFAULT_MAX_LINES,
+			maxBytes: disposition.context.maxBytes,
+		}).content;
+	}
 	return {
 		kind: "ok",
-		output: truncation.content,
+		output,
 		details: {
 			resultSize: {
-				bytes,
-				shownBytes: truncation.outputBytes,
+				bytes: outputBytes,
+				shownBytes: byteLength(output),
 				maxBytes: BASH_DISPLAY_MAX_BYTES,
-				truncated: truncation.truncated,
-				policy: "tail",
+				truncated: byteLength(rawOutput) > byteLength(output),
+				policy,
 			},
 		},
 	};
 }
 
-// Tail-truncate the combined output for display, spilling the full output to a
-// scratch file first when it overflows the display cap. Setting
-// `details.resultSize.offloadPath` tells the registry result-shaper to leave
-// this already-shaped (tail-biased) output alone instead of re-truncating it
-// head-first.
-function shapeBashOutput(
+function bashResultDetails(
+	result: Awaited<ReturnType<typeof runBashCommand>>,
 	rawOutput: string,
-	context: Pick<ToolInvokeOptions, "sessionId" | "toolCallId"> | undefined,
-): ShapedBashOutput {
-	const truncation = truncateTail(rawOutput, {
-		maxLines: DEFAULT_MAX_LINES,
-		maxBytes: BASH_DISPLAY_MAX_BYTES - BASH_TAIL_NOTE_RESERVE,
-	});
-	if (!truncation.truncated) return { text: rawOutput };
-
-	const totalBytes = Buffer.byteLength(rawOutput, "utf8");
-	const offloadPath = writeToolOffload(rawOutput, context, BASH_HARD_CAP_BYTES);
-	const startLine = truncation.totalLines - truncation.outputLines + 1;
-	const scope = truncation.lastLinePartial
-		? `last ${formatSize(truncation.outputBytes)} of line ${truncation.totalLines} (line is large)`
-		: `lines ${startLine}-${truncation.totalLines} of ${truncation.totalLines}`;
-	const location = offloadPath !== null ? ` Full output saved to ${offloadPath}; read it with offset/limit.` : "";
-	const note = `[Output tail-truncated: showing ${scope} (${formatSize(BASH_DISPLAY_MAX_BYTES)} display limit).${location}]`;
-	const details: ToolResultDetails = {
-		resultSize: {
-			bytes: totalBytes,
-			shownBytes: truncation.outputBytes,
-			maxBytes: BASH_DISPLAY_MAX_BYTES,
-			truncated: true,
-			policy: "tail",
-			followUpHint: "Read the full-output offload file with offset/limit, or re-run a narrower command.",
-			...(offloadPath !== null ? { offloadPath } : {}),
-		},
+	outcome: "success" | "nonzero" | "timeout" | "abort" | "output-cap",
+): ToolResultDetails {
+	return {
+		outcome,
+		exitCode: result.exitCode,
+		signal: result.signal,
+		timedOut: result.timedOut,
+		aborted: result.aborted,
+		outputCapped: result.outputCapped,
+		outputBytes: result.outputBytes,
+		retainedBytes: byteLength(rawOutput),
+		stdoutBytes: byteLength(result.stdout),
+		stderrBytes: byteLength(result.stderr),
 	};
-	return { text: `${truncation.content}\n\n${note}`, details };
-}
-
-function withDetails(base: ToolResult, details: ToolResultDetails | undefined): ToolResult {
-	if (details === undefined) return base;
-	if (base.kind === "ok") return { ...base, details };
-	return { ...base, details };
 }
 
 // A bash command whose first word is a plain file/dir observer has a
@@ -120,7 +157,7 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command and return stdout and stderr. Runs inside the session workspace. Default timeout 300000 ms.",
+		"Execute a bash command inside the session workspace. output_policy controls model context: bounded keeps the diagnostic tail and is the default; summary keeps deterministic redacted diagnostics; metadata-only keeps facts and retrieval; full is admitted only within the result budget.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
@@ -130,12 +167,29 @@ export const bashTool: ToolSpec = {
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
+		output_policy: Type.Optional(
+			Type.Union([Type.Literal("full"), Type.Literal("bounded"), Type.Literal("summary"), Type.Literal("metadata-only")], {
+				description:
+					"Model-context disposition. Omit for bounded tail output. Use summary for noisy runs, metadata-only when only status and retrieval matter, and full only for known-small output.",
+			}),
+		),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
+	prepareArguments: normalizeBashArguments,
+	resolveResultDisposition: resolveBashResultDisposition,
 	async run(args, options): Promise<ToolResult> {
+		args = normalizeBashArguments(args);
 		if (typeof args.command !== "string" || args.command.length === 0) {
 			return { kind: "error", message: "bash: missing command argument" };
+		}
+		const outputPolicy = bashOutputPolicy(args);
+		if (outputPolicy === null) {
+			return {
+				kind: "error",
+				message: "bash: output_policy must be one of full, bounded, summary, or metadata-only (omit it for bounded)",
+				details: { outcome: "invalid-arguments", exitCode: null },
+			};
 		}
 		const cwdArg = typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
 		// Pin the child's cwd inside the session workspace in the tool itself.
@@ -161,41 +215,49 @@ export const bashTool: ToolSpec = {
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
-					options.onUpdate?.(shapeBashProgress(combineBashOutput(progress)));
+					options.onUpdate?.(shapeBashProgress(combineBashOutput(progress), progress.outputBytes, outputPolicy));
 				};
 			}
 			const result = await runBashCommand(args.command, runOptions);
 			const { error, aborted, timedOut, outputCapped } = result;
+			const rawOutput = combineBashOutput(result);
+			const output = rawOutput.trim();
 			if (aborted) {
-				return { kind: "error", message: "bash: command aborted" };
+				const status = "bash: command aborted";
+				return {
+					kind: "error",
+					message: output.length > 0 ? `${output}\n\n${status}` : status,
+					details: bashResultDetails(result, rawOutput, "abort"),
+				};
 			}
-			const shaped = shapeBashOutput(combineBashOutput(result), options);
-			const output = shaped.text.trim();
 			if (timedOut) {
 				const status = `bash: command timed out after ${timeout}ms`;
-				return withDetails(
-					{ kind: "error", message: output.length > 0 ? `${output}\n\n${status}` : status },
-					shaped.details,
-				);
+				return {
+					kind: "error",
+					message: output.length > 0 ? `${output}\n\n${status}` : status,
+					details: bashResultDetails(result, rawOutput, "timeout"),
+				};
 			}
 			if (outputCapped) {
 				const status = `bash: command output exceeded ${BASH_HARD_CAP_BYTES} bytes and was stopped`;
-				return withDetails(
-					{ kind: "error", message: output.length > 0 ? `${output}\n\n${status}` : status },
-					shaped.details,
-				);
+				return {
+					kind: "error",
+					message: output.length > 0 ? `${output}\n\n${status}` : status,
+					details: bashResultDetails(result, rawOutput, "output-cap"),
+				};
 			}
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
 				const status = `bash: command failed (exit ${code ?? "?"})`;
 				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
-				return withDetails({ kind: "error", message }, shaped.details);
+				return { kind: "error", message, details: bashResultDetails(result, rawOutput, "nonzero") };
 			}
-			const body = shaped.text.length > 0 ? shaped.text : "(no output)";
-			return withDetails(
-				{ kind: "ok", output: `${body}${observeToolsNudge(args.command, options?.sessionId)}` },
-				shaped.details,
-			);
+			const body = rawOutput.length > 0 ? rawOutput : "(no output)";
+			return {
+				kind: "ok",
+				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}`,
+				details: bashResultDetails(result, rawOutput, "success"),
+			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `bash: ${msg}` };
