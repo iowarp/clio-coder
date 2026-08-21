@@ -145,6 +145,21 @@ export function resolveRecall(
 	};
 }
 
+/**
+ * The turn a `contextRecall` entry parents onto: the newest message on the
+ * active path. Every recall caller needs this and they must agree, because a
+ * record anchored anywhere else folds onto the wrong branch and a `/tree`
+ * switch would then show a recall the branch never made.
+ */
+export function recallParentTurnId(entries: ReadonlyArray<SessionEntry>, activeLeafTurnId?: string): string | null {
+	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
+	for (let i = active.length - 1; i >= 0; i -= 1) {
+		const candidate = active[i];
+		if (candidate?.kind === "message") return candidate.turnId;
+	}
+	return null;
+}
+
 export function buildRecallFields(
 	result: RecallResult,
 	meta: { trigger: RecallTrigger; toolCallId?: string },
