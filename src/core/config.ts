@@ -968,6 +968,7 @@ const TOP_LEVEL_KEYS = [
 	"delegation",
 	"keybindings",
 	"compaction",
+	"context",
 	"retry",
 	"guardrails",
 ] as const;
@@ -1401,6 +1402,59 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("systemPrompt" in raw.compaction) {
 				const v = expectString(issues, "compaction.systemPrompt", raw.compaction.systemPrompt);
 				if (v !== undefined) settings.compaction.systemPrompt = v;
+			}
+		}
+	}
+
+	if ("context" in raw) {
+		if (!isPlainObject(raw.context)) {
+			issues.add("context", `expected a map, got ${describe(raw.context)}`);
+		} else {
+			issues.unknownKeys("context", raw.context, ["workingSet"]);
+			if ("workingSet" in raw.context) {
+				if (!isPlainObject(raw.context.workingSet)) {
+					issues.add("context.workingSet", `expected a map, got ${describe(raw.context.workingSet)}`);
+				} else {
+					const workingSet = raw.context.workingSet;
+					issues.unknownKeys("context.workingSet", workingSet, [
+						"enabled",
+						"policy",
+						"target",
+						"protectLastTurns",
+						"minEvictableTokens",
+					]);
+					if ("enabled" in workingSet) {
+						const v = expectBoolean(issues, "context.workingSet.enabled", workingSet.enabled);
+						if (v !== undefined) settings.context.workingSet.enabled = v;
+					}
+					if ("policy" in workingSet) {
+						const v = expectEnum(issues, "context.workingSet.policy", workingSet.policy, [
+							"age-horizon",
+							"structural-v1",
+						] as const);
+						if (v !== undefined) settings.context.workingSet.policy = v;
+					}
+					if ("target" in workingSet) {
+						const v = expectNumber(issues, "context.workingSet.target", workingSet.target);
+						if (v !== undefined && (v <= 0 || v >= 1)) {
+							issues.add("context.workingSet.target", `expected a number > 0 and < 1, got ${v}`);
+						} else if (v !== undefined) {
+							settings.context.workingSet.target = v;
+						}
+					}
+					if ("protectLastTurns" in workingSet) {
+						const v = expectInteger(issues, "context.workingSet.protectLastTurns", workingSet.protectLastTurns, {
+							min: 1,
+						});
+						if (v !== undefined) settings.context.workingSet.protectLastTurns = v;
+					}
+					if ("minEvictableTokens" in workingSet) {
+						const v = expectInteger(issues, "context.workingSet.minEvictableTokens", workingSet.minEvictableTokens, {
+							min: 0,
+						});
+						if (v !== undefined) settings.context.workingSet.minEvictableTokens = v;
+					}
+				}
 			}
 		}
 	}

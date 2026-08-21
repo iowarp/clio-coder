@@ -61,6 +61,7 @@ export const BusChannels = {
 	ContextActivity: "context.activity",
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
+	ContextRecalled: "context.recalled",
 	AgentStatusChanged: "agent.status.changed",
 	RunAborted: "run.aborted",
 	BudgetAlert: "budget.alert",
@@ -253,21 +254,34 @@ export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload 
 	return true;
 }
 
-/** Payload published on {@link BusChannels.ContextPruned} after compaction reclaims tokens. */
+/** Payload published on {@link BusChannels.ContextPruned} after projected or summarized context shrinks. */
 export interface ContextPrunedPayload {
-	stage: "mask_observations" | "llm_summary";
+	stage: "mask_observations" | "working_set" | "llm_summary";
 	tokensBefore: number;
 	tokensAfter: number;
 	trigger: string;
 	snapshotIdBefore: string | null;
 	snapshotIdAfter: string;
 	at: number;
-	/** Used/window ratio at trigger time; mask stage only. */
+	/** Used/window ratio at trigger time; working-set and legacy-mask stages only. */
 	pressure?: number | null;
+	/** Legacy destructive-mask count. */
 	maskedObservations?: number;
-	/** Thinking blocks stripped from stale assistant messages; mask stage only. */
+	/** Thinking blocks stripped from stale assistant messages; legacy mask only. */
 	maskedThinkingBlocks?: number;
 	maskedThinkingChars?: number;
+	/** Working-set policy that selected an applied eviction event. */
+	policyId?: string;
+	/** Number of working-set units evicted by the event. */
+	evictedItems?: number;
+}
+
+/** Payload published on {@link BusChannels.ContextRecalled} after an exact working-set recall. */
+export interface ContextRecalledPayload {
+	ref: string;
+	trigger: "tool" | "operator";
+	tokensReadmitted: number;
+	at: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +741,7 @@ export type BusPayloadMap = {
 	[BusChannels.ContextActivity]: ContextActivityPayload;
 	[BusChannels.ContextWarning]: ContextWarningPayload;
 	[BusChannels.ContextPruned]: ContextPrunedPayload;
+	[BusChannels.ContextRecalled]: ContextRecalledPayload;
 	[BusChannels.AgentStatusChanged]: AgentStatusChangedPayload;
 	[BusChannels.RunAborted]: RunAbortedPayload;
 	[BusChannels.BudgetAlert]: BudgetAlertPayload;
