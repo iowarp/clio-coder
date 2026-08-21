@@ -2324,10 +2324,8 @@ describe("chat-panel transcript detail policy", () => {
 			ok(!text.includes("line 3 of the file body"), `no bodies at ${width}`);
 			ok(!text.includes("turn ·"), `no receipt at ${width}`);
 			ok(text.includes("Thinking…"), text);
-			// Below 60 columns the row keeps the exit status and drops the excerpt.
-			if (width >= 60) {
-				ok(text.includes("permission denied on src/secret"), `the error row keeps its excerpt at ${width}: ${text}`);
-			}
+			const excerpt = width === 40 ? "permission" : "permission denied on src/secret";
+			ok(text.includes(excerpt), `the error row keeps a bounded excerpt at ${width}: ${text}`);
 			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
 		}
 		ok(panel.toggleLastToolExpanded());
