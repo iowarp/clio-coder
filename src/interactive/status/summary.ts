@@ -107,8 +107,9 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 		// re-renders the same block). Reported output is the ceiling for anything
 		// inferred: reasoning is part of that output, never more than it. No
 		// clamp exists upstream in the adapters, so it lives here, once.
-		const reportedOutput = usage ? finite(usage.output) : 0;
-		next.reasoningTokens += reportedOutput > 0 ? Math.min(estimated, reportedOutput) : estimated;
+		const reportedOutput =
+			usage && typeof usage.output === "number" && Number.isFinite(usage.output) ? Math.max(0, usage.output) : null;
+		next.reasoningTokens += reportedOutput === null ? estimated : Math.min(estimated, reportedOutput);
 		next.hadEstimatedReasoning = true;
 	}
 	return next;
