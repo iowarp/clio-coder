@@ -28,7 +28,8 @@ import {
 	type WorkingSetView,
 } from "./contract.js";
 import { parseRefKey, refKey } from "./fold.js";
-import { offloadPathOf, toolResultPayload, toolResultText } from "./payload.js";
+import { callPathsByToolCallId } from "./path-index.js";
+import { offloadPathOf, primaryPathOf, toolResultPayload, toolResultText } from "./payload.js";
 
 export type RecallOutcome = { ok: true; result: RecallResult } | { ok: false; error: RecallError };
 
@@ -113,10 +114,21 @@ const MAX_LISTED_REFS = 8;
  * match names an unrelated result, and the listing is what helps.
  */
 function recallableRefListing(entries: ReadonlyArray<SessionEntry>, view: WorkingSetView): string {
-	const refs = [...view.evicted.keys()].filter((key) => {
-		const entry = entries.find((candidate) => candidate.turnId === key);
-		return entry !== undefined && isToolResultEntry(entry);
-	});
+	const byTurnId = new Map<string, SessionEntry>();
+	for (const entry of entries) byTurnId.set(entry.turnId, entry);
+	const callPaths = callPathsByToolCallId(entries);
+	const refs: string[] = [];
+	for (const key of view.evicted.keys()) {
+		const entry = byTurnId.get(key);
+		if (entry === undefined || !isToolResultEntry(entry)) continue;
+		// After a summary compaction the markers before the cut are gone from
+		// the working set, so the listing is the only place the caller learns
+		// what a ref was. Tool and path are what it needs to pick one.
+		const payload = toolResultPayload(entry.payload);
+		const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
+		const path = primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId));
+		refs.push(`${key} (${payload.toolName}${path === undefined ? "" : ` ${path}`})`);
+	}
 	if (refs.length === 0) return "No recallable refs on the active path.";
 	const shown = refs.slice(0, MAX_LISTED_REFS).join(", ");
 	const more = refs.length > MAX_LISTED_REFS ? `, and ${refs.length - MAX_LISTED_REFS} more` : "";

@@ -163,7 +163,7 @@ test("recall: not_evicted lists the refs that are evicted", () => {
 	assert.deepEqual(outcome.error, { kind: "not_evicted", ref: "turn-b1" });
 	assert.match(
 		recallErrorMessage(outcome.error, entries, view),
-		/not evicted.*Recallable refs on the active path: turn-a1, turn-a2\.$/,
+		/not evicted.*Recallable refs on the active path: turn-a1 \(read\), turn-a2 \(read\)\.$/,
 	);
 
 	const unknown = resolveRecall(entries, view, "turn-a2x");
@@ -171,7 +171,7 @@ test("recall: not_evicted lists the refs that are evicted", () => {
 	assert.equal(unknown.error.kind, "not_on_active_path");
 	assert.match(
 		recallErrorMessage(unknown.error, entries, view),
-		/Recallable refs on the active path: turn-a1, turn-a2\.$/,
+		/Recallable refs on the active path: turn-a1 \(read\), turn-a2 \(read\)\.$/,
 	);
 });
 
@@ -196,7 +196,31 @@ test("recall: the listing names tool results only, never evicted thinking", () =
 	assert.deepEqual([...view.evicted.keys()], ["a1", "t1"]);
 	const outcome = resolveRecall(entries, view, "nope");
 	assert.ok(!outcome.ok);
-	assert.match(recallErrorMessage(outcome.error, entries, view), /Recallable refs on the active path: t1\.$/);
+	assert.match(recallErrorMessage(outcome.error, entries, view), /Recallable refs on the active path: t1 \(read\)\.$/);
+});
+
+test("recall: the listing names the file the call read", () => {
+	const entries: SessionEntry[] = [
+		user("u1", null),
+		{
+			kind: "message",
+			turnId: "c1",
+			parentTurnId: "u1",
+			timestamp: stamp(),
+			role: "tool_call",
+			payload: { toolCallId: "call-t1", name: "read", args: { path: "src/a.ts" } },
+		},
+		toolResult("t1", "c1", "body"),
+		user("u2", "t1"),
+		eviction("e1", "u2", ["t1"]),
+	];
+	const view = foldWorkingSet(entries);
+	const outcome = resolveRecall(entries, view, "nope");
+	assert.ok(!outcome.ok);
+	assert.match(
+		recallErrorMessage(outcome.error, entries, view),
+		/Recallable refs on the active path: t1 \(read src\/a\.ts\)\.$/,
+	);
 });
 
 test("recall: the listing is cut after eight refs", () => {
@@ -211,7 +235,10 @@ test("recall: the listing is cut after eight refs", () => {
 	const view = foldWorkingSet(entries);
 	const outcome = resolveRecall(entries, view, "nope");
 	assert.ok(!outcome.ok);
-	assert.match(recallErrorMessage(outcome.error, entries, view), /t0, t1, t2, t3, t4, t5, t6, t7, and 2 more\.$/);
+	assert.match(
+		recallErrorMessage(outcome.error, entries, view),
+		/t0 \(read\), t1 \(read\), .*t7 \(read\), and 2 more\.$/,
+	);
 });
 
 test("recall: a ref on an abandoned branch is not_on_active_path after a fork", () => {
