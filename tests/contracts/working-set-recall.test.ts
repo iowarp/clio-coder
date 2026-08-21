@@ -163,13 +163,16 @@ test("recall: not_evicted lists the refs that are evicted", () => {
 	assert.deepEqual(outcome.error, { kind: "not_evicted", ref: "turn-b1" });
 	assert.match(
 		recallErrorMessage(outcome.error, entries, view),
-		/not evicted.*Evicted refs on the active path: turn-a1, turn-a2\.$/,
+		/not evicted.*Recallable refs on the active path: turn-a1, turn-a2\.$/,
 	);
 
 	const unknown = resolveRecall(entries, view, "turn-a2x");
 	assert.ok(!unknown.ok);
 	assert.equal(unknown.error.kind, "not_on_active_path");
-	assert.match(recallErrorMessage(unknown.error, entries, view), /Evicted refs on the active path: turn-a1, turn-a2\.$/);
+	assert.match(
+		recallErrorMessage(unknown.error, entries, view),
+		/Recallable refs on the active path: turn-a1, turn-a2\.$/,
+	);
 });
 
 test("recall: not_on_active_path for an unknown ref says when nothing is evicted", () => {
@@ -178,7 +181,22 @@ test("recall: not_on_active_path for an unknown ref says when nothing is evicted
 	const outcome = resolveRecall(entries, view, "zzz");
 	assert.ok(!outcome.ok);
 	assert.deepEqual(outcome.error, { kind: "not_on_active_path", ref: "zzz" });
-	assert.match(recallErrorMessage(outcome.error, entries, view), /not on the active path.*No refs are evicted/);
+	assert.match(recallErrorMessage(outcome.error, entries, view), /not on the active path.*No recallable refs/);
+});
+
+test("recall: the listing names tool results only, never evicted thinking", () => {
+	const entries: SessionEntry[] = [
+		user("u1", null),
+		assistant("a1", "u1"),
+		toolResult("t1", "a1", "body"),
+		user("u2", "t1"),
+		eviction("e1", "u2", ["a1", "t1"]),
+	];
+	const view = foldWorkingSet(entries);
+	assert.deepEqual([...view.evicted.keys()], ["a1", "t1"]);
+	const outcome = resolveRecall(entries, view, "nope");
+	assert.ok(!outcome.ok);
+	assert.match(recallErrorMessage(outcome.error, entries, view), /Recallable refs on the active path: t1\.$/);
 });
 
 test("recall: the listing is cut after eight refs", () => {

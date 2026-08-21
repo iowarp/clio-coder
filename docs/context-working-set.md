@@ -121,7 +121,7 @@ Recall is explicit and by ref. There is no auto-readmission: the marker tells th
 - `not_on_active_path` when the session has no such turn on this branch, which includes a ref from a branch `/tree` abandoned.
 - `not_evicted` when the unit is still in context. An assistant turn reports separately that thinking is not recallable.
 
-Both messages end with the refs that are evicted on the active path (up to eight, then a count), because a failed recall is usually a mistyped ref and the listing is what the next call needs.
+Both messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count), because a failed recall is usually a mistyped ref and the listing is what the next call needs.
 
 **A recall does not un-evict.** The key stays in `view.evicted`, the marker stays byte-identical at its original position, and the recalled body arrives at the tail of the working set inside the recall result. Readmitting it in place would duplicate the bytes and invalidate the provider prefix cache for everything after that point, which costs more than the recall saved.
 
