@@ -5,6 +5,7 @@ import type { WorkingSetPolicy } from "../contract.js";
 import { buildEvictionFields, planEviction } from "../engine.js";
 import { foldWorkingSet } from "../fold.js";
 import { projectWorkingSet } from "../project.js";
+import { selectVisibleEntries } from "../visible.js";
 import { isReplayTurnStart, type Trace } from "./trace.js";
 
 export interface ReplayConfig {
@@ -74,7 +75,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 			if (tokens > pressureLimit) {
 				const view = foldWorkingSet(soFar, leaf ?? undefined);
 				const plan = planEviction(policy, {
-					entries: soFar,
+					entries: selectVisibleEntries(soFar, leaf ?? undefined),
 					view,
 					settings: config.settings,
 					pressure: {

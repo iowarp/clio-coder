@@ -19,6 +19,7 @@ import type { ToolName } from "../core/tool-names.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
+import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -52,7 +53,6 @@ import { buildContextLedger, type ContextLedger, type PromptCacheStats } from ".
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { appendPromptCompileRecord, type SessionPromptCompileRecord } from "../domains/session/prompt-manifest.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
@@ -464,7 +464,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
 						planned = (deps.planEviction ?? planEviction)(policy, {
-							entries: filterEntriesToActivePath(entries, state.lastTurnId ?? undefined),
+							entries: selectVisibleEntries(entries, state.lastTurnId ?? undefined),
 							view,
 							settings: settings.context.workingSet,
 							pressure: {
