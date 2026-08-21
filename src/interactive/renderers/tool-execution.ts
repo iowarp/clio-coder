@@ -15,10 +15,13 @@
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { classifyResourceRead } from "../../tools/presentation.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
+
+export { classifyResourceRead };
 
 const theme = clioTheme();
 const dim = (text: string): string => theme.fg("dim", text);
@@ -286,24 +289,6 @@ function summarizeArgs(toolName: string, args: unknown): string {
 	return truncate(jsonStringifySafe(safeArgs), ARG_PREVIEW_LIMIT);
 }
 
-/**
- * Compact resource-read classification. Reads of skill/handbook/agent
- * instruction files and docs pages collapse to one labeled line and never
- * auto-expand; their bodies are reference material, not task output.
- */
-export function classifyResourceRead(toolName: string, args: unknown): string | null {
-	if (toolName !== "read") return null;
-	const path = readStringField(args, "path");
-	if (path === null) return null;
-	const normalized = path.replace(/\\/g, "/");
-	const base = normalized.split("/").pop() ?? "";
-	if (base === "SKILL.md") return "skill";
-	if (base === "CLIO-CODER.md") return "handbook";
-	if (base === "AGENTS.md") return "agents";
-	if (/(^|\/)docs\//.test(normalized)) return "docs";
-	return null;
-}
-
 function detailsOf(result: unknown): Record<string, unknown> | null {
 	if (!isPlainObject(result)) return null;
 	return isPlainObject(result.details) ? result.details : null;
@@ -448,13 +433,61 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 	const parts: string[] = [];
 	const outcome = outcomeSummary(finished);
 	if (outcome !== null) parts.push(outcome);
-	const bytes = isNonExecutedOutcome(finished.outcome) ? null : shownBytesOf(finished);
-	if (bytes !== null && bytes > 0) parts.push(formatSize(bytes));
-	const offloadPath = offloadPathOf(finished);
+	const executed = !isNonExecutedOutcome(finished.outcome);
+	// A folded bash row is the only view of the call the operator gets by
+	// default, so its settlement facts have to be here rather than only in the
+	// expanded body. A failed row already carries `(exit N)` on the status glyph.
+	if (executed && finished.toolName === "bash" && !finished.isError) {
+		parts.push(`exit ${structuredExitCode(finished) ?? "0"}`);
+	}
+	const bytes = executed ? shownBytesOf(finished) : null;
+	if (bytes !== null && bytes > 0) {
+		const total = totalBytesOf(finished);
+		parts.push(
+			total !== null && total > bytes ? `${formatSize(bytes)} shown / ${formatSize(total)} total` : formatSize(bytes),
+		);
+	}
+	if (executed) {
+		if (isTruncatedResult(finished)) parts.push("truncated");
+		const details = detailsOf(finished.result);
+		if (details?.timedOut === true) parts.push("timed out");
+		if (details?.outputCapped === true) parts.push("output capped");
+	}
+	if (finished.excludeFromContext === true) parts.push("excluded from context");
+	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
 		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
 		offload: offloadPath !== null ? dim(` · full: ${offloadPath}`) : "",
 	};
+}
+
+/** Longest diagnostic excerpt a folded failure row may carry. */
+const FAILURE_EXCERPT_LIMIT = 80;
+/**
+ * Below this width the row has no room for both the exit code and an excerpt,
+ * and the exit code is the fact worth keeping.
+ */
+const FAILURE_EXCERPT_MIN_WIDTH = 60;
+
+/**
+ * Last non-empty output line of a failed bash call, bounded so the folded row
+ * stays diagnostically useful without opening the body. Sanitized to one line:
+ * the source is raw command output.
+ */
+function failureExcerpt(finished: ToolExecutionFinished, width: number): string {
+	if (finished.toolName !== "bash" || !finished.isError) return "";
+	if (isNonExecutedOutcome(finished.outcome)) return "";
+	if (width < FAILURE_EXCERPT_MIN_WIDTH) return "";
+	const text = unwrapResultEnvelope(finished.result);
+	if (typeof text !== "string") return "";
+	let excerpt: string | undefined;
+	for (const raw of text.split("\n")) {
+		const line = sanitizeCallTargetText(raw).trim();
+		if (line.length > 0) excerpt = line;
+	}
+	if (excerpt === undefined) return "";
+	const limit = Math.min(FAILURE_EXCERPT_LIMIT, Math.max(20, width - 20));
+	return dim(` · ${truncate(excerpt, limit)}`);
 }
 
 /**
@@ -1132,9 +1165,10 @@ export function renderToolSubline(
 				}
 			: { elapsedMs: call.elapsedMs };
 	const parts = sublineParts(call, status, meta);
+	const excerpt = "result" in call ? failureExcerpt(call, width) : "";
 	const showHint = "result" in call && expandKey !== undefined && expandKey.length > 0;
 	const tail = showHint ? `${parts.tail}${dim(` (${expandKey})`)}` : parts.tail;
-	return wrapSublineWithTail(parts.lead, tail, width);
+	return wrapSublineWithTail(`${parts.lead}${excerpt}`, tail, width);
 }
 
 /**
@@ -1294,6 +1328,12 @@ export interface BashTranscriptExecution {
 	fullOutputPath?: string | undefined;
 	excludeFromContext?: boolean | undefined;
 	error?: string | undefined;
+	/**
+	 * Whether the block draws its one-line row instead of the full body. Local
+	 * bash folds by default for the same reason model bash does; the operator
+	 * opens it with the expand key. Omitted means folded.
+	 */
+	folded?: boolean | undefined;
 }
 
 /**
@@ -1301,7 +1341,11 @@ export interface BashTranscriptExecution {
  * as model-initiated bash. This is a view projection only; callers keep Clio's
  * existing immutable `bashExecution` ledger entry.
  */
-export function renderBashTranscriptExecution(execution: BashTranscriptExecution, width: number): string[] {
+export function renderBashTranscriptExecution(
+	execution: BashTranscriptExecution,
+	width: number,
+	expandKey?: string,
+): string[] {
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
 	const totalBytes = execution.totalBytes ?? shownBytes;
 	const args: Record<string, unknown> = { command: execution.command };
@@ -1319,7 +1363,20 @@ export function renderBashTranscriptExecution(execution: BashTranscriptExecution
 		content: [{ type: "text", text: execution.output }],
 		details,
 	};
+	const folded = execution.folded !== false;
 	if (execution.running) {
+		if (folded) {
+			return renderToolSubline(
+				{
+					toolCallId: "local-bash",
+					toolName: "bash",
+					args,
+					elapsedMs: execution.elapsedMs,
+					phase: "running",
+				},
+				width,
+			);
+		}
 		return renderToolStreamingExecution(
 			{
 				toolCallId: "local-bash",
@@ -1336,22 +1393,20 @@ export function renderBashTranscriptExecution(execution: BashTranscriptExecution
 	const output = message
 		? `${execution.output}${execution.output.length > 0 ? "\n\n" : ""}${message}`
 		: execution.output;
-	return renderToolExecution(
-		{
-			toolCallId: "local-bash",
-			toolName: "bash",
-			args,
-			result: { ...result, content: [{ type: "text", text: output }] },
-			isError: execution.cancelled === true || execution.error !== undefined || (execution.exitCode ?? 0) !== 0,
-			exitCode: execution.exitCode,
-			...(execution.cancelled === true ? { outcome: "aborted" as const } : {}),
-			excludeFromContext: execution.excludeFromContext,
-			resultSummary: {
-				bytes: shownBytes,
-				truncated: execution.truncated === true,
-				...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
-			},
+	const finished: ToolExecutionFinished = {
+		toolCallId: "local-bash",
+		toolName: "bash",
+		args,
+		result: { ...result, content: [{ type: "text", text: output }] },
+		isError: execution.cancelled === true || execution.error !== undefined || (execution.exitCode ?? 0) !== 0,
+		exitCode: execution.exitCode,
+		...(execution.cancelled === true ? { outcome: "aborted" as const } : {}),
+		excludeFromContext: execution.excludeFromContext,
+		resultSummary: {
+			bytes: shownBytes,
+			truncated: execution.truncated === true,
+			...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
 		},
-		width,
-	);
+	};
+	return folded ? renderToolSubline(finished, width, expandKey) : renderToolExecution(finished, width);
 }

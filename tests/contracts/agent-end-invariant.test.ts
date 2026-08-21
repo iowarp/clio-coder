@@ -293,6 +293,8 @@ describe("chat-panel agent_end settles open tool segments (S3 Part B mechanism)"
 			isError: false,
 		} as ChatLoopEvent);
 		panel.applyEvent({ type: "agent_end", messages: [] });
+		// bash folds by default, so open the row before reading its body.
+		panel.toggleLastToolExpanded();
 		const rendered = strip(panel.render(120).join("\n"));
 		ok(rendered.includes("listing output"), "the real result survives");
 		ok(!rendered.includes(SETTLE_MARKER), "a finished segment is never re-settled as incomplete");

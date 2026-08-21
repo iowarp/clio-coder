@@ -1,5 +1,6 @@
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
+import { toolPresentationPolicy } from "./presentation.js";
 import { readMaxBytes } from "./read.js";
 import type { ToolMetadata, ToolSourceInfo, ToolSpec } from "./registry.js";
 
@@ -129,6 +130,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use a narrower command or a dedicated verification/read/search tool to inspect omitted output.",
 		),
 		costLatency: "local_slow",
+		presentation: toolPresentationPolicy(ToolNames.Bash, undefined),
 	},
 	[ToolNames.Git]: {
 		objective: "Read-only git inspection: status, diff, or log.",
