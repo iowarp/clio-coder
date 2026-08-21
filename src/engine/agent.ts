@@ -11,6 +11,7 @@
  */
 
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
+import { isDispositionedToolResultError } from "../tools/result-disposition.js";
 import { engineStreamSimple } from "./api-registry.js";
 
 export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & { streamFn?: StreamFn };
@@ -20,8 +21,24 @@ export interface EngineAgentHandle {
 	state(): Agent["state"];
 }
 
+function dispositionAwareAfterToolCall(
+	delegate: AgentOptions["afterToolCall"],
+): NonNullable<AgentOptions["afterToolCall"]> {
+	return async (context, signal) => {
+		const override = await delegate?.(context, signal);
+		const effectiveResult =
+			override?.details === undefined ? context.result : { ...context.result, details: override.details };
+		if (isDispositionedToolResultError(effectiveResult)) return { ...override, isError: true };
+		return override;
+	};
+}
+
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
-	const agent = new Agent({ streamFn: engineStreamSimple, ...options });
+	const agent = new Agent({
+		streamFn: engineStreamSimple,
+		...options,
+		afterToolCall: dispositionAwareAfterToolCall(options.afterToolCall),
+	});
 	return {
 		agent,
 		state: () => agent.state,

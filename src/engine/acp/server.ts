@@ -12,6 +12,7 @@ import type { SessionContract, SessionMeta } from "../../domains/session/contrac
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage } from "../types.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
@@ -537,6 +538,8 @@ function applyStopReason(active: ActivePrompt, message: unknown): void {
 function outputText(value: unknown): string {
 	if (typeof value === "string") return value;
 	if (!isRecord(value)) return "";
+	const presentationText = toolResultPresentationText(value);
+	if (presentationText !== null) return presentationText;
 	if (Array.isArray(value.content)) return contentText(value.content);
 	if (typeof value.output === "string") return value.output;
 	if (typeof value.text === "string") return value.text;

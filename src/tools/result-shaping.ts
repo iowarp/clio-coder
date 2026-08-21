@@ -2,6 +2,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import {
+	normalizeToolResultDisposition,
+	projectToolResultContext,
+	type ToolResultDispositionMetadata,
+	toolResultContextOmitsContent,
+} from "./result-disposition.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
@@ -51,6 +57,13 @@ function existingOffloadPath(details: ToolResultDetails | undefined): string | n
 	if (typeof fromResultSize === "string" && fromResultSize.length > 0) return fromResultSize;
 	const fromObservation = detailsRecord(details, "observation")?.offloadPath;
 	return typeof fromObservation === "string" && fromObservation.length > 0 ? fromObservation : null;
+}
+
+function existingDisposition(details: ToolResultDetails | undefined): ToolResultDispositionMetadata | null {
+	const disposition = detailsRecord(details, "resultDisposition");
+	return disposition?.version === 1 && disposition.applications === 1
+		? (disposition as unknown as ToolResultDispositionMetadata)
+		: null;
 }
 
 function safePathSegment(value: string): string {
@@ -170,7 +183,7 @@ function shapeJsonOverflow(
 	return { ...result, message: stub, details: mergeDetails(result.details, resultSize) };
 }
 
-export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: ToolResultShapeContext): ToolResult {
+function shapeLegacyToolResult(spec: ToolSpec, result: ToolResult, context?: ToolResultShapeContext): ToolResult {
 	if (existingOffloadPath(result.details) !== null) return result;
 	const maxBytes = maxBytesFor(spec);
 	const text = result.kind === "ok" ? result.output : result.message;
@@ -200,5 +213,131 @@ export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: To
 		...result,
 		message: `${truncated}\n\n[${bracketedHint(spec, offloadPath)}]`,
 		details: mergeDetails(result.details, resultSize),
+	};
+}
+
+function specWithDisplayCap(spec: ToolSpec, maxBytes: number): ToolSpec {
+	const metadata = spec.metadata;
+	if (metadata === undefined) return spec;
+	return {
+		...spec,
+		metadata: {
+			...metadata,
+			resultSizePolicy: { ...metadata.resultSizePolicy, maxBytes },
+		},
+	};
+}
+
+function resultText(result: ToolResult): string {
+	return result.kind === "ok" ? result.output : result.message;
+}
+
+function numberField(record: Record<string, unknown> | null, key: string): number | null {
+	const value = record?.[key];
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function capturedBytesFor(result: ToolResult, text: string): number {
+	const declared = numberField(detailsRecord(result.details, "resultSize"), "bytes");
+	return Math.max(byteLength(text), declared ?? 0);
+}
+
+function resultWasTruncated(result: ToolResult): boolean {
+	return detailsRecord(result.details, "resultSize")?.truncated === true;
+}
+
+function withOffloadMetadata(
+	result: ToolResult,
+	offloadPath: string,
+	capturedBytes: number,
+	displayedBytes: number,
+	maxBytes: number,
+	hint: string,
+): ToolResult {
+	const current = detailsRecord(result.details, "resultSize") ?? {};
+	const resultSize = {
+		bytes: numberField(current, "bytes") ?? capturedBytes,
+		shownBytes: numberField(current, "shownBytes") ?? displayedBytes,
+		maxBytes: numberField(current, "maxBytes") ?? maxBytes,
+		truncated: current.truncated === true,
+		policy: typeof current.policy === "string" ? current.policy : "disposition",
+		followUpHint: typeof current.followUpHint === "string" ? current.followUpHint : hint,
+		...current,
+		offloadPath,
+	};
+	return { ...result, details: mergeDetails(result.details, resultSize) };
+}
+
+/**
+ * Apply legacy shaping or one declared canonical disposition. Registry calls
+ * this once, after middleware annotations have produced the terminal result.
+ */
+export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: ToolResultShapeContext): ToolResult {
+	if (existingDisposition(result.details) !== null) return result;
+	const hardMaxBytes = maxBytesFor(spec);
+	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes);
+	if (disposition === null) return shapeLegacyToolResult(spec, result, context);
+
+	const capturedText = resultText(result);
+	const capturedBytes = capturedBytesFor(result, capturedText);
+	let displayed = shapeLegacyToolResult(specWithDisplayCap(spec, disposition.presentation.maxBytes), result, context);
+	let displayedText = resultText(displayed);
+	let displayedBytes = byteLength(displayedText);
+	let offloadPath = existingOffloadPath(displayed.details);
+	const projectionInput = {
+		text: capturedText,
+		kind: result.kind,
+		details: displayed.details,
+		disposition,
+		capturedBytes,
+		displayedBytes,
+		offloadPath,
+		followUpHint: followUpHint(spec),
+	};
+	if (offloadPath === null && toolResultContextOmitsContent(projectionInput)) {
+		offloadPath = writeToolOffload(capturedText, context);
+		if (offloadPath !== null) {
+			displayed = withOffloadMetadata(
+				displayed,
+				offloadPath,
+				capturedBytes,
+				displayedBytes,
+				disposition.presentation.maxBytes,
+				followUpHint(spec),
+			);
+			displayedText = resultText(displayed);
+			displayedBytes = byteLength(displayedText);
+		}
+	}
+	const projection = projectToolResultContext({
+		...projectionInput,
+		details: displayed.details,
+		displayedBytes,
+		offloadPath,
+	});
+	const metadata: ToolResultDispositionMetadata = {
+		version: 1,
+		applications: 1,
+		presentation: { ...disposition.presentation, content: displayedText },
+		context: {
+			requestedMode: disposition.context.mode,
+			appliedMode: projection.appliedMode,
+			maxBytes: disposition.context.maxBytes,
+		},
+		capturedBytes,
+		displayedBytes,
+		contextBytes: byteLength(projection.text),
+		presentationTruncated: resultWasTruncated(displayed),
+		contextTruncated: projection.truncated,
+		...(projection.downgrade === undefined ? {} : { downgrade: projection.downgrade }),
+		...(offloadPath === null ? {} : { offloadPath }),
+		retrieval:
+			offloadPath === null ? followUpHint(spec) : `read ${offloadPath} with offset and limit to retrieve omitted content`,
+		...(projection.summaryProvenance === undefined ? {} : { summaryProvenance: projection.summaryProvenance }),
+	};
+	return {
+		...displayed,
+		details: { ...(displayed.details ?? {}), resultDisposition: metadata },
+		modelContext: projection.text,
 	};
 }

@@ -27,6 +27,7 @@ import { detectValidationCommand } from "../domains/safety/protected-artifacts.j
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
+import type { ToolResultDisposition } from "./result-disposition.js";
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
@@ -68,6 +69,8 @@ export interface ToolMetadata {
 	retrySafety: ToolRetrySafety;
 	/** Expected result-size behavior at the registry boundary. */
 	resultSizePolicy: ToolResultSizePolicy;
+	/** Independent operator-presentation and model-context policy for this result. */
+	resultDisposition?: ToolResultDisposition;
 	/** Coarse cost/latency bucket for dashboard diagnostics. */
 	costLatency: ToolCostLatencyClass;
 	/**
@@ -136,6 +139,8 @@ export type ToolResult =
 			kind: "ok";
 			output: string;
 			details?: ToolResultDetails;
+			/** Internal registry projection consumed only by the agent-tool adapter. */
+			modelContext?: string;
 			/**
 			 * Early-termination hint propagated to pi-agent-core's
 			 * `AgentToolResult.terminate`. When every finalized tool result in
@@ -145,7 +150,7 @@ export type ToolResult =
 			 */
 			terminate?: boolean;
 	  }
-	| { kind: "error"; message: string; details?: ToolResultDetails };
+	| { kind: "error"; message: string; details?: ToolResultDetails; modelContext?: string };
 
 export interface RegistryDeps {
 	safety: SafetyContract;
@@ -402,13 +407,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
-				const result = shapeToolResult(spec, await spec.run(preparedArgs, options), options);
+				const result = await spec.run(preparedArgs, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
 				return { kind: "ok", result: finalResult, decision };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				const result = shapeToolResult(spec, { kind: "error", message }, options);
+				const result: ToolResult = { kind: "error", message };
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 				return {
 					kind: "ok",
@@ -1161,7 +1166,9 @@ function applyToolResultEffects(result: ToolResult, effects: ReadonlyArray<Middl
 		if (result.terminate === true) annotated.terminate = true;
 		return annotated;
 	}
-	return { kind: "error", message: `${result.message}${suffix}` };
+	const annotated: ToolResult = { kind: "error", message: `${result.message}${suffix}` };
+	if (result.details !== undefined) annotated.details = result.details;
+	return annotated;
 }
 
 function annotationMessages(effects: ReadonlyArray<MiddlewareEffect>): string[] {
