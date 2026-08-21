@@ -232,6 +232,8 @@ type ThinkingSegment = {
 	finalized: boolean;
 	/** Panel clock when the first delta of this stretch arrived. */
 	startedAtMs?: number;
+	/** The operator's explicit fold for this stretch, or none. */
+	fold?: FoldOverride;
 };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 /**
@@ -248,13 +250,6 @@ type TranscriptEntry =
 	| {
 			role: "assistant";
 			segments: AssistantSegment[];
-			/**
-			 * The operator's explicit fold for this turn's thinking stretches, or
-			 * none. Effective state is this override when set, else the transcript
-			 * detail policy. A new turn carries no override: it inherits the
-			 * policy, not the last keypress.
-			 */
-			thinkingFold?: FoldOverride;
 			/**
 			 * `segments.length` when the current model call began, so `message_end`
 			 * can tell which segments belong to the message it is settling. A
@@ -354,7 +349,7 @@ export interface ChatPanel extends Component {
 	 */
 	clearFoldOverrides(): void;
 	/**
-	 * Flip the newest thinking-bearing turn between the one-line dim marker
+	 * Flip the newest thinking stretch between the one-line dim marker
 	 * and the full rail-prefixed body, as an override over the policy. A turn
 	 * with no thinking yet is left alone; a new stretch inherits the policy.
 	 */
@@ -936,12 +931,9 @@ function workerEntryFolded(entry: WorkerTranscriptEntry, detail: TranscriptDetai
 	return resolveFold(entry.fold, policyWorkerFold(detail, workerAskedByModel(entry.state))) === "folded";
 }
 
-/** Effective state of a turn's thinking stretches: the operator's override, else the policy. */
-function thinkingExpanded(
-	entry: Extract<TranscriptEntry, { role: "assistant" }>,
-	detail: TranscriptDetailPolicy,
-): boolean {
-	return resolveFold(entry.thinkingFold, policyThinkingFold(detail)) === "expanded";
+/** Effective state of one thinking stretch: the operator's override, else the policy. */
+function thinkingExpanded(segment: ThinkingSegment, detail: TranscriptDetailPolicy): boolean {
+	return resolveFold(segment.fold, policyThinkingFold(detail)) === "expanded";
 }
 
 function renderEntryLines(
@@ -985,7 +977,6 @@ function renderEntryLines(
 		return [];
 	}
 	const lines: string[] = [];
-	const thinkingExpandedNow = thinkingExpanded(entry, detail);
 	// Reasoning renders in stream order, between the text and tool segments it
 	// came between. A closed stretch is a folded marker (or a head-anchored rail
 	// when expanded); the stretch still open while the turn is pending is the
@@ -996,11 +987,14 @@ function renderEntryLines(
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	let labeled = false;
 	let liveIndicatorShown = false;
+	let latestThinkingExpanded = policyThinkingFold(detail) === "expanded";
 	for (let segIndex = 0; segIndex < entry.segments.length; segIndex += 1) {
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
 			if (seg.text.length === 0) continue;
+			const thinkingExpandedNow = thinkingExpanded(seg, detail);
+			latestThinkingExpanded = thinkingExpandedNow;
 			const live = entry.pending && !seg.finalized;
 			if (thinkingExpandedNow) lines.push(...renderThinkingRail(seg.text, width, live, unboundedToolBodies));
 			if (live) {
@@ -1071,7 +1065,7 @@ function renderEntryLines(
 	// away with that marker. An open tail stretch already rendered this line.
 	if (entry.pending && hasThinking(entry) && !liveIndicatorShown) {
 		lines.push(
-			detail.thinking === "marker" && !thinkingExpandedNow
+			detail.thinking === "marker" && !latestThinkingExpanded
 				? dimLine(THINKING_HIDDEN_LABEL, width)
 				: renderLiveReasoningLine(liveReasoning, undefined, width),
 		);
@@ -1197,9 +1191,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				continue;
 			}
 			if (entry.role !== "assistant") continue;
-			entry.thinkingFold = undefined;
 			for (const seg of entry.segments) {
-				if (seg.kind === "tool") seg.fold = undefined;
+				if (seg.kind === "tool" || seg.kind === "thinking") seg.fold = undefined;
 			}
 		}
 		clearRenderCaches();
@@ -1703,34 +1696,46 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				if (entry?.role !== "assistant") continue;
-				if (!hasThinking(entry)) continue;
-				entry.thinkingFold = thinkingExpanded(entry, detail) ? "folded" : "expanded";
-				clearRenderCaches();
-				markDirty();
-				return true;
+				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
+					const segment = entry.segments[segIndex];
+					if (segment?.kind !== "thinking" || segment.text.length === 0) continue;
+					segment.fold = thinkingExpanded(segment, detail) ? "folded" : "expanded";
+					clearRenderCaches();
+					markDirty();
+					return true;
+				}
 			}
 			return false;
 		},
 		toggleAllThinking(): boolean {
 			const detail = currentDetail();
-			const entries: Array<Extract<TranscriptEntry, { role: "assistant" }>> = [];
+			const segments: ThinkingSegment[] = [];
 			for (const entry of transcript) {
-				if (entry.role === "assistant" && hasThinking(entry)) entries.push(entry);
+				if (entry.role !== "assistant") continue;
+				for (const segment of entry.segments) {
+					if (segment.kind === "thinking" && segment.text.length > 0) segments.push(segment);
+				}
 			}
-			if (entries.length === 0) return false;
-			const expand = entries.some((entry) => !thinkingExpanded(entry, detail));
-			for (const entry of entries) entry.thinkingFold = expand ? "expanded" : "folded";
+			if (segments.length === 0) return false;
+			const expand = segments.some((segment) => !thinkingExpanded(segment, detail));
+			for (const segment of segments) segment.fold = expand ? "expanded" : "folded";
 			clearRenderCaches();
 			markDirty();
 			return true;
 		},
 		isThinkingExpanded(): boolean {
-			// The live stretch lives on the newest assistant entry; its override,
-			// if any, is the one that applies. Absent that, the policy answers.
+			// The live stretch lives on the newest assistant entry; its own override,
+			// if any, is the one that applies. Before a stretch arrives, the policy answers.
 			const detail = currentDetail();
 			const index = lastAssistantIndex(transcript);
 			const entry = index === null ? undefined : transcript[index];
-			return entry?.role === "assistant" ? thinkingExpanded(entry, detail) : policyThinkingFold(detail) === "expanded";
+			if (entry?.role === "assistant") {
+				for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
+					const segment = entry.segments[segIndex];
+					if (segment?.kind === "thinking" && segment.text.length > 0) return thinkingExpanded(segment, detail);
+				}
+			}
+			return policyThinkingFold(detail) === "expanded";
 		},
 		toggleLiveToolOutput(): boolean {
 			liveToolOutput = !liveToolOutput;

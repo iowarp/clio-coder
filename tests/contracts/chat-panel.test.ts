@@ -1215,6 +1215,21 @@ describe("chat-panel live reasoning indicator", () => {
 		ok(first.index < prose && prose < second.index && second.index < tool && tool < live.index, JSON.stringify(rows));
 	});
 
+	it("applies Alt+R to only the newest thinking stretch", () => {
+		const panel = interleavedTurn();
+		ok(panel.toggleLastThinking());
+		let rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("third plan"), rendered);
+		ok(!rendered.includes("first plan"), rendered);
+		ok(!rendered.includes("second plan"), rendered);
+
+		ok(panel.toggleAllThinking());
+		rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("first plan"), rendered);
+		ok(rendered.includes("second plan"), rendered);
+		ok(rendered.includes("third plan"), rendered);
+	});
+
 	it("keeps live reasoning progress at the tail after text closes the stretch", () => {
 		const panel = pendingTurnWithTool();
 		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
