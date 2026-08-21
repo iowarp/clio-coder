@@ -90,3 +90,26 @@ test("marker: preview collapses whitespace, escapes quotes, and stops at 120 cha
 		false,
 	);
 });
+
+test("marker: a resolved failure keeps its first line instead of a preview", () => {
+	const marker = renderMarker({
+		ref: { entry: "01J8" },
+		reason: "failure_resolved",
+		by: "01JC",
+		toolName: "bash",
+		text: "\n\nmake: *** No rule to make target\n  at build.mk:12\n  at Makefile:3\n",
+	});
+	assert.equal(
+		marker,
+		'[evicted ref=01J8 reason=failure_resolved by=01JC tool=bash size=6 lines/68B recall=context(scope="recall", ref="01J8") first_line="make: *** No rule to make target"]',
+	);
+	assert.equal(marker.includes("preview="), false);
+	// Same slot, same bounds, same escaping as a preview.
+	const long = renderMarker({
+		ref: { entry: "01J8" },
+		reason: "failure_resolved",
+		toolName: "bash",
+		text: `he said "no": ${"x".repeat(500)}\nrest`,
+	});
+	assert.equal(long.includes(`first_line="he said \\"no\\": ${"x".repeat(106)}"`), true, long);
+});
