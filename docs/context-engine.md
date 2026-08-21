@@ -31,15 +31,15 @@ The `/context` overlay and footer meter read the same ledger categories: `system
 
 Auto-compaction is controlled by one pressure threshold. Pressure is `estimated_tokens / context_window`. The default threshold is `0.8`.
 
-When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio first masks stale tool observations and stale thinking older than `excludeLastTurns`. This is a cheap local rewrite. Tool call and result structure remain present, but the observation body is replaced with a marker and stale assistant thinking content is dropped from replay.
+When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio first applies the configured working-set policy. The policy appends a `contextEviction` ledger entry and projects selected tool observations and thinking out of model replay; the original entries remain intact and recallable. The one-release destructive mask compatibility path runs only when `CLIO_CODER_LEGACY_MASK=1`.
 
-Marker format:
+The legacy escape hatch uses the old marker format:
 
 ```text
 [Observation masked: <tool> output was <lines> lines, <chars> chars - contents masked to save context. Re-run the tool for current content.] Preview: <preview>
 ```
 
-Already-compacted entries are not masked again. Recent turns keep their full observations and thinking. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
+Already-evicted entries are not selected again. Recent turns keep their full observations and thinking. If projection drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes projected replay messages from the session, and continues.
 
 When the ledger is replayed to the model, compaction summaries, branch summaries, and bash executions become standardized user-role message text. Clio imports `COMPACTION_SUMMARY_PREFIX`, `BRANCH_SUMMARY_PREFIX`, their suffixes, and `bashExecutionToText` through `src/engine/messages.ts`; `src/interactive/chat-renderer.ts` maps Clio's entry shapes onto them and applies replay truncation.
 
@@ -55,7 +55,7 @@ Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are deri
 
 ## Settings
 
-The public settings block has one threshold and one recent-turn horizon:
+The public settings use one compaction threshold plus a non-destructive working-set stage:
 
 ```yaml
 compaction:
@@ -64,9 +64,19 @@ compaction:
   excludeLastTurns: 6
   # model: provider/summary-model-id
   # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
+
+context:
+  workingSet:
+    enabled: true
+    policy: age-horizon
+    target: 0.6
+    protectLastTurns: 6
+    minEvictableTokens: 200
 ```
 
-`auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
+`compaction.auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `compaction.model` optionally selects a dedicated summarization model, and `compaction.systemPrompt` optionally points at a prompt override file. `compaction.excludeLastTurns` only governs the temporary legacy mask path; working-set protection uses `context.workingSet.protectLastTurns`.
+
+`context.workingSet.enabled: false` skips eviction and goes directly to summary compaction; it does not restore the destructive mask. `policy` selects `age-horizon` or the opt-in `structural-v1` policy. `target` is the pressure ratio an eviction event batches down to, `protectLastTurns` is the recent user-turn horizon whose observations remain available, and `minEvictableTokens` keeps results whose estimated savings would be too small. Set `CLIO_CODER_LEGACY_MASK=1` only as a temporary compatibility escape hatch for the old destructive mask stage.
 
 Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Edit removed or unknown keys deliberately; `clio-coder doctor --fix` does not transform settings into the current schema.
 

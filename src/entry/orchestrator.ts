@@ -161,8 +161,8 @@ import {
 import { openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
 import type { EngineModel } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
-import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
 import type { BootOptions } from "./boot-options.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -1620,7 +1620,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// parent onto.
 				chat.resetForSession(
 					leafTurnId,
-					buildReplayAgentMessagesFromTurns(readCurrentSessionEntries(), leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+					buildModelReplayAgentMessagesFromTurns(
+						readCurrentSessionEntries(),
+						leafTurnId ? { activeLeafTurnId: leafTurnId } : {},
+					),
 				);
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
@@ -1672,7 +1675,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					? {
 							readSessionEntries: readSessionEntriesForCompact,
 							buildReplayMessages: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) =>
-								buildReplayAgentMessagesFromTurns(entries, leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
+								buildModelReplayAgentMessagesFromTurns(entries, leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
 						}
 					: {}),
 				providers,

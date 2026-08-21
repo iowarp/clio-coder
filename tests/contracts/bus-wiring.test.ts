@@ -28,6 +28,8 @@ const EMIT_ALLOWLIST: Record<string, string> = {
 		"emitted through the channel-selecting ternary in src/domains/config/extension.ts dispatch()",
 	[BusChannels.ConfigRestartRequired]:
 		"emitted through the channel-selecting ternary in src/domains/config/extension.ts dispatch()",
+	[BusChannels.ContextRecalled]:
+		"successful recall emission is owned by the parallel ws/recall slice and lands when Worker C is merged",
 };
 
 /** Channels with no direct subscribe site, and why that is correct today. */

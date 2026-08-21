@@ -30,6 +30,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_TRUST_PROJECT_SKILLS` | off | `1` trusts project-local skills for execution (`src/domains/resources/skills/loader.ts`). |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | off | `1` lets full-auto pass through to external CLI runtimes with their own full access (`src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts`). |
 | `CLIO_CODER_FORCE_COMPACT` | off | `1` forces compaction on the next interactive turn (`src/interactive/chat-loop.ts`). |
+| `CLIO_CODER_LEGACY_MASK` | off | `1` temporarily restores the destructive stale-observation mask before summary compaction; remove it after compatibility diagnosis. |
 | `CLIO_CODER_STATUS_STUCK_MS` | 180000 | Stuck-turn watchdog threshold (`src/interactive/status/watchdog.ts`). |
 | `CLIO_CODER_SHUTDOWN_HOOK_MS` | 500 | Wall-clock budget per shutdown hook (`src/core/termination.ts`). |
 | `CLIO_CODER_HOOK_BUDGET_MS` | per-phase built-ins | Global middleware hook wall-clock budget (`src/domains/middleware/budget.ts`). |
