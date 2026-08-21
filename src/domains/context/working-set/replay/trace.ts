@@ -11,15 +11,11 @@ export interface Trace {
 	turnCount: number;
 }
 
-/** Turn boundaries shared by the live age horizon and replay runner. */
-export function isReplayTurnStart(entry: SessionEntry): boolean {
-	return isTurnStart(entry);
-}
-
+/** Turns in the sense the protection horizon counts them (`isTurnStart` in horizon.ts). */
 export function countReplayTurns(entries: ReadonlyArray<SessionEntry>): number {
 	let count = 0;
 	for (const entry of entries) {
-		if (isReplayTurnStart(entry)) count += 1;
+		if (isTurnStart(entry)) count += 1;
 	}
 	return count;
 }

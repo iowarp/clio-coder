@@ -6,10 +6,6 @@
  * once. It is the same cutoff `maskStaleObservations` used before this layer
  * existed, which is what keeps `age-horizon` selection-identical to the
  * destructive stage it replaced.
- *
- * `path-index.ts` keeps its own copy of `isTurnStart` on purpose: it is
- * cherry-picked on its own for the replay reference graph, so it stays free of
- * intra-layer imports beyond the payload readers.
  */
 
 import type { SessionEntry } from "../../session/entries.js";

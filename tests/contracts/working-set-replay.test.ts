@@ -9,6 +9,7 @@ import type {
 import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
 import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { isTurnStart } from "../../src/domains/context/working-set/horizon.js";
 import { buildPathIndex } from "../../src/domains/context/working-set/path-index.js";
 import { resolveWorkingSetPolicy } from "../../src/domains/context/working-set/policies/index.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
@@ -33,7 +34,7 @@ import {
 	type ReplayTraceResult,
 	replayTrace,
 } from "../../src/domains/context/working-set/replay/runner.js";
-import { isReplayTurnStart, type Trace } from "../../src/domains/context/working-set/replay/trace.js";
+import type { Trace } from "../../src/domains/context/working-set/replay/trace.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 
@@ -65,7 +66,7 @@ function prefixBeforeTurn(trace: Trace, wantedTurn: number): SessionEntry[] {
 	const prefix: SessionEntry[] = [];
 	let turn = 0;
 	for (const entry of trace.entries) {
-		if (isReplayTurnStart(entry)) {
+		if (isTurnStart(entry)) {
 			turn += 1;
 			if (turn === wantedTurn) return prefix;
 		}

@@ -20,10 +20,10 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
+import { isTurnStart } from "../../src/domains/context/working-set/horizon.js";
 import { ageHorizonPolicy } from "../../src/domains/context/working-set/policies/age-horizon.js";
 import { loadClioTraces } from "../../src/domains/context/working-set/replay/load-clio.js";
 import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
-import { isReplayTurnStart } from "../../src/domains/context/working-set/replay/trace.js";
 import type { EvictedItem, MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createScenarioHarness, evictionEntries } from "../harness/working-set-session.js";
 
@@ -42,7 +42,7 @@ function entriesBeforeTurn(entries: ReadonlyArray<SessionEntry>, turnIndex: numb
 	let seen = 0;
 	for (let index = 0; index < entries.length; index += 1) {
 		const entry = entries[index];
-		if (entry === undefined || !isReplayTurnStart(entry)) continue;
+		if (entry === undefined || !isTurnStart(entry)) continue;
 		seen += 1;
 		if (seen === turnIndex) return entries.slice(0, index);
 	}
