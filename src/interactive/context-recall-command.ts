@@ -51,8 +51,6 @@ export type OperatorRecallOutcome =
 	  }
 	| { ok: false; message: string };
 
-const MAX_LISTED_REFS = 8;
-
 function formatTokens(tokens: number): string {
 	return tokens.toLocaleString("en-US");
 }
@@ -72,18 +70,6 @@ function headlineFor(ref: string, tokens: number, state: EvictedState | undefine
 	return `[/context recall] ${parts.join(" · ")}`;
 }
 
-/**
- * A ref that resolved to nothing is usually a typo or a stale marker, so the
- * failure names what the operator could have typed instead: the nearest evicted
- * ref when the error carries one, and otherwise the refs that are actually out.
- */
-function failureMessage(message: string, evictedRefs: ReadonlyArray<string>, hasNearest: boolean): string {
-	if (hasNearest || evictedRefs.length === 0) return `[/context recall] ${message}`;
-	const shown = evictedRefs.slice(0, MAX_LISTED_REFS).join(", ");
-	const more = evictedRefs.length > MAX_LISTED_REFS ? ", …" : "";
-	return `[/context recall] ${message} Evicted refs on the active path: ${shown}${more}.`;
-}
-
 export function runOperatorRecall(ref: string, deps: OperatorRecallDeps): OperatorRecallOutcome {
 	if (!deps.hasSession()) {
 		return { ok: false, message: "[/context recall] no active session; start one with /new or /resume first" };
@@ -96,13 +82,10 @@ export function runOperatorRecall(ref: string, deps: OperatorRecallDeps): Operat
 	const leaf = deps.activeLeafTurnId();
 	const view = foldWorkingSet(entries, leaf);
 	const resolved = resolveRecall(entries, view, trimmed, leaf);
-	if (!resolved.ok) {
-		const hasNearest = "nearest" in resolved.error && resolved.error.nearest !== null;
-		return {
-			ok: false,
-			message: failureMessage(recallErrorMessage(resolved.error, entries), [...view.evicted.keys()], hasNearest),
-		};
-	}
+	// A ref that resolves to nothing is usually a typo or a stale marker; the
+	// shared message ends with the refs the operator could have typed instead.
+	if (!resolved.ok)
+		return { ok: false, message: `[/context recall] ${recallErrorMessage(resolved.error, entries, view)}` };
 	const { result } = resolved;
 	const fields = buildRecallFields(result, { trigger: "operator" });
 	try {

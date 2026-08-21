@@ -40,10 +40,9 @@ export type {
 };
 
 /**
- * Ref keys index `WorkingSetView.evicted`. A key is the entry turnId
- * (`ref.entry`); `fold.ts` owns the `refKey` / `parseRefKey` helpers.
+ * What the fold knows about one evicted unit. Keyed in `WorkingSetView.evicted`
+ * by the entry turnId (`ref.entry`); `fold.ts` owns `refKey` / `parseRefKey`.
  */
-/** What the fold knows about one evicted unit. */
 export interface EvictedState {
 	reason: EvictionReason;
 	marker: string;
@@ -144,10 +143,10 @@ export interface EvictionPlan {
 export type ContextEvictionFields = Omit<ContextEvictionEntry, "turnId" | "parentTurnId" | "timestamp">;
 export type ContextRecallFields = Omit<ContextRecallEntry, "turnId" | "parentTurnId" | "timestamp">;
 
-/** Typed failure for recall by ref. */
+/** Typed failure for recall by ref. `recallErrorMessage` lists the refs that are evicted beside it. */
 export type RecallError =
-	| { kind: "not_on_active_path"; ref: string; nearest: string | null }
-	| { kind: "not_evicted"; ref: string; nearest: string | null }
+	| { kind: "not_on_active_path"; ref: string }
+	| { kind: "not_evicted"; ref: string }
 	| { kind: "invalid_ref"; ref: string };
 
 export interface RecallResult {

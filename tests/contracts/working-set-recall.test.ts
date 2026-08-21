@@ -149,7 +149,7 @@ test("recall: invalid refs", () => {
 	assert.match(recallErrorMessage(outcome.error), /single turnId/);
 });
 
-test("recall: not_evicted names the nearest evicted ref by longest common prefix", () => {
+test("recall: not_evicted lists the refs that are evicted", () => {
 	const entries = [
 		user("u1", null),
 		toolResult("turn-a1", "u1", "a"),
@@ -160,26 +160,40 @@ test("recall: not_evicted names the nearest evicted ref by longest common prefix
 	const view = foldWorkingSet(entries);
 	const outcome = resolveRecall(entries, view, "turn-b1");
 	assert.ok(!outcome.ok);
-	assert.equal(outcome.error.kind, "not_evicted");
-	// "turn-b1" shares "turn-" (5) with both; the tie keeps fold order.
-	assert.deepEqual(outcome.error, { kind: "not_evicted", ref: "turn-b1", nearest: "turn-a1" });
-	assert.match(recallErrorMessage(outcome.error, entries), /not evicted.*Nearest evicted ref: turn-a1/);
+	assert.deepEqual(outcome.error, { kind: "not_evicted", ref: "turn-b1" });
+	assert.match(
+		recallErrorMessage(outcome.error, entries, view),
+		/not evicted.*Evicted refs on the active path: turn-a1, turn-a2\.$/,
+	);
 
-	// A closer prefix wins over an earlier one.
-	const closer = resolveRecall(entries, view, "turn-a2x");
-	assert.ok(!closer.ok);
-	assert.equal(closer.error.kind, "not_on_active_path");
-	assert.equal(closer.error.nearest, "turn-a2");
+	const unknown = resolveRecall(entries, view, "turn-a2x");
+	assert.ok(!unknown.ok);
+	assert.equal(unknown.error.kind, "not_on_active_path");
+	assert.match(recallErrorMessage(unknown.error, entries, view), /Evicted refs on the active path: turn-a1, turn-a2\.$/);
 });
 
-test("recall: not_on_active_path for an unknown ref, nearest null when nothing shares a prefix", () => {
-	const entries = fixture();
+test("recall: not_on_active_path for an unknown ref says when nothing is evicted", () => {
+	const entries = fixture().filter((entry) => entry.kind !== "contextEviction");
 	const view = foldWorkingSet(entries);
 	const outcome = resolveRecall(entries, view, "zzz");
 	assert.ok(!outcome.ok);
-	assert.deepEqual(outcome.error, { kind: "not_on_active_path", ref: "zzz", nearest: null });
-	assert.match(recallErrorMessage(outcome.error), /not on the active path/);
-	assert.doesNotMatch(recallErrorMessage(outcome.error), /Nearest/);
+	assert.deepEqual(outcome.error, { kind: "not_on_active_path", ref: "zzz" });
+	assert.match(recallErrorMessage(outcome.error, entries, view), /not on the active path.*No refs are evicted/);
+});
+
+test("recall: the listing is cut after eight refs", () => {
+	const refs = Array.from({ length: 10 }, (_, index) => `t${index}`);
+	const entries: SessionEntry[] = [user("u1", null)];
+	let parent = "u1";
+	for (const ref of refs) {
+		entries.push(toolResult(ref, parent, `body ${ref}`));
+		parent = ref;
+	}
+	entries.push(eviction("e1", parent, refs));
+	const view = foldWorkingSet(entries);
+	const outcome = resolveRecall(entries, view, "nope");
+	assert.ok(!outcome.ok);
+	assert.match(recallErrorMessage(outcome.error, entries, view), /t0, t1, t2, t3, t4, t5, t6, t7, and 2 more\.$/);
 });
 
 test("recall: a ref on an abandoned branch is not_on_active_path after a fork", () => {
@@ -196,7 +210,7 @@ test("recall: a ref on an abandoned branch is not_on_active_path after a fork", 
 	assert.deepEqual([...view.evicted.keys()], ["t1b"]);
 	const abandoned = resolveRecall(entries, view, "t1", "u2");
 	assert.ok(!abandoned.ok);
-	assert.deepEqual(abandoned.error, { kind: "not_on_active_path", ref: "t1", nearest: "t1b" });
+	assert.deepEqual(abandoned.error, { kind: "not_on_active_path", ref: "t1" });
 	const live = resolveRecall(entries, view, "t1b", "u2");
 	assert.ok(live.ok);
 	assert.equal(live.result.body, "live body");
