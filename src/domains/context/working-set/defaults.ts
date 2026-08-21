@@ -4,10 +4,11 @@
  * free of a backward domain dependency; this module pairs it with the value
  * the DEFAULT_SETTINGS tree and the engine read at runtime.
  *
- * `enabled: true` with `policy: "age-horizon"` is today's selection (every
- * tool-result body and thinking block beyond the protection horizon) recorded
- * as a projection instead of a ledger rewrite. `structural-v1` stays opt-in
- * until replay-lite shows it ahead of `age-horizon`.
+ * `structural-v1` is the default: typed path-keyed rules first, the age
+ * rule last and batched to `target`. On 165 Claude Code transcripts it held
+ * retention 0.831 against 0.781 for `age-horizon` and 0.779 for random at a
+ * 128k budget (benchmarks/results/context-replay/). `age-horizon` stays
+ * available as the exact pre-layer selection recorded through the ledger.
  */
 
 import type { WorkingSetSettings } from "../../../core/defaults.js";
@@ -16,7 +17,7 @@ export type { WorkingSetPolicyId, WorkingSetSettings } from "../../../core/defau
 
 export const DEFAULT_WORKING_SET_SETTINGS: WorkingSetSettings = {
 	enabled: true,
-	policy: "age-horizon",
+	policy: "structural-v1",
 	target: 0.6,
 	protectLastTurns: 6,
 	minEvictableTokens: 200,

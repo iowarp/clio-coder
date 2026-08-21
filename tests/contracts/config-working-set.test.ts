@@ -10,7 +10,7 @@ describe("contracts/context working-set settings", () => {
 			context: {
 				workingSet: {
 					enabled: false,
-					policy: "structural-v1",
+					policy: "age-horizon",
 					target: 0.55,
 					protectLastTurns: 3,
 					minEvictableTokens: 0,
@@ -21,7 +21,7 @@ describe("contracts/context working-set settings", () => {
 		deepStrictEqual(result.issues, []);
 		deepStrictEqual(result.settings.context.workingSet, {
 			enabled: false,
-			policy: "structural-v1",
+			policy: "age-horizon",
 			target: 0.55,
 			protectLastTurns: 3,
 			minEvictableTokens: 0,

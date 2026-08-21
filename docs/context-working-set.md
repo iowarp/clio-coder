@@ -5,7 +5,7 @@ The working set is the part of the session ledger the model actually receives on
 Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in `src/domains/session/entries.ts`, and the compaction stage in `src/interactive/turn-context.ts` (`runAutoCompact`).
 
 > [!WARNING]
-> This is an experimental community alpha surface. The default policy is `age-horizon`, which reproduces the selection Clio already made before this layer existed. `structural-v1` is opt-in.
+> This is an experimental community alpha surface. The default policy is `structural-v1`, chosen from the replay tables under `benchmarks/results/context-replay/`. `age-horizon` reproduces the selection Clio made before this layer existed and stays available.
 
 ## Vocabulary
 
@@ -84,7 +84,7 @@ A policy answers one question: which units should leave. It never writes, never 
 6. A write or edit the turn in flight is still standing on.
 7. A failure nothing later resolved, and any unindexed failure, because without an observation there is no way to ask whether it was resolved.
 
-### `age-horizon` (default)
+### `age-horizon`
 
 The rule `maskStaleObservations` applied, recorded instead of destroyed. Every `tool_result` body older than the protection horizon leaves the working set, and every `assistant` message older than the horizon loses its thinking blocks. Same turn-start definition, same cutoff, and a body carrying a legacy compaction marker is skipped the same way.
 
@@ -94,7 +94,7 @@ Candidates arrive newest-safe-first, so a caller that stops early has evicted th
 
 Age is not a quality signal. A file read twenty turns ago and never touched since is more useful than a directory listing from two turns ago, which is the whole reason `structural-v1` exists.
 
-### `structural-v1` (opt-in)
+### `structural-v1` (default)
 
 Rule order is the policy. Each rung emits candidates newest-first, every candidate passes `isProtected`, and no unit is claimed twice, so a read that is both stale and superseded is evicted for the reason that came first and carries the `by` ref that explains it. The rungs, in order:
 
