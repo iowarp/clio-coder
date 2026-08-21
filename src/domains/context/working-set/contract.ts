@@ -95,10 +95,13 @@ export interface PressureInput {
 }
 
 /**
- * Everything a policy may look at. Entries are the active path in ledger
- * order and are NOT projected: a policy must consult `view.evicted` to skip
- * units that are already out. Token counts enter selection only through
- * `settings.minEvictableTokens` and the headroom arithmetic against
+ * Everything a policy may look at. `entries` are the active-path entries the
+ * model can currently see: after the latest `compactionSummary` cut, in ledger
+ * order, as `selectVisibleEntries` in visible.ts produces them. They are NOT
+ * projected: a policy must consult `view.evicted` to skip units that are
+ * already out. The view is folded over the full active path, so a ref evicted
+ * before a later compaction is still known. Token counts enter selection only
+ * through `settings.minEvictableTokens` and the headroom arithmetic against
  * `pressure.target`; no rule may rank candidates by size or recency score.
  */
 export interface PolicyInput {
