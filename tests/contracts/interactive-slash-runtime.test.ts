@@ -514,6 +514,7 @@ describe("contracts/interactive slash runtime", () => {
 		runtime.dispatchCommand(`/output ${settings.terminal.outputVerbosity}`);
 
 		strictEqual(harness.events.filter((event) => event === "clear-folds").length, 1);
+		strictEqual(harness.events.filter((event) => event === "footer").length, 1, "the footer reads the new session value");
 	});
 
 	it("submits a shared worker result as a user turn, and never expands it", async () => {

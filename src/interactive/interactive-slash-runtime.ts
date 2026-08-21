@@ -402,6 +402,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			// this even when the requested level already matches the current one;
 			// the render-time change detector cannot observe a same-value command.
 			deps.chatPanel.clearFoldOverrides();
+			deps.refreshFooter();
 			return { status: "applied", verbosity: match };
 		},
 		openModel: deps.openModel,
