@@ -57,6 +57,8 @@ export interface ToolSourceInfo {
 export interface ToolResultSizePolicy {
 	kind: "exact" | "bounded" | "summary" | "truncate";
 	maxBytes?: number;
+	/** Scratch retention ceiling for this tool; defaults to the generic 10 MiB cap. */
+	offloadMaxBytes?: number;
 	followUpHint?: string;
 }
 
@@ -117,6 +119,15 @@ export interface ToolSpec {
 	 * the same function at the top of `run`.
 	 */
 	prepareArguments?(args: Record<string, unknown>): Record<string, unknown>;
+	/**
+	 * Resolve an argument-sensitive canonical disposition after normalization
+	 * and before execution. The registry applies the result exactly once after
+	 * middleware has annotated the terminal result.
+	 */
+	resolveResultDisposition?(
+		args: Record<string, unknown>,
+		declared: ToolResultDisposition | undefined,
+	): ToolResultDisposition | undefined;
 	/**
 	 * Synchronous admission planner. Unlike `prepareArguments`, this runs before
 	 * safety/autonomy mapping so approval-sensitive tools can attach the exact
@@ -389,6 +400,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		decision: SafetyDecision,
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
+		let resultDisposition = spec.metadata?.resultDisposition;
 		try {
 			// The hook layer is the only control stage past safety admission. Guards
 			// (loop, protected artifacts, dispatch dedup) are before_tool
@@ -407,9 +419,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
+				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);
 				const result = await spec.run(preparedArgs, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
-				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
+				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition);
 				return { kind: "ok", result: finalResult, decision };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -417,7 +430,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 				return {
 					kind: "ok",
-					result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options),
+					result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition),
 					decision,
 				};
 			}
@@ -859,6 +872,19 @@ function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<
 		return prepared !== null && typeof prepared === "object" && !Array.isArray(prepared) ? prepared : args;
 	} catch {
 		return args;
+	}
+}
+
+function resolveToolResultDisposition(
+	spec: ToolSpec,
+	args: Record<string, unknown>,
+): ToolResultDisposition | undefined {
+	const declared = spec.metadata?.resultDisposition;
+	if (!spec.resolveResultDisposition) return declared;
+	try {
+		return spec.resolveResultDisposition(args, declared);
+	} catch {
+		return declared;
 	}
 }
 

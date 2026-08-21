@@ -92,10 +92,30 @@ describe("contracts/tool-hardening bash tail-biased non-destructive output", () 
 		const toolCallId = `bash-tail-${Date.now()}`;
 		// ~1.049MB of "A\n" then a trailing "FAIL" with no newline: the actionable
 		// tail lives past clio's old 1MB head-truncation point.
-		const result = await bashTool.run({ command: "yes A | head -c 1049000; printf FAIL" }, { sessionId, toolCallId });
+		// The tool body now returns the one complete capture so the canonical
+		// registry shaper can apply any context disposition exactly once. Exercise
+		// the public registry boundary where tail presentation and offload occur.
+		const registry = createRegistry({
+			safety: {
+				classify: () => ({ actionClass: "execute", reasons: [] }),
+				evaluate: () => ({ kind: "allow", classification: { actionClass: "execute", reasons: [] } }),
+				observeLoop: () => ({ looping: false, key: "bash-tail", count: 0 }),
+				scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+				isSubset: () => true,
+				audit: { recordCount: () => 0 },
+			},
+		});
+		registerAllTools(registry);
+		const verdict = await registry.invoke(
+			{ tool: ToolNames.Bash, args: { command: "yes A | head -c 1049000; printf FAIL" } },
+			{ sessionId, toolCallId },
+		);
+		strictEqual(verdict.kind, "ok");
+		if (verdict.kind !== "ok") return;
+		const result = verdict.result;
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
-		ok(result.output.includes("FAIL"), "model-facing output must include the trailing FAIL");
+		ok(result.output.includes("FAIL"), "operator-facing output must include the trailing FAIL");
 		ok(result.output.includes("tail-truncated"), "output should announce tail truncation");
 
 		const resultSize = (result.details as { resultSize?: { offloadPath?: string; bytes?: number } } | undefined)
