@@ -198,7 +198,24 @@ type ErrorSegment = {
 	kind: "error";
 	text: string;
 };
-type AssistantSegment = TextSegment | ToolSegment | ErrorSegment;
+/**
+ * One stretch of reasoning, in stream order with the text and tool segments
+ * around it. A turn used to hold one `thinking` string, so reasoning could only
+ * ever render in one place (above everything or below everything) and a
+ * turn that thought, wrote, thought again, called a tool, and thought once more
+ * had its reasoning pinned at the tail while the prose streamed in above it.
+ * Each stretch is its own segment now: it renders where it happened, and the
+ * one still open at the tail is the live indicator.
+ */
+type ThinkingSegment = {
+	kind: "thinking";
+	text: string;
+	/** Closed by the first text, tool, or message_end that follows it. */
+	finalized: boolean;
+	/** Panel clock when the first delta of this stretch arrived. */
+	startedAtMs?: number;
+};
+type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 type ReplayBlockRenderer = (width: number) => string[];
 type AssistantStatusLine = { phase: StatusPhase; verb: string; toneHint: VerbRender["toneHint"] };
 
@@ -209,28 +226,20 @@ type TranscriptEntry =
 			role: "assistant";
 			segments: AssistantSegment[];
 			/**
-			 * Raw thinking content from `thinking_delta` events plus
-			 * `thinking` blocks captured on `message_end`. Renders live while
-			 * the turn is pending: a folded `Thinking (N tokens)…` marker by
-			 * default, or the tail of the reasoning down a dim `│ ` rail if
-			 * expanded via `toggleLastThinking()` (Ctrl+T). Once the turn
-			 * settles it collapses to a static `Thinking...` marker (folded) or
-			 * a head-anchored rail (expanded), mirroring the pi-coding-agent
-			 * reference which streams thinking from the partial message.
-			 */
-			thinking: string;
-			/**
-			 * Whether the thinking block renders as the full body (true) or
-			 * the one-line dim marker (false/undefined). Toggled by
+			 * Whether this turn's thinking segments render as their full body
+			 * (true) or the one-line dim marker (false/undefined). Toggled by
 			 * `toggleLastThinking()`. New thinking inherits the panel-level
 			 * visibility mode until Ctrl+T toggles it again.
 			 */
 			expandedThinking?: boolean;
 			/**
-			 * When this turn's reasoning first arrived, so the live line can state
-			 * how long the model has been thinking. Panel clock, set once per entry.
+			 * `segments.length` when the current model call began, so `message_end`
+			 * can tell which segments belong to the message it is settling. A
+			 * provider that delivers thinking only in the final message (no
+			 * `thinking_delta`) gets its thinking segment inserted here, ahead of
+			 * the text the same message produced, rather than at the tail.
 			 */
-			thinkingStartedAtMs?: number;
+			messageStartSegmentIndex?: number | undefined;
 			pending: boolean;
 			statusLine?: AssistantStatusLine | null | undefined;
 			isError: boolean;
@@ -499,6 +508,24 @@ function scopeTerminalErrorAfterSuccessfulTool(
 	return `[error] ${modelFailure}${detachedDispatchSucceeded ? "; detached runs continue" : ""}`;
 }
 
+function hasThinking(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
+	return entry.segments.some((seg) => seg.kind === "thinking" && seg.text.length > 0);
+}
+
+/** The thinking segment still receiving deltas, which is always the tail. */
+function openThinkingSegment(entry: Extract<TranscriptEntry, { role: "assistant" }>): ThinkingSegment | null {
+	const tail = entry.segments[entry.segments.length - 1];
+	return tail?.kind === "thinking" && !tail.finalized ? tail : null;
+}
+
+/** Index of the last thinking segment, which is where a settled turn's count chip rides. */
+function lastThinkingIndex(entry: Extract<TranscriptEntry, { role: "assistant" }>): number {
+	for (let index = entry.segments.length - 1; index >= 0; index -= 1) {
+		if (entry.segments[index]?.kind === "thinking") return index;
+	}
+	return -1;
+}
+
 function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
 	for (const seg of entry.segments) {
 		if (seg.kind === "tool") return true;
@@ -637,9 +664,10 @@ function dimLine(text: string, width: number): string {
 }
 
 /**
- * The settled turn's folded marker, at the head of the entry: history reads
- * reasoning first, then the response. The count comes from the turn's settled
- * usage, never from measuring the excerpt the panel happens to be holding.
+ * A closed thinking stretch's folded marker, in place in the segment order. The
+ * turn's count chip rides on the last marker of a settled turn (`view` is
+ * unmeasured everywhere else), and comes from the settled usage, never from
+ * measuring the excerpt the panel happens to be holding.
  */
 function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): string {
 	const chip = formatReasoningChip(view, compactReasoningTokens);
@@ -650,10 +678,12 @@ function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): s
 }
 
 /**
- * The live turn's one reasoning line, rendered at the TAIL of the pending entry
- * where the status verb goes. Anchoring it at the head put it above every
+ * The live turn's one reasoning line, rendered where the open thinking segment
+ * sits, which is the tail of the entry by construction: the first text, tool,
+ * or message_end closes it. Anchoring reasoning at the head put it above every
  * streamed segment, so on a long turn the only progress indicator scrolled off
- * the top while text and tools kept arriving below it.
+ * the top; pinning one line at the tail put it below prose that streamed in
+ * after the model had already moved on, so the transcript read out of order.
  *
  * The count is whatever the run tally has folded so far, so between model calls
  * the line states elapsed and nothing else. Visible thinking text is never
@@ -884,29 +914,43 @@ function renderEntryLines(
 	// A mid-turn notice splits the transcript, so the events after it open a
 	// fresh entry that a stopped turn never fills; that entry used to reach the
 	// tail below and print a lone agent bubble under the notice.
-	if (
-		!entry.pending &&
-		entry.thinking.length === 0 &&
-		entry.turnUsage === undefined &&
-		!hasVisibleOutput(entry) &&
-		entry.segments.length === 0
-	) {
+	if (!entry.pending && entry.turnUsage === undefined && !hasVisibleOutput(entry) && entry.segments.length === 0) {
 		return [];
 	}
 	const lines: string[] = [];
 	const thinkingExpandedNow = verbosity === "verbose" || (verbosity !== "minimal" && entry.expandedThinking === true);
-	// A settled turn's reasoning renders BEFORE its text and tool segments,
-	// because that is the order it happened in and the order history reads.
-	// While the turn is live it renders at the TAIL instead (below), where the
-	// operator is actually looking.
-	if (entry.thinking.length > 0 && !entry.pending) {
-		if (thinkingExpandedNow) lines.push(...renderThinkingRail(entry.thinking, width, false));
-		else lines.push(renderSettledThinkingMarker(reasoningFromTurnUsage(entry.turnUsage), width));
-	}
+	// Reasoning renders in stream order, between the text and tool segments it
+	// came between. A closed stretch is a folded marker (or a head-anchored rail
+	// when expanded); the stretch still open while the turn is pending is the
+	// live indicator, with the tally's count and its own elapsed. The turn's
+	// settled count chip rides on the last marker once the turn has settled.
+	const chipIndex = entry.pending ? -1 : lastThinkingIndex(entry);
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	let labeled = false;
-	for (const seg of entry.segments) {
+	let liveIndicatorShown = false;
+	for (let segIndex = 0; segIndex < entry.segments.length; segIndex += 1) {
+		const seg = entry.segments[segIndex];
+		if (seg === undefined) continue;
+		if (seg.kind === "thinking") {
+			if (seg.text.length === 0) continue;
+			const live = entry.pending && !seg.finalized;
+			if (thinkingExpandedNow) lines.push(...renderThinkingRail(seg.text, width, live));
+			if (live) {
+				liveIndicatorShown = true;
+				lines.push(
+					renderLiveReasoningLine(
+						liveReasoning,
+						seg.startedAtMs === undefined ? undefined : Math.max(0, nowMs - seg.startedAtMs),
+						width,
+					),
+				);
+			} else if (!thinkingExpandedNow) {
+				const view = segIndex === chipIndex ? reasoningFromTurnUsage(entry.turnUsage) : UNMEASURED_REASONING;
+				lines.push(renderSettledThinkingMarker(view, width));
+			}
+			continue;
+		}
 		if (seg.kind === "tool") {
 			lines.push(
 				...renderToolSegmentLines(
@@ -950,33 +994,19 @@ function renderEntryLines(
 		}
 	}
 	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, verbosity));
-	// The live turn's reasoning indicator, at the tail, is the one line that
-	// speaks for reasoning while the turn runs. The generic thinking verb is
-	// suppressed beneath it so the entry never carries two indicators for the
-	// same thing.
-	const showsLiveReasoning = entry.pending && entry.thinking.length > 0;
+	// The open thinking segment's line is the one that speaks for reasoning while
+	// the turn runs. The generic thinking verb is suppressed while it shows so
+	// the entry never carries two indicators for the same thing.
 	const shouldRenderStatus =
 		entry.pending &&
 		entry.statusLine !== null &&
 		entry.statusLine !== undefined &&
 		!(entry.statusLine.phase === "writing" && hasStreamingText(entry)) &&
-		!(entry.statusLine.phase === "thinking" && showsLiveReasoning);
-	const tail: string[] = [];
-	if (showsLiveReasoning) {
-		if (thinkingExpandedNow) tail.push(...renderThinkingRail(entry.thinking, width, true));
-		tail.push(
-			renderLiveReasoningLine(
-				liveReasoning,
-				entry.thinkingStartedAtMs === undefined ? undefined : Math.max(0, nowMs - entry.thinkingStartedAtMs),
-				width,
-			),
-		);
-	}
-	if (shouldRenderStatus) {
-		tail.push(`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
-	}
+		!(entry.statusLine.phase === "thinking" && liveIndicatorShown);
 	if (!labeled && !hasVisibleOutput(entry)) lines.push(clioPrefix.trimEnd());
-	for (const line of tail) lines.push(line);
+	if (shouldRenderStatus) {
+		lines.push(`${STATUS_INDENT}${styleStatusVerb(entry.statusLine?.verb ?? "", entry.statusLine?.toneHint ?? "muted")}`);
+	}
 	return lines;
 }
 
@@ -1122,7 +1152,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const entry: Extract<TranscriptEntry, { role: "assistant" }> = {
 			role: "assistant",
 			segments: [],
-			thinking: "",
 			expandedThinking: thinkingExpanded,
 			pending: false,
 			isError: false,
@@ -1131,9 +1160,34 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		return entry;
 	};
 
+	/**
+	 * Close the thinking stretch at the tail, if one is open. Anything that
+	 * follows reasoning in the stream (text, a tool call, the message settling)
+	 * ends that stretch; a later `thinking_delta` opens a new segment after it,
+	 * so the transcript keeps the order the model actually worked in.
+	 */
+	const closeOpenThinking = (entry: Extract<TranscriptEntry, { role: "assistant" }>): void => {
+		const open = openThinkingSegment(entry);
+		if (open === null) return;
+		open.finalized = true;
+		invalidateEntryCache(entry);
+	};
+
+	const appendThinkingDelta = (entry: Extract<TranscriptEntry, { role: "assistant" }>, delta: string): void => {
+		if (delta.length === 0) return;
+		invalidateEntryCache(entry);
+		const open = openThinkingSegment(entry);
+		if (open !== null) {
+			open.text += delta;
+			return;
+		}
+		entry.segments.push({ kind: "thinking", text: delta, finalized: false, startedAtMs: now() });
+	};
+
 	const appendTextDelta = (entry: Extract<TranscriptEntry, { role: "assistant" }>, delta: string): void => {
 		if (delta.length === 0) return;
 		invalidateEntryCache(entry);
+		closeOpenThinking(entry);
 		const tail = entry.segments[entry.segments.length - 1];
 		if (tail && tail.kind === "text" && !tail.finalized) {
 			tail.text += delta;
@@ -1143,15 +1197,22 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	/**
-	 * Canonicalize a streamed text segment from a completed assistant message.
-	 * When streaming produced a prefix of the final text (the common case),
-	 * the tail segment is overwritten and flipped to finalized so the next
-	 * render pipes it through Markdown. When the message arrived fully formed
-	 * with no deltas (non-streaming test path, synthetic notices), a fresh
-	 * finalized text segment is appended after any tool segments that may
-	 * have landed in this turn already. `replaceTail` forces the overwrite for
-	 * messages the chat loop rewrote after streaming (locked-turn markup
-	 * sanitation): the streamed tail is dead text there, not a prefix.
+	 * Canonicalize the streamed text of a completed assistant message.
+	 *
+	 * The streamed text is wherever this message put it, not necessarily at the
+	 * tail: a message that thinks, writes, and thinks again leaves its text
+	 * behind a thinking segment. Looking only at the tail appended the message
+	 * text a second time under the reasoning marker, so the answer read twice.
+	 *
+	 * One streamed segment that is a prefix of the final text (the common case)
+	 * is overwritten in place and flipped to finalized so the next render pipes
+	 * it through Markdown. Several streamed segments (text split by reasoning)
+	 * are each finalized where they stand; the deltas already are the text.
+	 * When the message arrived fully formed with no deltas (non-streaming
+	 * path, synthetic notices, replay), a fresh finalized segment is appended.
+	 * `replaceTail` forces the overwrite for messages the chat loop rewrote
+	 * after streaming (locked-turn markup sanitation): the streamed text is dead
+	 * there, not a prefix.
 	 */
 	const canonicalizeMessageText = (
 		entry: Extract<TranscriptEntry, { role: "assistant" }>,
@@ -1159,15 +1220,36 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		replaceTail = false,
 	): void => {
 		if (text.length === 0) return;
-		const tail = entry.segments[entry.segments.length - 1];
-		if (tail?.kind === "text" && !tail.finalized && (replaceTail || text.startsWith(tail.text))) {
-			tail.text = text;
-			tail.finalized = true;
+		closeOpenThinking(entry);
+		const messageStart = Math.min(entry.messageStartSegmentIndex ?? 0, entry.segments.length);
+		const streamed: TextSegment[] = [];
+		for (let index = messageStart; index < entry.segments.length; index += 1) {
+			const segment = entry.segments[index];
+			if (segment?.kind === "text" && !segment.finalized) streamed.push(segment);
+		}
+		const finalize = (segment: TextSegment, value: string): void => {
+			segment.text = value;
+			segment.finalized = true;
 			// The streaming wrap cache assumes append-only text. This is the one
 			// path that rewrites it wholesale, and finalized segments render through
 			// Markdown instead, so the cache is dead here either way.
-			delete tail.wrapCache;
-			if (tail.md) tail.md.setText(text);
+			delete segment.wrapCache;
+			if (segment.md) segment.md.setText(value);
+		};
+		if (replaceTail && streamed.length > 0) {
+			const [first, ...rest] = streamed;
+			if (first) finalize(first, text);
+			for (const dead of rest) entry.segments.splice(entry.segments.indexOf(dead), 1);
+			return;
+		}
+		if (streamed.length === 1 && streamed[0] !== undefined) {
+			const only = streamed[0];
+			if (text.startsWith(only.text)) {
+				finalize(only, text);
+				return;
+			}
+		} else if (streamed.length > 1) {
+			for (const segment of streamed) finalize(segment, segment.text);
 			return;
 		}
 		entry.segments.push({ kind: "text", text, finalized: true });
@@ -1245,7 +1327,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// The live reasoning line counts its own elapsed, so a turn that is
 				// only thinking still needs the time-keyed render key.
 			) ||
-				(entry.pending && entry.thinking.length > 0 && entry.thinkingStartedAtMs !== undefined))) ||
+				(entry.pending && openThinkingSegment(entry)?.startedAtMs !== undefined))) ||
 		(entry.role === "replayBlock" && entry.isLive?.() === true);
 
 	/**
@@ -1505,7 +1587,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 				const entry = transcript[entryIndex];
 				if (entry?.role !== "assistant") continue;
-				if (entry.thinking.length === 0) continue;
+				if (!hasThinking(entry)) continue;
 				entry.expandedThinking = entry.expandedThinking !== true;
 				thinkingExpanded = entry.expandedThinking === true;
 				clearRenderCaches();
@@ -1518,7 +1600,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		toggleAllThinking(): boolean {
 			const entries: Array<Extract<TranscriptEntry, { role: "assistant" }>> = [];
 			for (const entry of transcript) {
-				if (entry.role === "assistant" && entry.thinking.length > 0) entries.push(entry);
+				if (entry.role === "assistant" && hasThinking(entry)) entries.push(entry);
 			}
 			if (entries.length === 0) {
 				thinkingExpanded = !thinkingExpanded;
@@ -1604,6 +1686,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				} else if (existing === undefined) {
 					const assistant = ensureAssistant();
 					assistant.pending = true;
+					closeOpenThinking(assistant);
 					assistant.segments.push({
 						kind: "tool",
 						id: streamed.id,
@@ -1627,17 +1710,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "thinking_delta") {
-				// Capture for downstream consumers but never render inline.
+				// The text itself is never rendered unless the operator expands it;
+				// the segment is what keeps reasoning in its place in the stream.
 				const assistant = ensureAssistant();
 				assistant.pending = true;
-				assistant.thinking += event.delta;
-				assistant.thinkingStartedAtMs ??= now();
+				appendThinkingDelta(assistant, event.delta);
 				assistant.expandedThinking = thinkingExpanded;
 				markDirty();
 				return;
 			}
 			if (event.type === "message_start" && event.message.role === "assistant") {
-				ensureAssistant().pending = true;
+				const assistant = ensureAssistant();
+				assistant.pending = true;
+				assistant.messageStartSegmentIndex = assistant.segments.length;
 				markDirty();
 				return;
 			}
@@ -1671,6 +1756,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// their one-line row until the operator expands them.
 				const expanded = toolPresentationPolicy(event.toolName, event.args).foldDefault === "expanded";
 				assistant.pending = true;
+				closeOpenThinking(assistant);
 				assistant.segments.push({
 					kind: "tool",
 					id: event.toolCallId,
@@ -1798,11 +1884,23 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				invalidateEntryCache(assistant);
 				if (usage !== undefined) assistant.turnUsage = usage;
 				if (terminalError.length > 0) assistant.isError = true;
+				// The message is settled, so whatever reasoning it streamed is closed.
+				// A message that carried thinking the panel never saw as deltas (a
+				// non-streaming provider, a replayed message) gets one segment at the
+				// point this message began, ahead of the text the same message
+				// produced, rather than a marker dangling after the answer.
+				closeOpenThinking(assistant);
 				if (thinking.length > 0) {
-					assistant.thinking = thinking;
-					assistant.thinkingStartedAtMs ??= now();
+					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
+					const streamedThisMessage = assistant.segments
+						.slice(messageStart)
+						.some((segment) => segment.kind === "thinking" && segment.text.length > 0);
+					if (!streamedThisMessage) {
+						assistant.segments.splice(messageStart, 0, { kind: "thinking", text: thinking, finalized: true });
+					}
 					assistant.expandedThinking = thinkingExpanded;
 				}
+				assistant.messageStartSegmentIndex = undefined;
 				// The chat loop marks messages it sanitized after streaming (dead
 				// tool-call markup on a synthesis-locked turn); the streamed tail
 				// must be replaced, not kept alongside a duplicate segment.
@@ -1873,8 +1971,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 					if (entry.pending) {
 						invalidateEntryCache(entry);
+						closeOpenThinking(entry);
 						entry.pending = false;
 						entry.statusLine = null;
+						entry.messageStartSegmentIndex = undefined;
 					}
 				}
 				markDirty();
