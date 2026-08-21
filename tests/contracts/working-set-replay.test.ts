@@ -240,6 +240,7 @@ describe("contracts/working-set replay-lite", () => {
 				threshold: 0.8,
 				target: 0.6,
 				seed: 0,
+				format: "auto" as const,
 				filter: "default" as const,
 				settings: SETTINGS,
 			},
@@ -258,15 +259,19 @@ describe("contracts/working-set replay-lite", () => {
 			assert.equal(markdown.match(new RegExp(`^\\| ${policyId} \\|`, "gm"))?.length, budgets.length);
 		}
 		assert.equal(markdown.match(/^## Budget /gm)?.length, budgets.length);
+		assert.equal(markdown.match(/\(n=\d+\)/g)?.length, policies.length * budgets.length);
 
 		const json = renderReplayJson(input);
 		assert.equal(renderReplayJson(input), json, "stable input must render byte-identically");
 		const parsed = JSON.parse(json) as {
 			provenance: { gitSha: string; commandLine: string[] };
-			results: unknown[];
+			results: Array<{ metrics: { mean: { turnsToFirstSummary: number | null; turnsToFirstSummaryCount: number } } }>;
 		};
 		assert.equal(parsed.provenance.gitSha, "abc123");
 		assert.deepEqual(parsed.provenance.commandLine, input.commandLine);
 		assert.equal(parsed.results.length, policies.length * budgets.length);
+		for (const result of parsed.results) {
+			assert.equal(result.metrics.mean.turnsToFirstSummaryCount, result.metrics.mean.turnsToFirstSummary === null ? 0 : 1);
+		}
 	});
 });

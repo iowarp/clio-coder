@@ -8,6 +8,7 @@ export interface ReplayReportConfig {
 	threshold: number;
 	target: number;
 	seed: number;
+	format: "clio" | "claude-code" | "auto";
 	filter: "default" | "none";
 	settings: WorkingSetSettings;
 }
@@ -26,7 +27,7 @@ export interface ReplayReportInput {
 	commandLine: ReadonlyArray<string>;
 }
 
-function metricObject(metrics: ReplayMetrics): Record<string, number | null> {
+function metricObject(metrics: ReplayMetrics, turnsToFirstSummaryCount: number): Record<string, number | null> {
 	return {
 		traces: metrics.traces,
 		retention: metrics.retention,
@@ -36,6 +37,7 @@ function metricObject(metrics: ReplayMetrics): Record<string, number | null> {
 		evictionEvents: metrics.evictionEvents,
 		churn: metrics.churn,
 		turnsToFirstSummary: metrics.turnsToFirstSummary,
+		turnsToFirstSummaryCount,
 	};
 }
 
@@ -49,6 +51,7 @@ export function renderReplayJson(input: ReplayReportInput): string {
 			threshold: input.config.threshold,
 			target: input.config.target,
 			seed: input.config.seed,
+			format: input.config.format,
 			filter: input.config.filter,
 			settings: {
 				enabled: input.config.settings.enabled,
@@ -72,7 +75,7 @@ export function renderReplayJson(input: ReplayReportInput): string {
 			budgetTokens: result.budgetTokens,
 			policyId: result.policyId,
 			metrics: {
-				mean: metricObject(result.metrics.mean),
+				mean: metricObject(result.metrics.mean, result.metrics.turnsToFirstSummaryCount),
 				pooledRetention: result.metrics.pooledRetention,
 				pooledRetentionAt10: result.metrics.pooledRetentionAt10,
 			},
@@ -121,7 +124,7 @@ export function renderReplayMarkdown(input: ReplayReportInput): string {
 			if (result === undefined) continue;
 			const metrics = result.metrics.mean;
 			lines.push(
-				`| ${policy} | ${metrics.traces} | ${ratio(metrics.retention)} | ${ratio(result.metrics.pooledRetention)} | ${ratio(metrics.retentionAt10)} | ${ratio(metrics.evictionPrecision)} | ${quantity(metrics.tokensEvicted)} | ${quantity(metrics.evictionEvents)} | ${ratio(metrics.churn)} | ${metrics.turnsToFirstSummary === null ? "—" : quantity(metrics.turnsToFirstSummary)} |`,
+				`| ${policy} | ${metrics.traces} | ${ratio(metrics.retention)} | ${ratio(result.metrics.pooledRetention)} | ${ratio(metrics.retentionAt10)} | ${ratio(metrics.evictionPrecision)} | ${quantity(metrics.tokensEvicted)} | ${quantity(metrics.evictionEvents)} | ${ratio(metrics.churn)} | ${metrics.turnsToFirstSummary === null ? "—" : quantity(metrics.turnsToFirstSummary)} (n=${result.metrics.turnsToFirstSummaryCount}) |`,
 			);
 		}
 	}
