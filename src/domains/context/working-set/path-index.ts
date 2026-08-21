@@ -69,6 +69,8 @@ export interface PathObservation {
 	/** Listing ops only: concrete file paths the result surfaced, resolved like `path`. */
 	surfaced: ReadonlyArray<string>;
 	isError: boolean;
+	/** The safety rails refused the call: no observation happened, and it resolves nothing. */
+	isBlocked: boolean;
 	/** Turn starts (user message, bashExecution, branchSummary) strictly before this entry. */
 	turnIndex: number;
 	/** Index in the entries array this index was built from. */
@@ -339,6 +341,7 @@ function toolResultObservation(
 	if (op === undefined) return null;
 	const args = call !== undefined && isRecord(call.args) ? call.args : null;
 	const isError = obj?.isError === true || obj?.error === true;
+	const isBlocked = obj?.outcome === "blocked" || typeof obj?.blockReason === "string";
 	const path = observedPath(op, args, context.cwd);
 	const surfaced = shouldParseSurfaced(op, args, isError)
 		? surfacedPaths(op, args, toolResultText(obj?.result ?? entry.payload), path, context.cwd)
@@ -352,6 +355,7 @@ function toolResultObservation(
 		range: op === "read" ? readRange(args) : null,
 		surfaced,
 		isError,
+		isBlocked,
 		turnIndex: context.turnIndex,
 		entryIndex: context.entryIndex,
 		argsKey: call?.argsKey ?? "",
@@ -382,6 +386,7 @@ export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: P
 				range: null,
 				surfaced: [],
 				isError: false,
+				isBlocked: false,
 				turnIndex,
 				entryIndex,
 				argsKey: "",
