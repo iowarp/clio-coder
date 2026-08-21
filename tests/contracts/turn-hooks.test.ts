@@ -33,6 +33,9 @@ import { createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createStatusController, type TurnSummary } from "../../src/interactive/status/index.js";
 import { createToolProseRegistration } from "../../src/interactive/tool-prose-registration.js";
 
+const CAPTURED_CONVERSATIONAL_OFFER =
+	"What are we working on? If you've got a task, file in mind, or a directory you want me to explore, point me at it and I'll get moving.";
+
 function settings(): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 	value.orchestrator.target = "test-target";
@@ -665,6 +668,40 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		ok(!(prompts[2] ?? "").includes("<system-reminder>"), "reminders flush once, not on every request");
 	});
 
+	it("leaves the captured conversational offer at one provider prompt without open-work notices", async () => {
+		const entries: SessionEntry[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		const prompts: string[] = [];
+		const notices: Array<{ level: string; text: string }> = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				prompts.push(String(input));
+				await emitAssistantTurn(agent, assistantStopMessage(CAPTURED_CONVERSATIONAL_OFFER));
+			}, []),
+		} as never);
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push({ level: event.level, text: event.text });
+		});
+
+		await loop.submit("hi");
+
+		deepStrictEqual(prompts, ["hi"]);
+		strictEqual(
+			notices.some(
+				(notice) =>
+					notice.text === "turn ended with open work; nudge sent" ||
+					notice.text === "turn still has open work; this turn's nudge is spent",
+			),
+			false,
+		);
+	});
+
 	it("auto-continues once when a turn announces work but calls no tools", async () => {
 		const entries: SessionEntry[] = [];
 		const middleware = createMiddlewareBundle().contract;
@@ -1015,6 +1052,16 @@ describe("contracts/turn-hooks stalled-turn nudge", () => {
 			strictEqual(effects.length, 1, text);
 			strictEqual(effects[0]?.kind, "request_continuation");
 			ok(effects[0]?.kind === "request_continuation" && effects[0].message === STALLED_TURN_REQUEST_CONTINUATION_MESSAGE);
+		}
+	});
+
+	it("does not fire for the captured greeting or conditional offers of future help", () => {
+		for (const text of [
+			CAPTURED_CONVERSATIONAL_OFFER,
+			"If you'd like, I'll inspect the repository files for you.",
+			"Send me a path and I'll read the file when you're ready.",
+		]) {
+			strictEqual(effectsFor(text).length, 0, text);
 		}
 	});
 
