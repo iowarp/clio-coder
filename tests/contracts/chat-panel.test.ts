@@ -1137,34 +1137,184 @@ describe("chat-panel live reasoning indicator", () => {
 		return panel;
 	}
 
-	// The marker used to render above every segment, so on a long turn the only
-	// reasoning indicator scrolled off the top while text and tools streamed
-	// below it (issue #171).
-	it("renders the live line at the tail, below the turn's tool and text segments", () => {
-		const panel = pendingTurnWithTool();
-		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
-		const rows = panel
-			.render(80)
+	/**
+	 * thinking → text → thinking → tool → thinking, still open. Each stretch
+	 * renders where it happened, and the only live indicator is the stretch at
+	 * the tail that is still receiving deltas.
+	 */
+	function interleavedTurn(clock: () => number = frozen.now): ReturnType<typeof createChatPanel> {
+		const panel = createChatPanel({ now: clock });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "first plan",
+			partialThinking: "first plan",
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "text_delta", contentIndex: 1, delta: "Looking at the file." } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 2,
+			delta: "second plan",
+			partialThinking: "second plan",
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "read",
+			args: { path: "a.ts" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "ok" }] },
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 3,
+			delta: "third plan",
+			partialThinking: "third plan",
+		} as ChatLoopEvent);
+		return panel;
+	}
+
+	function rowsOf(panel: ReturnType<typeof createChatPanel>, width: number): string[] {
+		return panel
+			.render(width)
 			.map(strip)
 			.filter((row) => row.trim().length > 0);
-		const last = rows[rows.length - 1] ?? "";
-		ok(last.includes("Thinking · r≈1.2k estimated"), JSON.stringify(rows));
-		const thinkingRows = rows.filter((row) => row.includes("Thinking"));
-		strictEqual(thinkingRows.length, 1, `one reasoning indicator per entry: ${JSON.stringify(rows)}`);
+	}
+
+	function indexOfRow(rows: ReadonlyArray<string>, needle: string): number {
+		return rows.findIndex((row) => row.includes(needle));
+	}
+
+	// Reasoning used to be one string per turn, so it could only render in one
+	// place: above everything (and scroll off) or pinned below everything while
+	// the prose streamed in above it. It renders in stream order now.
+	it("renders each thinking stretch where it happened and the live line at the open tail", () => {
+		const panel = interleavedTurn();
+		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
+		const rows = rowsOf(panel, 80);
+		const markers = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.includes("Thinking"));
+		strictEqual(markers.length, 3, JSON.stringify(rows));
+		const [first, second, live] = markers;
+		ok(first && second && live);
+		strictEqual(first.row, "Thinking…", JSON.stringify(rows));
+		strictEqual(second.row, "Thinking…", JSON.stringify(rows));
+		ok(live.row.includes("Thinking · r≈1.2k estimated"), JSON.stringify(rows));
+		strictEqual(live.index, rows.length - 1, `the live line is the last row: ${JSON.stringify(rows)}`);
+		const prose = indexOfRow(rows, "Looking at the file.");
+		const tool = indexOfRow(rows, "a.ts");
+		ok(first.index < prose && prose < second.index && second.index < tool && tool < live.index, JSON.stringify(rows));
+	});
+
+	it("closes a stretch when text follows it, so no live line survives below the prose", () => {
+		const panel = pendingTurnWithTool();
+		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
+		const rows = rowsOf(panel, 80);
+		strictEqual(rows[0], "Thinking…", JSON.stringify(rows));
+		ok(!rows.some((row) => row.includes("Thinking ·")), `no live line once the model moved on: ${JSON.stringify(rows)}`);
+		ok(indexOfRow(rows, "a.ts") < indexOfRow(rows, "answering now"), JSON.stringify(rows));
+	});
+
+	it("settles the interleaved turn in order with the count chip on the last marker", () => {
+		const panel = interleavedTurn();
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "first plan" },
+				{ type: "text", text: "Looking at the file." },
+				{ type: "thinking", thinking: "second plan" },
+				{ type: "thinking", thinking: "third plan" },
+			],
+			usage: { input: 30, output: 900, reasoningTokens: 42 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+		const rows = rowsOf(panel, 80);
+		const markers = rows.filter((row) => row.includes("Thinking"));
+		strictEqual(markers.length, 3, JSON.stringify(rows));
+		strictEqual(markers[0], "Thinking…");
+		strictEqual(markers[1], "Thinking…");
+		strictEqual(markers[2], "Thinking… · r42 provider-reported", JSON.stringify(rows));
+		ok(indexOfRow(rows, "Looking at the file.") < indexOfRow(rows, "a.ts"), JSON.stringify(rows));
+		ok(!rows.some((row) => row.includes("Thinking ·")), JSON.stringify(rows));
+		// Nothing was re-ordered or duplicated by the settle.
+		strictEqual(rows.filter((row) => row.includes("Looking at the file.")).length, 1);
+	});
+
+	// A second model call on the same turn used to overwrite the first call's
+	// thinking, and a provider that ships thinking only in the final message
+	// (no deltas) had it appended after the answer.
+	it("keeps every call's reasoning on a multi-call turn and places non-streamed thinking before its text", () => {
+		const panel = createChatPanel({ now: frozen.now });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+		panel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: "call one",
+			partialThinking: "call one",
+		} as ChatLoopEvent);
+		const first = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "call one" }],
+			usage: { input: 10, output: 50, reasoningTokens: 5 },
+			stopReason: "toolUse",
+		};
+		panel.applyEvent({ type: "message_end", message: first } as unknown as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "read",
+			args: { path: "b.ts" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "ok" }] },
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+		const second = {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "call two, never streamed" },
+				{ type: "text", text: "final answer" },
+			],
+			usage: { input: 10, output: 50, reasoningTokens: 9 },
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_end", message: second } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [first, second] } as unknown as ChatLoopEvent);
+		const rows = rowsOf(panel, 80);
+		const markers = rows.filter((row) => row.includes("Thinking"));
+		strictEqual(markers.length, 2, JSON.stringify(rows));
+		const secondMarker = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.includes("Thinking"))[1];
+		ok(secondMarker);
 		ok(
-			rows.some((row) => row.includes("answering now")),
-			JSON.stringify(rows),
+			indexOfRow(rows, "b.ts") < secondMarker.index,
+			`second call's reasoning follows the tool: ${JSON.stringify(rows)}`,
 		);
-		ok(rows.findIndex((row) => row.includes("answering now")) < rows.length - 1, "the line sits below the prose");
+		ok(secondMarker.index < indexOfRow(rows, "final answer"), `and precedes its own text: ${JSON.stringify(rows)}`);
+		panel.toggleAllThinking();
+		const expanded = strip(panel.render(80).join("\n"));
+		ok(expanded.includes("call one"), expanded);
+		ok(expanded.includes("call two, never streamed"), expanded);
 	});
 
 	it("does not print a second thinking indicator from the status verb", () => {
-		const panel = pendingTurnWithTool();
+		const panel = interleavedTurn();
 		panel.setLiveReasoning({ tokens: 900, provenance: "provider" });
 		panel.setStatusLine({ phase: "thinking", verb: "receiving thinking", toneHint: "muted" });
 		const rendered = strip(panel.render(80).join("\n"));
 		ok(rendered.includes("Thinking · r900 provider-reported"), rendered);
 		ok(!rendered.includes("receiving thinking"), rendered);
+		strictEqual(rendered.split("Thinking ·").length - 1, 1, `one live indicator: ${rendered}`);
 	});
 
 	it("states no token count until something settles into the tally", () => {
@@ -1316,7 +1466,7 @@ describe("chat-panel live reasoning indicator", () => {
 	});
 
 	it("states the same reasoning text at 40, 80, and 120 columns and across bare re-renders", () => {
-		const panel = pendingTurnWithTool();
+		const panel = interleavedTurn();
 		panel.setLiveReasoning({ tokens: 1234, provenance: "mixed" });
 		for (const width of [40, 80, 120]) {
 			const rows = panel.render(width).map(strip);
