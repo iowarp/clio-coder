@@ -176,13 +176,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const pendingColdReasons = new Set<string>();
 	let runExpectedColdReasons: string[] = [];
 	let nextAssistantColdReasons: string[] = [];
+	// A working-set eviction changes the prefix itself, so it cools every
+	// tier's cache, not only a single-slot local one. Dispatch and compaction
+	// disturbances keep the local-native gate below.
+	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<string> = new Set(["working_set_evict"]);
+	const stampsOnTier = (reason: string, runtimeId: string | undefined): boolean =>
+		TIER_INDEPENDENT_COLD_REASONS.has(reason) ||
+		(runtimeId !== undefined && deps.providers.getRuntime(runtimeId)?.tier === "local-native");
 	const noteColdReason = (reason: string): void => {
 		if (!state.streaming) {
 			pendingColdReasons.add(reason);
 			return;
 		}
-		const runtimeId = state.runtime?.runtimeId;
-		if (!runtimeId || deps.providers.getRuntime(runtimeId)?.tier !== "local-native") return;
+		if (!stampsOnTier(reason, state.runtime?.runtimeId)) return;
 		if (!runExpectedColdReasons.includes(reason)) runExpectedColdReasons.push(reason);
 		if (nextAssistantColdReasons.includes(reason)) return;
 		nextAssistantColdReasons.push(reason);
@@ -901,9 +907,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			runExpectedColdReasons = [];
 			nextAssistantColdReasons = [];
 			if (pendingColdReasons.size > 0) {
-				const reasons = [...pendingColdReasons];
+				const reasons = [...pendingColdReasons].filter((reason) => stampsOnTier(reason, runtimeId));
 				pendingColdReasons.clear();
-				if (deps.providers.getRuntime(runtimeId)?.tier === "local-native") {
+				if (reasons.length > 0) {
 					runExpectedColdReasons = reasons;
 					nextAssistantColdReasons = reasons;
 					deps.emitNotice(`[context engine] backend prefix cache likely cold this turn: ${reasons.join(", ")}`);
