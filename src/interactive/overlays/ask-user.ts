@@ -13,8 +13,9 @@ import {
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-user.js";
-import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
 import { type ClioToken, clioTheme, dotSep, GLYPH, screenTitle } from "../theme/index.js";
+import { nextContentScrollOffset, type ViewScrollAction } from "../view/view-overlay.js";
 
 /**
  * The border and title token while a decision is pending.
@@ -54,7 +55,7 @@ export const ASK_USER_DEFAULT_SURFACE: AskUserSurface = "panel";
 interface AskUserSurfaceGeometry {
 	/** Box width in columns; zero fills the row. The frame clamps to the terminal. */
 	width: number;
-	/** Rows the body may use, before the borders. */
+	/** Rows the body may use, before the borders. Zero means every row the frame has. */
 	maxInnerRows: number;
 	anchor: NonNullable<OverlayOptions["anchor"]>;
 	margin: NonNullable<OverlayOptions["margin"]>;
@@ -74,12 +75,18 @@ interface AskUserSurfaceGeometry {
 export const ASK_USER_SURFACE_GEOMETRY: Record<AskUserSurface, AskUserSurfaceGeometry> = {
 	compact: { width: 68, maxInnerRows: 10, anchor: "bottom-center", margin: { top: 1, right: 2, bottom: 1, left: 2 } },
 	panel: { width: 88, maxInnerRows: 18, anchor: "center", margin: 1 },
-	interview: { width: 0, maxInnerRows: 42, anchor: "center", margin: 1 },
+	// The interview is a workspace, not a modal. A cap of 42 turned a 66-row
+	// terminal into a centered box with twenty blank rows around it, so the
+	// interview takes every row the frame has and lays its own chrome out inside
+	// them. The one-row margin keeps the border off the top row and the footer.
+	interview: { width: 0, maxInnerRows: 0, anchor: "center", margin: 1 },
 };
 
 const ASK_USER_FRAME_ROWS = 2;
 const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_VISIBLE_OPTIONS = 3;
+/** Interview rows spent on chrome before an option row: strip, header, blanks, status, one question row. */
+const INTERVIEW_CHROME_ROWS = 7;
 const MAX_VISIBLE_OPTIONS = 12;
 const ELLIPSIS = "…";
 
@@ -227,6 +234,14 @@ class AskUserOverlayView implements Component {
 	private list: SelectList | null = null;
 	private input: Input | null = null;
 	private resolveCurrent: ((result: AskUserResult) => void) | null = null;
+	/** Rows of the interview's scrollable middle already scrolled past. */
+	private contentScrollOffset = 0;
+	/** Whether the last interview render had more content than the region held. */
+	private contentOverflows = false;
+	/** Rows the scroll region drew on the last render, for a page-sized jump. */
+	private contentRegionHeight = 1;
+	/** Rows the scroll region wanted on the last render. */
+	private contentTotalRows = 0;
 
 	constructor(private readonly deps: AskUserOverlayViewDeps) {}
 
@@ -240,6 +255,7 @@ class AskUserOverlayView implements Component {
 		this.states = this.questions.map((question) => createQuestionState(question));
 		this.list = null;
 		this.input = null;
+		this.resetContentScroll();
 		// Before the controls, because how many option rows fit is a property of
 		// the box this round is about to be drawn in.
 		this.setSurface(askUserSurface(this.questions, this.history.length));
@@ -282,6 +298,10 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		if (!question || !state) return;
+
+		// Scrolling the transcript must not cost the operator their place in the
+		// options, so the region has keys of its own that neither control claims.
+		if (this.handleScrollInput(data, state.mode)) return;
 
 		if (state.mode === "text") {
 			if (this.isTextModePreviousKey(data)) {
@@ -331,21 +351,106 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		if (!question) return [clioTheme().fg("muted", "No questions.")];
 
-		const interview = this.surface === "interview";
+		if (this.surface === "interview") return this.renderInterview(question, safeWidth, maxRows);
+
+		this.contentOverflows = false;
 		const controlLines = this.renderControlLines(safeWidth);
-		const ledgerLines = interview ? this.renderAnswerLedger(safeWidth) : [];
 		const statusLines = this.status.length > 0 ? ["", fitLine(clioTheme().fg("dim", this.status), safeWidth)] : [];
-		const stripLines = interview ? [this.renderQuestionStrip(safeWidth), ""] : [];
 		const headerLine = this.renderQuestionHeader(question, safeWidth);
 		const headerLines = headerLine.length > 0 ? [headerLine] : [];
-		const spent =
-			stripLines.length + headerLines.length + statusLines.length + 1 + controlLines.length + ledgerLines.length;
+		const spent = headerLines.length + statusLines.length + 1 + controlLines.length;
 		const questionLines = wrapTextWithAnsi(question.question, safeWidth).slice(0, Math.max(1, maxRows - spent));
 
-		return [...stripLines, ...headerLines, ...questionLines, ...statusLines, "", ...controlLines, ...ledgerLines].slice(
-			0,
-			maxRows,
+		return [...headerLines, ...questionLines, ...statusLines, "", ...controlLines].slice(0, maxRows);
+	}
+
+	/**
+	 * The interview, as a workspace with fixed chrome and a scrolling middle.
+	 *
+	 * The round strip and the question header hold the top; the status line and
+	 * the active control hold the bottom, at their full row cost, so the thing the
+	 * operator has to act on is never the thing that gets clipped. The question
+	 * text and the answer ledger share whatever is left and scroll through it.
+	 * Everything is re-derived per render, so a resize is just the next frame.
+	 */
+	private renderInterview(question: AskUserQuestion, width: number, maxRows: number): string[] {
+		const theme = clioTheme();
+		const controlLines = this.renderControlLines(width);
+		const statusLines = this.status.length > 0 ? ["", fitLine(theme.fg("dim", this.status), width)] : [];
+		const headerLine = this.renderQuestionHeader(question, width);
+		const headerLines = headerLine.length > 0 ? [headerLine] : [];
+		const stripLines = [this.renderQuestionStrip(width), ""];
+		const content = [...wrapTextWithAnsi(question.question, width), ...this.renderAnswerLedger(width)];
+
+		// Chrome sheds from the outside in when the terminal is too short to carry
+		// all of it: the round strip first, then the header, then the status, and
+		// the control only if a terminal is short enough that nothing else is left.
+		let top = [...stripLines, ...headerLines];
+		let bottom = [...statusLines, "", ...controlLines];
+		const region = (): number => maxRows - top.length - bottom.length;
+		if (region() < 1) top = [...headerLines];
+		if (region() < 1) top = [];
+		if (region() < 1) bottom = ["", ...controlLines];
+		if (region() < 1) bottom = [...controlLines];
+		const regionRows = Math.max(1, region());
+
+		const overflows = content.length > regionRows;
+		this.contentOverflows = overflows;
+		this.contentTotalRows = content.length;
+		// One row of the region pays for the indicator when there is more than the
+		// region holds, so the marker never covers a row it is reporting on.
+		const viewRows = overflows ? Math.max(1, regionRows - 1) : regionRows;
+		this.contentRegionHeight = viewRows;
+		this.contentScrollOffset = Math.max(0, Math.min(this.contentScrollOffset, Math.max(0, content.length - viewRows)));
+
+		const visible = content.slice(this.contentScrollOffset, this.contentScrollOffset + viewRows);
+		const middle = [...visible];
+		if (overflows) middle.push(fitLine(theme.fg("dim", this.scrollIndicator(content.length, viewRows)), width));
+		while (middle.length < regionRows) middle.push("");
+
+		return [...top, ...middle, ...bottom].slice(0, maxRows);
+	}
+
+	private scrollIndicator(total: number, viewRows: number): string {
+		const above = this.contentScrollOffset;
+		const below = Math.max(0, total - viewRows - above);
+		const parts: string[] = [];
+		if (above > 0) parts.push(`↑ ${above} more`);
+		if (below > 0) parts.push(`↓ ${below} more`);
+		parts.push(`(${Math.min(total, above + viewRows)}/${total})`);
+		return parts.join("  ");
+	}
+
+	/** True when the key belonged to the scroll region rather than to a control. */
+	private handleScrollInput(data: string, mode: Mode): boolean {
+		if (this.surface !== "interview") return false;
+		const action = this.scrollAction(data, mode);
+		if (!action) return false;
+		const next = nextContentScrollOffset(
+			this.contentScrollOffset,
+			this.contentTotalRows,
+			this.contentRegionHeight,
+			action,
 		);
+		if (next !== this.contentScrollOffset) {
+			this.contentScrollOffset = next;
+			this.deps.requestRender();
+		}
+		return true;
+	}
+
+	private scrollAction(data: string, mode: Mode): ViewScrollAction | null {
+		if (matchesKey(data, "pageUp")) return "page-up";
+		if (matchesKey(data, "pageDown")) return "page-down";
+		// Ctrl+U and Ctrl+D are line-kill and half-page in a text field, so they
+		// stay with the input while one is focused.
+		if (mode === "select" && matchesKey(data, "ctrl+u")) return "half-up";
+		if (mode === "select" && matchesKey(data, "ctrl+d")) return "half-down";
+		return null;
+	}
+
+	private resetContentScroll(): void {
+		this.contentScrollOffset = 0;
 	}
 
 	footerHint(): string {
@@ -357,11 +462,11 @@ class AskUserOverlayView implements Component {
 		if (!question || !state) return buildHint([]);
 		if (state.mode === "text") {
 			return this.questions.length > 1
-				? buildHint([
+				? this.withScrollHint([
 						{ key: "Enter", verb: "submit" },
 						{ key: "Alt+Left/Right", verb: "question" },
 					])
-				: buildHint([{ key: "Enter", verb: "submit" }]);
+				: this.withScrollHint([{ key: "Enter", verb: "submit" }]);
 		}
 		// `accept` rather than `select` or `commit`: the footer of a decision prompt
 		// has one job, which is to name the key that answers it. Esc keeps the
@@ -369,22 +474,32 @@ class AskUserOverlayView implements Component {
 		// interview together.
 		if (question.multi_select === true) {
 			return this.questions.length > 1
-				? buildHint([
+				? this.withScrollHint([
 						{ key: "Left/Right", verb: "question" },
 						{ key: "Space", verb: "toggle" },
 						{ key: "Enter", verb: "accept" },
 					])
-				: buildHint([
+				: this.withScrollHint([
 						{ key: "Space", verb: "toggle" },
 						{ key: "Enter", verb: "accept" },
 					]);
 		}
 		return this.questions.length > 1
-			? buildHint([
+			? this.withScrollHint([
 					{ key: "Left/Right", verb: "question" },
 					{ key: "Enter", verb: "accept" },
 				])
-			: buildHint([{ key: "Enter", verb: "accept" }]);
+			: this.withScrollHint([{ key: "Enter", verb: "accept" }]);
+	}
+
+	/**
+	 * The keys for this question, plus the scroll keys when there is something to
+	 * scroll. A footer that always advertised PgUp would be advertising a key that
+	 * does nothing on most rounds.
+	 */
+	private withScrollHint(entries: ReadonlyArray<HintEntry>): string {
+		if (this.surface !== "interview" || !this.contentOverflows) return buildHint(entries);
+		return buildHint([...entries, { key: "PgUp/PgDn", verb: "scroll" }]);
 	}
 
 	private setSurface(next: AskUserSurface): void {
@@ -443,17 +558,20 @@ class AskUserOverlayView implements Component {
 	private maxInnerRows(): number {
 		const cap = ASK_USER_SURFACE_GEOMETRY[this.surface].maxInnerRows;
 		const rows = this.deps.getTerminalRows();
-		if (!Number.isFinite(rows) || rows <= 0) return cap;
-		return Math.max(1, Math.min(cap, Math.floor(rows) - ASK_USER_FRAME_AND_MARGIN_ROWS));
+		// A zero cap is the interview's "every row the frame has", which is the
+		// same number the frame budgets itself when the mount passes no maxHeight.
+		if (!Number.isFinite(rows) || rows <= 0) return cap > 0 ? cap : 1;
+		const available = Math.max(1, Math.floor(rows) - ASK_USER_FRAME_AND_MARGIN_ROWS);
+		return cap > 0 ? Math.min(cap, available) : available;
 	}
 
 	private maxVisibleOptions(): number {
 		const inner = this.maxInnerRows();
-		// The interview surface spends rows on the round strip and the ledger
-		// before an option ever renders. The other two spend them on a header, a
-		// question, and a separator, so the options get nearly everything.
+		// The interview's option list is budgeted off the live row count rather
+		// than a fixed heuristic: the strip, header, blank, status, blank and one
+		// row of question are what the control shares the workspace with.
 		if (this.surface === "interview") {
-			return Math.max(MIN_VISIBLE_OPTIONS, Math.min(MAX_VISIBLE_OPTIONS, inner - 12));
+			return Math.max(MIN_VISIBLE_OPTIONS, Math.min(MAX_VISIBLE_OPTIONS, inner - INTERVIEW_CHROME_ROWS));
 		}
 		return Math.max(1, Math.min(MAX_VISIBLE_OPTIONS, inner - 4));
 	}
@@ -809,6 +927,7 @@ class AskUserOverlayView implements Component {
 		const next = this.nextUnansweredIndex();
 		if (next !== null) {
 			this.index = next;
+			this.resetContentScroll();
 			const nextState = this.currentState();
 			const nextQuestion = this.currentQuestion();
 			if (nextState && nextQuestion && !nextState.answer.trim()) nextState.mode = initialMode(nextQuestion);
@@ -844,6 +963,7 @@ class AskUserOverlayView implements Component {
 		this.syncActiveControl();
 		this.index = (this.index + delta + this.questions.length) % this.questions.length;
 		this.status = "";
+		this.resetContentScroll();
 		this.rebuildControl();
 		this.deps.requestRender();
 	}
@@ -888,7 +1008,9 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		handle = showClioOverlayFrame(tui, view, {
 			anchor: geometry.anchor,
 			width: geometry.width,
-			maxHeight: geometry.maxInnerRows + ASK_USER_FRAME_ROWS,
+			// A zero cap means the frame keeps its own budget, which is every row
+			// the terminal has left after the margins.
+			...(geometry.maxInnerRows > 0 ? { maxHeight: geometry.maxInnerRows + ASK_USER_FRAME_ROWS } : {}),
 			margin: geometry.margin,
 			title: () => (view.isDecisionPending() ? ASK_USER_DECISION_TITLE : ASK_USER_WAITING_TITLE),
 			tone: () => (view.isDecisionPending() ? ASK_USER_DECISION_TONE : undefined),

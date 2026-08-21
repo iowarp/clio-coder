@@ -68,6 +68,7 @@ function askOverlay(
 	frame: () => Component;
 	options: () => OverlayOptions | undefined;
 	renderFrame: (width?: number) => string[];
+	setRows: (next: number) => void;
 } {
 	let mounted: Component | null = null;
 	let mountedOptions: OverlayOptions | undefined;
@@ -79,8 +80,9 @@ function askOverlay(
 		unfocus() {},
 		isFocused: () => true,
 	};
+	const terminal = { rows, columns };
 	const tui = {
-		terminal: { rows, columns },
+		terminal,
 		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
 			mounted = component;
 			mountedOptions = options;
@@ -104,8 +106,12 @@ function askOverlay(
 		// unbudgeted frame.
 		renderFrame: (width = columns) => {
 			const frame = mountedFrame();
-			mountedOptions?.visible?.(columns, rows);
+			frame.invalidate?.();
+			mountedOptions?.visible?.(columns, terminal.rows);
 			return frame.render(width);
+		},
+		setRows: (next: number) => {
+			terminal.rows = next;
 		},
 	};
 }
@@ -648,6 +654,234 @@ describe("contracts/ask-user surfaces", () => {
 		} finally {
 			mounted.session.cancel();
 			await second;
+		}
+	});
+});
+
+/**
+ * The interview is the surface an operator works in for a whole round, and a
+ * 42-row cap turned a 66-row terminal into a centered box with twenty blank
+ * rows around it. It now fills the frame, holds its chrome fixed, and scrolls
+ * the question and the ledger between them.
+ */
+describe("contracts/ask-user interview workspace", () => {
+	const rowBudget = (frame: Component): number => (frame as unknown as { rowBudget: number }).rowBudget;
+	const PAGE_DOWN = "\x1b[6~";
+	const PAGE_UP = "\x1b[5~";
+	const longQuestion = Array.from(
+		{ length: 30 },
+		(_, index) => `Sentence ${index + 1} of a question long enough to outrun the region it is drawn in.`,
+	).join(" ");
+
+	const roundQuestions = (question: string): AskUserQuestion[] => [
+		{ header: "Scope", question, options: [{ label: "Narrow" }, { label: "Wide" }] },
+		{
+			header: "Checks",
+			question: "Which checks run before commit?",
+			options: [{ label: "Targeted" }, { label: "Full" }],
+		},
+	];
+
+	it("fills the frame instead of capping the body at a fixed height", async () => {
+		const mounted = askOverlay(50);
+		const pending = mounted.session.ask(roundQuestions("Which implementation should Clio assume?"));
+		try {
+			// Zero is "every row the frame has", and the mount says so by passing no
+			// fixed maxHeight at all.
+			strictEqual(ASK_USER_SURFACE_GEOMETRY.interview.maxInnerRows, 0);
+			// The mount passes no fixed maxHeight, so the frame's own budget is every
+			// row the terminal has left after the margins.
+			mounted.options()?.visible?.(120, 50);
+			strictEqual(rowBudget(mounted.frame()), 48);
+
+			const lines = mounted.renderFrame();
+			// One row of margin top and bottom, then the two border rows.
+			strictEqual(lines.length, 48);
+			strictEqual(lines.length - 2, 46);
+			const body = lines.slice(1, -1).map((line) => stripAnsi(line));
+			ok(!body.some((line) => line.includes("more rows")), `the frame never has to drop body rows: ${body.join(" | ")}`);
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
+	});
+
+	it("leaves the compact and panel geometry alone", async () => {
+		deepStrictEqual(ASK_USER_SURFACE_GEOMETRY.compact, {
+			width: 68,
+			maxInnerRows: 10,
+			anchor: "bottom-center",
+			margin: { top: 1, right: 2, bottom: 1, left: 2 },
+		});
+		deepStrictEqual(ASK_USER_SURFACE_GEOMETRY.panel, { width: 88, maxInnerRows: 18, anchor: "center", margin: 1 });
+
+		const mounted = askOverlay(50);
+		const pending = mounted.session.ask([
+			{
+				header: "Scope",
+				question: "Which runtime should this target?",
+				options: Array.from({ length: ASK_USER_COMPACT_MAX_OPTIONS + 1 }, (_, index) => ({ label: `Runtime ${index}` })),
+			},
+		]);
+		try {
+			mounted.options()?.visible?.(120, 50);
+			strictEqual(rowBudget(mounted.frame()), ASK_USER_SURFACE_GEOMETRY.panel.maxInnerRows + 2);
+			const lines = mounted.renderFrame();
+			ok(lines.length <= ASK_USER_SURFACE_GEOMETRY.panel.maxInnerRows + 2, `the panel stays capped: ${lines.length}`);
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
+	});
+
+	it("keeps the control on the last rows and scrolls the content between the chrome", async () => {
+		const mounted = askOverlay(30);
+		const first = mounted.session.ask([
+			{ header: "Scope", question: "First root decision?", options: [{ label: "Narrow" }, { label: "Wide" }] },
+		]);
+		mounted.child().handleInput?.("\r");
+		await first;
+		// Fourteen more answered rounds, so the ledger alone outruns the region.
+		for (let round = 2; round <= 15; round += 1) {
+			const pendingRound = mounted.session.ask([
+				{ header: `Round ${round}`, question: `Decision ${round}?`, options: [{ label: `Answer ${round}` }] },
+			]);
+			mounted.child().handleInput?.("\r");
+			await pendingRound;
+		}
+
+		const pending = mounted.session.ask([
+			{ header: "Long", question: longQuestion, options: [{ label: "Yes" }, { label: "No" }] },
+		]);
+		try {
+			const before = mounted.renderFrame().map((line) => stripAnsi(line));
+			const bodyBefore = before.slice(1, -1);
+			ok(
+				bodyBefore.slice(-3).some((line) => line.includes("[Enter]")),
+				`the control holds the last rows: ${bodyBefore.slice(-4).join(" | ")}`,
+			);
+			ok(
+				bodyBefore.some((line) => line.includes("more")),
+				`the scroll indicator appears when content overflows: ${bodyBefore.join(" | ")}`,
+			);
+			ok(
+				before[before.length - 1]?.includes("PgUp/PgDn"),
+				`the footer names the scroll keys: ${before[before.length - 1]}`,
+			);
+
+			mounted.child().handleInput?.(PAGE_DOWN);
+			const after = mounted.renderFrame().map((line) => stripAnsi(line));
+			ok(after.join("\n") !== before.join("\n"), "PgDn moves the content");
+			ok(
+				after
+					.slice(1, -1)
+					.slice(-3)
+					.some((line) => line.includes("[Enter]")),
+				"the control is still on the last rows after scrolling",
+			);
+
+			// The offset clamps at both ends: pages past the end stay at the end,
+			// and pages past the top come back to the same first frame.
+			for (let index = 0; index < 40; index += 1) mounted.child().handleInput?.(PAGE_DOWN);
+			const bottom = mounted.renderFrame().map((line) => stripAnsi(line));
+			for (let index = 0; index < 5; index += 1) mounted.child().handleInput?.(PAGE_DOWN);
+			deepStrictEqual(
+				mounted.renderFrame().map((line) => stripAnsi(line)),
+				bottom,
+			);
+			for (let index = 0; index < 60; index += 1) mounted.child().handleInput?.(PAGE_UP);
+			deepStrictEqual(
+				mounted.renderFrame().map((line) => stripAnsi(line)),
+				before,
+			);
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
+	});
+
+	it("resets the scroll on the next round and keeps the decision title", async () => {
+		const mounted = askOverlay(20);
+		const opening = mounted.session.ask([
+			{ header: "Scope", question: "First root decision?", options: [{ label: "Narrow" }] },
+		]);
+		mounted.child().handleInput?.("\r");
+		await opening;
+
+		const first = mounted.session.ask([
+			{ header: "Depth", question: longQuestion, options: [{ label: "Narrow" }, { label: "Wide" }] },
+		]);
+		mounted.renderFrame();
+		mounted.child().handleInput?.(PAGE_DOWN);
+		const scrolled = mounted.renderFrame().map((line) => stripAnsi(line));
+		mounted.child().handleInput?.("\r");
+		await first;
+
+		const second = mounted.session.ask([{ header: "Shape", question: longQuestion, options: [{ label: "Shallow" }] }]);
+		try {
+			const lines = mounted.renderFrame().map((line) => stripAnsi(line));
+			ok(lines[0]?.includes(ASK_USER_DECISION_TITLE), `the title still names the decision: ${lines[0]}`);
+			ok(
+				!lines.some((line) => line.includes("↑ ")),
+				`the new round starts at the top of its content: ${lines.join(" | ")}`,
+			);
+			ok(
+				scrolled.some((line) => line.includes("↑ ")),
+				"the previous round had in fact been scrolled",
+			);
+		} finally {
+			mounted.session.cancel();
+			await second;
+		}
+	});
+
+	it("keeps the text input and the way out on a 40x12 terminal", async () => {
+		const mounted = askOverlay(12, 40);
+		const first = mounted.session.ask([
+			{ header: "Scope", question: "First root decision?", options: [{ label: "Narrow" }] },
+		]);
+		mounted.child().handleInput?.("\r");
+		await first;
+
+		const pending = mounted.session.ask([{ header: "Detail", question: longQuestion }]);
+		try {
+			const lines = mounted.renderFrame(40).map((line) => stripAnsi(line));
+			ok(
+				lines.slice(1, -1).some((line) => line.includes(GLYPH.cursor)),
+				`the input row survives a short terminal: ${lines.join(" | ")}`,
+			);
+			ok(lines[lines.length - 1]?.includes("Esc"), `the way out survives: ${lines[lines.length - 1]}`);
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
+	});
+
+	it("keeps the control visible when the terminal shrinks under it", async () => {
+		const mounted = askOverlay(50);
+		const pending = mounted.session.ask(roundQuestions(longQuestion));
+		try {
+			ok(
+				mounted
+					.renderFrame()
+					.map((line) => stripAnsi(line))
+					.some((line) => line.includes("[Enter]")),
+				"the control renders at 50 rows",
+			);
+			mounted.setRows(15);
+			const small = mounted.renderFrame().map((line) => stripAnsi(line));
+			strictEqual(small.length, 13);
+			ok(
+				small.some((line) => line.includes("[Enter]")),
+				`the control survives the shrink: ${small.join(" | ")}`,
+			);
+			ok(
+				!small.some((line) => line.includes("more rows")),
+				`the frame never drops body rows after the shrink: ${small.join(" | ")}`,
+			);
+		} finally {
+			mounted.session.cancel();
+			await pending;
 		}
 	});
 });
