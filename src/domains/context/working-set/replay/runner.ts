@@ -5,6 +5,7 @@ import type { WorkingSetPolicy } from "../contract.js";
 import { buildEvictionFields, planEviction } from "../engine.js";
 import { foldWorkingSet } from "../fold.js";
 import { projectWorkingSet } from "../project.js";
+import { selectVisibleEntries } from "../visible.js";
 import { isReplayTurnStart, type Trace } from "./trace.js";
 
 export interface ReplayConfig {
@@ -36,10 +37,13 @@ export interface ReplayTraceResult {
 	entries: ReadonlyArray<SessionEntry>;
 }
 
+/** Tokens of what the model would see: the visible slice (after any compaction cut) under the full-path fold. */
 function sumProjectedTokens(entries: ReadonlyArray<SessionEntry>, activeLeafTurnId?: string): number {
 	const view = foldWorkingSet(entries, activeLeafTurnId);
 	let tokens = 0;
-	for (const entry of projectWorkingSet(entries, view)) tokens += estimateTokens(entry);
+	for (const entry of projectWorkingSet(selectVisibleEntries(entries, activeLeafTurnId), view)) {
+		tokens += estimateTokens(entry);
+	}
 	return tokens;
 }
 
@@ -74,8 +78,9 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 			if (tokens > pressureLimit) {
 				const view = foldWorkingSet(soFar, leaf ?? undefined);
 				const plan = planEviction(policy, {
-					entries: soFar,
+					entries: selectVisibleEntries(soFar, leaf ?? undefined),
 					view,
+					cwd: trace.cwd,
 					settings: config.settings,
 					pressure: {
 						tokens,

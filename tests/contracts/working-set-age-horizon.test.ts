@@ -123,6 +123,7 @@ function policyInput(entries: ReadonlyArray<SessionEntry>, overrides: Partial<Wo
 	return {
 		entries,
 		view: EMPTY_WORKING_SET_VIEW,
+		cwd: null,
 		settings: { ...DEFAULT_WORKING_SET_SETTINGS, protectLastTurns: PROTECT_LAST_TURNS, ...overrides },
 		pressure: { tokens: 90_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
 		estimateTokens,
@@ -170,6 +171,46 @@ test("age-horizon: the default floor keeps a result too small to be worth a mark
 	// Thinking has no floor: it is dropped without a marker, so it is free.
 	assert.equal(selected.has("a2"), true);
 	assert.equal(selected.size + 1, maskedRefs(entries, PROTECT_LAST_TURNS).size);
+});
+
+test("age-horizon: the planned event matches the destructive mask for every body longer than its marker", () => {
+	// `select` with no floor names everything the mask rewrote (the test above).
+	// The plan is stricter by exactly one rule: a body that its own marker would
+	// not shorten is refused, because evicting it frees nothing. Turn 3's "ok"
+	// is the only such body in the fixture.
+	const entries = ledger();
+	const plan = planEviction(agePolicy, policyInput(entries, { minEvictableTokens: 0 }));
+	assert.ok(plan);
+	const planned = new Set(plan.items.map((item) => item.ref.entry));
+	const masked = maskedRefs(entries, PROTECT_LAST_TURNS);
+	assert.equal(masked.has("t3"), true, "the mask rewrote the tiny body");
+	masked.delete("t3");
+	assert.deepEqual(planned, masked);
+	assert.ok(plan.items.every((item) => item.tokensFreed > 0));
+});
+
+test("age-horizon: the floor measures the body the marker replaces, not the payload envelope", () => {
+	const entries = ledger();
+	// A two-byte body under a 1.5KB details envelope: the payload clears any
+	// floor, the body clears none.
+	const fat = entries.find((entry) => entry.turnId === "t3");
+	assert.ok(fat && fat.kind === "message");
+	const payload = fat.payload as { result: Record<string, unknown> };
+	payload.result = { ...payload.result, details: { exec: { env: "x".repeat(1_500), argv: ["true"] } } };
+	assert.ok(
+		estimateTokens(fat) > DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens,
+		"the envelope alone clears the floor",
+	);
+
+	const selected = new Set(agePolicy.select(policyInput(entries)).map((c) => c.ref.entry));
+	assert.equal(selected.has("t3"), false);
+	const plan = planEviction(agePolicy, policyInput(entries, { minEvictableTokens: 0 }));
+	assert.ok(plan);
+	assert.equal(
+		plan.items.some((item) => item.ref.entry === "t3"),
+		false,
+		"even with no floor the engine refuses an item that frees nothing",
+	);
 });
 
 test("age-horizon: units already out of the working set are never re-selected", () => {

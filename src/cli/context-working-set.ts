@@ -244,7 +244,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 	try {
 		const loaded = await loadReplayTraces(parsed.sessions, parsed.format, { filter: !parsed.noFilter });
 		const indexed = loaded.traces.map((trace) => {
-			const index = buildPathIndex(trace.entries);
+			const index = buildPathIndex(trace.entries, { cwd: trace.cwd });
 			return { trace, index, graph: buildReferenceGraph(trace, index) };
 		});
 		const settings = { ...DEFAULT_WORKING_SET_SETTINGS, target: parsed.target };
@@ -344,9 +344,21 @@ async function pinnedLeafForSession(source: string): Promise<string | undefined>
 	}
 }
 
+async function sessionCwdForSession(source: string): Promise<string | null> {
+	try {
+		const raw = await readFile(join(dirname(source), "meta.json"), "utf8");
+		const value = JSON.parse(raw) as unknown;
+		if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+		const cwd = (value as Record<string, unknown>).cwd;
+		return typeof cwd === "string" && cwd.length > 0 ? cwd : null;
+	} catch {
+		return null;
+	}
+}
+
 function formatWorkingSet(trace: Trace): string {
 	const view = foldWorkingSet(trace.entries);
-	const index = buildPathIndex(trace.entries);
+	const index = buildPathIndex(trace.entries, { cwd: trace.cwd });
 	const graph = buildReferenceGraph(trace, index);
 	const evictedTokens = [...view.evicted.values()].reduce((sum, state) => sum + state.tokensFreed, 0);
 	const churn = view.itemsEvicted === 0 ? "n/a" : (view.recalls / view.itemsEvicted).toFixed(3);
@@ -425,8 +437,15 @@ export async function runContextWorkingSetCommand(args: string[]): Promise<numbe
 		const parsed = parseSessionEntries(raw, source);
 		if (parsed.errors.length > 0) throw new Error(parsed.errors.join("; "));
 		const entries = filterEntriesToActivePath(parsed.entries, await pinnedLeafForSession(source));
+		const cwd = await sessionCwdForSession(source);
 		process.stdout.write(
-			formatWorkingSet({ id: basename(dirname(source)), source, entries, turnCount: buildPathIndex(entries).turnCount }),
+			formatWorkingSet({
+				id: basename(dirname(source)),
+				source,
+				cwd,
+				entries,
+				turnCount: buildPathIndex(entries, { cwd }).turnCount,
+			}),
 		);
 		return 0;
 	} catch (error) {

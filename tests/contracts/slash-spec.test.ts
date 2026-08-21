@@ -816,7 +816,7 @@ describe("contracts/slash-spec", () => {
 		for (const retired of ["exit", "ctx", "compact", "models", "config"]) {
 			strictEqual(byName.has(retired), false, `/${retired} is not suggested`);
 		}
-		strictEqual(byName.get("context")?.argumentHint, "compact | init | refresh | reset");
+		strictEqual(byName.get("context")?.argumentHint, "compact | recall | init | refresh | reset");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
 		strictEqual(byName.get("help")?.argumentHint, "[query]");
 		strictEqual(byName.get("share")?.argumentHint, "[runId] | export | import");
@@ -830,7 +830,7 @@ describe("contracts/slash-spec", () => {
 		}
 	});
 
-	it("completes exactly the four canonical context actions with short stable descriptions", async () => {
+	it("completes exactly the five canonical context actions with short stable descriptions", async () => {
 		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
 		const context = byName.get("context");
 
@@ -839,6 +839,7 @@ describe("contracts/slash-spec", () => {
 			all?.map((item) => ({ label: item.label, description: item.description })),
 			[
 				{ label: "compact", description: "Compact session context" },
+				{ label: "recall", description: "Recall an evicted result" },
 				{ label: "init", description: "Initialize project context" },
 				{ label: "refresh", description: "Refresh project context" },
 				{ label: "reset", description: "Reset project context" },

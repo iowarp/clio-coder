@@ -150,11 +150,16 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		if (entry === undefined) continue;
 		const marker = markerFor(entry, candidate);
 		if (marker === null) continue;
+		// A marker at least as long as the body it replaces is a cold turn bought
+		// for nothing, whatever the policy's reason. Refused here so no policy can
+		// record an eviction that freed nothing.
+		const tokensFreed = tokensFreedByEviction(input.estimateTokens, entry, candidate);
+		if (tokensFreed <= 0) continue;
 		claimed.add(key);
 		items.push({
 			ref: candidate.ref,
 			reason: candidate.reason,
-			tokensFreed: tokensFreedByEviction(input.estimateTokens, entry, candidate),
+			tokensFreed,
 			marker,
 			...(candidate.by === undefined ? {} : { by: candidate.by }),
 		});

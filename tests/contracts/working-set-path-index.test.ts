@@ -6,8 +6,8 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 const CWD = "/repo";
 const TS = "2026-08-21T00:00:00.000Z";
 
-/** The JSONL header is a SessionFileEntry, not a SessionEntry; callers that keep it pass it through. */
-const HEADER = { type: "session", version: 4, id: "s1", timestamp: TS, cwd: CWD } as unknown as SessionEntry;
+/** Live callers never see the JSONL header; the session cwd is passed explicitly. */
+const OPTS = { cwd: CWD };
 
 let seq = 0;
 function nextId(prefix: string): string {
@@ -57,8 +57,8 @@ function result(
 /** One call/result pair plus the entries around it, indexed. */
 function indexOne(toolName: string, args: unknown, text = "", options: { isError?: boolean } = {}): PathObservation {
 	const made = call(toolName, args);
-	const entries: SessionEntry[] = [HEADER, user("go"), made.entry, result(toolName, made.id, text, options)];
-	const observations = buildPathIndex(entries).observations;
+	const entries: SessionEntry[] = [user("go"), made.entry, result(toolName, made.id, text, options)];
+	const observations = buildPathIndex(entries, OPTS).observations;
 	const first = observations[0];
 	assert.ok(first, `expected one observation for ${toolName}`);
 	return first;
@@ -83,12 +83,27 @@ test("path index: read ranges normalize the 1-indexed offset argument", () => {
 	assert.equal(indexOne("read", { path: "src/a.ts", tail: 30 }).range, null);
 });
 
-test("path index: an absolute argument is kept, a relative one without a header is left as written", () => {
+test("path index: an absolute argument is kept, a relative one without a cwd is normalized but left relative", () => {
 	assert.equal(indexOne("read", { path: "/elsewhere/b.ts" }).path, "/elsewhere/b.ts");
 
-	const made = call("read", { path: "src/a.ts" });
+	const made = call("read", { path: "./src/../src/a.ts" });
 	const entries: SessionEntry[] = [user("go"), made.entry, result("read", made.id, "body")];
 	assert.equal(buildPathIndex(entries).observations[0]?.path, "src/a.ts");
+	assert.equal(buildPathIndex(entries, { cwd: null }).observations[0]?.path, "src/a.ts");
+});
+
+test("path index: with a cwd, relative, dot-relative, and absolute spellings key the same file", () => {
+	const spellings = ["src/a.ts", "./src/a.ts", `${CWD}/src/a.ts`, "src/./a.ts"];
+	for (const spelling of spellings) {
+		assert.equal(indexOne("read", { path: spelling }).path, `${CWD}/src/a.ts`, spelling);
+	}
+});
+
+test("path index: a listing under a relative root joins its output onto that root", () => {
+	const made = call("find", { pattern: "**/*.ts", path: "src" });
+	const entries: SessionEntry[] = [user("go"), made.entry, result("find", made.id, "a.ts\nnested/b.ts")];
+	assert.deepEqual(buildPathIndex(entries).observations[0]?.surfaced, ["src/a.ts", "src/nested/b.ts"]);
+	assert.deepEqual(buildPathIndex(entries, OPTS).observations[0]?.surfaced, ["/repo/src/a.ts", "/repo/src/nested/b.ts"]);
 });
 
 test("path index: grep surfaces the path before the line number", () => {
@@ -168,13 +183,12 @@ test("path index: an error result keeps its observation and surfaces nothing", (
 
 test("path index: a fileEntry is write evidence with no tool call", () => {
 	const entries: SessionEntry[] = [
-		HEADER,
 		user("go"),
 		{ kind: "fileEntry", turnId: "f1", parentTurnId: null, timestamp: TS, path: "src/a.ts", operation: "create" },
 		{ kind: "fileEntry", turnId: "f2", parentTurnId: null, timestamp: TS, path: "src/b.ts", operation: "edit" },
 		{ kind: "fileEntry", turnId: "f3", parentTurnId: null, timestamp: TS, path: "src/c.ts", operation: "read" },
 	];
-	const index = buildPathIndex(entries);
+	const index = buildPathIndex(entries, OPTS);
 	assert.deepEqual(
 		index.observations.map((observation) => [observation.ref.entry, observation.op, observation.path]),
 		[
@@ -197,8 +211,8 @@ test("path index: argsKey is order-independent and distinguishes different argum
 });
 
 test("path index: an unpaired result carries an empty argsKey rather than a guess", () => {
-	const entries: SessionEntry[] = [HEADER, user("go"), result("read", "call-missing", "body")];
-	const observation = buildPathIndex(entries).observations[0];
+	const entries: SessionEntry[] = [user("go"), result("read", "call-missing", "body")];
+	const observation = buildPathIndex(entries, OPTS).observations[0];
 	assert.equal(observation?.argsKey, "");
 	assert.equal(observation?.path, "");
 	assert.equal(observation?.toolCallId, "call-missing");
@@ -206,7 +220,6 @@ test("path index: an unpaired result carries an empty argsKey rather than a gues
 
 test("path index: a call streamed as an assistant content block still pairs", () => {
 	const entries: SessionEntry[] = [
-		HEADER,
 		user("go"),
 		{
 			kind: "message",
@@ -220,7 +233,7 @@ test("path index: a call streamed as an assistant content block still pairs", ()
 		},
 		result("read", "call-block", "body"),
 	];
-	const observation = buildPathIndex(entries).observations[0];
+	const observation = buildPathIndex(entries, OPTS).observations[0];
 	assert.equal(observation?.path, "/repo/src/a.ts");
 	assert.equal(observation?.argsKey, '{"path":"src/a.ts"}');
 });
@@ -229,7 +242,6 @@ test("path index: turn positions count turn starts strictly before an entry", ()
 	const first = call("read", { path: "a.ts" });
 	const second = call("read", { path: "b.ts" });
 	const entries: SessionEntry[] = [
-		HEADER,
 		user("one"),
 		first.entry,
 		result("read", first.id, "body", { turnId: "r1" }),
@@ -247,7 +259,7 @@ test("path index: turn positions count turn starts strictly before an entry", ()
 		second.entry,
 		result("read", second.id, "body", { turnId: "r2" }),
 	];
-	const index = buildPathIndex(entries);
+	const index = buildPathIndex(entries, OPTS);
 	assert.equal(index.turnCount, 2);
 	assert.equal(index.byRef.get("r1")?.turnIndex, 1);
 	assert.equal(index.byRef.get("r2")?.turnIndex, 2);
@@ -261,7 +273,6 @@ test("path index: byPath groups every observation of one file in ledger order", 
 	const edit = call("edit", { path: "src/a.ts", edits: [] });
 	const other = call("read", { path: "src/b.ts" });
 	const entries: SessionEntry[] = [
-		HEADER,
 		user("go"),
 		read.entry,
 		result("read", read.id, "body", { turnId: "r1" }),
@@ -270,7 +281,7 @@ test("path index: byPath groups every observation of one file in ledger order", 
 		other.entry,
 		result("read", other.id, "body", { turnId: "r2" }),
 	];
-	const index = buildPathIndex(entries);
+	const index = buildPathIndex(entries, OPTS);
 	assert.deepEqual(
 		index.byPath.get("/repo/src/a.ts")?.map((observation) => observation.ref.entry),
 		["r1", "e1"],
@@ -289,12 +300,12 @@ test("path index: byPath groups every observation of one file in ledger order", 
 
 test("path index: unobserved tools produce no observation", () => {
 	const made = call("web_fetch", { url: "https://example.com" });
-	const entries: SessionEntry[] = [HEADER, user("go"), made.entry, result("web_fetch", made.id, "page")];
-	assert.deepEqual(buildPathIndex(entries).observations, []);
+	const entries: SessionEntry[] = [user("go"), made.entry, result("web_fetch", made.id, "page")];
+	assert.deepEqual(buildPathIndex(entries, OPTS).observations, []);
 });
 
 test("path index: the same ledger indexes identically twice", () => {
 	const made = call("grep", { pattern: "x", path: "src" });
-	const entries: SessionEntry[] = [HEADER, user("go"), made.entry, result("grep", made.id, "src/a.ts:1: x")];
-	assert.deepEqual(buildPathIndex(entries).observations, buildPathIndex(entries).observations);
+	const entries: SessionEntry[] = [user("go"), made.entry, result("grep", made.id, "src/a.ts:1: x")];
+	assert.deepEqual(buildPathIndex(entries, OPTS).observations, buildPathIndex(entries, OPTS).observations);
 });

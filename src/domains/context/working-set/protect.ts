@@ -15,7 +15,7 @@
 import type { SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
 import type { PathIndex, PathObservation } from "./path-index.js";
-import { hasLegacyCompactionMarker, isRecord } from "./payload.js";
+import { hasLegacyCompactionMarker, isRecord, toolResultBodyTokens } from "./payload.js";
 
 export interface ProtectionContext {
 	entryIndex: number;
@@ -45,6 +45,8 @@ function isErrorResult(payload: unknown): boolean {
  * The later call that resolved this failure: same tool with byte-identical
  * arguments, or, for the path-identified ops, the same file by any route. Null
  * when nothing after it succeeded, which is what keeps the failure protected.
+ * A refused call is not a success: the safety rails returned a verdict, not
+ * the observation the failure was trying to make.
  *
  * Shared with `structural.ts` rung 3 on purpose: the rule that evicts a
  * resolved failure and the predicate that protects an unresolved one must
@@ -52,7 +54,7 @@ function isErrorResult(payload: unknown): boolean {
  */
 export function findLaterSuccess(observation: PathObservation, index: PathIndex): PathObservation | null {
 	for (const candidate of index.observations) {
-		if (candidate.entryIndex <= observation.entryIndex || candidate.isError) continue;
+		if (candidate.entryIndex <= observation.entryIndex || candidate.isError || candidate.isBlocked) continue;
 		if (candidate.toolName === observation.toolName && observation.argsKey.length > 0) {
 			if (candidate.argsKey === observation.argsKey) return candidate;
 		}
@@ -86,8 +88,9 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	if (ctx.entryIndex >= ctx.cutoffIndex) return true;
 	if (entry.role === "assistant") return false;
 
-	// Below the floor the marker costs more than the body it replaces.
-	if (ctx.input.estimateTokens(entry) < ctx.input.settings.minEvictableTokens) return true;
+	// Below the floor the marker costs more than the body it replaces. The
+	// floor is the body's size, not the payload's: details never reach the model.
+	if (toolResultBodyTokens(entry.payload) < ctx.input.settings.minEvictableTokens) return true;
 	// A body the legacy destructive stage already replaced has nothing left to evict.
 	if (hasLegacyCompactionMarker(entry.payload)) return true;
 	if (isBlockedResult(entry.payload)) return true;

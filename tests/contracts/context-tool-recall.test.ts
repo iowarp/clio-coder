@@ -132,7 +132,8 @@ describe("contracts/context recall scope", () => {
 		const tool = createContextTool({ session: deps });
 		const notEvicted = await tool.run({ scope: "recall", ref: "t2" }, undefined);
 		assert.equal(notEvicted.kind, "error");
-		if (notEvicted.kind === "error") assert.match(notEvicted.message, /not evicted.*Nearest evicted ref: t1\./);
+		if (notEvicted.kind === "error")
+			assert.match(notEvicted.message, /not evicted.*Nearest evicted ref: t1\. Evicted refs on the active path: t1\./);
 		const offPath = await tool.run({ scope: "recall", ref: "nope" }, undefined);
 		assert.equal(offPath.kind, "error");
 		if (offPath.kind === "error")
