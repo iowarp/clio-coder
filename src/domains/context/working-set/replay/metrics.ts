@@ -12,7 +12,6 @@ export interface ReplayMetrics {
 	evictionEvents: number;
 	/** Fraction of applied events that exhausted the policy's usable candidates. */
 	saturatedEvents: number;
-	churn: number;
 	turnsToFirstSummary: number | null;
 }
 
@@ -65,9 +64,11 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 		}
 	}
 
+	// Precision is the share of evicted items never referenced again; the
+	// complement (items the session came back to) is what live churn would
+	// count as recalls, so it is not reported as a second column.
 	let evictedItems = 0;
 	let safelyEvictedItems = 0;
-	let churnedItems = 0;
 	let tokensEvicted = 0;
 	let saturatedEventCount = 0;
 	for (const event of input.replay.events) {
@@ -76,9 +77,7 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 			evictedItems += 1;
 			tokensEvicted += item.tokensFreed;
 			const future = input.graph.futureTurnsOf.get(item.ref.entry) ?? [];
-			const referencedAfter = future.some((turn) => turn > event.turnIndex);
-			if (referencedAfter) churnedItems += 1;
-			else safelyEvictedItems += 1;
+			if (!future.some((turn) => turn > event.turnIndex)) safelyEvictedItems += 1;
 		}
 	}
 
@@ -91,7 +90,6 @@ function measure(input: ReplayMeasurement): MeasuredTrace {
 			tokensEvicted,
 			evictionEvents: input.replay.events.length,
 			saturatedEvents: safeFraction(saturatedEventCount, input.replay.events.length, 0),
-			churn: safeFraction(churnedItems, evictedItems, 0),
 			turnsToFirstSummary: input.replay.turnsToFirstSummary,
 		},
 		pairs,
@@ -129,7 +127,6 @@ export function aggregateReplayMetrics(inputs: ReadonlyArray<ReplayMeasurement>)
 			evictionEvents: mean(measured.map((entry) => entry.metrics.evictionEvents)),
 			// Event-pooled: zero-event traces must not dilute the saturation rate.
 			saturatedEvents: safeFraction(saturatedEvents, totalEvents, 0),
-			churn: mean(measured.map((entry) => entry.metrics.churn)),
 			turnsToFirstSummary: summaries.length === 0 ? null : mean(summaries),
 		},
 		turnsToFirstSummaryCount: summaries.length,

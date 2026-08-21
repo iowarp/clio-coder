@@ -181,7 +181,6 @@ describe("contracts/working-set replay-lite", () => {
 		assert.equal(metrics.tokensEvicted, 250);
 		assert.equal(metrics.evictionEvents, 1);
 		assert.equal(metrics.saturatedEvents, 1);
-		assert.equal(metrics.churn, 1);
 	});
 
 	it("pools saturated events by event count rather than by trace", async () => {
