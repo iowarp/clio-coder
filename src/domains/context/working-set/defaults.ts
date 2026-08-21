@@ -6,9 +6,10 @@
  *
  * `structural-v1` is the default: typed path-keyed rules first, the age
  * rule last and batched to `target`. On 165 Claude Code transcripts it held
- * retention 0.831 against 0.781 for `age-horizon` and 0.779 for random at a
- * 128k budget (benchmarks/results/context-replay/). `age-horizon` stays
- * available as the exact pre-layer selection recorded through the ledger.
+ * retention 0.812 against 0.788 for `age-horizon` and 0.798 for random at a
+ * 128k budget (benchmarks/results/context-replay/README.md has the rule and
+ * the grid). `age-horizon` stays available as the exact pre-layer selection
+ * recorded through the ledger.
  */
 
 import type { WorkingSetSettings } from "../../../core/defaults.js";
