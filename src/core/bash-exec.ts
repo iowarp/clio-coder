@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import {
 	gitCommitAttributionEnabled,
@@ -28,6 +29,8 @@ export interface BashCommandResult {
 	aborted: boolean;
 	timedOut: boolean;
 	outputCapped: boolean;
+	/** Exact bytes retained from stdout and stderr, never above the hard cap. */
+	outputBytes: number;
 }
 
 export interface BashCommandProgress {
@@ -151,6 +154,9 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let killSent = false;
 		let stdout = "";
 		let stderr = "";
+		const stdoutDecoder = new StringDecoder("utf8");
+		const stderrDecoder = new StringDecoder("utf8");
+		let decodersFinished = false;
 		let outputBytes = 0;
 		let outputCapped = false;
 		let updateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -163,6 +169,16 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
+
+		const finishDecoders = (): void => {
+			if (decodersFinished) return;
+			decodersFinished = true;
+			// A hard byte cap may bisect a multibyte code point. Discard the
+			// decoder's incomplete suffix instead of manufacturing U+FFFD.
+			if (outputCapped) return;
+			stdout += stdoutDecoder.end();
+			stderr += stderrDecoder.end();
+		};
 
 		const emitUpdate = (): void => {
 			if (options.onUpdate === undefined || !updateDirty) return;
@@ -250,24 +266,20 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 
 		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
 			if (outputCapped) return;
-			outputBytes += chunk.byteLength;
-			if (outputBytes > BASH_HARD_CAP_BYTES) {
-				// Keep the bytes seen so far (including this chunk's prefix would
-				// overshoot memory, so append the remaining budget) and stop the
-				// child. Truncation for display is tail-biased downstream.
-				const remaining = BASH_HARD_CAP_BYTES - (outputBytes - chunk.byteLength);
-				if (remaining > 0) {
-					const slice = chunk.subarray(0, remaining).toString("utf8");
-					if (target === "stdout") stdout += slice;
-					else stderr += slice;
-				}
+			const remaining = BASH_HARD_CAP_BYTES - outputBytes;
+			const accepted = chunk.byteLength <= remaining ? chunk : chunk.subarray(0, Math.max(0, remaining));
+			outputBytes += accepted.byteLength;
+			if (accepted.byteLength > 0) {
+				const decoded = target === "stdout" ? stdoutDecoder.write(accepted) : stderrDecoder.write(accepted);
+				if (target === "stdout") stdout += decoded;
+				else stderr += decoded;
+			}
+			if (accepted.byteLength < chunk.byteLength) {
 				outputCapped = true;
 				scheduleUpdate();
 				killChild();
 				return;
 			}
-			if (target === "stdout") stdout += chunk.toString("utf8");
-			else stderr += chunk.toString("utf8");
 			scheduleUpdate();
 		};
 
@@ -278,6 +290,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
+			finishDecoders();
 			finishUpdates();
 			options.signal?.removeEventListener("abort", onAbort);
 			resolve({
@@ -289,6 +302,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 				aborted,
 				timedOut,
 				outputCapped,
+				outputBytes,
 			});
 		});
 		child.on("close", (code, signalName) => {
@@ -296,6 +310,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
+			finishDecoders();
 			finishUpdates();
 			options.signal?.removeEventListener("abort", onAbort);
 			const error =
@@ -307,7 +322,17 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 							code: code ?? undefined,
 							signal: signalName ?? undefined,
 						} as NodeJS.ErrnoException);
-			resolve({ error, stdout, stderr, exitCode: code, signal: signalName, aborted, timedOut, outputCapped });
+			resolve({
+				error,
+				stdout,
+				stderr,
+				exitCode: code,
+				signal: signalName,
+				aborted,
+				timedOut,
+				outputCapped,
+				outputBytes,
+			});
 		});
 	});
 }

@@ -102,10 +102,15 @@ Arguments:
 - `command` (required).
 - `cwd` (optional). Working directory; resolved against the session workspace and rejected when it escapes it. The safety net blocks an escaping cwd at admission, and the tool enforces the same rule itself.
 - `timeout_ms` (optional). Default 300000 (5 minutes).
+- `output_policy` (optional). Canonical model-context disposition: `full`, `bounded`, `summary`, or `metadata-only`. Omission is exactly `bounded`.
 
 Workspace containment: commands whose filesystem targets resolve outside the session workspace escalate to `system_modify` and ask for one-shot confirmation at every autonomy level (headless runs deny asks). Recognized targets are shell redirects, `tee`/`mkdir`/`touch` path operands, `cp`/`mv`/`ln` destinations, in-place `sed -i` operands, and any `cd`/`pushd` whose directory leaves the workspace, since a `cd` outside re-bases every relative path that follows it. Inside-workspace equivalents stay plain `execute` with no new prompts.
 
-Output shaping is tail-biased: the display keeps the LAST 16KB / 2000 lines, because the failing assertion, compiler error, and exit summary live at the end. Before truncating, the full output is spilled to the per-session scratch file and the appended note names the path; read it with offset/limit. A command producing more than 16MB of output is stopped with an error. A timeout or nonzero exit returns the shaped output plus a status line (`bash: command timed out after <ms>ms`, `bash: command failed (exit N)`).
+The default `bounded` policy keeps a tail-biased model excerpt under the 16KB result budget, because the failing assertion, compiler error, and exit summary usually live at the end. `summary` is useful for noisy builds and test runs: code deterministically selects a bounded head, tail, and error-like lines, applies Clio's repository secret redactor, and records the source hash and algorithm in summary provenance. `metadata-only` is appropriate when the model needs only outcome and termination facts; stdout and stderr stay out of model context while the operator presentation, retained byte size, and retrieval path remain available. `full` is for output known to be small. It is admitted only when the complete captured result and its facts fit the bounded result/context budget; otherwise the result explicitly records a typed downgrade to tail-biased `bounded` and provides retrieval. Do not use `full` as the routine default.
+
+Presentation is independent from model context. The operator-facing display remains folded and tail-biased under every policy. When the display or selected context omits captured content, the terminal result writes one per-session scratch artifact and names it in the result. Live updates use the selected policy, remain bounded, and never write per-update artifacts. Every terminal result records requested and applied context modes, captured/displayed/context bytes, truncation or downgrade state, and any offload path. Exit code, signal, timeout, abort, and output-cap facts survive every policy. Scratch retrieval may contain the raw retained output; the deterministic `summary` projection is the redacted surface.
+
+A command producing more than 16MB of combined output is stopped with an error. UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as `bash: command timed out after <ms>ms` or `bash: command failed (exit N)` before canonical shaping.
 
 Reach for bash for builds, git, package managers, and anything without a dedicated tool. Prefer the dedicated tools over their shell equivalents: grep/find/read/ls get envelope truncation, exact continuation hints, and the shared ignore policy that `cat`, shell `grep`, and shell `find` do not. Prefer `verify` over bash for declared package scripts and project-catalog entries, since verify produces typed evidence.
 
@@ -113,6 +118,8 @@ Reach for bash for builds, git, package managers, and anything without a dedicat
 bash(command="git status --short")
 bash(command="git log --oneline -10")
 bash(command="npm run build", timeout_ms=600000)
+bash(command="npm run test", timeout_ms=600000, output_policy="summary")
+bash(command="make artifact", output_policy="metadata-only")
 ```
 
 ## grep: search file contents with ripgrep

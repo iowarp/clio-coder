@@ -1,19 +1,24 @@
 import { createHash } from "node:crypto";
+import { createRedactionTally, redactSecretsText } from "../domains/evidence/redact.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { byteLength } from "./truncate-utf8.js";
 
+export type ToolResultExcerptBias = "head-tail" | "tail";
+
 /** How much of a captured tool result is inserted into the model conversation. */
 export type ToolResultContextDisposition =
-	| { mode: "full"; maxBytes?: number }
-	| { mode: "bounded"; maxBytes: number }
-	| { mode: "summary"; maxBytes: number }
+	| { mode: "full"; maxBytes?: number; downgradeExcerpt?: ToolResultExcerptBias }
+	| { mode: "bounded"; maxBytes: number; excerpt?: ToolResultExcerptBias }
+	| { mode: "summary"; maxBytes: number; strategy?: "head-tail" | "diagnostic"; redact?: boolean }
 	| { mode: "metadata-only"; maxBytes: number };
 
 /** Operator-facing policy for one result, independent of its model projection. */
 export interface ToolResultPresentationDisposition extends ToolPresentationPolicy {
 	/** Registry display backstop. Overflow is retained in scratch when possible. */
 	maxBytes?: number;
+	/** Which edge of textual overflow the canonical shaper preserves. */
+	overflow?: "head" | "tail";
 }
 
 /**
@@ -29,9 +34,10 @@ export type AppliedToolResultContextMode = ToolResultContextDisposition["mode"];
 
 export interface ToolResultSummaryProvenance {
 	producer: "code";
-	algorithm: "sha256-head-tail-v1";
+	algorithm: "sha256-head-tail-v1" | "sha256-diagnostic-v1";
 	sourceSha256: string;
 	sourceLines: number;
+	redactions?: number;
 }
 
 export interface ToolResultDispositionMetadata {
@@ -42,6 +48,8 @@ export interface ToolResultDispositionMetadata {
 		requestedMode: AppliedToolResultContextMode;
 		appliedMode: AppliedToolResultContextMode;
 		maxBytes: number;
+		excerpt?: ToolResultExcerptBias;
+		summaryStrategy?: "head-tail" | "diagnostic";
 	};
 	capturedBytes: number;
 	displayedBytes: number;
@@ -59,7 +67,7 @@ export interface ToolResultDispositionMetadata {
 }
 
 export interface NormalizedToolResultDisposition {
-	presentation: ToolPresentationPolicy & { maxBytes: number };
+	presentation: ToolResultPresentationDisposition & { maxBytes: number };
 	context: ToolResultContextDisposition & { maxBytes: number };
 }
 
@@ -83,6 +91,7 @@ export interface ProjectToolResultContextInput {
 }
 
 const ESSENTIAL_DETAIL_KEYS = new Set([
+	"aborted",
 	"continuation",
 	"continuationHint",
 	"decision",
@@ -91,12 +100,19 @@ const ESSENTIAL_DETAIL_KEYS = new Set([
 	"evidence",
 	"exitCode",
 	"exitStatus",
+	"outputBytes",
+	"outputCapped",
 	"next",
 	"outcome",
 	"safety",
 	"safetyDecision",
 	"status",
+	"signal",
 	"terminate",
+	"timedOut",
+	"retainedBytes",
+	"stderrBytes",
+	"stdoutBytes",
 ]);
 
 function positiveByteCap(value: number | undefined, fallback: number): number {
@@ -107,8 +123,9 @@ function positiveByteCap(value: number | undefined, fallback: number): number {
 export function normalizeToolResultDisposition(
 	spec: ToolSpec,
 	hardMaxBytes: number,
+	requested: ToolResultDisposition | undefined = spec.metadata?.resultDisposition,
 ): NormalizedToolResultDisposition | null {
-	const declared = spec.metadata?.resultDisposition;
+	const declared = requested;
 	if (declared === undefined) return null;
 	const hardCap = positiveByteCap(hardMaxBytes, 1);
 	const presentationCap = Math.min(positiveByteCap(declared.presentation.maxBytes, hardCap), hardCap);
@@ -119,6 +136,7 @@ export function normalizeToolResultDisposition(
 			showDiffWhenFolded: declared.presentation.showDiffWhenFolded,
 			failureExcerpt: declared.presentation.failureExcerpt,
 			maxBytes: presentationCap,
+			...(declared.presentation.overflow === undefined ? {} : { overflow: declared.presentation.overflow }),
 		},
 		context: { ...declared.context, maxBytes: contextCap },
 	};
@@ -185,10 +203,11 @@ function capUtf8(text: string, maxBytes: number): string {
 	return byteLength(text) <= maxBytes ? text : utf8Prefix(text, maxBytes);
 }
 
-/** A deterministic, UTF-8-safe head/tail excerpt whose total bytes never exceed maxBytes. */
-function boundedToolResultExcerpt(text: string, maxBytes: number): string {
+/** A deterministic, UTF-8-safe excerpt whose total bytes never exceed maxBytes. */
+function boundedToolResultExcerpt(text: string, maxBytes: number, bias: ToolResultExcerptBias = "head-tail"): string {
 	if (maxBytes <= 0) return "";
 	if (byteLength(text) <= maxBytes) return text;
+	if (bias === "tail") return utf8Suffix(text, maxBytes);
 	const marker = "\n[… omitted …]\n";
 	const markerBytes = byteLength(marker);
 	if (markerBytes >= maxBytes) return utf8Prefix(text, maxBytes);
@@ -203,13 +222,87 @@ function sourceLineCount(text: string): number {
 	return text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n").length;
 }
 
-function summaryProvenance(text: string): ToolResultSummaryProvenance {
+function summaryProvenance(
+	text: string,
+	algorithm: ToolResultSummaryProvenance["algorithm"] = "sha256-head-tail-v1",
+	redactions = 0,
+): ToolResultSummaryProvenance {
 	return {
 		producer: "code",
-		algorithm: "sha256-head-tail-v1",
+		algorithm,
 		sourceSha256: createHash("sha256").update(text).digest("hex"),
 		sourceLines: sourceLineCount(text),
+		...(redactions > 0 ? { redactions } : {}),
 	};
+}
+
+const ERROR_LIKE_LINE =
+	/(?:\b(?:abort(?:ed)?|assert(?:ion)?|error|exception|fail(?:ed|ure)?|fatal|killed|panic|signal|timed?\s*out|timeout)\b|\bnot ok\b|\bERR!\b)/iu;
+const SUMMARY_LINE_MAX_BYTES = 768;
+
+function summaryLine(line: string): string {
+	return boundedToolResultExcerpt(line, SUMMARY_LINE_MAX_BYTES);
+}
+
+function renderSummarySection(label: string, lines: ReadonlyArray<string>): string {
+	return lines.length === 0 ? "" : `[${label}]\n${lines.map(summaryLine).join("\n")}`;
+}
+
+/**
+ * Stable Bash-style diagnostic summary. It keeps a bounded head and tail plus
+ * error-like lines from the middle, and applies the repository secret redactor
+ * before any selected content enters model context.
+ */
+export function deterministicDiagnosticSummary(
+	text: string,
+	maxBytes: number,
+	redact = true,
+): { text: string; redactions: number } {
+	if (maxBytes <= 0 || text.length === 0) return { text: "", redactions: 0 };
+	const tally = createRedactionTally();
+	const safeText = redact ? redactSecretsText(text, tally) : text;
+	const lines = safeText.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n");
+	const nonempty = lines.map((line, index) => ({ line: line.trim(), index })).filter((entry) => entry.line.length > 0);
+	if (nonempty.length === 0) return { text: "", redactions: tally.count };
+	if (nonempty.length === 1) {
+		return {
+			text: boundedToolResultExcerpt(nonempty[0]?.line ?? "", maxBytes),
+			redactions: tally.count,
+		};
+	}
+
+	const head = nonempty.slice(0, 4);
+	const tail = nonempty.slice(-6);
+	const edgeIndexes = new Set([...head, ...tail].map((entry) => entry.index));
+	const diagnostics = nonempty.filter((entry) => !edgeIndexes.has(entry.index) && ERROR_LIKE_LINE.test(entry.line));
+	const sections = [
+		renderSummarySection(
+			"diagnostic head",
+			head.map((entry) => entry.line),
+		),
+		renderSummarySection(
+			"error-like lines",
+			diagnostics.map((entry) => entry.line),
+		),
+		renderSummarySection(
+			"diagnostic tail",
+			tail.map((entry) => entry.line),
+		),
+	].filter((section) => section.length > 0);
+	const complete = sections.join("\n");
+	if (byteLength(complete) <= maxBytes) return { text: complete, redactions: tally.count };
+
+	// Preserve all three signal classes under pressure. The middle allocation is
+	// deliberately largest because those error-like lines are the summary's
+	// value over an ordinary head/tail excerpt.
+	const weights = diagnostics.length > 0 ? [0.25, 0.45, 0.3] : [0.4, 0, 0.6];
+	const boundedSections: string[] = [];
+	for (const [index, section] of sections.entries()) {
+		const weight = diagnostics.length > 0 ? (weights[index] ?? 0) : index === 0 ? 0.4 : 0.6;
+		const budget = Math.floor(maxBytes * weight);
+		if (budget > 0) boundedSections.push(boundedToolResultExcerpt(section ?? "", budget));
+	}
+	return { text: capUtf8(boundedSections.join("\n"), maxBytes), redactions: tally.count };
 }
 
 function retrievalLine(offloadPath: string | null, followUpHint: string): string {
@@ -238,14 +331,19 @@ function contextHeader(
 	return lines.join("\n");
 }
 
-function joinHeaderAndBody(header: string, body: string, maxBytes: number): string {
+function joinHeaderAndBody(
+	header: string,
+	body: string,
+	maxBytes: number,
+	bias: ToolResultExcerptBias = "head-tail",
+): string {
 	if (body.length === 0) return capUtf8(header, maxBytes);
 	const separator = "\n";
 	const headerBytes = byteLength(header);
 	const separatorBytes = byteLength(separator);
 	if (headerBytes + separatorBytes >= maxBytes) return capUtf8(header, maxBytes);
 	const bodyBudget = maxBytes - headerBytes - separatorBytes;
-	return `${header}${separator}${boundedToolResultExcerpt(body, bodyBudget)}`;
+	return `${header}${separator}${boundedToolResultExcerpt(body, bodyBudget, bias)}`;
 }
 
 function fullTrailer(input: ProjectToolResultContextInput): string {
@@ -286,7 +384,7 @@ export function projectToolResultContext(input: ProjectToolResultContextInput): 
 		}
 		const header = contextHeader(input, "bounded", true);
 		return {
-			text: joinHeaderAndBody(header, input.text, maxBytes),
+			text: joinHeaderAndBody(header, input.text, maxBytes, input.disposition.context.downgradeExcerpt),
 			appliedMode: "bounded",
 			truncated: true,
 			downgrade: { from: "full", to: "bounded", reason: "hard-budget" },
@@ -300,24 +398,37 @@ export function projectToolResultContext(input: ProjectToolResultContextInput): 
 		};
 	}
 	if (requestedMode === "summary") {
-		const provenance = summaryProvenance(input.text);
+		const diagnostic = input.disposition.context.strategy === "diagnostic";
+		const initialProvenance = summaryProvenance(input.text, diagnostic ? "sha256-diagnostic-v1" : "sha256-head-tail-v1");
+		const initialHeader = contextHeader(input, "summary", input.capturedBytes > 0, initialProvenance);
+		const bodyBudget = Math.max(0, maxBytes - byteLength(initialHeader) - 1);
+		const selected = diagnostic
+			? deterministicDiagnosticSummary(input.text, bodyBudget, input.disposition.context.redact !== false)
+			: {
+					text: input.text
+						.replace(/\r\n/gu, "\n")
+						.replace(/\r/gu, "\n")
+						.split("\n")
+						.map((line) => line.trim())
+						.filter((line) => line.length > 0)
+						.join("\n"),
+					redactions: 0,
+				};
+		const provenance = summaryProvenance(
+			input.text,
+			diagnostic ? "sha256-diagnostic-v1" : "sha256-head-tail-v1",
+			selected.redactions,
+		);
 		const header = contextHeader(input, "summary", input.capturedBytes > 0, provenance);
-		const meaningfulLines = input.text
-			.replace(/\r\n/gu, "\n")
-			.replace(/\r/gu, "\n")
-			.split("\n")
-			.map((line) => line.trim())
-			.filter((line) => line.length > 0)
-			.join("\n");
 		return {
-			text: joinHeaderAndBody(header, meaningfulLines, maxBytes),
+			text: joinHeaderAndBody(header, selected.text, maxBytes),
 			appliedMode: "summary",
 			truncated: input.capturedBytes > 0,
 			summaryProvenance: provenance,
 		};
 	}
 	const header = contextHeader(input, "bounded", input.capturedBytes > maxBytes);
-	const text = joinHeaderAndBody(header, input.text, maxBytes);
+	const text = joinHeaderAndBody(header, input.text, maxBytes, input.disposition.context.excerpt);
 	return {
 		text,
 		appliedMode: "bounded",
