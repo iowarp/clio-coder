@@ -81,6 +81,13 @@ export interface ToolExecutionFinished {
 	 * model reading the same transcript, to guess at the rule.
 	 */
 	blockReason?: string | undefined;
+	/**
+	 * Working-set eviction reason, when the projection has replaced this
+	 * result's body for the model. The transcript still renders the full body:
+	 * the ledger is what the operator scrolls, the projection is only what the
+	 * next request carries. The tag says the two now differ here.
+	 */
+	evictedReason?: string | undefined;
 	/** Structured exit status when the caller has one; text parsing is legacy fallback only. */
 	exitCode?: number | string | null | undefined;
 	/** Local `!!` bash output is visible to the operator but excluded from model context. */
@@ -456,6 +463,7 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 		if (details?.outputCapped === true) parts.push("output capped");
 	}
 	if (finished.excludeFromContext === true) parts.push("excluded from context");
+	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
 		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
@@ -1041,6 +1049,7 @@ function outputFacts(finished: ToolExecutionFinished): string[] {
 	}
 	if (isPlainObject(finished.result) && finished.result.terminate === true) parts.push("terminal result");
 	if (finished.excludeFromContext === true) parts.push("excluded from context");
+	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	return parts;
 }
 
