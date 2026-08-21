@@ -348,6 +348,15 @@ The assessor decision order is:
 3. If the assistant explicitly states what could not be verified and why, the contract passes with `explicit_limitation`.
 4. Otherwise, the contract engages with `unvalidated_mutation`.
 
+The finish assessment projects only onto the canonical completion-evidence
+axis. `validation_evidence` becomes `evidenced`, `unvalidated_mutation` becomes
+`incomplete`, `explicit_limitation` becomes `limited`, and `no_mutation`
+becomes `not_applicable`. The worker receipt's autonomy grade belongs to the
+separate autonomy-enforcement axis. Even `enforced` autonomy cannot promote
+completion evidence. The canonical state vocabulary, attribution rules, and
+persisted-format compatibility table are documented in
+[`evidence-and-memory.md`](evidence-and-memory.md#canonical-trust-status).
+
 - **Normal Rigor**: Clio issues a soft advisory warning (`FINISH_CONTRACT_ADVISORY_MESSAGE`) injected as a reminder for the next turn, but permits the turn to settle.
 - **High Rigor**: Clio withholds completion. The assessor emits `request_continuation` and a warning `inject_reminder` carrying `HIGH_RIGOR_REVALIDATION_MESSAGE`, instructing the model to run a verification-family command (e.g. `npm test`, `npm run build`) or explicitly declare a limitation before ending.
 

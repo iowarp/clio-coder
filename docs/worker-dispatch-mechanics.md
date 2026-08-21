@@ -213,6 +213,16 @@ Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 1
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
 - **Coverage**: Includes every current receipt field and reconstructible ledger field, including route intent/decision/quality, execution role, worker identity, result-contract conformance, node/reroute/gate/plan provenance, briefing, steering, and `outcomeCode`.
 
+Integrity is only the artifact-integrity axis of the canonical trust status.
+The other axes are validation grounding, independent review, context
+provenance, autonomy enforcement, and completion evidence. Sealing proves that
+the receipt matches its covered ledger facts; it does not verify correctness,
+establish context authorship, turn a correlated review into an independent
+one, or prove completion. Every non-absent canonical fact retains a named
+source and authority plus bounded references to detailed artifacts. The full
+state vocabulary and compatibility map are documented in
+[`evidence-and-memory.md`](evidence-and-memory.md#canonical-trust-status).
+
 ### 5.3 Acceptance Coverage
 
 The assignment contract's acceptance scenarios map to deterministic contract
