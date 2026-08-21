@@ -165,7 +165,7 @@ export function autonomyAskRejection(
 			// directory listings.
 			...(actionClass === "execute"
 				? [
-						'A declared package.json check runs without approval through the verify tool: verify(check="<script>").',
+						'A declared package or project-catalog check runs without approval through the verify tool: verify(check="<id>").',
 						"Read-only inspection runs without approval through the ls, read, grep, and find tools.",
 					]
 				: []),

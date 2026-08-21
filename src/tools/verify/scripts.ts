@@ -4,56 +4,147 @@ import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { declaredVerificationScripts, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { ToolResult } from "../registry.js";
 import { runVectorTool } from "../safe-exec.js";
+import {
+	type DeclaredCheck,
+	type DeclaredCheckSource,
+	loadProjectVerifierCatalog,
+	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
+	packageDeclaredCheck,
+	resolveProjectVerifierExecutionCwd,
+} from "./catalog.js";
 
 /**
- * verify(check=<script>): run one declared package.json verification script
- * through npm with no shell, and verify() with no check: list what is
- * declared. Internal module of the verify tool. The listing shape is grouped
- * by source so later check providers (Makefile, justfile, pixi) can add their
- * own groups without changing the surface.
+ * Package scripts and the project catalog meet here as one canonical check
+ * projection. Project checks retain their admitted argv/cwd/timeout exactly;
+ * package scripts keep the established npm argument-widening behavior.
  */
 
-export interface DeclaredCheckSource {
-	kind: "package.json";
-	path: string;
-	checks: string[];
+export type DeclaredCheckDiscoveryResult = { ok: true; sources: DeclaredCheckSource[] } | { ok: false; reason: string };
+
+function repositoryRelativeCwd(workspaceRoot: string, resolved: string): string {
+	const relative = path.relative(workspaceRoot, resolved);
+	return relative.length === 0 ? "." : relative.split(path.sep).join("/");
 }
 
-function declaredCheckSources(cwd: string): DeclaredCheckSource[] {
-	const pkgPath = path.join(cwd, "package.json");
-	if (!existsSync(pkgPath)) return [];
-	const pkg = parsePackageJson(pkgPath);
-	if (!pkg.ok) return [];
-	return [{ kind: "package.json", path: pkgPath, checks: declaredVerificationScripts(pkg.scripts) }];
+function packageTag(id: string): string[] {
+	const separator = id.search(/[:.-]/u);
+	return [separator === -1 ? id : id.slice(0, separator)];
+}
+
+function packageCheckSource(packageRoot: string, workspaceRoot: string): DeclaredCheckSource | null {
+	const packagePath = path.join(packageRoot, "package.json");
+	if (!existsSync(packagePath)) return null;
+	const pkg = parsePackageJson(packagePath);
+	if (!pkg.ok) return null;
+	const cwd = repositoryRelativeCwd(workspaceRoot, packageRoot);
+	const checks = declaredVerificationScripts(pkg.scripts).map((id) =>
+		packageDeclaredCheck(id, packagePath, cwd, packageTag(id)),
+	);
+	return { kind: "package.json", path: packagePath, checks };
+}
+
+function providerCollision(sources: ReadonlyArray<DeclaredCheckSource>): string | null {
+	const seen = new Map<string, DeclaredCheck>();
+	for (const source of sources) {
+		for (const check of source.checks) {
+			const prior = seen.get(check.id);
+			if (prior !== undefined) {
+				return (
+					`duplicate declared check id '${check.id}' from ` +
+					`${prior.source.kind} (${prior.source.path}) and ${check.source.kind} (${check.source.path})`
+				);
+			}
+			seen.set(check.id, check);
+		}
+	}
+	return null;
+}
+
+export function discoverDeclaredChecks(cwdArg: string | undefined): DeclaredCheckDiscoveryResult {
+	const workspaceRoot = process.cwd();
+	let packageRoot: string;
+	try {
+		packageRoot = resolveSafeCwd(cwdArg, workspaceRoot);
+	} catch (error) {
+		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+	}
+	const sources: DeclaredCheckSource[] = [];
+	const packageSource = packageCheckSource(packageRoot, workspaceRoot);
+	if (packageSource !== null) sources.push(packageSource);
+	const projectCatalog = loadProjectVerifierCatalog(workspaceRoot);
+	if (!projectCatalog.ok) return projectCatalog;
+	if (projectCatalog.source !== null) sources.push(projectCatalog.source);
+	const collision = providerCollision(sources);
+	if (collision !== null) return { ok: false, reason: collision };
+	return { ok: true, sources };
+}
+
+function clonedSources(sources: ReadonlyArray<DeclaredCheckSource>): DeclaredCheckSource[] {
+	return sources.map((source) => ({
+		kind: source.kind,
+		path: source.path,
+		checks: source.checks.map((check) => ({
+			...check,
+			command: [...check.command],
+			tags: [...check.tags],
+			source: { ...check.source },
+		})),
+	}));
 }
 
 export function listChecks(cwdArg: string | undefined): ToolResult {
-	let cwd: string;
-	try {
-		cwd = resolveSafeCwd(cwdArg, process.cwd());
-	} catch (err) {
-		return { kind: "error", message: `verify: ${err instanceof Error ? err.message : String(err)}` };
-	}
-	const sources = declaredCheckSources(cwd);
+	const discovery = discoverDeclaredChecks(cwdArg);
+	if (!discovery.ok) return { kind: "error", message: `verify: ${discovery.reason}` };
 	const lines: string[] = [];
-	if (sources.length === 0 || sources.every((source) => source.checks.length === 0)) {
-		lines.push("No declared verification checks found (no package.json verification scripts).");
+	if (discovery.sources.length === 0 || discovery.sources.every((source) => source.checks.length === 0)) {
+		lines.push(
+			`No declared verification checks found (no package.json verification scripts or ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} entries).`,
+		);
 	} else {
 		lines.push("Declared verification checks:");
-		for (const source of sources) {
-			lines.push(`${source.kind}:`);
-			for (const check of source.checks) lines.push(`- ${check}`);
+		for (const source of discovery.sources) {
+			lines.push(source.kind === "package.json" ? "package.json:" : `${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}:`);
+			for (const check of source.checks) {
+				const tags = check.tags.length > 0 ? ` [${check.tags.join(", ")}]` : "";
+				lines.push(`- ${check.id}${tags}: ${check.description}`);
+			}
 		}
 	}
 	lines.push(
 		"",
-		'Run one with verify(check="<name>"). verify(check="frontend", path=<file>) validates an HTML/CSS/JS artifact.',
+		'Run one with verify(check="<id>"). verify(check="frontend", path=<file>) validates an HTML/CSS/JS artifact.',
 	);
 	return {
 		kind: "ok",
 		output: lines.join("\n"),
-		details: { sources: sources.map((source) => ({ ...source })) },
+		details: { sources: clonedSources(discovery.sources) },
 	};
+}
+
+function withDeclaredEvidence(result: ToolResult, check: DeclaredCheck): ToolResult {
+	return {
+		...result,
+		details: {
+			...result.details,
+			action: "verify",
+			check: check.id,
+			source: { ...check.source },
+			description: check.description,
+			declaredCommand: [...check.command],
+			declaredCwd: check.cwd,
+			declaredTimeoutMs: check.timeoutMs,
+			tags: [...check.tags],
+		},
+	};
+}
+
+export async function runProjectCheck(check: DeclaredCheck, options?: { signal?: AbortSignal }): Promise<ToolResult> {
+	const [file, ...vector] = check.command;
+	if (file === undefined) return { kind: "error", message: `verify: declared check '${check.id}' has empty argv` };
+	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
+	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
+	const result = await runVectorTool("verify", file, vector, { cwd, timeout_ms: check.timeoutMs }, options);
+	return withDeclaredEvidence(result, check);
 }
 
 export async function runScriptCheck(
@@ -64,12 +155,12 @@ export async function runScriptCheck(
 	let cwd: string;
 	try {
 		cwd = resolveSafeCwd(typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined, process.cwd());
-	} catch (err) {
-		return { kind: "error", message: `verify: ${err instanceof Error ? err.message : String(err)}` };
+	} catch (error) {
+		return { kind: "error", message: `verify: ${error instanceof Error ? error.message : String(error)}` };
 	}
-	const pkgPath = path.join(cwd, "package.json");
-	if (!existsSync(pkgPath)) return { kind: "error", message: `verify: package.json not found in ${cwd}` };
-	const pkg = parsePackageJson(pkgPath);
+	const packagePath = path.join(cwd, "package.json");
+	if (!existsSync(packagePath)) return { kind: "error", message: `verify: package.json not found in ${cwd}` };
+	const pkg = parsePackageJson(packagePath);
 	if (!pkg.ok) return { kind: "error", message: `verify: ${pkg.reason}` };
 	if (!Object.hasOwn(pkg.scripts, check)) {
 		const declared = declaredVerificationScripts(pkg.scripts);
@@ -90,10 +181,10 @@ export async function runScriptCheck(
 export { VERIFICATION_SCRIPT_FAMILY_HINT };
 
 function parsePackageJson(
-	pkgPath: string,
+	packagePath: string,
 ): { ok: true; scripts: Record<string, unknown> } | { ok: false; reason: string } {
 	try {
-		const parsed = JSON.parse(readFileSync(pkgPath, "utf8")) as unknown;
+		const parsed = JSON.parse(readFileSync(packagePath, "utf8")) as unknown;
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 			return { ok: false, reason: "package.json root must be an object" };
 		}
@@ -102,7 +193,7 @@ function parsePackageJson(
 			return { ok: false, reason: "package.json has no scripts object" };
 		}
 		return { ok: true, scripts: scripts as Record<string, unknown> };
-	} catch (err) {
-		return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+	} catch (error) {
+		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
 	}
 }

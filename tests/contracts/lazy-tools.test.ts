@@ -35,7 +35,7 @@ describe("contracts/lazy tool stubs", () => {
 	const SURFACE_SHA256 = {
 		code_nav: "bbdb58bd9e57679d34ff1c966d2ddd4929fef12419cb0e0971ddbf0025a9e4a9",
 		context: "c6a4035f70c0657c1af97bc93beb1565ca79db071404965d5305aea9b9fa7d00",
-		verify: "f7c499209b02f6ddc0cf3938681bb748aa544f8aaa40610fcd2ffa5ab70c5a80",
+		verify: "120035c16ec88e8354cf86ee3f297e96070db9d011db149253f56a945795849a",
 		web_fetch: "6b9c7e66866cc5f8c7cef21bcc6d1dd301692b051ad339f8ec3764ba14d6f164",
 	} as const;
 

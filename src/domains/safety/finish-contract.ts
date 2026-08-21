@@ -1,5 +1,5 @@
 import { ToolNames } from "../../core/tool-names.js";
-import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -399,8 +399,9 @@ export function typedValidationSummary(toolName: string, payload: Record<string,
 			const path = typeof args?.path === "string" && args.path.trim().length > 0 ? args.path.trim() : "artifact";
 			return `verify frontend ${path}`;
 		}
-		if (!isVerificationScriptName(check)) return null;
-		return `npm run ${check}`;
+		if (isVerificationScriptName(check)) return `npm run ${check}`;
+		if (isProjectVerifierCheckId(check)) return `verify ${check}`;
+		return null;
 	}
 	return null;
 }
