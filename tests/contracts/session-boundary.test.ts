@@ -1,10 +1,11 @@
-import { strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { listSessionsForCwd } from "../../src/domains/session/history.js";
 import { resumeSessionState } from "../../src/domains/session/manager.js";
+import { runMigrations } from "../../src/domains/session/migrations/index.js";
 import {
 	CURRENT_SESSION_FORMAT_VERSION,
 	createSession,
@@ -110,7 +111,7 @@ describe("contracts/session-boundary", () => {
 		});
 	});
 
-	for (const version of [1, 2, 3] as const) {
+	for (const version of [1, 2] as const) {
 		it(`rejects session format version ${version} with an operator remedy`, async () => {
 			const { meta, writer } = createSession({ cwd: scratch });
 			await writer.close();
@@ -135,6 +136,31 @@ describe("contracts/session-boundary", () => {
 
 		throws(() => resumeSessionState(meta.id), {
 			message: `session was written by a newer Clio (format version ${newer}, this build reads version ${CURRENT_SESSION_FORMAT_VERSION}): ${paths.meta}. Upgrade clio-coder to resume this session.`,
+		});
+	});
+
+	// Version 4 only added the working-set kinds; a version-3 ledger is readable
+	// as-is, so an upgrade must not strand every session the operator has.
+	it("resumes a version-3 session as a no-op migration and restamps the metadata", async () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		await writer.close();
+		const paths = sessionPaths(meta);
+		writeFileSync(paths.meta, JSON.stringify({ ...meta, sessionFormatVersion: 3 }));
+
+		deepStrictEqual(runMigrations({ ...meta, sessionFormatVersion: 3 } as never, paths.meta), {
+			migrated: true,
+			from: 3,
+			to: CURRENT_SESSION_FORMAT_VERSION,
+		});
+		const resumed = resumeSessionState(meta.id);
+		strictEqual(resumed.state.meta.sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
+		strictEqual(JSON.parse(readFileSync(paths.meta, "utf8")).sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
+		await resumed.state.writer.close();
+		// A second resume sees the current version and migrates nothing.
+		deepStrictEqual(runMigrations(resumed.state.meta, paths.meta), {
+			migrated: false,
+			from: CURRENT_SESSION_FORMAT_VERSION,
+			to: CURRENT_SESSION_FORMAT_VERSION,
 		});
 	});
 
