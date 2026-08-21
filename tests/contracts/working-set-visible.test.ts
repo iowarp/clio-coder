@@ -6,8 +6,8 @@ import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { ageHorizonPolicy, structuralPolicy } from "../../src/domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../../src/domains/context/working-set/visible.js";
-import { estimateAgentMessageTokens } from "../../src/domains/session/context-accounting.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
+import { estimateAgentMessageTokens } from "../../src/domains/session/context-accounting.js";
 import type { ContextEvictionEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 
@@ -61,7 +61,12 @@ class Ledger {
 			parentTurnId: this.last,
 			timestamp: TS,
 			role: "tool_result",
-			payload: { toolCallId: callId, toolName: "read", result: { content: [{ type: "text", text: body(path) }] }, isError: false },
+			payload: {
+				toolCallId: callId,
+				toolName: "read",
+				result: { content: [{ type: "text", text: body(path) }] },
+				isError: false,
+			},
 		});
 	}
 
@@ -95,7 +100,10 @@ function input(ledger: Ledger, protectLastTurns: number): PolicyInput {
 }
 
 function replayTokens(entries: ReadonlyArray<SessionEntry>): number {
-	return buildModelReplayAgentMessagesFromTurns(entries).reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
+	return buildModelReplayAgentMessagesFromTurns(entries).reduce(
+		(sum, message) => sum + estimateAgentMessageTokens(message),
+		0,
+	);
 }
 
 function withEvent(ledger: Ledger, plan: NonNullable<ReturnType<typeof planEviction>>): SessionEntry[] {
@@ -140,7 +148,9 @@ test("visible: the compaction cut removes everything before firstKeptTurnId and 
 		visible.some((entry) => entry.kind === "compactionSummary"),
 		false,
 	);
-	assert.equal(visible[0]?.payload && (visible[0].payload as { text?: string }).text, "after summary");
+	const first = visible[0];
+	assert.ok(first && first.kind === "message");
+	assert.equal((first.payload as { text?: string }).text, "after summary");
 });
 
 test("visible: a ledger without a compaction is the active path unchanged", () => {
@@ -178,6 +188,9 @@ test("visible: with one post-cut result past the horizon, it is the only item an
 		// prices the message content the model receives. The two differ only by
 		// that stamp, a handful of tokens, never by a body behind the cut.
 		const claimed = plan.tokensBefore - plan.tokensAfter;
-		assert.ok(Math.abs(claimed - (before - after)) <= 8, `${policy.id}: claimed ${claimed}, replay lost ${before - after}`);
+		assert.ok(
+			Math.abs(claimed - (before - after)) <= 8,
+			`${policy.id}: claimed ${claimed}, replay lost ${before - after}`,
+		);
 	}
 });

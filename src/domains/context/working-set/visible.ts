@@ -31,9 +31,8 @@ export function selectVisibleEntries(entries: ReadonlyArray<SessionEntry>, activ
 	const compaction = active[compactionIndex];
 	if (compaction?.kind !== "compactionSummary") return active;
 	const firstKeptIndex =
-		compaction.firstKeptTurnId.length > 0
-			? active.findIndex((entry) => entry.turnId === compaction.firstKeptTurnId)
-			: -1;
-	const kept = firstKeptIndex >= 0 && firstKeptIndex < compactionIndex ? active.slice(firstKeptIndex, compactionIndex) : [];
+		compaction.firstKeptTurnId.length > 0 ? active.findIndex((entry) => entry.turnId === compaction.firstKeptTurnId) : -1;
+	const kept =
+		firstKeptIndex >= 0 && firstKeptIndex < compactionIndex ? active.slice(firstKeptIndex, compactionIndex) : [];
 	return [...kept, ...active.slice(compactionIndex + 1)];
 }

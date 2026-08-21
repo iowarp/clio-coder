@@ -37,10 +37,13 @@ export interface ReplayTraceResult {
 	entries: ReadonlyArray<SessionEntry>;
 }
 
+/** Tokens of what the model would see: the visible slice (after any compaction cut) under the full-path fold. */
 function sumProjectedTokens(entries: ReadonlyArray<SessionEntry>, activeLeafTurnId?: string): number {
 	const view = foldWorkingSet(entries, activeLeafTurnId);
 	let tokens = 0;
-	for (const entry of projectWorkingSet(entries, view)) tokens += estimateTokens(entry);
+	for (const entry of projectWorkingSet(selectVisibleEntries(entries, activeLeafTurnId), view)) {
+		tokens += estimateTokens(entry);
+	}
 	return tokens;
 }
 
