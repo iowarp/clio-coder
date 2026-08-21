@@ -1058,8 +1058,8 @@ describe("contracts/autonomy ask rejection hints", () => {
 	it("execute asks name the approval-free pivots: verify and the observe tools", () => {
 		const rejection = autonomyAskRejection("auto-edit", "bash", "execute");
 		ok(
-			rejection.hints.some((hint) => hint.includes('verify(check="<script>")')),
-			"the verify pivot reaches the model",
+			rejection.hints.some((hint) => hint.includes('verify(check="<id>")')),
+			"the canonical approval-free verify pivot reaches the model",
 		);
 		ok(
 			rejection.hints.some((hint) => hint.includes("ls, read, grep, and find")),

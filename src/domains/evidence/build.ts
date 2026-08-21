@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rawDurationMs } from "../../core/timers.js";
-import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import type {
 	RunEnvelope,
 	RunKind,
@@ -508,8 +508,10 @@ function validationToolCallSummary(toolName: string, args: unknown): string | nu
 			const target = readOptionalString(argRecord?.path) ?? "artifact";
 			return `verify frontend ${target}`;
 		}
-		if (check === null || !isVerificationScriptName(check)) return null;
-		return `npm run ${check}`;
+		if (check === null) return null;
+		if (isVerificationScriptName(check)) return `npm run ${check}`;
+		if (isProjectVerifierCheckId(check)) return `verify ${check}`;
+		return null;
 	}
 	return null;
 }

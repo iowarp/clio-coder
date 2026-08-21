@@ -24,20 +24,24 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 export const verifyToolSurface = {
 	name: ToolNames.Verify,
 	description:
-		'Run a declared verification check: no arguments lists checks, check=<package.json script> runs it, check="frontend" with path validates an HTML/CSS/JS artifact.',
+		'Run a declared verification check: no arguments lists package scripts and .clio-coder/verifiers.yaml entries, check=<id> runs one, and check="frontend" with path validates an HTML/CSS/JS artifact.',
 	parameters: Type.Object({
 		check: Type.Optional(
 			Type.String({
-				description: `Declared script name (${VERIFICATION_SCRIPT_FAMILY_HINT}) or "frontend". Omit to list available checks.`,
+				description: `Declared project check ID, package script (${VERIFICATION_SCRIPT_FAMILY_HINT}), or "frontend". Omit to list available checks.`,
 			}),
 		),
 		path: Type.Optional(Type.String({ description: "check=frontend: artifact file under the workspace root." })),
-		args: Type.Optional(Type.Array(Type.String(), { description: "Extra arguments passed after --." })),
+		args: Type.Optional(
+			Type.Array(Type.String(), { description: "Package scripts only: extra arguments passed after --." }),
+		),
 		browser: Type.Optional(
 			StringEnum(BROWSER_MODES, { description: "check=frontend: headless browser mode (default auto)." }),
 		),
-		cwd: Type.Optional(Type.String({ description: "Working directory." })),
-		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
+		cwd: Type.Optional(Type.String({ description: "Package-script working directory; ignored by project checks." })),
+		timeout_ms: Type.Optional(
+			Type.Number({ description: "Package/frontend timeout in ms; project checks use their declared timeoutMs." }),
+		),
 		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes (default 600000)." })),
 	}),
 	baseActionClass: "execute",
