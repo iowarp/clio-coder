@@ -108,6 +108,29 @@ function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: Sessi
 	return total;
 }
 
+/**
+ * What one candidate takes out of the working set: the entry as it stands now
+ * minus the entry as the projection would render it. Zero when the candidate
+ * does not apply to the entry, and never negative, because a marker longer than
+ * the body it replaces is a bad trade, not a negative saving.
+ *
+ * Exported so a policy can do headroom arithmetic (`structural-v1` rung 6 needs
+ * to know when to stop) against the same numbers `planEviction` will record.
+ * A policy that priced evictions its own way would report headroom the ledger
+ * then contradicts.
+ */
+export function tokensFreedByEviction(
+	estimateTokens: (entry: SessionEntry) => number,
+	entry: SessionEntry,
+	candidate: EvictionCandidate,
+): number {
+	const marker = markerFor(entry, candidate);
+	if (marker === null) return 0;
+	const key = refKey(candidate.ref);
+	const projected = projectWorkingSet([entry], soloView(key, pendingState(candidate, marker, "")))[0] ?? entry;
+	return Math.max(0, estimateTokens(entry) - estimateTokens(projected));
+}
+
 export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null {
 	const candidates = policy.select(input);
 	if (candidates.length === 0) return null;
@@ -128,11 +151,10 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		const marker = markerFor(entry, candidate);
 		if (marker === null) continue;
 		claimed.add(key);
-		const projected = projectWorkingSet([entry], soloView(key, pendingState(candidate, marker, policy.id)))[0] ?? entry;
 		items.push({
 			ref: candidate.ref,
 			reason: candidate.reason,
-			tokensFreed: Math.max(0, input.estimateTokens(entry) - input.estimateTokens(projected)),
+			tokensFreed: tokensFreedByEviction(input.estimateTokens, entry, candidate),
 			marker,
 			...(candidate.by === undefined ? {} : { by: candidate.by }),
 		});
