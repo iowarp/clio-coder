@@ -463,7 +463,7 @@ describe("contracts/working-set scenarios (S11 thinking rule)", () => {
 });
 
 describe("contracts/working-set scenarios (S12 default-off safety)", () => {
-	it("disabled: the ledger is untouched and the summary stage is reached", async () => {
+	it("disabled: the ledger is untouched and an empty summary attempt emits no hook", async () => {
 		const harness = await createScenarioHarness({
 			prefix: "clio-ws-s12-off-",
 			contextWindow: 4_000,
@@ -480,8 +480,8 @@ describe("contracts/working-set scenarios (S12 default-off safety)", () => {
 
 			strictEqual(harness.rawLedger(), before, "a disabled working set must not write to the ledger");
 			strictEqual(evictionEntries(harness.entries()).length, 0);
-			strictEqual(harness.summaryCalls(), 1, "pressure still reaches the summary stage");
-			deepStrictEqual(harness.hookStages, ["llm_summary"]);
+			strictEqual(harness.summaryCalls(), 1, "pressure still probes the summary planner once");
+			deepStrictEqual(harness.hookStages, [], "an empty automatic summary emits no lifecycle hook");
 		} finally {
 			await harness.dispose();
 		}
