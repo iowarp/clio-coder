@@ -11,11 +11,16 @@
  * the same trace disagree.
  *
  * The field order is fixed (ref, reason, by, tool, path, size, offload,
- * recall, preview) so a diff between two markers is readable and so a model
- * reading many of them sees the same shape every time. Undefined fields are
- * omitted rather than rendered empty. `recall` spells out the exact tool call
- * that brings the body back, which is the only affordance the model has once
- * the body is gone.
+ * recall, then the body tail) so a diff between two markers is readable and so
+ * a model reading many of them sees the same shape every time. Undefined
+ * fields are omitted rather than rendered empty. `recall` spells out the exact
+ * tool call that brings the body back, which is the only affordance the model
+ * has once the body is gone.
+ *
+ * The body tail is `preview` for every reason but one. A `failure_resolved`
+ * eviction renders `first_line` instead: failures are evidence, and the line
+ * that says what failed is the part worth a marker's tokens, where a preview
+ * of a stack trace is not.
  */
 
 import { formatSize } from "../../../engine/truncate.js";
@@ -52,6 +57,15 @@ function preview(text: string): string {
 	return text.trim().replace(/\s+/g, " ").slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
 }
 
+/** The first line that says anything, bounded and escaped like a preview. */
+function firstLine(text: string): string {
+	for (const line of text.split(/\r\n|\r|\n/)) {
+		const trimmed = line.trim();
+		if (trimmed.length > 0) return trimmed.slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
+	}
+	return "";
+}
+
 export function renderMarker(input: MarkerInput): string {
 	const ref = input.ref.entry;
 	const fields: string[] = [`ref=${ref}`, `reason=${input.reason}`];
@@ -64,8 +78,9 @@ export function renderMarker(input: MarkerInput): string {
 	// An offloaded body is one `read` away at a stable path; a preview of it
 	// would spend tokens repeating what the pointer already promises.
 	if (input.offloadPath === undefined) {
-		const head = preview(input.text);
-		if (head.length > 0) fields.push(`preview="${head}"`);
+		const failed = input.reason === "failure_resolved";
+		const tail = failed ? firstLine(input.text) : preview(input.text);
+		if (tail.length > 0) fields.push(`${failed ? "first_line" : "preview"}="${tail}"`);
 	}
 	return `[evicted ${fields.join(" ")}]`;
 }
