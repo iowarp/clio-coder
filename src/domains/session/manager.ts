@@ -70,9 +70,16 @@ export function resumeSessionState(sessionId: string): {
 } {
 	const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
 	const paths = sessionPaths(persistedMeta);
-	runMigrations(persistedMeta, paths.meta);
+	const migration = runMigrations(persistedMeta, paths.meta);
 	const { meta, writer, tree } = engineResumeSession(sessionId);
-	return { state: { meta: meta as SessionMeta, writer }, nodes: tree };
+	const state: SessionManagerState = { meta: meta as SessionMeta, writer };
+	if (migration.migrated) {
+		// The ledger needed no transformation; only the stamp moves, so the next
+		// reader does not re-run the same no-op.
+		state.meta.sessionFormatVersion = migration.to;
+		persistSessionMeta(state);
+	}
+	return { state, nodes: tree };
 }
 
 export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTurnRecord {
