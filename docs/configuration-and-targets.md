@@ -228,7 +228,7 @@ compaction:
 context:
   workingSet:
     enabled: true
-    policy: age-horizon
+    policy: structural-v1
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
@@ -585,7 +585,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `compaction.threshold` | `0.8` | number in 0 to 1 | next turn |
 | `compaction.excludeLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.enabled` | `true` | boolean | next turn |
-| `context.workingSet.policy` | `age-horizon` | `age-horizon` or `structural-v1` | next turn |
+| `context.workingSet.policy` | `structural-v1` | `age-horizon` or `structural-v1` | next turn |
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | next turn |
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |

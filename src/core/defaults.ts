@@ -655,15 +655,17 @@ compaction:
 
 # Non-destructive working-set eviction before summary compaction.
 #   enabled             false skips eviction and goes directly to the summary stage.
-#   policy              age-horizon preserves today's age-based selection;
-#                       structural-v1 opts into structure-aware selection.
+#   policy              structural-v1 evicts by what the session did since
+#                       (re-reads, edits, resolved failures, consumed listings)
+#                       and falls back to age only under pressure;
+#                       age-horizon is the previous age-based selection.
 #   target              pressure ratio an applied eviction batches down to.
 #   protectLastTurns    recent user turns whose observations remain in the working set.
 #   minEvictableTokens  entries below this estimate remain in the working set.
 context:
   workingSet:
     enabled: true
-    policy: age-horizon
+    policy: structural-v1
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
