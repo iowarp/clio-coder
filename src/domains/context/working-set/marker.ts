@@ -43,27 +43,44 @@ export interface MarkerInput {
 	path?: string | undefined;
 }
 
+/** Lines as `split(/\r\n|\r|\n/)` would count them, without materializing them. */
 function lineCount(text: string): number {
 	if (text.length === 0) return 0;
-	return text.split(/\r\n|\r|\n/).length;
+	let count = 1;
+	for (let index = 0; index < text.length; index += 1) {
+		const code = text.charCodeAt(index);
+		if (code === 10 || (code === 13 && text.charCodeAt(index + 1) !== 10)) count += 1;
+	}
+	return count;
 }
 
 /**
  * First `PREVIEW_LIMIT` characters with whitespace collapsed to single spaces
  * and double quotes escaped, so the preview never breaks the quoted field or
- * spills onto a second line.
+ * spills onto a second line. Bounded: the body is scanned only as far as the
+ * preview reaches, because the marker is priced once per candidate on every
+ * eviction and a body-length collapse was most of that price.
  */
 function preview(text: string): string {
-	return text.trim().replace(/\s+/g, " ").slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
+	let out = "";
+	let pendingSpace = false;
+	for (const char of text) {
+		if (/\s/.test(char)) {
+			pendingSpace = out.length > 0;
+			continue;
+		}
+		if (pendingSpace) out += " ";
+		pendingSpace = false;
+		out += char;
+		if (out.length >= PREVIEW_LIMIT) break;
+	}
+	return out.slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
 }
 
 /** The first line that says anything, bounded and escaped like a preview. */
 function firstLine(text: string): string {
-	for (const line of text.split(/\r\n|\r|\n/)) {
-		const trimmed = line.trim();
-		if (trimmed.length > 0) return trimmed.slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
-	}
-	return "";
+	const line = /[^\r\n]*\S[^\r\n]*/.exec(text)?.[0] ?? "";
+	return line.trim().slice(0, PREVIEW_LIMIT).replace(/"/g, '\\"');
 }
 
 export function renderMarker(input: MarkerInput): string {
