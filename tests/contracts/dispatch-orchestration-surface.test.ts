@@ -28,6 +28,7 @@ import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { type AgentSpec, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { RunReceipt, RunReceiptVerification } from "../../src/domains/dispatch/types.js";
+import { adaptRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { compile, compileWorker, WORKER_CLAIM_GUIDANCE } from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
@@ -345,7 +346,11 @@ describe("contracts/orchestration dispatch summary honesty", () => {
 		ok(labels.includes("first_pass=false"), labels);
 		ok(labels.includes("findings=blocked-tool"), labels);
 
-		const notices = workerTextNonEvidenceNotices(run, unverified, '{"verdict":"pass"}').join("\n");
+		const notices = workerTextNonEvidenceNotices(
+			run,
+			adaptRunReceiptTrustStatus({ ...run, verification: unverified }, { integrity }),
+			'{"verdict":"pass"}',
+		).join("\n");
 		ok(notices.includes("no mutating tool call succeeded"), notices);
 		ok(notices.includes("Confirm with a diff"), notices);
 	});
@@ -361,7 +366,13 @@ describe("contracts/orchestration dispatch summary honesty", () => {
 		ok(labels.includes("work=calls:3 ok:3 failed:0 blocked:0 mutations:no"), labels);
 		strictEqual(labels.includes("mutation_effect=none"), false, labels);
 		strictEqual(
-			workerTextNonEvidenceNotices(run, notApplicable, "src/a.ts:2 holds it.").join("\n").includes("mutating tool call"),
+			workerTextNonEvidenceNotices(
+				run,
+				adaptRunReceiptTrustStatus({ ...run, verification: notApplicable }, { integrity }),
+				"src/a.ts:2 holds it.",
+			)
+				.join("\n")
+				.includes("mutating tool call"),
 			false,
 		);
 	});

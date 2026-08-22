@@ -5,6 +5,7 @@ import { readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { redactArtifactForStorage } from "../eval/artifacts/redact.js";
 import type { EvalCommandResult, EvalRunArtifact, EvalRunRecord } from "../eval/index.js";
 import { loadEvalArtifact } from "../eval/index.js";
+import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { evidenceDirectory, findingsFile } from "./store.js";
 import {
 	EVIDENCE_VERSION,
@@ -21,6 +22,7 @@ import {
 	type EvidenceReceiptFile,
 	type EvidenceTag,
 	type EvidenceToolEvent,
+	type EvidenceTrustStatusFile,
 } from "./types.js";
 
 const EVAL_EVIDENCE_FILES = [
@@ -32,6 +34,7 @@ const EVAL_EVIDENCE_FILES = [
 	"audit-linked.jsonl",
 	"receipt.json",
 	"gate-decisions.json",
+	"trust-status.json",
 	"protected-artifacts.json",
 	"eval-result.json",
 	"findings.json",
@@ -87,8 +90,23 @@ export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Prom
 						options.stateDir,
 					).map((entry) => entry.artifact),
 	};
-	await writeEvalEvidenceFiles(directory, artifact, overview, findings, toolEventRows, linkedRuns, gateDecisions);
-	return { evidenceId, directory, overview, findings };
+	const trustStatus = buildEvidenceTrustStatusFile({
+		evidenceId,
+		runSources: linkedRuns.runSources,
+		gateDecisions: gateDecisions.decisions,
+		auditRows: linkedRuns.auditRows,
+	});
+	await writeEvalEvidenceFiles(
+		directory,
+		artifact,
+		overview,
+		findings,
+		toolEventRows,
+		linkedRuns,
+		gateDecisions,
+		trustStatus,
+	);
+	return { evidenceId, directory, overview, findings, trustStatus };
 }
 
 export function evalEvidenceId(evalId: string): string {
@@ -218,6 +236,7 @@ async function writeEvalEvidenceFiles(
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
 	linkedRuns: EvalLinkedRuns,
 	gateDecisions: EvidenceGateDecisionsFile,
+	trustStatus: EvidenceTrustStatusFile,
 ): Promise<void> {
 	const emptyProtected: EvidenceProtectedArtifactsFile = { version: EVIDENCE_VERSION, artifacts: [], events: [] };
 	const receiptsFile: EvidenceReceiptFile = {
@@ -234,6 +253,7 @@ async function writeEvalEvidenceFiles(
 	await writeJsonl(join(directory, "audit-linked.jsonl"), linkedRuns.auditRows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile);
 	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
+	await writeJson(join(directory, "trust-status.json"), trustStatus);
 	await writeJson(join(directory, "protected-artifacts.json"), emptyProtected);
 	await writeJson(join(directory, "eval-result.json"), redactedArtifact);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));

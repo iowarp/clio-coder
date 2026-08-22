@@ -228,6 +228,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 
 		const verified = runBlock(result.output, "run-verified");
 		match(verified, /receipt_integrity=verified\/v15\/sha256/);
+		match(verified, /trust_status=v1 artifactIntegrity:verified validationGrounding:validated/);
 		match(verified, /evidence_verification=verified\/validation-tool/);
 		match(verified, new RegExp(`briefing=bytes:12 sha256:${"a".repeat(64)}`));
 		match(verified, /project_context=absent/);
@@ -235,6 +236,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 
 		const unverified = runBlock(result.output, "run-unverified");
 		match(unverified, /receipt_integrity=verified\/v15\/sha256/);
+		match(unverified, /trust_status=v1 artifactIntegrity:verified validationGrounding:absent/);
 		match(unverified, /evidence_verification=unverified\/no-validation-tool/);
 		match(unverified, /briefing=none/);
 		match(unverified, new RegExp(`project_context=bounded chars:639 sha256:${"b".repeat(64)}`));
@@ -242,6 +244,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 
 		const recon = runBlock(result.output, "run-recon");
 		match(recon, /receipt_integrity=verified\/v15\/sha256/);
+		match(recon, /trust_status=v1 artifactIntegrity:verified validationGrounding:not_applicable/);
 		match(recon, /evidence_verification=not_applicable\/read-only-agent/);
 		match(recon, new RegExp(`briefing=bytes:24 sha256:${"c".repeat(64)}`));
 		match(recon, new RegExp(`project_context=bounded chars:412 sha256:${"d".repeat(64)}`));
@@ -249,6 +252,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 
 		const unknown = runBlock(result.output, "run-unknown");
 		match(unknown, /receipt_integrity=verified\/v15\/sha256/);
+		match(unknown, /trust_status=v1 artifactIntegrity:verified validationGrounding:unknown/);
 		match(unknown, /evidence_verification=unknown\/acp-external-unobserved/);
 		match(unknown, /briefing=none/);
 		match(unknown, /project_context=absent/);
@@ -260,31 +264,31 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(canceled, /non-evidence: this run did not succeed; treat the text above as an unsubstantiated report/);
 
 		const tampered = runBlock(result.output, "run-tampered");
-		match(tampered, /worker claims \(validation not observable at this layer\):/);
+		match(tampered, /worker claims \(unverified prose\):/);
 		match(tampered, /RECEIPT INTEGRITY FAILED/);
 		match(tampered, /receipt integrity failed: integrity mismatch/);
 		strictEqual(tampered.includes("output run-tampered"), false, tampered);
 		strictEqual(tampered.includes("worker output (tool-verified):"), false, tampered);
 
 		const missing = runBlock(result.output, "run-missing");
-		match(missing, /worker claims \(validation not observable at this layer\):/);
+		match(missing, /worker claims \(unverified prose\):/);
 		match(missing, /receipt integrity unavailable: cannot read/);
 		strictEqual(missing.includes("worker output (tool-verified):"), false, missing);
 		strictEqual(missing.includes("output run-missing"), false, missing);
 
 		const noPath = runBlock(result.output, "run-no-path");
-		match(noPath, /worker claims \(validation not observable at this layer\):/);
+		match(noPath, /worker claims \(unverified prose\):/);
 		match(noPath, /receipt integrity unavailable: no stored receipt/);
 		strictEqual(noPath.includes("worker output (tool-verified):"), false, noPath);
 		strictEqual(noPath.includes("output run-no-path"), false, noPath);
 
 		const malformed = runBlock(result.output, "run-malformed");
-		match(malformed, /worker claims \(validation not observable at this layer\):/);
+		match(malformed, /worker claims \(unverified prose\):/);
 		match(malformed, /receipt integrity unavailable: cannot read/);
 		strictEqual(malformed.includes("worker output (tool-verified):"), false, malformed);
 
 		const pruned = runBlock(result.output, "run-pruned");
-		match(pruned, /worker claims \(validation not observable at this layer\):/);
+		match(pruned, /worker claims \(unverified prose\):/);
 		match(pruned, /receipt integrity unavailable: the run ledger envelope is missing/);
 		strictEqual(pruned.includes("worker output (tool-verified):"), false, pruned);
 	});
@@ -310,6 +314,10 @@ describe("contracts/monitor collect evidence labeling", () => {
 		if (result.kind !== "ok") return;
 		strictEqual(JSON.parse(result.output).runId, envelope.id, "receipt output remains raw JSON");
 		deepStrictEqual(result.details?.receiptIntegrity, { ok: true });
+		deepStrictEqual(
+			(result.details?.trustStatus as { artifactIntegrity?: { state?: string } })?.artifactIntegrity?.state,
+			"verified",
+		);
 		deepStrictEqual(result.details?.evidenceVerification, {
 			state: "unverified",
 			basis: "no-validation-tool",

@@ -3,7 +3,14 @@ import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/index.js";
 import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
-import type { EvidenceFinding, EvidenceFindingsFile, EvidenceInspectable, EvidenceOverview } from "./types.js";
+import { normalizeTrustStatus } from "./trust-status.js";
+import type {
+	EvidenceFinding,
+	EvidenceFindingsFile,
+	EvidenceInspectable,
+	EvidenceOverview,
+	EvidenceTrustStatusView,
+} from "./types.js";
 
 export const EVIDENCE_FILES = [
 	"overview.json",
@@ -14,6 +21,7 @@ export const EVIDENCE_FILES = [
 	"audit-linked.jsonl",
 	"receipt.json",
 	"gate-decisions.json",
+	"trust-status.json",
 	"protected-artifacts.json",
 	"findings.json",
 	"findings.md",
@@ -69,7 +77,42 @@ export async function inspectEvidence(dataDir: string, evidenceId: string): Prom
 	}
 	const findingsParsed = parseJson(findingsRaw, `${evidenceId}/findings.json`);
 	const findings = parseFindingsFile(findingsParsed, `${evidenceId}/findings.json`);
-	return { overview, findings };
+	return { overview, findings, trustStatus: await loadEvidenceTrustStatus(dataDir, evidenceId) };
+}
+
+/** Load a canonical projection, or make the missing historical boundary explicit. */
+export async function loadEvidenceTrustStatus(dataDir: string, evidenceId: string): Promise<EvidenceTrustStatusView> {
+	let raw: string;
+	try {
+		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "trust-status.json"), "utf8");
+	} catch (error) {
+		if (isMissingFile(error)) {
+			return { version: 1, evidenceId, projection: "historical_format", runs: [] };
+		}
+		throw error;
+	}
+	const source = `${evidenceId}/trust-status.json`;
+	const parsed = parseJson(raw, source);
+	if (!isRecord(parsed)) throw new Error(`${source}: expected object`);
+	if (parsed.version !== 1) throw new Error(`${source}: expected version 1`);
+	if (readString(parsed, source, "evidenceId") !== evidenceId) {
+		throw new Error(`${source}.evidenceId: expected ${evidenceId}`);
+	}
+	if (parsed.projection !== "canonical") throw new Error(`${source}.projection: expected canonical`);
+	if (!Array.isArray(parsed.runs)) throw new Error(`${source}.runs: expected array`);
+	return {
+		version: 1,
+		evidenceId,
+		projection: "canonical",
+		runs: parsed.runs.map((entry, index) => {
+			const entrySource = `${source}.runs[${index}]`;
+			if (!isRecord(entry)) throw new Error(`${entrySource}: expected object`);
+			return {
+				runId: readString(entry, entrySource, "runId"),
+				status: normalizeTrustStatus(entry.status),
+			};
+		}),
+	};
 }
 
 /** A bundle run whose receipt carries at least one provenance field set. */
