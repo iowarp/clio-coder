@@ -6,6 +6,7 @@ import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { renderMarker } from "../../src/domains/context/working-set/marker.js";
 import { ageHorizonPolicy } from "../../src/domains/context/working-set/policies/age-horizon.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
+import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 
 const BODY = `${"observation line\n".repeat(60)}final secret body`;
@@ -221,6 +222,15 @@ test("project: usage recorded before the event stops anchoring the estimate", ()
 	// usage is still the honest anchor.
 	assert.equal(payloadOf(projected[6]).contextUsageInvalidated, undefined);
 	assert.equal(payloadOf(entries[1]).contextUsageInvalidated, undefined);
+});
+
+test("project: the usage-invalidation stamp is not priced as prompt content", () => {
+	const unstamped = assistant("a1", "u1", [{ type: "text", text: "answer" }], 90_000);
+	const stamped: MessageEntry = {
+		...unstamped,
+		payload: { ...(unstamped.payload as Record<string, unknown>), contextUsageInvalidated: true },
+	};
+	assert.equal(estimateTokens(stamped), estimateTokens(unstamped));
 });
 
 test("project: a recall leaves the marker in place; the body rides the recall tool result", () => {

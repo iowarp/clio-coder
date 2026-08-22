@@ -34,7 +34,18 @@ export interface TokenEstimator {
 }
 
 function estimateMessage(entry: MessageEntry): number {
-	return estimateAgentMessageTokens(entry);
+	// Usage invalidation is bookkeeping for token-anchor selection. The replay
+	// builder carries it as AgentMessage metadata, but providers never see it in
+	// message content, so it cannot change a projected entry's prompt cost. Drop
+	// it here so plan-time pricing and the post-event projection use one byte
+	// definition even though only the latter has applied the stamp.
+	if (entry.role !== "assistant" || !entry.payload || typeof entry.payload !== "object") {
+		return estimateAgentMessageTokens(entry);
+	}
+	const payload = entry.payload as Record<string, unknown>;
+	if (!("contextUsageInvalidated" in payload)) return estimateAgentMessageTokens(entry);
+	const { contextUsageInvalidated: _stamp, ...promptPayload } = payload;
+	return estimateAgentMessageTokens({ ...entry, payload: promptPayload });
 }
 
 function estimateBashExecution(entry: BashExecutionEntry): number {
