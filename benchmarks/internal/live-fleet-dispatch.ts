@@ -23,6 +23,7 @@ import {
 	prepareLiveHome,
 	REPO_ROOT,
 	rejectUnknown,
+	requireBuild,
 	runDriver,
 	takeFlag,
 } from "./live-target.js";
@@ -161,6 +162,7 @@ function readJson(path: string): unknown {
 }
 
 await runDriver(USAGE, async () => {
+	requireBuild();
 	const args = parseLiveArgs(process.argv.slice(2), "medium");
 	const timeoutMs = Number.parseInt(takeFlag(args.rest, "--timeout-ms") ?? "600000", 10);
 	if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 30_000) throw new LiveUsageError("--timeout-ms must be >= 30000");
@@ -170,7 +172,7 @@ await runDriver(USAGE, async () => {
 	// singular local runs; read-only recipes plus the snapshot below keep the
 	// workspace unchanged.
 	const home = prepareLiveHome(args, { prefix: "clio-live-fleet-dispatch-", autonomy: "auto-edit" });
-	const workspaceDir = join(home.dir, "workspace");
+	const workspaceDir = home.workspace;
 	cpSync(REPO_ROOT, workspaceDir, {
 		recursive: true,
 		filter(source) {

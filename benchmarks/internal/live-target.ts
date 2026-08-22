@@ -9,6 +9,16 @@
  * scratch tree is kept. Nothing here writes to the operator's real
  * config, data, state, or cache.
  *
+ * A child of the run that makes its own temporary directories (the eval runner
+ * gives each item a state dir and each temp-copy workspace a tree under
+ * `os.tmpdir()`) lands inside the home as well, because the home's environment
+ * sets `TMPDIR` beneath it. That keeps `CLIO_CODER_REQUIRE_HOME_PREFIX` honest
+ * for every process in the run, not only the first one.
+ *
+ * The binary runs in the home's own empty `workspace/` unless a driver passes
+ * a cwd, so a prompt that writes files (the delegation smoke asks the agent to
+ * create one) writes into the scratch tree and never into this checkout.
+ *
  * Every driver under benchmarks/internal takes the same flags:
  *
  *   --target <id>        required; a configured target id
@@ -115,6 +125,8 @@ export interface LiveHome {
 	dataDir: string;
 	stateDir: string;
 	cacheDir: string;
+	/** Empty directory under the home; the default cwd for the binary. */
+	workspace: string;
 	env: NodeJS.ProcessEnv;
 	target: TargetDescriptor;
 	model: string;
@@ -123,6 +135,11 @@ export interface LiveHome {
 	redact(text: string): string;
 	/** Remove credentials always; remove the tree on success unless --keep. */
 	cleanup(passed: boolean): void;
+}
+
+/** Fail early with the one message that matters when dist/ is missing. */
+export function requireBuild(): void {
+	if (!existsSync(CLI_ENTRY)) throw new LiveUsageError(`${CLI_ENTRY} is missing; run \`npm run build\` first`);
 }
 
 export interface LiveHomeOptions {
@@ -148,7 +165,6 @@ function operatorTarget(id: string): TargetDescriptor {
 }
 
 export function prepareLiveHome(args: LiveArgs, options: LiveHomeOptions): LiveHome {
-	if (!existsSync(CLI_ENTRY)) throw new LiveUsageError(`${CLI_ENTRY} is missing; run \`npm run build\` first`);
 	const target = operatorTarget(args.target);
 	const model = args.model ?? target.defaultModel ?? null;
 	if (!model) throw new LiveUsageError(`target "${target.id}" has no defaultModel; pass --model <wireId>`);
@@ -163,7 +179,9 @@ export function prepareLiveHome(args: LiveArgs, options: LiveHomeOptions): LiveH
 	const dataDir = env.CLIO_CODER_DATA_DIR as string;
 	const stateDir = env.CLIO_CODER_STATE_DIR as string;
 	const cacheDir = env.CLIO_CODER_CACHE_DIR as string;
-	for (const path of [configDir, dataDir, stateDir, cacheDir]) mkdirSync(path, { recursive: true });
+	const tmpDir = join(dir, "tmp");
+	const workspace = join(dir, "workspace");
+	for (const path of [configDir, dataDir, stateDir, cacheDir, tmpDir, workspace]) mkdirSync(path, { recursive: true });
 
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [structuredClone(target)];
@@ -192,7 +210,8 @@ export function prepareLiveHome(args: LiveArgs, options: LiveHomeOptions): LiveH
 		dataDir,
 		stateDir,
 		cacheDir,
-		env: { ...env, TERM: "xterm-256color" },
+		workspace,
+		env: { ...env, TMPDIR: tmpDir, TERM: "xterm-256color" },
 		target,
 		model,
 		thinking: args.thinking,
@@ -212,13 +231,13 @@ export function prepareLiveHome(args: LiveArgs, options: LiveHomeOptions): LiveH
 	};
 }
 
-/** Run the built binary inside the scratch home. Rejects on timeout. */
+/** Run the built binary inside the scratch home, in its workspace unless told otherwise. Rejects on timeout. */
 export function clio(
 	home: LiveHome,
 	args: ReadonlyArray<string>,
 	options: Omit<RunOptions, "env"> = {},
 ): Promise<RunResult> {
-	return runCli(args, { ...options, env: home.env });
+	return runCli(args, { cwd: home.workspace, ...options, env: home.env });
 }
 
 /** Standard driver entry: usage on error, exit 2 for usage, 1 for a failed run. */

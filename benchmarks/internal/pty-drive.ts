@@ -25,6 +25,7 @@ import {
 	parseLiveArgs,
 	prepareLiveHome,
 	rejectUnknown,
+	requireBuild,
 	runDriver,
 	takeFlag,
 	takeSwitch,
@@ -164,6 +165,7 @@ async function drive(
 
 await runDriver(USAGE, async () => {
 	if (!ptySupported) throw new LiveUsageError("node-pty has no Windows support in this harness");
+	requireBuild();
 	const args = parseLiveArgs(process.argv.slice(2));
 	const workspaceArg = takeFlag(args.rest, "--workspace");
 	if (!workspaceArg) throw new LiveUsageError("--workspace <dir> is required");

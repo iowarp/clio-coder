@@ -24,7 +24,7 @@ await runDriver(USAGE, async () => {
 	rejectUnknown(args.rest);
 	const home = prepareLiveHome({ ...args, keep: true }, { prefix: "clio-live-home-", autonomy: "full-auto" });
 	const lines = Object.entries(home.env)
-		.filter(([key, value]) => key.startsWith("CLIO_CODER_") && typeof value === "string")
+		.filter(([key, value]) => (key.startsWith("CLIO_CODER_") || key === "TMPDIR") && typeof value === "string")
 		.map(([key, value]) => `export ${key}=${JSON.stringify(value)}`);
 	lines.push(`# target=${home.target.id} model=${home.model} thinking=${home.thinking}`);
 	lines.push(`# remove when done: rm -rf ${JSON.stringify(home.dir)}`);

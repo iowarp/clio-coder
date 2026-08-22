@@ -8,7 +8,15 @@
  *
  *   npm run live:smoke -- --target <id> [--model <id>] [--thinking <level>] [--delegation] [--keep]
  */
-import { clio, parseLiveArgs, prepareLiveHome, rejectUnknown, runDriver, takeSwitch } from "./live-target.js";
+import {
+	clio,
+	parseLiveArgs,
+	prepareLiveHome,
+	rejectUnknown,
+	requireBuild,
+	runDriver,
+	takeSwitch,
+} from "./live-target.js";
 
 const USAGE = `usage: npm run live:smoke -- --target <id> [--model <wireId>] [--thinking <level>] [--delegation] [--keep]
 
@@ -22,6 +30,7 @@ const DELEGATION_AGENTS = [
 ];
 
 await runDriver(USAGE, async () => {
+	requireBuild();
 	const args = parseLiveArgs(process.argv.slice(2));
 	const delegation = takeSwitch(args.rest, "--delegation");
 	rejectUnknown(args.rest);

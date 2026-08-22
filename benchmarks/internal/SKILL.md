@@ -88,8 +88,9 @@ tmux send-keys -t clio "/quit" Enter
 rm -rf "$CLIO_CODER_HOME" "$WS"
 ```
 
-`live:home` prints `export CLIO_CODER_HOME=...` and the four `_DIR` exports;
-`eval` puts them in your shell so tmux inherits them. Turn settlement is in
+`live:home` prints `export CLIO_CODER_HOME=...`, the four `_DIR` exports,
+and `TMPDIR` beneath the home so anything the run creates in a temp directory
+stays in the same tree; `eval` puts them in your shell so tmux inherits them. Turn settlement is in
 the ledger, not the screen: poll
 `$CLIO_CODER_STATE_DIR/sessions/*/*/current.jsonl` for an assistant `message`
 without a `toolCall` block if you need to know a turn finished rather than

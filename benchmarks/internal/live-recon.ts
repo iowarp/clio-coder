@@ -19,7 +19,6 @@
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import {
@@ -30,6 +29,7 @@ import {
 	prepareLiveHome,
 	REPO_ROOT,
 	rejectUnknown,
+	requireBuild,
 	runDriver,
 	takeFlag,
 } from "./live-target.js";
@@ -40,8 +40,8 @@ Runs the stale-wiki and Scout-routing scenarios through clio-coder eval against 
 configured target. Needs dist/ (npm run build). Default cost ceiling is $0.50.
 `;
 
-function seedStaleWiki(env: NodeJS.ProcessEnv): string {
-	const dir = mkdtempSync(join(tmpdir(), "clio-live-recon-stale-wiki-"));
+function seedStaleWiki(root: string, env: NodeJS.ProcessEnv): string {
+	const dir = mkdtempSync(join(root, "stale-wiki-"));
 	const git = (args: string[]): void => {
 		execFileSync("git", args, { cwd: dir, stdio: "pipe" });
 	};
@@ -68,6 +68,7 @@ function seedStaleWiki(env: NodeJS.ProcessEnv): string {
 }
 
 await runDriver(USAGE, async () => {
+	requireBuild();
 	const args = parseLiveArgs(process.argv.slice(2));
 	const maxCostUsd = Number.parseFloat(takeFlag(args.rest, "--max-cost-usd") ?? "0.50");
 	if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) throw new LiveUsageError("--max-cost-usd must be positive");
@@ -81,7 +82,7 @@ await runDriver(USAGE, async () => {
 	let passed = false;
 	let staleWikiDir: string | null = null;
 	try {
-		staleWikiDir = seedStaleWiki(home.env);
+		staleWikiDir = seedStaleWiki(home.dir, home.env);
 		const suite = {
 			version: 2,
 			suite: {

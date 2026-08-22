@@ -114,3 +114,10 @@ Keep 29 rows (10 CI, 10 harness modules, 2 operator-run, 7 community), merge 3
 example, `MANIFEST.md`, the placeholder run, the `bench:*` scripts,
 `live-verify-dispatch-routing.mjs`, `lifecycle-matrix.mjs`, the four scratch
 drivers, `context-replay-readme.py`, the `/tmp` leftovers).
+
+## Live results recorded on 2026-08-22 (`zbook`, `qwen3.8-27b-dynamo`, thinking off)
+
+- `live:smoke`: PASS, twice (before and after the workspace isolation fix).
+- `live:tui`: exit 0; one prompt settled with two tool results, `/context` overlay opened, `/quit` clean.
+- `live:recon`: first run failed before any model call because the eval runner's per-item state dir under `os.tmpdir()` tripped `CLIO_CODER_REQUIRE_HOME_PREFIX` (a defect inherited from `live-eval-recon.mjs`); fixed by giving the home `TMPDIR`, pinned by `tests/contracts/live-home.test.ts`. Second run, 66,308 tokens in 51 s: `stale-wiki` PASS (`wiki.staleAcknowledged=true`); `scout-routing` FAIL, `dispatch.count=0`, the model answered the orientation itself. A behavioral result for this model, not a harness fault.
+- `live:fleet-dispatch`: FAIL at the 600 s turn budget. The ledger shows `context → tasks → dispatch(scout, receipt succeeded) → 4 reads → dispatch(debugger, detached) → monitor → steer → monitor`, still waiting on the Debugger, which shares the single local slot. Two harness weaknesses seen and not yet fixed: the partial JSONL stream is dropped when `runCli` rejects on timeout, and the workspace-unchanged check counts Clio's own `.clio-coder/{codewiki,state}.json` as a workspace change.
