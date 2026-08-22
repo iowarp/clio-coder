@@ -141,6 +141,14 @@ export type TrustStatusValidation = { ok: true; status: CanonicalTrustStatus } |
 /**
  * These forbidden promotions are policy, not presentation advice. Composition
  * and projection copy an axis exactly and never synthesize another axis.
+ *
+ * The table is enforced at the two boundaries that can actually promote: the
+ * adapters below, which refuse to establish an axis from a source that is not
+ * entitled to it (`AXIS_SOURCES`, and the self-report filter in
+ * `adaptGroundedEvidenceValidationStatus`), and the evidence composition
+ * boundary in `run-trust.ts`, which feeds each observed artifact to exactly
+ * the axis it authentically establishes. Nothing here is presentation advice
+ * and nothing here is documentation-only.
  */
 export const TRUST_STATUS_NO_PROMOTION_RULES = [
 	{
@@ -163,7 +171,22 @@ export const TRUST_STATUS_NO_PROMOTION_RULES = [
 		to: "completionEvidence",
 		reason: "Enforced authority does not establish task completion.",
 	},
+	{
+		from: "completionEvidence",
+		to: "validationGrounding",
+		reason: "A completion self-report does not independently establish validation.",
+	},
 ] as const satisfies ReadonlyArray<{ from: TrustStatusAxis; to: TrustStatusAxis; reason: string }>;
+
+/**
+ * Artifact kinds that are self-reports of the run under inspection. They can
+ * establish `completionEvidence`, the axis they authentically own, and can
+ * never be read as independently observed validation.
+ */
+const SELF_REPORTED_ARTIFACT_KINDS: ReadonlySet<TrustArtifactKind> = new Set([
+	"finish_contract_evidence",
+	"run_receipt",
+]);
 
 const AXIS_STATES: Record<TrustStatusAxis, ReadonlySet<string>> = {
 	artifactIntegrity: new Set(TRUST_STATUS_STATES.artifactIntegrity),
@@ -239,7 +262,12 @@ function hasExactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string
 	return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key));
 }
 
-function validIdentifier(value: unknown): value is string {
+/**
+ * The identifier rule every source, authority, and artifact reference is held
+ * to. Exported so derivation boundaries can drop an unusable identifier from a
+ * malformed input row instead of throwing at normalization time.
+ */
+export function isTrustStatusIdentifier(value: unknown): value is string {
 	if (typeof value !== "string" || value.trim().length === 0 || value.length > TRUST_STATUS_MAX_IDENTIFIER_LENGTH) {
 		return false;
 	}
@@ -264,7 +292,7 @@ function normalizeArtifactReference(value: unknown, path: string): TrustArtifact
 	if (typeof value.kind !== "string" || !ARTIFACT_KINDS.has(value.kind)) {
 		throw new Error(`${path}.kind is invalid`);
 	}
-	if (!validIdentifier(value.id)) throw new Error(`${path}.id is invalid`);
+	if (!isTrustStatusIdentifier(value.id)) throw new Error(`${path}.id is invalid`);
 	const reference: TrustArtifactReference = { kind: value.kind as TrustArtifactKind, id: value.id };
 	if (value.digest !== undefined) {
 		if (
@@ -292,7 +320,7 @@ function normalizeAttributedStatus(axis: TrustStatusAxis, value: Record<string, 
 		typeof value.source.kind !== "string" ||
 		!SOURCE_KINDS.has(value.source.kind) ||
 		!AXIS_SOURCES[axis].has(value.source.kind as TrustStatusSourceKind) ||
-		!validIdentifier(value.source.id)
+		!isTrustStatusIdentifier(value.source.id)
 	) {
 		throw new Error(`${axis}.source is invalid`);
 	}
@@ -305,7 +333,7 @@ function normalizeAttributedStatus(axis: TrustStatusAxis, value: Record<string, 
 		!SOURCE_AUTHORITIES[value.source.kind as TrustStatusSourceKind].has(
 			value.authority.kind as TrustStatusAuthorityKind,
 		) ||
-		!validIdentifier(value.authority.id)
+		!isTrustStatusIdentifier(value.authority.id)
 	) {
 		throw new Error(`${axis}.authority is invalid`);
 	}
@@ -816,15 +844,23 @@ export interface GroundedEvidenceValidationInput {
 	artifacts?: ReadonlyArray<TrustArtifactReference>;
 }
 
-/** Project validation that the evidence linker grounded in an executed artifact. */
+/**
+ * Project validation that the evidence linker grounded in an executed
+ * artifact. Grounding requires at least one independently observed artifact:
+ * a self-report of the run under inspection cannot ground its own validation
+ * (`TRUST_STATUS_NO_PROMOTION_RULES`), and an empty reference list grounds
+ * nothing at all.
+ */
 export function adaptGroundedEvidenceValidationStatus(
 	input: GroundedEvidenceValidationInput,
 ): ValidationGroundingStatus {
+	const observed = (input.artifacts ?? []).filter((artifact) => !SELF_REPORTED_ARTIFACT_KINDS.has(artifact.kind));
+	if (observed.length === 0) return absentTrustStatus("not_observed");
 	return attributed(
 		"validated",
 		{ kind: "evidence_bundle", id: `${input.evidenceId}:${input.runId}` },
 		{ kind: "clio", id: "evidence-grounding" },
-		uniqueBoundedReferences([{ kind: "evidence_bundle", id: input.evidenceId }, ...(input.artifacts ?? [])]),
+		uniqueBoundedReferences([{ kind: "evidence_bundle", id: input.evidenceId }, ...observed]),
 	);
 }
 
