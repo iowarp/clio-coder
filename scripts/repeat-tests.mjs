@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // The boundary checks used to be a test lane of their own. They are static
 // analysis, so they moved to scripts/check-hygiene.ts and run under lint;
 // smoke is what is left that repeating actually exercises.
@@ -13,7 +13,7 @@ const DEFAULT_PATTERNS = ["tests/smoke/**/*.test.ts"];
 function usage() {
 	process.stderr.write(
 		[
-			"usage: node tests/harness/repeat-tests.mjs [--runs N] [--seed text] [-- pattern...]",
+			"usage: node scripts/repeat-tests.mjs [--runs N] [--seed text] [-- pattern...]",
 			"",
 			"Runs a deterministic shuffled test lane repeatedly. Defaults to smoke.",
 			"",
