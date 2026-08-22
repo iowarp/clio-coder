@@ -1083,6 +1083,65 @@ describe("contracts/turn-hooks stalled-turn nudge", () => {
 		);
 	});
 
+	it("nudges natural inflections of the concrete action verbs", () => {
+		for (const text of [
+			"I'll run the tests.",
+			"I'll be running the tests.",
+			"Let me start by reading the config.",
+			"Let me start by checking the config.",
+			"I'll be verifying the output.",
+			"Next I will be scanning the source tree.",
+			"Now I am going to be debugging the worker.",
+			"Let me start by formatting the changed files.",
+			"I'll be searching the transcript for the stall.",
+			"Let me start by applying the patch to the middleware.",
+		]) {
+			strictEqual(effectsFor(text).length, 1, text);
+		}
+	});
+
+	it("nudges a final sentence whose action names a path, so a filename's dot never shreds it", () => {
+		for (const text of [
+			"I'll read bash.ts now.",
+			"Let me update package.json.",
+			"I'll cat package.json.",
+			"Let me open src/domains/middleware/stalled-turn.ts next.",
+			"I'll check ./scripts/check-hygiene.ts first.",
+			"Now I'll diff tests/contracts/turn-hooks.test.ts against the fixture.",
+			"I found the bug. Let me patch src/tools/verify/authoring.ts.",
+		]) {
+			strictEqual(effectsFor(text).length, 1, text);
+		}
+	});
+
+	it("nudges a final sentence that names a command to run", () => {
+		for (const text of [
+			"I'll npm run build now.",
+			"Let me git status before touching anything else.",
+			"Next I will cargo test --workspace.",
+			"Now I'll pytest -q the failing module.",
+		]) {
+			strictEqual(effectsFor(text).length, 1, text);
+		}
+	});
+
+	it("keeps conditional, vague, and deferred announcements suppressed even when they name a file", () => {
+		for (const text of [
+			CAPTURED_CONVERSATIONAL_OFFER,
+			CAPTURED_CONVERSATIONAL_OFFER.replace(/'/gu, "’"),
+			"I'll let you know once package.json is updated.",
+			"If you want, I'll read src/cli/index.ts for you.",
+			"Send me a path and I'll open bash.ts when you're ready.",
+			"I'll run npm run build if that is what you need.",
+			"Hey! I'm ready whenever you are.",
+			"I'll get moving.",
+			"I'll think about the design.",
+			"Tell me which file to open and I'll take it from there.",
+		]) {
+			strictEqual(effectsFor(text).length, 0, text);
+		}
+	});
+
 	it("only fires on absent or normal stop reasons", () => {
 		strictEqual(
 			effectsFor("Next I will inspect the files.", { turnToolCalls: 0 }).length,
