@@ -439,6 +439,13 @@ describe("contracts/evidence-build", () => {
 			strictEqual(linked.length, 1);
 			strictEqual(linked[0]?.outcome, "pass");
 			strictEqual(linked[0]?.subjects[0]?.runId, builder.runId);
+			const review = built.trustStatus.runs[0]?.status.independentReview;
+			strictEqual(review?.state, "passed");
+			if (review?.state === "passed") {
+				deepStrictEqual(review.authority, { kind: "reviewer", id: reviewer.runId });
+				strictEqual(review.artifacts[0]?.kind, "gate_decision");
+				strictEqual(review.artifacts[0]?.id, decision.artifact.id);
+			}
 
 			const tampered = JSON.parse(readFileSync(decision.path, "utf8")) as Record<string, unknown>;
 			tampered.outcome = "fail";
@@ -525,6 +532,14 @@ describe("contracts/evidence-build", () => {
 				false,
 			);
 			strictEqual(result.overview.totals.auditRows, 1);
+			const status = result.trustStatus.runs[0]?.status;
+			strictEqual(status?.validationGrounding.state, "validated");
+			strictEqual(status?.completionEvidence.state, "evidenced");
+			if (status?.completionEvidence.state === "evidenced") {
+				deepStrictEqual(status.completionEvidence.authority, { kind: "clio", id: "finish-contract" });
+				strictEqual(status.completionEvidence.artifacts[0]?.kind, "finish_contract_evidence");
+				strictEqual(status.completionEvidence.artifacts[1]?.id, "turn-validated");
+			}
 		});
 	});
 

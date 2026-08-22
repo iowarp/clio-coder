@@ -1,6 +1,7 @@
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
+import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 
 /** Matches a source citation the parent can independently spot-check. */
 const SOURCE_CITATION_PATTERN = /([\w./~-]+):(\d+)/g;
@@ -39,10 +40,10 @@ export const SPOT_CHECK_GUIDANCE =
  * keeps its own role, so this is deliberately narrow; the activity and
  * first-pass labels below carry the honest signal for every other class.
  */
-function isMutationClassRun(receipt: RunReceipt, verification: RunReceiptVerification): boolean {
+function isMutationClassRun(receipt: RunReceipt, status: CanonicalTrustStatus): boolean {
 	// A read-only agent seals `not_applicable`; recon that changes nothing is
 	// the expected outcome there, not a missing effect.
-	if (verification.state === "not_applicable") return false;
+	if (status.validationGrounding.state === "not_applicable") return false;
 	if (receipt.executionRole === "builder" || receipt.executionRole === "recovery") return true;
 	return receipt.quality?.resultContract?.sourceId?.startsWith("agent-result-contract:mutation-report") === true;
 }
@@ -87,7 +88,7 @@ function receiptAdmissionLabels(receipt: RunReceipt): string[] {
  * fixed the file. These labels are the receipt's own counters, so the parent
  * sees the shape of the run before it reads the worker's account of it.
  */
-function receiptActivityLabels(receipt: RunReceipt, verification: RunReceiptVerification): string[] {
+function receiptActivityLabels(receipt: RunReceipt, status: CanonicalTrustStatus): string[] {
 	const labels: string[] = [];
 	const activity = receipt.toolActivity;
 	if (activity !== undefined) {
@@ -98,7 +99,7 @@ function receiptActivityLabels(receipt: RunReceipt, verification: RunReceiptVeri
 		);
 		// The case this whole label set exists for: the task was to change
 		// something and nothing changed, under an exit code that says success.
-		if (!activity.mutatingSucceeded && isMutationClassRun(receipt, verification)) labels.push("mutation_effect=none");
+		if (!activity.mutatingSucceeded && isMutationClassRun(receipt, status)) labels.push("mutation_effect=none");
 	}
 	const findings = receipt.findingsSummary;
 	if (findings !== undefined) {
@@ -119,7 +120,11 @@ export function receiptEvidenceLabels(
 	verification: RunReceiptVerification,
 	integrity: ReceiptIntegrityResult,
 ): string[] {
-	if (!integrity.ok) return [`receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
+	const status = adaptRunReceiptTrustStatus({ ...receipt, verification }, { integrity });
+	const canonical = canonicalTrustLabel(status);
+	if (!integrity.ok) {
+		return [canonical, `receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
+	}
 	const briefing =
 		receipt.briefing === undefined
 			? "briefing=none"
@@ -132,13 +137,26 @@ export function receiptEvidenceLabels(
 		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
 	return [
+		canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
 		...receiptAdmissionLabels(receipt),
-		...receiptActivityLabels(receipt, verification),
+		...receiptActivityLabels(receipt, status),
 		briefing,
 		projectContext,
 	];
+}
+
+function canonicalTrustLabel(status: CanonicalTrustStatus): string {
+	return [
+		`trust_status=v${status.version}`,
+		`artifactIntegrity:${status.artifactIntegrity.state}`,
+		`validationGrounding:${status.validationGrounding.state}`,
+		`independentReview:${status.independentReview.state}`,
+		`contextProvenance:${status.contextProvenance.state}`,
+		`autonomyEnforcement:${status.autonomyEnforcement.state}`,
+		`completionEvidence:${status.completionEvidence.state}`,
+	].join(" ");
 }
 
 /**
@@ -146,9 +164,9 @@ export function receiptEvidenceLabels(
  * verification. The string is shared by dispatch and monitor so detached
  * collection cannot silently assign a different evidence meaning.
  */
-export function workerTextLabel(verification: RunReceiptVerification): string {
-	switch (verification.state) {
-		case "verified":
+export function workerTextLabel(status: CanonicalTrustStatus): string {
+	switch (status.validationGrounding.state) {
+		case "validated":
 			return "worker output (tool-verified):";
 		case "not_applicable":
 			return "reconnaissance output (advisory leads, not validation evidence):";
@@ -166,7 +184,7 @@ export function workerTextLabel(verification: RunReceiptVerification): string {
  */
 export function workerTextNonEvidenceNotices(
 	receipt: RunReceipt,
-	verification: RunReceiptVerification,
+	status: CanonicalTrustStatus,
 	answerText: string,
 ): string[] {
 	const notices: string[] = [];
@@ -184,7 +202,7 @@ export function workerTextNonEvidenceNotices(
 	}
 	if (receipt.toolActivity !== undefined && receipt.toolActivity.succeeded === 0) {
 		notices.push("non-evidence: no tool call succeeded in this run; the text above was written without observed work.");
-	} else if (receipt.toolActivity?.mutatingSucceeded === false && isMutationClassRun(receipt, verification)) {
+	} else if (receipt.toolActivity?.mutatingSucceeded === false && isMutationClassRun(receipt, status)) {
 		// A live verifier run returned {"verdict":"pass"} for a check it never
 		// ran, on a script that does not exist, at exit 0. The parent recovered
 		// only because it independently diffed the tree; say so on the line.
@@ -206,7 +224,12 @@ export function workerTextNonEvidenceNotices(
 			`non-evidence: '${receipt.capabilityMismatch.agentId}' is a ${receipt.capabilityMismatch.capabilityClass} recipe and cannot write to the workspace, but this task classified as ${receipt.capabilityMismatch.taskType}. Nothing it reports as changed can have been changed by it.`,
 		);
 	}
-	if (!failedRun && verification.state === "not_applicable" && answerText.length > 0 && !hasSourceCitation(answerText)) {
+	if (
+		!failedRun &&
+		status.validationGrounding.state === "not_applicable" &&
+		answerText.length > 0 &&
+		!hasSourceCitation(answerText)
+	) {
 		notices.push(
 			"non-evidence: this reconnaissance answer cites no file:line locations; treat its leads as unconfirmed.",
 		);
