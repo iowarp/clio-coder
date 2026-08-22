@@ -10,7 +10,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { parseDocument, stringify } from "yaml";
+import { isMap, isSeq, parseDocument, stringify, type YAMLMap } from "yaml";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
@@ -53,6 +53,8 @@ export interface AuthoringCheck {
 	tags: string[];
 	provenance: VerifierProvenance;
 	state: "active" | "existing" | "proposed" | "manual";
+	/** The id this check has in the on-disk catalog, so a rename still edits its node in place. */
+	catalogId?: string;
 }
 
 export interface VerifierAuthoringDiscovery {
@@ -64,6 +66,8 @@ export interface VerifierAuthoringDiscovery {
 	proposals: AuthoringCheck[];
 	diagnostics: string[];
 	manualEntry: string;
+	/** The catalog file as found, when one exists; revisions are written into it in place. */
+	catalogText?: string;
 }
 
 export interface VerifierAuthoringDiscoveryError {
@@ -81,6 +85,7 @@ export interface VerifierDraft {
 	checks: AuthoringCheck[];
 	diagnostics: string[];
 	manualEntry: string;
+	catalogText?: string;
 }
 
 export type VerifierRevision =
@@ -271,6 +276,7 @@ function projectedCheck(workspaceRoot: string, check: DeclaredCheck): AuthoringC
 		tags: [...check.tags],
 		provenance: sourceProvenance(workspaceRoot, check),
 		state: check.source.kind === "package.json" ? "active" : "existing",
+		...(check.source.kind === "package.json" ? {} : { catalogId: check.id }),
 	};
 }
 
@@ -749,15 +755,18 @@ export function discoverVerifierAuthoring(workspaceRoot = process.cwd()): Verifi
 			"No package verification script, supported toolchain declaration, or exact validation command was found.",
 		);
 	}
+	const catalogPath = path.join(workspaceRoot, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
+	const catalogText = regularFileText(catalogPath, workspaceRoot);
 	return {
 		ok: true,
 		workspaceRoot,
-		catalogPath: path.join(workspaceRoot, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH),
+		catalogPath,
 		activeChecks,
 		existingChecks,
 		proposals,
 		diagnostics,
 		manualEntry,
+		...(typeof catalogText === "string" ? { catalogText } : {}),
 	};
 }
 
@@ -774,27 +783,51 @@ export function createVerifierDraft(
 			.sort((left, right) => compareCodepoints(left.id, right.id)),
 		diagnostics: [...discovery.diagnostics],
 		manualEntry: discovery.manualEntry,
+		...(discovery.catalogText === undefined ? {} : { catalogText: discovery.catalogText }),
 	};
 }
 
-function catalogValue(checks: ReadonlyArray<AuthoringCheck>): unknown {
-	return {
-		version: PROJECT_VERIFIER_CATALOG_VERSION,
-		checks: [...checks]
-			.sort((left, right) => compareCodepoints(left.id, right.id))
-			.map(({ id, description, command, cwd, timeoutMs, tags }) => ({
-				id,
-				description,
-				command: [...command],
-				cwd,
-				timeoutMs,
-				tags: [...tags],
-			})),
-	};
+function catalogEntry({ id, description, command, cwd, timeoutMs, tags }: AuthoringCheck): Record<string, unknown> {
+	return { id, description, command: [...command], cwd, timeoutMs, tags: [...tags] };
 }
 
+/**
+ * A fresh catalog is serialized from the draft. An existing catalog is edited
+ * in place: the operator's comments and on-disk order survive, untouched
+ * fields keep their bytes, and only changed fields, removed checks, and
+ * appended checks move. The parser sorts by id on load, so order on disk is
+ * the operator's to keep.
+ */
 function serializeVerifierDraft(draft: VerifierDraft): string {
-	return stringify(catalogValue(draft.checks), { lineWidth: 0 });
+	const checks = [...draft.checks].sort((left, right) => compareCodepoints(left.id, right.id));
+	const document = draft.catalogText === undefined ? null : parseDocument(draft.catalogText);
+	const sequence = document?.get("checks");
+	if (document === null || !isSeq(sequence)) {
+		return stringify({ version: PROJECT_VERIFIER_CATALOG_VERSION, checks: checks.map(catalogEntry) }, { lineWidth: 0 });
+	}
+	const nodes = new Map<unknown, YAMLMap>();
+	for (const node of sequence.items) if (isMap(node)) nodes.set(node.get("id"), node);
+	const kept = new Set<YAMLMap>();
+	const appended: unknown[] = [];
+	let changed = false;
+	for (const check of checks) {
+		const entry = catalogEntry(check);
+		const node = nodes.get(check.catalogId ?? check.id);
+		if (node === undefined) {
+			appended.push(document.createNode(entry));
+			continue;
+		}
+		kept.add(node);
+		const current = node.toJSON() as Record<string, unknown>;
+		for (const [field, value] of Object.entries(entry)) {
+			if (JSON.stringify(current[field]) === JSON.stringify(value)) continue;
+			node.set(field, value);
+			changed = true;
+		}
+	}
+	if (!changed && appended.length === 0 && kept.size === sequence.items.length) return draft.catalogText as string;
+	sequence.items = [...sequence.items.filter((node) => isMap(node) && kept.has(node)), ...appended];
+	return document.toString({ lineWidth: 0 });
 }
 
 /** Validate with the same production parser used by verify(). */
@@ -834,6 +867,7 @@ export function validateVerifierDraft(draft: VerifierDraft): VerifierDraftValida
 					authority: "project-declared",
 				} satisfies VerifierProvenance),
 			state: original?.state ?? "manual",
+			...(original?.catalogId === undefined ? {} : { catalogId: original.catalogId }),
 		} satisfies AuthoringCheck;
 	});
 	return { ok: true, text, checks };
