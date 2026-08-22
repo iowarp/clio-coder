@@ -220,6 +220,7 @@ async function executeWorkflow(
 	const result = await runVerifierAuthoringWorkflow({
 		includeProposals: options.includeProposals,
 		initialRevisions: options.revisions,
+		confirmed: parsed.yes,
 		decide(context) {
 			process.stdout.write(`${context.preview}\n`);
 			printedPreview = true;

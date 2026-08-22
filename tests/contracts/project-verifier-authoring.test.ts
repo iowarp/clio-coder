@@ -5,12 +5,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runVerifiersCommand } from "../../src/cli/verifiers.js";
 import {
+	type AuthoringCheck,
 	createVerifierDraft,
 	deterministicVerifierId,
 	discoverVerifierAuthoring,
 	previewVerifierDraft,
 	reviseVerifierDraft,
 	runVerifierAuthoringWorkflow,
+	type VerifierDraft,
 	type VerifierRevision,
 	validateVerifierDraft,
 } from "../../src/tools/verify/authoring.js";
@@ -391,6 +393,92 @@ describe("contracts/project verifier authoring", { concurrency: false }, () => {
 			);
 			match(discovery.diagnostics.join("\n"), /'go-test' collides with declared authority; using 'go-test-2'/u);
 		}
+	});
+
+	it("keeps the preview-only warning unconfirmed and never prints it on a confirmed write", async () => {
+		write("go.mod", "module example.org/footer\n");
+
+		const unconfirmed = await captureProcessWrites(() => runVerifiersCommand(["author"]));
+		strictEqual(unconfirmed.result, 0, unconfirmed.stderr);
+		match(unconfirmed.stdout, /Preview only: no file has been written and no check has been executed\./u);
+		strictEqual(existsSync(join(workspace, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH)), false);
+
+		const confirmed = await captureProcessWrites(() => runVerifiersCommand(["author", "--yes"]));
+		strictEqual(confirmed.result, 0, confirmed.stderr);
+		strictEqual(confirmed.stdout.includes("no file has been written"), false, confirmed.stdout);
+		strictEqual(confirmed.stdout.includes("Preview only"), false, confirmed.stdout);
+		// The operator still sees the full authority review, and sees it before the write.
+		match(confirmed.stdout, /Project verifier authority preview/u);
+		match(confirmed.stdout, /effective execution authority: exact catalog authority after confirmation/u);
+		ok(
+			confirmed.stdout.indexOf("Project verifier authority preview") < confirmed.stdout.indexOf("ok: wrote"),
+			"the authority preview must precede the write receipt",
+		);
+		strictEqual(existsSync(join(workspace, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH)), true);
+	});
+
+	it("returns a written preview without the unwritten-file claim and a rejected preview with it", async () => {
+		write("go.mod", "module example.org/preview-footer\n");
+		const rejected = await runVerifierAuthoringWorkflow({ decide: () => ({ kind: "reject" }) });
+		strictEqual(rejected.status, "rejected");
+		if (rejected.status !== "rejected") return;
+		match(rejected.preview, /Preview only: no file has been written/u);
+
+		const written = await runVerifierAuthoringWorkflow({ confirmed: true, decide: () => ({ kind: "confirm" }) });
+		strictEqual(written.status, "written", written.status === "invalid" ? written.reason : "");
+		if (written.status !== "written") return;
+		strictEqual(written.preview.includes("no file has been written"), false, written.preview);
+		match(written.preview, /Catalog checks after confirmation:/u);
+		strictEqual(existsSync(join(workspace, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH)), true);
+	});
+
+	it("rejects a draft with the production catalog parser's own diagnostic, not an authoring-local one", async () => {
+		const discovery = discoverVerifierAuthoring();
+		strictEqual(discovery.ok, true);
+		if (!discovery.ok) return;
+		const shellCheck: AuthoringCheck = {
+			id: "shellish",
+			description: "Run cargo through a shell",
+			command: ["bash", "-c", "cargo test"],
+			cwd: ".",
+			timeoutMs: 10_000,
+			tags: ["test"],
+			provenance: {
+				kind: "manual-entry",
+				path: PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
+				detail: "manual check 'shellish'",
+				authority: "project-declared",
+			},
+			state: "manual",
+		};
+		const hostile: VerifierDraft = { ...createVerifierDraft(discovery), checks: [shellCheck] };
+
+		// Only src/tools/verify/catalog.ts produces this wording; an authoring-local
+		// validator or a self-printed banner cannot satisfy either assertion.
+		const validation = validateVerifierDraft(hostile);
+		strictEqual(validation.ok, false);
+		if (validation.ok) return;
+		match(validation.reason, /checks\[0\]\.command\[0\] may not invoke shell executable 'bash'/u);
+		match(
+			previewVerifierDraft(hostile),
+			/Schema validation: rejected \(.*checks\[0\]\.command\[0\] may not invoke shell executable 'bash'\)/u,
+		);
+
+		const cli = await captureProcessWrites(() =>
+			runVerifiersCommand([
+				"add",
+				"--id",
+				"shellish",
+				"--description",
+				"Run cargo through a shell",
+				"--command",
+				'["bash","-c","cargo test"]',
+				"--yes",
+			]),
+		);
+		strictEqual(cli.result, 1);
+		match(cli.stderr, /checks\[0\]\.command\[0\] may not invoke shell executable 'bash'/u);
+		strictEqual(existsSync(join(workspace, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH)), false);
 	});
 
 	it("rejects package collisions and provides CLI preview, confirmation, validation, and removal", async () => {

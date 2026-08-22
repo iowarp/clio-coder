@@ -133,6 +133,11 @@ export interface VerifierAuthoringWorkflowOptions {
 	workspaceRoot?: string;
 	includeProposals?: boolean;
 	initialRevisions?: VerifierRevision[];
+	/**
+	 * The operator already authorized writing (`--yes`), so the review is a
+	 * pre-write authority preview and must not claim nothing will be written.
+	 */
+	confirmed?: boolean;
 	decide: (context: VerifierAuthoringDecisionContext) => VerifierAuthoringDecision | Promise<VerifierAuthoringDecision>;
 	runCheck?: (id: string) => Promise<ToolResult>;
 }
@@ -940,8 +945,13 @@ function renderCheck(check: AuthoringCheck, destinationPath: string): string[] {
 	];
 }
 
+export interface VerifierPreviewOptions {
+	/** Suppress the unconfirmed-preview footer once the write is authorized. */
+	confirmed?: boolean;
+}
+
 /** Render an authority review. This function is pure and never executes or writes. */
-export function previewVerifierDraft(draft: VerifierDraft): string {
+export function previewVerifierDraft(draft: VerifierDraft, options: VerifierPreviewOptions = {}): string {
 	const validation = validateVerifierDraft(draft);
 	const lines = [
 		"Project verifier authority preview",
@@ -967,7 +977,9 @@ export function previewVerifierDraft(draft: VerifierDraft): string {
 				: "No catalog checks are proposed; the package checks above are already executable without a catalog entry.",
 		);
 	}
-	lines.push("", "Preview only: no file has been written and no check has been executed.");
+	if (options.confirmed !== true) {
+		lines.push("", "Preview only: no file has been written and no check has been executed.");
+	}
 	return lines.join("\n");
 }
 
@@ -1012,7 +1024,7 @@ export async function runVerifierAuthoringWorkflow(
 	}
 	for (let revision = 0; revision <= PROJECT_VERIFIER_CATALOG_CAPS.checks; revision += 1) {
 		const validation = validateVerifierDraft(draft);
-		const preview = previewVerifierDraft(draft);
+		const preview = previewVerifierDraft(draft, { confirmed: options.confirmed === true });
 		const decision = await options.decide({ draft: cloneDraft(draft), preview, validation, revision });
 		if (decision.kind === "reject") {
 			return { status: "rejected", wrote: false, preview, diagnostics: [...draft.diagnostics] };
@@ -1027,6 +1039,9 @@ export async function runVerifierAuthoringWorkflow(
 			continue;
 		}
 		if (!validation.ok) return { status: "invalid", reason: validation.reason, wrote: false, preview };
+		// Past this point the operator has authorized the write, so the returned
+		// review may never claim that no file has been written.
+		const authorizedPreview = previewVerifierDraft(draft, { confirmed: true });
 		try {
 			writeValidatedDraft(draft, validation);
 		} catch (error) {
@@ -1034,7 +1049,7 @@ export async function runVerifierAuthoringWorkflow(
 				status: "invalid",
 				reason: `Could not write ${draft.catalogPath}: ${error instanceof Error ? error.message : String(error)}`,
 				wrote: false,
-				preview,
+				preview: authorizedPreview,
 			};
 		}
 		const loaded = discoverDeclaredChecksAtRoot(workspaceRoot, undefined);
@@ -1044,7 +1059,7 @@ export async function runVerifierAuthoringWorkflow(
 				reason: `Catalog was written but production discovery rejected it: ${loaded.reason}`,
 				wrote: true,
 				path: draft.catalogPath,
-				preview,
+				preview: authorizedPreview,
 			};
 		}
 		const dryRuns: VerifierDryRunResult[] = [];
@@ -1056,7 +1071,7 @@ export async function runVerifierAuthoringWorkflow(
 			status: "written",
 			wrote: true,
 			path: draft.catalogPath,
-			preview,
+			preview: authorizedPreview,
 			diagnostics: [...draft.diagnostics],
 			dryRuns,
 		};
