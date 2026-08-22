@@ -1,7 +1,7 @@
 ---
 name: clio-test
 description: Use when writing or modifying Clio Coder's own source under src/, or verifying a change end-to-end against the real test harness. Covers the three real layers (contracts / smoke / boundaries), choosing which to run for a given change, the mock-provider and ACP-over-stdio harness, and the hot-reload dev loop for picking up latest code. Activate on any src/ edit, before declaring a change verified, or when asked whether Clio still works.
-version: 0.1.3
+version: 0.1.4
 license: Apache-2.0
 clio:
   registry-id: iowarp/clio-coder
@@ -24,17 +24,15 @@ local-vs-contribute boundary.
 ## Commands
 
 ```bash
-npm run typecheck         # tsc -p tsconfig.tests.json (includes tests/)
-npm run lint              # biome check .
-npm run check:boundaries  # import boundary rules (tsx, no build)
+npm run typecheck         # tsc -p tsconfig.tests.json (includes tests/ and benchmarks/internal/)
+npm run lint              # biome check . && scripts/check-hygiene.ts (import boundaries, skill pins, doc drift)
 npm run test:file -- 'tests/contracts/**/*.test.ts'  # contract tests (tsx, import src directly, no build)
 npm run test:file -- 'tests/smoke/**/*.test.ts'      # spawn dist/cli/index.js end-to-end (NEEDS a build)
 npm run test              # contracts + smoke, sharded across processes (the full gate)
 npm run build             # tsup -> dist/
 npm run dev               # tsup --watch -> rebuilds dist/ on save
 npm run ci                # typecheck && lint && skills:check && build && test && test:trace-viewer
-npm run test:live         # local live provider smoke; requires CLIO_CODER_LIVE_SMOKE=1
-npm run test:live -- --delegation  # adds local opencode/copilot ACP checks
+npm run live:smoke -- --target <id>   # one real turn against a configured target; never in CI
 ```
 
 ## Which layer catches what
@@ -44,7 +42,7 @@ npm run test:live -- --delegation  # adds local opencode/copilot ACP checks
 | pure logic in `src/domains/<x>/*.ts` | `npm run test:file -- 'tests/contracts/**/*.test.ts'` | contract tests import `src` via tsx; no build |
 | dispatch / providers / prompts / safety / config / persistence / acp behavior | `npm run test:file -- 'tests/contracts/**/*.test.ts'` | each has a file in `tests/contracts/` |
 | skills loader / activation | `npm run test:file -- 'tests/contracts/**/*.test.ts'` | `tests/contracts/skills.test.ts`, `skill-activation-compaction.test.ts` |
-| any `src/` import edit | `npm run check:boundaries` | enforces rule1/2/3 |
+| any `src/` import edit | `npm run lint` | the hygiene check enforces rule1/2/3 |
 | `src/cli/*` or `src/entry/*` user-facing flow | build, then `npm run test:file -- 'tests/smoke/**/*.test.ts'` | smoke spawns the real `dist/cli/index.js` |
 | ACP surface (`src/cli/acp.ts`, engine ACP) | build, then `npm run test:file -- 'tests/smoke/**/*.test.ts'` | smoke drives `clio-coder acp` over JSON-RPC/stdio |
 
@@ -54,8 +52,9 @@ a single file.
 ## Boundary rules you must not break
 
 `tests/boundaries/check-boundaries.ts` enforces three rules (also the Hard
-Invariants in `CLIO-CODER.md`). If `npm run check:boundaries` reports a
-violation, fix the import — never silence the check:
+Invariants in `CLIO-CODER.md`), run by `scripts/check-hygiene.ts` under
+`npm run lint`. If it reports a violation, fix the import — never silence the
+check:
 
 - **rule1**: only `src/engine/**` may value-import `@earendil-works/pi-*`. Outside
   engine, use Clio contracts or type-only imports that erase at compile time.
@@ -70,9 +69,9 @@ There are two independent reload mechanisms; know which applies.
 
 **Source reload for tests.** This is the "pick up latest code" loop:
 
-- **Fast loop — no build.** The contracts glob and `check:boundaries` run
-  `node --import tsx --test` and import `src/**` directly, so they always run the
-  latest source with zero build step. Iterate here whenever the change is pure
+- **Fast loop — no build.** The contracts glob runs `node --import tsx --test`
+  and imports `src/**` directly, and the hygiene lint reads source statically,
+  so both always see the latest source with zero build step. Iterate here whenever the change is pure
   logic or a contract.
 - **Full loop — needs `dist/`.** The smoke glob spawns `dist/cli/index.js`, so it
   only sees code that has been built. Keep `npm run dev` (`tsup --watch`) running
@@ -98,7 +97,7 @@ restart the process (against a freshly built `dist/`).
 1. Write the change.
 2. `npm run typecheck` and `npm run lint`.
 3. Run the narrowest layer from the table above.
-4. `npm run check:boundaries` if you touched imports.
+4. `npm run lint` if you touched imports.
 5. If you touched CLI/entry/ACP: `npm run build` (or rely on `dev` watch), then
    `npm run test:file -- 'tests/smoke/**/*.test.ts'`.
 6. `npm run ci` before calling it done. Report exactly what ran and what is
@@ -113,8 +112,10 @@ node --import tsx --test --test-only tests/contracts/<file>.test.ts  # it.only
 
 ## What NOT to do
 
-- Don't reintroduce `tests/unit|integration|e2e/` or a pty harness — that
-  taxonomy was deliberately removed.
+- Don't reintroduce `tests/unit|integration|e2e/`; that taxonomy was
+  deliberately removed. Don't add a second pseudo-terminal: `tests/harness/pty.ts`
+  is the one PTY, used by the three `*-pty`/`tui-width-matrix` smoke suites and
+  by `benchmarks/internal/pty-drive.ts`.
 - Don't add `scripts/diag-*.ts` or `scripts/verify-*.ts`. A test belongs in
   `tests/`; a one-off probe belongs in `/tmp` and gets deleted (see
   `references/harness.md`).
@@ -126,5 +127,7 @@ node --import tsx --test --test-only tests/contracts/<file>.test.ts  # it.only
 
 ## Harness reference
 
-Driving the real CLI, the mock provider, and ACP over stdio, plus the throwaway
-probe pattern: **see `references/harness.md`**.
+Driving the real CLI, the mock provider, ACP over stdio, and the PTY, plus the
+throwaway probe pattern: **see `references/harness.md`**. Driving the real
+binary against a real model (headless, PTY, tmux, herdr) is a different claim
+and lives in `benchmarks/internal/SKILL.md`.

@@ -1,18 +1,20 @@
 # Clio test harness reference
 
-How to drive the real Clio binary, a mock provider, and the ACP surface in
-tests. All of this is non-interactive — there is no pty harness in v0.2.2.
+How to drive the real Clio binary, a mock provider, the ACP surface, and a
+real pseudo-terminal in tests. Every model here is a stub; these are machinery
+tests. A run against a real model is `benchmarks/internal/SKILL.md`.
 
 ## Contents
 - The spawn harness (`runCli`, `makeScratchHome`)
 - Mocking a provider (OpenAI-compatible SSE fixture)
 - ACP over JSON-RPC/stdio
+- The PTY (`openPty`, `runInPty`)
 - One-off probes (no test file)
 
 ## The spawn harness
 
-`tests/harness/spawn.ts` is the only harness. It spawns `node dist/cli/index.js`,
-so **build first** (or keep `npm run dev` running) before `test:smoke`.
+`tests/harness/spawn.ts` spawns `node dist/cli/index.js` with piped stdio, so
+**build first** (or keep `npm run dev` running) before running smoke.
 
 ```ts
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -76,11 +78,38 @@ client (see `createJsonRpcProcessClient` in the smoke test): `initialize` →
 non-spec discriminator breaks strict clients like Zed, so the smoke test asserts
 every emitted variant is in the v1 set.
 
+## The PTY
+
+Piped stdio reports no terminal width and no TTY, so the TUI refuses to start
+and every width-sensitive path collapses to 80 columns. `tests/harness/pty.ts`
+opens a real pseudo-terminal through `node-pty` (a devDependency, never
+shipped):
+
+```ts
+import { openPty, runInPty, stripAnsi, visibleLines } from "../harness/pty.js";
+
+// Scripted: type on a schedule, stop when the output matches, bounded by a timeout.
+const run = await runInPty(process.execPath, [CLI], { cols: 120, rows: 40, cwd, env,
+  readyWhen: /ctx /, input: [{ afterMs: 200, data: "/quit\r" }], until: /bye/, timeoutMs: 20_000 });
+
+// Controllable: write, resize, pause output, wait for a matcher, wait for exit.
+const session = await openPty(process.execPath, [CLI], { cols: 140, rows: 44, cwd, env });
+await session.waitForOutput((out) => /ctx /.test(stripAnsi(out)), 30_000);
+session.write("/quit\r");
+await session.waitForExit(10_000);
+```
+
+Use it only for what a pipe cannot show: width, raw mode, SIGINT through a
+terminal, the alternate-screen and keyboard-protocol teardown. The three
+suites that need it are `tests/smoke/tui-width-matrix.test.ts`,
+`instant-shell-pty.test.ts`, and `render-trace-pty.test.ts`. Anything else
+belongs on `runCli`.
+
 ## One-off probes (no test file)
 
 To poke at Clio without writing a permanent test, drop a throwaway script in
-`/tmp` and run it with tsx. Delete it when done — never leave probes under
-`tests/` or `scripts/`.
+your scratch directory and run it with tsx. Delete it when done — never leave
+probes under `tests/`, `scripts/`, or `benchmarks/`.
 
 ```ts
 // /tmp/probe.ts
