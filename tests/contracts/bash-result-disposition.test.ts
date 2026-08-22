@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -188,8 +189,12 @@ describe("contracts/bash result disposition", () => {
 		ok(toolResultContextText(large).includes("TAIL🙂"));
 		strictEqual(toolResultContextText(large).includes("�"), false);
 		ok(applied.offloadPath && existsSync(applied.offloadPath));
-		strictEqual(applied.offloadPath, join(stateDir, "scratch", "full-large", "call.txt"));
-		ok(readFileSync(applied.offloadPath, "utf8").includes("TAIL🙂"));
+		const spilled = readFileSync(applied.offloadPath, "utf8");
+		strictEqual(
+			applied.offloadPath,
+			join(stateDir, "scratch", "full-large", `${createHash("sha256").update(spilled).digest("hex")}.txt`),
+		);
+		ok(spilled.includes("TAIL🙂"));
 		assertByteAccounting(large);
 	});
 

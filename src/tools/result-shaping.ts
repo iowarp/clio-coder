@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
@@ -83,10 +84,6 @@ function safePathSegment(value: string): string {
 	return safe.length > 0 ? safe : "unnamed";
 }
 
-function timestampSegment(): string {
-	return new Date().toISOString().replace(/[^A-Za-z0-9._-]/g, "_");
-}
-
 function offloadBody(text: string, bytes: number, maxBytes: number): string {
 	if (bytes <= maxBytes) return text;
 	const notice = `\n[clio-coder scratch output truncated at ${maxBytes} bytes; original size ${bytes} bytes]`;
@@ -100,18 +97,24 @@ function offloadBody(text: string, bytes: number, maxBytes: number): string {
  * to spill complete output before truncating and set
  * `details.resultSize.offloadPath`; canonical disposition shaping also uses it
  * once when presentation or model context omits captured content.
+ *
+ * The file is named by the sha256 of the captured text, so the path is a pure
+ * function of the bytes: identical captures share one file and the
+ * `retrieve=` header, the eviction marker, and the resume transcript carry the
+ * same bytes every time, which is what keeps the prompt-cache prefix stable
+ * across runs. Pass `digest` when the caller already hashed the text.
  */
 export function writeToolOffload(
 	text: string,
 	context: ToolResultShapeContext | undefined,
 	maxBytes: number = RESULT_OFFLOAD_MAX_BYTES,
+	digest: string = createHash("sha256").update(text).digest("hex"),
 ): string | null {
 	try {
 		const bytes = byteLength(text);
 		const sessionId = safePathSegment(context?.sessionId ?? "no-session");
-		const callId = safePathSegment(context?.toolCallId ?? timestampSegment());
 		const dir = join(clioStateDir(), "scratch", sessionId);
-		const path = join(dir, `${callId}.txt`);
+		const path = join(dir, `${digest}.txt`);
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(path, offloadBody(text, bytes, maxBytes), "utf8");
 		return path;
@@ -381,7 +384,12 @@ export function shapeToolResult(
 	// omits content earns one offload and the honest omission facts with it.
 	let projection = projectToolResultContext(projectionInput);
 	if (offloadPath === null && projection.truncated) {
-		offloadPath = writeToolOffload(capturedText, context, offloadMaxBytesFor(spec));
+		offloadPath = writeToolOffload(
+			capturedText,
+			context,
+			offloadMaxBytesFor(spec),
+			projection.summaryProvenance?.sourceSha256,
+		);
 		if (offloadPath !== null) {
 			displayed = withOffloadMetadata(
 				displayed,

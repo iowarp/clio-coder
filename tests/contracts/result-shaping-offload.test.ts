@@ -1,4 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -128,8 +129,20 @@ describe("contracts/result-shaping offload", () => {
 		);
 
 		const path = offloadPath(shaped);
-		strictEqual(path, join(stateDir, "scratch", "session-1", "call-1.txt"));
+		strictEqual(path, join(stateDir, "scratch", "session-1", `${createHash("sha256").update(text).digest("hex")}.txt`));
 		strictEqual(readFileSync(path, "utf8"), text);
+		// Content-addressed: the same bytes captured under another call land on
+		// the same path, so the model-facing pointer is byte-stable.
+		strictEqual(
+			offloadPath(
+				shapeToolResult(
+					mockToolSpec(ToolNames.Bash, 64),
+					{ kind: "ok", output: text },
+					{ sessionId: "session-1", toolCallId: "call-2" },
+				),
+			),
+			path,
+		);
 		ok(outputText(shaped).includes("[tool result truncated]"));
 		ok(outputText(shaped).includes(`full: ${path} (overflow copy, read-only; not the workspace)`));
 		ok(outputText(shaped).includes("read it with offset and limit to inspect the rest."));
