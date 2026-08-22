@@ -49,6 +49,8 @@ An evicted body comes back on demand and only on demand. The marker names the ex
 
 A recall does not un-evict. The marker stays byte-identical where it was, so the provider prefix cache is untouched, and repeated recalls of the same ref are the churn signal the `/context` overlay reports.
 
+Offline replay does not infer those explicit decisions from a later read of the same path. A reread already returns current content, while recall returns a selected historical ref. The replay tables keep the token-weighted `recallTokens` demand bound and reserve recall count, churn, and tail-growth simulation for ledgers or corpora that record which refs were actually recalled.
+
 ### 3. LLM summary, as a last resort
 
 If pressure remains above the threshold after eviction, Clio runs the summary compaction path: it calls the summarization model, appends a `compactionSummary` entry, refreshes projected replay messages from the session, and continues. This is the only mechanism that spends tokens and the only one whose output is a lossy paraphrase, which is why it runs last.
