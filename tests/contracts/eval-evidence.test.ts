@@ -225,15 +225,10 @@ describe("contracts/eval evidence linking", () => {
 			const status = result.trustStatus.runs[0]?.status;
 			if (status === undefined) throw new Error("eval trust status missing linked run");
 			strictEqual(status.artifactIntegrity.state, "verified");
-			strictEqual(status.validationGrounding.state, "validated");
-			if (status.validationGrounding.state === "validated") {
-				deepStrictEqual(status.validationGrounding.authority, { kind: "clio", id: "evidence-grounding" });
-				ok(
-					status.validationGrounding.artifacts.some(
-						(reference) => reference.kind === "session_entry" && reference.id === "turn-1",
-					),
-				);
-			}
+			// The completion_contract row names `turn-1` as its own evidence. That
+			// is the run's self-report, not an observed validation execution, so it
+			// lands on completionEvidence below and leaves this axis unfilled.
+			deepStrictEqual(status.validationGrounding, { state: "absent", reason: "not_observed" });
 			strictEqual(status.independentReview.state, "passed");
 			if (status.independentReview.state === "passed") {
 				deepStrictEqual(status.independentReview.authority, { kind: "reviewer", id: "reviewer-eval" });
