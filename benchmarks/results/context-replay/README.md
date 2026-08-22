@@ -52,6 +52,24 @@ Eviction is what keeps the summary stage rare. With no eviction a 300-turn scien
 
 The cold-prefix column is the cost side. `structural-v1` stops at `target` and comes back, so it fires 1.1x to 1.8x more events than `age-horizon`, which drains everything evictable in one event, and it therefore re-prefills 1.2x to 2.3x more tokens under an exact-prefix cache for the same number of summaries. On a llama.cpp backend with `--cache-reuse` that cost is partly recovered by KV shifting; on a cloud provider it is paid at 1.25x write price per event. The number that moves it is event count, not which items an event picks, which is what the provider cache mechanics in `docs/context-engine.md` predict and what a cloud-tier deployment should tune through `context.workingSet.target` rather than through the policy.
 
+## Target and rung-6 stop sweep
+
+The 24 traces were replayed at targets 0.4, 0.5, and 0.6 with `protectLastTurns: 6`. A fourth diagnostic let rung 6 exhaust every usable tool result. The exhaustive result was identical to target 0.4 in every reported cell because protected and otherwise un-evictable residue stopped the policy first.
+
+| target or stop | budget | events | cold prefix | summaries | retention | retention covered |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.4 or exhaustive | 32000 | 121.25 | 2.590M | 45.292 | 0.06660 | 0.49547 |
+| 0.5 | 32000 | 121.25 | 2.590M | 45.292 | 0.06660 | 0.49547 |
+| 0.6 | 32000 | 121.50 | 2.596M | 45.292 | 0.06660 | 0.49547 |
+| 0.4 or exhaustive | 64000 | 61.75 | 1.863M | 8.792 | 0.09910 | 0.56511 |
+| 0.5 | 64000 | 62.42 | 1.891M | 8.750 | 0.09908 | 0.56496 |
+| 0.6 | 64000 | 64.00 | 1.984M | 8.750 | 0.09902 | 0.56514 |
+| 0.4 or exhaustive | 128000 | 35.58 | 1.708M | 3.083 | 0.16542 | 0.65657 |
+| 0.5 | 128000 | 35.92 | 1.737M | 3.083 | 0.16553 | 0.65704 |
+| 0.6 | 128000 | 36.46 | 1.821M | 3.125 | 0.16607 | 0.66011 |
+
+The shipped default stays at 0.6. Moving every target, including local backends with reusable KV state, to 0.4 saved only 6.1% of cold-prefix tokens at 64k and 6.2% at 128k. It did not materially change summary count and reduced retention covered by 0.00354 at 128k. A tier-aware default is not justified by this sweep. Reopen the decision when target 0.4 cuts cold-prefix tokens by at least 10% at both 64k and 128k without increasing summaries or lowering retention covered by more than 0.002. Operators on exact-prefix cloud tiers can still select 0.4 through the existing setting; no new setting or stop rule is needed.
+
 ## Regenerating
 
 ```
