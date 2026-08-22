@@ -402,7 +402,7 @@ Conventions worth knowing before your first PR: local imports end in `.js`,
 tests use `node:test`, `any` needs a tracking issue, and compile-time
 boundaries between domains are enforced by the hygiene lint rather than by
 convention. Read [docs/architecture.md](docs/architecture.md) before adding a
-cross-domain import. Live model validation (`npm run test:live`) and the
+cross-domain import. Live model validation (`npm run live:smoke -- --target <id>`) and the
 SWE-bench, SciCode, and Terminal-Bench harnesses under `benchmarks/` are
 separate and opt-in, because no deterministic suite can promise that every
 local model behaves identically.

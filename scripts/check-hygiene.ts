@@ -350,7 +350,7 @@ function checkCiScripts(): void {
 	);
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
-	expectScript("test:live", "node scripts/live-smoke.mjs");
+	expectScript("live:smoke", "node --import tsx benchmarks/internal/live-smoke.ts");
 	expectScript("test:repeat", "node scripts/repeat-tests.mjs");
 	if (!scripts["test:coverage"]?.includes("--experimental-test-coverage")) {
 		fail("ci-scripts", "scripts.test:coverage must set --experimental-test-coverage");

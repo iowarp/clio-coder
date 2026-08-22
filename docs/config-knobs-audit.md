@@ -96,7 +96,6 @@ All default off; all enabled with `1`.
 
 | Env var(s) | Used by |
 |---|---|
-| `CLIO_CODER_LIVE_SMOKE`, `CLIO_CODER_LIVE_TARGET`, `CLIO_CODER_LIVE_RUNTIME`, `CLIO_CODER_LIVE_BASE_URL`, `CLIO_CODER_LIVE_MODEL`, `CLIO_CODER_LIVE_API_KEY`, `CLIO_CODER_LIVE_KEEP` | `scripts/live-smoke.mjs` |
 | `CLIO_CODER_MAIN_TARGET/_MODEL/_URL/_RUNTIME/_THINKING`, `CLIO_CODER_WORKER_TARGET/_MODEL/_URL/_RUNTIME/_THINKING`, `CLIO_CODER_LLAMACPP_KEY`, `CLIO_CODER_LMSTUDIO_KEY` | Terminal-Bench installed agent (`benchmarks/community/terminal-bench/`), which renders its own settings.yaml inside the task container |
 | `CLIO_CODER_AUTONOMY`, `CLIO_CODER_TASK_TIMEOUT` | terminal-bench agent wrapper (writes settings.yaml / its own timeout; not a Clio knob) |
 | `CLIO_CODER_BIN`, `CLIO_CODER_ENTRY`, `CLIO_CODER_TARBALL_URL` | install/dev scripts |

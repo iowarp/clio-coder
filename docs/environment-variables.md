@@ -112,4 +112,4 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_TEST_STAGE1_DELAY_MS`, `CLIO_CODER_TEST_STAGE1_FAIL` | `NODE_ENV=test`-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (`src/cli/clio.ts`). |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` (`src/core/init.ts`). |
 
-Variables used only by `scripts/` and `benchmarks/` harnesses (the `CLIO_CODER_LIVE_*` smoke-test family, benchmark fleet configuration, install-script inputs) are not part of the shipped runtime and are documented inline where they are consumed.
+Variables used only by the Terminal-Bench agent under `benchmarks/community/` and by the install script are not part of the shipped runtime and are documented inline where they are consumed. The live drivers under `benchmarks/internal/` take no environment of their own: the target comes from `--target <id>`.
