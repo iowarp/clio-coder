@@ -39,14 +39,12 @@ worker spec and receipt are written.
 
 ## Benchmarking Models
 
-Model and config benchmark adapters ship under [benchmarks/community/](../benchmarks/community/). These adapters (such as `bench:swe`, `bench:scicode`, and the fleet benchmark `bench:tb`) drive Clio through the CLI or `clio-coder eval`. 
-
-For example, to run the fleet benchmark:
-```sh
-npm run bench:tb -- --limit 3
-```
-
-The benchmarks record context-window, thinking, sampling, weight quantization, and KV-cache settings so sweeps can be compared consistently.
+The public benchmark adapters under [benchmarks/community/](../benchmarks/community/)
+(SWE-bench Lite, Terminal-Bench, SciCode, HumanEval) drive Clio through
+`clio-coder run --json` or `clio-coder eval run`, each taking `--target` and
+`--model` from the configured targets. `benchmarks/README.md` has the
+commands. The run manifests record the target profile (runtime, model,
+thinking level) so sweeps can be compared consistently.
 
 ## What "sanctioned" means
 
