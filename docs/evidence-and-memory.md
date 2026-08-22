@@ -193,6 +193,10 @@ The composition rules prohibit cross-axis promotion:
 - Recorded context provenance never promotes validation or correctness.
 - A passing review never establishes authorship or context origin.
 - Enforced autonomy never promotes completion evidence.
+- A completion self-report never promotes validation grounding. The linked
+  `completion_contract` audit row is the run's own report of what it did, so it
+  reaches completion evidence and no other axis. Validation grounding is filled
+  only by independently observed executions the session ledger recorded.
 
 The current adapters apply the following persisted-format compatibility rules.
 They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
@@ -211,7 +215,8 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`. Correlated review maps to `not_independent`. Unauthenticated artifacts map to `unknown`; operator or full-auto confirmation alone is `not_applicable` to independent review. |
 | Evidence findings and links | Failure and proxy-validation findings map to `failed` and `ungrounded`; `no-validation` maps to `absent`. Exact links record provenance, while best-effort links remain `unknown`. No clean bundle is promoted to validated merely because negative findings are absent. |
 | Receipt autonomy grade | `mediated`, `approximated`, and `bypassed` map to `enforced`, `approximated`, and `bypassed`. A dangerous-bypass flag always normalizes to `bypassed`; a missing historical block is `unknown`. |
-| Finish-contract assessment | `validation_evidence`, `unvalidated_mutation`, `explicit_limitation`, and `no_mutation` map to `evidenced`, `incomplete`, `limited`, and `not_applicable`. |
+| Finish-contract assessment | `validation_evidence`, `unvalidated_mutation`, `explicit_limitation`, and `no_mutation` map to `evidenced`, `incomplete`, `limited`, and `not_applicable`. A run whose receipt was presented and rejected downgrades `evidenced` to `unknown`: the row still points at its own record, but a rejected receipt authenticates nothing about the run it names. |
+| Malformed audit row identifier | A blank or whitespace-only optional identifier is treated as absent. The row falls back to its derived correlation id or drops out of the trust projection; it never aborts the bundle. |
 | Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
 
 Receipt inspection, worker output, monitor details, and evidence rebuilding all

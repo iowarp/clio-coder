@@ -501,7 +501,7 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
-	it("treats linked completion_contract validation_evidence as run validation proof", async () => {
+	it("records linked completion_contract validation_evidence as completion evidence only", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const { runId } = await sealRun();
 			const dataDir = join(scratch, "data");
@@ -527,13 +527,16 @@ describe("contracts/evidence-build", () => {
 
 			const result = await buildEvidence({ dataDir, stateDir, runId });
 
+			// The audit log is unauthenticated input. The run's own completion
+			// self-report establishes completion evidence and nothing else, so the
+			// operator still gets the no-validation warning.
 			strictEqual(
 				result.findings.some((finding) => finding.tag === "no-validation"),
-				false,
+				true,
 			);
 			strictEqual(result.overview.totals.auditRows, 1);
 			const status = result.trustStatus.runs[0]?.status;
-			strictEqual(status?.validationGrounding.state, "validated");
+			deepStrictEqual(status?.validationGrounding, { state: "absent", reason: "not_observed" });
 			strictEqual(status?.completionEvidence.state, "evidenced");
 			if (status?.completionEvidence.state === "evidenced") {
 				deepStrictEqual(status.completionEvidence.authority, { kind: "clio", id: "finish-contract" });

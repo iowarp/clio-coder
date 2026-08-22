@@ -1,9 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import type { GateDecisionArtifact } from "../../src/domains/dispatch/gate-decisions.js";
+import {
+	type GateDecisionArtifact,
+	materializePendingGateDecision,
+	stagePendingGateDecision,
+} from "../../src/domains/dispatch/gate-decisions.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type {
 	RunEnvelope,
@@ -16,6 +20,7 @@ import {
 	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
 	buildEvidence,
+	type CanonicalTrustStatus,
 	composeTrustStatus,
 	inspectEvidence,
 	inspectRunReceiptTrustStatus,
@@ -134,7 +139,7 @@ function sealedFixture(
 	return { envelope, receipt: withReceiptIntegrity(draft, envelope) };
 }
 
-function persistFixture(root: string, fixture: { envelope: RunEnvelope; receipt: RunReceipt }): void {
+function persistFixture(root: string, fixture: { envelope: RunEnvelope; receipt: RunReceipt }): RunReceipt {
 	const stateDir = join(root, "state");
 	const receiptPath = join(stateDir, "receipts", `${fixture.receipt.runId}.json`);
 	mkdirSync(join(stateDir, "receipts"), { recursive: true });
@@ -145,6 +150,89 @@ function persistFixture(root: string, fixture: { envelope: RunEnvelope; receipt:
 	);
 	writeFileSync(join(stateDir, "runs.json"), `${JSON.stringify([envelope], null, 2)}\n`, "utf8");
 	writeFileSync(receiptPath, `${JSON.stringify(resealed, null, 2)}\n`, { encoding: "utf8", flag: "w" });
+	return resealed;
+}
+
+const AUDIT_TIMESTAMP = "2026-08-21T10:00:03.000Z";
+
+interface CompletionRowOptions {
+	correlationId?: string;
+	turnId?: string;
+	evidenceKinds?: string[];
+}
+
+/**
+ * The unauthenticated JSONL line #157 is written against: the run's own
+ * completion self-report, optionally naming the very receipt under inspection
+ * as its evidence.
+ */
+function writeCompletionContractRow(root: string, runId: string, options: CompletionRowOptions = {}): void {
+	const auditDir = join(root, "state", "audit");
+	mkdirSync(auditDir, { recursive: true });
+	writeFileSync(
+		join(auditDir, `${AUDIT_TIMESTAMP.slice(0, 10)}.jsonl`),
+		`${JSON.stringify({
+			kind: "completion_contract",
+			ts: AUDIT_TIMESTAMP,
+			correlationId: options.correlationId ?? "completion-157",
+			runId,
+			...(options.turnId === undefined ? {} : { turnId: options.turnId }),
+			decision: "ok",
+			reason: "validation_evidence",
+			rigor: "high",
+			mutatedPaths: ["src/app.ts"],
+			evidenceKinds: options.evidenceKinds ?? ["dispatch_receipt"],
+		})}\n`,
+		"utf8",
+	);
+}
+
+/** An authenticated review whose subject digest really is this receipt's digest. */
+function writeGateDecision(root: string, runId: string, receipt: RunReceipt): GateDecisionArtifact {
+	const stateDir = join(root, "state");
+	return materializePendingGateDecision(
+		stagePendingGateDecision(
+			{
+				group: "canonical-trust",
+				topology: "review",
+				cycle: 1,
+				outcome: "pass",
+				subjects: [{ runId, digest: receipt.integrity.digest }],
+				decider: { runId: "reviewer-157", digest: DIGEST_B },
+				correlation: {
+					agent: false,
+					target: true,
+					modelFamily: false,
+					runtime: true,
+					node: true,
+					independent: true,
+				},
+				createdAt: "2026-08-21T10:00:02.000Z",
+			},
+			{ stateDir },
+		),
+	).artifact;
+}
+
+function tamperReceipt(envelope: RunEnvelope): void {
+	const receiptPath = envelope.receiptPath as string;
+	const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as RunReceipt;
+	writeFileSync(
+		receiptPath,
+		`${JSON.stringify({ ...receipt, verification: { state: "verified", basis: "validation-tool" } }, null, 2)}\n`,
+		"utf8",
+	);
+}
+
+function axisStates(status: CanonicalTrustStatus): Record<string, string> {
+	return {
+		artifactIntegrity: status.artifactIntegrity.state,
+		validationGrounding: status.validationGrounding.state,
+		independentReview: status.independentReview.state,
+		contextProvenance: status.contextProvenance.state,
+		autonomyEnforcement: status.autonomyEnforcement.state,
+		completionEvidence: status.completionEvidence.state,
+	};
 }
 
 function gateArtifact(): GateDecisionArtifact {
@@ -240,17 +328,55 @@ describe("contracts/evidence canonical trust projection", () => {
 		strictEqual(reviewed.independentReview.state, "passed");
 	});
 
-	it("makes receipt inspection and a rebuilt bundle deeply equivalent and byte-stable", async () => {
+	it("composes gate and completion inputs onto exact axes and stays byte-stable", async () => {
 		const root = scratchDir();
-		const fixture = sealedFixture("equivalent-run");
-		persistFixture(root, fixture);
+		const fixture = sealedFixture("equivalent-run", {
+			verification: { state: "unverified", basis: "no-validation-tool" },
+		});
+		const sealed = persistFixture(root, fixture);
+		const gate = writeGateDecision(root, fixture.envelope.id, sealed);
+		writeCompletionContractRow(root, fixture.envelope.id, { turnId: "turn-157" });
 		const stateDir = join(root, "state");
 		const dataDir = join(root, "data");
 		const persistedEnvelope = JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8"))[0] as RunEnvelope;
 		const persistedReceipt = JSON.parse(readFileSync(persistedEnvelope.receiptPath as string, "utf8")) as RunReceipt;
 		const inspectedReceipt = inspectRunReceiptTrustStatus(persistedReceipt, persistedEnvelope);
 		const first = await buildEvidence({ dataDir, stateDir, runId: persistedEnvelope.id });
-		deepStrictEqual(first.trustStatus.runs[0]?.status, inspectedReceipt.status);
+		const composed = first.trustStatus.runs[0]?.status;
+		if (composed === undefined) throw new Error("missing composed status");
+
+		// Literal expected axes. The gate decision and the completion row each
+		// reach exactly one axis; neither reaches validationGrounding.
+		deepStrictEqual(axisStates(composed), {
+			artifactIntegrity: "verified",
+			validationGrounding: "absent",
+			independentReview: "passed",
+			contextProvenance: "recorded",
+			autonomyEnforcement: "enforced",
+			completionEvidence: "evidenced",
+		});
+		if (composed.independentReview.state !== "passed") throw new Error("expected an authenticated review");
+		deepStrictEqual(composed.independentReview.source, { kind: "gate_decision", id: gate.id });
+		if (composed.completionEvidence.state !== "evidenced") throw new Error("expected completion evidence");
+		deepStrictEqual(composed.completionEvidence.source, { kind: "finish_contract", id: "completion-157" });
+		deepStrictEqual(composed.completionEvidence.artifacts, [
+			{ kind: "finish_contract_evidence", id: "completion-157" },
+			{ kind: "session_entry", id: "turn-157" },
+		]);
+
+		// The axes neither input owns still equal the standalone inspection, and
+		// the two composed axes genuinely differ from it, so this assertion can
+		// distinguish real composition from delegation alone.
+		for (const axis of [
+			"artifactIntegrity",
+			"validationGrounding",
+			"contextProvenance",
+			"autonomyEnforcement",
+		] as const) {
+			deepStrictEqual(composed[axis], inspectedReceipt.status[axis], axis);
+		}
+		strictEqual(inspectedReceipt.status.independentReview.state, "absent");
+		strictEqual(inspectedReceipt.status.completionEvidence.state, "absent");
 
 		const context = first.trustStatus.runs[0]?.status.contextProvenance;
 		if (context?.state === "absent" || context === undefined) throw new Error("expected recorded context provenance");
@@ -307,6 +433,123 @@ describe("contracts/evidence canonical trust projection", () => {
 		strictEqual(unsupportedInspection.integrity.ok, false);
 		strictEqual(unsupportedInspection.status.artifactIntegrity.state, "failed");
 		strictEqual(unsupportedInspection.status.validationGrounding.state, "absent");
+	});
+
+	it("never lets a completion-contract row promote an axis it does not establish", async () => {
+		// The four-row matrix: {intact, tampered} receipt x {no row, row}. The row
+		// names `dispatch_receipt` as its evidence, so on the tampered rows it
+		// cites the very receipt that failed authentication.
+		const observed: Array<Record<string, unknown>> = [];
+		for (const tampered of [false, true]) {
+			for (const auditRow of [false, true]) {
+				const root = scratchDir();
+				const runId = `matrix-${tampered ? "tampered" : "intact"}-${auditRow ? "row" : "norow"}`;
+				const fixture = sealedFixture(runId, {
+					verification: { state: "unverified", basis: "no-validation-tool" },
+				});
+				persistFixture(root, fixture);
+				const stateDir = join(root, "state");
+				const envelope = JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8"))[0] as RunEnvelope;
+				if (auditRow) writeCompletionContractRow(root, runId, { turnId: "t-1" });
+				if (tampered) tamperReceipt(envelope);
+				const result = await buildEvidence({ dataDir: join(root, "data"), stateDir, runId });
+				const status = result.trustStatus.runs[0]?.status;
+				if (status === undefined) throw new Error(`missing status for ${runId}`);
+				observed.push({
+					tampered,
+					auditRow,
+					integrity: status.artifactIntegrity.state,
+					validationGrounding: status.validationGrounding.state,
+					completionEvidence: status.completionEvidence.state,
+					noValidationFinding: result.findings.some((finding) => finding.tag === "no-validation"),
+				});
+			}
+		}
+		deepStrictEqual(observed, [
+			{
+				tampered: false,
+				auditRow: false,
+				integrity: "verified",
+				validationGrounding: "absent",
+				completionEvidence: "absent",
+				noValidationFinding: true,
+			},
+			{
+				tampered: false,
+				auditRow: true,
+				integrity: "verified",
+				validationGrounding: "absent",
+				completionEvidence: "evidenced",
+				noValidationFinding: true,
+			},
+			{
+				tampered: true,
+				auditRow: false,
+				integrity: "failed",
+				validationGrounding: "absent",
+				completionEvidence: "absent",
+				noValidationFinding: true,
+			},
+			{
+				tampered: true,
+				auditRow: true,
+				integrity: "failed",
+				validationGrounding: "absent",
+				completionEvidence: "unknown",
+				noValidationFinding: true,
+			},
+		]);
+	});
+
+	it("keeps a tampered receipt from acquiring any verified field even with gate and audit inputs", async () => {
+		const root = scratchDir();
+		const fixture = sealedFixture("rejected-authority", {
+			verification: { state: "unverified", basis: "no-validation-tool" },
+		});
+		const sealed = persistFixture(root, fixture);
+		writeGateDecision(root, fixture.envelope.id, sealed);
+		writeCompletionContractRow(root, fixture.envelope.id, { turnId: "turn-157" });
+		const stateDir = join(root, "state");
+		const envelope = JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8"))[0] as RunEnvelope;
+		tamperReceipt(envelope);
+		const result = await buildEvidence({ dataDir: join(root, "data"), stateDir, runId: envelope.id });
+		const status = result.trustStatus.runs[0]?.status;
+		if (status === undefined) throw new Error("missing rejected-authority status");
+		strictEqual(status.artifactIntegrity.state, "failed");
+		const forbidden = new Set(["verified", "validated", "passed", "recorded", "enforced", "evidenced"]);
+		for (const [axis, state] of Object.entries(axisStates(status))) {
+			strictEqual(forbidden.has(state), false, `${axis}=${state}`);
+		}
+		ok(result.findings.some((finding) => finding.tag === "receipt-integrity"));
+	});
+
+	it("keeps building a bundle when an audit row carries blank optional identifiers", async () => {
+		const root = scratchDir();
+		const fixture = sealedFixture("blank-identifier-run", {
+			verification: { state: "unverified", basis: "no-validation-tool" },
+		});
+		persistFixture(root, fixture);
+		writeCompletionContractRow(root, fixture.envelope.id, { correlationId: "   ", turnId: "" });
+		const stateDir = join(root, "state");
+		const result = await buildEvidence({ dataDir: join(root, "data"), stateDir, runId: fixture.envelope.id });
+		const status = result.trustStatus.runs[0]?.status;
+		if (status === undefined) throw new Error("missing blank-identifier status");
+		strictEqual(result.overview.totals.auditRows, 1);
+		strictEqual(status.completionEvidence.state, "evidenced");
+		if (status.completionEvidence.state === "evidenced") {
+			deepStrictEqual(status.completionEvidence.source, {
+				kind: "finish_contract",
+				id: "blank-identifier-run:completion-contract",
+			});
+			deepStrictEqual(status.completionEvidence.artifacts, [
+				{ kind: "finish_contract_evidence", id: "blank-identifier-run:completion-contract" },
+			]);
+		}
+		strictEqual(status.validationGrounding.state, "absent");
+		// Every declared bundle file is still written; one malformed row does not
+		// take the overview and findings down with it.
+		for (const file of result.overview.files) ok(existsSync(join(result.directory, file)), file);
+		ok(result.overview.files.length > 1);
 	});
 
 	it("keeps claims separate and retains gate and finish-contract authorities and references", () => {

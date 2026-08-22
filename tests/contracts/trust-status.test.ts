@@ -14,6 +14,7 @@ import {
 	adaptEvidenceLinkContextStatus,
 	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
+	adaptGroundedEvidenceValidationStatus,
 	adaptReceiptIntegrityStatus,
 	adaptRunReceiptAutonomyStatus,
 	adaptRunReceiptContextStatus,
@@ -325,8 +326,42 @@ describe("contracts/trust-status", () => {
 				["contextProvenance", "validationGrounding"],
 				["independentReview", "contextProvenance"],
 				["autonomyEnforcement", "completionEvidence"],
+				["completionEvidence", "validationGrounding"],
 			],
 		);
+		// The completion rule is enforced, not documented: a finish-contract
+		// self-report cannot ground validation even when handed straight to the
+		// grounding adapter.
+		deepStrictEqual(
+			adaptGroundedEvidenceValidationStatus({
+				evidenceId: "evidence-1",
+				runId: "subject",
+				artifacts: [
+					{ kind: "finish_contract_evidence", id: "completion-1" },
+					{ kind: "run_receipt", id: "subject" },
+				],
+			}),
+			{ state: "absent", reason: "not_observed" },
+		);
+		deepStrictEqual(
+			adaptGroundedEvidenceValidationStatus({ evidenceId: "evidence-1", runId: "subject", artifacts: [] }),
+			{ state: "absent", reason: "not_observed" },
+		);
+		const observed = adaptGroundedEvidenceValidationStatus({
+			evidenceId: "evidence-1",
+			runId: "subject",
+			artifacts: [
+				{ kind: "session_entry", id: "turn-1" },
+				{ kind: "finish_contract_evidence", id: "completion-1" },
+			],
+		});
+		strictEqual(observed.state, "validated");
+		if (observed.state === "validated") {
+			deepStrictEqual(observed.artifacts, [
+				{ kind: "evidence_bundle", id: "evidence-1" },
+				{ kind: "session_entry", id: "turn-1" },
+			]);
+		}
 	});
 
 	it("adapts current and historical receipt facts conservatively", () => {
