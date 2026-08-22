@@ -405,7 +405,7 @@ test("structural: protection keeps the recent window, small results, and blocked
 	ledger.read("src/recent.ts");
 
 	const candidates = byRef(select(ledger.entries));
-	assert.equal(candidates.has(tiny), false, "below the floor the marker costs more than the body");
+	assert.equal(candidates.has(tiny), false, "the configured floor protects low-yield bodies");
 	assert.equal(candidates.has(blocked), false, "an admission verdict is a decision, not an observation");
 	assert.equal(candidates.has(recent), false, "inside the protection horizon");
 });

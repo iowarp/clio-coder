@@ -78,7 +78,7 @@ A policy answers one question: which units should leave. It never writes, never 
 
 1. Anything that is not a `tool_result` or `assistant` message. Operator words, compaction and branch summaries, skill activations, task ledgers, worker runs, and bash executions are the session's record of itself.
 2. Anything inside the recent window, which starts at `protectionCutoffIndex(entries, protectLastTurns)`. A turn starts at a user message, a `bashExecution`, or a `branchSummary`.
-3. A result whose estimated size is below `minEvictableTokens`, where the marker would cost more than the body it replaces.
+3. A result whose estimated body is below `minEvictableTokens`. This protects low-yield bodies from churn; the engine independently rejects a marker that would free no tokens.
 4. A body the legacy destructive stage already replaced, which has nothing left to evict.
 5. A call the safety rails blocked. A refused call is a decision the session made, not an observation it can re-fetch.
 6. A write or edit the turn in flight is still standing on.
@@ -88,7 +88,7 @@ A policy answers one question: which units should leave. It never writes, never 
 
 The rule `maskStaleObservations` applied, recorded instead of destroyed. Every `tool_result` body older than the protection horizon leaves the working set, and every `assistant` message older than the horizon loses its thinking blocks. Same turn-start definition, same cutoff, and a body carrying a legacy compaction marker is skipped the same way.
 
-One skip condition is new, so this is today's selection minus small results rather than a byte-identical reproduction of it: a result whose estimated body is below `minEvictableTokens` (200 tokens by default) stays, whatever its age, because the marker would cost more than the body it replaces. The old mask had no such floor and masked those results too. Thinking has no size floor either way, because dropping it renders no marker.
+One skip condition is new, so this is today's selection minus small results rather than a byte-identical reproduction of it: a result whose estimated body is below `minEvictableTokens` (200 tokens by default) stays, whatever its age. The engine already rejects markers that save no tokens; the higher default is a measured low-yield churn guard. The old mask had no such floor and masked those results too. Thinking has no size floor either way, because dropping it renders no marker.
 
 `age-horizon` has no target stop. It evicts everything beyond the horizon in one event, exactly as the mask did, and ignores `context.workingSet.target`; the replay tables show this as `saturated events = 1.000` on every row. That is deliberate: the policy exists to reproduce the old selection through the ledger, and an operator who wants batching to a target wants `structural-v1`. Candidates arrive newest-safe-first, so a caller that stops early has evicted the newest safe unit rather than the oldest one.
 
@@ -160,7 +160,7 @@ context:
 | `context.workingSet.policy` | `structural-v1` | `age-horizon`, `structural-v1` | Candidate selection rule set. |
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | Used-over-window ratio an applied `structural-v1` event batches down to. `age-horizon` ignores it. |
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | Recent turns whose observations and thinking are never evicted. |
-| `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this estimate are never evicted. |
+| `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this body estimate are never evicted. The default protects low-yield bodies; marker break-even is enforced separately. |
 
 `compaction.excludeLastTurns` governs only the temporary legacy mask path; working-set protection uses `protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
 

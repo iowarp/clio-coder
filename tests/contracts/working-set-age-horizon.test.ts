@@ -27,7 +27,7 @@ function body(turn: number): string {
 
 /**
  * Twelve turns of user / assistant / tool_call / tool_result. Even turns carry
- * thinking, turn 3 returns a result too small to be worth a marker, and turn 5
+ * thinking, turn 3 returns a result below the configured floor, and turn 5
  * was already rewritten by the legacy destructive mask.
  */
 function ledger(): SessionEntry[] {
@@ -163,7 +163,7 @@ test("age-horizon: candidates arrive newest-safe-first", () => {
 	assert.equal(selected[selected.length - 1], "t1");
 });
 
-test("age-horizon: the default floor keeps a result too small to be worth a marker", () => {
+test("age-horizon: the default floor keeps a low-yield result", () => {
 	const entries = ledger();
 	const selected = new Set(agePolicy.select(policyInput(entries)).map((c) => c.ref.entry));
 	assert.equal(selected.has("t3"), false, "a two-byte result costs more as a marker than as a body");
