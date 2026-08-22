@@ -8,6 +8,7 @@ import {
 	type CanonicalTrustStatus,
 	composeTrustStatus,
 	inspectRunReceiptTrustStatus,
+	isTrustStatusIdentifier,
 	type TrustArtifactReference,
 } from "./trust-status.js";
 import { EVIDENCE_VERSION, type EvidenceAuditLinkedRow, type EvidenceTrustStatusFile } from "./types.js";
@@ -59,11 +60,17 @@ interface ComposeEvidenceRunTrustInput {
 
 function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): CanonicalTrustStatus {
 	const inspection = inspectRunReceiptTrustStatus(input.source.receipt, input.source.envelope);
+	// A receipt that was presented and rejected authenticates nothing about the
+	// run it names. Its integrity failure stays on `artifactIntegrity`; no other
+	// axis may reach a trust-granting state on the strength of that run's own
+	// self-reports. A missing or unchecked receipt is not a rejection.
+	const receiptRejected = inspection.status.artifactIntegrity.state === "failed";
 	let status = inspection.status;
-	const grounded = [
-		...input.validationEvidence,
-		...groundedValidationEvidenceFromAudit(input.auditRows, input.source.envelope.id),
-	];
+	// Only independently observed executions ground validation. The
+	// completion-contract audit row is the run's own self-report: it feeds
+	// `completionEvidence` below and nothing else
+	// (`TRUST_STATUS_NO_PROMOTION_RULES`).
+	const grounded = input.validationEvidence.filter((artifact) => isTrustStatusIdentifier(artifact.id));
 	if (
 		grounded.length > 0 &&
 		(status.validationGrounding.state === "absent" || status.validationGrounding.state === "unknown")
@@ -101,44 +108,23 @@ function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): Can
 
 	const finish = latestFinishContractForRun(input.auditRows, input.source.envelope.id);
 	if (finish !== null) {
+		const completion = adaptFinishContractCompletionStatus(finish.assessment, {
+			sourceId: finish.sourceId,
+			artifacts: finish.artifacts,
+		});
 		status = composeTrustStatus(status, {
-			completionEvidence: adaptFinishContractCompletionStatus(finish.assessment, {
-				sourceId: finish.sourceId,
-				artifacts: finish.artifacts,
-			}),
+			completionEvidence:
+				receiptRejected && completion.state === "evidenced"
+					? {
+							state: "unknown",
+							source: { kind: "finish_contract", id: finish.sourceId },
+							authority: { kind: "clio", id: "finish-contract" },
+							artifacts: finish.artifacts,
+						}
+					: completion,
 		});
 	}
 	return status;
-}
-
-function groundedValidationEvidenceFromAudit(
-	rows: ReadonlyArray<EvidenceAuditLinkedRow>,
-	runId: string,
-): TrustArtifactReference[] {
-	return rows.flatMap((linked) => {
-		if (
-			linked.auditKind !== "completion_contract" ||
-			linked.runId !== runId ||
-			linked.confidence !== "exact" ||
-			readOptionalString(linked.row.decision) !== "ok" ||
-			readOptionalString(linked.row.reason) !== "validation_evidence"
-		) {
-			return [];
-		}
-		const evidenceKinds = Array.isArray(linked.row.evidenceKinds)
-			? linked.row.evidenceKinds.filter(isFinishContractEvidenceKind)
-			: [];
-		if (evidenceKinds.length === 0) return [];
-		const turnId = readOptionalString(linked.row.turnId);
-		return [
-			turnId === null
-				? {
-						kind: "finish_contract_evidence" as const,
-						id: readOptionalString(linked.row.correlationId) ?? `${runId}:completion-contract`,
-					}
-				: { kind: "session_entry" as const, id: turnId },
-		];
-	});
 }
 
 function latestGateDecisionForRun(
@@ -172,10 +158,14 @@ function latestFinishContractForRun(
 			const assessment = finishContractAssessmentFromAudit(row.row);
 			if (assessment === null) return [];
 			const correlationId = readOptionalString(row.row.correlationId) ?? `${runId}:completion-contract`;
+			// A malformed row is dropped from the trust projection rather than
+			// thrown out of the whole forensic build. `readAuditRows` already
+			// reports the malformed line, so the bundle stays honest about it.
+			if (!isTrustStatusIdentifier(correlationId)) return [];
 			const turnId = readOptionalString(row.row.turnId);
 			const artifacts: TrustArtifactReference[] = [
 				{ kind: "finish_contract_evidence", id: correlationId },
-				...(turnId === null ? [] : [{ kind: "session_entry" as const, id: turnId }]),
+				...(turnId === null || !isTrustStatusIdentifier(turnId) ? [] : [{ kind: "session_entry" as const, id: turnId }]),
 			];
 			return [{ sourceId: correlationId, assessment, artifacts, timestamp: row.ts ?? "" }];
 		})
@@ -220,8 +210,13 @@ function isFinishContractEvidenceKind(value: unknown): value is FinishContractEv
 	return value === "validation_command" || value === "protected_artifact" || value === "dispatch_receipt";
 }
 
+/**
+ * A blank or whitespace-only optional field is absent, not an identifier. The
+ * `??` fallbacks below depend on it, and an empty string would otherwise reach
+ * `normalizeArtifactReference` and abort the entire bundle.
+ */
 function readOptionalString(value: unknown): string | null {
-	return typeof value === "string" ? value : null;
+	return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function compareStrings(left: string, right: string): number {
