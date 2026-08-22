@@ -301,6 +301,73 @@ describe("contracts/project verifier authoring", { concurrency: false }, () => {
 		}
 	});
 
+	it("edits an existing catalog in place, keeping operator comments and on-disk order", () => {
+		const original = [
+			"# Operator notes: zz runs first on purpose.",
+			"version: 1",
+			"checks:",
+			"  - id: zz",
+			"    description: Run zz",
+			"    command: [node, --version] # pinned to the node in PATH",
+			"    cwd: .",
+			"    timeoutMs: 1000",
+			"    tags: [zz]",
+			"  - id: aa",
+			"    description: Run aa",
+			"    command: [node, --version]",
+			"    cwd: .",
+			"    timeoutMs: 1000",
+			"    tags: [aa]",
+			"  - id: mm",
+			"    description: Run mm",
+			"    command: [node, --version]",
+			"    cwd: .",
+			"    timeoutMs: 1000",
+			"    tags: [mm]",
+			"",
+		].join("\n");
+		write(PROJECT_VERIFIER_CATALOG_RELATIVE_PATH, original);
+		const discovery = discoverVerifierAuthoring();
+		strictEqual(discovery.ok, true);
+		if (!discovery.ok) return;
+		const revised = reviseVerifierDraft(createVerifierDraft(discovery), [
+			{ kind: "edit", id: "zz", changes: { description: "Run zz (revised)" } },
+			{ kind: "rename", id: "aa", newId: "bb" },
+			{ kind: "remove", id: "mm" },
+			{
+				kind: "add",
+				check: {
+					id: "new",
+					description: "Run new",
+					command: [process.execPath, "--version"],
+					cwd: ".",
+					timeoutMs: 1000,
+					tags: [],
+				},
+			},
+		]);
+		strictEqual(revised.ok, true, revised.ok ? "" : revised.reason);
+		if (!revised.ok) return;
+		const validation = validateVerifierDraft(revised.draft);
+		strictEqual(validation.ok, true, validation.ok ? "" : validation.reason);
+		if (!validation.ok) return;
+		ok(validation.text.startsWith("# Operator notes: zz runs first on purpose.\n"), validation.text);
+		ok(validation.text.includes("# pinned to the node in PATH"), validation.text);
+		deepStrictEqual(
+			[...validation.text.matchAll(/^ {2}- id: (\S+)$/gmu)].map((found) => found[1]),
+			["zz", "bb", "new"],
+		);
+		ok(validation.text.includes("description: Run zz (revised)"));
+		strictEqual(validation.text.includes("Run mm"), false);
+		deepStrictEqual(
+			validation.checks.map((check) => check.id),
+			["bb", "new", "zz"],
+		);
+		// A pure no-op revision writes the operator's bytes back unchanged.
+		const untouched = validateVerifierDraft(createVerifierDraft(discovery));
+		strictEqual(untouched.ok && untouched.text, original);
+	});
+
 	it("keeps IDs deterministic across edit, rename collision, and removal diagnostics", () => {
 		const discovery = discoverVerifierAuthoring();
 		strictEqual(discovery.ok, true);
