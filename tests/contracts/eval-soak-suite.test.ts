@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,8 +8,11 @@ import { fileURLToPath } from "node:url";
 import { evaluateGate } from "../../src/domains/eval/compare/gates.js";
 import { loadEvalSuiteFile } from "../../src/domains/eval/suites/load.js";
 import { runEvalSuiteV2 } from "../../src/domains/eval/suites/run.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const SOAK_SUITE = fileURLToPath(new URL("../../benchmarks/soak/clio-soak.yaml", import.meta.url));
+const BOUNDARY_SUITE = fileURLToPath(new URL("../../benchmarks/soak/clio-soak-boundary.yaml", import.meta.url));
+const BUILT_CLIO_ENTRY = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 
 /**
  * A Clio that seals whatever this fixture tells it to. It stands in for the
@@ -136,6 +139,60 @@ describe("contracts/soak suite", { concurrency: false }, () => {
 				false,
 				`${metric} must not become a suite-wide threshold`,
 			);
+		}
+	});
+
+	it("executes the shipped boundary suite against built Clio without a model", async () => {
+		const isolated = await isolateClioEnv("clio-soak-boundary-");
+		try {
+			// The test preload requires every child-process Clio root to stay below
+			// CLIO_CODER_HOME. Eval workspaces and per-item journals use os.tmpdir(),
+			// so keep that scratch inside this serialized isolated-env window too.
+			const nestedTmp = join(isolated.dir, "tmp");
+			mkdirSync(nestedTmp, { recursive: true });
+			process.env.TMPDIR = nestedTmp;
+
+			const loaded = await loadEvalSuiteFile(BOUNDARY_SUITE);
+			strictEqual(loaded.suite.suite.provenance?.offline, true);
+			for (const task of loaded.suite.tasks) {
+				strictEqual(task.runner.kind, "external-command");
+				strictEqual(task.runner.commands?.length, 1);
+				ok(task.runner.commands?.every((command) => command.includes('node "$CLIO_CODER_ENTRY" fleet run')));
+			}
+
+			const artifact = await runEvalSuiteV2(loaded, { clioEntry: BUILT_CLIO_ENTRY });
+			strictEqual(artifact.summary.runs, 2);
+			strictEqual(artifact.summary.passed, 2);
+			strictEqual(artifact.summary.failed, 0);
+			strictEqual(artifact.summary.tokens.measured, false);
+
+			const rolledBack = artifact.results.find((result) => result.taskId === "write-boundary.rolled-back");
+			strictEqual(rolledBack?.pass, true);
+			strictEqual(rolledBack?.failureClass, null);
+			strictEqual(rolledBack?.target.model, null);
+			strictEqual(rolledBack?.metrics["boundary.verdictCount"], 1);
+			strictEqual(rolledBack?.metrics["boundary.verdictSealed"], true);
+			strictEqual(rolledBack?.metrics["boundary.violationsDetected"], 1);
+			strictEqual(rolledBack?.metrics["boundary.violationsRolledBack"], 1);
+			strictEqual(rolledBack?.metrics["boundary.rollbackIncomplete"], 0);
+			strictEqual(rolledBack?.metrics["patch.filesChanged"], 0);
+			strictEqual(rolledBack?.metrics["verifier.exitCode"], 0);
+			strictEqual(rolledBack?.artifacts.verifierStdout, "write-boundary: rolled-back workspace state ok\n");
+
+			const incomplete = artifact.results.find((result) => result.taskId === "write-boundary.rollback-incomplete");
+			strictEqual(incomplete?.pass, true);
+			strictEqual(incomplete?.failureClass, null);
+			strictEqual(incomplete?.target.model, null);
+			strictEqual(incomplete?.metrics["boundary.verdictCount"], 1);
+			strictEqual(incomplete?.metrics["boundary.verdictSealed"], true);
+			strictEqual(incomplete?.metrics["boundary.violationsDetected"], 1);
+			strictEqual(incomplete?.metrics["boundary.violationsRolledBack"], 0);
+			strictEqual(incomplete?.metrics["boundary.rollbackIncomplete"], 1);
+			strictEqual(incomplete?.metrics["patch.filesChanged"], 1);
+			strictEqual(incomplete?.metrics["verifier.exitCode"], 0);
+			strictEqual(incomplete?.artifacts.verifierStdout, "write-boundary: rollback-incomplete workspace state ok\n");
+		} finally {
+			isolated.restore();
 		}
 	});
 
