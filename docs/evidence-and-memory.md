@@ -48,6 +48,7 @@ Run/session evidence files:
 ├── audit-linked.jsonl
 ├── receipt.json
 ├── gate-decisions.json
+├── trust-status.json
 ├── protected-artifacts.json
 ├── findings.json
 └── findings.md
@@ -67,6 +68,7 @@ Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact 
 | `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
+| `trust-status.json` | Canonical per-run six-axis trust projections derived from authenticated receipts, gate decisions, grounded validation artifacts, and exact finish-contract audit rows. |
 | `protected-artifacts.json` | Protected artifact state/events. |
 | `findings.json` / `findings.md` | Structured and readable findings. |
 
@@ -198,8 +200,9 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Existing persisted fact | Canonical mapping |
 |---|---|
 | Missing receipt | Every receipt-owned axis is `absent` with `artifact_missing`. |
-| Receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never authenticates itself. |
-| Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A historical receipt missing its integrity block remains `unknown` even if a caller presents a contradictory positive result. |
+| Current receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never authenticates itself. The other receipt-owned axes are `absent` with `not_observed` until authentication succeeds. |
+| Historical receipt missing its integrity block | Receipt-owned axes are `unknown` through the compatibility source, even if a caller presents a contradictory positive verification result. |
+| Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A failure leaves validation grounding, context provenance, and autonomy enforcement `absent`; no untrusted receipt claim contributes a positive state. |
 | Receipt `verification.state: verified` | Validation grounding is `validated` unless a stronger typed failure or ungrounded claim is present. |
 | Receipt `verification.state: unverified` | Validation grounding is `absent` with `not_observed`; lack of a validation tool is not a failed validation. |
 | Receipt verification `unknown` or `not_applicable` | Validation grounding preserves `unknown` or `not_applicable`. A missing historical verification field maps to `unknown`. |
@@ -209,11 +212,20 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Evidence findings and links | Failure and proxy-validation findings map to `failed` and `ungrounded`; `no-validation` maps to `absent`. Exact links record provenance, while best-effort links remain `unknown`. No clean bundle is promoted to validated merely because negative findings are absent. |
 | Receipt autonomy grade | `mediated`, `approximated`, and `bypassed` map to `enforced`, `approximated`, and `bypassed`. A dangerous-bypass flag always normalizes to `bypassed`; a missing historical block is `unknown`. |
 | Finish-contract assessment | `validation_evidence`, `unvalidated_mutation`, `explicit_limitation`, and `no_mutation` map to `evidenced`, `incomplete`, `limited`, and `not_applicable`. |
+| Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
+
+Receipt inspection, worker output, monitor details, and evidence rebuilding all
+use the same authenticated receipt projection boundary. Evidence rebuilding
+then composes independently authenticated gate decisions and exact
+finish-contract records without changing receipt-owned axes. Findings such as
+`no-validation`, `proxy-validation`, `external-approximation`, and
+`external-bypass` are selected from the canonical states, while their detailed
+domain artifacts remain in the receipt, gate, audit, and trace files.
 
 The canonical aggregate is an additive projection for downstream work. Receipt
 integrity remains version 15, evidence bundles remain version 1, gate decisions
 remain version 2, and no persisted receipt field or cryptographic algorithm
-changes in this foundation.
+changes.
 
 ### Mutation-Report Grounding
 

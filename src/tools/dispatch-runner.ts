@@ -41,6 +41,7 @@ import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
+import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import {
 	type CandidateWorktree,
@@ -458,8 +459,8 @@ function formatDispatchOutput(
 		.map((run) => integrityFailureBanner(run))
 		.filter((banner): banner is string => banner !== null);
 	const needsSpotCheck = runs.some((run) => {
-		const state = run.receipt.verification.state;
-		return state === "unverified" || state === "unknown";
+		const state = adaptRunReceiptTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
+		return state === "absent" || state === "unknown" || state === "ungrounded";
 	});
 	const lines = [
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
@@ -486,9 +487,8 @@ function formatDispatchOutput(
 			// Evidence confidence comes from the sealed receipt. A receipt that fails
 			// integrity cannot be read as evidence at all.
 			const verification = run.integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION;
-			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}${
-				run.integrity.ok ? "" : " evidence_verification=unknown/receipt-integrity-failed"
-			}`;
+			const trustStatus = adaptRunReceiptTrustStatus({ ...receipt, verification }, { integrity: run.integrity });
+			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}`;
 			const routingSuffix =
 				run.integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
@@ -509,9 +509,9 @@ function formatDispatchOutput(
 						: "(worker text withheld because receipt integrity failed)";
 			return [
 				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}`,
-				`  ${workerTextLabel(verification)}`,
+				`  ${workerTextLabel(trustStatus)}`,
 				...output.split("\n").map((line) => `  ${line}`),
-				...workerTextNonEvidenceNotices(receipt, verification, answerText).map((notice) => `  ${notice}`),
+				...workerTextNonEvidenceNotices(receipt, trustStatus, answerText).map((notice) => `  ${notice}`),
 			];
 		}),
 	];
@@ -555,6 +555,7 @@ function dispatchDetails(
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
+			const trustStatus = adaptRunReceiptTrustStatus(receipt, { integrity });
 			return {
 				runId: receipt.runId,
 				agentId: receipt.agentId,
@@ -566,6 +567,7 @@ function dispatchDetails(
 				// receipt is machine-visible here too.
 				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
 				receiptIntegrity: integrity,
+				trustStatus,
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
 					: {}),

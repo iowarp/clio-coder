@@ -1,6 +1,6 @@
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
+import type { CanonicalTrustStatus, EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
 import {
 	buildEvalEvidence,
 	buildEvidence,
@@ -178,7 +178,7 @@ function renderEvidence(
 	input: Awaited<ReturnType<typeof inspectEvidence>>,
 	provenance: ReadonlyArray<EvidenceRunProvenance> = [],
 ): void {
-	const { overview, findings } = input;
+	const { overview, findings, trustStatus } = input;
 	process.stdout.write(`evidence: ${overview.evidenceId}\n`);
 	process.stdout.write(`source: ${formatSource(overview)}\n`);
 	process.stdout.write(`generated: ${overview.generatedAt}\n`);
@@ -188,6 +188,13 @@ function renderEvidence(
 	process.stdout.write(`blocked tools: ${overview.totals.blockedToolCalls}\n`);
 	process.stdout.write(`tags: ${formatList(overview.tags)}\n`);
 	process.stdout.write(`findings: ${findings.length}\n`);
+	if (trustStatus.projection === "historical_format") {
+		process.stdout.write("trust status: unavailable (historical bundle without canonical projection)\n");
+	} else {
+		for (const run of trustStatus.runs) {
+			process.stdout.write(`trust ${run.runId}: ${formatTrustStatus(run.status)}\n`);
+		}
+	}
 	// Provenance is printed only for runs whose receipts carry it, so a legacy
 	// bundle prints nothing new here.
 	for (const { runId, view } of provenance) {
@@ -195,6 +202,17 @@ function renderEvidence(
 		for (const line of provenanceTranscriptLines(view)) process.stdout.write(`  ${line}\n`);
 	}
 	process.stdout.write(`files: ${formatList(overview.files)}\n`);
+}
+
+function formatTrustStatus(status: CanonicalTrustStatus): string {
+	return [
+		`artifactIntegrity=${status.artifactIntegrity.state}`,
+		`validationGrounding=${status.validationGrounding.state}`,
+		`independentReview=${status.independentReview.state}`,
+		`contextProvenance=${status.contextProvenance.state}`,
+		`autonomyEnforcement=${status.autonomyEnforcement.state}`,
+		`completionEvidence=${status.completionEvidence.state}`,
+	].join(" ");
 }
 
 function renderEvidenceList(overviews: ReadonlyArray<EvidenceOverview>): void {

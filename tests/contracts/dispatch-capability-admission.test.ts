@@ -32,6 +32,7 @@ import {
 	groundClaimedValidations,
 	invalidatesQuality,
 } from "../../src/domains/dispatch/validation-grounding.js";
+import { adaptRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { receiptEvidenceLabels, workerTextNonEvidenceNotices } from "../../src/tools/worker-evidence.js";
 
@@ -449,7 +450,11 @@ describe("contracts/dispatch summary line admission facts", () => {
 		ok(labels.includes('validations=claimed:1 grounded:0 unverifiable:"npm run typecheck"'), labels);
 		ok(labels.includes("capability_mismatch=verification/debug suggested:coder"), labels);
 
-		const notices = workerTextNonEvidenceNotices(run, unverified, '{"verdict":"pass"}').join("\n");
+		const notices = workerTextNonEvidenceNotices(
+			run,
+			adaptRunReceiptTrustStatus({ ...run, verification: unverified }, { integrity }),
+			'{"verdict":"pass"}',
+		).join("\n");
 		ok(notices.includes("executed no command at all"), notices);
 		ok(notices.includes("cannot write to the workspace"), notices);
 	});
