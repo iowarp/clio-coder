@@ -1,4 +1,4 @@
-# Where Clio's tests live (v0.2.2)
+# Where Clio's tests live
 
 Three layers under `tests/`. Add a new test next to the closest existing file;
 create a new file only for a genuinely new domain cluster.
@@ -7,10 +7,17 @@ create a new file only for a genuinely new domain cluster.
 
 | Layer | Path | Runner | Build needed |
 |---|---|---|---|
-| contracts | `tests/contracts/*.test.ts` | `node --import tsx --test` | no (imports `src`) |
-| smoke | `tests/smoke/*.test.ts` | `node --import tsx --test` | **yes** (spawns `dist/`) |
-| boundaries | `tests/boundaries/*.test.ts` | `node --import tsx --test` | no |
-| harness (not a test) | `tests/harness/spawn.ts` | imported by smoke | — |
+| contracts | `tests/contracts/*.test.ts` | `npm run test:file -- <glob>` (tsx + scratch root) | no (imports `src`) |
+| smoke | `tests/smoke/*.test.ts` | `npm run test:file -- <glob>` | **yes** (spawns `dist/`) |
+| boundaries | `tests/boundaries/check-boundaries.ts` | `npm run lint` (hygiene) | no |
+| harness (not tests) | `tests/harness/*.ts` | imported by contracts and smoke | — |
+
+The harness modules: `spawn.ts` (run the built CLI with pipes), `scratch-env.ts`
+(isolated Clio home), `pty.ts` (a real pseudo-terminal), `openai-compat-fixture.ts`
+and `fake-lmstudio-server.ts` (stub providers), `fake-ssh.ts` (stub fleet node),
+`clock.ts` (steppable clock), plus dispatch, receipt, and module-graph helpers.
+Everything under `tests/` stubs the model. Real-model runs are
+`benchmarks/internal/` and never run under `npm test`.
 
 ## Contract test files
 
@@ -33,18 +40,21 @@ create a new file only for a genuinely new domain cluster.
 | Area | File |
 |---|---|
 | non-interactive CLI + ACP-over-stdio end-to-end | `tests/smoke/cli.test.ts` |
-| import boundary rules (rule1/2/3) | `tests/boundaries/boundaries.test.ts` |
-| boundary checker implementation | `tests/boundaries/check-boundaries.ts` |
+| the package as installed from `npm pack` | `tests/smoke/pack-install.test.ts` |
+| TUI at real terminal sizes, NO_COLOR, Ctrl-C teardown (PTY) | `tests/smoke/tui-width-matrix.test.ts` |
+| instant shell before hydration, SIGTERM through the lease (PTY) | `tests/smoke/instant-shell-pty.test.ts` |
+| committed-frame render trace under PTY backpressure (PTY) | `tests/smoke/render-trace-pty.test.ts` |
+| import boundary rules (rule1/2/3), run under `npm run lint` | `tests/boundaries/check-boundaries.ts` |
 
 ## Running a subset
 
 ```bash
 # all contracts
-node --import tsx --test 'tests/contracts/**/*.test.ts'
+npm run test:file -- 'tests/contracts/**/*.test.ts'
 # one file
-node --import tsx --test tests/contracts/skills.test.ts
+npm run test:file -- tests/contracts/skills.test.ts
 # only it.only / describe.only within a file
-node --import tsx --test --test-only tests/contracts/skills.test.ts
+npm run test:file -- --test-only tests/contracts/skills.test.ts
 ```
 
 ## Writing tests
