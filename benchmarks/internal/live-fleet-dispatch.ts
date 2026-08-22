@@ -8,13 +8,15 @@
  * this repository and fails if that copy changes in any way.
  *
  * Everything asserted is read from the JSONL event stream of `run --json` and
- * from the scratch home's receipts, runs.json, and batches.json.
+ * from the scratch home's receipts, runs.json, and batches.json. The stream is
+ * written to the home as stdout.jsonl even when the turn hits its timeout, so
+ * a retained tree always says how far the lifecycle got.
  *
  *   npm run live:fleet-dispatch -- --target <id> [--model <id>] [--thinking medium] [--timeout-ms 600000] [--keep]
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import {
 	clio,
@@ -25,8 +27,10 @@ import {
 	rejectUnknown,
 	requireBuild,
 	runDriver,
+	settleRun,
 	takeFlag,
 } from "./live-target.js";
+import { workspaceChanges, workspaceSnapshot } from "./workspace-snapshot.js";
 
 const USAGE = `usage: npm run live:fleet-dispatch -- --target <id> [--model <wireId>] [--thinking <level>] [--timeout-ms <ms>] [--keep]
 
@@ -138,25 +142,6 @@ function assistantText(rows: Row[]): string {
 	return latest;
 }
 
-function workspaceSnapshot(workspaceDir: string): Map<string, string> {
-	const snapshot = new Map<string, string>();
-	const walk = (dir: string): void => {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			if (dir === workspaceDir && entry.name === ".git") continue;
-			const path = join(dir, entry.name);
-			const key = relative(workspaceDir, path);
-			if (entry.isDirectory()) {
-				snapshot.set(`${key}/`, "directory");
-				walk(path);
-			} else if (entry.isSymbolicLink()) snapshot.set(key, `symlink:${readlinkSync(path)}`);
-			else if (entry.isFile()) snapshot.set(key, `file:${sha256(readFileSync(path))}`);
-			else snapshot.set(key, "other");
-		}
-	};
-	walk(workspaceDir);
-	return snapshot;
-}
-
 function readJson(path: string): unknown {
 	return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -204,9 +189,8 @@ await runDriver(USAGE, async () => {
 	};
 	let passed = false;
 	try {
-		let stdout = "";
-		try {
-			const run = await clio(
+		const run = await settleRun(
+			clio(
 				home,
 				[
 					"run",
@@ -223,13 +207,15 @@ await runDriver(USAGE, async () => {
 					PROMPT,
 				],
 				{ cwd: workspaceDir, timeoutMs },
-			);
-			stdout = run.stdout;
-			writeFileSync(join(home.dir, "stdout.jsonl"), home.redact(run.stdout), "utf8");
-			writeFileSync(join(home.dir, "stderr.log"), home.redact(run.stderr), "utf8");
+			),
+		);
+		const stdout = run.stdout;
+		writeFileSync(join(home.dir, "stdout.jsonl"), home.redact(run.stdout), "utf8");
+		writeFileSync(join(home.dir, "stderr.log"), home.redact(run.stderr), "utf8");
+		if (run.timedOut) {
+			check(false, `CLI did not finish within ${timeoutMs} ms; partial stream kept at ${join(home.dir, "stdout.jsonl")}`);
+		} else {
 			check(run.code === 0, `CLI exited ${String(run.code)}${run.signal ? ` via ${run.signal}` : ""}`);
-		} catch (error) {
-			check(false, `CLI did not finish: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		const rows = parseJsonLines(stdout);
@@ -425,10 +411,7 @@ await runDriver(USAGE, async () => {
 
 		const porcelain = git(["status", "--short", "--untracked-files=all"]);
 		check(porcelain.trim().length === 0, `temporary workspace was not git-clean:\n${porcelain.trim()}`);
-		const after = workspaceSnapshot(workspaceDir);
-		const changed = [...new Set([...before.keys(), ...after.keys()])]
-			.filter((key) => before.get(key) !== after.get(key))
-			.sort();
+		const changed = workspaceChanges(before, workspaceSnapshot(workspaceDir));
 		check(changed.length === 0, `temporary workspace filesystem changed:\n${changed.join("\n")}`);
 
 		if (failures.length > 0) {

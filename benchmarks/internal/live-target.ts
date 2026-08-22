@@ -46,7 +46,7 @@ import { DEFAULT_SETTINGS, THINKING_LEVELS, type ThinkingLevel } from "../../src
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { scratchClioEnvVars } from "../../tests/harness/scratch-env.js";
-import { type RunOptions, type RunResult, runCli } from "../../tests/harness/spawn.js";
+import { RunCliTimeoutError, type RunOptions, type RunResult, runCli } from "../../tests/harness/spawn.js";
 
 export const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
@@ -238,6 +238,27 @@ export function clio(
 	options: Omit<RunOptions, "env"> = {},
 ): Promise<RunResult> {
 	return runCli(args, { cwd: home.workspace, ...options, env: home.env });
+}
+
+export interface SettledRun extends RunResult {
+	/** The child was killed at the timeout; stdout and stderr hold what it wrote before that. */
+	timedOut: boolean;
+}
+
+/**
+ * Resolve a run whether it finished or hit its timeout. A timeout keeps the
+ * partial output, which for a `run --json` turn is the JSONL stream that says
+ * how far the lifecycle got. Any other failure still rejects.
+ */
+export async function settleRun(run: Promise<RunResult>): Promise<SettledRun> {
+	try {
+		return { ...(await run), timedOut: false };
+	} catch (error) {
+		if (error instanceof RunCliTimeoutError) {
+			return { code: error.code, signal: error.signal, stdout: error.stdout, stderr: error.stderr, timedOut: true };
+		}
+		throw error;
+	}
 }
 
 /** Standard driver entry: usage on error, exit 2 for usage, 1 for a failed run. */
