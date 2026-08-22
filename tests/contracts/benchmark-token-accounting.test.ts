@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,8 +34,32 @@ function writeFakeClio(path: string, messageTotals: number[]): void {
 		}),
 		JSON.stringify({ type: "agent_end", messageCount: messageTotals.length, usage: { totalTokens: 999_999 } }),
 	];
-	writeFileSync(path, `#!/bin/sh\ncat <<'CLIO_CODER_EVENTS'\n${events.join("\n")}\nCLIO_CODER_EVENTS\n`, "utf8");
+	writeFileSync(
+		path,
+		`#!/bin/sh
+if [ -n "$CLIO_CODER_TEST_ARGS" ]; then
+  printf '%s\n' '__CALL__' >> "$CLIO_CODER_TEST_ARGS"
+  printf '%s\n' "$@" >> "$CLIO_CODER_TEST_ARGS"
+fi
+cat <<'CLIO_CODER_EVENTS'
+${events.join("\n")}
+CLIO_CODER_EVENTS
+`,
+		"utf8",
+	);
 	chmodSync(path, 0o755);
+}
+
+function capturedRunCalls(path: string): string[][] {
+	return readFileSync(path, "utf8")
+		.split("__CALL__\n")
+		.map((call) => call.trim().split("\n"))
+		.filter((call) => call.includes("run"));
+}
+
+function flagValue(call: string[] | undefined, flag: string): string | undefined {
+	if (!call) return undefined;
+	return call[call.indexOf(flag) + 1];
 }
 
 function messageEndUsage(stdout: string): Array<Record<string, number>> {
@@ -93,18 +117,45 @@ describe("contracts/benchmark adapter token accounting", () => {
 		);
 		const fakeClio = join(scratch, "fake-clio");
 		writeFakeClio(fakeClio, [1_000, 500]);
+		const capturedArgs = join(scratch, "scicode-clio-args");
 		const runDir = join(scratch, "run");
 
 		const result = spawnSync(
 			PYTHON,
-			[SCICODE, "run-problem", "--data", data, "--problem-id", "1", "--out", runDir, "--force"],
+			[
+				SCICODE,
+				"run-problem",
+				"--data",
+				data,
+				"--problem-id",
+				"1",
+				"--out",
+				runDir,
+				"--target",
+				"fixture-target",
+				"--model",
+				"fixture-model",
+				"--force",
+			],
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
-				env: { ...process.env, CLIO_CODER_BIN: fakeClio, SCICODE_DATA_DIR: join(scratch, "absent") },
+				env: {
+					...process.env,
+					CLIO_CODER_BIN: fakeClio,
+					CLIO_CODER_TEST_ARGS: capturedArgs,
+					CLIO_CODER_MAIN_THINKING: "",
+					SCICODE_DATA_DIR: join(scratch, "absent"),
+				},
 			},
 		);
 		strictEqual(result.status, 0, result.stderr);
+		const runCalls = capturedRunCalls(capturedArgs);
+		strictEqual(runCalls.length, 2);
+		for (const call of runCalls) {
+			strictEqual(call[call.indexOf("--target") + 1], "fixture-target");
+			strictEqual(call[call.indexOf("--model") + 1], "fixture-model");
+		}
 
 		// Two sub-steps, two assistant messages each: republished usage is the
 		// sum of the four message_end events and counts no republished form.
@@ -120,6 +171,10 @@ describe("contracts/benchmark adapter token accounting", () => {
 		strictEqual(summary.tokens, 3_000);
 		strictEqual(summary.tokensMeasuredSteps, 2);
 		strictEqual(summary.tokensTotalSteps, 2);
+		const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8")) as {
+			targetProfile: Record<string, string>;
+		};
+		deepStrictEqual(manifest.targetProfile, { model: "fixture-model", target: "fixture-target" });
 	});
 
 	it("a SciCode problem whose runs report no usage publishes nothing rather than a zero", () => {
@@ -152,7 +207,19 @@ describe("contracts/benchmark adapter token accounting", () => {
 
 		const result = spawnSync(
 			PYTHON,
-			[SCICODE, "run-problem", "--data", data, "--problem-id", "1", "--out", runDir, "--force"],
+			[
+				SCICODE,
+				"run-problem",
+				"--data",
+				data,
+				"--problem-id",
+				"1",
+				"--out",
+				runDir,
+				"--target",
+				"fixture-target",
+				"--force",
+			],
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
@@ -185,18 +252,43 @@ describe("contracts/benchmark adapter token accounting", () => {
 		);
 		const fakeClio = join(scratch, "fake-clio");
 		writeFakeClio(fakeClio, [700, 300]);
+		const capturedArgs = join(scratch, "humaneval-clio-args");
 		const runDir = join(scratch, "run");
 
 		const result = spawnSync(
 			PYTHON,
-			[HUMANEVAL, "run-task", "--data", data, "--task-id", "HumanEval/0", "--out", runDir, "--force"],
+			[
+				HUMANEVAL,
+				"run-task",
+				"--data",
+				data,
+				"--task-id",
+				"HumanEval/0",
+				"--out",
+				runDir,
+				"--target",
+				"fixture-target",
+				"--model",
+				"fixture-model",
+				"--force",
+			],
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
-				env: { ...process.env, CLIO_CODER_BIN: fakeClio, SCICODE_DATA_DIR: join(scratch, "absent") },
+				env: {
+					...process.env,
+					CLIO_CODER_BIN: fakeClio,
+					CLIO_CODER_TEST_ARGS: capturedArgs,
+					CLIO_CODER_MAIN_THINKING: "",
+					SCICODE_DATA_DIR: join(scratch, "absent"),
+				},
 			},
 		);
 		strictEqual(result.status, 0, result.stderr);
+		const runCalls = capturedRunCalls(capturedArgs);
+		strictEqual(runCalls.length, 1);
+		strictEqual(flagValue(runCalls[0], "--target"), "fixture-target");
+		strictEqual(flagValue(runCalls[0], "--model"), "fixture-model");
 
 		const published = messageEndUsage(result.stdout);
 		strictEqual(published.length, 1);
@@ -215,6 +307,10 @@ describe("contracts/benchmark adapter token accounting", () => {
 		};
 		strictEqual(summary.tokens, 1_000);
 		strictEqual(summary.tokensMeasured, true);
+		const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8")) as {
+			targetProfile: Record<string, string>;
+		};
+		deepStrictEqual(manifest.targetProfile, { model: "fixture-model", target: "fixture-target" });
 	});
 
 	/**
@@ -248,17 +344,35 @@ describe("contracts/benchmark adapter token accounting", () => {
 		return { instancesFile, cacheDir };
 	}
 
-	function runSweBench(root: string, clioBin: string): SpawnSyncReturns<string> {
+	function runSweBench(root: string, clioBin: string, capturedArgs?: string): SpawnSyncReturns<string> {
 		const { instancesFile, cacheDir } = seedSweBenchInstance(root);
 		return spawnSync(
 			PYTHON,
-			[SWEBENCH, "--instances-file", instancesFile, "--cache", cacheDir, "--out", join(root, "out")],
+			[
+				SWEBENCH,
+				"--instances-file",
+				instancesFile,
+				"--cache",
+				cacheDir,
+				"--out",
+				join(root, "out"),
+				"--target",
+				"fixture-target",
+				"--model",
+				"fixture-model",
+			],
 			{
 				cwd: REPO_ROOT,
 				encoding: "utf8",
 				// An isolated state dir is the point: receipt accounting must follow
 				// the Clio that just ran, not whatever lives under the real $HOME.
-				env: { ...process.env, CLIO_CODER_BIN: clioBin, CLIO_CODER_STATE_DIR: join(root, "state") },
+				env: {
+					...process.env,
+					CLIO_CODER_BIN: clioBin,
+					CLIO_CODER_STATE_DIR: join(root, "state"),
+					CLIO_CODER_MAIN_THINKING: "",
+					...(capturedArgs ? { CLIO_CODER_TEST_ARGS: capturedArgs } : {}),
+				},
 			},
 		);
 	}
@@ -266,9 +380,15 @@ describe("contracts/benchmark adapter token accounting", () => {
 	it("a SWE-bench instance sums its message_end usage and republishes it once", () => {
 		const fakeClio = join(scratch, "fake-clio");
 		writeFakeClio(fakeClio, [700, 300]);
+		const capturedArgs = join(scratch, "swebench-clio-args");
 
-		const result = runSweBench(scratch, fakeClio);
+		const result = runSweBench(scratch, fakeClio, capturedArgs);
 		strictEqual(result.status, 0, result.stderr);
+		const runCalls = capturedRunCalls(capturedArgs);
+		strictEqual(runCalls.length, 1);
+		const runCall = runCalls[0];
+		strictEqual(flagValue(runCall, "--target"), "fixture-target");
+		strictEqual(flagValue(runCall, "--model"), "fixture-model");
 
 		const published = messageEndUsage(result.stdout);
 		strictEqual(published.length, 1, "one aggregate usage line per instance");
@@ -291,6 +411,10 @@ describe("contracts/benchmark adapter token accounting", () => {
 		strictEqual(summary.tokens, 1_000);
 		strictEqual(summary.tokensMeasuredInstances, 1);
 		strictEqual(summary.tokensTotalInstances, 1);
+		const manifest = JSON.parse(readFileSync(join(scratch, "out", "manifest.json"), "utf8")) as {
+			targetProfile: Record<string, string>;
+		};
+		deepStrictEqual(manifest.targetProfile, { model: "fixture-model", target: "fixture-target" });
 	});
 
 	it("a SWE-bench instance whose run reported no usage publishes nothing rather than a zero", () => {
