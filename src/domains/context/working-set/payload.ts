@@ -13,8 +13,6 @@
  * whatever the tool returned, usually `{ content: [...], details: {...} }`.
  */
 
-import type { SessionEntry } from "../../session/entries.js";
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }

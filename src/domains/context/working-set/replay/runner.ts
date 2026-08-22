@@ -1,6 +1,12 @@
 import type { WorkingSetSettings } from "../../../../core/defaults.js";
+import { findCutPoint } from "../../../session/compaction/cut-point.js";
 import { estimateTokens } from "../../../session/compaction/tokens.js";
-import type { ContextEvictionEntry, EvictedItem, SessionEntry } from "../../../session/entries.js";
+import type {
+	CompactionSummaryEntry,
+	ContextEvictionEntry,
+	EvictedItem,
+	SessionEntry,
+} from "../../../session/entries.js";
 import { EMPTY_WORKING_SET_VIEW, type PolicyInput, type WorkingSetPolicy, type WorkingSetView } from "../contract.js";
 import { buildEvictionFields, planEviction } from "../engine.js";
 import { foldWorkingSet } from "../fold.js";
@@ -10,6 +16,25 @@ import { selectVisibleEntries } from "../visible.js";
 import type { ReplayCandidatePoolPolicy } from "./controls.js";
 import type { Trace } from "./trace.js";
 
+/**
+ * The summary stage, modeled. Live, when the projection is still over the
+ * threshold after an eviction, Clio summarizes: it cuts the history at
+ * `findCutPoint(entries, keepRecentTokens)` and replaces everything before
+ * the cut with one paraphrase. A long trace replayed without that stage spends
+ * most of its length in a regime the product never enters, because operator
+ * text, call arguments, and markers accumulate past any budget and no policy
+ * can evict them. The model appends the same `compactionSummary` record the
+ * live path would, with a constant-size summary standing in for the
+ * paraphrase, and counts it, so a policy is judged by how rarely it forces
+ * the one lossy, token-spending stage.
+ */
+export interface ReplaySummaryModel {
+	/** Mirrors `compaction.keepRecentTokens`: the cut keeps at least this many recent tokens. */
+	keepRecentTokens: number;
+	/** Tokens the stand-in summary occupies. */
+	summaryTokens: number;
+}
+
 export interface ReplayConfig {
 	policyId: string;
 	budgetTokens: number;
@@ -17,6 +42,8 @@ export interface ReplayConfig {
 	target: number;
 	settings: WorkingSetSettings;
 	seed: number;
+	/** Absent: summaries are counted as `turnsToFirstSummary` but never applied. */
+	summaries?: ReplaySummaryModel;
 }
 
 export interface ReplayEvictionEvent {
@@ -26,6 +53,12 @@ export interface ReplayEvictionEvent {
 	tokensAfter: number;
 	/** True when this event exhausted the policy's usable candidate pool. */
 	saturated: boolean;
+	/**
+	 * Tokens of the projected working set from the earliest evicted position to
+	 * the end, after the event: what an exact-prefix cache (Anthropic, OpenAI,
+	 * vLLM) re-prefills on the next request because the bytes before it moved.
+	 */
+	coldPrefixTokens: number;
 }
 
 export interface ReplayTraceResult {
@@ -37,7 +70,9 @@ export interface ReplayTraceResult {
 	/** Tool-result refs only; thinking-unit evictions are intentionally absent. */
 	evictedAtTurn: ReadonlyMap<string, number>;
 	turnsToFirstSummary: number | null;
-	/** Original entries plus synthetic append-only contextEviction sidecars. */
+	/** Summary compactions applied under `config.summaries`. */
+	summaries: number;
+	/** Original entries plus synthetic append-only contextEviction and compactionSummary records. */
 	entries: ReadonlyArray<SessionEntry>;
 }
 
@@ -139,6 +174,20 @@ function applyEvictionProjection(
 	}
 }
 
+function coldPrefixTokens(state: IncrementalProjection, items: ReadonlyArray<EvictedItem>): number {
+	let cut = state.projected.length;
+	for (const item of items) {
+		const index = state.indexByTurnId.get(item.ref.entry);
+		if (index !== undefined && index < cut) cut = index;
+	}
+	let tokens = 0;
+	for (let index = cut; index < state.projected.length; index += 1) {
+		const entry = state.projected[index];
+		if (entry !== undefined) tokens += estimateTokens(entry);
+	}
+	return tokens;
+}
+
 /** Live plan/fold/project code driven at deterministic ledger turn boundaries. */
 export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: ReplayConfig): ReplayTraceResult {
 	const soFar: SessionEntry[] = [];
@@ -150,6 +199,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 			.map((entry) => entry.turnId),
 	);
 	let evictionSequence = 0;
+	let summaries = 0;
 	let turnIndex = 0;
 	let turnsToFirstSummary: number | null = null;
 	let lastMessageTurnId: string | null = null;
@@ -201,6 +251,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 						tokensBefore: plan.tokensBefore,
 						tokensAfter: plan.tokensAfter,
 						saturated,
+						coldPrefixTokens: coldPrefixTokens(visible, plan.items),
 					});
 					for (const item of plan.items) {
 						if (toolResults.has(item.ref.entry) && !evictedAtTurn.has(item.ref.entry)) {
@@ -208,7 +259,34 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 						}
 					}
 				}
-				if (turnsToFirstSummary === null && visible.tokens > pressureLimit) turnsToFirstSummary = turnIndex;
+				if (visible.tokens > pressureLimit) {
+					if (turnsToFirstSummary === null) turnsToFirstSummary = turnIndex;
+					const cut =
+						config.summaries === undefined
+							? 0
+							: findCutPoint(visible.raw, config.summaries.keepRecentTokens).firstKeptEntryIndex;
+					// A cut that keeps everything is the live "nothing to compact" case.
+					if (config.summaries !== undefined && cut > 0) {
+						summaries += 1;
+						for (const cutAway of visible.raw.slice(0, cut)) {
+							if (toolResults.has(cutAway.turnId) && !evictedAtTurn.has(cutAway.turnId)) {
+								evictedAtTurn.set(cutAway.turnId, turnIndex);
+							}
+						}
+						const previous = soFar[soFar.length - 1];
+						const synthetic: CompactionSummaryEntry = {
+							kind: "compactionSummary",
+							turnId: `replay-summary-${summaries}`,
+							parentTurnId: leaf,
+							timestamp: previous?.timestamp ?? entry.timestamp,
+							summary: "#".repeat(config.summaries.summaryTokens * 4),
+							tokensBefore: visible.tokens,
+							firstKeptTurnId: visible.raw[cut]?.turnId ?? "",
+						};
+						soFar.push(synthetic);
+						visible = rebuildProjection(soFar, lastMessageTurnId, view);
+					}
+				}
 			}
 		}
 		soFar.push(entry);
@@ -225,6 +303,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 		events,
 		evictedAtTurn,
 		turnsToFirstSummary,
+		summaries,
 		entries: soFar,
 	};
 }

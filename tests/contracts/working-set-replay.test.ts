@@ -168,10 +168,12 @@ describe("contracts/working-set replay-lite", () => {
 					tokensBefore: 900,
 					tokensAfter: 650,
 					saturated: true,
+					coldPrefixTokens: 0,
 				},
 			],
 			evictedAtTurn: new Map([["result-01", 1]]),
 			turnsToFirstSummary: null,
+			summaries: 0,
 			entries: trace.entries,
 		};
 		const graph: ReferenceGraph = {
@@ -234,6 +236,7 @@ describe("contracts/working-set replay-lite", () => {
 			events: [],
 			evictedAtTurn: new Map([["original", 1]]),
 			turnsToFirstSummary: null,
+			summaries: 0,
 			entries: trace.entries,
 		};
 
@@ -269,6 +272,7 @@ describe("contracts/working-set replay-lite", () => {
 			tokensBefore: 900,
 			tokensAfter: 900,
 			saturated,
+			coldPrefixTokens: 0,
 		});
 		const aggregate = aggregateReplayMetrics([
 			{ trace, index, graph, replay: { ...base, events: [event(true), event(false)] } },
@@ -338,7 +342,7 @@ describe("contracts/working-set replay-lite", () => {
 				threshold: 0.8,
 				target: 0.6,
 				seed: 0,
-				format: "auto" as const,
+				corpus: ["ledgers"],
 				filter: "default" as const,
 				settings: SETTINGS,
 			},
