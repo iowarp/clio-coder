@@ -69,6 +69,18 @@ async function runSoakAgainst(entryBody: string | null): Promise<{ gatePass: boo
 }
 
 describe("contracts/soak suite", { concurrency: false }, () => {
+	it("every shipped soak suite file still loads", async () => {
+		// The boundary, chaos, and loop suites have no runner in CI; this is the
+		// one place a schema change finds them before an operator does.
+		for (const name of ["clio-soak", "clio-soak-boundary", "clio-soak-chaos", "clio-soak-loop"]) {
+			const loaded = await loadEvalSuiteFile(
+				fileURLToPath(new URL(`../../benchmarks/soak/${name}.yaml`, import.meta.url)),
+			);
+			strictEqual(loaded.suite.suite.id, name);
+			ok(loaded.suite.tasks.length > 0, `${name} must declare tasks`);
+		}
+	});
+
 	it("ships a suite whose fixture, setup, and thresholds all load", async () => {
 		const loaded = await loadEvalSuiteFile(SOAK_SUITE);
 
