@@ -41,7 +41,7 @@ npm run ci:release
 Live LLM smoke validation (manual/opt-in):
 
 ```bash
-CLIO_CODER_LIVE_SMOKE=1 CLIO_CODER_LIVE_TARGET=anthropic ANTHROPIC_API_KEY=your_key npm run test:live
+npm run live:smoke -- --target <configured-target-id>
 ```
 
 ## Testing conventions

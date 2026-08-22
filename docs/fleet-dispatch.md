@@ -695,11 +695,13 @@ After `npm run build`, an operator with a configured model target can run the
 single-turn, read-only fleet lifecycle check explicitly:
 
 ```bash
-CLIO_CODER_LIVE_EVAL=1 npm run test:live-eval:fleet-dispatch
+npm run live:fleet-dispatch -- --target <id> [--model <wireId>] [--thinking medium]
 ```
 
-It is not part of deterministic CI. The script copies the repository into an
-isolated committed workspace, sandboxes all Clio config/state/data/cache,
-exercises Scout, bounded spot-checking, detached Debugger briefing, steering,
-wait, and collect, and fails if any workspace content changes. Failures retain
-their isolated artifacts for diagnosis.
+It is not part of deterministic CI. The driver
+(`benchmarks/internal/live-fleet-dispatch.ts`) copies the repository into a
+committed temporary workspace, sandboxes all Clio config, state, data, and
+cache under a scratch home holding only the chosen target, exercises Scout,
+bounded spot-checking, detached Debugger briefing, steering, wait, and
+collect, and fails if any workspace content changes. A failed run retains its
+scratch tree for diagnosis.

@@ -465,7 +465,7 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 | --- | --- |
 | `npm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
 | `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
-| `npm run test:live` | Local manual live-model smoke. Requires `CLIO_CODER_LIVE_SMOKE=1` and a configured real model target. Add `-- --delegation` for `opencode` and `copilot` ACP delegation checks. |
+| `npm run live:smoke -- --target <id>` | One real headless turn against a configured target. Add `--delegation` for the `opencode` and `copilot` ACP agents. The other operator-run drivers (`live:recon`, `live:fleet-dispatch`, `live:tui`) are listed in `benchmarks/internal/README.md`. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
 | `npm run test` | Contract and smoke tests through the sharded runner. |
@@ -473,28 +473,21 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 | `npm run dev` | `tsup --watch`. |
 | `npm run clean` | Remove `dist/`. |
 
-Live smoke example:
+Live drivers pick their model with `--target <id>`, naming one of the targets
+`clio-coder targets` lists; `--model <wireId>` and `--thinking <level>`
+override that target's defaults for the run. The run happens in a scratch Clio
+home holding only that target, so nothing touches the operator's real state:
 
 ```bash
-CLIO_CODER_LIVE_SMOKE=1 \
-CLIO_CODER_LIVE_TARGET=openai-compat \
-CLIO_CODER_LIVE_RUNTIME=openai-compat \
-CLIO_CODER_LIVE_MODEL=your-model \
-CLIO_CODER_LIVE_BASE_URL=http://localhost:8080/v1 \
-npm run test:live
-```
-
-Delegation validation is a separate opt-in flag because it depends on local
-`opencode` and `copilot` commands:
-
-```bash
-CLIO_CODER_LIVE_SMOKE=1 npm run test:live -- --delegation
+npm run build
+npm run live:smoke -- --target local-lmstudio --model qwen3.8-27b
+npm run live:smoke -- --target anthropic --delegation
 ```
 
 Live checks cost tokens or local GPU time and are not deterministic CI. They
 are useful for OpenAI-compatible local gateways such as llama.cpp, LM Studio
 with Dynamo-backed workers, vLLM, and SGLang, plus cloud targets when
-credentials are available.
+credentials are configured.
 
 ## Environment Variables
 

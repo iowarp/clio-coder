@@ -87,8 +87,8 @@ history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.3.4 the supported
 install paths are `npm install -g @iowarp/clio-coder` and a source checkout
 through `npm run install:local`, the deterministic release gate is
 `npm run ci:release`, and live model smoke validation is local/manual and
-opt-in through `npm run test:live` (add `-- --delegation` for
-opencode/copilot checks).
+opt-in through `npm run live:smoke -- --target <id>` (add `--delegation`
+for opencode/copilot checks).
 
 ## Writing Documentation
 

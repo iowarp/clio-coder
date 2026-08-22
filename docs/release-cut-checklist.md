@@ -40,11 +40,11 @@ Run against the exact final candidate with `NO_COLOR` unset and
    resources, and the tarball and unpacked size budgets)
 9. Step 8 again under the other supported Node major. Both Node 22 and
    Node 24 must be green; the repo is developed against 22.22.3 and 24.9.0.
-10. `npm run test:lifecycle` for the twenty-case lifecycle matrix against a real
-    `npm pack` installed into a temporary prefix. Case 9 needs `--live` plus
-    `CLIO_CODER_LIFECYCLE_URL` and `CLIO_CODER_LIFECYCLE_MODEL` naming a target
-    whose model is already resident; report it separately when no such target
-    is available.
+10. `npm run live:smoke -- --target <id>` for one real headless turn through
+    the built binary against a configured target, which is the one release
+    check a deterministic suite cannot give. The packaged-install lifecycle
+    (pack, install into a clean prefix, run the installed launcher) is
+    `tests/smoke/pack-install.test.ts` and already ran under step 5.
 11. `npm pack --dry-run`, then a real `npm pack` into a temporary directory.
     Inspect the complete file list: `skills/`, `docs/*.md`, the builtin
     agents, the model catalogs, and `damage-control-rules.yaml` are present;
