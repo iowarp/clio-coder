@@ -403,6 +403,140 @@ describe("contracts/tool-result disposition", () => {
 		}
 	});
 
+	it("summarizes a 2-to-9-line output without duplicating lines, inflating bytes, or offloading", () => {
+		const stateDir = useStateDir();
+		for (const strategy of ["diagnostic", "head-tail"] as const) {
+			for (let lines = 2; lines <= 9; lines += 1) {
+				const label = `${strategy}/${lines}`;
+				const source = Array.from({ length: lines }, (_, index) => `short line ${index + 1}`).join("\n");
+				const spec: ToolSpec = mockSpec({
+					presentation: { foldDefault: "folded", showDiffWhenFolded: false, failureExcerpt: true, maxBytes: 8_192 },
+					context: { mode: "summary", maxBytes: 1_024, strategy },
+				});
+				const shaped = shapeToolResult(
+					spec,
+					{ kind: "ok", output: source },
+					{ sessionId: `short-summary-${strategy}`, toolCallId: `call-${lines}` },
+				);
+				const applied = metadata(shaped);
+				const context = toolResultContextText(shaped);
+
+				ok(context.endsWith(`\n${source}`), `${label} body is the whole output verbatim: ${context}`);
+				strictEqual(applied.context.appliedMode, "summary", label);
+				strictEqual(applied.contextTruncated, false, label);
+				strictEqual(applied.offloadPath, undefined, label);
+				strictEqual(existsSync(join(stateDir, "scratch")), false, label);
+				ok(context.includes("truncated=false"), label);
+				ok(context.includes("retrieve="), label);
+				for (let index = 1; index <= lines; index += 1) {
+					const occurrences = (context.match(new RegExp(`short line ${index}\\b`, "gu")) ?? []).length;
+					strictEqual(occurrences, 1, `${label} line ${index}`);
+				}
+			}
+		}
+	});
+
+	it("keeps the honest offload and omission facts when a summary really does elide content", () => {
+		useStateDir();
+		const source = Array.from({ length: 40 }, (_, index) => `line ${index + 1} of a long capture`).join("\n");
+		const shaped = shapeToolResult(
+			mockSpec({
+				presentation: { foldDefault: "folded", showDiffWhenFolded: false, failureExcerpt: true, maxBytes: 8_192 },
+				context: { mode: "summary", maxBytes: 1_024, strategy: "diagnostic" },
+			}),
+			{ kind: "ok", output: source },
+			{ sessionId: "long-summary", toolCallId: "call" },
+		);
+		const applied = metadata(shaped);
+		const context = toolResultContextText(shaped);
+
+		strictEqual(applied.contextTruncated, true);
+		ok(applied.offloadPath && existsSync(applied.offloadPath));
+		strictEqual(readFileSync(applied.offloadPath, "utf8"), source);
+		ok(context.includes("truncated=true"));
+		ok(context.includes(applied.offloadPath));
+		ok(applied.retrieval.includes(applied.offloadPath));
+		ok(context.includes("[diagnostic head]"));
+	});
+
+	it("redacts secrets under the head-tail summary strategy, not only the diagnostic one", () => {
+		useStateDir();
+		const secret = "api_key=abcdefghijklmnop";
+		const source = `first line\n${secret}\nlast line`;
+		for (const strategy of ["head-tail", "diagnostic"] as const) {
+			const shaped = shapeToolResult(
+				mockSpec({
+					presentation: { foldDefault: "folded", showDiffWhenFolded: false, failureExcerpt: true, maxBytes: 8_192 },
+					context: { mode: "summary", maxBytes: 1_024, strategy },
+				}),
+				{ kind: "ok", output: source },
+				{ sessionId: `redact-${strategy}`, toolCallId: "call" },
+			);
+			const applied = metadata(shaped);
+			const context = toolResultContextText(shaped);
+
+			strictEqual(context.includes(secret), false, strategy);
+			ok(context.includes("api_key=[redacted:assignment]"), strategy);
+			strictEqual(applied.summaryProvenance?.redactions, 1, strategy);
+			strictEqual(resultText(shaped), source, `${strategy} presentation stays unredacted and independent`);
+			// Redaction removes captured bytes, so retrieval facts stay honest.
+			strictEqual(applied.contextTruncated, true, strategy);
+			ok(applied.offloadPath && existsSync(applied.offloadPath), strategy);
+		}
+	});
+
+	it("keeps NUL out of model context in every mode without cutting UTF-8 or ANSI escapes", () => {
+		useStateDir();
+		const ansi = "\u001b[31mred diagnostic\u001b[0m";
+		const source = `head 🙂 line\u0000\n${ansi}\u0000 middle\nERROR tail 🙂\u0000`;
+		for (const mode of ["full", "bounded", "summary", "metadata-only"] as const) {
+			const shaped = shapeToolResult(
+				mockSpec(disposition(mode, "folded", 2_048), { kind: "ok", output: source }),
+				{ kind: "ok", output: source },
+				{ sessionId: `nul-${mode}`, toolCallId: "call" },
+			);
+			const applied = metadata(shaped);
+			const context = toolResultContextText(shaped);
+
+			strictEqual(context.includes("\u0000"), false, `${mode} passes no raw NUL to the model`);
+			strictEqual(context.includes("�"), false, mode);
+			strictEqual(Buffer.from(context, "utf8").toString("utf8"), context, mode);
+			strictEqual(applied.contextBytes, Buffer.byteLength(context, "utf8"), mode);
+			ok(applied.contextBytes <= 2_048, mode);
+			// Dropping NUL drops captured bytes, so every mode keeps retrieval.
+			strictEqual(applied.contextTruncated, true, mode);
+			ok(applied.offloadPath && existsSync(applied.offloadPath), mode);
+			strictEqual(readFileSync(applied.offloadPath, "utf8"), source, mode);
+			strictEqual(resultText(shaped), source, `${mode} presentation keeps the captured bytes`);
+			if (mode !== "metadata-only") {
+				ok(context.includes(ansi), `${mode} keeps whole ANSI escape sequences`);
+				ok(context.includes("🙂"), mode);
+			}
+		}
+	});
+
+	it("fails closed to metadata-only when a result-disposition resolver throws", async () => {
+		useStateDir();
+		const source = "resolver-failure payload";
+		const registry = createRegistry({ safety: allowAllSafety() });
+		registry.register({
+			...mockSpec(disposition("bounded", "folded", 4_096), { kind: "ok", output: source }),
+			resolveResultDisposition: () => {
+				throw new Error("resolver exploded");
+			},
+		});
+
+		const projected = await invokeRegisteredTool(registry, ToolNames.Read, {});
+		const modelText = projected.content[0]?.type === "text" ? projected.content[0].text : "";
+		const applied = (projected.details as Record<string, unknown>).resultDisposition as ToolResultDispositionMetadata;
+
+		strictEqual(applied.context.requestedMode, "metadata-only", "a failed resolver may not falsify requestedMode");
+		strictEqual(applied.context.appliedMode, "metadata-only", "a failed resolver may not widen model context");
+		strictEqual(modelText.includes(source), false);
+		ok(modelText.includes("[tool-result metadata-only]"));
+		strictEqual(toolResultPresentationText(projected), source);
+	});
+
 	it("leaves undeclared legacy shaping and agent-tool rejection behavior unchanged", async () => {
 		const original: ToolResult = { kind: "ok", output: "legacy output" };
 		const shaped = shapeToolResult(mockSpec(undefined), original, { sessionId: "legacy", toolCallId: "call" });

@@ -28,7 +28,7 @@ import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import type { ToolResultDisposition } from "./result-disposition.js";
-import { shapeToolResult } from "./result-shaping.js";
+import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult } from "./result-shaping.js";
 
 /**
  * Tool registry. Admission point for every tool call. Delegates classification
@@ -875,6 +875,14 @@ function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<
 	}
 }
 
+/**
+ * Resolve the argument-sensitive disposition, failing closed. A throwing
+ * resolver cannot fall back to the declared disposition: the caller may have
+ * asked for a narrower context than the tool declares, and silently restoring
+ * the declared mode would widen model context while recording the declared mode
+ * as the requested one. The failure keeps the declared presentation and applies
+ * the narrowest context instead, so the applied and recorded modes stay honest.
+ */
 function resolveToolResultDisposition(
 	spec: ToolSpec,
 	args: Record<string, unknown>,
@@ -884,7 +892,14 @@ function resolveToolResultDisposition(
 	try {
 		return spec.resolveResultDisposition(args, declared);
 	} catch {
-		return declared;
+		const maxBytes =
+			declared !== undefined && declared.context.maxBytes !== undefined
+				? declared.context.maxBytes
+				: DEFAULT_TOOL_RESULT_MAX_BYTES;
+		return {
+			presentation: declared?.presentation ?? { foldDefault: "folded", showDiffWhenFolded: false, failureExcerpt: true },
+			context: { mode: "metadata-only", maxBytes },
+		};
 	}
 }
 
