@@ -52,7 +52,7 @@ describe("contracts/live fleet-dispatch harness", { concurrency: false }, () => 
 		return script;
 	}
 
-	it("a timeout rejects with the partial stdout and stderr the child wrote before SIGKILL", async () => {
+	it("a timeout rejects with the partial stdout and stderr the child wrote before it was signalled", async () => {
 		const script = hangingScript();
 		const started = Date.now();
 		let caught: unknown;
@@ -66,7 +66,11 @@ describe("contracts/live fleet-dispatch harness", { concurrency: false }, () => 
 		strictEqual(caught.timeoutMs, 1_500);
 		strictEqual(caught.stdout, `${FIRST_LINE}\n`);
 		strictEqual(caught.stderr, `${STDERR_LINE}\n`);
-		strictEqual(caught.signal, "SIGKILL");
+		// SIGTERM, not SIGKILL: the timeout asks the group to shut down first so
+		// the CLI can signal its own detached tool groups, and a child with no
+		// handler dies to that. The SIGKILL escalation is a separate contract
+		// (tests/contracts/live-spawn.test.ts).
+		strictEqual(caught.signal, "SIGTERM");
 		strictEqual(caught.code, null);
 		ok(Date.now() - started < 6_000, "rejection waited on the kill grace instead of the child's close");
 	});
@@ -84,7 +88,9 @@ describe("contracts/live fleet-dispatch harness", { concurrency: false }, () => 
 		strictEqual(settled.timedOut, true);
 		strictEqual(settled.stdout, `${FIRST_LINE}\n`);
 		strictEqual(settled.stderr, `${STDERR_LINE}\n`);
-		strictEqual(settled.signal, "SIGKILL");
+		// Same reason as above: a child with no SIGTERM handler never reaches the
+		// SIGKILL escalation, and the partial stream survives either way.
+		strictEqual(settled.signal, "SIGTERM");
 	});
 
 	it("settleRun passes a finished run through with timedOut=false", async () => {
