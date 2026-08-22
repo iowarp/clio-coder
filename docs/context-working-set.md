@@ -31,7 +31,7 @@ Three properties follow from that shape:
 - **Branch safety.** The fold runs through `filterEntriesToActivePath` (issue #94), so an eviction recorded on a branch `/tree` later abandoned cannot project onto the live one, and a fork inherits the view of its shared prefix.
 - **Determinism.** A policy is a pure function of `PolicyInput`. The same ledger and the same settings select the same units in a live session and in an offline replay of that session.
 
-Usage anchors recorded before an eviction described a longer prompt than the model will now receive, so the projection stamps `contextUsageInvalidated` on assistant entries that precede the newest eviction event. Without that, `calculateContextTokens` would keep reporting the pre-eviction size and the pressure estimator would never see the space the event freed.
+Usage anchors recorded before an eviction described a longer prompt than the model will now receive, so the projection stamps `contextUsageInvalidated` on assistant entries that precede the newest eviction event. Without that, `calculateContextTokens` would keep reporting the pre-eviction size and the pressure estimator would never see the space the event freed. The stamp is replay bookkeeping, not provider-visible message content, and the prompt estimator deliberately excludes it. That keeps plan-time `tokensAfter` and the post-event cold-prefix metric on the same byte definition.
 
 ## Ledger records and format v4
 
@@ -109,7 +109,7 @@ Rule order is the policy. Each rung emits candidates newest-first, every candida
 
 Rungs 1 through 5 are unconditional: redundant content is free to drop, whatever the pressure. Rung 6 is the only one that looks at token counts, and it stops the moment the projected size reaches `context.workingSet.target × contextWindow`. Newest-first within a rung is a cost decision: evicting the youngest safe unit keeps the cold region after the eviction point small, so the turn that pays for the event pays least.
 
-The long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 6.1% at 64k and 6.2% at 128k, did not materially reduce summaries, and lowered retention covered by 0.00354 at 128k. The default therefore remains 0.6. The replay README records the full grid and the numeric reopening rule.
+The long-trace sweep found that targets 0.4 and an exhaustive rung 6 produced identical results because the usable candidate pool ran out first. Relative to the 0.6 default, 0.4 reduced cold-prefix tokens by 6.1% at 64k and 7.8% at 128k, did not reduce summaries, and lowered retention covered by 0.00102 at 128k. The default therefore remains 0.6. The replay README records the full grid and the numeric reopening rule.
 
 The facts the rungs read come from `path-index.ts`, one deterministic pass over the active-path entries producing one observation per tool result that names a path: which file, which line range, which paths a listing surfaced, whether the call failed, and where in the turn sequence it sits. Tools that observe no path (dispatch, web fetch, tasks, ask user, context) produce no observation. There are no content fingerprints.
 

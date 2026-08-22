@@ -122,9 +122,10 @@ describe("contracts/working-set synthetic corpus", () => {
 		const replay = replayTrace(trace, resolveWorkingSetPolicy("structural-v1"), config("structural-v1", 32_000));
 		assert.ok(replay.events.length > 0);
 		for (const event of replay.events) {
-			// The cold region always holds at least the evicted units' own markers
-			// and never the whole pre-event working set.
-			assert.ok(event.coldPrefixTokens > 0 && event.coldPrefixTokens < event.tokensBefore);
+			// The cold region is a suffix of the post-event projection. Usage
+			// invalidation stamps are metadata, so they cannot make it cost more
+			// than the planner's tokensAfter projection.
+			assert.ok(event.coldPrefixTokens > 0 && event.coldPrefixTokens <= event.tokensAfter);
 		}
 		const metrics = measureReplayTrace({ trace, index, graph, replay });
 		assert.equal(
