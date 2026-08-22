@@ -17,9 +17,11 @@ Four rules, no exceptions:
    run. Never run an experiment in this checkout or in the operator's
    projects.
 2. **Isolated state.** Every run gets a throwaway Clio home holding only the
-   chosen target. The drivers below do this for you; if you launch by hand,
-   source `live:home` first. Never point a run at the operator's real
-   config, data, state, or cache.
+   chosen target and its one credential entry. The drivers below do this for
+   you; if you launch by hand, make a home with `live:home` and start Clio
+   through the `<dir>/clio` launcher it writes. Never point a run at the
+   operator's real config, data, state, or cache, and never put a key in a
+   command line or an env file.
 3. **Explicit target.** The model is `--target <id>`, one of the ids
    `clio-coder targets` prints. `--model <wireId>` and `--thinking <level>`
    override that target's defaults for the run.
@@ -32,7 +34,7 @@ Four rules, no exceptions:
 | You want to know | Run |
 | --- | --- |
 | Does the target answer through Clio at all? | `npm run live:smoke -- --target <id>` |
-| What does one headless turn do for this prompt? | `node dist/cli/index.js --no-context-files run --target <id> --json "<prompt>"` inside a `live:home` shell, cwd in a temp repo |
+| What does one headless turn do for this prompt? | `"$HOME_DIR/clio" --no-context-files run --json "<prompt>"` from a `live:home` tree, cwd in a temp repo |
 | Does the model route and dispatch as documented? | `npm run live:recon -- --target <id>` and `npm run live:fleet-dispatch -- --target <id>` |
 | What does a person see in the TUI for these inputs? | `npm run live:tui -- --target <id> --workspace <dir> --send "<prompt>" --send "/context"` |
 | I want to watch it interactively | a tmux or herdr pane, below |
@@ -40,7 +42,12 @@ Four rules, no exceptions:
 
 All drivers take `--help`, exit 0/1/2 for pass/fail/usage, keep a failed
 run's scratch tree and print its path, and remove a passing run's tree unless
-`--keep` is given.
+`--keep` is given. A retained tree never holds credentials; the credential
+removal is armed before the driver's body runs, so a failed check, a thrown
+setup, a Ctrl-C, or a PTY child that will not die cannot skip it. `--pass-env
+<NAME>` hands the run one more environment variable (a delegated agent's own
+token, for instance), and `--lease 90m|8h|2d` bounds how long the tree may
+exist.
 
 ## Scripted TUI drive (`live:tui`)
 
@@ -72,62 +79,91 @@ Read `report.json` first. Then read `transcript.txt` for the words and
 sidecars). The TUI is ready when the footer shows `ctx `; that is the regex the
 driver waits on.
 
-## Interactive: tmux
+## Interactive: the `live:home` launcher
 
-Prepare an isolated home, then launch Clio in a detached tmux session at a
-real size and talk to it:
+`live:home` makes a scratch home and prints its path on stdout, and nothing
+else, so it can be captured. Everything you need to read goes to stderr: the
+target, the launcher path, the state dir, the names of the credential
+variables the run wants, and the lease expiry.
 
 ```bash
-eval "$(npm run -s live:home -- --target zbook --model qwen3.8-27b)"
+HOME_DIR=$(npm run -s live:home -- --target zbook --model qwen3.8-27b)
+"$HOME_DIR/clio"                                    # the TUI, isolated
+npm run -s live:home -- --release "$HOME_DIR"       # when the pane is done
+```
+
+`<dir>/clio` is the only supported way to start that tree. It rebuilds the
+run's environment at start from a list of *names* baked into the launcher,
+reading the values out of whatever shell runs it, so no key is ever written
+to disk or to shell history. Nothing outside that list reaches Clio. It
+refuses to start once the lease has expired.
+
+This is the one tree that keeps its credentials after the command returns,
+because the pane has not started yet. Release it yourself when done. If you
+do not, its lease (default 12h, `--lease`) is the backstop: the launcher stops
+working and the next driver to start scrubs and removes the tree. `--release`
+works from a normal shell and from a shell running inside the home.
+
+The launcher is a POSIX shell shim; on Windows run `node <dir>/launch.mjs`
+directly.
+
+### tmux
+
+```bash
+HOME_DIR=$(npm run -s live:home -- --target zbook --model qwen3.8-27b)
 WS=$(mktemp -d /tmp/clio-ws-XXXXXX) && cp -r benchmarks/soak/fixtures/single-file-bug/. "$WS"
-tmux new-session -d -s clio -x 140 -y 44 -c "$WS" "node $PWD/dist/cli/index.js"
+tmux new-session -d -s clio -x 140 -y 44 -c "$WS" "$HOME_DIR/clio"
 until tmux capture-pane -pt clio | grep -q 'ctx '; do sleep 1; done   # ready
 tmux send-keys -t clio "Read src/window.mjs and reply with exactly: window read" Enter
 sleep 20; tmux capture-pane -pt clio -S -200                           # what a person sees
 tmux send-keys -t clio "/quit" Enter
-rm -rf "$CLIO_CODER_HOME" "$WS"
+npm run -s live:home -- --release "$HOME_DIR"; rm -rf "$WS"
 ```
 
-`live:home` prints `export CLIO_CODER_HOME=...`, the four `_DIR` exports,
-and `TMPDIR` beneath the home so anything the run creates in a temp directory
-stays in the same tree; `eval` puts them in your shell so tmux inherits them. Turn settlement is in
+The launcher carries the home's `CLIO_CODER_*` variables and a `TMPDIR`
+beneath the home, so anything the run creates in a temp directory stays in
+the same tree; tmux does not need to inherit anything. Turn settlement is in
 the ledger, not the screen: poll
-`$CLIO_CODER_STATE_DIR/sessions/*/*/current.jsonl` for an assistant `message`
+`$HOME_DIR/state/sessions/*/*/current.jsonl` for an assistant `message`
 without a `toolCall` block if you need to know a turn finished rather than
-sleeping. Remove the home when done; that also removes the copied
-credentials.
+sleeping. Releasing the home is what removes the copied credentials.
 
-## Interactive: herdr
+### herdr
 
-Only when `HERDR_ENV=1` (you are inside a herdr pane). The same isolation,
-with the exports passed as pane env:
+Only when `HERDR_ENV=1` (you are inside a herdr pane). No `--env` arguments:
+the launcher is the environment.
 
 ```bash
-npm run -s live:home -- --target zbook --model qwen3.8-27b > /tmp/clio-home.env
-ENV_ARGS=$(grep '^export' /tmp/clio-home.env | sed 's/^export /--env /' | tr '\n' ' ')
+HOME_DIR=$(npm run -s live:home -- --target zbook --model qwen3.8-27b)
 WS=$(mktemp -d /tmp/clio-ws-XXXXXX) && cp -r benchmarks/soak/fixtures/single-file-bug/. "$WS"
-PANE=$(herdr pane split --current --direction right --cwd "$WS" $ENV_ARGS --no-focus | jq -r .result.pane.pane_id)
-herdr pane run "$PANE" "node $PWD/dist/cli/index.js"
+PANE=$(herdr pane split --current --direction right --cwd "$WS" --no-focus | jq -r .result.pane.pane_id)
+herdr pane run "$PANE" "$HOME_DIR/clio"
 herdr pane wait-output "$PANE" --regex 'ctx ' --timeout 90000
 herdr pane send-text "$PANE" "Read src/window.mjs and reply with exactly: window read"
 herdr pane send-keys "$PANE" enter
 herdr pane read "$PANE" --source recent --lines 60
 herdr pane send-text "$PANE" "/quit"; herdr pane send-keys "$PANE" enter
+npm run -s live:home -- --release "$HOME_DIR"
 ```
 
-`herdr pane read` is what a person sees; the ledger under the printed
-`CLIO_CODER_STATE_DIR` is what happened. Close the pane and remove the home
-when done. Herdr does not classify Clio as a known agent, so use the pane
-verbs, not `herdr agent`.
+`herdr pane read` is what a person sees; the ledger under `$HOME_DIR/state`
+is what happened. Close the pane and release the home when done. Herdr does
+not classify Clio as a known agent, so use the pane verbs, not `herdr agent`.
 
 ## Writing your own driver
 
 Import the harness rather than re-creating it:
 
 ```ts
-import { openPty, stripAnsi } from "../../tests/harness/pty.js";         // the PTY
-import { parseLiveArgs, prepareLiveHome, clio, runDriver } from "./live-target.js"; // target + scratch home
+import { openPty, stripAnsi } from "../../tests/harness/pty.js";      // the PTY
+import { parseLiveArgs, withLiveHome, clio, runDriver } from "./live-target.js"; // target + scratch home
 ```
+
+Use `withLiveHome(args, options, body)`, not `prepareLiveHome` plus your own
+`finally`: it arms the credential removal before your body's first line, so
+a throw, a signal, or a child that will not die cannot skip it. Generate
+everything the run needs under `home.dir` so the same cleanup owns it, and
+send anything you print or write out through `home.redact()`.
 
 `tests/harness/pty.ts` is the one pseudo-terminal implementation in the
 repository (`openPty` for a controllable session, `runInPty` for a scripted
@@ -144,4 +180,9 @@ the driver to the checks you can read back from the tree.
   template. The target flag and `DEFAULT_SETTINGS` are the contract.
 - Do not call a stubbed-model test a live run, and do not put a live run
   under `npm test`.
-- Do not leave scratch homes behind: they carry copied credentials.
+- Do not leave a `live:home` tree behind: it is the one tree that keeps its
+  credentials. `--release` it. A driver's own tree is scrubbed for you.
+- Do not `rm -rf` a scratch home by hand. `--release` checks it is one first;
+  a typo in an `rm -rf` does not.
+- Do not put a key on a command line, in an env file, or in a launcher. Name
+  the variable with `--pass-env` and let the launcher read it at start.
