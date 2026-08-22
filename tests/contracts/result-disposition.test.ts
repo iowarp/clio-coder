@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -204,7 +205,10 @@ describe("contracts/tool-result disposition", () => {
 		strictEqual(applied.contextTruncated, true);
 		ok(applied.contextBytes <= 320);
 		ok(applied.offloadPath);
-		strictEqual(applied.offloadPath, join(stateDir, "scratch", "hard-budget", "full-call.txt"));
+		strictEqual(
+			applied.offloadPath,
+			join(stateDir, "scratch", "hard-budget", `${createHash("sha256").update(source).digest("hex")}.txt`),
+		);
 		strictEqual(readFileSync(applied.offloadPath, "utf8"), source);
 		ok(toolResultContextText(shaped).includes("retrieve="));
 		strictEqual(toolResultContextText(shaped).includes(source), false);

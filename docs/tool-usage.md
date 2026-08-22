@@ -21,7 +21,7 @@ Truncated text results append exactly one notice line:
 
 Segments that do not apply are omitted. `<total>` renders as `N+` when the search stopped early at its item limit, so the true total was never counted. `next:` is an exact argument fragment (for example `limit=200` or `offset=451`); re-issue the same call with that argument changed to continue.
 
-Offload: when the byte cap cut content that was already collected, the complete rendering is written to `<clio-coder state dir>/scratch/<sessionId>/<toolCallId>.txt` and the notice's `full:` segment names the path. Read it with `read` using offset/limit. Tools offload only when the byte cap cut collected content; a bare item-limit truncation continues via `next` and does not offload. `read` never offloads, because the source file is directly re-addressable via `offset`.
+Offload: when the byte cap cut content that was already collected, the complete rendering is written to `<clio-coder state dir>/scratch/<sessionId>/<sha256 of the captured text>.txt` and the notice's `full:` segment names the path. Read it with `read` using offset/limit. Tools offload only when the byte cap cut collected content; a bare item-limit truncation continues via `next` and does not offload. `read` never offloads, because the source file is directly re-addressable via `offset`.
 
 JSON-format results (code_nav, context scope=docs/workspace) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
