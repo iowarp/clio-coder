@@ -77,7 +77,7 @@
 		"pretest": "test -f dist/assets/codewiki.json && [ -z \"$(find src -newer dist/assets/codewiki.json -type f -print -quit)\" ] || npm run build",
 		"test": "node scripts/shard-tests.mjs",
 		"test:coverage": "node scripts/test-coverage.mjs --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts'",
-		"test:repeat": "node tests/harness/repeat-tests.mjs",
+		"test:repeat": "node scripts/repeat-tests.mjs",
 		"test:trace-viewer": "npm --prefix apps/trace-viewer test",
 		"trace:ui": "node apps/trace-viewer/server.mjs",
 		"ci": "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test && npm run test:trace-viewer",
