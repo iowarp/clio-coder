@@ -90,7 +90,8 @@
 		"live:smoke": "node --import tsx benchmarks/internal/live-smoke.ts",
 		"live:recon": "node --import tsx benchmarks/internal/live-recon.ts",
 		"live:fleet-dispatch": "node --import tsx benchmarks/internal/live-fleet-dispatch.ts",
-		"live:tui": "node --import tsx benchmarks/internal/pty-drive.ts"
+		"live:tui": "node --import tsx benchmarks/internal/pty-drive.ts",
+		"live:home": "node --import tsx benchmarks/internal/live-home.ts"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186",

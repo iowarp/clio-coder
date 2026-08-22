@@ -274,6 +274,19 @@ thresholds:
 
 The soak benchmark suite located under [`benchmarks/soak/`](../benchmarks/soak/) measures Clio's own machinery performance, integrity, and structural invariant promises under load. Unlike standard evaluation suites, the soak suite evaluates the reliability of Clio rather than model capability. A weak model that fails to solve the workload still passes the suite if Clio's machinery behaves correctly; a strong model fails the suite if Clio fails to seal a receipt, cannot authenticate a receipt, or violates a system invariant.
 
+Every suite runs through the product's own eval runner against a configured
+target; there is no separate soak runner:
+
+```bash
+npm run build
+clio-coder eval run --suite benchmarks/soak/clio-soak.yaml \
+  --target <id> --model <wireId> --clio-coder-entry dist/cli/index.js
+```
+
+`tests/contracts/eval-soak-suite.test.ts` loads all four files in CI and drives
+`clio-soak.yaml` against a stub that seals receipts on purpose, so the gate is
+known to fail when sealing fails; the model runs themselves are operator-run.
+
 The soak suite comprises four specialized suite files:
 
 ### 1. Machinery Under Load (`clio-soak.yaml`)
