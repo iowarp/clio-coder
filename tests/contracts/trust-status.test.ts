@@ -25,7 +25,6 @@ import {
 	projectTrustStatus,
 	TRUST_STATUS_AXES,
 	TRUST_STATUS_MAX_ARTIFACT_REFERENCES,
-	TRUST_STATUS_NO_PROMOTION_RULES,
 	TRUST_STATUS_STATES,
 	TRUST_STATUS_VERSION,
 	validateTrustStatus,
@@ -319,16 +318,6 @@ describe("contracts/trust-status", () => {
 			autonomyEnforcement: withAutonomy.autonomyEnforcement,
 			completionEvidence: baseline.completionEvidence,
 		});
-		deepStrictEqual(
-			TRUST_STATUS_NO_PROMOTION_RULES.map(({ from, to }) => [from, to]),
-			[
-				["artifactIntegrity", "validationGrounding"],
-				["contextProvenance", "validationGrounding"],
-				["independentReview", "contextProvenance"],
-				["autonomyEnforcement", "completionEvidence"],
-				["completionEvidence", "validationGrounding"],
-			],
-		);
 		// The completion rule is enforced, not documented: a finish-contract
 		// self-report cannot ground validation even when handed straight to the
 		// grounding adapter.

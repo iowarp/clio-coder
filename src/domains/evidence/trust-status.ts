@@ -139,46 +139,6 @@ export type TrustStatusProjection = Partial<TrustStatusAxes>;
 export type TrustStatusValidation = { ok: true; status: CanonicalTrustStatus } | { ok: false; reason: string };
 
 /**
- * These forbidden promotions are policy, not presentation advice. Composition
- * and projection copy an axis exactly and never synthesize another axis.
- *
- * The table is enforced at the two boundaries that can actually promote: the
- * adapters below, which refuse to establish an axis from a source that is not
- * entitled to it (`AXIS_SOURCES`, and the self-report filter in
- * `adaptGroundedEvidenceValidationStatus`), and the evidence composition
- * boundary in `run-trust.ts`, which feeds each observed artifact to exactly
- * the axis it authentically establishes. Nothing here is presentation advice
- * and nothing here is documentation-only.
- */
-export const TRUST_STATUS_NO_PROMOTION_RULES = [
-	{
-		from: "artifactIntegrity",
-		to: "validationGrounding",
-		reason: "Authenticity of an artifact does not validate its claims.",
-	},
-	{
-		from: "contextProvenance",
-		to: "validationGrounding",
-		reason: "Known context origin does not establish correctness.",
-	},
-	{
-		from: "independentReview",
-		to: "contextProvenance",
-		reason: "A review outcome does not establish authorship or context origin.",
-	},
-	{
-		from: "autonomyEnforcement",
-		to: "completionEvidence",
-		reason: "Enforced authority does not establish task completion.",
-	},
-	{
-		from: "completionEvidence",
-		to: "validationGrounding",
-		reason: "A completion self-report does not independently establish validation.",
-	},
-] as const satisfies ReadonlyArray<{ from: TrustStatusAxis; to: TrustStatusAxis; reason: string }>;
-
-/**
  * Artifact kinds that are self-reports of the run under inspection. They can
  * establish `completionEvidence`, the axis they authentically own, and can
  * never be read as independently observed validation.
@@ -848,7 +808,8 @@ export interface GroundedEvidenceValidationInput {
  * Project validation that the evidence linker grounded in an executed
  * artifact. Grounding requires at least one independently observed artifact:
  * a self-report of the run under inspection cannot ground its own validation
- * (`TRUST_STATUS_NO_PROMOTION_RULES`), and an empty reference list grounds
+ * (docs/evidence-and-memory.md, "composition rules"), and an empty reference
+ * list grounds
  * nothing at all.
  */
 export function adaptGroundedEvidenceValidationStatus(
