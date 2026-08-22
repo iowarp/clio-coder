@@ -1,78 +1,64 @@
 # Working-set replay tables
 
-Replay of the eviction policies in `src/domains/context/working-set/policies/` over the 165 Claude Code transcripts of this repository that pass the default inclusion filter, driven by `clio-coder context replay` through the same fold, projection, and planner the live session uses. The command line is the first comment of each Markdown table; the JSON beside it carries the configuration, the git revision, and the exact command.
+Replay of the eviction policies in `src/domains/context/working-set/policies/` over the seeded procedural corpora in `src/domains/context/working-set/replay/synthetic.ts`, driven by `clio-coder context replay --synthetic` through the same fold, projection, planner, and summary cut the live session uses. The JSON beside each table carries the configuration, the git revision, and the exact command line; the tables rebuild on any checkout (the committed JSON is then passed through the repository formatter, `npx biome format --write`, which only reflows short arrays).
 
-Source revision for every table in this directory: `0acbe6d6`.
+Source revision for every table in this directory: `3af2f9d9`.
 
 | File | `protectLastTurns` | Budgets |
 | --- | ---: | --- |
-| `claude-code-2026-08-21-protect-6.md` / `.json` | 6 | 32000, 64000, 128000 |
-| `claude-code-2026-08-21-protect-2.md` / `.json` | 2 | 32000, 64000, 128000 |
+| `synthetic-2026-08-22-protect-6.md` / `.json` | 6 | 32000, 64000, 128000 |
+| `synthetic-2026-08-22-protect-2.md` / `.json` | 2 | 32000, 64000, 128000 |
 
 ## Corpus
 
-`~/.claude/projects/-home-akougkas-iowarp-clio-coder`: 303 transcripts found, 2 unreadable, 17 sidechain or subagent, 14 with fewer than 8 turns, 3 with fewer than 8 tool results, 102 with no file re-read, **165 kept**. The loader folds Claude Code's per-block assistant records into one assistant entry per message, maps its tool names and argument keys onto Clio's, and keeps the recorded cwd for the path index. Clio's own ledgers on the machine were too short to measure anything (129 sessions, 123 under 8 turns, retention 0.997 for every policy), which is why the Claude Code loader exists.
+Three corpora, 24 traces, every byte a function of the spec and the trace index. `science-long` is eight traces of 300 operator turns over a 48-file simulation repository (about 3.6k tokens per turn); `refactor` is eight traces of 200 turns over 64 files with a high return rate to earlier files (2.5k tokens per turn); `exploration` is eight traces of 200 turns over 120 files, listing-heavy (4.7k tokens per turn). Each turn plays one of four scripts: explore (a listing or grep whose surfaced paths are then read), implement (read, edit, read back), validate (a failing test run, an edit, the same command passing), and analyze (a simulation whose stdout exceeds the result cap and is offloaded, then a results read). Every assistant turn carries a thinking block. Trace 0 of `science-long` fires all six structural reasons and all three reference-edge kinds, which `tests/contracts/working-set-synthetic.test.ts` pins.
+
+The first tables in this directory were built from 165 private Claude Code transcripts. That loader is gone: the corpora replace it so the numbers are reproducible, and so the traces are long enough to measure what a long science session actually does to a window, which no corpus on a developer machine was.
+
+## The summary stage is modeled
+
+Over hundreds of turns, operator text, call arguments, assistant text, markers, and results below `minEvictableTokens` accumulate past any budget, and no policy can evict them. Live, Clio then summarizes. The replay applies the same cut (`findCutPoint` at `keepRecentTokens: 20000`), appends a stand-in `compactionSummary` of 1,500 tokens, counts it, and treats what the cut removed as lost for retention. Without this the long traces spend most of their length in a regime the product never enters, and every policy converges on the same numbers.
 
 ## Metrics
 
-- **retention**: of the (tool result, later turn that re-read or discovered the same file) pairs in the trace, the share whose result was still in the working set at that later turn. `mean` averages per trace; `pooled` counts pairs across all traces. Higher is better.
-- **retention covered**: the same pairs, also counted when a newer successful read of the same path covers the original range and that newer copy remains in the working set at the reference turn. The reference read cannot credit itself. `mean` and `pooled` aggregate exactly as retention does. Higher is better.
-- **eviction precision**: share of evicted items the session never referenced again. Its complement is what live churn (recalls over items evicted) would count.
-- **saturated events**: share of applied eviction events in which the policy exhausted its candidates before reaching `target`. `age-horizon` has no target stop by design, so it reads 1.000; a value below 1.0 means the policy chose, rather than ran out.
-- **turns to first summary**: turns until the projection still exceeded the threshold after an eviction and the summary path would have run; `n` is the number of traces that ever reached that point.
-- `none` evicts nothing and `oracle` evicts only what the future never references; `random` takes eligible results in seeded random order to the same target.
+- **retention**: of the (tool result, later turn that re-read or discovered the same file) pairs in the trace, the share whose result was still in the working set at that later turn, counting both evictions and summary cuts as removal. `mean` averages per trace; `pooled` counts pairs across all traces. Higher is better.
+- **retention covered**: the same pairs, also counted when a newer successful read of the same path covers the original range and survives to the reference turn.
+- **eviction precision**: share of evicted items the session never referenced again.
+- **recall tokens**: tokens freed by evicting items the session referenced again; what a perfect recall would read back. The token-weighted complement of precision.
+- **cold prefix tokens**: after each event, the projected working set from the earliest evicted position to the end, summed per trace. Under an exact-prefix cache (Anthropic, OpenAI, vLLM) this is what the next request re-prefills.
+- **saturated events**: share of applied events in which the policy exhausted its candidates before reaching `target`. `age-horizon` has no target stop by design and reads 1.000.
+- **turns to first summary** and **summaries**: when the summary stage first ran, and how many times it ran per trace. Summaries are the one lossy, token-spending stage; fewer is the point of eviction.
+- `none` evicts nothing, `oracle` evicts only what the future never references, and `random` takes eligible results in seeded random order to the same target.
 
 ## Default-policy rule
 
-`context.workingSet.policy` defaults to `structural-v1` if, at the shipped `protectLastTurns: 6`, every budget shows **(a)** `structural-v1` retention (mean) at or above `age-horizon`, **(b)** `structural-v1` precision above `random`, and **(c)** `structural-v1` saturated events below 1.0 at 64k and 128k, meaning the structural rungs and the target stop actually decided something. The `protectLastTurns: 2` table is a sensitivity check, not part of the rule.
+`context.workingSet.policy` defaults to `structural-v1` if, at the shipped `protectLastTurns: 6`, every budget shows **(a)** `structural-v1` retention (mean) at or above `age-horizon`, **(b)** `structural-v1` precision above `random`, and **(c)** `structural-v1` saturated events below 1.0 at 64k and 128k. The `protectLastTurns: 2` table is a sensitivity check.
 
-## Headline grid
+## Headline grid, `protectLastTurns: 6`
 
-### `protectLastTurns: 6`
+| budget | summaries: none | structural-v1 | age-horizon | random | retention mean: age-horizon | structural-v1 | random | retention covered: age-horizon | structural-v1 | precision: random | structural-v1 | saturated: structural-v1 | cold prefix: age-horizon | structural-v1 | rule |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 32000 | 108 | **45.3** | 44.4 | 46.9 | 0.066 | **0.067** | 0.065 | 0.490 | **0.495** | 0.194 | **0.492** | 0.556 | 2.25M | 2.60M | holds |
+| 64000 | 21.5 | **8.8** | 8.7 | 9.2 | 0.096 | **0.099** | 0.099 | 0.549 | **0.565** | 0.195 | **0.468** | 0.312 | 1.13M | 1.98M | holds |
+| 128000 | 8.9 | **3.1** | 3.1 | 3.1 | 0.158 | **0.166** | 0.169 | 0.637 | **0.660** | 0.195 | **0.456** | 0.243 | 0.78M | 1.82M | holds |
 
-| budget | retention mean: age-horizon | structural-v1 | random | retention pooled: age-horizon | structural-v1 | precision: random | structural-v1 | saturated: structural-v1 | rule |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 32000 | 0.479 | **0.480** | 0.485 | 0.426 | **0.426** | 0.947 | **0.953** | 0.963 | holds |
-| 64000 | 0.582 | **0.590** | 0.603 | 0.522 | **0.526** | 0.960 | **0.962** | 0.922 | holds |
-| 128000 | 0.788 | **0.812** | 0.798 | 0.745 | **0.741** | 0.980 | **0.979** | 0.856 | fails: (b) |
-
-### `protectLastTurns: 2`
-
-| budget | retention mean: age-horizon | structural-v1 | random | retention pooled: age-horizon | structural-v1 | precision: random | structural-v1 | saturated: structural-v1 | rule |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 32000 | 0.387 | **0.389** | 0.397 | 0.309 | **0.309** | 0.942 | **0.949** | 0.945 | holds |
-| 64000 | 0.529 | **0.524** | 0.546 | 0.442 | **0.445** | 0.954 | **0.959** | 0.911 | fails: (a) |
-| 128000 | 0.759 | **0.787** | 0.781 | 0.714 | **0.710** | 0.979 | **0.977** | 0.849 | fails: (b) |
-
-## Retention covered by surviving newer reads
-
-| `protectLastTurns` | budget | age-horizon mean raw → covered | structural-v1 mean raw → covered | random mean raw → covered | structural-v1 pooled raw → covered |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 6 | 32000 | 0.479 → **0.479** | 0.480 → **0.481** | 0.485 → **0.485** | 0.426 → **0.427** |
-| 6 | 64000 | 0.582 → **0.582** | 0.590 → **0.590** | 0.603 → **0.604** | 0.526 → **0.528** |
-| 6 | 128000 | 0.788 → **0.788** | 0.812 → **0.812** | 0.798 → **0.799** | 0.741 → **0.742** |
-| 2 | 32000 | 0.387 → **0.388** | 0.389 → **0.389** | 0.397 → **0.398** | 0.309 → **0.310** |
-| 2 | 64000 | 0.529 → **0.529** | 0.524 → **0.524** | 0.546 → **0.546** | 0.445 → **0.446** |
-| 2 | 128000 | 0.759 → **0.759** | 0.787 → **0.787** | 0.781 → **0.781** | 0.710 → **0.712** |
+At `protectLastTurns: 2` the rule also holds on every cell (retention 0.056/0.088/0.157 against 0.053/0.084/0.149 for `age-horizon`; precision 0.465/0.465/0.451 against 0.190/0.191/0.176 for random; saturation 0.393/0.279/0.205).
 
 ## Reading the grid
 
-At the shipped `protectLastTurns: 6` the rule holds at 32k and 64k and fails one cell at 128k: `structural-v1` precision 0.979 against random 0.980, a difference of one thousandth on the budget where its retention lead is largest (+0.024 over `age-horizon`, +0.014 over random). Retention (mean), the primary metric, is at or above `age-horizon` on all six cells of both tables except 64k at `protectLastTurns: 2` (0.524 vs 0.529). The default stays `structural-v1` on that basis, and the cell is recorded here rather than the rule being rewritten around it.
+Eviction is what keeps the summary stage rare. With no eviction a 300-turn science trace at 64k is summarized 21.5 times; with `structural-v1` 8.8 times, and at 128k 3.1 against 8.9. `oracle` barely helps here (18.9 at 64k) because it removes only what is never referenced again, which on a corpus that keeps returning to hot files is a small share: protecting retention and postponing summaries pull in different directions, and the product chooses to postpone summaries.
 
-One result the default-policy rule did not ask about is that random eviction to target retains more than either real policy at 32k and 64k (0.485 and 0.603 against 0.480 and 0.590 at `protectLastTurns: 6`). Both real policies evict about 13 percent more tokens than random because `age-horizon` has no target stop and `structural-v1` runs rungs 1 to 5 whatever the pressure, and every extra eviction is a chance to lose a pair. This remains a cost-model follow-up on #179.
+`structural-v1` leads `age-horizon` on retention and on retention covered at every budget and leads random on precision by 2.3x or more, while saturating between a quarter and a half of its events, so the target stop and the structural rungs decide something on every row. The absolute retention numbers are low by construction: the corpora return to earlier files across hundreds of turns, and a summary cut counts as loss.
 
-The surviving-copy variant shows how often raw retention understates usable file context. At `protectLastTurns: 6`, `structural-v1` mean retention changes by budget as 32k 0.480 → 0.481, 64k 0.590 → 0.590, 128k 0.812 → 0.812; pooled retention changes as 32k 0.426 → 0.427, 64k 0.526 → 0.528, 128k 0.741 → 0.742. The column credits only a newer covering read that survives to the reference turn, so it measures the benefit of supersession without changing the policy, the default-policy rule, or any eviction decision.
+The cold-prefix column is the cost side. `structural-v1` stops at `target` and comes back, so it fires 1.1x to 1.8x more events than `age-horizon`, which drains everything evictable in one event, and it therefore re-prefills 1.2x to 2.3x more tokens under an exact-prefix cache for the same number of summaries. On a llama.cpp backend with `--cache-reuse` that cost is partly recovered by KV shifting; on a cloud provider it is paid at 1.25x write price per event. The number that moves it is event count, not which items an event picks, which is what the provider cache mechanics in `docs/context-engine.md` predict and what a cloud-tier deployment should tune through `context.workingSet.target` rather than through the policy.
 
-Tables committed before `ca3f49b6` were produced with a loader that emitted one assistant entry per Claude Code JSONL record, three per message, and priced each with the per-message overhead; those numbers (0.831 / 0.781 / 0.779 at 128k) are superseded by this directory.
+## Regenerating
 
-## Reproducing
-
-```bash
-node --import tsx src/cli/index.ts context replay \
-  --sessions ~/.claude/projects/<project> \
-  --policies none,random,age-horizon,structural-v1,oracle \
-  --budgets 32000,64000,128000 --protect-last-turns 6 \
-  --md benchmarks/results/context-replay/<name>.md --json benchmarks/results/context-replay/<name>.json
+```
+node --import tsx src/cli/index.ts context replay --synthetic science-long,refactor,exploration \
+  --policies none,random,age-horizon,structural-v1,oracle --budgets 32000,64000,128000 \
+  --protect-last-turns 6 --json benchmarks/results/context-replay/synthetic-<date>-protect-6.json \
+  --md benchmarks/results/context-replay/synthetic-<date>-protect-6.md
 ```
 
-The matrix is deterministic for a given corpus, revision, and `--seed` (default 0). The 165-trace matrix takes roughly 35 minutes per `protectLastTurns` value on the operator machine; the two settings can run in parallel.
+Each run takes about a minute; run `npx biome format --write` on the JSON before committing. The JSON `provenance.commandLine` is the exact invocation.
