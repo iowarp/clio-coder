@@ -146,7 +146,7 @@ describe("contracts/working-set replay-lite", () => {
 		);
 	});
 
-	it("counts a ref evicted two turns before reuse as lost retention and full churn", async () => {
+	it("counts a ref evicted two turns before reuse as lost retention and full recall demand", async () => {
 		const { trace } = await fixture();
 		const index = buildPathIndex(trace.entries);
 		const replay: ReplayTraceResult = {
@@ -186,6 +186,7 @@ describe("contracts/working-set replay-lite", () => {
 		assert.equal(metrics.retentionAt10, 0);
 		assert.equal(metrics.evictionPrecision, 0);
 		assert.equal(metrics.tokensEvicted, 250);
+		assert.equal(metrics.recallTokens, 250);
 		assert.equal(metrics.evictionEvents, 1);
 		assert.equal(metrics.saturatedEvents, 1);
 	});

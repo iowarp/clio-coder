@@ -131,6 +131,8 @@ An LLM summary also preserves recall discovery across its cut. When an evicted t
 
 That also makes recall the churn signal. `churn = recalls / itemsEvicted` over the active path. A high churn number means the policy keeps evicting content the session still needs, which is a reason to change the policy rather than to raise the threshold.
 
+The procedural replay does not synthesize churn from path reuse. Its reference graph maps each earlier observation to every later reread or discovery of the same path, while a real `contextRecall` is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports `recallTokens` as a one-time demand bound per evicted item and waits for explicit `contextRecall` records before reporting recall count, churn, or tail growth. The graph-density measurements and reopening condition are in the replay README.
+
 An offloaded result returns its pointer, never the file. The model gets the same `full: <path>` promise the original tool result ended with and reads it with `read` when it wants it.
 
 The two entry points differ in where the body lands:

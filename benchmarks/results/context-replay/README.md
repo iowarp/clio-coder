@@ -96,6 +96,14 @@ The floor sweep separates marker break-even from the retention decision. Floors 
 
 Widening the unit set is not proposed on these numbers. Clearing only tool-call arguments after their paired result was evicted would free 1007, 873, and 517 tokens per summary point on the three corpora, just 1.8%, 1.5%, and 0.8% of residue. Reducing the existing protection horizon from six turns to two cut 64k summaries from 8.750 to 6.958, and reducing it to one cut them to 6.625. Neither approaches the 4.375 needed to halve summaries. The dominant residue is already an existing unit kind: tool-result bodies of at least 200 tokens account for 41% to 65% of the projected tokens at summary points, but the protection and unresolved-failure rules keep them in context. Deleting operator text, assistant text, call envelopes, or recall markers would violate the current owner contract for a larger but lossy gain.
 
+## Why recall remains a demand metric
+
+The reference graph is not a record of recall decisions. It links every earlier readable observation to every later reread or discovery of the same path. Across the eight traces in each corpus, that produces 7,172 refs and 159,220 future pairs for `science-long`, 5,058 refs and 73,321 pairs for `refactor`, and 11,882 refs and 283,434 pairs for `exploration`. One earlier ref has 292 later pairs, and the corpus means are 22.2, 14.5, and 23.9 pairs per ref.
+
+Appending a `contextRecall` for those edges would invent behavior. The later turn already performs a fresh read and appends the current body at the tail; injecting the older body as well duplicates it, and is specifically wrong for a result evicted as stale or superseded. A diagnostic that limited the invention to one recall per ref still exceeded 1,018,488 KB RSS after 52.6 seconds before a single-policy three-budget sweep completed. That resource growth is a consequence of duplicating thousands of bodies, not a product cost observed in a ledger.
+
+`recallTokens` therefore remains the one-time token-weighted demand bound: each evicted item that has any future critical path use contributes its freed tokens once. The tables do not report fabricated recall count, churn, or tail growth. Reopen simulation when a long ledger records explicit model-issued `contextRecall` entries, or when a corpus labels recall decisions separately from ordinary rereads. Those records identify which ref was chosen, whether its returned tail was still visible, and when a repeated recall actually occurred.
+
 ## Regenerating
 
 ```
