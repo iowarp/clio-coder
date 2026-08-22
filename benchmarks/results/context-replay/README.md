@@ -29,7 +29,11 @@ The first tables in this directory were built from 165 private Claude Code trans
 
 ## The summary stage is modeled
 
-Over hundreds of turns, operator text, call arguments, assistant text, markers, and results below `minEvictableTokens` accumulate past any budget, and no policy can evict them. Live, Clio then summarizes. The replay applies the same cut (`findCutPoint` at `keepRecentTokens: 20000`), appends a stand-in `compactionSummary` of 1,500 tokens, counts it, and treats what the cut removed as lost for retention. Without this the long traces spend most of their length in a regime the product never enters, and every policy converges on the same numbers.
+Over hundreds of turns, operator text, call arguments, assistant text, markers, and results below `minEvictableTokens` accumulate past any budget, and no policy can evict them. Live, Clio then summarizes. The replay applies `findCutPoint` at `keepRecentTokens: 20000` to the same raw active-path input. On the first compaction the boundary is the start of the ledger. On every later compaction it is the entry after the previous `compactionSummary`; the retained suffix visible to the provider is context for the cumulative replacement summary, not raw history eligible to be cut and charged again. A contract independently recomputes every one of those iterative cuts from the replay ledger.
+
+The modeled entry uses a 1,500-token stand-in and treats what the new cut removes as lost for retention. Five compaction outputs recorded locally price at 405, 405, 968, 981, and 1,124 tokens (median 968); 1,500 is 33% above the observed maximum, so it biases toward earlier pressure rather than flattering the policy. Replaying `structural-v1` with 1,000 instead produced exactly the same mean summary counts as 1,500 at all budgets: 27.042, 7.542, and 2.667. The recorded sessions lasted at most 0.57 hours, not multiple hours, so reopen the stand-in when a multi-hour ledger's p90 summary exceeds 1,500 tokens. Without any summary stage the long traces spend most of their length in a regime the product never enters, and every policy converges on the same numbers.
+
+Correcting the iterative boundary changed the row where `keepRecentTokens` is largest relative to the window. At 32k, mean summaries fell from 108.042 to 43.250 for `none` and from 42.000 to 27.042 for `structural-v1`; the 64k and 128k metrics were unchanged. The former replay was repeatedly making the prior retained suffix eligible for the next raw cut. The corrected count is lower because only history created after the checkpoint is newly summarized.
 
 ## Metrics
 
@@ -50,7 +54,7 @@ Over hundreds of turns, operator text, call arguments, assistant text, markers, 
 
 | budget | summaries: none | structural-v1 | age-horizon | random | retention mean: age-horizon | structural-v1 | random | retention covered: age-horizon | structural-v1 | precision: random | structural-v1 | saturated: structural-v1 | cold prefix: age-horizon | structural-v1 | rule |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 32000 | 108.0 | **42.0** | 41.7 | 43.8 | 0.066 | **0.067** | 0.065 | 0.481 | **0.488** | 0.191 | **0.478** | 0.561 | 2.20M | 2.56M | holds |
+| 32000 | 43.3 | **27.0** | 27.0 | 27.8 | 0.063 | **0.065** | 0.062 | 0.460 | **0.470** | 0.194 | **0.502** | 0.503 | 1.66M | 2.05M | holds |
 | 64000 | 20.3 | **7.5** | 7.4 | 7.7 | 0.099 | **0.103** | 0.103 | 0.547 | **0.563** | 0.169 | **0.434** | 0.346 | 1.13M | 2.01M | holds |
 | 128000 | 7.8 | **2.7** | 2.7 | 2.7 | 0.163 | **0.175** | 0.175 | 0.625 | **0.655** | 0.184 | **0.445** | 0.274 | 0.69M | 1.76M | holds |
 
@@ -72,9 +76,9 @@ The 24 traces were replayed at targets 0.4, 0.5, and 0.6 with `protectLastTurns:
 
 | target or stop | budget | events | cold prefix | summaries | retention | retention covered |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 0.4 or exhaustive | 32000 | 125.33 | 2.560M | 42.000 | 0.06705 | 0.48837 |
-| 0.5 | 32000 | 125.33 | 2.560M | 42.000 | 0.06705 | 0.48837 |
-| 0.6 | 32000 | 125.33 | 2.560M | 42.000 | 0.06706 | 0.48848 |
+| 0.4 or exhaustive | 32000 | 100.04 | 2.051M | 27.042 | 0.06483 | 0.47002 |
+| 0.5 | 32000 | 100.04 | 2.051M | 27.042 | 0.06483 | 0.47002 |
+| 0.6 | 32000 | 100.04 | 2.052M | 27.042 | 0.06484 | 0.47003 |
 | 0.4 or exhaustive | 64000 | 67.38 | 1.956M | 7.542 | 0.10343 | 0.56293 |
 | 0.5 | 64000 | 67.46 | 1.960M | 7.542 | 0.10342 | 0.56294 |
 | 0.6 | 64000 | 68.29 | 2.013M | 7.542 | 0.10349 | 0.56338 |
@@ -106,7 +110,7 @@ The residue probe replayed `structural-v1` at 64k and recorded the projected ent
 | exploration | tool-result body | 1017 | 332 | 5235 | 22566 | 29150 |
 | exploration | eviction marker | 0 | 0 | 15312 | 0 | 15312 |
 
-The floor sweep separates marker break-even from the retention decision. Floors 0 and 50 were identical because the engine already refuses an eviction whose marker saves no tokens. Lowering the floor from 200 to 0 changed summaries from 42.000 to 41.458 at 32k, from 7.542 to 7.375 at 64k, and left 128k at 2.667. It reduced covered retention from 0.5634 to 0.5558 at 64k and from 0.6555 to 0.6318 at 128k. The default stays at 200 as a low-yield churn guard, not as the literal marker break-even point.
+The floor sweep separates marker break-even from the retention decision. Floors 0 and 50 were identical because the engine already refuses an eviction whose marker saves no tokens. Lowering the floor from 200 to 0 changed summaries from 27.042 to 26.750 at 32k, from 7.542 to 7.375 at 64k, and left 128k at 2.667. It reduced covered retention from 0.5634 to 0.5558 at 64k and from 0.6555 to 0.6318 at 128k. The default stays at 200 as a low-yield churn guard, not as the literal marker break-even point.
 
 Widening the unit set is not proposed on these numbers. Clearing only tool-call arguments after their paired result was evicted would free 1222, 1197, and 1074 tokens per summary point on the three corpora, just 2.3%, 2.3%, and 1.9% of residue. Reducing the existing protection horizon from six turns to two cut 64k summaries from 7.542 to 5.917. That does not approach the 3.771 needed to halve summaries. Large tool-result bodies remain the biggest existing unit class, at 33% to 40% of projected tokens at summary points; eviction markers are now 27% to 33%, the durable cost of preserving recall identity. Deleting operator text, assistant text, call envelopes, or recall markers would violate the current owner contract for a larger but lossy gain.
 

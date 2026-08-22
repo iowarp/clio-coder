@@ -17,7 +17,7 @@
 		}
 	},
 	"provenance": {
-		"gitSha": "656aa1a9c23da7735eff9982bf1d6dae77547046",
+		"gitSha": "586c52b1c2a14aef781f71ad432a37c83f9b8539",
 		"commandLine": [
 			"/home/akougkas/.nvm/versions/node/v24.9.0/bin/node",
 			"--import",
@@ -56,9 +56,9 @@
 			"metrics": {
 				"mean": {
 					"traces": 24,
-					"retention": 0.0634216637316126,
-					"retentionCovered": 0.4804528552610477,
-					"retentionAt10": 0.6552701940355796,
+					"retention": 0.05491981567363847,
+					"retentionCovered": 0.41895227389714057,
+					"retentionAt10": 0.5664513727148641,
 					"evictionPrecision": 1,
 					"tokensEvicted": 0,
 					"recallTokens": 0,
@@ -67,11 +67,11 @@
 					"saturatedEvents": 0,
 					"turnsToFirstSummary": 7.333333333333333,
 					"turnsToFirstSummaryCount": 24,
-					"summaries": 108.04166666666667
+					"summaries": 43.25
 				},
-				"pooledRetention": 0.059096521650379936,
-				"pooledRetentionCovered": 0.4558357064665964,
-				"pooledRetentionAt10": 0.6286620677908363
+				"pooledRetention": 0.05121365003572208,
+				"pooledRetentionCovered": 0.39812604189389045,
+				"pooledRetentionAt10": 0.543859649122807
 			}
 		},
 		{
@@ -80,22 +80,22 @@
 			"metrics": {
 				"mean": {
 					"traces": 24,
-					"retention": 0.05401062493719267,
-					"retentionCovered": 0.3767490021364774,
-					"retentionAt10": 0.5183969815216745,
-					"evictionPrecision": 0.17328660838857549,
-					"tokensEvicted": 444873.1666666667,
-					"recallTokens": 333726.9583333333,
-					"coldPrefixTokens": 973674.0833333334,
-					"evictionEvents": 89.04166666666667,
-					"saturatedEvents": 0.7716424894712214,
+					"retention": 0.05401469593518481,
+					"retentionCovered": 0.3771397370839469,
+					"retentionAt10": 0.5185390338630081,
+					"evictionPrecision": 0.17274464820396532,
+					"tokensEvicted": 442790.125,
+					"recallTokens": 332260.4166666667,
+					"coldPrefixTokens": 969613,
+					"evictionEvents": 88.375,
+					"saturatedEvents": 0.7736916548797736,
 					"turnsToFirstSummary": 14.625,
 					"turnsToFirstSummaryCount": 24,
-					"summaries": 17.833333333333332
+					"summaries": 17.625
 				},
-				"pooledRetention": 0.05008895497417404,
-				"pooledRetentionCovered": 0.3642651158415901,
-				"pooledRetentionAt10": 0.49288877533639924
+				"pooledRetention": 0.05011096857858156,
+				"pooledRetentionCovered": 0.36499756849733134,
+				"pooledRetentionAt10": 0.4935275080906149
 			}
 		},
 		{
@@ -104,22 +104,22 @@
 			"metrics": {
 				"mean": {
 					"traces": 24,
-					"retention": 0.053266250083270246,
-					"retentionCovered": 0.3727167024228231,
-					"retentionAt10": 0.5064045128777012,
-					"evictionPrecision": 0.4389030214676913,
-					"tokensEvicted": 458819.2083333333,
-					"recallTokens": 333555.625,
-					"coldPrefixTokens": 824020.0416666666,
-					"evictionEvents": 83.41666666666667,
+					"retention": 0.05326639180843643,
+					"retentionCovered": 0.37319330454851346,
+					"retentionAt10": 0.5063821156342233,
+					"evictionPrecision": 0.43842105503448775,
+					"tokensEvicted": 456902.4583333333,
+					"recallTokens": 332440.25,
+					"coldPrefixTokens": 821506.75,
+					"evictionEvents": 83,
 					"saturatedEvents": 1,
 					"turnsToFirstSummary": 15,
 					"turnsToFirstSummaryCount": 24,
-					"summaries": 16.75
+					"summaries": 16.625
 				},
-				"pooledRetention": 0.04963867670220196,
-				"pooledRetentionCovered": 0.36143936953036976,
-				"pooledRetentionAt10": 0.4846065406234032
+				"pooledRetention": 0.049632672991909,
+				"pooledRetentionCovered": 0.3615814573406365,
+				"pooledRetentionAt10": 0.4845000851643672
 			}
 		},
 		{
@@ -128,22 +128,22 @@
 			"metrics": {
 				"mean": {
 					"traces": 24,
-					"retention": 0.056564581239097605,
-					"retentionCovered": 0.3895920581732475,
-					"retentionAt10": 0.5355743197224191,
-					"evictionPrecision": 0.4397242071903658,
-					"tokensEvicted": 455398.0833333333,
-					"recallTokens": 330372.0833333333,
-					"coldPrefixTokens": 1387959.0833333333,
-					"evictionEvents": 109.875,
-					"saturatedEvents": 0.41865756541524457,
+					"retention": 0.05657172580111058,
+					"retentionCovered": 0.3898419099738321,
+					"retentionAt10": 0.5354718365901576,
+					"evictionPrecision": 0.4388317614640678,
+					"tokensEvicted": 453963.9583333333,
+					"recallTokens": 329615.875,
+					"coldPrefixTokens": 1384429.9583333333,
+					"evictionEvents": 109.5,
+					"saturatedEvents": 0.4189497716894977,
 					"turnsToFirstSummary": 14.916666666666666,
 					"turnsToFirstSummaryCount": 24,
-					"summaries": 16.791666666666668
+					"summaries": 16.708333333333332
 				},
-				"pooledRetention": 0.052502446511944384,
-				"pooledRetentionCovered": 0.37667878749066924,
-				"pooledRetentionAt10": 0.5132217680122637
+				"pooledRetention": 0.052520457642823266,
+				"pooledRetentionCovered": 0.376708806042134,
+				"pooledRetentionAt10": 0.5131153125532277
 			}
 		},
 		{
@@ -152,22 +152,22 @@
 			"metrics": {
 				"mean": {
 					"traces": 24,
-					"retention": 0.06946548158319134,
-					"retentionCovered": 0.5065041210197259,
-					"retentionAt10": 0.7160625095539697,
+					"retention": 0.060290802071096765,
+					"retentionCovered": 0.44189925920464107,
+					"retentionAt10": 0.6173451850238422,
 					"evictionPrecision": 1,
-					"tokensEvicted": 99886.66666666667,
+					"tokensEvicted": 92454.375,
 					"recallTokens": 0,
-					"coldPrefixTokens": 653252.7916666666,
-					"evictionEvents": 66.45833333333333,
-					"saturatedEvents": 1,
+					"coldPrefixTokens": 584603.75,
+					"evictionEvents": 42,
+					"saturatedEvents": 0.9950396825396826,
 					"turnsToFirstSummary": 7.958333333333333,
 					"turnsToFirstSummaryCount": 24,
-					"summaries": 74.70833333333333
+					"summaries": 36.333333333333336
 				},
-				"pooledRetention": 0.06531236304035894,
-				"pooledRetentionCovered": 0.4790540554062411,
-				"pooledRetentionAt10": 0.689597172543008
+				"pooledRetention": 0.05626477162886664,
+				"pooledRetentionCovered": 0.4184285888679204,
+				"pooledRetentionAt10": 0.5910832907511497
 			}
 		},
 		{

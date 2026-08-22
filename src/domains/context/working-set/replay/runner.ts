@@ -20,13 +20,16 @@ import type { Trace } from "./trace.js";
  * The summary stage, modeled. Live, when the projection is still over the
  * threshold after an eviction, Clio summarizes: it cuts the history at
  * `findCutPoint(entries, keepRecentTokens)` and replaces everything before
- * the cut with one paraphrase. A long trace replayed without that stage spends
- * most of its length in a regime the product never enters, because operator
- * text, call arguments, and markers accumulate past any budget and no policy
- * can evict them. The model appends the same `compactionSummary` record the
- * live path would, with a constant-size summary standing in for the
- * paraphrase, and counts it, so a policy is judged by how rarely it forces
- * the one lossy, token-spending stage.
+ * the cut with one paraphrase. On iterative compaction, the cut search starts
+ * strictly after the previous `compactionSummary`; the retained suffix that
+ * replay still shows is canonical input to the new paraphrase, not new raw
+ * history to price a second time. A long trace replayed without that stage
+ * spends most of its length in a regime the product never enters, because
+ * operator text, call arguments, and markers accumulate past any budget and
+ * no policy can evict them. The model appends the same `compactionSummary`
+ * record the live path would, with a constant-size summary standing in for the
+ * paraphrase, and counts it, so a policy is judged by how rarely it forces the
+ * one lossy, token-spending stage.
  */
 export interface ReplaySummaryModel {
 	/** Mirrors `compaction.keepRecentTokens`: the cut keeps at least this many recent tokens. */
@@ -84,6 +87,13 @@ function sumTokens(entries: ReadonlyArray<SessionEntry>): number {
 
 function hasCandidatePool(policy: WorkingSetPolicy): policy is ReplayCandidatePoolPolicy {
 	return "replayCandidateCount" in policy && typeof policy.replayCandidateCount === "function";
+}
+
+function latestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		if (entries[index]?.kind === "compactionSummary") return index;
+	}
+	return -1;
 }
 
 function eventSaturated(
@@ -261,30 +271,36 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 				}
 				if (visible.tokens > pressureLimit) {
 					if (turnsToFirstSummary === null) turnsToFirstSummary = turnIndex;
+					const previousCompactionIndex = latestCompactionIndex(soFar);
+					const boundaryStart = previousCompactionIndex + 1;
 					const cut =
 						config.summaries === undefined
-							? 0
-							: findCutPoint(visible.raw, config.summaries.keepRecentTokens).firstKeptEntryIndex;
-					// A cut that keeps everything is the live "nothing to compact" case.
-					if (config.summaries !== undefined && cut > 0) {
+							? boundaryStart
+							: findCutPoint(soFar, config.summaries.keepRecentTokens, { startIndex: boundaryStart }).firstKeptEntryIndex;
+					// A cut at the iterative boundary has no new history or turn prefix,
+					// which is the live "nothing to compact" case.
+					if (config.summaries !== undefined && cut > boundaryStart) {
 						summaries += 1;
-						for (const cutAway of visible.raw.slice(0, cut)) {
-							if (toolResults.has(cutAway.turnId) && !evictedAtTurn.has(cutAway.turnId)) {
-								evictedAtTurn.set(cutAway.turnId, turnIndex);
-							}
-						}
+						const visibleBefore = new Set(visible.raw.map((candidate) => candidate.turnId));
 						const previous = soFar[soFar.length - 1];
+						const firstKeptTurnId = soFar[cut]?.turnId ?? "";
 						const synthetic: CompactionSummaryEntry = {
 							kind: "compactionSummary",
 							turnId: `replay-summary-${summaries}`,
-							parentTurnId: leaf,
+							parentTurnId: firstKeptTurnId || null,
 							timestamp: previous?.timestamp ?? entry.timestamp,
 							summary: "#".repeat(config.summaries.summaryTokens * 4),
 							tokensBefore: visible.tokens,
-							firstKeptTurnId: visible.raw[cut]?.turnId ?? "",
+							firstKeptTurnId,
 						};
 						soFar.push(synthetic);
 						visible = rebuildProjection(soFar, lastMessageTurnId, view);
+						const visibleAfter = new Set(visible.raw.map((candidate) => candidate.turnId));
+						for (const removed of visibleBefore) {
+							if (toolResults.has(removed) && !visibleAfter.has(removed) && !evictedAtTurn.has(removed)) {
+								evictedAtTurn.set(removed, turnIndex);
+							}
+						}
 					}
 				}
 			}
