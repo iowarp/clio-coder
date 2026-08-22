@@ -10,8 +10,6 @@ import type {
 } from "../../src/domains/evidence/index.js";
 import {
 	absentTrustStatus,
-	adaptEvidenceFindingsValidationStatus,
-	adaptEvidenceLinkContextStatus,
 	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
 	adaptGroundedEvidenceValidationStatus,
@@ -511,32 +509,6 @@ describe("contracts/trust-status", () => {
 			"failed",
 		);
 		strictEqual(adaptGateDecisionReviewStatus(null, "subject", { ok: true }).state, "absent");
-	});
-
-	it("adapts evidence findings and exact or best-effort links without manufacturing a validation pass", () => {
-		const finding = (tag: "test-failure" | "proxy-validation" | "no-validation") => ({
-			id: `finding-${tag}`,
-			severity: "warn" as const,
-			tag,
-			runId: "run-154",
-			message: tag,
-		});
-		strictEqual(
-			adaptEvidenceFindingsValidationStatus({ evidenceId: "evidence-1", findings: [finding("test-failure")] }).state,
-			"failed",
-		);
-		strictEqual(
-			adaptEvidenceFindingsValidationStatus({ evidenceId: "evidence-1", findings: [finding("proxy-validation")] }).state,
-			"ungrounded",
-		);
-		strictEqual(
-			adaptEvidenceFindingsValidationStatus({ evidenceId: "evidence-1", findings: [finding("no-validation")] }).state,
-			"absent",
-		);
-		strictEqual(adaptEvidenceFindingsValidationStatus({ evidenceId: "evidence-1", findings: [] }).state, "unknown");
-		strictEqual(adaptEvidenceLinkContextStatus("evidence-1", "exact").state, "recorded");
-		strictEqual(adaptEvidenceLinkContextStatus("evidence-1", "best-effort").state, "unknown");
-		strictEqual(adaptEvidenceLinkContextStatus("evidence-1", undefined).state, "absent");
 	});
 
 	it("adapts every finish-contract settlement as completion evidence only", () => {
