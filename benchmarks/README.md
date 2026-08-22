@@ -32,20 +32,12 @@ untracked.
 Each adapter drives Clio through the installed CLI or `clio-coder eval`; none of these
 files is the eval engine itself.
 
-## Fleet config
+## Running an adapter
 
-Real fleet coordinates are private. `benchmarks/community/fleet.json` is
-gitignored, and `CLIO_CODER_FLEET` may point at any private JSON file with the same
-shape as `benchmarks/community/fleet.example.json`.
-
-The adapter scripts also honor per-run overrides such as `CLIO_CODER_MAIN_URL`,
-`CLIO_CODER_MAIN_MODEL`, `CLIO_CODER_WORKER_URL`, `CLIO_CODER_WORKER_MODEL`, and the matching
-target and thinking variables.
+Run the Python adapters with `uv run --no-project` so a benchmark command never
+captures a machine-specific interpreter path:
 
 ```sh
-CLIO_CODER_FLEET=/path/to/private/fleet.json \
-  uv run --no-project python benchmarks/community/clio_fleet.py
-
 uv run --no-project --with datasets --with swebench \
   python benchmarks/community/swe-bench-lite/swebench_clio.py \
   --instances pytest-dev__pytest-6116 \
@@ -58,6 +50,10 @@ uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run
   --limit 5 \
   --out benchmarks/community/human-eval/runs/smoke
 ```
+
+Each adapter takes `--target <id>` and `--model <id>` naming one of the
+operator's configured Clio targets. `benchmarks/community/README.md` has the
+per-adapter detail.
 
 ## Result manifests
 

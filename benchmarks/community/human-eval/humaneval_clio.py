@@ -52,14 +52,6 @@ from clio_usage import (
 from result_manifest import target_profile, write_result_manifest
 from uv_command import uv_python_cmd, uv_script_cmd
 
-_FLEET: dict[str, Any] | None
-try:
-    from clio_fleet import load_fleet
-
-    _FLEET = load_fleet()
-except Exception:
-    _FLEET = None
-
 PYTHON_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
@@ -73,14 +65,12 @@ def humaneval_model(model: str | None) -> str:
         or os.environ.get("CLIO_CODER_PRED_MODEL")
         or os.environ.get("CLIO_CODER_MODEL")
         or os.environ.get("CLIO_CODER_MAIN_MODEL")
-        or ((_FLEET or {}).get("predictionModelName") if isinstance(_FLEET, dict) else None)
         or "unspecified"
     )
 
 
 def humaneval_target_profile(target: str | None, model: str | None) -> dict[str, str]:
     return target_profile(
-        profile=(_FLEET or {}).get("profile") if isinstance(_FLEET, dict) else None,
         target=target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
         model=model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
         thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),

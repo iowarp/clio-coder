@@ -57,38 +57,23 @@ from terminal_bench.agents.installed_agents.abstract_installed_agent import (
 )
 from terminal_bench.terminal.models import TerminalCommand
 
-# Shared fleet defaults (benchmarks/community/clio_fleet.py). Guarded so the
-# agent still loads if the private config is missing.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from result_manifest import target_profile, write_result_manifest
 
-try:
-    from clio_fleet import load_fleet
-
-    _F = load_fleet()
-    _DEF = {
-        "main_target": _F["orchestrator"]["target"],
-        "main_model": _F["orchestrator"]["model"],
-        "main_runtime": _F["orchestrator"].get("runtime", "llamacpp"),
-        "main_thinking": _F["orchestrator"].get("thinking", "off"),
-        "worker_target": _F["workers"]["target"],
-        "worker_model": _F["workers"]["model"],
-        "worker_runtime": _F["workers"].get("runtime", "lmstudio-native"),
-        "worker_thinking": _F["workers"].get("thinking", "off"),
-        "autonomy": _F.get("autonomy", "full-auto"),
-    }
-except Exception:
-    _DEF = {
-        "main_target": os.environ.get("CLIO_CODER_MAIN_TARGET", "local-main"),
-        "main_model": os.environ.get("CLIO_CODER_MAIN_MODEL", "example-coder-model"),
-        "main_runtime": "llamacpp",
-        "main_thinking": "off",
-        "worker_target": os.environ.get("CLIO_CODER_WORKER_TARGET", "local-worker"),
-        "worker_model": os.environ.get("CLIO_CODER_WORKER_MODEL", "example-coder-model"),
-        "worker_runtime": "lmstudio-native",
-        "worker_thinking": "off",
-        "autonomy": "full-auto",
-    }
+# Fallbacks behind the CLIO_CODER_* environment the README documents. There is
+# no fleet file: the operator's real targets live in Clio's own settings, and
+# this agent only needs the two nodes the container will reach.
+_DEF = {
+    "main_target": "local-main",
+    "main_model": "example-coder-model",
+    "main_runtime": "llamacpp",
+    "main_thinking": "off",
+    "worker_target": "local-worker",
+    "worker_model": "example-coder-model",
+    "worker_runtime": "lmstudio-native",
+    "worker_thinking": "off",
+    "autonomy": "full-auto",
+}
 
 
 class ClioCoder(AbstractInstalledAgent):

@@ -7,17 +7,20 @@ adapters are wrappers around Clio, not a second eval engine.
 
 ```text
 community/
-  fleet.example.json
-  clio_fleet.py
-  uv_command.py
-  swe-bench-lite/
-  terminal-bench/
-  scicode/
-  human-eval/
+  clio_usage.py        fold `clio-coder run --json` usage for a parent `clio-coder eval`
+  result_manifest.py   the manifest.json and summary.json shape results/ tracks
+  uv_command.py        portable `uv run` command prefixes for generated tasks
+  requirements.txt     per-adapter Python dependencies, for operators who want a venv
+  swe-bench-lite/      SWE-bench Lite prediction generation
+  terminal-bench/      Terminal-Bench installed agent
+  scicode/             SciCode task generation and grading
+  human-eval/          HumanEval completion generation and grading
 ```
 
-`fleet.json` is intentionally gitignored. Keep real endpoints in that file or
-point `CLIO_CODER_FLEET` at another private file.
+Each adapter exists for what Clio cannot do on its own: fetch an external
+dataset, render its prompts, and score the output against the upstream grader.
+The agent work itself is one `clio-coder run --json` or `clio-coder eval run`
+per task; nothing here reimplements dispatch, accounting, or receipts.
 
 ## Python runner
 
@@ -26,27 +29,15 @@ capture a local interpreter path. Generated `clio-coder eval` task files also us
 Set `UV_BIN` to pin a uv executable, or `CLIO_CODER_BENCH_UV_WITH` to inject extra
 comma-separated `uv --with` packages into generated verifier commands.
 
-## Fleet setup
+## Targets
 
-Inspect a private fleet file with:
-
-```sh
-CLIO_CODER_FLEET=/path/to/private/fleet.json uv run --no-project python benchmarks/community/clio_fleet.py
-```
-
-The same file shape is shown in `fleet.example.json`. Per-run environment
-overrides still work:
-
-```sh
-CLIO_CODER_MAIN_URL=http://orchestrator.example:8080 \
-CLIO_CODER_MAIN_MODEL=example-orchestrator-model \
-CLIO_CODER_WORKER_URL=http://worker.example:1234 \
-CLIO_CODER_WORKER_MODEL=example-worker-model \
-uv run --no-project python benchmarks/community/clio_fleet.py
-```
-
-Do not commit real fleet URLs, private hostnames, credentials, or local machine
-paths.
+Every adapter takes `--target <id>` and `--model <id>` and passes them to
+`clio-coder run`, so the model comes from the operator's configured targets
+(`clio-coder targets`). The Terminal-Bench agent is the exception: it runs
+inside a container with no Clio config, so it takes its two endpoints from
+`CLIO_CODER_MAIN_URL` and `CLIO_CODER_WORKER_URL` and writes its own
+`settings.yaml`. Do not commit real endpoints, hostnames, credentials, or
+machine paths.
 
 ## SWE-bench Lite
 

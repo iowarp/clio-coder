@@ -28,9 +28,6 @@ from pathlib import Path
 DATASET = "princeton-nlp/SWE-bench_Lite"
 CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 
-# Shared fleet config (benchmarks/community/clio_fleet.py) is the one
-# source of truth for fleet endpoints/model names. The import is guarded so the
-# adapter still runs if the config is missing; env vars override either way.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from clio_usage import (
     emit_observed_usage,
@@ -40,16 +37,7 @@ from clio_usage import (
 )
 from result_manifest import target_profile, write_result_manifest
 
-try:
-    from clio_fleet import load_fleet
-
-    _FLEET = load_fleet()
-except Exception:
-    _FLEET = None
-
-DEFAULT_MODEL_NAME = os.environ.get("CLIO_CODER_PRED_MODEL") or (_FLEET or {}).get(
-    "predictionModelName", os.environ.get("CLIO_CODER_MODEL", "clio-coder")
-)
+DEFAULT_MODEL_NAME = os.environ.get("CLIO_CODER_PRED_MODEL") or os.environ.get("CLIO_CODER_MODEL", "clio-coder")
 
 TASK_TEMPLATE = """You are resolving a GitHub issue in the {repo} repository (checked out at commit {base_commit}).
 
@@ -295,7 +283,6 @@ def main():
         dataset_split="test",
         model=args.model_name,
         profile=target_profile(
-            profile=(_FLEET or {}).get("profile") if isinstance(_FLEET, dict) else None,
             target=args.target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
             model=args.model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
             thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
