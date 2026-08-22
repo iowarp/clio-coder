@@ -23,12 +23,12 @@ import {
 	type LiveHome,
 	LiveUsageError,
 	parseLiveArgs,
-	prepareLiveHome,
 	rejectUnknown,
 	requireBuild,
 	runDriver,
 	takeFlag,
 	takeSwitch,
+	withLiveHome,
 } from "./live-target.js";
 
 const USAGE = `usage: npm run live:tui -- --target <id> --workspace <dir> (--send <text>)... [options]
@@ -110,6 +110,33 @@ function turnSettled(entries: Json[]): boolean {
 	return !content.some((block) => isJson(block) && block.type === "toolCall");
 }
 
+/**
+ * Stop a PTY child that did not exit on /quit. node-pty starts the child as
+ * a session leader, so its pid is its process group: SIGKILL the group when
+ * the polite kill is not answered in time. Returns a description of what did
+ * not work rather than throwing, because the caller's next step is removing
+ * credentials and nothing may skip that.
+ */
+async function terminatePty(session: PtySession): Promise<string | null> {
+	if (session.exited) return null;
+	try {
+		await session.killAndWaitForExit(5_000);
+		return null;
+	} catch (first) {
+		try {
+			process.kill(-session.pid, "SIGKILL");
+		} catch {
+			// Already gone or not ours; the wait below decides.
+		}
+		try {
+			await session.waitForExit(5_000);
+			return null;
+		} catch {
+			return `PTY child ${session.pid} survived SIGHUP and SIGKILL: ${first instanceof Error ? first.message : String(first)}`;
+		}
+	}
+}
+
 interface Turn {
 	sent: string;
 	kind: "prompt" | "command";
@@ -188,64 +215,80 @@ await runDriver(USAGE, async () => {
 		if (!Number.isSafeInteger(value) || value <= 0) throw new LiveUsageError(`${name} must be a positive integer`);
 	}
 
-	const home = prepareLiveHome(args, { prefix: "clio-live-tui-", autonomy: "full-auto" });
-	const workspace = inPlace ? resolve(workspaceArg) : join(home.dir, "workspace");
-	if (!inPlace) cpSync(resolve(workspaceArg), workspace, { recursive: true });
-	const out = outArg ? resolve(outArg) : join(home.dir, "out");
-	mkdirSync(out, { recursive: true });
-	const env: Record<string, string> = {};
-	for (const [key, value] of Object.entries({ ...process.env, ...home.env })) if (value !== undefined) env[key] = value;
+	return withLiveHome(args, { prefix: "clio-live-tui-", autonomy: "full-auto" }, async (home) => {
+		const workspace = inPlace ? resolve(workspaceArg) : join(home.dir, "workspace");
+		if (!inPlace) cpSync(resolve(workspaceArg), workspace, { recursive: true });
+		const out = outArg ? resolve(outArg) : join(home.dir, "out");
+		mkdirSync(out, { recursive: true });
+		// The run's environment and nothing else; the TUI's tool children see the same.
+		const env: Record<string, string> = {};
+		for (const [key, value] of Object.entries(home.env)) if (value !== undefined) env[key] = value;
 
-	process.stderr.write(
-		`live tui: target=${home.target.id} model=${home.model} thinking=${home.thinking} ${cols}x${rows} workspace=${workspace}\n`,
-	);
-	let passed = false;
-	let session: PtySession | null = null;
-	try {
-		session = await openPty(process.execPath, [CLI_ENTRY], { cols, rows, cwd: workspace, env });
-		await session.waitForOutput((output) => READY.test(stripAnsi(output)), 90_000);
-		await sleep(1500);
-		const turns = await drive(home, session, sends, turnTimeoutMs, settleMs);
-		// A slash command may have left an overlay open; Escape closes it so
-		// /quit reaches the editor rather than the overlay.
-		session.write("\u001b");
-		await sleep(500);
-		session.write("/quit\r");
-		const exit = await session.waitForExit(15_000).catch(() => session?.killAndWaitForExit(5_000));
-
-		const entries = ledgerEntries(home.stateDir);
-		const ledger = findLedger(home.stateDir);
-		if (ledger) writeFileSync(join(out, "ledger.jsonl"), readFileSync(ledger));
-		writeFileSync(join(out, "raw.txt"), session.output, "utf8");
-		writeFileSync(join(out, "transcript.txt"), stripAnsi(session.output), "utf8");
-		const count = (predicate: (entry: Json) => boolean): number => entries.filter(predicate).length;
-		const report = {
-			target: home.target.id,
-			model: home.model,
-			thinking: home.thinking,
-			workspace,
-			cols,
-			rows,
-			exit: exit ?? null,
-			turns: turns.map(({ output: _output, ...turn }) => turn),
-			ledger: {
-				path: ledger,
-				entries: entries.length,
-				userMessages: userCount(entries),
-				assistantMessages: count((entry) => entry.kind === "message" && entry.role === "assistant"),
-				toolResults: count((entry) => entry.kind === "message" && entry.role === "tool_result"),
-				contextEviction: count((entry) => entry.kind === "contextEviction"),
-				contextRecall: count((entry) => entry.kind === "contextRecall"),
-				compactionSummary: count((entry) => entry.kind === "compactionSummary"),
-			},
-			out,
+		process.stderr.write(
+			`live tui: target=${home.target.id} model=${home.model} thinking=${home.thinking} ${cols}x${rows} workspace=${workspace}\n`,
+		);
+		let session: PtySession | null = null;
+		// Terminating is attempted at most once: the failure path already waited
+		// out both grace windows, and repeating them in the `finally` would only
+		// delay the credential removal that must follow.
+		let termination: string | null = null;
+		let terminated = false;
+		const stopPty = async (): Promise<string | null> => {
+			if (terminated || !session) return termination;
+			terminated = true;
+			termination = await terminatePty(session);
+			return termination;
 		};
-		writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
-		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-		passed = turns.length === sends.length && turns.every((turn) => turn.settled) && exit?.exitCode === 0;
-	} finally {
-		if (session && !session.exited) await session.killAndWaitForExit(5_000);
-		home.cleanup(passed);
-	}
-	return passed;
+		try {
+			session = await openPty(process.execPath, [CLI_ENTRY], { cols, rows, cwd: workspace, env });
+			await session.waitForOutput((output) => READY.test(stripAnsi(output)), 90_000);
+			await sleep(1500);
+			const turns = await drive(home, session, sends, turnTimeoutMs, settleMs);
+			// A slash command may have left an overlay open; Escape closes it so
+			// /quit reaches the editor rather than the overlay.
+			session.write("\u001b");
+			await sleep(500);
+			session.write("/quit\r");
+			const exit = await session.waitForExit(15_000).catch(() => null);
+			if (!exit) await stopPty();
+			if (termination) process.stderr.write(`live tui: ${termination}\n`);
+
+			const entries = ledgerEntries(home.stateDir);
+			const ledger = findLedger(home.stateDir);
+			if (ledger) writeFileSync(join(out, "ledger.jsonl"), home.redact(readFileSync(ledger, "utf8")), "utf8");
+			writeFileSync(join(out, "raw.txt"), home.redact(session.output), "utf8");
+			writeFileSync(join(out, "transcript.txt"), home.redact(stripAnsi(session.output)), "utf8");
+			const count = (predicate: (entry: Json) => boolean): number => entries.filter(predicate).length;
+			const report = {
+				target: home.target.id,
+				model: home.model,
+				thinking: home.thinking,
+				workspace,
+				cols,
+				rows,
+				exit: exit ?? null,
+				termination,
+				turns: turns.map(({ output: _output, ...turn }) => turn),
+				ledger: {
+					path: ledger,
+					entries: entries.length,
+					userMessages: userCount(entries),
+					assistantMessages: count((entry) => entry.kind === "message" && entry.role === "assistant"),
+					toolResults: count((entry) => entry.kind === "message" && entry.role === "tool_result"),
+					contextEviction: count((entry) => entry.kind === "contextEviction"),
+					contextRecall: count((entry) => entry.kind === "contextRecall"),
+					compactionSummary: count((entry) => entry.kind === "compactionSummary"),
+				},
+				out,
+			};
+			writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+			process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+			return turns.length === sends.length && turns.every((turn) => turn.settled) && exit?.exitCode === 0;
+		} finally {
+			// A child that cannot be stopped is reported, not thrown: withLiveHome's
+			// cleanup runs next and the credentials go regardless.
+			const left = await stopPty();
+			if (left) process.stderr.write(`live tui: ${left}; removing credentials anyway\n`);
+		}
+	});
 });

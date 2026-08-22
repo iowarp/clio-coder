@@ -22,13 +22,13 @@ import {
 	clio,
 	LiveUsageError,
 	parseLiveArgs,
-	prepareLiveHome,
 	REPO_ROOT,
 	rejectUnknown,
 	requireBuild,
 	runDriver,
 	settleRun,
 	takeFlag,
+	withLiveHome,
 } from "./live-target.js";
 import { workspaceChanges, workspaceSnapshot } from "./workspace-snapshot.js";
 
@@ -155,40 +155,40 @@ await runDriver(USAGE, async () => {
 
 	// Dispatch is denied at read-only autonomy. auto-edit admits the two
 	// singular local runs; read-only recipes plus the snapshot below keep the
-	// workspace unchanged.
-	const home = prepareLiveHome(args, { prefix: "clio-live-fleet-dispatch-", autonomy: "auto-edit" });
-	const workspaceDir = home.workspace;
-	cpSync(REPO_ROOT, workspaceDir, {
-		recursive: true,
-		filter(source) {
-			const path = relative(REPO_ROOT, source);
-			if (path.length === 0) return true;
-			return !EXCLUDED_ROOTS.has(path.split(sep)[0] as string);
-		},
-	});
-	const git = (gitArgs: string[]): string =>
-		execFileSync("git", gitArgs, { cwd: workspaceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-	git(["init", "--quiet"]);
-	git(["config", "user.email", "eval@clio.local"]);
-	git(["config", "user.name", "Clio Fleet Live Eval"]);
-	git(["add", "-A"]);
-	git(["commit", "--quiet", "-m", "eval: fleet-dispatch baseline"]);
-	const before = workspaceSnapshot(workspaceDir);
+	// workspace unchanged. The repository copy and git seeding run inside the
+	// home's cleanup protection, so a copy that fails half-way still removes
+	// the credentials.
+	return withLiveHome(args, { prefix: "clio-live-fleet-dispatch-", autonomy: "auto-edit" }, async (home) => {
+		const workspaceDir = home.workspace;
+		cpSync(REPO_ROOT, workspaceDir, {
+			recursive: true,
+			filter(source) {
+				const path = relative(REPO_ROOT, source);
+				if (path.length === 0) return true;
+				return !EXCLUDED_ROOTS.has(path.split(sep)[0] as string);
+			},
+		});
+		const git = (gitArgs: string[]): string =>
+			execFileSync("git", gitArgs, { cwd: workspaceDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+		git(["init", "--quiet"]);
+		git(["config", "user.email", "eval@clio.local"]);
+		git(["config", "user.name", "Clio Fleet Live Eval"]);
+		git(["add", "-A"]);
+		git(["commit", "--quiet", "-m", "eval: fleet-dispatch baseline"]);
+		const before = workspaceSnapshot(workspaceDir);
 
-	const briefingBytes = Buffer.byteLength(BRIEFING_SENTINEL, "utf8");
-	const briefingHash = sha256(BRIEFING_SENTINEL);
-	const steeringBytes = Buffer.byteLength(STEERING_SENTINEL, "utf8");
-	const steeringHash = sha256(STEERING_SENTINEL);
+		const briefingBytes = Buffer.byteLength(BRIEFING_SENTINEL, "utf8");
+		const briefingHash = sha256(BRIEFING_SENTINEL);
+		const steeringBytes = Buffer.byteLength(STEERING_SENTINEL, "utf8");
+		const steeringHash = sha256(STEERING_SENTINEL);
 
-	process.stdout.write(
-		`live fleet-dispatch: target=${home.target.id} model=${home.model} thinking=${home.thinking} timeoutMs=${timeoutMs}\n`,
-	);
-	const failures: string[] = [];
-	const check = (condition: boolean, message: string): void => {
-		if (!condition) failures.push(message);
-	};
-	let passed = false;
-	try {
+		process.stdout.write(
+			`live fleet-dispatch: target=${home.target.id} model=${home.model} thinking=${home.thinking} timeoutMs=${timeoutMs}\n`,
+		);
+		const failures: string[] = [];
+		const check = (condition: boolean, message: string): void => {
+			if (!condition) failures.push(message);
+		};
 		const run = await settleRun(
 			clio(
 				home,
@@ -415,16 +415,13 @@ await runDriver(USAGE, async () => {
 		check(changed.length === 0, `temporary workspace filesystem changed:\n${changed.join("\n")}`);
 
 		if (failures.length > 0) {
-			process.stderr.write(`live fleet-dispatch: FAIL\n- ${failures.join("\n- ")}\n`);
-		} else {
-			passed = true;
-			process.stdout.write(
-				`live fleet-dispatch: PASS scoutReceipts=${scoutReceipts.length} specialistReceipts=${specialistReceipts.length} ` +
-					`briefingBytes=${briefingBytes} steeringBytes=${steeringBytes}\n`,
-			);
+			process.stderr.write(`live fleet-dispatch: FAIL\n- ${home.redact(failures.join("\n- "))}\n`);
+			return false;
 		}
-	} finally {
-		home.cleanup(passed);
-	}
-	return passed;
+		process.stdout.write(
+			`live fleet-dispatch: PASS scoutReceipts=${scoutReceipts.length} specialistReceipts=${specialistReceipts.length} ` +
+				`briefingBytes=${briefingBytes} steeringBytes=${steeringBytes}\n`,
+		);
+		return true;
+	});
 });
