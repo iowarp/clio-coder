@@ -9,8 +9,9 @@
  * Pure and idempotent. Projecting an already-projected slice reproduces it
  * byte for byte, because the marker comes from the ledger entry rather than
  * from the body being replaced. Entries the view does not name are returned by
- * reference, so a session with one eviction clones one entry instead of the
- * whole history.
+ * reference, and a named entry is a shallow copy with a new payload: nothing
+ * below the payload is ever mutated, so a deep clone of the body about to be
+ * replaced would only cost the pricing loop the body's size.
  *
  * Callers may pass raw ledger entries: only entries whose `turnId` is a key in
  * `view.evicted` change, and the view was already narrowed to the active path
@@ -20,7 +21,7 @@
 
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { EvictedState, WorkingSetView } from "./contract.js";
-import { cloneEntry, hasThinking, isRecord, toolResultPayload, withoutThinkingBlocks } from "./payload.js";
+import { hasThinking, isRecord, toolResultPayload, withoutThinkingBlocks } from "./payload.js";
 
 /**
  * Replace the observation body with its marker. Tool pairing (`toolCallId`,
@@ -30,7 +31,7 @@ import { cloneEntry, hasThinking, isRecord, toolResultPayload, withoutThinkingBl
  * reader tells a marker from a genuinely tiny tool result.
  */
 function projectToolResult(entry: MessageEntry, state: EvictedState): MessageEntry {
-	const next = cloneEntry(entry);
+	const next = { ...entry };
 	const { obj, result } = toolResultPayload(next.payload);
 	const details = isRecord(result) && isRecord(result.details) ? result.details : {};
 	next.payload = {
@@ -66,7 +67,7 @@ function projectAssistant(entry: MessageEntry): MessageEntry {
 	if (obj === null || !hasThinking(obj)) return entry;
 	const content = withoutThinkingBlocks(obj.content);
 	if (!hasVisibleContent(obj, content)) return entry;
-	const next = cloneEntry(entry);
+	const next = { ...entry };
 	next.payload = {
 		...obj,
 		...(content !== undefined ? { content } : {}),
@@ -93,7 +94,7 @@ function invalidateUsage(entry: SessionEntry): SessionEntry {
 	if (entry.kind !== "message" || entry.role !== "assistant") return entry;
 	const obj = isRecord(entry.payload) ? entry.payload : null;
 	if (obj === null || obj.contextUsageInvalidated === true) return entry;
-	const next = cloneEntry(entry);
+	const next = { ...entry };
 	next.payload = { ...obj, contextUsageInvalidated: true };
 	return next;
 }

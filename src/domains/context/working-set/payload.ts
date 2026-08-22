@@ -19,10 +19,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-export function cloneEntry<T extends SessionEntry>(entry: T): T {
-	return structuredClone(entry) as T;
-}
-
 export interface ToolResultPayload {
 	/** The payload object itself, or a synthetic wrapper when the payload is a bare value. */
 	obj: Record<string, unknown>;
