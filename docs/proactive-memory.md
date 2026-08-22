@@ -1,6 +1,6 @@
 # Proactive task memory
 
-> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.3.3).
+> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.3.4).
 
 Clio's proactive task memory protects long-running work from behavioral state
 decay: a requirement, environment fact, failed attempt, or diagnosis can still
