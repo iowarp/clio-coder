@@ -12,10 +12,11 @@ Generation runs on the host against the local fleet. Evaluation is separate
 (swebench.harness.run_evaluation or sb-cli) and needs Docker.
 
 Usage:
-  uv run --no-project --with datasets --with swebench python swebench_clio.py --instances pytest-dev__pytest-6116 --out runs/smoke
-  uv run --no-project --with datasets --with swebench python swebench_clio.py --limit 3 --smallest --out runs/smoke
-  uv run --no-project --with datasets --with swebench python swebench_clio.py --all --out runs/full      # gated: 300 instances
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --instances pytest-dev__pytest-6116 --out runs/smoke
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --limit 3 --smallest --out runs/smoke
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --all --out runs/full      # gated: 300 instances
 """
+
 import argparse
 import json
 import os
@@ -57,6 +58,13 @@ def sh(cmd, cwd=None, timeout=None, check=False):
     )
 
 
+def explicit_target(value: str) -> str:
+    target = value.strip()
+    if not target:
+        raise argparse.ArgumentTypeError("target id must not be empty")
+    return target
+
+
 def clone_instance(repo: str, base_commit: str, dest: Path, cache_dir: Path) -> None:
     cache = cache_dir / (repo.replace("/", "__") + ".git")
     if not cache.exists():
@@ -82,10 +90,10 @@ def clone_instance(repo: str, base_commit: str, dest: Path, cache_dir: Path) -> 
     sh(["git", "-C", str(dest), "tag", "-f", "swebench_base", base_commit])
 
 
-def run_clio(checkout: Path, task: str, events_path: Path, timeout_s: int, target, model):
-    cmd = [CLIO, "run", "--json"]
-    if target:
-        cmd += ["--target", target]
+def run_clio(
+    checkout: Path, task: str, events_path: Path, timeout_s: int, target, model
+):
+    cmd = [CLIO, "run", "--json", "--target", target]
     if model:
         cmd += ["--model", model]
     cmd += [task]
@@ -192,7 +200,12 @@ def main():
     ap.add_argument("--smallest", action="store_true", help="prefer smallest gold patches")
     ap.add_argument("--all", action="store_true", help="run all 300 (gated)")
     ap.add_argument("--timeout", type=int, default=1800, help="per-instance clio wall cap (s)")
-    ap.add_argument("--target", default=None, help="clio-coder --target override")
+    ap.add_argument(
+        "--target",
+        required=True,
+        type=explicit_target,
+        help="configured clio-coder target id (required; never inherited from operator defaults)",
+    )
     ap.add_argument("--model", default=None, help="clio-coder --model override")
     ap.add_argument("--model-name", default=DEFAULT_MODEL_NAME, help="model_name_or_path in predictions")
     ap.add_argument(
@@ -283,7 +296,7 @@ def main():
         dataset_split="test",
         model=args.model_name,
         profile=target_profile(
-            target=args.target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
+            target=args.target,
             model=args.model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
             thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
         ),

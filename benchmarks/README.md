@@ -26,9 +26,12 @@ the runner for every YAML suite in this tree.
 | Does the model route and dispatch the way the docs claim? | `npm run live:recon`, `npm run live:fleet-dispatch` (`internal/README.md`) |
 | What does a person see in the TUI for this prompt? | `npm run live:tui -- --target <id> --workspace <dir> --send "<text>"` |
 
-Every one of these picks its model with `--target <id>`, a target from the
-operator's configured `settings.yaml` (`clio-coder targets`). None of them runs
-under `npm test` or `npm run ci`.
+Every model-running command picks its configured target explicitly with
+`--target <id>` from the operator's `settings.yaml` (`clio-coder targets`). The
+community Terminal-Bench adapter is the documented exception: its container
+has no operator settings, so the harness supplies explicit main and worker
+endpoints and the adapter writes the container-local targets. None of these
+runs under `npm test` or `npm run ci`.
 
 ## Running a community adapter
 
@@ -38,6 +41,7 @@ captures a machine-specific interpreter path:
 ```sh
 uv run --no-project --with datasets --with swebench \
   python benchmarks/community/swe-bench-lite/swebench_clio.py \
+  --target <id> \
   --instances pytest-dev__pytest-6116 \
   --out benchmarks/community/swe-bench-lite/runs/smoke
 
@@ -45,12 +49,16 @@ uv run --no-project python benchmarks/community/scicode/scicode_clio.py inspect-
   --data /path/to/scicode/problems_all.jsonl
 
 uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
+  --target <id> \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/smoke
 ```
 
-Each adapter takes `--target <id>` and `--model <id>`; `community/README.md`
-has the per-adapter detail, including the Terminal-Bench container setup.
+SWE-bench, SciCode, and HumanEval require `--target <id>` for commands that
+will start a Clio model run. `--model <id>` remains an optional explicit
+override. Offline inspection, grading, recomputation, and dry-run commands do
+not require a target. `community/README.md` has the per-adapter detail,
+including the endpoint-based Terminal-Bench container setup.
 
 ## Result manifests
 

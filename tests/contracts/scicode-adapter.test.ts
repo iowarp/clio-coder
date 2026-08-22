@@ -92,6 +92,10 @@ describe("contracts/SciCode Clio adapter", () => {
 		const taskFile = join(scratch, "scicode-tasks.yaml");
 		runPython([
 			"generate-tasks",
+			"--target",
+			"fixture-target",
+			"--model",
+			"fixture-model",
 			"--data",
 			data,
 			"--references",
@@ -107,6 +111,8 @@ describe("contracts/SciCode Clio adapter", () => {
 		match(taskYaml, /id: scicode-1/);
 		match(taskYaml, /run-problem/);
 		match(taskYaml, /grade-problem/);
+		match(taskYaml, /--target fixture-target/);
+		match(taskYaml, /--model fixture-model/);
 
 		const step = JSON.parse(
 			runPython([
@@ -126,12 +132,24 @@ describe("contracts/SciCode Clio adapter", () => {
 		strictEqual(step.status, "pass");
 		strictEqual(step.pass, true);
 
+		writeFileSync(
+			join(runDir, "manifest.json"),
+			`${JSON.stringify({ model: "fixture-model", targetProfile: { target: "fixture-target", model: "fixture-model" } })}\n`,
+			"utf8",
+		);
 		const problem = JSON.parse(
 			runPython(["grade-problem", "--data", data, "--references", refs, "--problem-id", "1", "--run", runDir]),
 		) as { main_pass: boolean; passed_steps: number; blocked_steps: number };
 		strictEqual(problem.main_pass, true);
 		strictEqual(problem.passed_steps, 1);
 		strictEqual(problem.blocked_steps, 0);
+		const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8")) as {
+			model: string;
+			targetProfile: Record<string, string>;
+		};
+		strictEqual(manifest.model, "fixture-model");
+		strictEqual(manifest.targetProfile.target, "fixture-target");
+		strictEqual(manifest.targetProfile.model, "fixture-model");
 	});
 
 	it("marks grading blocked when no target artifact is supplied", () => {

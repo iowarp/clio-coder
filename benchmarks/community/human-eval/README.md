@@ -35,6 +35,7 @@ uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py ins
 
 ```sh
 uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
+  --target <id> \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/smoke \
   --timeout 300
@@ -46,7 +47,10 @@ Useful options:
 - `--all` runs all 164 tasks.
 - `--samples-per-task N --pass-at 1 --pass-at 10` records multiple samples and
   reports pass@k estimates.
-- `--target` and `--model` are forwarded to `clio-coder run`.
+- `--target` is required for model-running commands and is forwarded to
+  `clio-coder run`; the adapter never inherits the operator's default target.
+- `--model` is an optional explicit override and is forwarded alongside the
+  selected target.
 - `--evaluator auto|official|subprocess` defaults to the official evaluator when
   installed and otherwise uses the adapter's subprocess fallback.
 
@@ -59,6 +63,7 @@ Generate a normal v1 task file, then run it with Clio eval:
 
 ```sh
 uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
+  --target <id> \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/tasks.yaml \
   --run-root benchmarks/community/human-eval/runs/eval-smoke
@@ -67,7 +72,10 @@ clio-coder eval run --task-file benchmarks/community/human-eval/runs/tasks.yaml
 ```
 
 Each generated task runs `run-task` during setup and `grade-task` as verifier.
-The per-task run directories are under the selected `--run-root`.
+The setup command carries the selected target (and model override, when
+provided). The per-task run directories are under the selected `--run-root`.
+`inspect-data`, `grade-task`, and `regrade` remain target-free because they do
+not invoke Clio; `--dry-run` generation is target-free for the same reason.
 
 ## Result policy
 

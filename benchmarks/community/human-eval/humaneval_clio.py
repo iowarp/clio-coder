@@ -71,10 +71,17 @@ def humaneval_model(model: str | None) -> str:
 
 def humaneval_target_profile(target: str | None, model: str | None) -> dict[str, str]:
     return target_profile(
-        target=target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
+        target=target,
         model=model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
         thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
     )
+
+
+def explicit_target(value: str) -> str:
+    target = value.strip()
+    if not target:
+        raise argparse.ArgumentTypeError("target id must not be empty")
+    return target
 
 
 def normalize_task_id(task_id: str) -> str:
@@ -220,10 +227,15 @@ def render_clio_prompt(problem: dict[str, Any]) -> str:
     return header + problem.get("prompt", "") + "\n```\n"
 
 
-def run_clio(prompt: str, cwd: Path, events_path: Path, timeout: int, target: str | None, model: str | None) -> dict[str, Any]:
-    cmd = [CLIO, "--no-context-files", "run", "--json"]
-    if target:
-        cmd.extend(["--target", target])
+def run_clio(
+    prompt: str,
+    cwd: Path,
+    events_path: Path,
+    timeout: int,
+    target: str,
+    model: str | None,
+) -> dict[str, Any]:
+    cmd = [CLIO, "--no-context-files", "run", "--json", "--target", target]
     if model:
         cmd.extend(["--model", model])
     cmd.append(prompt)
@@ -990,7 +1002,12 @@ def add_selection_args(parser: argparse.ArgumentParser) -> None:
 
 def add_clio_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", type=int, default=300, help="per-sample Clio wall-clock timeout in seconds")
-    parser.add_argument("--target", default=None, help="clio-coder --target override")
+    parser.add_argument(
+        "--target",
+        type=explicit_target,
+        default=None,
+        help="configured clio-coder target id (required unless --dry-run is used)",
+    )
     parser.add_argument("--model", default=None, help="clio-coder --model override")
     parser.add_argument("--force", action="store_true", help="replace existing run directories")
     parser.add_argument("--dry-run", action="store_true", help="render prompts and seed solution.py without calling Clio")
@@ -1075,6 +1092,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command in {"generate-tasks", "run", "run-task"} and not args.dry_run and not args.target:
+        parser.error(
+            f"{args.command} requires an explicit --target (or use --dry-run to avoid calling Clio)"
+        )
     try:
         return args.func(args)
     except DataBlocked as exc:

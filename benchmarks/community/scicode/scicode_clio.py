@@ -111,9 +111,33 @@ def scicode_model(model: str | None) -> str:
 
 def scicode_target_profile(target: str | None, model: str | None) -> dict[str, str]:
     return target_profile(
-        target=target or os.environ.get("CLIO_CODER_MAIN_TARGET"),
+        target=target,
         model=model or os.environ.get("CLIO_CODER_MAIN_MODEL"),
         thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
+    )
+
+
+def explicit_target(value: str) -> str:
+    target = value.strip()
+    if not target:
+        raise argparse.ArgumentTypeError("target id must not be empty")
+    return target
+
+
+def recorded_provenance(run_dir: Path) -> tuple[str | None, dict[str, str] | None]:
+    """Return generation provenance before an offline grader rewrites it."""
+    manifest_path = run_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None, None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    model = manifest.get("model")
+    profile = manifest.get("targetProfile")
+    return (
+        model if isinstance(model, str) and model and model != "unspecified" else None,
+        profile if isinstance(profile, dict) and profile else None,
     )
 
 
@@ -332,8 +356,7 @@ def generate_tasks(args: argparse.Namespace) -> int:
             "--timeout",
             str(args.timeout),
         ]
-        if args.target:
-            setup.extend(["--target", args.target])
+        setup.extend(["--target", args.target])
         if args.model:
             setup.extend(["--model", args.model])
         if args.with_background:
@@ -411,13 +434,11 @@ def run_clio_step(
     cwd: Path,
     events_path: Path,
     timeout: int,
-    target: str | None,
+    target: str,
     model: str | None,
     agent: str | None = None,
 ) -> dict[str, Any]:
-    cmd = [CLIO, "--no-context-files", "run", "--json"]
-    if target:
-        cmd.extend(["--target", target])
+    cmd = [CLIO, "--no-context-files", "run", "--json", "--target", target]
     if model:
         cmd.extend(["--model", model])
     # Without --agent a sub-step is one main-agent turn: no worker is spawned
@@ -870,13 +891,14 @@ def grade_problem(args: argparse.Namespace) -> int:
         "mainPass": main_pass,
         "scoringRule": "main_pass requires every sub-step to pass",
     }
+    recorded_model, recorded_profile = recorded_provenance(run_dir)
     manifest_path, summary_path = write_result_manifest(
         run_dir,
         suite="scicode",
         dataset=scicode_dataset_name(data),
         dataset_split=scicode_dataset_split(),
-        model=scicode_model(None),
-        profile=scicode_target_profile(None, None),
+        model=recorded_model or scicode_model(None),
+        profile=recorded_profile or scicode_target_profile(None, None),
         instances=1,
         resolved=1 if main_pass else 0,
         errors=len(failed) + len(blocked),
@@ -937,7 +959,12 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--problem-id", action="append", default=[])
     tasks.add_argument("--limit", type=int, default=0)
     tasks.add_argument("--timeout", type=int, default=1800)
-    tasks.add_argument("--target", default=None)
+    tasks.add_argument(
+        "--target",
+        type=explicit_target,
+        default=None,
+        help="configured clio-coder target id (required for generated model runs)",
+    )
     tasks.add_argument("--model", default=None)
     tasks.add_argument("--h5py-file", default=default_h5())
     tasks.add_argument("--references", default=None)
@@ -949,7 +976,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--problem-id", required=True)
     run.add_argument("--out", required=True)
     run.add_argument("--timeout", type=int, default=1800)
-    run.add_argument("--target", default=None)
+    run.add_argument(
+        "--target",
+        type=explicit_target,
+        default=None,
+        help="configured clio-coder target id (required unless --dry-run is used)",
+    )
     run.add_argument("--model", default=None)
     run.add_argument("--agent", default=None, help="dispatch each sub-step to this agent recipe instead of the main agent")
     run.add_argument("--template", default=None)
@@ -993,6 +1025,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "generate-tasks" and not args.target:
+        parser.error("generate-tasks requires an explicit --target")
+    if args.command == "run-problem" and not args.dry_run and not args.target:
+        parser.error(
+            "run-problem requires an explicit --target (or use --dry-run to avoid calling Clio)"
+        )
     try:
         return args.func(args)
     except DataBlocked as exc:

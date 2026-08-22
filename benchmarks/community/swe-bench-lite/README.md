@@ -9,10 +9,15 @@ patch from the checkout.
 ```sh
 uv run --no-project --with datasets --with swebench \
   python benchmarks/community/swe-bench-lite/swebench_clio.py \
+  --target <id> \
   --instances pytest-dev__pytest-6116 \
   --out benchmarks/community/swe-bench-lite/runs/smoke \
   --timeout 1800
 ```
+
+`--target` is required and is forwarded to every `clio-coder run`; the adapter
+never inherits the operator's default target. Pass `--model <id>` as an
+optional explicit model override.
 
 Each run directory receives:
 

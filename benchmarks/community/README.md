@@ -31,13 +31,20 @@ comma-separated `uv --with` packages into generated verifier commands.
 
 ## Targets
 
-Every adapter takes `--target <id>` and `--model <id>` and passes them to
-`clio-coder run`, so the model comes from the operator's configured targets
-(`clio-coder targets`). The Terminal-Bench agent is the exception: it runs
-inside a container with no Clio config, so it takes its two endpoints from
-`CLIO_CODER_MAIN_URL` and `CLIO_CODER_WORKER_URL` and writes its own
-`settings.yaml`. Do not commit real endpoints, hostnames, credentials, or
-machine paths.
+SWE-bench, SciCode, and HumanEval require an explicit `--target <id>` before a
+command can start a Clio model run, and pass that selection to `clio-coder
+run`. They do not silently inherit the operator's default target. The target
+comes from the operator's configured targets (`clio-coder targets`); `--model
+<id>` remains an optional explicit override. Generated eval task files carry
+the same selection in their setup commands. Offline inspection, grading,
+recomputation, and `--dry-run` paths do not start a model run and do not require
+a target.
+
+The Terminal-Bench agent is the endpoint-based exception. It runs inside a
+container with no operator Clio config, so the harness must supply its main and
+worker endpoints through `CLIO_CODER_MAIN_URL` and `CLIO_CODER_WORKER_URL`; the
+adapter writes those selections into its own container-local `settings.yaml`.
+Do not commit real endpoints, hostnames, credentials, or machine paths.
 
 ## SWE-bench Lite
 
@@ -49,6 +56,7 @@ Evaluation with the official harness is a separate Docker workflow.
 ```sh
 uv run --no-project --with datasets --with swebench \
   python benchmarks/community/swe-bench-lite/swebench_clio.py \
+  --target <id> \
   --instances pytest-dev__pytest-6116 \
   --out benchmarks/community/swe-bench-lite/runs/smoke \
   --timeout 1800
@@ -118,6 +126,7 @@ uv run --no-project python benchmarks/community/scicode/scicode_clio.py inspect-
   --data /path/to/scicode/problems_all.jsonl
 
 uv run --no-project python benchmarks/community/scicode/scicode_clio.py generate-tasks \
+  --target <id> \
   --data /path/to/scicode/problems_all.jsonl \
   --h5py-file /path/to/scicode/test_data.h5 \
   --out benchmarks/community/scicode/runs/tasks.yaml \
@@ -143,11 +152,13 @@ uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py ens
 uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py inspect-data
 
 uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
+  --target <id> \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/smoke \
   --timeout 300
 
 uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
+  --target <id> \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/tasks.yaml \
   --run-root benchmarks/community/human-eval/runs/eval-smoke

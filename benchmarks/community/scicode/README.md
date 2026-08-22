@@ -31,6 +31,7 @@ Generate a small Clio eval file once the target artifact is available:
 
 ```sh
 uv run --no-project python benchmarks/community/scicode/scicode_clio.py generate-tasks \
+  --target <id> \
   --data /path/to/scicode/problems_all.jsonl \
   --h5py-file /path/to/scicode/test_data.h5 \
   --out benchmarks/community/scicode/runs/tasks.yaml \
@@ -43,6 +44,7 @@ Run or grade one problem directly:
 
 ```sh
 uv run --no-project python benchmarks/community/scicode/scicode_clio.py run-problem \
+  --target <id> \
   --data /path/to/scicode/problems_all.jsonl \
   --problem-id 10 \
   --out benchmarks/community/scicode/runs/scicode-10
@@ -53,6 +55,13 @@ uv run --no-project python benchmarks/community/scicode/scicode_clio.py grade-pr
   --run benchmarks/community/scicode/runs/scicode-10 \
   --h5py-file /path/to/scicode/test_data.h5
 ```
+
+`generate-tasks` and model-running `run-problem` commands require an explicit
+`--target` and never inherit the operator's default target. Pass `--model <id>`
+as an optional explicit override. `inspect-data`, `snapshot-step`,
+`grade-problem`, and `grade-step` remain target-free because they do not invoke
+Clio; `run-problem --dry-run` is target-free for the same reason. Offline
+grading preserves the target and model provenance recorded during generation.
 
 `run-problem` writes `manifest.json` and `summary.json` with generated step
 attempt counts and hashes for produced artifacts. `grade-problem` rewrites
