@@ -3,6 +3,7 @@ import type { RunPersonaOverride, RunPipelineProvenance, RunReceiptAutonomyEnfor
 import type { EvalCommandPhase, EvalFailureClass, EvalRunRecord } from "../eval/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { RunEscalationCounts } from "./provenance.js";
+import type { CanonicalTrustStatus } from "./trust-status.js";
 
 export const EVIDENCE_VERSION = 1;
 
@@ -131,12 +132,37 @@ export interface EvidenceBuildResult {
 	directory: string;
 	overview: EvidenceOverview;
 	findings: EvidenceFinding[];
+	trustStatus: EvidenceTrustStatusFile;
 }
 
 export interface EvidenceInspectable {
 	overview: EvidenceOverview;
 	findings: EvidenceFinding[];
+	trustStatus: EvidenceTrustStatusView;
 }
+
+export interface EvidenceRunTrustStatus {
+	runId: string;
+	status: CanonicalTrustStatus;
+}
+
+/** Canonical per-run projection persisted by current evidence builders. */
+export interface EvidenceTrustStatusFile {
+	version: 1;
+	evidenceId: string;
+	projection: "canonical";
+	runs: EvidenceRunTrustStatus[];
+}
+
+/** Explicit compatibility result for a bundle built before the projection existed. */
+export interface HistoricalEvidenceTrustStatus {
+	version: 1;
+	evidenceId: string;
+	projection: "historical_format";
+	runs: [];
+}
+
+export type EvidenceTrustStatusView = EvidenceTrustStatusFile | HistoricalEvidenceTrustStatus;
 
 export interface EvidenceRunSource {
 	envelope: RunEnvelope;

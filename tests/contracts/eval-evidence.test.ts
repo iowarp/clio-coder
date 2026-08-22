@@ -1,8 +1,11 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { EvalRunArtifact } from "../../src/domains/eval/types.js";
 import { buildEvalEvidence } from "../../src/domains/evidence/eval.js";
 
@@ -79,7 +82,7 @@ describe("contracts/eval evidence linking", () => {
 			mkdirSync(join(stateDir, "sessions", "hash", "session-nested"), { recursive: true });
 			mkdirSync(cwd, { recursive: true });
 
-			const run = {
+			const run: RunEnvelope = {
 				id: "run-nested",
 				agentId: "coder",
 				executionRole: "builder",
@@ -102,27 +105,78 @@ describe("contracts/eval evidence linking", () => {
 				tokenCount: 42,
 				costUsd: 0.001,
 			};
-			writeFileSync(join(stateDir, "runs.json"), `${JSON.stringify([run], null, 2)}\n`);
-			writeFileSync(
-				receiptPath,
-				`${JSON.stringify(
-					{
-						...run,
-						runId: run.id,
-						compiledPromptHash: null,
-						staticCompositionHash: null,
-						clioVersion: "test",
-						piMonoVersion: "test",
-						platform: process.platform,
-						nodeVersion: process.version,
-						toolCalls: 1,
-						toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 12 }],
-						sessionId: "session-nested",
-						integrity: { version: 3, algorithm: "sha256", digest: "fixture" },
+			const receiptDraft: RunReceiptDraft = {
+				runId: run.id,
+				agentId: run.agentId,
+				executionRole: run.executionRole,
+				task: run.task,
+				targetId: run.targetId,
+				wireModelId: run.wireModelId,
+				runtimeId: run.runtimeId,
+				runtimeKind: run.runtimeKind,
+				startedAt: run.startedAt,
+				endedAt: run.endedAt ?? run.startedAt,
+				outcome: "succeeded",
+				exitCode: 0,
+				tokenCount: run.tokenCount,
+				costUsd: run.costUsd,
+				costProvenance: "unknown",
+				compiledPromptHash: null,
+				staticCompositionHash: null,
+				clioVersion: "test",
+				piMonoVersion: "test",
+				platform: process.platform,
+				nodeVersion: process.version,
+				toolCalls: 1,
+				toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 12 }],
+				toolActivity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false },
+				verification: { state: "unverified", basis: "no-validation-tool" },
+				routingIntent: {
+					posture: "balanced",
+					maxCostUsd: null,
+					deadlineMs: null,
+					minimumQuality: null,
+					requiredCapabilities: [],
+					locality: "any",
+					failover: "none",
+				},
+				quality: {
+					version: 1,
+					typedValidations: [],
+					responseSchema: {
+						sourceId: null,
+						schemaDigest: null,
+						runtimeEnforceable: false,
+						enforcementPassed: null,
 					},
-					null,
-					2,
-				)}\n`,
+					resultContract: null,
+				},
+				sessionId: "session-nested",
+			};
+			const receipt = withReceiptIntegrity(receiptDraft, run);
+			writeFileSync(join(stateDir, "runs.json"), `${JSON.stringify([run], null, 2)}\n`);
+			writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+			const gate = materializePendingGateDecision(
+				stagePendingGateDecision(
+					{
+						group: "eval-review",
+						topology: "review",
+						cycle: 1,
+						outcome: "pass",
+						subjects: [{ runId: run.id, digest: receipt.integrity.digest }],
+						decider: { runId: "reviewer-eval", digest: "d".repeat(64) },
+						correlation: {
+							agent: false,
+							target: true,
+							modelFamily: false,
+							runtime: true,
+							node: true,
+							independent: true,
+						},
+						createdAt: "2026-07-01T10:02:00.000Z",
+					},
+					{ stateDir },
+				),
 			);
 			writeFileSync(
 				join(stateDir, "sessions", "hash", "session-nested", "current.jsonl"),
@@ -167,6 +221,39 @@ describe("contracts/eval evidence linking", () => {
 			};
 			strictEqual(receiptFile.receipts.length, 1);
 			ok(!result.overview.modelIds.includes("none"));
+			deepStrictEqual(JSON.parse(readFileSync(join(result.directory, "trust-status.json"), "utf8")), result.trustStatus);
+			const status = result.trustStatus.runs[0]?.status;
+			if (status === undefined) throw new Error("eval trust status missing linked run");
+			strictEqual(status.artifactIntegrity.state, "verified");
+			strictEqual(status.validationGrounding.state, "validated");
+			if (status.validationGrounding.state === "validated") {
+				deepStrictEqual(status.validationGrounding.authority, { kind: "clio", id: "evidence-grounding" });
+				ok(
+					status.validationGrounding.artifacts.some(
+						(reference) => reference.kind === "session_entry" && reference.id === "turn-1",
+					),
+				);
+			}
+			strictEqual(status.independentReview.state, "passed");
+			if (status.independentReview.state === "passed") {
+				deepStrictEqual(status.independentReview.authority, { kind: "reviewer", id: "reviewer-eval" });
+				deepStrictEqual(status.independentReview.artifacts, [
+					{
+						kind: "gate_decision",
+						id: gate.artifact.id,
+						digest: { algorithm: "sha256", value: gate.artifact.integrity.digest },
+					},
+				]);
+			}
+			strictEqual(status.completionEvidence.state, "evidenced");
+			if (status.completionEvidence.state === "evidenced") {
+				deepStrictEqual(status.completionEvidence.source, { kind: "finish_contract", id: "audit-1" });
+				deepStrictEqual(status.completionEvidence.authority, { kind: "clio", id: "finish-contract" });
+				deepStrictEqual(status.completionEvidence.artifacts, [
+					{ kind: "finish_contract_evidence", id: "audit-1" },
+					{ kind: "session_entry", id: "turn-1" },
+				]);
+			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

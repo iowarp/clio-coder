@@ -1,7 +1,8 @@
 import type { GateDecisionArtifact, GateDecisionVerification } from "../dispatch/gate-decisions.js";
-import type { ReceiptIntegrityResult } from "../dispatch/receipt-integrity.js";
+import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
 import type {
 	RunBriefingProvenance,
+	RunEnvelope,
 	RunProjectContextProvenance,
 	RunReceipt,
 	RunReceiptQuality,
@@ -551,7 +552,11 @@ export function adaptRunReceiptValidationStatus(
 	if (qualityHasFailure(receipt.quality)) {
 		return attributed("failed", receiptSource(receipt), { kind: "validator", id: "receipt-quality" }, artifacts);
 	}
-	if ((receipt.validationGrounding?.ungrounded.length ?? 0) > 0) {
+	if (
+		(receipt.validationGrounding?.ungrounded.length ?? 0) > 0 ||
+		(receipt.validationGrounding !== undefined &&
+			receipt.validationGrounding.claimed > receipt.validationGrounding.grounded)
+	) {
 		return attributed("ungrounded", receiptSource(receipt), { kind: "validator", id: "command-grounding" }, artifacts);
 	}
 	if (qualityHasValidation(receipt.quality)) {
@@ -641,21 +646,111 @@ export interface AdaptRunReceiptTrustOptions {
 	integrity?: ReceiptIntegrityResult;
 }
 
+function receiptClaimsAreAuthenticated(
+	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+	integrity: ReceiptIntegrityResult | undefined,
+): boolean {
+	return receipt?.integrity !== undefined && integrity?.ok === true;
+}
+
+function unauthenticatedReceiptProjection(
+	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+): TrustStatusProjection {
+	if (receipt === null || receipt === undefined) {
+		return {
+			validationGrounding: absentTrustStatus("artifact_missing"),
+			contextProvenance: absentTrustStatus("artifact_missing"),
+			autonomyEnforcement: absentTrustStatus("artifact_missing"),
+		};
+	}
+	if (receipt.integrity === undefined) {
+		const artifacts = [receiptReference(receipt)];
+		return {
+			validationGrounding: attributed(
+				"unknown",
+				compatibilitySource(receipt, "canonical-projection"),
+				COMPATIBILITY_AUTHORITY,
+				artifacts,
+			),
+			contextProvenance: attributed(
+				"unknown",
+				compatibilitySource(receipt, "canonical-projection"),
+				COMPATIBILITY_AUTHORITY,
+				artifacts,
+			),
+			autonomyEnforcement: attributed(
+				"unknown",
+				compatibilitySource(receipt, "canonical-projection"),
+				COMPATIBILITY_AUTHORITY,
+				artifacts,
+			),
+		};
+	}
+	// The artifact-integrity axis retains the failure diagnostic. No other
+	// axis reads a field from a receipt that failed authentication.
+	return {
+		validationGrounding: absentTrustStatus("not_observed"),
+		contextProvenance: absentTrustStatus("not_observed"),
+		autonomyEnforcement: absentTrustStatus("not_observed"),
+	};
+}
+
 /** Build the receipt-owned projection. Gate and finish facts remain absent until explicitly composed. */
 export function adaptRunReceiptTrustStatus(
 	receipt: PersistedRunReceiptTrustFacts | null | undefined,
 	options: AdaptRunReceiptTrustOptions = {},
 ): CanonicalTrustStatus {
+	const authenticated = receiptClaimsAreAuthenticated(receipt, options.integrity);
+	const receiptProjection = authenticated
+		? {
+				validationGrounding: adaptRunReceiptValidationStatus(receipt),
+				contextProvenance: adaptRunReceiptContextStatus(receipt),
+				autonomyEnforcement: adaptRunReceiptAutonomyStatus(receipt),
+			}
+		: unauthenticatedReceiptProjection(receipt);
 	return composeTrustStatus({
 		artifactIntegrity: adaptReceiptIntegrityStatus(receipt, options.integrity),
-		validationGrounding: adaptRunReceiptValidationStatus(receipt),
+		...receiptProjection,
 		independentReview: absentTrustStatus(receipt === null || receipt === undefined ? "artifact_missing" : "not_recorded"),
-		contextProvenance: adaptRunReceiptContextStatus(receipt),
-		autonomyEnforcement: adaptRunReceiptAutonomyStatus(receipt),
 		completionEvidence: absentTrustStatus(
 			receipt === null || receipt === undefined ? "artifact_missing" : "not_recorded",
 		),
 	});
+}
+
+export interface RunReceiptTrustInspection {
+	integrity: ReceiptIntegrityResult;
+	status: CanonicalTrustStatus;
+}
+
+/**
+ * Inspect a receipt and ledger envelope through one pure authentication and
+ * projection boundary. Callers retain the integrity result as the diagnostic
+ * and consume `status` for every trust-bearing presentation.
+ */
+export function inspectRunReceiptTrustStatus(
+	receipt: RunReceipt | null | undefined,
+	envelope: RunEnvelope | null | undefined,
+): RunReceiptTrustInspection {
+	let integrity: ReceiptIntegrityResult;
+	if (receipt === null || receipt === undefined) {
+		integrity = { ok: false, reason: "receipt unavailable" };
+	} else if (envelope === null || envelope === undefined) {
+		integrity = { ok: false, reason: "run ledger envelope unavailable" };
+	} else {
+		try {
+			integrity = verifyReceiptIntegrity(receipt, envelope);
+		} catch (error) {
+			integrity = {
+				ok: false,
+				reason: `receipt invalid: ${error instanceof Error ? error.message : String(error)}`,
+			};
+		}
+	}
+	return {
+		integrity,
+		status: adaptRunReceiptTrustStatus(receipt, { integrity }),
+	};
 }
 
 function gateReference(artifact: GateDecisionArtifact): TrustArtifactReference {
@@ -715,6 +810,24 @@ export interface EvidenceFindingsTrustInput {
 	findings: ReadonlyArray<EvidenceFinding>;
 }
 
+export interface GroundedEvidenceValidationInput {
+	evidenceId: string;
+	runId: string;
+	artifacts?: ReadonlyArray<TrustArtifactReference>;
+}
+
+/** Project validation that the evidence linker grounded in an executed artifact. */
+export function adaptGroundedEvidenceValidationStatus(
+	input: GroundedEvidenceValidationInput,
+): ValidationGroundingStatus {
+	return attributed(
+		"validated",
+		{ kind: "evidence_bundle", id: `${input.evidenceId}:${input.runId}` },
+		{ kind: "clio", id: "evidence-grounding" },
+		uniqueBoundedReferences([{ kind: "evidence_bundle", id: input.evidenceId }, ...(input.artifacts ?? [])]),
+	);
+}
+
 /** Evidence findings can expose negative or missing validation, but their absence cannot create a pass. */
 export function adaptEvidenceFindingsValidationStatus(input: EvidenceFindingsTrustInput): ValidationGroundingStatus {
 	const source: TrustStatusSource = { kind: "evidence_bundle", id: input.evidenceId };
@@ -746,15 +859,24 @@ export function adaptEvidenceLinkContextStatus(
 	);
 }
 
+export interface AdaptFinishContractTrustOptions {
+	sourceId?: string;
+	artifacts?: ReadonlyArray<TrustArtifactReference>;
+}
+
 /** Map the live finish contract onto completion evidence without inferring completion from autonomy. */
-export function adaptFinishContractCompletionStatus(assessment: FinishContractAssessment): CompletionEvidenceStatus {
+export function adaptFinishContractCompletionStatus(
+	assessment: FinishContractAssessment,
+	options: AdaptFinishContractTrustOptions = {},
+): CompletionEvidenceStatus {
 	const artifacts = uniqueBoundedReferences(
-		assessment.evidence.map((evidence, index) => ({
-			kind: evidence.turnId === undefined ? "finish_contract_evidence" : "session_entry",
-			id: evidence.turnId ?? `${evidence.kind}:${index + 1}`,
-		})),
+		options.artifacts ??
+			assessment.evidence.map((evidence, index) => ({
+				kind: evidence.turnId === undefined ? "finish_contract_evidence" : "session_entry",
+				id: evidence.turnId ?? `${evidence.kind}:${index + 1}`,
+			})),
 	);
-	const source: TrustStatusSource = { kind: "finish_contract", id: assessment.reason };
+	const source: TrustStatusSource = { kind: "finish_contract", id: options.sourceId ?? assessment.reason };
 	const authority: TrustStatusAuthority = { kind: "clio", id: "finish-contract" };
 	if (assessment.reason === "no_mutation") return attributed("not_applicable", source, authority, artifacts);
 	if (assessment.reason === "validation_evidence") return attributed("evidenced", source, authority, artifacts);

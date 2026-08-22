@@ -4,13 +4,18 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
-import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import {
 	isTerminalRunEnvelope,
 	type RunEnvelope,
 	type RunReceipt,
 	type RunReceiptVerification,
 } from "../domains/dispatch/types.js";
+import {
+	adaptRunReceiptTrustStatus,
+	type CanonicalTrustStatus,
+	inspectRunReceiptTrustStatus,
+} from "../domains/evidence/trust-status.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import { monitorToolSurface } from "./monitor-surface.js";
@@ -333,14 +338,18 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 	const body = truncateUtf8(raw, RECEIPT_MAX_BYTES, `\n[receipt truncated; read ${run.receiptPath} for the rest]`);
 	let receipt: RunReceipt | null = null;
 	let receiptIntegrity: ReceiptIntegrityResult;
+	let trustStatus: CanonicalTrustStatus;
 	try {
 		receipt = JSON.parse(raw) as RunReceipt;
-		receiptIntegrity = verifyReceiptIntegrity(receipt, run);
+		const inspection = inspectRunReceiptTrustStatus(receipt, run);
+		receiptIntegrity = inspection.integrity;
+		trustStatus = inspection.status;
 	} catch (err) {
 		receiptIntegrity = {
 			ok: false,
 			reason: `receipt invalid: ${err instanceof Error ? err.message : String(err)}`,
 		};
+		trustStatus = adaptRunReceiptTrustStatus(null, { integrity: receiptIntegrity });
 	}
 	return {
 		kind: "ok",
@@ -350,6 +359,7 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 			runId,
 			receiptPath: run.receiptPath,
 			receiptIntegrity,
+			trustStatus,
 			...(receipt !== null && receiptIntegrity.ok
 				? {
 						evidenceVerification: receipt.verification,
@@ -366,6 +376,7 @@ interface DurableRunEvidence {
 	output: RunReceipt["output"] | null;
 	verification: RunReceiptVerification;
 	integrity: ReceiptIntegrityResult;
+	trustStatus: CanonicalTrustStatus;
 	integrityNote: string | null;
 	integrityFailure: boolean;
 }
@@ -376,6 +387,7 @@ function unavailableRunEvidence(reason: string, note: string, integrityFailure =
 		output: null,
 		verification: UNVERIFIABLE_RECEIPT_VERIFICATION,
 		integrity: { ok: false, reason },
+		trustStatus: adaptRunReceiptTrustStatus(null, { integrity: { ok: false, reason } }),
 		integrityNote: note,
 		integrityFailure,
 	};
@@ -410,29 +422,24 @@ function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
 			`receipt integrity unavailable: cannot read or parse ${run.receiptPath} (${detail}); worker text is unavailable and validation is unknown.`,
 		);
 	}
-	let integrity: ReceiptIntegrityResult;
-	try {
-		integrity = verifyReceiptIntegrity(receipt, run);
-	} catch (err) {
-		const detail = err instanceof Error ? err.message : String(err);
-		return unavailableRunEvidence(
-			`receipt invalid: ${detail}`,
-			`receipt integrity failed: invalid receipt (${detail}); worker text is withheld as untrusted and validation is unknown.`,
-			true,
-		);
-	}
+	const inspection = inspectRunReceiptTrustStatus(receipt, run);
+	const integrity = inspection.integrity;
 	if (!integrity.ok) {
-		return unavailableRunEvidence(
-			integrity.reason,
-			`receipt integrity failed: ${integrity.reason}; worker text is withheld as untrusted and validation is unknown.`,
-			true,
-		);
+		return {
+			...unavailableRunEvidence(
+				integrity.reason,
+				`receipt integrity failed: ${integrity.reason}; worker text is withheld as untrusted and validation is unknown.`,
+				true,
+			),
+			trustStatus: inspection.status,
+		};
 	}
 	return {
 		receipt,
 		output: receipt.output ?? null,
 		verification: receipt.verification,
 		integrity,
+		trustStatus: inspection.status,
 		integrityNote: null,
 		integrityFailure: false,
 	};
@@ -534,7 +541,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 		);
 	}
 	if (row.evidence.integrityNote) lines.push(`  ${row.evidence.integrityNote}`);
-	lines.push(`  ${workerTextLabel(row.evidence.verification)}`);
+	lines.push(`  ${workerTextLabel(row.evidence.trustStatus)}`);
 	const output = row.evidence.output;
 	if (output) {
 		const capped = truncateUtf8(output.text, COLLECT_TEXT_BYTES, "...");
@@ -543,7 +550,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));
 		if (row.evidence.receipt) {
 			lines.push(
-				...workerTextNonEvidenceNotices(row.evidence.receipt, row.evidence.verification, output.text).map(
+				...workerTextNonEvidenceNotices(row.evidence.receipt, row.evidence.trustStatus, output.text).map(
 					(notice) => `  ${notice}`,
 				),
 			);
@@ -693,6 +700,7 @@ async function runCollect(
 					exitCode: row.run?.exitCode ?? null,
 					receiptPath: row.run?.receiptPath ?? null,
 					receiptIntegrity: row.evidence.integrity,
+					trustStatus: row.evidence.trustStatus,
 					evidenceVerification: row.evidence.verification,
 					briefing: row.evidence.receipt?.briefing ?? null,
 					projectContext: row.evidence.receipt?.projectContext ?? null,

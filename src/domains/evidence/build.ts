@@ -10,12 +10,7 @@ import type {
 	RunStatus,
 	ToolCallStat,
 } from "../dispatch/index.js";
-import {
-	type ExecutionRole,
-	isExecutionRole,
-	readGateDecisionArtifactsForRunIds,
-	verifyReceiptIntegrity,
-} from "../dispatch/index.js";
+import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
 	type AuditJsonRow,
@@ -31,7 +26,10 @@ import {
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
+import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
+import type { TrustArtifactReference } from "./trust-status.js";
+import { inspectRunReceiptTrustStatus } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
@@ -48,6 +46,7 @@ import {
 	type EvidenceRunSource,
 	type EvidenceTag,
 	type EvidenceToolEvent,
+	type EvidenceTrustStatusFile,
 } from "./types.js";
 
 const MAX_TASK_CHARS = 500;
@@ -153,7 +152,15 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	const auditLinks = await linkAuditRows(options.stateDir, source, runSources, sessionLinks);
 	const toolEventRows = toolEvents(runSources, sessionLinks, auditLinks);
 	const protectedArtifactsRaw = protectedArtifactsFile(sessionLinks);
-	const findings = buildFindings(runSources, sessionLinks, auditLinks, protectedArtifactsRaw);
+	const validationEvidence = validationEvidenceByRun(sessionLinks.entries, runSources);
+	const trustStatusRaw = buildEvidenceTrustStatusFile({
+		evidenceId,
+		runSources,
+		gateDecisions: gateDecisions.decisions,
+		auditRows: auditLinks.rows,
+		validationEvidence,
+	});
+	const findings = buildFindings(runSources, trustStatusRaw, sessionLinks, auditLinks, protectedArtifactsRaw);
 	// Export-boundary redaction (cold path): secret-shaped values are scrubbed
 	// from everything the bundle serializes: envelopes, receipts (including
 	// delegation toolCallLog arguments), tool-event previews, audit rows,
@@ -176,6 +183,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		readErrors: auditLinks.readErrors,
 	};
 	const protectedArtifacts = redactSecretsDeep(protectedArtifactsRaw, tally);
+	const trustStatus = redactSecretsDeep(trustStatusRaw, tally);
 	const overview = buildOverview(
 		evidenceId,
 		source,
@@ -197,10 +205,11 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		redactedAuditLinks,
 		redactedToolEvents,
 		gateDecisions,
+		trustStatus,
 		protectedArtifacts,
 		transcript,
 	);
-	return { evidenceId, directory, overview: finalOverview, findings };
+	return { evidenceId, directory, overview: finalOverview, findings, trustStatus };
 }
 
 function buildOverview(
@@ -264,18 +273,24 @@ function buildOverview(
 
 function buildFindings(
 	runSources: ReadonlyArray<EvidenceRunSource>,
+	trustStatus: EvidenceTrustStatusFile,
 	sessionLinks: SessionLinkResult,
 	auditLinks: AuditLinkResult,
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 ): EvidenceFinding[] {
 	const findings: EvidenceFinding[] = [];
-	const validationRunIds = validationEvidenceRunIds(sessionLinks.entries, runSources, auditLinks.rows);
+	const trustByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
 	for (const source of runSources) {
+		const status = trustByRun.get(source.envelope.id);
+		if (status === undefined) throw new Error(`canonical trust status missing for run ${source.envelope.id}`);
 		if (source.receiptError !== null) {
 			const tag = source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
 			findings.push(finding(findings.length, "warn", tag, source.envelope.id, source.receiptError));
 		}
-		if (isSuccessfulRun(source) && !validationRunIds.has(source.envelope.id)) {
+		if (
+			isSuccessfulRun(source) &&
+			(status.validationGrounding.state === "absent" || status.validationGrounding.state === "unknown")
+		) {
 			findings.push(
 				finding(
 					findings.length,
@@ -286,10 +301,21 @@ function buildFindings(
 				),
 			);
 		}
+		if (status.validationGrounding.state === "ungrounded") {
+			findings.push(
+				finding(
+					findings.length,
+					"warn",
+					"proxy-validation",
+					source.envelope.id,
+					"run claimed validation that was not grounded in an observed execution",
+				),
+			);
+		}
 		if (source.envelope.cwd.trim().length === 0) {
 			findings.push(finding(findings.length, "warn", "cwd-missing", source.envelope.id, "run ledger cwd is empty"));
 		}
-		const receipt = source.receipt;
+		const receipt = authenticatedReceipt(source);
 		const blocked = receipt?.toolStats.reduce((total, stat) => total + stat.blocked, 0) ?? 0;
 		if (blocked > 0) {
 			findings.push(
@@ -311,15 +337,17 @@ function buildFindings(
 				),
 			);
 		}
-		const autonomyEnforcement = receipt?.autonomyEnforcement;
-		if (autonomyEnforcement?.dangerousBypass === true) {
+		if (status.autonomyEnforcement.state === "bypassed") {
 			const message =
-				autonomyEnforcement.externalMode === "agent-managed"
+				status.autonomyEnforcement.authority.id === "agent-managed"
 					? "run used external agent-managed governance; Clio safety blocks were not enforced"
 					: "run executed with external permission bypass (CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced";
 			findings.push(finding(findings.length, "warn", "external-bypass", source.envelope.id, message));
-		} else if (autonomyEnforcement?.grade === "approximated") {
-			const mode = autonomyEnforcement.externalMode ? ` via ${autonomyEnforcement.externalMode}` : "";
+		} else if (status.autonomyEnforcement.state === "approximated") {
+			const mode =
+				status.autonomyEnforcement.authority.id === "external-runtime"
+					? ""
+					: ` via ${status.autonomyEnforcement.authority.id}`;
 			findings.push(
 				finding(
 					findings.length,
@@ -410,25 +438,28 @@ function buildFindings(
 interface ValidationToolCallCandidate {
 	toolCallId: string;
 	runId: string | null;
+	artifact: TrustArtifactReference;
 }
 
-function validationEvidenceRunIds(
+function validationEvidenceByRun(
 	entries: ReadonlyArray<LinkedSessionEntry>,
 	runSources: ReadonlyArray<EvidenceRunSource>,
-	auditRows: ReadonlyArray<EvidenceAuditLinkedRow>,
-): Set<string> {
-	const runIds = new Set<string>();
-	const sourceRunIds = new Set(runSources.map((source) => source.envelope.id));
+): Map<string, TrustArtifactReference[]> {
+	const evidence = new Map<string, TrustArtifactReference[]>();
 	const calls = new Map<string, ValidationToolCallCandidate>();
 	for (const linked of entries) {
 		const runId = validationRunIdFor(linked, runSources);
 		const entry = linked.entry;
 		if (entry.kind === "bashExecution") {
-			if (runId !== null && isSuccessfulValidationBashExecution(entry)) runIds.add(runId);
+			if (runId !== null && isSuccessfulValidationBashExecution(entry)) {
+				addValidationEvidence(evidence, runId, { kind: "session_entry", id: entry.turnId });
+			}
 			continue;
 		}
 		if (entry.kind === "protectedArtifact") {
-			if (runId !== null && isValidationProtectedArtifact(entry)) runIds.add(runId);
+			if (runId !== null && isValidationProtectedArtifact(entry)) {
+				addValidationEvidence(evidence, runId, { kind: "session_entry", id: entry.turnId });
+			}
 			continue;
 		}
 		if (entry.kind !== "message") continue;
@@ -441,16 +472,21 @@ function validationEvidenceRunIds(
 		const result = extractSessionToolResult(entry, linked);
 		if (result.id === null || !isSuccessfulSessionToolResult(result)) continue;
 		const candidate = calls.get(result.id);
-		if (candidate?.runId !== null && candidate?.runId !== undefined) runIds.add(candidate.runId);
+		if (candidate?.runId !== null && candidate?.runId !== undefined) {
+			addValidationEvidence(evidence, candidate.runId, candidate.artifact);
+		}
 	}
-	for (const linked of auditRows) {
-		if (linked.auditKind !== "completion_contract") continue;
-		if (linked.runId === null || !sourceRunIds.has(linked.runId)) continue;
-		if (readOptionalString(linked.row.decision) !== "ok") continue;
-		if (readOptionalString(linked.row.reason) !== "validation_evidence") continue;
-		runIds.add(linked.runId);
-	}
-	return runIds;
+	return evidence;
+}
+
+function addValidationEvidence(
+	evidence: Map<string, TrustArtifactReference[]>,
+	runId: string,
+	reference: TrustArtifactReference,
+): void {
+	const current = evidence.get(runId) ?? [];
+	current.push(reference);
+	evidence.set(runId, current);
 }
 
 function validationRunIdFor(linked: LinkedSessionEntry, runSources: ReadonlyArray<EvidenceRunSource>): string | null {
@@ -463,10 +499,17 @@ function validationRunIdFor(linked: LinkedSessionEntry, runSources: ReadonlyArra
 }
 
 function isSuccessfulRun(source: EvidenceRunSource): boolean {
-	const outcome = source.receipt?.outcome ?? source.envelope.outcome ?? null;
+	const receipt = authenticatedReceipt(source);
+	const outcome = receipt?.outcome ?? source.envelope.outcome ?? null;
 	if (outcome !== null) return outcome === "succeeded";
-	const exitCode = source.receipt?.exitCode ?? source.envelope.exitCode;
+	const exitCode = receipt?.exitCode ?? source.envelope.exitCode;
 	return source.envelope.status === "completed" && exitCode === 0;
+}
+
+function authenticatedReceipt(source: EvidenceRunSource): RunReceipt | null {
+	return source.receipt !== null && source.receiptError === null && !source.receiptIntegrityFailed
+		? source.receipt
+		: null;
 }
 
 function isSuccessfulValidationBashExecution(entry: BashExecutionEntry): boolean {
@@ -490,6 +533,7 @@ function validationToolCallCandidate(
 	return {
 		toolCallId: call.id,
 		runId: validationRunIdFor(linked, runSources),
+		artifact: { kind: "session_entry", id: entry.turnId },
 	};
 }
 
@@ -548,6 +592,7 @@ async function writeEvidenceFiles(
 	auditLinks: AuditLinkResult,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
 	gateDecisions: EvidenceGateDecisionsFile,
+	trustStatus: EvidenceTrustStatusFile,
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 	transcript?: string,
 ): Promise<void> {
@@ -564,6 +609,7 @@ async function writeEvidenceFiles(
 	await writeJsonl(join(directory, "audit-linked.jsonl"), auditLinks.rows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile(runSources));
 	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
+	await writeJson(join(directory, "trust-status.json"), trustStatus);
 	await writeJson(join(directory, "protected-artifacts.json"), protectedArtifacts);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
 	await writeFile(join(directory, "findings.md"), renderFindings(findings), "utf8");
@@ -1447,9 +1493,18 @@ async function readReceipt(
 		}
 		return { receipt: null, error: `receipt read error: ${err.message ?? String(err)}`, integrityFailed: false };
 	}
-	const parsed = parseJson(raw, receiptPath);
-	const receipt = parseRunReceipt(parsed, receiptPath);
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
+	let receipt: RunReceipt;
+	try {
+		const parsed = parseJson(raw, receiptPath);
+		receipt = parseRunReceipt(parsed, receiptPath);
+	} catch (error) {
+		return {
+			receipt: null,
+			error: `receipt invalid: ${error instanceof Error ? error.message : String(error)}`,
+			integrityFailed: true,
+		};
+	}
+	const integrity = inspectRunReceiptTrustStatus(receipt, envelope).integrity;
 	if (!integrity.ok) {
 		return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
 	}
