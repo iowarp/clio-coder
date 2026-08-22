@@ -23,6 +23,7 @@ import {
 	SYNTHETIC_CORPORA,
 	syntheticCorpus,
 } from "../../src/domains/context/working-set/replay/synthetic.js";
+import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 
 const OBSERVATION_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -153,6 +154,32 @@ describe("contracts/working-set synthetic corpus", () => {
 		);
 		// Without the model, the runner only records where the first summary would have run.
 		assert.equal(replayTrace(trace, nonePolicy, config("none", 64_000)).summaries, 0);
+	});
+
+	it("uses the live iterative boundary for every modeled summary cut", () => {
+		const spec = syntheticCorpus("science-long");
+		assert.ok(spec);
+		const summaries = { keepRecentTokens: 20_000, summaryTokens: 1_500 };
+		const replay = replayTrace(generateSyntheticTrace(spec, 0), resolveWorkingSetPolicy("structural-v1"), {
+			...config("structural-v1", 32_000),
+			summaries,
+		});
+		let previousCompactionIndex = -1;
+		let checked = 0;
+		for (let index = 0; index < replay.entries.length; index += 1) {
+			const entry = replay.entries[index];
+			if (entry?.kind !== "compactionSummary") continue;
+			const boundaryStart = previousCompactionIndex + 1;
+			const input = replay.entries.slice(0, index);
+			const cut = findCutPoint(input, summaries.keepRecentTokens, { startIndex: boundaryStart });
+			assert.ok(cut.firstKeptEntryIndex > boundaryStart);
+			assert.equal(entry.firstKeptTurnId, input[cut.firstKeptEntryIndex]?.turnId);
+			assert.equal(entry.parentTurnId, entry.firstKeptTurnId);
+			previousCompactionIndex = index;
+			checked += 1;
+		}
+		assert.ok(checked > 2, `expected repeated summaries, got ${checked}`);
+		assert.equal(checked, replay.summaries);
 	});
 
 	it("prices the cold prefix and the recall bill from the events that cause them", () => {

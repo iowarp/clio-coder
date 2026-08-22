@@ -50,7 +50,11 @@ const WORKING_SET_HELP = `Usage:
 Print the durable working-set fold and path-index summary for one Clio session.
 `;
 
-/** Stand-in size of a summary paraphrase in the modeled summary stage. */
+/**
+ * Conservative stand-in for replay's summary paraphrase. Five recorded local
+ * compactions price at 405, 405, 968, 981, and 1,124 tokens; 1,500 sits above
+ * that observed range. The replay README records the sample and sensitivity.
+ */
 const REPLAY_SUMMARY_TOKENS = 1_500;
 
 const POLICY_IDS = ["none", "random", "age-horizon", "structural-v1", "oracle"] as const;
