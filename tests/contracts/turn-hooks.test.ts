@@ -1095,6 +1095,9 @@ describe("contracts/turn-hooks stalled-turn nudge", () => {
 			"Let me start by formatting the changed files.",
 			"I'll be searching the transcript for the stall.",
 			"Let me start by applying the patch to the middleware.",
+			"I'm going to grep for the symbol first.",
+			"Let me look at the failing test:",
+			"I'll look into the flaky shard.",
 		]) {
 			strictEqual(effectsFor(text).length, 1, text);
 		}
@@ -1137,9 +1140,17 @@ describe("contracts/turn-hooks stalled-turn nudge", () => {
 			"I'll get moving.",
 			"I'll think about the design.",
 			"Tell me which file to open and I'll take it from there.",
+			// A clause that opens by deferring is a wait statement, whatever
+			// path or verb it goes on to name.
+			"I'll wait for your go-ahead before I touch src/cli/index.ts.",
+			"I'll hold off until you confirm the target in settings.yaml.",
+			"Let me just wait for you to run npm run ci on your side.",
 		]) {
 			strictEqual(effectsFor(text).length, 0, text);
 		}
+		// Deferral is read at the head of the announced clause only: an action
+		// that merely ends in waiting is still an action.
+		strictEqual(effectsFor("I'll run the tests and wait for the results.").length, 1);
 	});
 
 	it("only fires on absent or normal stop reasons", () => {

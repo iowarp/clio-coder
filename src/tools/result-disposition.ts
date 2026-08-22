@@ -22,12 +22,24 @@ export interface ToolResultPresentationDisposition extends ToolPresentationPolic
 }
 
 /**
+ * Why a disposition is not the one the tool asked for. Today the only cause is
+ * a throwing `resolveResultDisposition`: the registry then fails closed to
+ * metadata-only, and this record is what keeps that narrowing visible to the
+ * operator and the model instead of reading as a deliberate request.
+ */
+export interface ToolResultDispositionFallback {
+	reason: "resolver-error";
+	message: string;
+}
+
+/**
  * The canonical tool-result disposition vocabulary. Presentation controls the
  * operator surface; context independently controls what the model receives.
  */
 export interface ToolResultDisposition {
 	presentation: ToolResultPresentationDisposition;
 	context: ToolResultContextDisposition;
+	fallback?: ToolResultDispositionFallback;
 }
 
 export type AppliedToolResultContextMode = ToolResultContextDisposition["mode"];
@@ -64,11 +76,13 @@ export interface ToolResultDispositionMetadata {
 	offloadPath?: string;
 	retrieval: string;
 	summaryProvenance?: ToolResultSummaryProvenance;
+	fallback?: ToolResultDispositionFallback;
 }
 
 export interface NormalizedToolResultDisposition {
 	presentation: ToolResultPresentationDisposition & { maxBytes: number };
 	context: ToolResultContextDisposition & { maxBytes: number };
+	fallback?: ToolResultDispositionFallback;
 }
 
 export interface ToolResultContextProjection {
@@ -144,6 +158,7 @@ export function normalizeToolResultDisposition(
 			...(declared.presentation.overflow === undefined ? {} : { overflow: declared.presentation.overflow }),
 		},
 		context: { ...declared.context, maxBytes: contextCap },
+		...(declared.fallback === undefined ? {} : { fallback: declared.fallback }),
 	};
 }
 
@@ -303,7 +318,9 @@ export function deterministicDiagnosticSummary(
 	const safeText = redact ? redactSecretsText(text, tally) : text;
 	const lines = normalizeNewlines(safeText).split("\n");
 	const nonempty = lines.map((line, index) => ({ line: line.trim(), index })).filter((entry) => entry.line.length > 0);
-	if (nonempty.length === 0) return { text: "", redactions: tally.count, complete: false };
+	// Whitespace-only output carries no content to omit, so dropping it is
+	// exactly the whitespace-only difference the completeness contract ignores.
+	if (nonempty.length === 0) return { text: "", redactions: tally.count, complete: tally.count === 0 };
 	if (nonempty.length === 1) {
 		const only = nonempty[0]?.line ?? "";
 		return {
@@ -378,6 +395,9 @@ function contextHeader(
 	];
 	if (provenance !== undefined) {
 		lines.push(`summary=code/${provenance.algorithm} sha256=${provenance.sourceSha256} lines=${provenance.sourceLines}`);
+	}
+	if (input.disposition.fallback !== undefined) {
+		lines.push(`fallback=${input.disposition.fallback.reason} ${JSON.stringify(input.disposition.fallback.message)}`);
 	}
 	const facts = essentialFacts(input.details);
 	if (facts !== null) lines.push(`facts=${stableJson(facts)}`);

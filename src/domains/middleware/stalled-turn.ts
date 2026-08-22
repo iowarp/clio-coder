@@ -30,12 +30,14 @@ const CONCRETE_ACTION_STEMS = [
 	"find",
 	"fix",
 	"format",
+	"grep",
 	"implement",
 	"inspect",
 	"install",
 	"investigate",
 	"list",
 	"load",
+	"look",
 	"modify",
 	"open",
 	"patch",
@@ -110,6 +112,11 @@ const CONDITIONAL_INVITATION_PATTERN = /\b(?:ask|give|point|say|send|share|tell)
 const CONDITIONAL_OFFER_SUFFIX_PATTERN =
 	/\b(?:if\s+(?:needed|necessary|requested)\b|if\b[^.!?]*\byou\b|when(?:ever)?\s+you\b)/i;
 const LET_ME_KNOW_PATTERN = /\blet me know\b/i;
+// "I'll wait for your go-ahead before I touch src/cli/index.ts" names a path
+// and promises nothing now. A clause that opens by deferring is a wait
+// statement whatever it goes on to name, so it is read before any verb or
+// path inside it can count as an announcement.
+const DEFERRAL_LEAD_PATTERN = /^\s*(?:just\s+|simply\s+|now\s+)?(?:wait|hold\s+off|hold|stand\s+by|pause|defer)\b/i;
 const COMPLETION_PATTERN =
 	/^\s*(?:all\s+done|done|complete|completed|all\s+set)\b|^\s*(?:here(?:'s| is)\s+)?(?:a\s+)?summary\b|^\s*summary\s*:?$/i;
 
@@ -155,6 +162,7 @@ function announcesConcreteAction(sentence: string): boolean {
 			return false;
 		}
 		const clause = sentence.slice(intent.index + intent[0].length);
+		if (DEFERRAL_LEAD_PATTERN.test(clause)) return false;
 		if (hasActionWithObject(clause)) return true;
 		// A path or command is evidence of an immediate action only when the
 		// announcement itself is unconditional; "once package.json is updated"

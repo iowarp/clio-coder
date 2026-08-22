@@ -57,6 +57,7 @@ interface ReceiptFixtureOptions {
 	executionRole?: RunReceiptDraft["executionRole"];
 	autonomyEnforcement?: RunReceiptDraft["autonomyEnforcement"];
 	validationGrounding?: RunReceiptDraft["validationGrounding"];
+	sessionId?: string;
 }
 
 function sealedFixture(
@@ -109,7 +110,7 @@ function sealedFixture(
 		projectContext: { tier: "bounded", chars: 240, contentHash: DIGEST_B },
 		autonomyEnforcement: options.autonomyEnforcement ?? { grade: "mediated", autonomy: "auto-edit" },
 		...(options.validationGrounding === undefined ? {} : { validationGrounding: options.validationGrounding }),
-		sessionId: null,
+		sessionId: options.sessionId ?? null,
 	};
 	const envelope: RunEnvelope = {
 		id: runId,
@@ -131,7 +132,7 @@ function sealedFixture(
 		pid: null,
 		heartbeatAt: null,
 		receiptPath: null,
-		sessionId: null,
+		sessionId: options.sessionId ?? null,
 		cwd: "/tmp",
 		tokenCount: draft.tokenCount,
 		costUsd: draft.costUsd,
@@ -212,6 +213,31 @@ function writeGateDecision(root: string, runId: string, receipt: RunReceipt): Ga
 			{ stateDir },
 		),
 	).artifact;
+}
+
+/**
+ * An execution the session ledger itself observed: a validation command that
+ * ran and exited 0. This is the one input entitled to ground validation, and
+ * it is a different artifact from the receipt.
+ */
+function writeValidationSession(root: string, sessionId: string): void {
+	const sessionDir = join(root, "state", "sessions", "trust-cwd", sessionId);
+	mkdirSync(sessionDir, { recursive: true });
+	writeFileSync(
+		join(sessionDir, "current.jsonl"),
+		`${JSON.stringify({
+			kind: "bashExecution",
+			turnId: "turn-validation",
+			parentTurnId: null,
+			timestamp: "2026-08-21T10:00:00.500Z",
+			command: "npm test",
+			output: "ok",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		})}\n`,
+		"utf8",
+	);
 }
 
 function tamperReceipt(envelope: RunEnvelope): void {
@@ -521,6 +547,65 @@ describe("contracts/evidence canonical trust projection", () => {
 			strictEqual(forbidden.has(state), false, `${axis}=${state}`);
 		}
 		ok(result.findings.some((finding) => finding.tag === "receipt-integrity"));
+	});
+
+	it("grounds validation from the session ledger independently of receipt integrity", async () => {
+		// Receipt integrity and validation grounding are separate artifacts with
+		// separate authorities. A rejected receipt must not grant validation, and
+		// it must not erase validation the session ledger observed on its own,
+		// so the two axes are expected to disagree on a tampered run.
+		const results: Record<string, { integrity: string; grounding: string; artifacts: string[] }> = {};
+		for (const tampered of [false, true]) {
+			const root = scratchDir();
+			const runId = `session-grounded-${tampered ? "tampered" : "intact"}`;
+			const sessionId = `session-${runId}`;
+			const fixture = sealedFixture(runId, {
+				verification: { state: "unverified", basis: "no-validation-tool" },
+				sessionId,
+			});
+			persistFixture(root, fixture);
+			writeValidationSession(root, sessionId);
+			const stateDir = join(root, "state");
+			const envelope = JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8"))[0] as RunEnvelope;
+			if (tampered) tamperReceipt(envelope);
+			const result = await buildEvidence({ dataDir: join(root, "data"), stateDir, runId });
+			const status = result.trustStatus.runs[0]?.status;
+			if (status === undefined) throw new Error(`missing ${runId} status`);
+			results[runId] = {
+				integrity: status.artifactIntegrity.state,
+				grounding: status.validationGrounding.state,
+				artifacts:
+					status.validationGrounding.state === "absent" ? [] : status.validationGrounding.artifacts.map((a) => a.id),
+			};
+			if (status.validationGrounding.state !== "absent") {
+				deepStrictEqual(status.validationGrounding.source, {
+					kind: "evidence_bundle",
+					id: `${result.evidenceId}:${runId}`,
+				});
+			}
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "no-validation"),
+				false,
+				runId,
+			);
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "receipt-integrity"),
+				tampered,
+				runId,
+			);
+		}
+		deepStrictEqual(results, {
+			"session-grounded-intact": {
+				integrity: "verified",
+				grounding: "validated",
+				artifacts: [results["session-grounded-intact"]?.artifacts[0] ?? "", "turn-validation"],
+			},
+			"session-grounded-tampered": {
+				integrity: "failed",
+				grounding: "validated",
+				artifacts: [results["session-grounded-tampered"]?.artifacts[0] ?? "", "turn-validation"],
+			},
+		});
 	});
 
 	it("keeps building a bundle when an audit row carries blank optional identifiers", async () => {
