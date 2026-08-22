@@ -40,6 +40,8 @@ export interface SyntheticCorpusSpec {
 	files: number;
 	/** Probability that an episode returns to a focus set from an earlier episode. */
 	returnProbability: number;
+	/** Exponent of the file-rank power law; 1 is the log-uniform Zipf case. */
+	zipfExponent: number;
 	/** Relative weight of each episode script. */
 	scripts: { explore: number; implement: number; validate: number; analyze: number };
 	/** Lines per file, uniform in this range. */
@@ -57,6 +59,7 @@ export const SYNTHETIC_CORPORA: ReadonlyArray<SyntheticCorpusSpec> = [
 		turns: 300,
 		files: 48,
 		returnProbability: 0.3,
+		zipfExponent: 1,
 		scripts: { explore: 1, implement: 3, validate: 2, analyze: 2 },
 		fileLines: [12, 96],
 		simulationLines: [100, 2400],
@@ -69,6 +72,7 @@ export const SYNTHETIC_CORPORA: ReadonlyArray<SyntheticCorpusSpec> = [
 		turns: 200,
 		files: 64,
 		returnProbability: 0.4,
+		zipfExponent: 1,
 		scripts: { explore: 1, implement: 5, validate: 2, analyze: 0 },
 		fileLines: [16, 110],
 		simulationLines: [100, 400],
@@ -81,6 +85,7 @@ export const SYNTHETIC_CORPORA: ReadonlyArray<SyntheticCorpusSpec> = [
 		turns: 200,
 		files: 120,
 		returnProbability: 0.15,
+		zipfExponent: 1,
 		scripts: { explore: 4, implement: 1, validate: 1, analyze: 1 },
 		fileLines: [10, 64],
 		simulationLines: [100, 800],
@@ -103,9 +108,23 @@ function mulberry32(seed: number): () => number {
 	};
 }
 
+/** Sample zero-based rank from a bounded continuous power law. */
+function powerLawRank(size: number, exponent: number, draw: number): number {
+	const upper = size + 1;
+	const sample = exponent === 1 ? upper ** draw : (1 + draw * (upper ** (1 - exponent) - 1)) ** (1 / (1 - exponent));
+	return Math.min(size - 1, Math.max(0, Math.floor(sample) - 1));
+}
+
 const DIRECTORIES = ["src/sim", "src/io", "src/analysis", "src/mesh", "tests", "scripts", "configs"];
 const STEMS = ["solver", "reader", "writer", "grid", "field", "boundary", "stepper", "metrics", "plot", "checkpoint"];
 const EXTENSIONS = ["py", "py", "py", "c", "h", "yaml", "toml"];
+
+// A consumed listing must remain plausible under Clio's shipped per-turn
+// ceilings. At most 48 paths are sampled with 20-line reads, so the listing,
+// grep, and reads stay below the 192 KiB observation pool and the 60-call
+// backstop. Broad unconsumed listings still surface the full repository.
+const CONSUMED_LISTING_READ_LIMIT = 48;
+const CONSUMED_LISTING_SAMPLE_LINES = 20;
 
 interface RepoFile {
 	path: string;
@@ -257,14 +276,21 @@ export function generateSyntheticTrace(spec: SyntheticCorpusSpec, index: number)
 			version: 1,
 		});
 	}
-	/** Zipf over file rank: rank 0 is hot, the tail is cold. */
-	const zipf = (): RepoFile => repo[Math.min(repo.length - 1, Math.floor(repo.length ** rnd()) - 1)] as RepoFile;
+	/** Zipf over file rank: rank 0 is hot, and every tail rank is reachable. */
+	const zipf = (): RepoFile => repo[powerLawRank(repo.length, spec.zipfExponent, rnd())] as RepoFile;
 	const scriptNames = (Object.keys(spec.scripts) as Array<keyof typeof spec.scripts>).flatMap((name) =>
 		Array.from({ length: spec.scripts[name] }, () => name),
 	);
 	const history: RepoFile[][] = [];
+	let treeListings = 0;
 
 	const readWhole = (file: RepoFile): void => ledger.call("read", { path: file.path }, fileBody(file));
+	const readListingPath = (file: RepoFile): void =>
+		ledger.call(
+			"read",
+			{ path: file.path, offset: 1, limit: CONSUMED_LISTING_SAMPLE_LINES },
+			fileBody(file, 0, CONSUMED_LISTING_SAMPLE_LINES),
+		);
 	const readRange = (file: RepoFile): void => {
 		const limit = between(20, 80);
 		const offset = between(1, Math.max(1, file.lines - limit));
@@ -300,9 +326,15 @@ export function generateSyntheticTrace(spec: SyntheticCorpusSpec, index: number)
 				// root, exactly as the path index reads a real find/ls result.
 				const dir = pick(DIRECTORIES);
 				const tree = rnd() < 0.6;
-				const listed = tree
+				const discovered = tree
 					? repo.slice(0, between(24, repo.length))
 					: repo.filter((file) => file.path.startsWith(`${dir}/`));
+				// Every seventh tree listing is a bounded, fully consumed sample. The
+				// fixed cadence guarantees an evictable listing in every seed; short
+				// directory listings remain below the low-yield eviction floor.
+				const consumeListing = tree && treeListings % 7 === 0;
+				if (tree) treeListings += 1;
+				const listed = consumeListing ? repo.slice(0, CONSUMED_LISTING_READ_LIMIT) : discovered;
 				const root = tree ? "." : dir;
 				ledger.call(
 					rnd() < 0.5 ? "find" : "ls",
@@ -323,8 +355,9 @@ export function generateSyntheticTrace(spec: SyntheticCorpusSpec, index: number)
 				);
 				// A few listings are walked in full, which is what rung 4 and the
 				// discovery edges measure; the rest leave unread paths behind.
-				const walk = rnd() < 0.15 ? listed : listed.slice(0, between(2, 4));
-				for (const file of [...walk, ...matches.slice(0, between(0, 2))]) readWhole(file);
+				const walk = consumeListing ? listed : listed.slice(0, between(2, 4));
+				for (const file of walk) (consumeListing ? readListingPath : readWhole)(file);
+				for (const file of matches.slice(0, between(0, 2))) readWhole(file);
 				break;
 			}
 			case "implement": {
