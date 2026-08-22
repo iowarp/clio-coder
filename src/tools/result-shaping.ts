@@ -7,7 +7,6 @@ import {
 	projectToolResultContext,
 	type ToolResultDisposition,
 	type ToolResultDispositionMetadata,
-	toolResultContextOmitsContent,
 } from "./result-disposition.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
@@ -362,7 +361,12 @@ export function shapeToolResult(
 		offloadPath,
 		followUpHint: followUpHint(spec),
 	};
-	if (offloadPath === null && toolResultContextOmitsContent(projectionInput)) {
+	// Project first, then decide on retrieval. A projection that already carries
+	// every captured byte (a short `summary`, a `full` inside budget) needs no
+	// scratch artifact and must not claim truncation; anything that genuinely
+	// omits content earns one offload and the honest omission facts with it.
+	let projection = projectToolResultContext(projectionInput);
+	if (offloadPath === null && projection.truncated) {
 		offloadPath = writeToolOffload(capturedText, context, offloadMaxBytesFor(spec));
 		if (offloadPath !== null) {
 			displayed = withOffloadMetadata(
@@ -375,14 +379,14 @@ export function shapeToolResult(
 			);
 			displayedText = resultText(displayed);
 			displayedBytes = byteLength(displayedText);
+			projection = projectToolResultContext({
+				...projectionInput,
+				details: displayed.details,
+				displayedBytes,
+				offloadPath,
+			});
 		}
 	}
-	const projection = projectToolResultContext({
-		...projectionInput,
-		details: displayed.details,
-		displayedBytes,
-		offloadPath,
-	});
 	const metadata: ToolResultDispositionMetadata = {
 		version: 1,
 		applications: 1,

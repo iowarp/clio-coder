@@ -19,6 +19,7 @@ import { grepTool } from "../../src/tools/grep.js";
 import { fdIgnoreArgs, rgIgnoreArgs } from "../../src/tools/ignore-policy.js";
 import { DEFAULT_READ_MAX_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { toolResultContextText } from "../../src/tools/result-disposition.js";
 import { DEFAULT_MAX_BYTES, truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
@@ -117,6 +118,13 @@ describe("contracts/tool-hardening bash tail-biased non-destructive output", () 
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("FAIL"), "operator-facing output must include the trailing FAIL");
 		ok(result.output.includes("tail-truncated"), "output should announce tail truncation");
+
+		// The model reads the context projection, not the presentation text, so
+		// the >1MB tail guarantee has to be asserted on the axis it applies to.
+		const modelText = toolResultContextText(result);
+		ok(modelText.includes("FAIL"), "model-facing context must include the trailing FAIL");
+		strictEqual(modelText.includes("�"), false, "model-facing context must not split a code point");
+		strictEqual(Buffer.from(modelText, "utf8").toString("utf8"), modelText);
 
 		const resultSize = (result.details as { resultSize?: { offloadPath?: string; bytes?: number } } | undefined)
 			?.resultSize;
