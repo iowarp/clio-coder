@@ -69,8 +69,8 @@ function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): Can
 	let status = inspection.status;
 	// Only independently observed executions ground validation. The
 	// completion-contract audit row is the run's own self-report: it feeds
-	// `completionEvidence` below and nothing else
-	// (`TRUST_STATUS_NO_PROMOTION_RULES`).
+	// `completionEvidence` below and nothing else. The cross-axis rules this
+	// enforces are listed under "composition rules" in docs/evidence-and-memory.md.
 	const grounded = input.validationEvidence.filter((artifact) => isTrustStatusIdentifier(artifact.id));
 	if (
 		grounded.length > 0 &&
