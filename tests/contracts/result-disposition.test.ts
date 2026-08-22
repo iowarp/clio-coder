@@ -17,6 +17,7 @@ import { invokeRegisteredTool, resolveAgentTools } from "../../src/tools/agent-t
 import type { ToolResult, ToolSpec } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import {
+	deterministicDiagnosticSummary,
 	type ToolResultDisposition,
 	type ToolResultDispositionMetadata,
 	toolResultContextText,
@@ -534,7 +535,45 @@ describe("contracts/tool-result disposition", () => {
 		strictEqual(applied.context.appliedMode, "metadata-only", "a failed resolver may not widen model context");
 		strictEqual(modelText.includes(source), false);
 		ok(modelText.includes("[tool-result metadata-only]"));
-		strictEqual(toolResultPresentationText(projected), source);
+		// The narrowing is never silent: the metadata names the cause, the model
+		// header says why its context is facts-only, and the operator row carries
+		// the same diagnostic beside the complete presentation text.
+		deepStrictEqual(applied.fallback, { reason: "resolver-error", message: "resolver exploded" });
+		ok(modelText.includes('fallback=resolver-error "resolver exploded"'), modelText);
+		const presentation = toolResultPresentationText(projected) ?? "";
+		ok(presentation.startsWith(source), presentation);
+		ok(presentation.includes("fell back to metadata-only: resolver-error (resolver exploded)"), presentation);
+		strictEqual(applied.displayedBytes, Buffer.byteLength(presentation, "utf8"));
+
+		// A resolver that returns normally records no fallback at all.
+		const healthy = createRegistry({ safety: allowAllSafety() });
+		healthy.register({
+			...mockSpec(disposition("bounded", "folded", 4_096), { kind: "ok", output: source }),
+			resolveResultDisposition: (_args, declared) => declared,
+		});
+		const intact = await invokeRegisteredTool(healthy, ToolNames.Read, {});
+		const intactMetadata = (intact.details as Record<string, unknown>).resultDisposition as ToolResultDispositionMetadata;
+		strictEqual(intactMetadata.fallback, undefined);
+		strictEqual(toolResultPresentationText(intact), source);
+	});
+
+	it("treats whitespace-only output as complete in summary mode and writes no offload for it", async () => {
+		const stateDir = useStateDir();
+		const blank = "   \n\t\n";
+		deepStrictEqual(deterministicDiagnosticSummary(blank, 1_024), { text: "", redactions: 0, complete: true });
+		const shaped = shapeToolResult(
+			mockSpec({
+				...disposition("summary", "folded", 4_096),
+				context: { mode: "summary", maxBytes: 4_096, strategy: "diagnostic" },
+			}),
+			{ kind: "ok", output: blank },
+			{ sessionId: "blank-summary", toolCallId: "call" },
+		);
+		const applied = metadata(shaped);
+		strictEqual(applied.contextTruncated, false);
+		strictEqual(applied.offloadPath, undefined);
+		ok(toolResultContextText(shaped).includes("truncated=false"));
+		strictEqual(existsSync(join(stateDir, "scratch", "blank-summary")), false);
 	});
 
 	it("leaves undeclared legacy shaping and agent-tool rejection behavior unchanged", async () => {

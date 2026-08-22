@@ -891,7 +891,7 @@ function resolveToolResultDisposition(
 	if (!spec.resolveResultDisposition) return declared;
 	try {
 		return spec.resolveResultDisposition(args, declared);
-	} catch {
+	} catch (error) {
 		const maxBytes =
 			declared !== undefined && declared.context.maxBytes !== undefined
 				? declared.context.maxBytes
@@ -899,6 +899,10 @@ function resolveToolResultDisposition(
 		return {
 			presentation: declared?.presentation ?? { foldDefault: "folded", showDiffWhenFolded: false, failureExcerpt: true },
 			context: { mode: "metadata-only", maxBytes },
+			// The narrowing is recorded with the result, so a resolver bug shows up
+			// on the transcript row and in the model's header instead of reading as
+			// a deliberate metadata-only request.
+			fallback: { reason: "resolver-error", message: error instanceof Error ? error.message : String(error) },
 		};
 	}
 }

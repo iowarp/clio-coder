@@ -6,6 +6,7 @@ import {
 	normalizeToolResultDisposition,
 	projectToolResultContext,
 	type ToolResultDisposition,
+	type ToolResultDispositionFallback,
 	type ToolResultDispositionMetadata,
 } from "./result-disposition.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
@@ -289,6 +290,18 @@ function resultText(result: ToolResult): string {
 	return result.kind === "ok" ? result.output : result.message;
 }
 
+/**
+ * The operator-facing trace of a disposition that was narrowed rather than
+ * requested. Without it a throwing resolver degrades every call of that tool
+ * to metadata-only with nothing on the transcript row to say so.
+ */
+function withFallbackNotice(result: ToolResult, fallback: ToolResultDispositionFallback): ToolResult {
+	const note = `\n\n[result disposition fell back to metadata-only: ${fallback.reason} (${fallback.message}); the model received facts and retrieval only]`;
+	return result.kind === "ok"
+		? { ...result, output: `${result.output}${note}` }
+		: { ...result, message: `${result.message}${note}` };
+}
+
 function numberField(record: Record<string, unknown> | null, key: string): number | null {
 	const value = record?.[key];
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -348,6 +361,7 @@ export function shapeToolResult(
 		context,
 		disposition.presentation.overflow,
 	);
+	if (disposition.fallback !== undefined) displayed = withFallbackNotice(displayed, disposition.fallback);
 	let displayedText = resultText(displayed);
 	let displayedBytes = byteLength(displayedText);
 	let offloadPath = existingOffloadPath(displayed.details);
@@ -415,6 +429,7 @@ export function shapeToolResult(
 		retrieval:
 			offloadPath === null ? followUpHint(spec) : `read ${offloadPath} with offset and limit to retrieve omitted content`,
 		...(projection.summaryProvenance === undefined ? {} : { summaryProvenance: projection.summaryProvenance }),
+		...(disposition.fallback === undefined ? {} : { fallback: disposition.fallback }),
 	};
 	return {
 		...displayed,
