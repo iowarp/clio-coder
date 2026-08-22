@@ -5,6 +5,7 @@ import { readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { redactArtifactForStorage } from "../eval/artifacts/redact.js";
 import type { EvalCommandResult, EvalRunArtifact, EvalRunRecord } from "../eval/index.js";
 import { loadEvalArtifact } from "../eval/index.js";
+import { compareCodepoints as compareStrings } from "./ordering.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { evidenceDirectory, findingsFile } from "./store.js";
 import {
@@ -596,7 +597,7 @@ function compareAuditRows(a: EvidenceAuditLinkedRow, b: EvidenceAuditLinkedRow):
 	return (
 		compareNullableStrings(a.ts, b.ts) ||
 		compareNullableStrings(a.runId, b.runId) ||
-		JSON.stringify(a.row).localeCompare(JSON.stringify(b.row))
+		compareStrings(JSON.stringify(a.row), JSON.stringify(b.row))
 	);
 }
 
@@ -614,10 +615,6 @@ function compareNullableStrings(a: string | null, b: string | null): number {
 function sanitizeEvidenceId(value: string): string {
 	const sanitized = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 	return sanitized.length === 0 ? "unknown" : sanitized;
-}
-
-function compareStrings(a: string, b: string): number {
-	return a.localeCompare(b);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

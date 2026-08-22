@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseDocument } from "yaml";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { isProjectVerifierCheckId } from "../../core/verification-scripts.js";
+import { compareCodepoints } from "../../domains/evidence/ordering.js";
 
 export const PROJECT_VERIFIER_CATALOG_RELATIVE_PATH = ".clio-coder/verifiers.yaml";
 export const PROJECT_VERIFIER_CATALOG_VERSION = 1;
@@ -85,7 +86,7 @@ function catalogDiagnostic(message: string): ProjectCatalogLoadResult {
 function unknownFields(record: Record<string, unknown>, allowed: ReadonlySet<string>): string[] {
 	return Object.keys(record)
 		.filter((key) => !allowed.has(key))
-		.sort((left, right) => left.localeCompare(right));
+		.sort(compareCodepoints);
 }
 
 function relativeCwd(workspaceRoot: string, resolved: string): string {
@@ -328,7 +329,7 @@ export function parseProjectVerifierCatalogText(
 		ids.set(id, index);
 		checks.push({ id, description, command, cwd, timeoutMs, tags, source: { ...sourceRef } });
 	}
-	checks.sort((left, right) => left.id.localeCompare(right.id));
+	checks.sort((left, right) => compareCodepoints(left.id, right.id));
 	return { ok: true, source: { ...sourceRef, checks } };
 }
 
