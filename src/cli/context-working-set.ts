@@ -8,8 +8,7 @@ import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { buildPathIndex } from "../domains/context/working-set/path-index.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { makeOraclePolicy, makeRandomPolicy, nonePolicy } from "../domains/context/working-set/replay/controls.js";
-import { loadReplayTraces, type ReplayInputFormat } from "../domains/context/working-set/replay/load-claude-code.js";
-import type { ReplayLoadCascade } from "../domains/context/working-set/replay/load-clio.js";
+import { loadClioTraces, type ReplayLoadCascade } from "../domains/context/working-set/replay/load-clio.js";
 import { aggregateReplayMetrics, type ReplayMeasurement } from "../domains/context/working-set/replay/metrics.js";
 import { buildReferenceGraph, type ReferenceGraph } from "../domains/context/working-set/replay/reference-graph.js";
 import {
@@ -19,17 +18,20 @@ import {
 	renderReplayMarkdown,
 } from "../domains/context/working-set/replay/report.js";
 import { replayTrace } from "../domains/context/working-set/replay/runner.js";
+import { generateSyntheticCorpora, SYNTHETIC_CORPORA } from "../domains/context/working-set/replay/synthetic.js";
 import type { Trace } from "../domains/context/working-set/replay/trace.js";
 import { parseSessionEntries } from "../domains/session/archive-readers.js";
+import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 
 const REPLAY_HELP = `Usage:
-  clio-coder context replay --sessions <path>... [options]
+  clio-coder context replay (--sessions <path>... | --synthetic <corpus>...) [options]
 
 Options:
+  --sessions <path>... Clio session directories, sessions roots, or ledger JSONL files
+  --synthetic <ids>   comma-separated procedural corpora: ${SYNTHETIC_CORPORA.map((spec) => spec.id).join(",")}
   --policies <ids>    comma-separated none,random,age-horizon,structural-v1,oracle
   --budgets <tokens>  comma-separated budgets (default: 16000,32000,64000)
-  --format <format>    clio, claude-code, or auto (default: auto)
   --threshold <ratio> pressure threshold (default: 0.8)
   --target <ratio>    post-eviction pressure target (default: 0.6)
   --protect-last-turns <n>
@@ -48,6 +50,9 @@ const WORKING_SET_HELP = `Usage:
 Print the durable working-set fold and path-index summary for one Clio session.
 `;
 
+/** Stand-in size of a summary paraphrase in the modeled summary stage. */
+const REPLAY_SUMMARY_TOKENS = 1_500;
+
 const POLICY_IDS = ["none", "random", "age-horizon", "structural-v1", "oracle"] as const;
 type ReplayPolicyId = (typeof POLICY_IDS)[number];
 
@@ -62,7 +67,7 @@ interface ReplayArgs {
 	protectLastTurns: number;
 	minEvictableTokens: number;
 	seed: number;
-	format: ReplayInputFormat;
+	synthetic: string[];
 	noFilter: boolean;
 	jsonPath?: string;
 	markdownPath?: string;
@@ -113,7 +118,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		protectLastTurns: DEFAULT_WORKING_SET_SETTINGS.protectLastTurns,
 		minEvictableTokens: DEFAULT_WORKING_SET_SETTINGS.minEvictableTokens,
 		seed: 0,
-		format: "auto",
+		synthetic: [],
 		noFilter: false,
 	};
 	let policiesExplicit = false;
@@ -136,7 +141,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		if (
 			arg === "--policies" ||
 			arg === "--budgets" ||
-			arg === "--format" ||
+			arg === "--synthetic" ||
 			arg === "--threshold" ||
 			arg === "--target" ||
 			arg === "--protect-last-turns" ||
@@ -159,11 +164,12 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 					}
 					return budget;
 				});
-			} else if (arg === "--format") {
-				if (value !== "clio" && value !== "claude-code" && value !== "auto") {
-					throw new CliUsageError("--format must be clio, claude-code, or auto");
-				}
-				parsed.format = value;
+			} else if (arg === "--synthetic") {
+				const values = commaValues(value, arg);
+				const known = SYNTHETIC_CORPORA.map((spec) => spec.id);
+				const unknown = values.filter((entry) => !known.includes(entry));
+				if (unknown.length > 0) throw new CliUsageError(`unknown synthetic corpus: ${unknown.join(", ")}`);
+				parsed.synthetic = values;
 			} else if (arg === "--threshold") {
 				parsed.threshold = numberValue(value, arg);
 				if (parsed.threshold <= 0 || parsed.threshold > 1) {
@@ -199,7 +205,9 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 		}
 		throw new CliUsageError(`unknown flag ${arg}`);
 	}
-	if (parsed.sessions.length === 0) throw new CliUsageError("--sessions is required");
+	if (parsed.sessions.length === 0 && parsed.synthetic.length === 0) {
+		throw new CliUsageError("--sessions or --synthetic is required");
+	}
 	if (parsed.target >= parsed.threshold) throw new CliUsageError("--target must be less than --threshold");
 	if (policiesExplicit) {
 		const unavailable = parsed.policies.filter((id) => !policyResolves(id));
@@ -262,7 +270,17 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	try {
-		const loaded = await loadReplayTraces(parsed.sessions, parsed.format, { filter: !parsed.noFilter });
+		const ledgers = await loadClioTraces(parsed.sessions, { filter: parsed.noFilter ? false : {} });
+		const synthetic = generateSyntheticCorpora(parsed.synthetic);
+		const loaded = {
+			traces: [...ledgers.traces, ...synthetic.traces],
+			cascade: {
+				found: ledgers.cascade.found + synthetic.cascade.found,
+				unreadable: ledgers.cascade.unreadable,
+				filtered: ledgers.cascade.filtered,
+				kept: ledgers.cascade.kept + synthetic.cascade.kept,
+			},
+		};
 		if (loaded.traces.length === 0) {
 			process.stderr.write(`clio-coder context replay: no traces to replay (${cascadeLine(loaded.cascade)})\n`);
 			return 1;
@@ -291,6 +309,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 						target: parsed.target,
 						settings,
 						seed: parsed.seed,
+						summaries: { keepRecentTokens: DEFAULT_KEEP_RECENT_TOKENS, summaryTokens: REPLAY_SUMMARY_TOKENS },
 					}),
 				}));
 				results.push({ budgetTokens, policyId, metrics: aggregateReplayMetrics(measurements) });
@@ -303,7 +322,7 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 				threshold: parsed.threshold,
 				target: parsed.target,
 				seed: parsed.seed,
-				format: parsed.format,
+				corpus: [...(parsed.sessions.length > 0 ? ["ledgers"] : []), ...parsed.synthetic],
 				filter: parsed.noFilter ? "none" : "default",
 				settings,
 			},

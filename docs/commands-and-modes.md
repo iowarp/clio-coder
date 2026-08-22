@@ -78,7 +78,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder context wiki [--update] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
 | `clio-coder context index [--json]` | Build the structural codewiki index without model calls; writes `.clio-coder/codewiki.json` and `.clio-coder/state.json` and prints coverage plus a structural hash. |
-| `clio-coder context replay --sessions <path>... [--format clio\|claude-code\|auto] [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio or Claude Code session ledgers and report retention, precision, token savings, saturation, and summary headroom. |
+| `clio-coder context replay (--sessions <path>... \| --synthetic <ids>) [--policies <ids>] [--budgets <tokens>] [--threshold <ratio>] [--target <ratio>] [--protect-last-turns <n>] [--min-evictable-tokens <n>] [--seed <n>] [--no-filter] [--json <out>] [--md <out>]` | Replay working-set policies over Clio session ledgers or the seeded procedural corpora and report retention, precision, token savings, recall cost, cold-prefix cost, saturation, and summary headroom. |
 | `clio-coder context working-set --session <id\|path>` | Inspect one session's durable working-set fold and path-index summary without modifying the ledger. |
 
 ## Headless Run Flags
@@ -528,24 +528,29 @@ incremental updates.
 ### Working-set replay
 
 `clio-coder context replay --sessions <path>...` accepts individual session directories,
-Clio sessions roots, Claude Code project roots, and JSONL files. `--format auto` is the
-default and distinguishes a Clio session header from the first semantic Claude Code
-user, assistant, or summary record after metadata; `--format clio` and
-`--format claude-code` force a loader. Clio traces remove prior eviction/recall sidecars
-and select the active branch. Claude Code traces skip sidechain/subagent and summary-only
-files, normalize tool calls and results into Clio's message shapes, and retain the recorded
-cwd for path indexing. Both drive the live fold, projection, policy, and eviction planner at
-deterministic turn boundaries. The default inclusion cascade requires at least eight turns,
-eight tool results, and one file re-read; `--no-filter` retains every otherwise-readable
-trace. Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable
-report including the configuration, git revision when available, and exact command line.
+Clio sessions roots, and ledger JSONL files; `--synthetic <ids>` adds one or more procedural
+corpora (`science-long`, `refactor`, `exploration`) generated in memory from a fixed seed, so
+the committed tables can be rebuilt byte for byte on any checkout without private transcripts.
+Clio traces remove prior eviction/recall sidecars and select the active branch. Both sources
+drive the live fold, projection, policy, and eviction planner at deterministic turn
+boundaries. The default inclusion cascade for ledgers requires at least eight turns, eight
+tool results, and one file re-read; `--no-filter` retains every otherwise-readable trace.
+Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable report
+including the configuration, the corpus, git revision when available, and exact command line.
 `--protect-last-turns` and `--min-evictable-tokens` override those two working-set settings
 for the replay only; they never update saved settings. Saturated events is pooled over
 applied eviction events and reports how often a policy exhausted its usable candidates,
 which distinguishes a budget that measures policy choice from one that simply runs out of
-evictable material.
-The summary-headroom mean always carries its contributing trace count because traces that
-never require summary compaction do not enter that nullable mean.
+evictable material. Recall tokens is the token-weighted complement of precision: what a
+perfect recall would read back for evicted items the session referenced again. Cold prefix
+tokens is the projected working set after the earliest evicted position of each event, which
+is what an exact-prefix cache re-prefills on the next request. The replay also models the
+summary stage: when the projection is still over the threshold after an eviction, it applies
+the same `findCutPoint(keepRecentTokens)` cut the live path uses, appends a stand-in
+`compactionSummary`, counts it, and treats what the cut removed as lost for retention.
+Summaries (mean) is therefore the number of lossy, token-spending compactions a policy forced
+per trace. The summary-headroom mean always carries its contributing trace count because
+traces that never require summary compaction do not enter that nullable mean.
 
 `clio-coder context working-set --session <id|path>` is a read-only inspection command for
 one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate

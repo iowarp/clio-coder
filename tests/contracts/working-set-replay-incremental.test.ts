@@ -8,7 +8,6 @@ import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { isTurnStart } from "../../src/domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../../src/domains/context/working-set/policies/index.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
-import { loadClaudeCodeTraces } from "../../src/domains/context/working-set/replay/load-claude-code.js";
 import { loadClioTraces } from "../../src/domains/context/working-set/replay/load-clio.js";
 import {
 	type ReplayConfig,
@@ -16,13 +15,13 @@ import {
 	type ReplayTraceResult,
 	replayTrace,
 } from "../../src/domains/context/working-set/replay/runner.js";
+import { generateSyntheticTrace, syntheticCorpus } from "../../src/domains/context/working-set/replay/synthetic.js";
 import type { Trace } from "../../src/domains/context/working-set/replay/trace.js";
 import { selectVisibleEntries } from "../../src/domains/context/working-set/visible.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import type { ContextEvictionEntry, SessionEntry } from "../../src/domains/session/entries.js";
 
 const CLIO_FIXTURE = fileURLToPath(new URL("../fixtures/context-replay/fixture-01.jsonl", import.meta.url));
-const CLAUDE_FIXTURE = fileURLToPath(new URL("../fixtures/context-replay/claude-code-01.jsonl", import.meta.url));
 const SETTINGS: WorkingSetSettings = {
 	...DEFAULT_WORKING_SET_SETTINGS,
 	protectLastTurns: 3,
@@ -30,7 +29,7 @@ const SETTINGS: WorkingSetSettings = {
 };
 
 interface ReferenceResult {
-	events: ReadonlyArray<Omit<ReplayEvictionEvent, "saturated">>;
+	events: ReadonlyArray<Omit<ReplayEvictionEvent, "saturated" | "coldPrefixTokens">>;
 	evictedAtTurn: ReadonlyMap<string, number>;
 	turnsToFirstSummary: number | null;
 	entries: ReadonlyArray<SessionEntry>;
@@ -47,7 +46,7 @@ function projectedTokens(entries: ReadonlyArray<SessionEntry>, leaf: string | nu
 /** Frozen copy of the quadratic runner, retained only as an equivalence oracle. */
 function referenceReplay(trace: Trace, policy: WorkingSetPolicy, config: ReplayConfig): ReferenceResult {
 	const soFar: SessionEntry[] = [];
-	const events: Array<Omit<ReplayEvictionEvent, "saturated">> = [];
+	const events: Array<Omit<ReplayEvictionEvent, "saturated" | "coldPrefixTokens">> = [];
 	const evictedAtTurn = new Map<string, number>();
 	const toolResults = new Set(
 		trace.entries
@@ -209,14 +208,15 @@ function syntheticTrace(turns: number): Trace {
 }
 
 describe("contracts/working-set incremental replay", () => {
-	it("is event-identical to the quadratic reference on both frozen fixtures", async () => {
+	it("is event-identical to the quadratic reference on the frozen fixture and a procedural trace", async () => {
 		const clio = (await loadClioTraces([CLIO_FIXTURE])).traces[0];
-		const claude = (await loadClaudeCodeTraces([CLAUDE_FIXTURE])).traces[0];
+		const spec = syntheticCorpus("science-long");
 		assert.ok(clio);
-		assert.ok(claude);
+		assert.ok(spec);
+		const procedural = generateSyntheticTrace({ ...spec, turns: 30 }, 0);
 		for (const [trace, budget] of [
 			[clio, 12_000],
-			[claude, 10_000],
+			[procedural, 24_000],
 		] as const) {
 			const config = replayConfig("age-horizon", budget);
 			assert.deepEqual(
