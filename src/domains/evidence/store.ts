@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/index.js";
+import { compareCodepoints as compareStrings } from "./ordering.js";
 import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
 import { normalizeTrustStatus } from "./trust-status.js";
 import type {
@@ -323,10 +324,6 @@ function parseJson(raw: string, source: string): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function compareStrings(a: string, b: string): number {
-	return a.localeCompare(b);
 }
 
 export function findingsFile(evidenceId: string, findings: EvidenceFinding[]): EvidenceFindingsFile {

@@ -1,6 +1,7 @@
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
 import type { FinishContractAssessment, FinishContractEvidenceKind } from "../safety/finish-contract.js";
+import { compareCodepoints as compareStrings } from "./ordering.js";
 import {
 	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
@@ -217,8 +218,4 @@ function isFinishContractEvidenceKind(value: unknown): value is FinishContractEv
  */
 function readOptionalString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function compareStrings(left: string, right: string): number {
-	return left.localeCompare(right);
 }

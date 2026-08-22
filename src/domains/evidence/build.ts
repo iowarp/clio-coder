@@ -24,6 +24,7 @@ import {
 	type SessionEntry,
 } from "../session/index.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
+import { compareCodepoints as compareStrings } from "./ordering.js";
 import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
@@ -1199,7 +1200,7 @@ function compareAuditLinkedRows(a: EvidenceAuditLinkedRow, b: EvidenceAuditLinke
 	const aCorrelation = readOptionalString(a.row.correlationId) ?? "";
 	const bCorrelation = readOptionalString(b.row.correlationId) ?? "";
 	if (aCorrelation !== bCorrelation) return compareStrings(aCorrelation, bCorrelation);
-	return JSON.stringify(a.row).localeCompare(JSON.stringify(b.row));
+	return compareStrings(JSON.stringify(a.row), JSON.stringify(b.row));
 }
 
 function receiptsFile(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceReceiptFile {
@@ -1777,10 +1778,6 @@ function uniqueStrings(values: ReadonlyArray<string>): string[] {
 
 function uniqueTags(values: ReadonlyArray<EvidenceTag>): EvidenceTag[] {
 	return [...new Set(values)].sort(compareStrings);
-}
-
-function compareStrings(a: string, b: string): number {
-	return a.localeCompare(b);
 }
 
 function compareNullableStrings(a: string | null, b: string | null): number {

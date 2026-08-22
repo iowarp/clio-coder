@@ -13,6 +13,7 @@ import path from "node:path";
 import { parseDocument, stringify } from "yaml";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import type { ToolResult } from "../registry.js";
 import {
 	type DeclaredCheck,
@@ -232,10 +233,10 @@ export function deterministicVerifierId(preferredId: string, occupied: ReadonlyS
 
 function rawProposalSort(left: RawProposal, right: RawProposal): number {
 	return (
-		left.provenance.path.localeCompare(right.provenance.path) ||
-		left.provenance.detail.localeCompare(right.provenance.detail) ||
-		left.preferredId.localeCompare(right.preferredId) ||
-		JSON.stringify(left.command).localeCompare(JSON.stringify(right.command))
+		compareCodepoints(left.provenance.path, right.provenance.path) ||
+		compareCodepoints(left.provenance.detail, right.provenance.detail) ||
+		compareCodepoints(left.preferredId, right.preferredId) ||
+		compareCodepoints(JSON.stringify(left.command), JSON.stringify(right.command))
 	);
 }
 
@@ -696,8 +697,8 @@ export function discoverVerifierAuthoring(workspaceRoot = process.cwd()): Verifi
 			else existingChecks.push(projected);
 		}
 	}
-	activeChecks.sort((left, right) => left.id.localeCompare(right.id));
-	existingChecks.sort((left, right) => left.id.localeCompare(right.id));
+	activeChecks.sort((left, right) => compareCodepoints(left.id, right.id));
+	existingChecks.sort((left, right) => compareCodepoints(left.id, right.id));
 
 	const diagnostics: string[] = [];
 	const raw = deduplicatedRawProposals(
@@ -742,7 +743,7 @@ export function discoverVerifierAuthoring(workspaceRoot = process.cwd()): Verifi
 			state: "proposed",
 		});
 	}
-	proposals.sort((left, right) => left.id.localeCompare(right.id));
+	proposals.sort((left, right) => compareCodepoints(left.id, right.id));
 	if (activeChecks.length === 0 && existingChecks.length === 0 && proposals.length === 0) {
 		diagnostics.push(
 			"No package verification script, supported toolchain declaration, or exact validation command was found.",
@@ -770,7 +771,7 @@ export function createVerifierDraft(
 		activeChecks: discovery.activeChecks.map(cloneCheck),
 		checks: [...discovery.existingChecks, ...(options.includeProposals === false ? [] : discovery.proposals)]
 			.map(cloneCheck)
-			.sort((left, right) => left.id.localeCompare(right.id)),
+			.sort((left, right) => compareCodepoints(left.id, right.id)),
 		diagnostics: [...discovery.diagnostics],
 		manualEntry: discovery.manualEntry,
 	};
@@ -780,7 +781,7 @@ function catalogValue(checks: ReadonlyArray<AuthoringCheck>): unknown {
 	return {
 		version: PROJECT_VERIFIER_CATALOG_VERSION,
 		checks: [...checks]
-			.sort((left, right) => left.id.localeCompare(right.id))
+			.sort((left, right) => compareCodepoints(left.id, right.id))
 			.map(({ id, description, command, cwd, timeoutMs, tags }) => ({
 				id,
 				description,
@@ -914,7 +915,7 @@ export function reviseVerifierDraft(
 		if (revision.changes.tags !== undefined) check.tags = [...revision.changes.tags];
 		diagnostics.push(`Edited check '${revision.id}' without changing its deterministic ID.`);
 	}
-	next.checks.sort((left, right) => left.id.localeCompare(right.id));
+	next.checks.sort((left, right) => compareCodepoints(left.id, right.id));
 	const validation = validateVerifierDraft(next);
 	if (!validation.ok) return { ok: false, draft, reason: validation.reason };
 	next.checks = validation.checks;
