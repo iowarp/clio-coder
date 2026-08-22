@@ -39,7 +39,7 @@ Crossing that threshold engages three mechanisms in a fixed order. The first two
 
 When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio applies the configured working-set policy first. The policy selects tool-result bodies and closed-turn thinking blocks, `runAutoCompact` appends one `contextEviction` ledger entry, and `refreshAgentMessagesFromSession` projects those units out of model replay behind a one-line marker. Nothing is deleted: the ledger keeps the original bodies, the transcript keeps showing them, and `/resume`, `/tree`, `/fork`, and the HTML export are unaffected.
 
-Already-evicted units are never selected again. Recent turns keep their full observations and thinking, governed by `context.workingSet.protectLastTurns`. Results whose estimated body is below `context.workingSet.minEvictableTokens` (200 tokens by default) are kept whatever their age, because a marker would cost more than the body it replaces. The `age-horizon` policy is therefore the selection the old destructive mask made minus those small results, not a byte-identical reproduction of it; the default `structural-v1` policy applies its structural rules before any age rule.
+Already-evicted units are never selected again. Recent turns keep their full observations and thinking, governed by `context.workingSet.protectLastTurns`. Results whose estimated body is below `context.workingSet.minEvictableTokens` (200 tokens by default) are kept whatever their age as a low-yield churn guard. The engine separately refuses any candidate whose marker would save no tokens. The `age-horizon` policy is therefore the selection the old destructive mask made minus those small results, not a byte-identical reproduction of it; the default `structural-v1` policy applies its structural rules before any age rule.
 
 If the projection drops pressure below the threshold, Clio sends the request and no summary runs. The policies, the protection predicates, the marker format, and the ledger records are documented in [context-working-set.md](context-working-set.md).
 
@@ -112,7 +112,7 @@ context:
 | `context.workingSet.policy` | `structural-v1` | `age-horizon`, `structural-v1` | Candidate selection rule set. `age-horizon` is the pre-layer age selection. |
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | Used-over-window ratio an applied eviction event batches down to. |
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | Recent turns whose observations and thinking are never evicted. |
-| `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this estimate are never evicted, because the marker would cost more than the body. |
+| `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this body estimate are never evicted. The default is a measured low-yield churn guard; marker break-even is enforced separately. |
 
 Set `CLIO_CODER_LEGACY_MASK=1` only as a temporary compatibility escape hatch for the old destructive mask stage. See [context-working-set.md](context-working-set.md) for what each policy selects and why.
 

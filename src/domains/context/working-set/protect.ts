@@ -88,8 +88,10 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	if (ctx.entryIndex >= ctx.cutoffIndex) return true;
 	if (entry.role === "assistant") return false;
 
-	// Below the floor the marker costs more than the body it replaces. The
-	// floor is the body's size, not the payload's: details never reach the model.
+	// The floor protects low-yield bodies from churn. The engine separately
+	// rejects any candidate whose marker would free zero or negative tokens, so
+	// this setting may stay above the literal marker break-even point. The floor
+	// is the body's size, not the payload's: details never reach the model.
 	if (toolResultBodyTokens(entry.payload) < ctx.input.settings.minEvictableTokens) return true;
 	// A body the legacy destructive stage already replaced has nothing left to evict.
 	if (hasLegacyCompactionMarker(entry.payload)) return true;

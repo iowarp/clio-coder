@@ -70,6 +70,32 @@ The 24 traces were replayed at targets 0.4, 0.5, and 0.6 with `protectLastTurns:
 
 The shipped default stays at 0.6. Moving every target, including local backends with reusable KV state, to 0.4 saved only 6.1% of cold-prefix tokens at 64k and 6.2% at 128k. It did not materially change summary count and reduced retention covered by 0.00354 at 128k. A tier-aware default is not justified by this sweep. Reopen the decision when target 0.4 cuts cold-prefix tokens by at least 10% at both 64k and 128k without increasing summaries or lowering retention covered by more than 0.002. Operators on exact-prefix cloud tiers can still select 0.4 through the existing setting; no new setting or stop rule is needed.
 
+## Summary residue and the eviction floor
+
+The residue probe replayed `structural-v1` at 64k and recorded the projected entries immediately before every modeled summary. The table reports mean tokens per summary point. Size class is estimated body tokens for an un-evicted tool result and projected entry tokens for every other kind. The sample contains 67 summary points for `science-long`, 49 for `refactor`, and 94 for `exploration`.
+
+| corpus | entry kind | <50 | 50–99 | 100–199 | ≥200 | total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| science-long | user | 1312 | 0 | 0 | 0 | 1312 |
+| science-long | assistant | 2270 | 1535 | 0 | 0 | 3806 |
+| science-long | tool call | 7175 | 956 | 0 | 0 | 8131 |
+| science-long | tool-result body | 2557 | 476 | 2893 | 23035 | 28961 |
+| science-long | eviction marker | 0 | 0 | 14167 | 0 | 14167 |
+| refactor | user | 1168 | 0 | 0 | 0 | 1168 |
+| refactor | assistant | 1981 | 1447 | 0 | 0 | 3428 |
+| refactor | tool call | 7453 | 602 | 0 | 0 | 8055 |
+| refactor | tool-result body | 2895 | 418 | 1382 | 27648 | 32343 |
+| refactor | eviction marker | 0 | 0 | 13539 | 0 | 13539 |
+| exploration | user | 577 | 0 | 0 | 0 | 577 |
+| exploration | assistant | 808 | 1073 | 0 | 0 | 1881 |
+| exploration | tool call | 6624 | 246 | 0 | 0 | 6870 |
+| exploration | tool-result body | 654 | 236 | 4478 | 44867 | 50234 |
+| exploration | eviction marker | 0 | 0 | 9190 | 0 | 9190 |
+
+The floor sweep separates marker break-even from the retention decision. Floors 0 and 50 were identical because the engine already refuses an eviction whose marker saves no tokens. Lowering the floor from 200 to 0 changed summaries from 45.292 to 44.667 at 32k, from 8.750 to 8.792 at 64k, and not at all from 3.125 at 128k. It reduced covered retention from 0.5651 to 0.5574 at 64k and from 0.6601 to 0.6435 at 128k. The default stays at 200 as a low-yield churn guard, not as the literal marker break-even point.
+
+Widening the unit set is not proposed on these numbers. Clearing only tool-call arguments after their paired result was evicted would free 1007, 873, and 517 tokens per summary point on the three corpora, just 1.8%, 1.5%, and 0.8% of residue. Reducing the existing protection horizon from six turns to two cut 64k summaries from 8.750 to 6.958, and reducing it to one cut them to 6.625. Neither approaches the 4.375 needed to halve summaries. The dominant residue is already an existing unit kind: tool-result bodies of at least 200 tokens account for 41% to 65% of the projected tokens at summary points, but the protection and unresolved-failure rules keep them in context. Deleting operator text, assistant text, call envelopes, or recall markers would violate the current owner contract for a larger but lossy gain.
+
 ## Regenerating
 
 ```

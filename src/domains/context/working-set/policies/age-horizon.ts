@@ -18,7 +18,7 @@
  * exists: a file read twenty turns ago and never touched since is more useful
  * than a directory listing from two turns ago. Nothing here scores candidates
  * by size or recency beyond that ordering; the only token input is the
- * `minEvictableTokens` floor, below which the marker costs more than the body.
+ * `minEvictableTokens` floor, which protects low-yield bodies from churn.
  */
 
 import type { EvictionCandidate, PolicyInput, WorkingSetPolicy } from "../contract.js";

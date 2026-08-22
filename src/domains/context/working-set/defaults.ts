@@ -21,5 +21,8 @@ export const DEFAULT_WORKING_SET_SETTINGS: WorkingSetSettings = {
 	policy: "structural-v1",
 	target: 0.6,
 	protectLastTurns: 6,
+	// The procedural floor sweep found marker break-even near 50 tokens, but
+	// lowering this to 0 did not reduce summaries at 64k or 128k and reduced
+	// covered retention. Keep 200 as a measured low-yield churn guard.
 	minEvictableTokens: 200,
 };
