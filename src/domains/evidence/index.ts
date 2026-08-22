@@ -32,7 +32,6 @@ export type {
 	CanonicalTrustStatus,
 	CompletionEvidenceStatus,
 	ContextProvenanceStatus,
-	EvidenceFindingsTrustInput,
 	GroundedEvidenceValidationInput,
 	IndependentReviewStatus,
 	PersistedRunReceiptTrustFacts,
@@ -52,8 +51,6 @@ export type {
 } from "./trust-status.js";
 export {
 	absentTrustStatus,
-	adaptEvidenceFindingsValidationStatus,
-	adaptEvidenceLinkContextStatus,
 	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
 	adaptGroundedEvidenceValidationStatus,

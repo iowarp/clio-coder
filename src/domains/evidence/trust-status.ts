@@ -9,7 +9,6 @@ import type {
 	RunReceiptVerification,
 } from "../dispatch/types.js";
 import type { FinishContractAssessment } from "../safety/finish-contract.js";
-import type { EvidenceFinding, EvidenceLinkConfidence } from "./types.js";
 
 /** Persisted version of the canonical, deliberately non-scalar trust model. */
 export const TRUST_STATUS_VERSION = 1 as const;
@@ -793,11 +792,6 @@ export function adaptGateDecisionReviewStatus(
 	return attributed("inconclusive", source, authority, artifacts);
 }
 
-export interface EvidenceFindingsTrustInput {
-	evidenceId: string;
-	findings: ReadonlyArray<EvidenceFinding>;
-}
-
 export interface GroundedEvidenceValidationInput {
 	evidenceId: string;
 	runId: string;
@@ -822,37 +816,6 @@ export function adaptGroundedEvidenceValidationStatus(
 		{ kind: "evidence_bundle", id: `${input.evidenceId}:${input.runId}` },
 		{ kind: "clio", id: "evidence-grounding" },
 		uniqueBoundedReferences([{ kind: "evidence_bundle", id: input.evidenceId }, ...observed]),
-	);
-}
-
-/** Evidence findings can expose negative or missing validation, but their absence cannot create a pass. */
-export function adaptEvidenceFindingsValidationStatus(input: EvidenceFindingsTrustInput): ValidationGroundingStatus {
-	const source: TrustStatusSource = { kind: "evidence_bundle", id: input.evidenceId };
-	const authority: TrustStatusAuthority = { kind: "clio", id: "evidence-builder" };
-	const artifacts = [{ kind: "evidence_bundle", id: input.evidenceId }] as const;
-	if (input.findings.some((finding) => finding.tag === "test-failure" || finding.tag === "build-failure")) {
-		return attributed("failed", source, authority, artifacts);
-	}
-	if (input.findings.some((finding) => finding.tag === "proxy-validation")) {
-		return attributed("ungrounded", source, authority, artifacts);
-	}
-	if (input.findings.some((finding) => finding.tag === "no-validation")) {
-		return absentTrustStatus("not_observed");
-	}
-	return attributed("unknown", source, authority, artifacts);
-}
-
-/** Exact evidence attribution records provenance only; it never promotes validation. */
-export function adaptEvidenceLinkContextStatus(
-	evidenceId: string,
-	confidence: EvidenceLinkConfidence | null | undefined,
-): ContextProvenanceStatus {
-	if (confidence === null || confidence === undefined) return absentTrustStatus("not_recorded");
-	return attributed(
-		confidence === "exact" ? "recorded" : "unknown",
-		{ kind: "evidence_bundle", id: evidenceId },
-		{ kind: "clio", id: "evidence-linker" },
-		[{ kind: "evidence_bundle", id: evidenceId }],
 	);
 }
 
