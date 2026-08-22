@@ -74,6 +74,11 @@ export interface NormalizedToolResultDisposition {
 export interface ToolResultContextProjection {
 	text: string;
 	appliedMode: AppliedToolResultContextMode;
+	/**
+	 * True when the projection omits captured content, which is exactly when a
+	 * retrieval artifact earns its place. Whitespace-only differences (trimmed
+	 * line ends, dropped blank lines) do not count as omitted content.
+	 */
 	truncated: boolean;
 	downgrade?: ToolResultDispositionMetadata["downgrade"];
 	summaryProvenance?: ToolResultSummaryProvenance;
@@ -240,8 +245,43 @@ const ERROR_LIKE_LINE =
 	/(?:\b(?:abort(?:ed)?|assert(?:ion)?|error|exception|fail(?:ed|ure)?|fatal|killed|panic|signal|timed?\s*out|timeout)\b|\bnot ok\b|\bERR!\b)/iu;
 const SUMMARY_LINE_MAX_BYTES = 768;
 
+/**
+ * A selected summary body plus the two facts the caller needs to stay honest:
+ * how many secrets the redactor replaced, and whether every nonempty captured
+ * line survived verbatim. `complete` is the input to the retrieval decision;
+ * it is false whenever any line was dropped, cut, or redacted.
+ */
+export interface ToolResultSummarySelection {
+	text: string;
+	redactions: number;
+	complete: boolean;
+}
+
 function summaryLine(line: string): string {
 	return boundedToolResultExcerpt(line, SUMMARY_LINE_MAX_BYTES);
+}
+
+function normalizeNewlines(text: string): string {
+	return text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+}
+
+/** The trimmed nonempty lines that carry a text's content, in source order. */
+function contentLines(text: string): string[] {
+	return normalizeNewlines(text)
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+}
+
+/**
+ * The non-diagnostic summary strategy: every nonempty line, trimmed, in order.
+ * Redaction is applied here too, so `redact` is honored whichever strategy the
+ * caller declared.
+ */
+function deterministicHeadTailSummary(text: string, redact = true): ToolResultSummarySelection {
+	const tally = createRedactionTally();
+	const safeText = redact ? redactSecretsText(text, tally) : text;
+	return { text: contentLines(safeText).join("\n"), redactions: tally.count, complete: tally.count === 0 };
 }
 
 function renderSummarySection(label: string, lines: ReadonlyArray<string>): string {
@@ -257,22 +297,27 @@ export function deterministicDiagnosticSummary(
 	text: string,
 	maxBytes: number,
 	redact = true,
-): { text: string; redactions: number } {
-	if (maxBytes <= 0 || text.length === 0) return { text: "", redactions: 0 };
+): ToolResultSummarySelection {
+	if (maxBytes <= 0 || text.length === 0) return { text: "", redactions: 0, complete: text.length === 0 };
 	const tally = createRedactionTally();
 	const safeText = redact ? redactSecretsText(text, tally) : text;
-	const lines = safeText.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n");
+	const lines = normalizeNewlines(safeText).split("\n");
 	const nonempty = lines.map((line, index) => ({ line: line.trim(), index })).filter((entry) => entry.line.length > 0);
-	if (nonempty.length === 0) return { text: "", redactions: tally.count };
+	if (nonempty.length === 0) return { text: "", redactions: tally.count, complete: false };
 	if (nonempty.length === 1) {
+		const only = nonempty[0]?.line ?? "";
 		return {
-			text: boundedToolResultExcerpt(nonempty[0]?.line ?? "", maxBytes),
+			text: boundedToolResultExcerpt(only, maxBytes),
 			redactions: tally.count,
+			complete: tally.count === 0 && byteLength(only) <= maxBytes,
 		};
 	}
 
+	// Head and tail are disjoint by construction. Overlapping slices used to
+	// emit every line of a short output twice, so a two-line result summarized
+	// larger than the output it summarized.
 	const head = nonempty.slice(0, 4);
-	const tail = nonempty.slice(-6);
+	const tail = nonempty.slice(Math.max(head.length, nonempty.length - 6));
 	const edgeIndexes = new Set([...head, ...tail].map((entry) => entry.index));
 	const diagnostics = nonempty.filter((entry) => !edgeIndexes.has(entry.index) && ERROR_LIKE_LINE.test(entry.line));
 	const sections = [
@@ -289,8 +334,16 @@ export function deterministicDiagnosticSummary(
 			tail.map((entry) => entry.line),
 		),
 	].filter((section) => section.length > 0);
-	const complete = sections.join("\n");
-	if (byteLength(complete) <= maxBytes) return { text: complete, redactions: tally.count };
+	const selected = [...head, ...diagnostics, ...tail];
+	const keepsEveryLine =
+		selected.length === nonempty.length && selected.every((entry) => byteLength(entry.line) <= SUMMARY_LINE_MAX_BYTES);
+	// Section labels earn their bytes by telling the model which lines were
+	// elided. When nothing was elided they are pure overhead, and on a short
+	// output they made the summary larger than the output itself.
+	const rendered = keepsEveryLine ? selected.map((entry) => summaryLine(entry.line)).join("\n") : sections.join("\n");
+	if (byteLength(rendered) <= maxBytes) {
+		return { text: rendered, redactions: tally.count, complete: keepsEveryLine && tally.count === 0 };
+	}
 
 	// Preserve all three signal classes under pressure. The middle allocation is
 	// deliberately largest because those error-like lines are the summary's
@@ -302,7 +355,7 @@ export function deterministicDiagnosticSummary(
 		const budget = Math.floor(maxBytes * weight);
 		if (budget > 0) boundedSections.push(boundedToolResultExcerpt(section ?? "", budget));
 	}
-	return { text: capUtf8(boundedSections.join("\n"), maxBytes), redactions: tally.count };
+	return { text: capUtf8(boundedSections.join("\n"), maxBytes), redactions: tally.count, complete: false };
 }
 
 function retrievalLine(offloadPath: string | null, followUpHint: string): string {
@@ -354,37 +407,39 @@ function fullTrailer(input: ProjectToolResultContextInput): string {
 	return lines.length === 0 ? "" : `[tool-result metadata]\n${lines.join("\n")}`;
 }
 
-/** Whether the final projection will omit captured content and therefore benefits from an offload artifact. */
-export function toolResultContextOmitsContent(input: ProjectToolResultContextInput): boolean {
-	const mode = input.disposition.context.mode;
-	if (input.capturedBytes === 0) return false;
-	if (mode === "metadata-only" || mode === "summary") return true;
-	if (mode === "full") {
-		const trailer = fullTrailer(input);
-		const candidate = trailer.length === 0 ? input.text : `${input.text}\n\n${trailer}`;
-		return input.capturedBytes > byteLength(input.text) || byteLength(candidate) > input.disposition.context.maxBytes;
-	}
-	const header = contextHeader(input, "bounded", false);
-	return (
-		input.capturedBytes > byteLength(input.text) ||
-		byteLength(header) + 1 + byteLength(input.text) > input.disposition.context.maxBytes
-	);
+const NUL = "\u0000";
+
+/**
+ * A raw NUL cannot survive the provider conversation as content: it is not
+ * printable, it terminates strings in most consumers downstream of the model,
+ * and it carries no diagnostic value. It is removed from the model projection
+ * only. Removal is byte-exact and touches no other byte, so multi-byte code
+ * points stay whole and ANSI escape sequences are never cut mid-sequence.
+ * Presentation text and the retrieval artifact keep the captured bytes.
+ */
+function stripNulForContext(text: string): { text: string; stripped: number } {
+	const parts = text.split(NUL);
+	return parts.length === 1 ? { text, stripped: 0 } : { text: parts.join(""), stripped: parts.length - 1 };
 }
 
 /** Build the deterministic model projection for a normalized disposition. */
 export function projectToolResultContext(input: ProjectToolResultContextInput): ToolResultContextProjection {
 	const requestedMode = input.disposition.context.mode;
 	const maxBytes = input.disposition.context.maxBytes;
+	const sanitized = stripNulForContext(input.text);
+	const body = sanitized.text;
+	// The captured text can already be a partial capture, and NUL removal drops
+	// bytes the operator surface still holds. Either way content is omitted.
+	const capturedTextIsComplete = input.capturedBytes <= byteLength(input.text) && sanitized.stripped === 0;
 	if (requestedMode === "full") {
 		const trailer = fullTrailer(input);
-		const candidate = trailer.length === 0 ? input.text : `${input.text}\n\n${trailer}`;
-		const capturedTextIsComplete = input.capturedBytes <= byteLength(input.text);
+		const candidate = trailer.length === 0 ? body : `${body}\n\n${trailer}`;
 		if (capturedTextIsComplete && byteLength(candidate) <= maxBytes) {
 			return { text: candidate, appliedMode: "full", truncated: false };
 		}
 		const header = contextHeader(input, "bounded", true);
 		return {
-			text: joinHeaderAndBody(header, input.text, maxBytes, input.disposition.context.downgradeExcerpt),
+			text: joinHeaderAndBody(header, body, maxBytes, input.disposition.context.downgradeExcerpt),
 			appliedMode: "bounded",
 			truncated: true,
 			downgrade: { from: "full", to: "bounded", reason: "hard-budget" },
@@ -399,40 +454,33 @@ export function projectToolResultContext(input: ProjectToolResultContextInput): 
 	}
 	if (requestedMode === "summary") {
 		const diagnostic = input.disposition.context.strategy === "diagnostic";
-		const initialProvenance = summaryProvenance(input.text, diagnostic ? "sha256-diagnostic-v1" : "sha256-head-tail-v1");
-		const initialHeader = contextHeader(input, "summary", input.capturedBytes > 0, initialProvenance);
-		const bodyBudget = Math.max(0, maxBytes - byteLength(initialHeader) - 1);
+		const algorithm = diagnostic ? "sha256-diagnostic-v1" : "sha256-head-tail-v1";
+		const redact = input.disposition.context.redact !== false;
+		const budgetHeader = contextHeader(input, "summary", true, summaryProvenance(input.text, algorithm));
+		const bodyBudget = Math.max(0, maxBytes - byteLength(budgetHeader) - 1);
 		const selected = diagnostic
-			? deterministicDiagnosticSummary(input.text, bodyBudget, input.disposition.context.redact !== false)
-			: {
-					text: input.text
-						.replace(/\r\n/gu, "\n")
-						.replace(/\r/gu, "\n")
-						.split("\n")
-						.map((line) => line.trim())
-						.filter((line) => line.length > 0)
-						.join("\n"),
-					redactions: 0,
-				};
-		const provenance = summaryProvenance(
-			input.text,
-			diagnostic ? "sha256-diagnostic-v1" : "sha256-head-tail-v1",
-			selected.redactions,
-		);
-		const header = contextHeader(input, "summary", input.capturedBytes > 0, provenance);
+			? deterministicDiagnosticSummary(body, bodyBudget, redact)
+			: deterministicHeadTailSummary(body, redact);
+		const provenance = summaryProvenance(input.text, algorithm, selected.redactions);
+		// "Nothing omitted" is only true if the whole selection also survives the
+		// header it would then render, so the claim can never itself be truncated.
+		const completeHeader = contextHeader(input, "summary", false, provenance);
+		const fits = byteLength(completeHeader) + 1 + byteLength(selected.text) <= maxBytes;
+		const truncated = input.capturedBytes > 0 && !(capturedTextIsComplete && selected.complete && fits);
+		const header = contextHeader(input, "summary", truncated, provenance);
 		return {
 			text: joinHeaderAndBody(header, selected.text, maxBytes),
 			appliedMode: "summary",
-			truncated: input.capturedBytes > 0,
+			truncated,
 			summaryProvenance: provenance,
 		};
 	}
 	const header = contextHeader(input, "bounded", input.capturedBytes > maxBytes);
-	const text = joinHeaderAndBody(header, input.text, maxBytes, input.disposition.context.excerpt);
+	const text = joinHeaderAndBody(header, body, maxBytes, input.disposition.context.excerpt);
 	return {
 		text,
 		appliedMode: "bounded",
-		truncated: byteLength(header) + 1 + byteLength(input.text) > maxBytes || input.capturedBytes > byteLength(input.text),
+		truncated: byteLength(header) + 1 + byteLength(body) > maxBytes || !capturedTextIsComplete,
 	};
 }
 

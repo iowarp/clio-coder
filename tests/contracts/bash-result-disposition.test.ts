@@ -21,6 +21,8 @@ import {
 	toolResultPresentationText,
 } from "../../src/tools/result-disposition.js";
 
+const ESC = "\u001b";
+const NUL = "\u0000";
 const roots: string[] = [];
 const savedEnv = {
 	CLIO_CODER_HOME: process.env.CLIO_CODER_HOME,
@@ -305,6 +307,45 @@ describe("contracts/bash result disposition", () => {
 		strictEqual(resultText(hugeLine).includes("�"), false);
 		strictEqual(toolResultContextText(hugeLine).includes("�"), false);
 		assertByteAccounting(hugeLine);
+	});
+
+	it("keeps NUL and ANSI safe through every mode, in context and in presentation", async () => {
+		useStateDir();
+		// Raw NUL, CSI colour sequences, and a 4-byte code point in one capture,
+		// with an error-like line so the summary strategy has a middle to keep.
+		const payload =
+			`head ${ESC}[31mred${ESC}[0m 🙂 ${NUL} start\n` +
+			`${`${ESC}[2mnoise 🙂${ESC}[0m\n`.repeat(400)}` +
+			`ERROR ${NUL} middle diagnostic 🙂\n` +
+			`${ESC}[1mTAIL${ESC}[0m 🙂 ${NUL} end`;
+		const script = `process.stdout.write(${JSON.stringify(payload)})`;
+		for (const mode of ["full", "bounded", "summary", "metadata-only"] as const) {
+			const result = await invokeBash(
+				{ command: `node -e ${JSON.stringify(script)}`, output_policy: mode },
+				{ sessionId: `control-bytes-${mode}`, toolCallId: "call" },
+			);
+			const applied = disposition(result);
+			const context = toolResultContextText(result);
+
+			strictEqual(result.kind, "ok", mode);
+			strictEqual(context.includes(NUL), false, `${mode} sends no raw NUL to the model`);
+			strictEqual(context.includes("�"), false, `${mode} context has no replacement character`);
+			strictEqual(Buffer.from(context, "utf8").toString("utf8"), context, `${mode} context round-trips as UTF-8`);
+			for (let at = context.indexOf(ESC); at !== -1; at = context.indexOf(ESC, at + 1)) {
+				ok(/^\[[0-9;]*m/u.test(context.slice(at + 1)), `${mode} keeps whole ANSI sequences`);
+			}
+			strictEqual(resultText(result).includes("�"), false, `${mode} presentation has no replacement character`);
+			ok(resultText(result).includes(NUL), `${mode} presentation keeps the captured bytes`);
+			ok(applied.offloadPath && existsSync(applied.offloadPath), mode);
+			ok(readFileSync(applied.offloadPath, "utf8").includes(NUL), `${mode} retrieval keeps the captured bytes`);
+			strictEqual(applied.contextTruncated, true, mode);
+			assertByteAccounting(result);
+			if (mode === "metadata-only") {
+				strictEqual(context.includes("ERROR"), false);
+			} else {
+				ok(context.includes("🙂"), mode);
+			}
+		}
 	});
 
 	it("bounds live updates under the selected policy and writes only the terminal offload", async () => {
