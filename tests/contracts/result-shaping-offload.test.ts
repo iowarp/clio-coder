@@ -8,6 +8,7 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +18,12 @@ import { Type } from "typebox";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ToolResult, ToolSpec } from "../../src/tools/registry.js";
-import { OFFLOAD_POINTER_NOTE, shapeToolResult } from "../../src/tools/result-shaping.js";
+import {
+	OFFLOAD_POINTER_NOTE,
+	shapeToolResult,
+	sweepExpiredToolOffloads,
+	TOOL_OFFLOAD_MAX_AGE_MS,
+} from "../../src/tools/result-shaping.js";
 
 const roots: string[] = [];
 const savedEnv = {
@@ -113,6 +119,26 @@ describe("contracts/result-shaping offload", () => {
 
 		strictEqual(shaped, original);
 		strictEqual(existsSync(join(stateDir, "scratch")), false);
+	});
+
+	it("sweeps expired offloads at boot and preserves fresh files", () => {
+		const stateDir = useStateDir();
+		const now = Date.UTC(2026, 7, 23);
+		const expiredDir = join(stateDir, "scratch", "expired-session");
+		const currentDir = join(stateDir, "scratch", "current-session");
+		const expired = join(expiredDir, "expired.txt");
+		const current = join(currentDir, "current.txt");
+		mkdirSync(expiredDir, { recursive: true });
+		mkdirSync(currentDir, { recursive: true });
+		writeFileSync(expired, "old", "utf8");
+		writeFileSync(current, "fresh", "utf8");
+		utimesSync(expired, new Date(now - TOOL_OFFLOAD_MAX_AGE_MS - 1), new Date(now - TOOL_OFFLOAD_MAX_AGE_MS - 1));
+		utimesSync(current, new Date(now - TOOL_OFFLOAD_MAX_AGE_MS + 1), new Date(now - TOOL_OFFLOAD_MAX_AGE_MS + 1));
+
+		strictEqual(sweepExpiredToolOffloads(now), 1);
+		strictEqual(existsSync(expired), false);
+		strictEqual(existsSync(expiredDir), false, "an emptied session directory is pruned");
+		strictEqual(readFileSync(current, "utf8"), "fresh");
 	});
 
 	it("writes full over-cap output and includes the scratch path in the hint", () => {

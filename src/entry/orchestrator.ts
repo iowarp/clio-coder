@@ -183,6 +183,7 @@ import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/comp
 import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
+import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -726,6 +727,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.installSignalHandlers();
 
 	ensureClioState();
+	sweepExpiredToolOffloads();
 	timer.mark("install check");
 
 	// A hard-killed coordinator cannot run domain drains. Reconcile its compete

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -21,6 +21,7 @@ export const DEFAULT_TOOL_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES + 2 * 1024;
 const RESULT_TRUNCATION_MARKER = "\n[tool result truncated]";
 const RESULT_OFFLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const TAIL_NOTICE_RESERVE_BYTES = 512;
+export const TOOL_OFFLOAD_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
 type ToolResultShapeContext = Pick<ToolInvokeOptions, "sessionId" | "toolCallId">;
 
@@ -89,6 +90,32 @@ function offloadBody(text: string, bytes: number, maxBytes: number): string {
 	const notice = `\n[clio-coder scratch output truncated at ${maxBytes} bytes; original size ${bytes} bytes]`;
 	const prefixBudget = maxBytes - byteLength(notice);
 	return `${truncateUtf8(text, Math.max(0, prefixBudget), "")}${notice}`;
+}
+
+/** Remove regular offload files older than the boot retention cap. */
+export function sweepExpiredToolOffloads(now = Date.now()): number {
+	const root = join(clioStateDir(), "scratch");
+	const cutoff = now - TOOL_OFFLOAD_MAX_AGE_MS;
+	let removed = 0;
+	try {
+		for (const session of readdirSync(root, { withFileTypes: true })) {
+			if (!session.isDirectory()) continue;
+			const sessionDir = join(root, session.name);
+			for (const entry of readdirSync(sessionDir, { withFileTypes: true })) {
+				if (!entry.isFile()) continue;
+				const path = join(sessionDir, entry.name);
+				try {
+					if (statSync(path).mtimeMs >= cutoff) continue;
+					rmSync(path, { force: true });
+					removed += 1;
+				} catch {}
+			}
+			try {
+				if (readdirSync(sessionDir).length === 0) rmdirSync(sessionDir);
+			} catch {}
+		}
+	} catch {}
+	return removed;
 }
 
 /**
