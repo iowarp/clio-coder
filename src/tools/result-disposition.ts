@@ -52,6 +52,23 @@ export interface ToolResultSummaryProvenance {
 	redactions?: number;
 }
 
+export const TOOL_RESULT_DIGEST_MAX_BYTES = 240;
+
+export interface ToolResultDigestProvenance {
+	producer: "code";
+	source: "canonical-result-disposition" | "legacy-fallback";
+	algorithm: "redacted-context-digest-v1" | "redacted-legacy-digest-v1";
+	contextMode?: AppliedToolResultContextMode;
+	summaryAlgorithm?: ToolResultSummaryProvenance["algorithm"];
+	redactions?: number;
+}
+
+/** A bounded diagnostic that is safe to pass to task memory. */
+export interface ToolResultDigest {
+	text: string;
+	provenance: ToolResultDigestProvenance;
+}
+
 export interface ToolResultDispositionMetadata {
 	version: 1;
 	applications: 1;
@@ -221,6 +238,14 @@ function utf8Suffix(text: string, maxBytes: number): string {
 
 function capUtf8(text: string, maxBytes: number): string {
 	return byteLength(text) <= maxBytes ? text : utf8Prefix(text, maxBytes);
+}
+
+function capDigestUtf8(text: string, maxBytes: number): string {
+	if (byteLength(text) <= maxBytes) return text;
+	const marker = "…";
+	const markerBytes = byteLength(marker);
+	if (markerBytes >= maxBytes) return utf8Prefix(text, maxBytes);
+	return `${utf8Prefix(text, maxBytes - markerBytes).trimEnd()}${marker}`;
 }
 
 /** A deterministic, UTF-8-safe excerpt whose total bytes never exceed maxBytes. */
@@ -501,6 +526,137 @@ export function projectToolResultContext(input: ProjectToolResultContextInput): 
 		text,
 		appliedMode: "bounded",
 		truncated: byteLength(header) + 1 + byteLength(body) > maxBytes || !capturedTextIsComplete,
+	};
+}
+
+const DIGEST_FACT_KEYS = [
+	"outcome",
+	"exitCode",
+	"timedOut",
+	"aborted",
+	"outputCapped",
+	"signal",
+	"status",
+	"error",
+	"decision",
+	"next",
+] as const;
+
+function digestFactText(details: ToolResultDetails | undefined): string {
+	if (details === undefined) return "";
+	const facts: string[] = [];
+	for (const key of DIGEST_FACT_KEYS) {
+		if (details[key] !== undefined) facts.push(`${key}=${stableJson(details[key])}`);
+	}
+	return facts.join(" ");
+}
+
+function projectionBody(input: ProjectToolResultContextInput, projection: ToolResultContextProjection): string {
+	if (projection.appliedMode === "metadata-only") return "";
+	if (projection.appliedMode === "full") {
+		const trailer = fullTrailer(input);
+		return trailer.length > 0 && projection.text.endsWith(`\n\n${trailer}`)
+			? projection.text.slice(0, -(trailer.length + 2))
+			: projection.text;
+	}
+	const header = contextHeader(input, projection.appliedMode, projection.truncated, projection.summaryProvenance);
+	const prefix = `${header}\n`;
+	return projection.text.startsWith(prefix) ? projection.text.slice(prefix.length) : "";
+}
+
+function digestText(
+	status: string,
+	facts: string,
+	body: string,
+	redactions: number,
+	maxBytes: number,
+): { text: string; redactions: number } {
+	const tally = createRedactionTally();
+	const safeStatus = redactSecretsText(status, tally);
+	const safeFacts = redactSecretsText(facts, tally);
+	const statusAndFacts = [safeStatus, safeFacts].filter((value) => value.length > 0).join(" ");
+	const bodyBudget = Math.max(0, maxBytes - byteLength(statusAndFacts) - 2);
+	const selected = deterministicDiagnosticSummary(body, bodyBudget, true);
+	const candidate = [statusAndFacts, selected.text.replace(/\s+/gu, " ").trim()]
+		.filter((value) => value.length > 0)
+		.join("; ");
+	return {
+		text: capDigestUtf8(candidate, maxBytes),
+		redactions: redactions + tally.count + selected.redactions,
+	};
+}
+
+/**
+ * Reuse the applied model-context projection as task memory's diagnostic
+ * source. Metadata-only never contributes captured content, and bounded or
+ * summarized modes contribute only the body admitted by that projection.
+ */
+export function deterministicToolResultDigest(
+	input: ProjectToolResultContextInput,
+	maxBytes = TOOL_RESULT_DIGEST_MAX_BYTES,
+): ToolResultDigest {
+	const projection = projectToolResultContext(input);
+	const status = [
+		`kind=${input.kind}`,
+		`mode=${projection.appliedMode}`,
+		`truncated=${String(projection.truncated)}`,
+		...(projection.appliedMode === "metadata-only" || projection.truncated
+			? [`capturedBytes=${input.capturedBytes}`]
+			: []),
+	].join(" ");
+	const digest = digestText(
+		status,
+		digestFactText(input.details),
+		projectionBody(input, projection),
+		projection.summaryProvenance?.redactions ?? 0,
+		Math.max(1, Math.floor(maxBytes)),
+	);
+	return {
+		text: digest.text,
+		provenance: {
+			producer: "code",
+			source: "canonical-result-disposition",
+			algorithm: "redacted-context-digest-v1",
+			contextMode: projection.appliedMode,
+			...(projection.summaryProvenance === undefined ? {} : { summaryAlgorithm: projection.summaryProvenance.algorithm }),
+			...(digest.redactions > 0 ? { redactions: digest.redactions } : {}),
+		},
+	};
+}
+
+/** Deterministic compatibility path for results without a canonical disposition. */
+export function legacyToolResultDigest(
+	text: string,
+	options: { outcome: "ok" | "error"; maxBytes?: number },
+): ToolResultDigest {
+	const maxBytes = Math.max(1, Math.floor(options.maxBytes ?? TOOL_RESULT_DIGEST_MAX_BYTES));
+	const fallback = options.outcome === "error" && text.trim().length === 0 ? "an unknown tool error" : text;
+	const digest = digestText("", "", fallback, 0, maxBytes);
+	return {
+		text: digest.text,
+		provenance: {
+			producer: "code",
+			source: "legacy-fallback",
+			algorithm: "redacted-legacy-digest-v1",
+			...(digest.redactions > 0 ? { redactions: digest.redactions } : {}),
+		},
+	};
+}
+
+/** Reapply the memory boundary's redaction and byte cap to a supplied digest. */
+export function sanitizeToolResultDigest(
+	digest: ToolResultDigest,
+	maxBytes = TOOL_RESULT_DIGEST_MAX_BYTES,
+): ToolResultDigest {
+	const tally = createRedactionTally();
+	const safe = redactSecretsText(digest.text, tally).replace(/\s+/gu, " ").trim();
+	const redactions = (digest.provenance.redactions ?? 0) + tally.count;
+	return {
+		text: capDigestUtf8(safe, Math.max(1, Math.floor(maxBytes))),
+		provenance: {
+			...digest.provenance,
+			...(redactions > 0 ? { redactions } : {}),
+		},
 	};
 }
 

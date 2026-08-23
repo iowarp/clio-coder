@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+	legacyToolResultDigest,
+	sanitizeToolResultDigest,
+	type ToolResultDigest,
+} from "../../tools/result-disposition.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank } from "../memory/task-bank.js";
 import {
 	runTaskMemoryPolicy,
@@ -40,7 +45,6 @@ export interface MemoryInterventionSettings {
 	timeoutMs: number;
 }
 
-const RESULT_DIGEST_MAX_CHARS = 240;
 const CALL_DESCRIPTION_MAX_CHARS = 180;
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
@@ -48,7 +52,7 @@ type ToolOutcome = "ok" | "error";
 
 interface PendingToolStep {
 	toolName: string;
-	fingerprint: string;
+	operationFingerprint: string;
 	callDescription: string;
 }
 
@@ -145,7 +149,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let toolStep = 0;
 	let lastTurnEndStep = 0;
 	let reactivateAfterCompaction = false;
-	let lastInjectedFingerprint: string | null = null;
+	let lastInjectedOperationFingerprint: string | null = null;
 	let currentTask = "(current task unavailable)";
 	let toolsSinceMemoryStep = 0;
 	let consecutiveErrors = 0;
@@ -467,13 +471,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	function observeBeforeTool(input: MiddlewareHookInput): void {
 		const prepared = prepareToolStep(input);
 		if (prepared === null) return;
-		setBounded(pending, pendingKey(input, prepared.fingerprint), prepared, settings().windowSteps);
+		setBounded(pending, pendingKey(input, prepared.operationFingerprint), prepared, settings().windowSteps);
 	}
 
 	function observeAfterTool(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 		const fallback = prepareToolStep(input);
 		if (fallback === null) return NO_EFFECTS;
-		const key = pendingKey(input, fallback.fingerprint);
+		const key = pendingKey(input, fallback.operationFingerprint);
 		const prepared = pending.get(key) ?? fallback;
 		pending.delete(key);
 		const outcome = input.metadata?.resultKind === "error" ? "error" : "ok";
@@ -487,11 +491,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		} else {
 			consecutiveErrors = 0;
 		}
+		const digest = resultDigest(input, outcome);
 		const step: TrajectoryStep = {
 			...prepared,
 			step: toolStep,
 			outcome,
-			resultDigest: resultDigest(input, outcome),
+			resultDigest: digest.text,
+			resultDigestProvenance: digest.provenance,
 		};
 		trajectory.push(step);
 		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
@@ -507,20 +513,20 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * itself, which the model reads on its very next round.
 	 */
 	function annotateRepeatedFailure(step: TrajectoryStep): ReadonlyArray<MiddlewareEffect> {
-		if (annotatedThisTurn.has(step.fingerprint)) return NO_EFFECTS;
+		if (annotatedThisTurn.has(step.operationFingerprint)) return NO_EFFECTS;
 		const occurrences = trajectory.filter(
-			(candidate) => candidate.outcome === "error" && candidate.fingerprint === step.fingerprint,
+			(candidate) => candidate.outcome === "error" && candidate.operationFingerprint === step.operationFingerprint,
 		).length;
-		const failure = failures.get(step.fingerprint);
+		const failure = failures.get(step.operationFingerprint);
 		if (occurrences < 2 || failure === undefined) return NO_EFFECTS;
 		const message = boundedReminder(
 			`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}. Change the approach rather than repeating it.`,
 			settings().maxTokens,
 		);
 		if (message.length === 0) return NO_EFFECTS;
-		annotatedThisTurn.add(step.fingerprint);
+		annotatedThisTurn.add(step.operationFingerprint);
 		// Claim the turn-end channel too, so one repeated failure is surfaced once.
-		lastInjectedFingerprint = step.fingerprint;
+		lastInjectedOperationFingerprint = step.operationFingerprint;
 		lastDecision = "injected";
 		rulesInjectedSincePromptedStep = true;
 		annotatedSinceTurnEnd = true;
@@ -530,7 +536,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	function rememberFailure(step: TrajectoryStep): void {
-		const previous = failures.get(step.fingerprint);
+		const previous = failures.get(step.operationFingerprint);
 		const attempts = (previous?.attempts ?? 0) + 1;
 		const firstStep = previous?.firstStep ?? step.step;
 		const content = proceduralContent(step.callDescription, attempts, firstStep, step.resultDigest);
@@ -546,7 +552,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		}
 		setBounded(
 			failures,
-			step.fingerprint,
+			step.operationFingerprint,
 			{
 				entryId,
 				attempts,
@@ -566,21 +572,21 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					step === undefined ||
 					step.outcome !== "error" ||
 					step.step <= lastTurnEndStep ||
-					step.fingerprint === lastInjectedFingerprint
+					step.operationFingerprint === lastInjectedOperationFingerprint
 				) {
 					continue;
 				}
 				const occurrences = trajectory.filter(
-					(candidate) => candidate.outcome === "error" && candidate.fingerprint === step.fingerprint,
+					(candidate) => candidate.outcome === "error" && candidate.operationFingerprint === step.operationFingerprint,
 				).length;
-				const failure = failures.get(step.fingerprint);
+				const failure = failures.get(step.operationFingerprint);
 				if (occurrences < 2 || failure === undefined) continue;
 				const message = boundedReminder(
 					`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}.`,
 					settings().maxTokens,
 				);
 				if (message.length === 0) return NO_EFFECTS;
-				lastInjectedFingerprint = step.fingerprint;
+				lastInjectedOperationFingerprint = step.operationFingerprint;
 				lastInjectedMessage = message;
 				lastDecision = "injected";
 				rulesInjectedSincePromptedStep = true;
@@ -624,31 +630,35 @@ function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {
 	const canonical = hashToolCall(toolName, input.toolArgs ?? {});
 	return {
 		toolName,
-		fingerprint: createHash("sha256").update(canonical).digest("hex").slice(0, 16),
+		operationFingerprint: createHash("sha256").update(canonical).digest("hex").slice(0, 16),
 		callDescription: shortText(canonical, CALL_DESCRIPTION_MAX_CHARS),
 	};
 }
 
-function pendingKey(input: MiddlewareHookInput, fingerprint: string): string {
-	return input.toolCallId ?? `anonymous:${fingerprint}`;
+function pendingKey(input: MiddlewareHookInput, operationFingerprint: string): string {
+	return input.toolCallId ?? `anonymous:${operationFingerprint}`;
 }
 
-function resultDigest(input: MiddlewareHookInput, outcome: ToolOutcome): string {
+function resultDigest(input: MiddlewareHookInput, outcome: ToolOutcome): ToolResultDigest {
+	if (input.toolResultDigest !== undefined) return sanitizeToolResultDigest(input.toolResultDigest);
 	if (outcome === "error") {
 		const metadataMessage = input.metadata?.errorMessage;
 		if (typeof metadataMessage === "string" && metadataMessage.trim().length > 0) {
-			return shortText(diagnosticLine(metadataMessage), RESULT_DIGEST_MAX_CHARS);
+			return legacyToolResultDigest(diagnosticLine(metadataMessage), { outcome });
 		}
 		for (const key of ["error", "message"] as const) {
 			const value = input.toolResultDetails?.[key];
 			if (typeof value === "string" && value.trim().length > 0) {
-				return shortText(diagnosticLine(value), RESULT_DIGEST_MAX_CHARS);
+				return legacyToolResultDigest(diagnosticLine(value), { outcome });
 			}
 		}
-		return "an unknown tool error";
+		return legacyToolResultDigest("", { outcome });
 	}
 	const resultFingerprint = input.metadata?.resultFingerprint;
-	return typeof resultFingerprint === "string" ? `ok result ${resultFingerprint.slice(0, 16)}` : "ok";
+	return legacyToolResultDigest(
+		typeof resultFingerprint === "string" ? `ok result ${resultFingerprint.slice(0, 16)}` : "ok",
+		{ outcome },
+	);
 }
 
 const DIAGNOSTIC_HINT =

@@ -18,6 +18,12 @@ const BASE_INPUT = {
 	maxTokens: 100,
 } as const;
 
+const LEGACY_DIGEST_PROVENANCE = {
+	producer: "code",
+	source: "legacy-fallback",
+	algorithm: "redacted-legacy-digest-v1",
+} as const;
+
 function response(operations: ReadonlyArray<unknown>, phaseTwo = "<no_intervention/>"): string {
 	return `<operations>${JSON.stringify(operations)}</operations>\n${phaseTwo}`;
 }
@@ -51,11 +57,12 @@ describe("contracts/task memory prompted policy", () => {
 		const calls: TaskMemoryModelRequest[] = [];
 		const trajectory = Array.from({ length: 8 }, (_, index) => ({
 			toolName: "bash",
-			fingerprint: `${index}`.repeat(16),
+			operationFingerprint: `${index}`.repeat(16),
 			callDescription: `bash{"command":"${"x".repeat(160)}"}`,
 			step: index + 1,
 			outcome: "error" as const,
 			resultDigest: `error ${"y".repeat(230)}`,
+			resultDigestProvenance: LEGACY_DIGEST_PROVENANCE,
 		}));
 		await runTaskMemoryPolicy(new TaskMemoryBank(), clientReturning(response([]), calls), {
 			...BASE_INPUT,
@@ -178,10 +185,11 @@ describe("contracts/task memory prompted policy", () => {
 					{
 						step: 2,
 						toolName: "bash",
-						fingerprint: "abc123",
+						operationFingerprint: "abc123",
 						callDescription: "npm test",
 						outcome: "ok",
 						resultDigest: "passed",
+						resultDigestProvenance: LEGACY_DIGEST_PROVENANCE,
 					},
 				],
 			},

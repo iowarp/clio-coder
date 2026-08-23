@@ -328,6 +328,12 @@ function cloneHookInput(input: MiddlewareHookInput): MiddlewareHookInput {
 	if (input.metadata !== undefined) cloned.metadata = { ...input.metadata };
 	if (input.toolArgs !== undefined) cloned.toolArgs = { ...input.toolArgs };
 	if (input.toolResultDetails !== undefined) cloned.toolResultDetails = { ...input.toolResultDetails };
+	if (input.toolResultDigest !== undefined) {
+		cloned.toolResultDigest = {
+			text: input.toolResultDigest.text,
+			provenance: { ...input.toolResultDigest.provenance },
+		};
+	}
 	if (input.text !== undefined) cloned.text = input.text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS);
 	return cloned;
 }

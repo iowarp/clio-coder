@@ -4,8 +4,11 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import {
+	deterministicToolResultDigest,
+	legacyToolResultDigest,
 	normalizeToolResultDisposition,
 	projectToolResultContext,
+	type ToolResultDigest,
 	type ToolResultDisposition,
 	type ToolResultDispositionFallback,
 	type ToolResultDispositionMetadata,
@@ -48,6 +51,34 @@ function offloadMaxBytesFor(spec: ToolSpec): number {
 	return typeof configured === "number" && Number.isFinite(configured) && configured > 0
 		? Math.floor(configured)
 		: RESULT_OFFLOAD_MAX_BYTES;
+}
+
+/**
+ * Build the task-memory diagnostic from the same normalized disposition that
+ * will shape model context. Legacy tools use the explicit compatibility path.
+ */
+export function toolResultDigestFor(
+	spec: ToolSpec,
+	result: ToolResult,
+	requestedDisposition?: ToolResultDisposition,
+): ToolResultDigest {
+	const text = resultText(result);
+	const disposition = normalizeToolResultDisposition(spec, maxBytesFor(spec), requestedDisposition);
+	if (disposition === null) {
+		const projected = shapeLegacyToolResult(spec, result);
+		return legacyToolResultDigest(resultText(projected), { outcome: result.kind });
+	}
+	const capturedBytes = capturedBytesFor(result, text);
+	return deterministicToolResultDigest({
+		text,
+		kind: result.kind,
+		details: result.details,
+		disposition,
+		capturedBytes,
+		displayedBytes: Math.min(capturedBytes, disposition.presentation.maxBytes),
+		offloadPath: existingOffloadPath(result.details),
+		followUpHint: followUpHint(spec),
+	});
 }
 
 function detailsRecord(details: ToolResultDetails | undefined, key: string): Record<string, unknown> | null {

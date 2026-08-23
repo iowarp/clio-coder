@@ -10,6 +10,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - `docs/middleware-and-components.md` documents every built-in middleware registration: id, hooks, trigger, and what does not trigger it.
 
 ### Fixed
+- Proactive task memory now reuses deterministic tool-result disposition digests with explicit source provenance (#173). Operation fingerprints remain separate for loop and repeated-failure identity, while redaction and byte caps apply before diagnostics reach the task bank or background policy.
 - The llama.cpp router's `sleeping` state now reads as not resident (#192), and `clio-coder targets` reports `resident: none` while preserving the reported context-slot metadata.
 - `servedModel` now records whether an OpenAI-compatible stream reported a model id (#193). A string is the reported id, while `null` means the adapter observed the stream but no model id appeared. Receipts and usage render the null case as `unknown`; providers outside the stream tap keep the prior `responseModel` fallback. The `servedCalls` field in the `model-usage` fact now counts calls where the server reported any id, rather than only calls answered under a different id.
 - The selected live model's capability probe now starts at boot (#195), so the first `/context` view and footer show the probed context window before any model turn.
