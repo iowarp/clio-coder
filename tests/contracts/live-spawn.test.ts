@@ -18,6 +18,13 @@
  * The survivor check writes the grandchild's pid to a file and then polls
  * `kill(pid, 0)` from here, because the only honest way to ask whether a
  * process is gone is to ask the kernel.
+ *
+ * Every span below is read off `performance.now()`. These assertions are about
+ * how long the escalation took, and docs/time-conventions.md reserves the wall
+ * clock for anchored instants. A host that resyncs its wall clock steps it
+ * backward mid-run, which once made a full 2s grace plus 1s timeout measure as
+ * 760ms and failed the escalation assertion while the escalation itself was
+ * correct. The monotonic clock does not move under NTP or a hypervisor resync.
  */
 import { ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -41,8 +48,8 @@ function alive(pid: number): boolean {
 
 /** Wait until `pid` is gone, or give up after `timeoutMs` and report it still alive. */
 async function waitForGone(pid: number, timeoutMs: number): Promise<boolean> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
+	const deadline = performance.now() + timeoutMs;
+	while (performance.now() < deadline) {
 		if (!alive(pid)) return true;
 		await sleep(50);
 	}
@@ -67,7 +74,7 @@ describe("contracts/live spawn", { concurrency: false }, () => {
 
 	it("a child with no handler dies to the graceful SIGTERM, before the kill escalation", async () => {
 		const entry = script("term.mjs", ['process.stdout.write("up\\n");', "setInterval(() => {}, 1000);", ""].join("\n"));
-		const started = Date.now();
+		const started = performance.now();
 		let caught: unknown;
 		try {
 			await runNodeScript(entry, [], { cwd: dir, timeoutMs: 1_000 });
@@ -77,7 +84,7 @@ describe("contracts/live spawn", { concurrency: false }, () => {
 		ok(caught instanceof RunCliTimeoutError, `expected RunCliTimeoutError, got ${String(caught)}`);
 		strictEqual(caught.stdout, "up\n");
 		strictEqual(caught.signal, "SIGTERM");
-		const elapsed = Date.now() - started;
+		const elapsed = Math.round(performance.now() - started);
 		ok(elapsed < 2_500, `settled at ${elapsed}ms; the 2s SIGKILL grace should not have been waited out`);
 	});
 
@@ -92,7 +99,7 @@ describe("contracts/live spawn", { concurrency: false }, () => {
 				"",
 			].join("\n"),
 		);
-		const started = Date.now();
+		const started = performance.now();
 		let caught: unknown;
 		try {
 			await runNodeScript(entry, [], { cwd: dir, timeoutMs: 1_000 });
@@ -103,7 +110,7 @@ describe("contracts/live spawn", { concurrency: false }, () => {
 		strictEqual(caught.signal, "SIGKILL");
 		strictEqual(caught.stdout, "stubborn\n");
 		strictEqual(caught.stderr, "stubborn-err\n");
-		const elapsed = Date.now() - started;
+		const elapsed = Math.round(performance.now() - started);
 		ok(elapsed >= 2_500, `settled at ${elapsed}ms; SIGKILL must follow the 2s grace, not precede it`);
 		ok(elapsed < 9_000, `settled at ${elapsed}ms; the kill grace should not have been waited out`);
 	});
