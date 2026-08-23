@@ -1,5 +1,6 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
+import { isSkillSuggestionWait, SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE } from "./stalled-turn.js";
 import { type MiddlewareEffect, metadataNumber } from "./types.js";
 
 /**
@@ -32,12 +33,17 @@ export function skillsReminderMessage(installed: number, installable = 0): strin
 		installable > 0
 			? `${installed} installed, ${installable} installable from the marketplace`
 			: `${installed} installed`;
+	// Inline and non-blocking (issue #184): a 27B model read "and wait for the
+	// operator" as the whole job, spent a 40-second turn deliberating over the
+	// suggestion, and ended without one repository read. The suggestion is one
+	// line, the task continues in the same turn, and only the operator loads.
 	return (
 		`[Skills] ${counts}. Start this task by listing them with context(scope="skills") ` +
 		"and checking for a match; if one matches, open your reply with the line " +
 		`\`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose) ` +
-		"and wait for the operator; load only on operator request, and a marketplace skill is offered for " +
-		"install when the operator runs it. If none match, do not mention skills and continue with the task."
+		"and then continue the task in the same turn without the skill. Only the operator loads a skill, and a " +
+		"marketplace skill is offered for install when the operator runs it. If none match, do not mention skills " +
+		"and continue with the task."
 	);
 }
 
@@ -135,9 +141,18 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 
 	return {
 		id: SKILLS_REMINDER_REGISTRATION_ID,
-		description: "once per session, on the first substantive turn, teaches the skill-suggestion reply protocol",
-		hooks: ["turn_start"],
+		description:
+			"once per session, on the first substantive turn, teaches the skill-suggestion reply protocol; keeps a turn going that stopped on the suggestion",
+		hooks: ["turn_start", "turn_end"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+			// The registration that teaches "suggest, then continue" owns the
+			// consequence when a model suggests and stops. The generic stalled-turn
+			// rule cannot see this case: the listing call counts as a tool call.
+			if (input.hook === "turn_end") {
+				return isSkillSuggestionWait(input)
+					? [{ kind: "request_continuation", message: SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE }]
+					: NO_EFFECTS;
+			}
 			const sessionId = input.sessionId ?? null;
 			if (lastSeenSessionId === undefined) {
 				lastSeenSessionId = sessionId;

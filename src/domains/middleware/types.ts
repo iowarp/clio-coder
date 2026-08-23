@@ -114,6 +114,12 @@ export function metadataNumber(input: MiddlewareHookInput, key: string): number 
 	return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/** The string under `key`, or null when the caller did not report one. */
+export function metadataString(input: MiddlewareHookInput, key: string): string | null {
+	const value = input.metadata?.[key];
+	return typeof value === "string" ? value : null;
+}
+
 export function isMiddlewareHook(value: string): value is MiddlewareHook {
 	return (MIDDLEWARE_HOOKS as ReadonlyArray<string>).includes(value);
 }

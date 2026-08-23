@@ -589,6 +589,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				middlewareToolChoice.toolStarted(event.toolName);
 				deps.toolStartTimes.set(event.toolCallId, eventClock);
 				state.turnToolCalls += 1;
+				state.turnToolNames.push(event.toolName);
 			} else if (event.type === "tool_execution_end") {
 				toolsInFlight = Math.max(0, toolsInFlight - 1);
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);

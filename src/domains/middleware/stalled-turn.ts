@@ -1,10 +1,15 @@
+import { SKILL_SUGGESTION_PREFIX } from "../../core/skill-activation.js";
+import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareRuleDefinition } from "./runtime.js";
-import type { MiddlewareHookInput } from "./types.js";
+import { type MiddlewareHookInput, metadataNumber, metadataString } from "./types.js";
 
 export const STALLED_TURN_REGISTRATION_ID = "nudge.stalled-turn";
 
 export const STALLED_TURN_REQUEST_CONTINUATION_MESSAGE =
 	"You ended your turn after announcing an action without executing it: no tools were called. Continue now and perform the announced action, or state plainly that you are finished and waiting for the user.";
+
+export const SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE =
+	"You ended your turn on a skill suggestion without doing the task. The suggestion line has already made the offer and only the operator loads a skill, so nothing is needed from them before you proceed. Continue the task now without the skill.";
 
 const INTENT_PATTERN = /\b(let me|i['’]ll|i will|i am going to|i['’]m going to|now i|next i|let's|let us)\b/i;
 
@@ -132,6 +137,43 @@ export const STALLED_TURN_RULE_DEFINITION: MiddlewareRuleDefinition = {
 	effects: [{ kind: "request_continuation", message: STALLED_TURN_REQUEST_CONTINUATION_MESSAGE }],
 	predicate: shouldRequestStalledTurnContinuation,
 };
+
+// "run /skill X or say skip", "Suggested skill: /skill x", "want me to use
+// the skill?": the sentence hands the operator a decision the protocol does
+// not require of them.
+const SKILL_WAIT_PATTERN = /\/skill\b|\bskills?\b|\bskip\b/i;
+
+/**
+ * A turn that made the skill suggestion and then stopped, with only the
+ * listing call behind it (issue #184). The generic stalled-turn predicate
+ * cannot see this: `context(scope="skills")` is a tool call, so the turn
+ * looks busy, and "say skip and I'll explore the tree" reads as a
+ * conditional offer rather than an announcement. The suggestion is supposed
+ * to be one inline line before the work, so a reply that is the suggestion
+ * plus a wait has not done the task.
+ */
+export function isSkillSuggestionWait(input: MiddlewareHookInput): boolean {
+	if (input.hook !== "turn_end") return false;
+	if (!isNormalStopReason(input.metadata?.stopReason)) return false;
+	const text = input.text ?? "";
+	if (!text.includes(SKILL_SUGGESTION_PREFIX)) return false;
+	const toolNames = metadataString(input, "turnToolNames");
+	if (toolNames === null) {
+		if ((metadataNumber(input, "turnToolCalls") ?? 0) !== 0) return false;
+	} else if (
+		toolNames
+			.split(",")
+			.filter((name) => name.length > 0)
+			.some((name) => name !== ToolNames.Context)
+	) {
+		return false;
+	}
+	const lastLine = lastNonEmptyLine(text);
+	if (lastLine === null) return false;
+	const finalSentence = lastSentence(lastLine);
+	if (finalSentence.length === 0) return false;
+	return SKILL_WAIT_PATTERN.test(finalSentence) || isQuestion(finalSentence) || LET_ME_KNOW_PATTERN.test(finalSentence);
+}
 
 export function shouldRequestStalledTurnContinuation(input: MiddlewareHookInput): boolean {
 	if (input.hook !== "turn_end") return false;
