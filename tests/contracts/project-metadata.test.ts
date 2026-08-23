@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { hasTomlTable, readProjectMetadata } from "../../src/domains/context/project-metadata.js";
+import { createTomlFileReader } from "../../src/core/toml.js";
+import { readProjectMetadata } from "../../src/domains/context/project-metadata.js";
 
 const scratchRoots: string[] = [];
 
@@ -70,7 +71,7 @@ describe("contracts/project-metadata", () => {
 		strictEqual(metadata.descriptionSource, "Doxyfile");
 	});
 
-	it("reads pyproject, Cargo, and go-adjacent manifests without a TOML dependency", () => {
+	it("reads pyproject and Cargo metadata through parsed TOML documents", () => {
 		const python = project({
 			"pyproject.toml": [
 				"[build-system]",
@@ -99,6 +100,58 @@ describe("contracts/project-metadata", () => {
 			"pyproject.toml": ["[tool.poetry]", 'name = "legacy"', 'description = "an older Poetry layout"'].join("\n"),
 		});
 		strictEqual(readProjectMetadata(poetry).description, "an older Poetry layout");
+	});
+
+	it("supports structural TOML forms for Python metadata", () => {
+		const dotted = project({
+			"pyproject.toml": 'project.name = "dotted"\nproject.description = "metadata from dotted keys"\n',
+		});
+		strictEqual(readProjectMetadata(dotted).name, "dotted");
+		strictEqual(readProjectMetadata(dotted).description, "metadata from dotted keys");
+
+		const quoted = project({
+			"pyproject.toml": '["tool"."poetry"]\n"name" = "quoted"\n"description" = "metadata from quoted keys"\n',
+		});
+		strictEqual(readProjectMetadata(quoted).name, "quoted");
+		strictEqual(readProjectMetadata(quoted).description, "metadata from quoted keys");
+
+		const inline = project({
+			"pyproject.toml": 'project = { name = "inline", description = "metadata from an inline table" }\n',
+		});
+		strictEqual(readProjectMetadata(inline).name, "inline");
+		strictEqual(readProjectMetadata(inline).description, "metadata from an inline table");
+	});
+
+	it("supports structural TOML forms for Cargo metadata", () => {
+		const dotted = project({
+			"Cargo.toml": 'package.name = "dotted-crate"\npackage.description = "metadata from dotted keys"\n',
+		});
+		strictEqual(readProjectMetadata(dotted).name, "dotted-crate");
+		strictEqual(readProjectMetadata(dotted).description, "metadata from dotted keys");
+
+		const quoted = project({
+			"Cargo.toml": '["package"]\n"name" = "quoted-crate"\n"description" = "metadata from quoted keys"\n',
+		});
+		strictEqual(readProjectMetadata(quoted).name, "quoted-crate");
+		strictEqual(readProjectMetadata(quoted).description, "metadata from quoted keys");
+
+		const inline = project({
+			"Cargo.toml": 'package = { name = "inline-crate", description = "metadata from an inline table" }\n',
+		});
+		strictEqual(readProjectMetadata(inline).name, "inline-crate");
+		strictEqual(readProjectMetadata(inline).description, "metadata from an inline table");
+	});
+
+	it("does not treat an array of tables as a supported metadata table", () => {
+		const cwd = project({
+			"pyproject.toml": '[[project]]\nname = "array-project"\ndescription = "not PEP 621 metadata"\n',
+			"Cargo.toml": '[[package]]\nname = "array-crate"\ndescription = "not Cargo package metadata"\n',
+			"README.md": "# Fallback\n\nThe README supplies the supported metadata shape.\n",
+		});
+		const metadata = readProjectMetadata(cwd);
+		strictEqual(metadata.name, "Fallback");
+		strictEqual(metadata.description, "The README supplies the supported metadata shape");
+		strictEqual(metadata.descriptionSource, "README.md");
 	});
 
 	/**
@@ -218,37 +271,28 @@ describe("contracts/project-metadata", () => {
 		strictEqual(metadata.description, "The README still describes this project adequately");
 	});
 
-	describe("hasTomlTable", () => {
-		it("finds a table declared as its own line", () => {
-			strictEqual(hasTomlTable('[project]\nname = "x"\n\n[tool.tox]\nenvlist = py312\n', "tool.tox"), true);
+	it("fails safely on malformed TOML without inventing metadata", () => {
+		const cwd = project({
+			"pyproject.toml": '[project]\nname = "broken"\ndescription = [\n',
+			"Cargo.toml": '[package]\nname = "also-broken"\ndescription = {\n',
+			"README.md": "# Fallback\n\nOnly valid sources may supply project metadata.\n",
 		});
+		const metadata = readProjectMetadata(cwd);
+		strictEqual(metadata.name, "Fallback");
+		strictEqual(metadata.description, "Only valid sources may supply project metadata");
+		strictEqual(metadata.descriptionSource, "README.md");
+	});
 
-		it("ignores the same bracketed name inside a comment", () => {
-			strictEqual(hasTomlTable("# see [tool.tox] for the old config\n", "tool.tox"), false);
+	it("reuses each parsed TOML document within one metadata operation", () => {
+		const cwd = project({
+			"pyproject.toml": '[project]\nname = "first"\ndescription = "the initial document"\n',
 		});
-
-		it("ignores the same bracketed name inside a string value", () => {
-			strictEqual(hasTomlTable('description = "notes: [tool.tox] is mentioned here, not declared"\n', "tool.tox"), false);
-		});
-
-		it("recognizes a valid header line carrying a trailing comment", () => {
-			strictEqual(hasTomlTable("[tool.pytest.ini_options] # project tests\n", "tool.pytest.ini_options"), true);
-			strictEqual(hasTomlTable("[tool.tox]# legacy\n", "tool.tox"), true);
-		});
-
-		it("does not match a table name that is merely a prefix of a longer one", () => {
-			strictEqual(hasTomlTable("[tool.tox.legacy]\n", "tool.tox"), false);
-		});
-
-		it("rejects trailing content on the header line that is not a comment", () => {
-			strictEqual(hasTomlTable("[tool.tox]invalid\n", "tool.tox"), false);
-		});
-
-		it("matches regardless of surrounding indentation", () => {
-			strictEqual(
-				hasTomlTable('   [tool.pytest.ini_options]   \ntestpaths = ["tests"]\n', "tool.pytest.ini_options"),
-				true,
-			);
-		});
+		const tomlFiles = createTomlFileReader(cwd);
+		const first = tomlFiles.read("pyproject.toml");
+		writeFileSync(join(cwd, "pyproject.toml"), '[project]\nname = "second"\ndescription = "a later document"\n', "utf8");
+		strictEqual(tomlFiles.read("pyproject.toml"), first);
+		const metadata = readProjectMetadata(cwd, tomlFiles);
+		strictEqual(metadata.name, "first");
+		strictEqual(metadata.description, "the initial document");
 	});
 });

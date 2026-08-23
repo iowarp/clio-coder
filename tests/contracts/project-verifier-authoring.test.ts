@@ -135,6 +135,82 @@ describe("contracts/project verifier authoring", { concurrency: false }, () => {
 		match(discovery.diagnostics.join("\n"), /validators\[2\] is ambiguous/u);
 	});
 
+	it("uses parsed TOML structure for Cargo and Python discovery", () => {
+		write(
+			"Cargo.toml",
+			[
+				"[package]",
+				'name = "fixture"',
+				'description = """',
+				"Migration notes:",
+				"[workspace]",
+				"is no longer declared.",
+				'"""',
+				"",
+			].join("\n"),
+		);
+		write(
+			"pyproject.toml",
+			[
+				"[project]",
+				'name = "fixture"',
+				'description = """',
+				"Migration notes:",
+				"[tool.tox]",
+				"is no longer declared.",
+				'"""',
+				"notes = '''",
+				"[tool.nox]",
+				"is no longer declared.",
+				"'''",
+				'ordinary = "[tool.tox] is only prose"',
+				"",
+				'["tool.tox"]',
+				'enabled = "literal dotted key"',
+				"",
+				"[[tool.nox]]",
+				'name = "array entry"',
+				"",
+				'[tool."pytest".ini_options] # project tests',
+				'addopts = "-q"',
+				"",
+			].join("\n"),
+		);
+
+		const discovery = discoverVerifierAuthoring();
+		strictEqual(discovery.ok, true, discovery.ok ? "" : discovery.reason);
+		if (!discovery.ok) return;
+		const cargo = discovery.proposals.filter((check) => check.provenance.kind === "cargo");
+		deepStrictEqual(
+			cargo.map((check) => check.command),
+			[["cargo", "test"]],
+		);
+		const python = discovery.proposals.filter((check) => check.provenance.kind === "python-runner");
+		deepStrictEqual(
+			python.map((check) => check.command),
+			[["python", "-m", "pytest"]],
+		);
+	});
+
+	it("fails closed on malformed TOML during verifier discovery", () => {
+		write("Cargo.toml", '[package]\nname = "fixture"\ndescription = [\n');
+		write("pyproject.toml", '[project]\nname = "fixture"\n[tool.tox\n');
+
+		const discovery = discoverVerifierAuthoring();
+		strictEqual(discovery.ok, true, discovery.ok ? "" : discovery.reason);
+		if (!discovery.ok) return;
+		strictEqual(
+			discovery.proposals.some((check) => check.provenance.kind === "cargo"),
+			false,
+		);
+		strictEqual(
+			discovery.proposals.some((check) => check.provenance.kind === "python-runner"),
+			false,
+		);
+		match(discovery.diagnostics.join("\n"), /Cargo\.toml: invalid TOML/u);
+		match(discovery.diagnostics.join("\n"), /pyproject\.toml: invalid TOML/u);
+	});
+
 	it("keeps discovery and authority preview read-only while pinning every effective field", () => {
 		write("go.mod", "module example.org/demo\n");
 		mkdirSync(join(workspace, "build"));

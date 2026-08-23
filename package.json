@@ -99,7 +99,8 @@
 		"@earendil-works/pi-tui": "0.84.0",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"grok-mermaid": "0.2.2",
-		"ollama": "0.6.3"
+		"ollama": "0.6.3",
+		"smol-toml": "1.8.0"
 	},
 	"overrides": {
 		"@anthropic-ai/sdk": "0.105.0",

@@ -19,6 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 
 /** Longest description worth carrying into a one-sentence identity line. */
 const MAX_DESCRIPTION_CHARS = 400;
@@ -39,7 +40,7 @@ interface MetadataFragment {
 	description?: string | null;
 }
 
-type MetadataReader = (cwd: string) => { file: string; fragment: MetadataFragment } | null;
+type MetadataReader = (cwd: string, tomlFiles: TomlFileReader) => { file: string; fragment: MetadataFragment } | null;
 
 function readText(cwd: string, relative: string): string | null {
 	try {
@@ -81,54 +82,6 @@ function jsonRecord(cwd: string, relative: string): Record<string, unknown> | nu
 	} catch {
 		return null;
 	}
-}
-
-/**
- * One key from one TOML table, without a TOML parser.
- *
- * Deliberately narrow: it reads `key = "value"` (single-line, single- or
- * double-quoted) from the named top-level table and understands nothing else.
- * That is the entire shape `description` and `name` take in `pyproject.toml`
- * and `Cargo.toml`. A multi-line or otherwise exotic value reads as absent,
- * which costs a description and never produces a wrong one.
- */
-function tomlTableValue(raw: string, table: string, key: string): string | null {
-	const lines = raw.split(/\r?\n/u);
-	let inTable = false;
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (trimmed.startsWith("[")) {
-			inTable = trimmed === `[${table}]`;
-			continue;
-		}
-		if (!inTable) continue;
-		const match = /^([A-Za-z0-9_-]+)\s*=\s*(.*)$/u.exec(trimmed);
-		if (!match || match[1] !== key) continue;
-		const value = (match[2] ?? "").trim();
-		const quoted = /^"((?:[^"\\]|\\.)*)"$/u.exec(value) ?? /^'([^']*)'$/u.exec(value);
-		if (!quoted) return null;
-		return (quoted[1] ?? "").replace(/\\"/gu, '"');
-	}
-	return null;
-}
-
-/**
- * Whether a TOML file declares the named top-level table, e.g. `tool.tox`.
- * A trimmed line must start with `[table]` and carry nothing after it but an
- * optional `# comment`, the only content TOML itself allows there. A raw
- * `raw.includes("[table]")` check would also fire on a comment mentioning the
- * table or a string value that happens to contain the same bracketed text;
- * anchoring to the start of the line rules both out without a TOML parser,
- * while still accepting the valid `[table] # comment` form that a plain
- * equality check would have missed.
- */
-export function hasTomlTable(raw: string, table: string): boolean {
-	const header = `[${table}]`;
-	return raw.split(/\r?\n/u).some((line) => {
-		const trimmed = line.trim();
-		if (!trimmed.startsWith(header)) return false;
-		return /^\s*(?:#.*)?$/u.test(trimmed.slice(header.length));
-	});
 }
 
 /** One `KEY = value` line from a Doxyfile or an INI-shaped config. */
@@ -182,27 +135,30 @@ const packageJson: MetadataReader = (cwd) => {
 	return { file: "package.json", fragment: { name: name(record.name), description: description(record.description) } };
 };
 
-const pyprojectToml: MetadataReader = (cwd) => {
-	const raw = readText(cwd, "pyproject.toml");
-	if (raw === null) return null;
+const pyprojectToml: MetadataReader = (_cwd, tomlFiles) => {
+	const document = tomlFiles.read("pyproject.toml");
+	if (document === null) return null;
+	const project = tomlTableAt(document, ["project"]);
+	const poetry = tomlTableAt(document, ["tool", "poetry"]);
 	// PEP 621 `[project]` first, then Poetry's older table.
-	const projectName = tomlTableValue(raw, "project", "name") ?? tomlTableValue(raw, "tool.poetry", "name");
-	const projectDescription =
-		tomlTableValue(raw, "project", "description") ?? tomlTableValue(raw, "tool.poetry", "description");
 	return {
 		file: "pyproject.toml",
-		fragment: { name: name(projectName), description: description(projectDescription) },
+		fragment: {
+			name: name(project?.name) ?? name(poetry?.name),
+			description: description(project?.description) ?? description(poetry?.description),
+		},
 	};
 };
 
-const cargoToml: MetadataReader = (cwd) => {
-	const raw = readText(cwd, "Cargo.toml");
-	if (raw === null) return null;
+const cargoToml: MetadataReader = (_cwd, tomlFiles) => {
+	const document = tomlFiles.read("Cargo.toml");
+	if (document === null) return null;
+	const packageTable = tomlTableAt(document, ["package"]);
 	return {
 		file: "Cargo.toml",
 		fragment: {
-			name: name(tomlTableValue(raw, "package", "name")),
-			description: description(tomlTableValue(raw, "package", "description")),
+			name: name(packageTable?.name),
+			description: description(packageTable?.description),
 		},
 	};
 };
@@ -488,13 +444,13 @@ function readmeTitle(content: string): string | null {
  * a CMake project that names itself but describes itself only in its README
  * should get both, not one or neither.
  */
-export function readProjectMetadata(cwd: string): ProjectMetadata {
+export function readProjectMetadata(cwd: string, tomlFiles = createTomlFileReader(cwd)): ProjectMetadata {
 	const out: ProjectMetadata = { name: null, description: null, nameSource: null, descriptionSource: null };
 	for (const reader of METADATA_READERS) {
 		if (out.name !== null && out.description !== null) break;
 		let read: ReturnType<MetadataReader>;
 		try {
-			read = reader(cwd);
+			read = reader(cwd, tomlFiles);
 		} catch {
 			continue;
 		}
