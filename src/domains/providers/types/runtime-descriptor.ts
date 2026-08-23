@@ -1,6 +1,6 @@
 import type { Api, Model } from "../../../engine/types.js";
-
 import type { CapabilityFlags } from "./capability-flags.js";
+import type { ContextWindowSlots } from "./context-window-slots.js";
 import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, RerankResult } from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 import type { TargetDescriptor } from "./target-descriptor.js";
@@ -61,6 +61,8 @@ export type ProbeModelLoadState = "loaded" | "loading" | "unloaded" | "failed" |
 export interface ProbeModelStatus {
 	state: ProbeModelLoadState;
 	detail?: string;
+	/** The per-request window is `totalContextSize / slots`; absent when the server does not split. */
+	contextSlots?: ContextWindowSlots;
 	/**
 	 * Context the runtime has this model loaded at, when it reports one. LM
 	 * Studio serves a loaded instance at whatever window it was opened with,

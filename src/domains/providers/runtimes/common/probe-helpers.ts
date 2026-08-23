@@ -1,5 +1,6 @@
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
+import { type ContextWindowSlots, formatContextWindowSlots } from "../../types/context-window-slots.js";
 import type { ProbeContext, ProbeModelStatus, ProbeResult } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
@@ -88,7 +89,15 @@ export async function probeOpenAIModelCatalog(
 			// A reported loaded context is itself the residency answer: nothing
 			// serves a window for a model it has not loaded.
 			(loadedContext !== undefined ? { state: "loaded" as const } : undefined);
-		if (state) modelStates[row.id] = loadedContext === undefined ? state : { ...state, contextLength: loadedContext };
+		// The slot split rides on the load-state record because it is the same
+		// kind of fact: how this server is serving this model. A row with no
+		// recognized state still gets one, as `unknown`, so the split is kept
+		// without claiming residency the server did not report.
+		const contextSlots = contextSlotsFromEntry(row) ?? (detailRow ? contextSlotsFromEntry(detailRow) : undefined);
+		const withSlots = contextSlots ? { ...(state ?? { state: "unknown" as const }), contextSlots } : state;
+		if (withSlots) {
+			modelStates[row.id] = loadedContext === undefined ? withSlots : { ...withSlots, contextLength: loadedContext };
+		}
 	}
 	return { models, modelCapabilities, modelStates };
 }
@@ -203,12 +212,16 @@ function statusArgsFromEntry(row: Record<string, unknown>): string[] {
 	return argsFromStatus(status);
 }
 
+function contextSlotsFromEntry(row: Record<string, unknown>): ContextWindowSlots | undefined {
+	return llamaCppRequestContextWindow(parseLlamaCppServerFlags(statusArgsFromEntry(row)))?.slots;
+}
+
 function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial<CapabilityFlags> {
 	const caps: Partial<CapabilityFlags> = {};
 	const meta = nestedRecord(row, "meta");
 	const flags = parseLlamaCppServerFlags(statusArgsFromEntry(row));
 	const contextWindow =
-		positiveNumber(flags.contextSize) ??
+		llamaCppRequestContextWindow(flags)?.contextWindow ??
 		firstPositiveNumber(row, [
 			// What is actually loaded outranks what the model could support: a
 			// model served at 8k out of a possible 262k has an 8k window today,
@@ -310,8 +323,41 @@ export interface LlamaCppServerFlags {
 	topK?: number;
 	nGpuLayers?: number;
 	parallel?: number;
+	/** `--kv-unified` / `-kvu` true, `--no-kv-unified` false, absent when neither was given. */
+	kvUnified?: boolean;
 	mmproj?: string;
 	chatTemplateKwargs?: string;
+}
+
+export interface LlamaCppRequestContextWindow {
+	/** What one request can use. */
+	contextWindow: number;
+	/** Present when `contextWindow` is a quotient of the server's total. */
+	slots?: ContextWindowSlots;
+}
+
+/**
+ * The window one request actually gets from a llama.cpp server.
+ *
+ * `--ctx-size` is the total KV budget of the process. Without `--kv-unified`
+ * the server splits it evenly across `--parallel` slots, so a router started
+ * with `--ctx-size 786432 --parallel 4 --no-kv-unified` admits 196,608 tokens
+ * per request while reporting 786,432 as its context size. Reading the total
+ * as the window armed autocompact at a number the server would never admit
+ * and walked a long session into a hard context failure with the meter at
+ * 25% (issue #187). With `--kv-unified` every slot shares one sequence and
+ * the total is the window.
+ */
+export function llamaCppRequestContextWindow(flags: LlamaCppServerFlags): LlamaCppRequestContextWindow | undefined {
+	const total = positiveNumber(flags.contextSize);
+	if (total === undefined) return undefined;
+	const parallel = positiveNumber(flags.parallel);
+	if (parallel === undefined || parallel <= 1 || flags.kvUnified === true) return { contextWindow: Math.floor(total) };
+	const slots = Math.floor(parallel);
+	return {
+		contextWindow: Math.floor(total / slots),
+		slots: { totalContextSize: Math.floor(total), slots },
+	};
 }
 
 export interface LlamaCppStatusEnrichment {
@@ -329,22 +375,37 @@ function argsFromStatus(status: unknown): string[] {
 	return [];
 }
 
-function valueAfter(args: ReadonlyArray<string>, flag: string): string | undefined {
-	const index = args.indexOf(flag);
-	if (index < 0) return undefined;
-	const value = args[index + 1];
-	return value && !value.startsWith("--") ? value : undefined;
+/** `-1` is a value (`--reasoning-budget -1`); `-np` and `--jinja` are flags. */
+function looksLikeFlag(token: string): boolean {
+	return token.startsWith("-") && Number.isNaN(Number(token));
 }
 
-function numberFlag(args: ReadonlyArray<string>, flag: string): number | undefined {
-	const value = valueAfter(args, flag);
+/**
+ * The value after the first of `flags` present, or undefined. A token that
+ * reads as the next flag is not a value, which is how boolean flags read as
+ * present-without-value. Short spellings (`-c`, `-np`) come after the long
+ * one so the long form wins when both are given.
+ */
+function valueAfter(args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>): string | undefined {
+	for (const flag of flags) {
+		const index = args.indexOf(flag);
+		if (index < 0) continue;
+		const value = args[index + 1];
+		return value && !looksLikeFlag(value) ? value : undefined;
+	}
+	return undefined;
+}
+
+function numberFlag(args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>): number | undefined {
+	const value = valueAfter(args, ...flags);
 	if (value === undefined) return undefined;
 	const parsed = Number(value);
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function booleanFlag(args: ReadonlyArray<string>, flag: string): boolean | undefined {
-	if (!args.includes(flag)) return undefined;
+function booleanFlag(args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>): boolean | undefined {
+	const flag = flags.find((candidate) => args.includes(candidate));
+	if (flag === undefined) return undefined;
 	const value = valueAfter(args, flag);
 	if (value === undefined) return true;
 	const normalized = value.toLowerCase();
@@ -353,9 +414,9 @@ function booleanFlag(args: ReadonlyArray<string>, flag: string): boolean | undef
 	return undefined;
 }
 
-function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFlags {
+export function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFlags {
 	const flags: LlamaCppServerFlags = {};
-	const ctxSize = numberFlag(args, "--ctx-size");
+	const ctxSize = numberFlag(args, "--ctx-size", "-c");
 	if (ctxSize !== undefined) flags.contextSize = ctxSize;
 	const maxTokens = numberFlag(args, "--n-predict");
 	if (maxTokens !== undefined) flags.maxTokens = maxTokens;
@@ -375,8 +436,14 @@ function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFl
 	if (topK !== undefined) flags.topK = topK;
 	const nGpuLayers = numberFlag(args, "--n-gpu-layers");
 	if (nGpuLayers !== undefined) flags.nGpuLayers = nGpuLayers;
-	const parallel = numberFlag(args, "--parallel");
+	const parallel = numberFlag(args, "--parallel", "-np");
 	if (parallel !== undefined) flags.parallel = parallel;
+	// The negative spelling is its own flag, and the last one given wins, which
+	// is how llama.cpp itself resolves a repeated boolean option.
+	const kvUnifiedAt = Math.max(args.lastIndexOf("--kv-unified"), args.lastIndexOf("-kvu"));
+	const noKvUnifiedAt = args.lastIndexOf("--no-kv-unified");
+	if (noKvUnifiedAt > kvUnifiedAt) flags.kvUnified = false;
+	else if (kvUnifiedAt >= 0) flags.kvUnified = booleanFlag(args, "--kv-unified", "-kvu") ?? true;
 	const cacheTypeK = valueAfter(args, "--cache-type-k");
 	if (cacheTypeK) flags.cacheTypeK = cacheTypeK;
 	const cacheTypeV = valueAfter(args, "--cache-type-v");
@@ -418,7 +485,8 @@ export async function probeLlamaCppModelStatus(
 	if (args.length === 0) return { notes: statusNotes(selected.id, selected.status) };
 	const flags = parseLlamaCppServerFlags(args);
 	const caps: Partial<CapabilityFlags> = {};
-	if (flags.contextSize !== undefined && flags.contextSize > 0) caps.contextWindow = flags.contextSize;
+	const window = llamaCppRequestContextWindow(flags);
+	if (window !== undefined) caps.contextWindow = window.contextWindow;
 	if (flags.maxTokens !== undefined && flags.maxTokens > 0) caps.maxTokens = flags.maxTokens;
 	if (flags.reasoning === true || flags.reasoningBudget !== undefined) caps.reasoning = true;
 	if (flags.mmproj) caps.vision = true;
@@ -426,6 +494,11 @@ export async function probeLlamaCppModelStatus(
 	const enrichment: LlamaCppStatusEnrichment = { modelId: selected.id, serverFlags: flags };
 	if (Object.keys(caps).length > 0) enrichment.discoveredCapabilities = caps;
 	const notes = statusNotes(selected.id, selected.status);
+	if (window?.slots) {
+		notes.push(
+			`${selected.id} context window ${formatContextWindowSlots(window.contextWindow, window.slots)}: --ctx-size is split across --parallel slots without --kv-unified`,
+		);
+	}
 	if (notes.length > 0) enrichment.notes = notes;
 	return enrichment;
 }

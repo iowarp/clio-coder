@@ -1028,10 +1028,19 @@ export function residentModelsSummary(states: TargetStatus["discoveredModelState
  * capability the target reported. Saying so is the difference between a number
  * a user can plan against and one they cannot.
  */
-export function formatContextWindow(status: Pick<TargetStatus, "capabilities" | "contextWindowProvenance">): string {
+export function formatContextWindow(
+	status: Pick<TargetStatus, "capabilities" | "contextWindowProvenance"> &
+		Partial<Pick<TargetStatus, "target" | "discoveredModelStates">>,
+): string {
 	const window = status.capabilities.contextWindow;
-	return status.contextWindowProvenance === "runtime-default"
-		? `ctx ${window} (unverified runtime default)`
+	if (status.contextWindowProvenance === "runtime-default") return `ctx ${window} (unverified runtime default)`;
+	// A llama.cpp window that is one slot's share of `--ctx-size` names the
+	// split, so `ctx 196608` is not mistaken for the whole server (issue #187).
+	const slots = status.target?.defaultModel
+		? status.discoveredModelStates?.[status.target.defaultModel]?.contextSlots
+		: undefined;
+	return slots && Math.floor(slots.totalContextSize / slots.slots) === window
+		? `ctx ${window} (${slots.totalContextSize} / ${slots.slots} slots)`
 		: `ctx ${window}`;
 }
 

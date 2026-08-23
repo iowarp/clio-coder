@@ -5,7 +5,7 @@ import { getCatalogModelForRuntime, resolveCostProvenance } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
-import { hasLiveModelCatalog, loadedContextWindowForModel } from "./model-discovery.js";
+import { contextSlotsForModel, hasLiveModelCatalog, loadedContextWindowForModel } from "./model-discovery.js";
 import {
 	type ReasoningClass,
 	type ResolvedModelRuntimeCapabilities,
@@ -14,6 +14,7 @@ import {
 	resolveTargetRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
+import type { ContextWindowSlots } from "./types/context-window-slots.js";
 import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type {
@@ -52,6 +53,12 @@ export interface ContextWindowDetails {
 	effectiveContextWindow: number;
 	/** Where `effectiveContextWindow` came from. */
 	contextWindowSource: ContextWindowSource;
+	/**
+	 * Present when the probed window is a per-request share of the server's
+	 * KV budget (llama.cpp `--ctx-size` over `--parallel` slots), so the
+	 * operator surfaces can render `196,608 (786,432 / 4 slots)`.
+	 */
+	contextWindowSlots: ContextWindowSlots | null;
 	/** The window is below what this kind of work wants. An actionable degradation. */
 	warning: string | null;
 	/** The window is a placeholder rather than something the target reported. */
@@ -406,6 +413,8 @@ export function resolveRuntimeTarget(
 		providers.knowledgeBase,
 		probedContextWindow,
 		loadedContextWindow,
+		undefined,
+		contextSlotsForModel(status, wireModelId),
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
 	if (contextWindowDetails.warning) {
@@ -513,6 +522,7 @@ export function refineRuntimeTargetWithModelHints(
 		// hand the planner the declared window back on the first refinement.
 		target.contextWindowDetails.loadedContextWindow,
 		modelHintContextWindow,
+		target.contextWindowDetails.contextWindowSlots,
 	);
 	capabilities.contextWindow = contextWindowDetails.effectiveContextWindow;
 
@@ -623,6 +633,7 @@ export function resolveContextWindowDetails(
 	probedContextWindow: number | null,
 	loadedContextWindow: number | null = null,
 	modelHintContextWindow?: number,
+	probedContextSlots: ContextWindowSlots | null = null,
 ): ContextWindowDetails {
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
 	const kbHit = knowledgeBase?.lookup(wireModelId) ?? null;
@@ -707,6 +718,16 @@ export function resolveContextWindowDetails(
 			`Run 'clio-coder targets --probe' to read the real one.`;
 	}
 
+	// The split explains the probed number and nothing else: once an override
+	// or a loaded window decides the figure, `786,432 / 4 slots` no longer
+	// describes it.
+	const contextWindowSlots =
+		source === "probe" &&
+		probedContextSlots !== null &&
+		Math.floor(probedContextSlots.totalContextSize / probedContextSlots.slots) === effective
+			? probedContextSlots
+			: null;
+
 	return {
 		declaredContextWindow,
 		probedContextWindow,
@@ -714,6 +735,7 @@ export function resolveContextWindowDetails(
 		desiredContextWindow: desired,
 		effectiveContextWindow: effective,
 		contextWindowSource: source,
+		contextWindowSlots,
 		warning,
 		provenanceNotice,
 	};

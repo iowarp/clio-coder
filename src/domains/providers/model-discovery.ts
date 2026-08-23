@@ -1,5 +1,6 @@
 import type { TargetStatus } from "./contract.js";
 import { listKnownModelsForRuntime } from "./support.js";
+import type { ContextWindowSlots } from "./types/context-window-slots.js";
 
 export type ProviderModelSource = "configured" | "live" | "catalog" | "default";
 
@@ -43,6 +44,14 @@ export function loadedContextWindowForModel(
 ): number | null {
 	const reported = status?.discoveredModelStates?.[modelId]?.contextLength;
 	return typeof reported === "number" && Number.isFinite(reported) && reported > 0 ? reported : null;
+}
+
+/** How the server splits its KV budget for this model, when the probe saw it split. */
+export function contextSlotsForModel(
+	status: DiscoveryStatus | null | undefined,
+	modelId: string,
+): ContextWindowSlots | null {
+	return status?.discoveredModelStates?.[modelId]?.contextSlots ?? null;
 }
 
 /**
