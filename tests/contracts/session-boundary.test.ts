@@ -90,6 +90,94 @@ describe("contracts/session-boundary", () => {
 		strictEqual(history[0]?.messageCount, 1);
 	});
 
+	/**
+	 * Every row of the /resume picker read `<system-reminder> [Skills] 9
+	 * installed…` (issue #188): the first user entry of a session is the
+	 * composed prompt, with the reminder block and any skill preamble ahead of
+	 * the operator's words. The preview is the operator's words: `operatorText`
+	 * when the entry carries it, the scaffolding stripped when it does not, the
+	 * next turn when nothing operator-authored remains, and the first assistant
+	 * text when no turn carries any.
+	 */
+	it("previews the operator's first prompt, not the injected reminder ahead of it", async () => {
+		const reminder =
+			"<system-reminder>\n[Skills] 9 installed, 30 installable from the marketplace. Start this task by listing them.\n</system-reminder>";
+		const user = (turnId: string, parentTurnId: string | null, payload: unknown, at: string) => ({
+			entry: {
+				kind: "message" as const,
+				turnId,
+				parentTurnId,
+				timestamp: at,
+				role: "user" as const,
+				payload,
+			},
+			options: { treeNode: { id: turnId, parentId: parentTurnId, at, kind: "user" as const } },
+		});
+
+		// Written by a current build: operatorText is authoritative.
+		const withOperatorText = createSession({ cwd: scratch });
+		{
+			const turn = user(
+				"u1",
+				null,
+				{ text: `${reminder}\n\nexplain what this repo does`, operatorText: "explain what this repo does" },
+				"2026-08-23T00:00:00.000Z",
+			);
+			withOperatorText.writer.appendEntry(turn.entry, turn.options);
+			await withOperatorText.writer.close();
+		}
+		// Written before operatorText existed: the scaffolding is stripped.
+		const legacy = createSession({ cwd: scratch });
+		{
+			const turn = user(
+				"u1",
+				null,
+				{
+					text: `${reminder}\n\n[Skill request]\n- context-prime (installed, source=slash-command)\nFirst call context with scope="skills" and name for: context-prime. Only these pending skill names are allowed this turn. After the skill loads, follow the loaded workflow.\n\nfind the off-by-one in variance`,
+				},
+				"2026-08-23T00:00:01.000Z",
+			);
+			legacy.writer.appendEntry(turn.entry, turn.options);
+			await legacy.writer.close();
+		}
+		// A reminder-only first turn (a continuation) yields to the next turn.
+		const continuationFirst = createSession({ cwd: scratch });
+		{
+			const first = user("u1", null, { text: reminder }, "2026-08-23T00:00:02.000Z");
+			const second = user("u2", "u1", { text: "now fix it" }, "2026-08-23T00:00:03.000Z");
+			continuationFirst.writer.appendEntry(first.entry, first.options);
+			continuationFirst.writer.appendEntry(second.entry, second.options);
+			await continuationFirst.writer.close();
+		}
+		// No operator words anywhere: the first assistant text stands in.
+		const assistantOnly = createSession({ cwd: scratch });
+		{
+			const first = user("u1", null, { text: reminder }, "2026-08-23T00:00:04.000Z");
+			assistantOnly.writer.appendEntry(first.entry, first.options);
+			assistantOnly.writer.appendEntry(
+				{
+					kind: "message",
+					turnId: "a1",
+					parentTurnId: "u1",
+					timestamp: "2026-08-23T00:00:05.000Z",
+					role: "assistant",
+					payload: { content: [{ type: "text", text: "The repo is a statistics toolkit." }] },
+				},
+				{ treeNode: { id: "a1", parentId: "u1", at: "2026-08-23T00:00:05.000Z", kind: "assistant" } },
+			);
+			await assistantOnly.writer.close();
+		}
+
+		const previews = new Map(listSessionsForCwd(scratch).map((meta) => [meta.id, meta.firstMessagePreview]));
+		strictEqual(previews.get(withOperatorText.meta.id), "explain what this repo does");
+		strictEqual(previews.get(legacy.meta.id), "find the off-by-one in variance");
+		strictEqual(previews.get(continuationFirst.meta.id), "now fix it");
+		strictEqual(previews.get(assistantOnly.meta.id), "The repo is a statistics toolkit.");
+		for (const preview of previews.values()) {
+			strictEqual(preview?.includes("<system-reminder>"), false, `no row previews a reminder: ${preview}`);
+		}
+	});
+
 	it("rejects removed turn records instead of normalizing session history", async () => {
 		const { meta, writer } = createSession({ cwd: scratch });
 		await writer.close();

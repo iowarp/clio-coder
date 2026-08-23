@@ -48,21 +48,15 @@ function collapseWhitespace(text: string): string {
 }
 
 /**
- * Pull the first non-empty piece of user-authored text out of a payload.
- * Structured message payloads may contain a bare string, a text property,
- * or pi-ai content blocks.
+ * Pull the first non-empty piece of text out of a message payload. Structured
+ * message payloads may contain a bare string, a text property, or pi-ai
+ * content blocks.
  */
-function extractUserText(payload: unknown): string | null {
-	if (typeof payload === "string") {
-		const collapsed = collapseWhitespace(payload);
-		return collapsed.length > 0 ? collapsed : null;
-	}
+function rawMessageText(payload: unknown): string | null {
+	if (typeof payload === "string") return payload.trim().length > 0 ? payload : null;
 	if (!payload || typeof payload !== "object") return null;
 	const obj = payload as Record<string, unknown>;
-	if (typeof obj.text === "string") {
-		const collapsed = collapseWhitespace(obj.text);
-		if (collapsed.length > 0) return collapsed;
-	}
+	if (typeof obj.text === "string" && obj.text.trim().length > 0) return obj.text;
 	if (Array.isArray(obj.content)) {
 		const parts: string[] = [];
 		for (const part of obj.content) {
@@ -75,14 +69,65 @@ function extractUserText(payload: unknown): string | null {
 				parts.push((part as { text: string }).text);
 			}
 		}
-		const joined = collapseWhitespace(parts.join(" "));
-		if (joined.length > 0) return joined;
+		const joined = parts.join("\n");
+		if (joined.trim().length > 0) return joined;
 	}
 	return null;
 }
 
+function extractMessageText(payload: unknown): string | null {
+	const raw = rawMessageText(payload);
+	if (raw === null) return null;
+	const collapsed = collapseWhitespace(raw);
+	return collapsed.length > 0 ? collapsed : null;
+}
+
+/**
+ * What the operator typed for a user turn, for the picker preview.
+ *
+ * The persisted text is the composed prompt: a `<system-reminder>` block and
+ * any `[Skill request]` preamble ride ahead of the operator's words as visible
+ * text the model receives. Reading that verbatim made every row of the
+ * `/resume` picker read `<system-reminder> [Skills] 9 installed…`, so sessions
+ * were indistinguishable and the type-to-filter matched them all (issue #188).
+ * Entries written since the operator text was persisted carry it as
+ * `operatorText`; older ones drop the leading scaffolding. Null when nothing
+ * operator-authored remains, so the caller moves on to the next turn.
+ */
+export function operatorTextOfUserPayload(payload: unknown): string | null {
+	if (
+		payload &&
+		typeof payload === "object" &&
+		typeof (payload as { operatorText?: unknown }).operatorText === "string"
+	) {
+		const collapsed = collapseWhitespace((payload as { operatorText: string }).operatorText);
+		return collapsed.length > 0 ? collapsed : null;
+	}
+	// Strip before collapsing: the preamble's line structure is what the
+	// patterns anchor on.
+	const text = rawMessageText(payload);
+	if (text === null) return null;
+	const stripped = collapseWhitespace(stripInjectedPreamble(text));
+	return stripped.length > 0 ? stripped : null;
+}
+
+const LEADING_SYSTEM_REMINDER = /^\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/u;
+const LEADING_SKILL_REQUEST =
+	/^\s*\[Skill request\][\s\S]*?Only these pending skill names are allowed this turn\.[^\n]*\s*/u;
+
+function stripInjectedPreamble(text: string): string {
+	let current = text;
+	for (;;) {
+		const next = current.replace(LEADING_SYSTEM_REMINDER, "").replace(LEADING_SKILL_REQUEST, "");
+		if (next === current) return current;
+		current = next;
+	}
+}
+
 interface ScanResult {
 	firstUserMessage: string | null;
+	/** The first assistant text, the preview when no turn carries operator words. */
+	firstAssistantMessage: string | null;
 	messageCount: number;
 	lastTimestamp: string | null;
 	name: string | null;
@@ -92,6 +137,7 @@ interface ScanResult {
 function scanCurrentJsonl(currentPath: string): ScanResult {
 	const result: ScanResult = {
 		firstUserMessage: null,
+		firstAssistantMessage: null,
 		messageCount: 0,
 		lastTimestamp: null,
 		name: null,
@@ -106,9 +152,13 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 		if (parsed.kind === "message" && parsed.role === "user") {
 			result.messageCount += 1;
 			if (result.firstUserMessage === null) {
-				const text = extractUserText(parsed.payload);
+				const text = operatorTextOfUserPayload(parsed.payload);
 				if (text !== null) result.firstUserMessage = text;
 			}
+		}
+		if (parsed.kind === "message" && parsed.role === "assistant" && result.firstAssistantMessage === null) {
+			const text = extractMessageText(parsed.payload);
+			if (text !== null) result.firstAssistantMessage = text;
 		}
 		if (parsed.kind === "sessionInfo") {
 			const info = parsed as SessionInfoEntry;
@@ -139,11 +189,10 @@ function enrichMetaForListing(meta: SessionMeta, currentPath: string): void {
 	if (scan.name) meta.name = scan.name;
 	const labelValues = [...scan.labels.values()].map((entry) => entry.label.trim()).filter((label) => label.length > 0);
 	if (labelValues.length > 0) meta.labels = labelValues;
-	if (scan.firstUserMessage) {
+	const preview = scan.firstUserMessage ?? scan.firstAssistantMessage;
+	if (preview) {
 		meta.firstMessagePreview =
-			scan.firstUserMessage.length > PREVIEW_MAX_CHARS
-				? `${scan.firstUserMessage.slice(0, PREVIEW_MAX_CHARS - 1)}…`
-				: scan.firstUserMessage;
+			preview.length > PREVIEW_MAX_CHARS ? `${preview.slice(0, PREVIEW_MAX_CHARS - 1)}…` : preview;
 	}
 	if (scan.messageCount > 0) meta.messageCount = scan.messageCount;
 	const fallbackMtime = readMtimeIso(currentPath);
