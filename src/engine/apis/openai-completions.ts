@@ -1,3 +1,4 @@
+import { TextDecoder } from "node:util";
 import {
 	type Api,
 	type AssistantMessage,
@@ -34,6 +35,13 @@ import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./
 import { residencyManagedFor } from "./residency.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
+
+declare module "@earendil-works/pi-ai" {
+	interface AssistantMessage {
+		/** The model id present in an OpenAI-compatible response, or null when the response omitted it. */
+		servedModel?: string | null;
+	}
+}
 
 const piOpenAICompletions = openAICompletionsApi();
 
@@ -81,6 +89,115 @@ function pickSamplingProfile(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+interface ServedModelCapture {
+	model: string | null;
+	observed: boolean;
+	done: boolean;
+	buffer: string;
+	decoder: TextDecoder | null;
+}
+
+function observeServedModelLine(line: string, capture: ServedModelCapture): void {
+	if (capture.done) return;
+	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
+	if (!normalized.startsWith("data:")) return;
+	const data = normalized.slice("data:".length).trimStart();
+	if (data.length === 0 || data === "[DONE]") return;
+	try {
+		const payload = JSON.parse(data) as unknown;
+		if (!isPlainRecord(payload)) return;
+		const model = payload.model;
+		if (typeof model === "string" && model.trim().length > 0) {
+			capture.model = model.trim();
+			capture.done = true;
+		}
+	} catch {
+		// A partial or vendor-specific event is pi-ai's parsing concern. This
+		// observer records only complete OpenAI-compatible JSON data lines.
+	}
+}
+
+function observeServedModelBytes(chunk: Uint8Array | undefined, capture: ServedModelCapture, flush = false): void {
+	if (capture.done || !capture.decoder) return;
+	capture.buffer += chunk ? capture.decoder.decode(chunk, { stream: !flush }) : capture.decoder.decode();
+	let newline = capture.buffer.indexOf("\n");
+	while (newline >= 0) {
+		const line = capture.buffer.slice(0, newline);
+		capture.buffer = capture.buffer.slice(newline + 1);
+		observeServedModelLine(line, capture);
+		if (capture.done) {
+			capture.buffer = "";
+			capture.decoder = null;
+			return;
+		}
+		newline = capture.buffer.indexOf("\n");
+	}
+	if (flush && capture.buffer.length > 0) {
+		observeServedModelLine(capture.buffer, capture);
+		capture.buffer = "";
+	}
+	if (capture.done || flush) capture.decoder = null;
+}
+
+function captureServedModelResponse(response: Response, capture: ServedModelCapture): Response {
+	if (!response.body || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
+		return response;
+	}
+	const body = response.body.pipeThrough(
+		new TransformStream<Uint8Array, Uint8Array>({
+			transform(chunk, controller) {
+				capture.observed = true;
+				if (!capture.done) observeServedModelBytes(chunk, capture);
+				controller.enqueue(chunk);
+			},
+			flush() {
+				capture.observed = true;
+				if (!capture.done) observeServedModelBytes(undefined, capture, true);
+			},
+		}),
+	);
+	return new Response(body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
+}
+
+function withServedModelCapture<TOptions extends StreamOptions>(
+	options: TOptions,
+	sourceFactory: (capturedOptions: TOptions) => AssistantMessageEventStream,
+): AssistantMessageEventStream {
+	const capture: ServedModelCapture = {
+		model: null,
+		observed: false,
+		done: false,
+		buffer: "",
+		decoder: new TextDecoder(),
+	};
+	const fetchImpl: NonNullable<StreamOptions["fetch"]> =
+		options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+	const capturedOptions = {
+		...options,
+		fetch: async (input, init) => captureServedModelResponse(await fetchImpl(input, init), capture),
+	} as TOptions;
+	const source = sourceFactory(capturedOptions);
+	const annotated = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			for await (const event of source) {
+				if (capture.observed && event.type === "done") event.message.servedModel = capture.model;
+				else if (capture.observed && event.type === "error") event.error.servedModel = capture.model;
+				annotated.push(event as AssistantMessageEvent);
+			}
+			annotated.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(message);
+		}
+	})();
+	return annotated;
 }
 
 function samplingParamsFromProfile(profile: SamplingProfile): Record<string, unknown> {
@@ -735,18 +852,15 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withLocalResidency(
-								model,
-								{
-									...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-									...(options?.signal !== undefined ? { signal: options.signal } : {}),
-								},
-								(requestModel) =>
-									piOpenAICompletions.stream(
-										requestModel,
-										effectiveContext,
-										withRemainingContextBudget(model, effectiveContext, withSamplers),
-									),
+							withServedModelCapture(withRemainingContextBudget(model, effectiveContext, withSamplers), (capturedOptions) =>
+								withLocalResidency(
+									model,
+									{
+										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+										...(options?.signal !== undefined ? { signal: options.signal } : {}),
+									},
+									(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
+								),
 							),
 							resolved.family === "gemma-4",
 						),
@@ -768,18 +882,15 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withLocalResidency(
-								model,
-								{
-									...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-									...(options?.signal !== undefined ? { signal: options.signal } : {}),
-								},
-								(requestModel) =>
-									piOpenAICompletions.streamSimple(
-										requestModel,
-										effectiveContext,
-										withRemainingContextBudget(model, effectiveContext, withSamplers),
-									),
+							withServedModelCapture(withRemainingContextBudget(model, effectiveContext, withSamplers), (capturedOptions) =>
+								withLocalResidency(
+									model,
+									{
+										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+										...(options?.signal !== undefined ? { signal: options.signal } : {}),
+									},
+									(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
+								),
 							),
 							resolved.family === "gemma-4",
 						),

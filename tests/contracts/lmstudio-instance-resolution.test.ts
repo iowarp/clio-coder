@@ -147,8 +147,45 @@ describe("contracts/lmstudio host and instance identity", () => {
 		ok(peerWarnings[0]?.message.includes("also loaded on zbook"), peerWarnings[0]?.message);
 		strictEqual(peerWarnings[0]?.detail?.requestedModel, "qwen3.8-27b-zbook");
 
-		const done = first.find((event) => event.type === "done") as { message?: { responseModel?: unknown } } | undefined;
+		const done = first.find((event) => event.type === "done") as
+			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| undefined;
+		strictEqual(done?.message?.servedModel, "ornith-1.5-35b-a3b");
 		strictEqual(done?.message?.responseModel, "ornith-1.5-35b-a3b", "the served id rides on the assistant message");
+	});
+
+	it("distinguishes an echoed model id from an omitted one", async () => {
+		const echoedServer = await fake("dynamo", "qwen3.8-27b-dynamo");
+		const echoed = await drainChat(target(echoedServer, "dynamo"), "qwen3.8-27b-dynamo");
+		const echoedDone = echoed.find((event) => event.type === "done") as
+			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| undefined;
+		strictEqual(echoedDone?.message?.servedModel, "qwen3.8-27b-dynamo");
+		strictEqual(echoedDone?.message?.responseModel, undefined);
+
+		const omittedServer = await fake("dynamo");
+		const omitted = await drainChat(target(omittedServer, "dynamo"), "qwen3.8-27b-dynamo");
+		const omittedDone = omitted.find((event) => event.type === "done") as
+			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| undefined;
+		strictEqual(omittedDone?.message?.servedModel, null);
+		strictEqual(omittedDone?.message?.responseModel, undefined);
+	});
+
+	it("leaves servedModel absent when the response is not an observed event stream", async () => {
+		const server = await startFakeLmStudioServer({
+			hostIdentity: "dynamo",
+			servedModel: "qwen3.8-27b-dynamo",
+			chatContentType: "text/plain",
+		});
+		fixtures.push(server);
+		const events = await drainChat(target(server, "dynamo"), "qwen3.8-27b-dynamo");
+		const done = events.find((event) => event.type === "done") as
+			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| undefined;
+		ok(done?.message);
+		strictEqual(Object.hasOwn(done.message, "servedModel"), false);
+		strictEqual(done.message.responseModel, undefined);
 	});
 
 	it("refuses an unadvertised model before the completion endpoint is called", async () => {

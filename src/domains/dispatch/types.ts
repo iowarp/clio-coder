@@ -616,6 +616,8 @@ export interface RunReceiptReproducibility {
 
 export interface RunReceiptUpstreamResponse {
 	model: string | null;
+	/** Model id present in the response, or null when the adapter observed its absence. */
+	servedModel: string | null;
 	responseModel: string | null;
 	responseId: string | null;
 }

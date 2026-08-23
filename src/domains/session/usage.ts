@@ -24,15 +24,14 @@ import type { SessionEntry } from "./entries.js";
 /** One completed assistant API call, as the ledger recorded it. */
 export interface LedgerUsageCall {
 	providerId: string;
-	/** The model the tokens are attributed to: the served id when the server reported a different one, else the requested id. */
+	/** The model the tokens are attributed to, or `unknown` when the server omitted its model id. */
 	modelId: string;
 	/** The id the session asked for (the configured model, or the message's own `model`). */
 	requestedModel: string;
 	/**
-	 * The id the server reported in the response when it differed from the
-	 * request (`responseModel`), the LM Link peer case (issue #185). Null when
-	 * the server reported the requested id or none; the two are not told apart
-	 * because the adapter records a response id only when it differs.
+	 * The id the server reported in the response. Null means the adapter saw an
+	 * OpenAI-compatible response with no model id. Historical rows that predate
+	 * `servedModel` retain their prior `responseModel` fallback.
 	 */
 	servedModel: string | null;
 	input: number;
@@ -145,10 +144,11 @@ export function ledgerUsageCalls(
 		const cost = usage.cost;
 		const costUsd = cost && typeof cost === "object" ? numberAt(cost as Record<string, unknown>, "total") : 0;
 		const requestedModel = currentModel ?? stringAt(record, "model") ?? "unknown";
-		const servedModel = stringAt(record, "responseModel");
+		const hasServedModelPresence = Object.hasOwn(record, "servedModel");
+		const servedModel = hasServedModelPresence ? stringAt(record, "servedModel") : stringAt(record, "responseModel");
 		calls.push({
 			providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
-			modelId: servedModel ?? requestedModel,
+			modelId: hasServedModelPresence ? (servedModel ?? "unknown") : (servedModel ?? requestedModel),
 			requestedModel,
 			servedModel,
 			input,

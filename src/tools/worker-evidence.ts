@@ -11,6 +11,13 @@ export interface SourceCitation {
 	line: number;
 }
 
+/** Human projection of the response model facts carried by a new receipt. */
+export function receiptServedModelLabel(receipt: Pick<RunReceipt, "upstreamResponses">): string | null {
+	const responses = receipt.upstreamResponses?.filter((response) => Object.hasOwn(response, "servedModel")) ?? [];
+	if (responses.length === 0) return null;
+	return `served=${responses.map((response) => response.servedModel ?? "unknown").join(",")}`;
+}
+
 function sourceCitations(text: string): SourceCitation[] {
 	const citations: SourceCitation[] = [];
 	for (const match of text.matchAll(SOURCE_CITATION_PATTERN)) {
@@ -136,10 +143,12 @@ export function receiptEvidenceLabels(
 			sections.length > 0 ? ` sections:${[...sections].sort().join(",")}` : ""
 		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
+	const served = receiptServedModelLabel(receipt);
 	return [
 		canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
+		...(served ? [served] : []),
 		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, status),
 		briefing,

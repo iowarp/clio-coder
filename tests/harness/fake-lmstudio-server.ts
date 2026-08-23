@@ -46,8 +46,12 @@ function json(response: import("node:http").ServerResponse, status: number, valu
 	response.end(JSON.stringify(value));
 }
 
-function sse(response: import("node:http").ServerResponse, values: ReadonlyArray<unknown>): void {
-	response.writeHead(200, { "content-type": "text/event-stream" });
+function sse(
+	response: import("node:http").ServerResponse,
+	values: ReadonlyArray<unknown>,
+	contentType = "text/event-stream",
+): void {
+	response.writeHead(200, { "content-type": contentType });
 	for (const value of values) response.write(`data: ${JSON.stringify(value)}\n\n`);
 	response.end("data: [DONE]\n\n");
 }
@@ -61,6 +65,8 @@ export async function startFakeLmStudioServer(
 		hostIdentity?: "dynamo" | "zbook";
 		/** `model` field stamped on every chat completion chunk; an LM Link peer answers under its own id. */
 		servedModel?: string;
+		/** Overrides the chat response content type for adapter boundary tests. */
+		chatContentType?: string;
 	} = {},
 ): Promise<FakeLmStudioFixture> {
 	const mode = options.mode ?? "0.4";
@@ -238,42 +244,50 @@ export async function startFakeLmStudioServer(
 				(message) => typeof message === "object" && message !== null && (message as { role?: unknown }).role === "tool",
 			);
 			if (Array.isArray(body?.tools) && body.tools.length > 0 && !hasToolResult) {
-				return sse(response, [
-					...(reasoningEnabled
-						? [{ choices: [{ index: 0, delta: { role: "assistant", reasoning: "I should use the tool." } }] }]
-						: []),
-					{
-						choices: [
-							{
-								index: 0,
-								delta: {
-									tool_calls: [
-										{ index: 0, id: "call_1", type: "function", function: { name: "get_weather", arguments: '{"city":' } },
-									],
+				return sse(
+					response,
+					[
+						...(reasoningEnabled
+							? [{ choices: [{ index: 0, delta: { role: "assistant", reasoning: "I should use the tool." } }] }]
+							: []),
+						{
+							choices: [
+								{
+									index: 0,
+									delta: {
+										tool_calls: [
+											{ index: 0, id: "call_1", type: "function", function: { name: "get_weather", arguments: '{"city":' } },
+										],
+									},
 								},
-							},
-						],
-					},
-					{
-						choices: [
-							{
-								index: 0,
-								delta: { tool_calls: [{ index: 0, function: { arguments: '"Chicago"}' } }] },
-								finish_reason: "tool_calls",
-							},
-						],
-					},
-					{ choices: [], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } },
-				]);
+							],
+						},
+						{
+							choices: [
+								{
+									index: 0,
+									delta: { tool_calls: [{ index: 0, function: { arguments: '"Chicago"}' } }] },
+									finish_reason: "tool_calls",
+								},
+							],
+						},
+						{ choices: [], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } },
+					],
+					options.chatContentType,
+				);
 			}
 			const served = options.servedModel !== undefined ? { model: options.servedModel } : {};
-			return sse(response, [
-				...(reasoningEnabled
-					? [{ ...served, choices: [{ index: 0, delta: { role: "assistant", reasoning: "Short thought." } }] }]
-					: []),
-				{ ...served, choices: [{ index: 0, delta: { content: "Visible answer." }, finish_reason: "stop" }] },
-				{ ...served, choices: [], usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 } },
-			]);
+			return sse(
+				response,
+				[
+					...(reasoningEnabled
+						? [{ ...served, choices: [{ index: 0, delta: { role: "assistant", reasoning: "Short thought." } }] }]
+						: []),
+					{ ...served, choices: [{ index: 0, delta: { content: "Visible answer." }, finish_reason: "stop" }] },
+					{ ...served, choices: [], usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 } },
+				],
+				options.chatContentType,
+			);
 		}
 		if (path.startsWith("/api/v1/")) return json(response, 404, { error: "Not found" });
 		return json(response, 200, { error: `Unexpected endpoint or method. (${request.method} ${path})` });

@@ -16,6 +16,7 @@ import type {
 	RunReceiptFindingsSummary,
 	RunReceiptIntegrity,
 } from "../../src/domains/dispatch/types.js";
+import { receiptServedModelLabel } from "../../src/tools/worker-evidence.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function fixtureRouteCandidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
@@ -47,6 +48,21 @@ const sampleSummary: RunReceiptFindingsSummary = {
 };
 
 describe("contracts/receipt-integrity", () => {
+	it("renders an omitted response model as unknown", () => {
+		strictEqual(
+			receiptServedModelLabel({
+				upstreamResponses: [{ model: "model-a", servedModel: null, responseModel: null, responseId: "response-1" }],
+			}),
+			"served=unknown",
+		);
+		strictEqual(
+			receiptServedModelLabel({
+				upstreamResponses: [{ model: "model-a", servedModel: "model-a", responseModel: null, responseId: "response-1" }],
+			}),
+			"served=model-a",
+		);
+	});
+
 	it("seals a receipt with a findings summary and round-trips verification", () => {
 		const envelope = fixtureEnvelope();
 		const draft: RunReceiptDraft = { ...fixtureReceiptDraft(envelope), findingsSummary: sampleSummary };
@@ -262,7 +278,9 @@ describe("contracts/receipt-integrity", () => {
 			operatorProfileApplied: true,
 			failureMessage: "diagnostic retained for evidence",
 			costProvenance: "known",
-			upstreamResponses: [{ model: "model-a", responseModel: "model-a-2026", responseId: "response-1" }],
+			upstreamResponses: [
+				{ model: "model-a", servedModel: "model-a-2026", responseModel: "model-a-2026", responseId: "response-1" },
+			],
 			output: { state: "final", text: "the durable final answer", bytes: 24, truncated: false },
 			promptSignature: required(envelope.promptSignature, "promptSignature"),
 			toolSignature: required(envelope.toolSignature, "toolSignature"),

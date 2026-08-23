@@ -177,13 +177,34 @@ describe("contracts/session usage reseed", () => {
 		strictEqual(served[0]?.requestedModel, "qwen3.8-27b-dynamo");
 		strictEqual(served[0]?.servedModel, "ornith-1.5-35b-a3b");
 
-		const same = ledgerUsageCalls([assistantTurn({ ...completedCall, responseModel: undefined }, "a1")], {
+		const legacy = ledgerUsageCalls([assistantTurn({ ...completedCall, responseModel: undefined }, "a1")], {
 			target: "dynamo",
 			model: "qwen3.8-27b-dynamo",
 		});
-		strictEqual(same[0]?.modelId, "qwen3.8-27b-dynamo");
-		strictEqual(same[0]?.requestedModel, "qwen3.8-27b-dynamo");
-		strictEqual(same[0]?.servedModel, null, "no differing id reported is null, not an assertion of the request");
+		strictEqual(legacy[0]?.modelId, "qwen3.8-27b-dynamo");
+		strictEqual(legacy[0]?.requestedModel, "qwen3.8-27b-dynamo");
+		strictEqual(
+			legacy[0]?.servedModel,
+			null,
+			"a historical row keeps the attribution it had before presence was recorded",
+		);
+	});
+
+	it("distinguishes an echoed response model from an omitted one", () => {
+		const echoed = ledgerUsageCalls([assistantTurn({ ...completedCall, servedModel: "qwen3.8-27b-dynamo" }, "a1")], {
+			target: "dynamo",
+			model: "qwen3.8-27b-dynamo",
+		});
+		strictEqual(echoed[0]?.modelId, "qwen3.8-27b-dynamo");
+		strictEqual(echoed[0]?.servedModel, "qwen3.8-27b-dynamo");
+
+		const omitted = ledgerUsageCalls([assistantTurn({ ...completedCall, servedModel: null }, "a1")], {
+			target: "dynamo",
+			model: "qwen3.8-27b-dynamo",
+		});
+		strictEqual(omitted[0]?.modelId, "unknown");
+		strictEqual(omitted[0]?.requestedModel, "qwen3.8-27b-dynamo");
+		strictEqual(omitted[0]?.servedModel, null);
 	});
 
 	it("follows a modelChange row so a session that switched targets attributes each call correctly", () => {

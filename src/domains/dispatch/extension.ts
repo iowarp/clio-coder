@@ -3473,6 +3473,7 @@ export function createDispatchBundle(
 					role?: string;
 					usage?: unknown;
 					model?: unknown;
+					servedModel?: unknown;
 					responseModel?: unknown;
 					responseId?: unknown;
 					stopReason?: unknown;
@@ -3523,10 +3524,11 @@ export function createDispatchBundle(
 				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
 				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
 				const model = readStringOrNull(event.message.model);
+				const servedModel = readStringOrNull(event.message.servedModel);
 				const responseModel = readStringOrNull(event.message.responseModel);
 				const responseId = readStringOrNull(event.message.responseId);
-				if (model !== null || responseModel !== null || responseId !== null) {
-					upstreamResponses.push({ model, responseModel, responseId });
+				if (model !== null || servedModel !== null || responseModel !== null || responseId !== null) {
+					upstreamResponses.push({ model, servedModel, responseModel, responseId });
 				}
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
@@ -4372,6 +4374,7 @@ export function createDispatchBundle(
 					role?: string;
 					usage?: unknown;
 					model?: unknown;
+					servedModel?: unknown;
 					responseModel?: unknown;
 					responseId?: unknown;
 					stopReason?: unknown;
@@ -4478,10 +4481,11 @@ export function createDispatchBundle(
 				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
 				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
 				const model = readStringOrNull(event.message.model);
+				const servedModel = readStringOrNull(event.message.servedModel);
 				const responseModel = readStringOrNull(event.message.responseModel);
 				const responseId = readStringOrNull(event.message.responseId);
-				if (model !== null || responseModel !== null || responseId !== null) {
-					upstreamResponses.push({ model, responseModel, responseId });
+				if (model !== null || servedModel !== null || responseModel !== null || responseId !== null) {
+					upstreamResponses.push({ model, servedModel, responseModel, responseId });
 				}
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
