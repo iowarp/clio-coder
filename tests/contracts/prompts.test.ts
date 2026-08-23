@@ -364,14 +364,15 @@ describe("contracts/prompts", () => {
 			ok(selfAwareness, "identity.self-awareness must be registered");
 			strictEqual(selfAwareness.version, 1);
 			strictEqual(selfAwareness.dynamic, false);
-			ok(selfAwareness.body.includes("# Clio's own harness"));
-			ok(selfAwareness.body.includes("Installed documentation: {CLIO_DOCS_PATH}"));
-			ok(selfAwareness.body.includes("Installed source: {CLIO_SRC_PATH}"));
-			ok(selfAwareness.body.includes("Code map: {CLIO_CODEWIKI_PATH}"));
+			deepStrictEqual(
+				[...selfAwareness.body.matchAll(/\{(CLIO_[A-Z_]+)\}/gu)].map((match) => match[1]).sort(),
+				["CLIO_CODEWIKI_PATH", "CLIO_DOCS_PATH", "CLIO_SRC_PATH"],
+				"the static fragment exposes exactly the three compiler-owned path slots",
+			);
+			const documentationRoutes = selfAwareness.body.match(/docs\/[a-z0-9-]+\.md/gu) ?? [];
+			ok(documentationRoutes.length >= 2, "the harness fragment points to bundled documentation pages");
 			ok(selfAwareness.body.includes("Documentation routes, code decides"));
 			ok(selfAwareness.body.includes("~/.config/clio-coder/settings.yaml"));
-			ok(selfAwareness.body.includes("docs/extensions-and-sharing.md"));
-			ok(selfAwareness.body.includes("docs/skills-marketplace.md"));
 		});
 
 		// The doc-existence check for the docs/*.md paths named in
@@ -390,16 +391,15 @@ describe("contracts/prompts", () => {
 				sessionInputs: { provider: "p", model: "m" },
 			});
 			const packageRoot = resolvePackageRoot();
-			ok(result.systemPrompt.includes(`Installed documentation: ${join(packageRoot, "docs")}`));
-			ok(result.systemPrompt.includes(`Installed source: ${join(packageRoot, "src")}`));
-			ok(result.systemPrompt.includes(`Code map: ${join(packageRoot, "dist", "assets", "codewiki.json")}`));
-			strictEqual(result.systemPrompt.includes("{CLIO_SRC_PATH}"), false);
-			strictEqual(result.systemPrompt.includes("{CLIO_CODEWIKI_PATH}"), false);
-			ok(result.systemPrompt.includes("# Clio's own harness"));
+			for (const resolvedPath of [
+				join(packageRoot, "docs"),
+				join(packageRoot, "src"),
+				join(packageRoot, "dist", "assets", "codewiki.json"),
+			]) {
+				ok(result.systemPrompt.includes(resolvedPath), `compiled self-awareness contains ${resolvedPath}`);
+			}
+			strictEqual(/\{CLIO_[A-Z_]+\}/u.test(result.systemPrompt), false, "no compiler-owned path slot survives");
 			ok(result.systemPrompt.includes("~/.config/clio-coder/settings.yaml"));
-			ok(result.systemPrompt.includes("docs/extensions-and-sharing.md"));
-			ok(result.systemPrompt.includes("docs/skills-marketplace.md"));
-			strictEqual(result.systemPrompt.includes("{CLIO_DOCS_PATH}"), false);
 			ok(result.fragmentManifest.some((f) => f.id === "identity.self-awareness"));
 		});
 
@@ -464,16 +464,19 @@ describe("contracts/prompts", () => {
 				],
 				persona: workerPersona(),
 			});
-			strictEqual(result.systemPrompt.includes("Clio's own harness"), false);
-			strictEqual(result.systemPrompt.includes("Installed documentation"), false);
-			strictEqual(result.systemPrompt.includes("{CLIO_DOCS_PATH}"), false);
-			strictEqual(result.systemPrompt.includes("Installed source"), false);
-			strictEqual(result.systemPrompt.includes("Code map"), false);
-			strictEqual(result.systemPrompt.includes("settings.yaml"), false);
 			strictEqual(
 				result.fragmentManifest.some((f) => f.id === "identity.self-awareness"),
 				false,
 			);
+			strictEqual(/\{CLIO_[A-Z_]+\}/u.test(result.systemPrompt), false);
+			const packageRoot = resolvePackageRoot();
+			for (const orchestratorOnlyPath of [
+				join(packageRoot, "docs"),
+				join(packageRoot, "src"),
+				join(packageRoot, "dist", "assets", "codewiki.json"),
+			]) {
+				strictEqual(result.systemPrompt.includes(orchestratorOnlyPath), false);
+			}
 		});
 		it("compiles the worker harness in canonical section order", () => {
 			const result = compileWorker(loadFragments(), {
