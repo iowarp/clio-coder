@@ -77,6 +77,22 @@ describe("per-worker context meter", () => {
 
 describe("dispatch board fleet visibility", () => {
 	it("renders node, gate, reroute, context meter, and tool trail on cards", () => {
+		const budget = {
+			version: 1 as const,
+			policy: {
+				recipeId: "architect",
+				default: { toolCalls: 32, readReserve: 5, synthesis: true },
+				maximum: { toolCalls: 150, readReserve: 16 },
+				exact: false,
+			},
+			request: {
+				toolCalls: 64,
+				readReserve: 8,
+				retryRevision: { toolCalls: 120, readReserve: 12 },
+			},
+			effective: { toolCalls: 120, readReserve: 12, synthesis: true, hardCap: 150 },
+			reasons: [{ code: "revision-growth-authorized" as const, detail: "revision used its preauthorized ceiling" }],
+		};
 		const lines = renderDispatchCard(
 			boardRow({
 				node: "blade",
@@ -86,8 +102,9 @@ describe("dispatch board fleet visibility", () => {
 				lastContextTokens: 6800,
 				currentTool: "edit",
 				recentTools: ["read", "grep"],
+				budget,
 			}),
-			120,
+			180,
 		);
 		const body = strip(lines.join("\n"));
 		ok(body.includes("node blade"), `node id renders, got: ${body}`);
@@ -96,6 +113,10 @@ describe("dispatch board fleet visibility", () => {
 		ok(body.includes("ctx 85%"), "context meter renders");
 		ok(body.includes("edit running"), "current tool renders");
 		ok(body.includes("recent read grep"), "tool trail renders");
+		ok(body.includes("default 32/5, max 150/16"), "recipe policy renders");
+		ok(body.includes("requested 64/8, retry/revision ceiling 120/12"), "requested envelope renders");
+		ok(body.includes("120/12, lifetime cap 150"), "effective envelope renders");
+		ok(body.includes("revision-growth-authorized"), "escalation reason renders");
 	});
 
 	it("renders the local node when placement is absent", () => {
@@ -107,6 +128,18 @@ describe("dispatch board fleet visibility", () => {
 		const bus = createSafeEventBus();
 		const store = createDispatchBoardStore(bus);
 		try {
+			const budget = {
+				version: 1 as const,
+				policy: {
+					recipeId: "coder",
+					default: { toolCalls: 50, readReserve: 5, synthesis: true },
+					maximum: { toolCalls: 50, readReserve: 5 },
+					exact: true,
+				},
+				request: null,
+				effective: { toolCalls: 50, readReserve: 5, synthesis: true, hardCap: 150 },
+				reasons: [],
+			};
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-bus1",
 				agentId: "coder",
@@ -119,6 +152,7 @@ describe("dispatch board fleet visibility", () => {
 				node: "mini",
 				gate: { role: "candidate", cycle: 1 },
 				contextWindow: 10_000,
+				budget,
 				assignmentId: "run-bus1",
 				attempt: 0,
 			});
@@ -131,6 +165,7 @@ describe("dispatch board fleet visibility", () => {
 			strictEqual(row?.node, "mini");
 			deepStrictEqual(row?.gate, { role: "candidate", cycle: 1 });
 			strictEqual(row?.contextWindow, 10_000);
+			deepStrictEqual(row?.budget, budget);
 			strictEqual(row?.currentTool, "grep");
 
 			bus.emit(BusChannels.DispatchProgress, {

@@ -14,6 +14,7 @@
 
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { ConfigDiff } from "../domains/config/classify.js";
+import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import type {
 	DispatchRequestOrigin,
 	RunKind,
@@ -480,6 +481,8 @@ export interface DispatchRunIdentity {
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
+	/** Admitted invocation budget provenance for native workers. */
+	budget?: RunToolBudgetEnvelope | undefined;
 	/** Fleet node id the run was placed on; absent renders as the local node. */
 	node?: string | undefined;
 	/** Review/compete gate role and cycle, for fleet board badges. */

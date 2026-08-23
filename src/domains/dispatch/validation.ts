@@ -11,6 +11,7 @@ import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { AgentProduct } from "../agents/spec.js";
 import { type AutonomyLevel, isAutonomyLevel } from "../safety/autonomy.js";
+import { cloneDispatchBudgetRequest, type DispatchBudgetRequest } from "./budget-envelope.js";
 import {
 	EXECUTION_HANDOFF_MAX_ITEMS,
 	EXECUTION_HANDOFF_MAX_TEXT_BYTES,
@@ -76,6 +77,8 @@ export interface JobSpec {
 	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
+	/** Invocation phase and optional preauthorized retry or revision ceiling. */
+	budget?: DispatchBudgetRequest;
 	/**
 	 * What this run delivers, which decides what its reserve window admits.
 	 * "orientation" adds `code_nav` to the delivery tools kept live inside the
@@ -180,6 +183,7 @@ const KNOWN_KEYS = new Set([
 	"target",
 	"model",
 	"thinkingLevel",
+	"budget",
 	"node",
 	"routingIntent",
 	"failover",
@@ -378,6 +382,15 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	let budget: DispatchBudgetRequest | undefined;
+	if ("budget" in spec && spec.budget !== undefined) {
+		try {
+			budget = cloneDispatchBudgetRequest(spec.budget);
+		} catch (error) {
+			errors.push(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	if ("requiredCapabilities" in spec && spec.requiredCapabilities !== undefined) {
 		if (!Array.isArray(spec.requiredCapabilities) || spec.requiredCapabilities.some((c) => typeof c !== "string")) {
 			errors.push("requiredCapabilities must be a string[]");
@@ -530,6 +543,7 @@ export function validateJobSpec(spec: unknown): Validated {
 		out.reroutes = spec.reroutes.map((hop) => ({ ...hop }));
 	}
 	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;
+	if (budget !== undefined) out.budget = budget;
 	if (Array.isArray(spec.requiredCapabilities)) {
 		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));
 	}

@@ -458,12 +458,14 @@ export interface CreateLoopGuardRegistrationOptions {
 export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 	/** Read-only attempt counter for tests and telemetry. */
 	callCount(): number;
+	/** One-way worker phase growth admitted before launch for a result-contract revision. */
+	extendWorkerToolCallPhase(phase: { toolCalls: number; readReserve: number }): boolean;
 }
 
 export function createLoopGuardRegistration(options: CreateLoopGuardRegistrationOptions): LoopGuardRegistration {
 	const budget = options.turnBlockBudget ?? INTERACTIVE_LOOP_BLOCK_BUDGET;
 	const cap = options.toolCallCap;
-	const softLimit =
+	let softLimit =
 		options.toolCallSoftLimit !== undefined &&
 		Number.isSafeInteger(options.toolCallSoftLimit) &&
 		options.toolCallSoftLimit > 0 &&
@@ -472,8 +474,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			: undefined;
 	const turnBudget = options.turnToolCallBudget;
 	const synthesisLockout = options.turnSynthesisLockout === true;
-	const softReadReserve = options.toolCallSoftReadReserve ?? 0;
-	const softReadReserveThreshold =
+	let softReadReserve = options.toolCallSoftReadReserve ?? 0;
+	let softReadReserveThreshold =
 		softLimit !== undefined && softReadReserve > 0 && softLimit > softReadReserve ? softLimit - softReadReserve : null;
 	const deliveryTools = [...new Set(options.deliveryTools ?? [])];
 	const reserveAdmits = (tool: string | undefined): boolean => isReserveAdmittedTool(tool, deliveryTools);
@@ -850,6 +852,28 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
 		hooks: ["before_tool", "after_tool"],
 		callCount: () => count,
+		extendWorkerToolCallPhase(phase): boolean {
+			if (
+				softLimit === undefined ||
+				!Number.isSafeInteger(phase.toolCalls) ||
+				!Number.isSafeInteger(phase.readReserve) ||
+				phase.toolCalls <= 0 ||
+				phase.readReserve < 0 ||
+				phase.readReserve >= phase.toolCalls ||
+				(cap !== undefined && phase.toolCalls > cap) ||
+				phase.toolCalls < softLimit ||
+				(phase.toolCalls === softLimit && phase.readReserve <= softReadReserve)
+			) {
+				return false;
+			}
+			softLimit = phase.toolCalls;
+			softReadReserve = phase.readReserve;
+			softReadReserveThreshold = softReadReserve > 0 && softLimit > softReadReserve ? softLimit - softReadReserve : null;
+			softReadReserveEntered = false;
+			softLockout = null;
+			reserveDenials = { denials: 0 };
+			return true;
+		},
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);

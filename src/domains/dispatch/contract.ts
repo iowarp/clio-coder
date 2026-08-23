@@ -6,6 +6,7 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
+import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole } from "./execution-role.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
@@ -111,6 +112,7 @@ export interface DispatchSnapshot {
 		outcomePhase: string;
 		heartbeat: "alive" | "stale" | "dead" | "n/a";
 		lineage: RunLineage;
+		budget?: RunToolBudgetEnvelope;
 		startedAt: string;
 		/** Execution-only elapsed time retained for runtime monitoring. */
 		elapsedMs: number;

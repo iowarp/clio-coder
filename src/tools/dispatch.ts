@@ -25,6 +25,27 @@ export type { DispatchToolDeps } from "./dispatch-types.js";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+const DispatchBudgetPhaseSchema = Type.Object(
+	{
+		toolCalls: Type.Integer({ minimum: 1 }),
+		readReserve: Type.Integer({ minimum: 0 }),
+	},
+	{ additionalProperties: false },
+);
+
+const DispatchBudgetSchema = Type.Object(
+	{
+		toolCalls: Type.Integer({ minimum: 1, description: "Requested tool-call phase boundary." }),
+		readReserve: Type.Integer({ minimum: 0, description: "Requested tail reserve for canonical read calls." }),
+		retryRevision: Type.Optional(DispatchBudgetPhaseSchema),
+	},
+	{
+		additionalProperties: false,
+		description:
+			"Invocation budget inside the recipe policy. retryRevision preauthorizes one ceiling for retry, result-contract revision, or review revision phases.",
+	},
+);
+
 /**
  * Stable, lightweight dispatch surface. Admission remains synchronous so the
  * policy decision and provisional reservation are bound to the exact argument
@@ -62,7 +83,7 @@ export function createDispatchTool(
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			'Dispatch one bounded task with task, or a batch with tasks (never both). Singular example: {agent:"debugger", task:"Verify the receipt boundary", briefing:"Prior receipt evidence...", detach:true}. task is the worker assignment; briefing is separate bounded parent context/data and cannot replace task. Ordinary calls auto-wait; detach:true returns ids for monitoring/steering, and collect is the authoritative terminal batch operation before final synthesis. Batch modes are parallel (default), sequential, pipeline, or compete. Task objects may include persona and tool_profile. Sealed receipts are durable evidence; report receipt integrity, evidence verification, briefing provenance, and project-context provenance separately. Call with list:true to see agents. Do not repeat an identical successful dispatch in the same user turn. Prefer this tool over inline exploration whenever work is read-only fan-out, parallel investigation, or the operator asked for a worker by name; if you cannot dispatch, say so plainly and name the reason, and never narrate or summarize a worker you did not actually dispatch.',
+			'Dispatch one bounded task with task, or a batch with tasks (never both). Singular example: {agent:"debugger", task:"Verify the receipt boundary", briefing:"Prior receipt evidence...", detach:true}. task is the worker assignment; briefing is separate bounded parent context/data and cannot replace task. Ordinary calls auto-wait; detach:true returns ids for monitoring/steering, and collect is the authoritative terminal batch operation before final synthesis. Batch modes are parallel (default), sequential, pipeline, or compete. Task objects may include persona, tool_profile, and a recipe-admitted budget envelope. Sealed receipts are durable evidence; report receipt integrity, evidence verification, briefing provenance, and project-context provenance separately. Call with list:true to see agents. Do not repeat an identical successful dispatch in the same user turn. Prefer this tool over inline exploration whenever work is read-only fan-out, parallel investigation, or the operator asked for a worker by name; if you cannot dispatch, say so plainly and name the reason, and never narrate or summarize a worker you did not actually dispatch.',
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
 			from_scout: Type.Optional(
@@ -105,6 +126,7 @@ export function createDispatchTool(
 							tool_profile: Type.Optional(
 								StringEnum(TOOL_PROFILE_NAMES, { description: "Narrow this worker's available tools." }),
 							),
+							budget: Type.Optional(DispatchBudgetSchema),
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
 							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
@@ -190,6 +212,7 @@ export function createDispatchTool(
 				Type.String({ description: "Default ad-hoc specialist persona for dispatched tasks, max 8000 chars." }),
 			),
 			tool_profile: Type.Optional(StringEnum(TOOL_PROFILE_NAMES, { description: "Default worker tool profile." })),
+			budget: Type.Optional(DispatchBudgetSchema),
 			target: Type.Optional(Type.String({ description: "Default configured target id (omit for fleet default)." })),
 			model: Type.Optional(Type.String({ description: "Default model override." })),
 			node: Type.Optional(

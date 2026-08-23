@@ -2,6 +2,7 @@
 
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
+import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -170,6 +171,13 @@ function dispatchRequestFromArgs(
 			return { ok: false, message: "thinking_level must be one of off|minimal|low|medium|high|xhigh|max" };
 		}
 		request.thinkingLevel = thinkingLevel as JobThinkingLevel;
+	}
+	if (args.budget !== undefined) {
+		try {
+			request.budget = cloneDispatchBudgetRequest(args.budget);
+		} catch (error) {
+			return { ok: false, message: error instanceof Error ? error.message : String(error) };
+		}
 	}
 	return { ok: true, request };
 }

@@ -9,17 +9,51 @@ import type {
 	AgentProjectContextTier,
 } from "./spec.js";
 
-/** Authored worker-loop phase policy carried by an agent recipe. */
-export interface AgentBudget {
+/** One bounded worker-loop phase policy. */
+export interface AgentBudgetPhase {
 	/** Admitted tool-call boundary before the final-response phase. */
 	toolCalls: number;
 	/** Tail of the admitted boundary reserved for canonical `read` calls. */
 	readReserve: number;
-	/** Whether reaching the boundary transitions to text-only synthesis. */
-	synthesis: boolean;
 }
 
-const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis"] as const;
+/** Authored worker-loop phase policy carried by an agent recipe. */
+export interface AgentBudget extends AgentBudgetPhase {
+	/** Whether reaching the boundary transitions to text-only synthesis. */
+	synthesis: boolean;
+	/** Optional upper bound for invocation-level requests. Absence pins the default exactly. */
+	maximum?: AgentBudgetPhase;
+}
+
+const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis", "maximum"] as const;
+
+function parseAgentBudgetPhase(value: unknown, prefix: string, relationTarget: string): AgentBudgetPhase {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error(`${prefix} must be a non-null YAML object`);
+	}
+	const record = value as Record<string, unknown>;
+	for (const key of Object.keys(record)) {
+		if (key !== "toolCalls" && key !== "readReserve") throw new Error(`${prefix}.${key} is unknown`);
+	}
+	for (const key of ["toolCalls", "readReserve"] as const) {
+		if (!Object.hasOwn(record, key)) throw new Error(`${prefix}.${key} is required`);
+	}
+
+	const toolCalls = record.toolCalls;
+	if (typeof toolCalls !== "number" || !Number.isSafeInteger(toolCalls)) {
+		throw new Error(`${prefix}.toolCalls must be a finite safe integer`);
+	}
+	if (toolCalls <= 0) throw new Error(`${prefix}.toolCalls must be greater than 0`);
+
+	const readReserve = record.readReserve;
+	if (typeof readReserve !== "number" || !Number.isSafeInteger(readReserve)) {
+		throw new Error(`${prefix}.readReserve must be a finite safe integer`);
+	}
+	if (readReserve < 0) throw new Error(`${prefix}.readReserve must be greater than or equal to 0`);
+	if (readReserve >= toolCalls) throw new Error(`${prefix}.readReserve must be less than ${relationTarget}`);
+
+	return { toolCalls, readReserve };
+}
 
 /** Strict parser shared by the one recipe schema and direct contract fixtures. */
 export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudget | undefined {
@@ -35,27 +69,33 @@ export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudge
 			throw new Error(`${prefix}.${key} is unknown`);
 		}
 	}
-	for (const key of AGENT_BUDGET_KEYS) {
+	for (const key of ["toolCalls", "readReserve", "synthesis"] as const) {
 		if (!Object.hasOwn(record, key)) throw new Error(`${prefix}.${key} is required`);
 	}
 
-	const toolCalls = record.toolCalls;
-	if (typeof toolCalls !== "number" || !Number.isSafeInteger(toolCalls)) {
-		throw new Error(`${prefix}.toolCalls must be a finite safe integer`);
-	}
-	if (toolCalls <= 0) throw new Error(`${prefix}.toolCalls must be greater than 0`);
-
-	const readReserve = record.readReserve;
-	if (typeof readReserve !== "number" || !Number.isSafeInteger(readReserve)) {
-		throw new Error(`${prefix}.readReserve must be a finite safe integer`);
-	}
-	if (readReserve < 0) throw new Error(`${prefix}.readReserve must be greater than or equal to 0`);
-	if (readReserve >= toolCalls) throw new Error(`${prefix}.readReserve must be less than budget.toolCalls`);
+	const phase = parseAgentBudgetPhase(
+		{ toolCalls: record.toolCalls, readReserve: record.readReserve },
+		prefix,
+		"budget.toolCalls",
+	);
 
 	const synthesis = record.synthesis;
 	if (typeof synthesis !== "boolean") throw new Error(`${prefix}.synthesis must be a boolean`);
 
-	return { toolCalls, readReserve, synthesis };
+	const maximum =
+		record.maximum === undefined
+			? undefined
+			: parseAgentBudgetPhase(record.maximum, `${prefix}.maximum`, "budget.maximum.toolCalls");
+	if (maximum !== undefined) {
+		if (maximum.toolCalls < phase.toolCalls) {
+			throw new Error(`${prefix}.maximum.toolCalls must be greater than or equal to budget.toolCalls`);
+		}
+		if (maximum.readReserve < phase.readReserve) {
+			throw new Error(`${prefix}.maximum.readReserve must be greater than or equal to budget.readReserve`);
+		}
+	}
+
+	return { ...phase, synthesis, ...(maximum === undefined ? {} : { maximum }) };
 }
 
 export interface AgentToolAnyOfRequirement {

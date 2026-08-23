@@ -118,6 +118,8 @@ Overlay frames share the island's top border rules and include keyboard shortcut
 └─ [Tab] mode · [Esc] close ─────────────────┘
 ```
 
+Fleet run cards add two bounded budget rows when native dispatch admission supplies an envelope. The `policy` row shows the recipe default or exact pin, its optional maximum, and the invocation request. The `budget` row shows the effective phase, the operator lifetime cap, and the clamp or retry/revision escalation reason. Historical or external-agent rows without this provenance omit both rows.
+
 ### 4.3 Section Headers
 
 - **Panel Section Tag**: Bold CAPS in `accentDeep`.

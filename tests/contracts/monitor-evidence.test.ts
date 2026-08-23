@@ -70,6 +70,7 @@ function envelopeFor(draft: RunReceiptDraft, receiptPath: string): RunEnvelope {
 		agentId: draft.agentId,
 		executionRole: "builder",
 		task: draft.task,
+		...(draft.budget !== undefined ? { budget: draft.budget } : {}),
 		targetId: draft.targetId,
 		wireModelId: draft.wireModelId,
 		runtimeId: draft.runtimeId,
@@ -155,6 +156,22 @@ describe("contracts/monitor collect evidence labeling", () => {
 				receiptDraft("run-verified", {
 					verification: { state: "verified", basis: "validation-tool" },
 					briefing: { bytes: 12, contentHash: "a".repeat(64) },
+					budget: {
+						version: 1,
+						policy: {
+							recipeId: "architect",
+							default: { toolCalls: 32, readReserve: 5, synthesis: true },
+							maximum: { toolCalls: 150, readReserve: 16 },
+							exact: false,
+						},
+						request: {
+							toolCalls: 64,
+							readReserve: 8,
+							retryRevision: { toolCalls: 120, readReserve: 12 },
+						},
+						effective: { toolCalls: 120, readReserve: 12, synthesis: true, hardCap: 150 },
+						reasons: [{ code: "revision-growth-authorized", detail: "revision used its preauthorized ceiling" }],
+					},
 				}),
 			),
 			writeSealedReceipt(
@@ -230,6 +247,10 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(verified, /receipt_integrity=verified\/v15\/sha256/);
 		match(verified, /trust_status=v1 artifactIntegrity:verified validationGrounding:validated/);
 		match(verified, /evidence_verification=verified\/validation-tool/);
+		match(verified, /budget_recipe_policy="architect default 32\/5, max 150\/16, synthesis=on"/);
+		match(verified, /budget_requested="64\/8, retry\/revision ceiling 120\/12"/);
+		match(verified, /budget_effective="120\/12, lifetime cap 150, synthesis=on"/);
+		match(verified, /budget_reason="revision-growth-authorized"/);
 		match(verified, new RegExp(`briefing=bytes:12 sha256:${"a".repeat(64)}`));
 		match(verified, /project_context=absent/);
 		match(verified, /worker output \(tool-verified\):/);

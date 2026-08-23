@@ -1442,6 +1442,71 @@ describe("contracts/worker-steer", () => {
 			}
 		});
 
+		it("uses tools in a result-contract revision only when the worker spec preauthorizes growth", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-result-contract-budget-revision-"));
+			const events: unknown[] = [];
+			const paths = Array.from({ length: 3 }, (_, index) => {
+				const path = join(scratch, `scout-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return path;
+			});
+			const finalResult = JSON.stringify({
+				findings: [{ claim: "revision evidence is present", path: "scout-2.md", line: 1 }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(
+						paths.slice(0, 2).map((path, index) => fauxToolCall("read", { path }, { id: `base-${index}` })),
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage("The result is not ready."),
+					fauxAssistantMessage([fauxToolCall("read", { path: paths[2] }, { id: "revision-read" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage(finalResult),
+				],
+				{
+					agentId: "scout",
+					budget: {
+						toolCalls: 2,
+						readReserve: 0,
+						synthesis: true,
+						hardCap: 5,
+						revision: { toolCalls: 4, readReserve: 1 },
+					},
+					task: "map one bounded area",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+					resultContract: { kind: "scout-report" },
+					cwd: scratch,
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 0);
+				strictEqual(lastAssistantText(events), finalResult);
+				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, 3);
+				ok(
+					result.messages.some(
+						(message) =>
+							message.role === "toolResult" &&
+							Array.isArray(message.content) &&
+							message.content.some(
+								(block) =>
+									block.type === "text" &&
+									block.text.includes("You may use the admitted tools to repair this validator failure"),
+							),
+					),
+					"the repair directive states the admitted revision authority",
+				);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
 		it("fails a run that ignores both bounded result-contract repairs", async () => {
 			const scratch = mkdtempSync(join(tmpdir(), "clio-result-contract-refusal-"));
 			const events: unknown[] = [];
