@@ -73,14 +73,14 @@ publish is a manual maintainer step. The ordered procedure for a cut lives in
 2. Run `npm run ci:release`. It runs the full `ci` gate, then
    `scripts/check-release.mjs`, which verifies the built `dist/` and audits
    the exact npm package contents.
-3. Land the release commit on `main` and let the `ci` workflow go green on
-   that commit.
+3. Land the release commit on `main`. There is no need to wait on the `ci`
+   workflow before tagging: the release workflow runs the same gate itself.
 4. Tag and push: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. The tag must
    match `package.json`'s version; the release workflow refuses mismatches.
-5. `.github/workflows/release.yml` requires a successful `ci` run for the
-   tagged commit, verifies the tag against `package.json`, builds `dist/`,
-   runs `scripts/check-release.mjs`, and creates the GitHub release with the
-   tarball attached. It does not publish to npm.
+5. `.github/workflows/release.yml` verifies the tag against `package.json`,
+   runs `npm run ci:release` on the tagged tree, and creates the GitHub
+   release with the tarball attached and the version's `CHANGELOG.md` section
+   as the body. It does not publish to npm.
 6. A maintainer publishes from the tagged commit with `npm publish`;
    `prepublishOnly` runs the same `ci:release` gate first.
 
