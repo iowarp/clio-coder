@@ -277,6 +277,49 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		loop.dispose();
 	});
 
+	it("coalesces the first submit onto the in-flight boot probe", async () => {
+		const configured = settings();
+		const targetProviders = providers("local-native");
+		const status = targetProviders.list()[0];
+		ok(status);
+		let releaseProbe: () => void = () => {};
+		const probeGate = new Promise<void>((resolve) => {
+			releaseProbe = resolve;
+		});
+		let probeCalls = 0;
+		targetProviders.probeTarget = async () => {
+			probeCalls += 1;
+			await probeGate;
+			return status;
+		};
+		let promptCalls = 0;
+		const loop = createChatLoop({
+			getSettings: () => configured,
+			providers: targetProviders,
+			knownTargets: () => new Set(["test-target"]),
+			createAgent: createFakeAgentFactory(async () => {
+				promptCalls += 1;
+			}),
+		} as never);
+
+		strictEqual(probeCalls, 1, "boot starts the only target probe");
+		let submitResolved = false;
+		const submit = loop.submit("wait for live capabilities").then(() => {
+			submitResolved = true;
+		});
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		strictEqual(submitResolved, false, "the first submit remains pending while the boot probe is in flight");
+		strictEqual(promptCalls, 0, "the turn does not reach the engine on stale capabilities");
+		strictEqual(probeCalls, 1, "the first submit shares the boot probe instead of issuing another request");
+
+		releaseProbe();
+		await submit;
+		strictEqual(promptCalls, 1, "the turn reaches the engine after the shared probe settles");
+		strictEqual(probeCalls, 1, "the settled submit still used only the boot probe");
+		loop.dispose();
+	});
+
 	it("emits an out-of-run notice as a typed notice event without fabricating agent_end", async () => {
 		const events: ChatLoopEvent[] = [];
 		const unconfigured = settings();
