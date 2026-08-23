@@ -2,9 +2,14 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
+## 0.3.6 - 2026-08-23
+
+0.3.5 was published by mistake and withdrawn; its content ships here.
 
 ### Added
+- `docs/middleware-and-components.md` documents every built-in middleware registration: id, hooks, trigger, and what does not trigger it.
+- Permission and `ask_user` dialogs now derive closed consequence tiers from typed request, scope, reversibility, origin, exposure, and authority facts (#169). Conversational answers, workspace authority, outward consequences, safety-net confirmations, system changes, and worker escalations receive distinct titles and semantic tokens, while caller prose cannot lower a tier or alter the underlying decision protocol.
+- Typed invocation-level dispatch budget envelopes (#175). Recipes keep an exact default unless they author a maximum, dispatch can request a phase and preauthorize a retry, result-contract revision, or review revision ceiling inside both recipe and operator policy, and immutable policy, request, effective, clamp, and escalation facts are sealed into receipts and shown by monitor, fleet status, and the live fleet card. Architect retains its 32-call default and now permits explicitly admitted runs up to its authored maximum.
 - The `Alt+W` Fleet Runs board shows live worker progress on operator request (#168). `Enter` opens the selected run's detail: the phase, the running call as `<tool> <verb> <object>`, and the bounded tail of the worker's own prose with a `/view dispatch:<runId>` link to the rest. The default list stays compact, so a fan-out of scouts costs one card each until an operator opens one.
 
 ### Changed
@@ -14,17 +19,6 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ### Fixed
 - Approval overlays now derive call targets from a per-tool field allowlist. Unlisted arguments are shown only by field name, type, and size, so an unexpected credential or pasted document cannot be copied into the rendered frame (#200).
 - Worker tool starts and finishes now share a call id when their producer has one. The transcript and Fleet Runs pair concurrent calls by that id, while older streams without ids continue to match by tool name (#201).
-
-## 0.3.6 - 2026-08-23
-
-0.3.5 was published by mistake and withdrawn; its content ships here.
-
-### Added
-- `docs/middleware-and-components.md` documents every built-in middleware registration: id, hooks, trigger, and what does not trigger it.
-- Permission and `ask_user` dialogs now derive closed consequence tiers from typed request, scope, reversibility, origin, exposure, and authority facts (#169). Conversational answers, workspace authority, outward consequences, safety-net confirmations, system changes, and worker escalations receive distinct titles and semantic tokens, while caller prose cannot lower a tier or alter the underlying decision protocol.
-- Typed invocation-level dispatch budget envelopes (#175). Recipes keep an exact default unless they author a maximum, dispatch can request a phase and preauthorize a retry, result-contract revision, or review revision ceiling inside both recipe and operator policy, and immutable policy, request, effective, clamp, and escalation facts are sealed into receipts and shown by monitor, fleet status, and the live fleet card. Architect retains its 32-call default and now permits explicitly admitted runs up to its authored maximum.
-
-### Fixed
 - Proactive task memory now reuses deterministic tool-result disposition digests with explicit source provenance (#173). Operation fingerprints remain separate for loop and repeated-failure identity, while redaction and byte caps apply before diagnostics reach the task bank or background policy.
 - The llama.cpp router's `sleeping` state now reads as not resident (#192), and `clio-coder targets` reports `resident: none` while preserving the reported context-slot metadata.
 - Response model-id presence is now an explicit `responseModelIdObservation` state (#193, #202). The short-lived `servedModel` and `servedCalls` names are replaced by requested and attributed model ids plus counts named for each observation state. Pre-#193 ledgers remain readable under the labeled `legacy-difference-only` state, and providers outside the stream tap retain the `responseModel` fallback without implying that presence was observed.
