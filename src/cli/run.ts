@@ -395,7 +395,7 @@ async function runDispatch(
 		const records = loadMemoryRecordsSync(clioDataDir());
 		const boundProfileName = parsed.agentProfile ?? effectiveSettings.workers.agentBindings[parsed.agentId];
 		const boundProfile = boundProfileName ? effectiveSettings.workers.profiles[boundProfileName] : undefined;
-		const configuredRuntime = (targetId: string | undefined): string | undefined =>
+		const configuredRuntime = (targetId: string | null | undefined): string | undefined =>
 			effectiveSettings.targets.find((target) => target.id === targetId)?.runtime;
 		const profileRuntimeId = configuredRuntime(boundProfile?.target);
 		// The memory section is compiled before fleet routing settles. Admit a
