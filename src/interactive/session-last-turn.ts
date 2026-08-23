@@ -133,6 +133,7 @@ export function lastTurnSummaryFromLedger(
 	let toolErrorCount = 0;
 	let targetId = turn.targetId;
 	let modelId = turn.modelId;
+	let servedModelId: string | null = null;
 
 	for (const row of turn.rows) {
 		const record = payloadRecord(row.payload);
@@ -148,7 +149,8 @@ export function lastTurnSummaryFromLedger(
 		const reason = stopReasonOf(record.stopReason);
 		if (reason && reason !== "stop") stopReason = reason;
 		targetId = targetId ?? nonEmptyString(record, "provider", "api");
-		modelId = modelId ?? nonEmptyString(record, "responseModel", "model");
+		modelId = modelId ?? nonEmptyString(record, "model");
+		servedModelId = nonEmptyString(record, "responseModel") ?? servedModelId;
 		const usage = payloadRecord(record.usage);
 		if (!usage) continue;
 		inputTokens += positiveNumber(usage.input);
@@ -178,6 +180,7 @@ export function lastTurnSummaryFromLedger(
 		watchdogPeak: 0,
 		truncated: false,
 	};
+	if (servedModelId !== null && servedModelId !== summary.modelId) summary.servedModelId = servedModelId;
 	if (sawReasoning) {
 		summary.reasoningTokens = reasoningTokens;
 		summary.reasoningTokenProvenance = "provider";

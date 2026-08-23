@@ -129,8 +129,34 @@ describe("contracts/last turn on the active branch", () => {
 		strictEqual(summary?.stopReason, "length");
 		strictEqual(summary?.targetId, "dynamo", "the target the modelChange row named, as /cost attributes it");
 		strictEqual(summary?.modelId, "Nemo-3.5-Lightning");
+		strictEqual(summary?.servedModelId, undefined, "the served id is named only when it differs");
 		strictEqual(summary?.reasoningTokens, 7);
 		strictEqual(summary?.reasoningTokenProvenance, "provider");
+	});
+
+	it("carries the served model a peer answered under, as the live footer did (#185)", () => {
+		const entries: SessionEntry[] = [
+			{
+				kind: "modelChange",
+				turnId: "m1",
+				parentTurnId: null,
+				timestamp: at(0),
+				provider: "lmstudio",
+				modelId: "qwen3.8-27b-dynamo",
+				target: "dynamo",
+			} as unknown as SessionEntry,
+			userTurn("u1", "m1", at(0, 10)),
+			assistantTurn(
+				"a1",
+				"u1",
+				at(0, 20),
+				{ input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110 },
+				{ responseModel: "ornith-1.5-35b-a3b" },
+			),
+		];
+		const summary = lastTurnSummaryFromLedger(entries, {}, "a1");
+		strictEqual(summary?.modelId, "qwen3.8-27b-dynamo", "what was requested");
+		strictEqual(summary?.servedModelId, "ornith-1.5-35b-a3b", "what answered");
 	});
 
 	/**

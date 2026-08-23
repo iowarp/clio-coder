@@ -27,6 +27,7 @@ import {
 	type TurnSummary,
 } from "../status/index.js";
 import {
+	abbreviateModelId,
 	type ClioTheme,
 	type ClioToken,
 	clioTheme,
@@ -724,6 +725,11 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 	}
 	if (summary.watchdogPeak >= 2) parts.push(theme.fg("warning", "slow"));
 	if (summary.truncated) parts.push(theme.fg("warning", "trunc"));
+	// The one case the model is named here: the rail shows what was asked for,
+	// and this says what answered when the two differ (issue #185).
+	if (summary.servedModelId !== undefined) {
+		parts.push(theme.fg("warning", `served ${abbreviateModelId(summary.servedModelId)}`));
+	}
 	return parts.join(theme.fg("dim", " · "));
 }
 

@@ -130,6 +130,25 @@ async function loadOwnedInstance(
 	return instanceId;
 }
 
+/**
+ * Residency runs before every request, and the same co-residency facts held
+ * every turn, so the peer warning printed once per turn (issue #185). Each
+ * distinct fact is said once per process; a new target, model, or peer set is
+ * a new fact.
+ */
+const announcedResidencyFacts = new Set<string>();
+
+function emitResidencyNoticeOnce(key: string, notice: Parameters<typeof emitResidencyNotice>[0]): void {
+	if (announcedResidencyFacts.has(key)) return;
+	announcedResidencyFacts.add(key);
+	emitResidencyNotice(notice);
+}
+
+/** Test seam: forget which residency facts were announced. */
+export function resetAnnouncedResidencyFacts(): void {
+	announcedResidencyFacts.clear();
+}
+
 export async function ensureLmStudioResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal } = {},
@@ -155,7 +174,7 @@ export async function ensureLmStudioResidency(
 		);
 	}
 	if (resolution.wireModelId !== model.id) {
-		emitResidencyNotice({
+		emitResidencyNoticeOnce(`resolved|${info.targetId}|${model.id}|${resolution.wireModelId}`, {
 			kind: "co-resident",
 			level: "info",
 			targetId: info.targetId,
@@ -166,14 +185,16 @@ export async function ensureLmStudioResidency(
 		});
 	}
 	if (resolution.peerTargets.length > 0) {
-		emitResidencyNotice({
+		const peers = resolution.peerTargets.join(", ");
+		const requested = resolution.wireModelId === model.id ? "" : ` (requested '${model.id}')`;
+		emitResidencyNoticeOnce(`peer|${info.targetId}|${model.id}|${resolution.wireModelId}|${peers}`, {
 			kind: "co-resident",
 			level: "warning",
 			targetId: info.targetId,
 			runtimeId: "lmstudio",
 			model: resolution.wireModelId,
-			message: `LM Studio instance '${resolution.wireModelId}' is also loaded on ${resolution.peerTargets.join(", ")}; this request may be served by that LM Link peer.`,
-			detail: { peerTargets: resolution.peerTargets.join(", ") },
+			message: `LM Studio instance '${resolution.wireModelId}'${requested} is also loaded on ${peers}; a request may be served by that LM Link peer, and the footer and usage ledger name the id that answered when it differs.`,
+			detail: { requestedModel: model.id, wireModel: resolution.wireModelId, peerTargets: peers },
 		});
 	}
 	if (!load || Object.keys(load).length === 0 || resolution.instance) return resolution.wireModelId;

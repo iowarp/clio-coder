@@ -306,6 +306,8 @@ LM Studio can require bearer authentication for its HTTP APIs
 
 A model id on an LM Studio target is resolved against that host's loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. When a bare model key is requested and multiple instances of it are loaded, Clio selects an instance in this order: the target's configured `defaultModel`, then an instance not cross-listed by another configured LM Studio target, and finally the first loaded instance. This behavior tracks issue #113.
 
+When the selected instance is also loaded on a peer, a request may be answered by that peer, so Clio attributes each turn to the model the server reported rather than the one it asked for (#185). The adapter records the response's `model` field as `responseModel` on the assistant entry whenever it differs from the request; the footer's last-turn line then adds `served <id>`, the `/cost` overlay and `clio-coder usage report` attribute the tokens to the served id and list the requested ids beside it (`same` when nothing differed), and dispatch receipts carry both on `upstreamResponses`. The peer warning is said once per process per distinct fact (target, requested id, resolved instance, peer set), not once per turn. A response that reported the requested id, or no id, records no `servedModel`; the two are not told apart.
+
 
 Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
 context checkpoints, and speculative-decoding variants are not writable through this Clio settings

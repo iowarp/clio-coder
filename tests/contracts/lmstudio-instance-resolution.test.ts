@@ -6,6 +6,7 @@ import { resetLmStudioHostCatalogs } from "../../src/domains/providers/runtimes/
 import lmstudioRuntime from "../../src/domains/providers/runtimes/local-native/lmstudio.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
+import { resetAnnouncedResidencyFacts } from "../../src/engine/apis/lmstudio.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { type ResidencyNotice, resetResidencyState, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 import { type FakeLmStudioFixture, startFakeLmStudioServer } from "../harness/fake-lmstudio-server.js";
@@ -17,11 +18,12 @@ afterEach(async () => {
 	setResidencyNoticeSink(null);
 	resetResidencyState();
 	resetLmStudioHostCatalogs();
+	resetAnnouncedResidencyFacts();
 	await Promise.all(fixtures.splice(0).map((fixture) => fixture.close()));
 });
 
-async function fake(hostIdentity: "dynamo" | "zbook"): Promise<FakeLmStudioFixture> {
-	const fixture = await startFakeLmStudioServer({ hostIdentity });
+async function fake(hostIdentity: "dynamo" | "zbook", servedModel?: string): Promise<FakeLmStudioFixture> {
+	const fixture = await startFakeLmStudioServer({ hostIdentity, ...(servedModel ? { servedModel } : {}) });
 	fixtures.push(fixture);
 	return fixture;
 }
@@ -115,6 +117,38 @@ describe("contracts/lmstudio host and instance identity", () => {
 		await drainChat(dynamo, "qwen3.8-27b-zbook");
 		ok(notices.some((notice) => notice.level === "warning" && notice.message.includes("LM Link peer")));
 		strictEqual(dynamoServer.requestsFor("/v1/chat/completions").at(-1)?.body?.model, "qwen3.8-27b-zbook");
+	});
+
+	/**
+	 * Residency runs before every request and the same facts held every turn,
+	 * so the peer warning printed once per turn (issue #185). One fact, one
+	 * notice per process; and the response's own `model` field is what names
+	 * the instance that answered, which the footer and usage ledger read as
+	 * `responseModel` when it differs from the request.
+	 */
+	it("warns about an LM Link peer once per process and records the served id", async () => {
+		const dynamoServer = await fake("dynamo", "ornith-1.5-35b-a3b");
+		const zbookServer = await fake("zbook");
+		const dynamo = target(dynamoServer, "dynamo");
+		await lmstudioRuntime.probe?.(dynamo, probeContext);
+		await lmstudioRuntime.probe?.(target(zbookServer, "zbook"), probeContext);
+		resetAnnouncedResidencyFacts();
+
+		const notices: ResidencyNotice[] = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		const first = await drainChat(dynamo, "qwen3.8-27b-zbook");
+		await drainChat(dynamo, "qwen3.8-27b-zbook");
+		await drainChat(dynamo, "qwen3.8-27b-zbook");
+		const peerWarnings = notices.filter(
+			(notice) => notice.level === "warning" && notice.message.includes("LM Link peer"),
+		);
+		strictEqual(peerWarnings.length, 1, `one warning for three turns: ${JSON.stringify(notices.map((n) => n.message))}`);
+		ok(peerWarnings[0]?.message.includes("'qwen3.8-27b-zbook'"), peerWarnings[0]?.message);
+		ok(peerWarnings[0]?.message.includes("also loaded on zbook"), peerWarnings[0]?.message);
+		strictEqual(peerWarnings[0]?.detail?.requestedModel, "qwen3.8-27b-zbook");
+
+		const done = first.find((event) => event.type === "done") as { message?: { responseModel?: unknown } } | undefined;
+		strictEqual(done?.message?.responseModel, "ornith-1.5-35b-a3b", "the served id rides on the assistant message");
 	});
 
 	it("refuses an unadvertised model before the completion endpoint is called", async () => {

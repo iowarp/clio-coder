@@ -59,6 +59,8 @@ export async function startFakeLmStudioServer(
 		greeting?: boolean;
 		failLoads?: number;
 		hostIdentity?: "dynamo" | "zbook";
+		/** `model` field stamped on every chat completion chunk; an LM Link peer answers under its own id. */
+		servedModel?: string;
 	} = {},
 ): Promise<FakeLmStudioFixture> {
 	const mode = options.mode ?? "0.4";
@@ -264,12 +266,13 @@ export async function startFakeLmStudioServer(
 					{ choices: [], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } },
 				]);
 			}
+			const served = options.servedModel !== undefined ? { model: options.servedModel } : {};
 			return sse(response, [
 				...(reasoningEnabled
-					? [{ choices: [{ index: 0, delta: { role: "assistant", reasoning: "Short thought." } }] }]
+					? [{ ...served, choices: [{ index: 0, delta: { role: "assistant", reasoning: "Short thought." } }] }]
 					: []),
-				{ choices: [{ index: 0, delta: { content: "Visible answer." }, finish_reason: "stop" }] },
-				{ choices: [], usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 } },
+				{ ...served, choices: [{ index: 0, delta: { content: "Visible answer." }, finish_reason: "stop" }] },
+				{ ...served, choices: [], usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 } },
 			]);
 		}
 		if (path.startsWith("/api/v1/")) return json(response, 404, { error: "Not found" });
