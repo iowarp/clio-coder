@@ -415,6 +415,37 @@ describe("list-overlay key routing", () => {
 		strictEqual(permission.stoppedTurns(), 1);
 	});
 
+	/**
+	 * The v0.3.4 drive approved a `system_modify` bash call with Enter on the
+	 * composer while the dialog was forty rows away (issue #186). Enter is the
+	 * habitual send key, so while the composer holds a draft it allows nothing,
+	 * and the deletion keys reach the editor so the draft can be cleared without
+	 * first denying the call. Typing still cannot.
+	 */
+	it("keeps Enter from allowing a parked call while the composer holds a draft", () => {
+		const permission = makeDeps();
+		const edited: string[] = [];
+		const deps = { ...permission.deps, composerHasDraft: () => true, editDraft: (data: string) => edited.push(data) };
+		strictEqual(routePermissionOverlayKey("\r", deps), true, "the press is consumed, never handed to the send path");
+		strictEqual(permission.confirmedPermissions(), 0, "a draft means Enter allows nothing");
+		strictEqual(routePermissionOverlayKey(KITTY_ENTER, deps), true);
+		strictEqual(permission.confirmedPermissions(), 0);
+		strictEqual(routePermissionOverlayKey("\x7f", deps), true, "backspace is consumed by the editor");
+		strictEqual(routePermissionOverlayKey("\x15", deps), true, "ctrl+u clears the line");
+		deepStrictEqual(edited, ["\x7f", "\x15"]);
+		strictEqual(routePermissionOverlayKey("a", deps), false, "letters still never reach the draft");
+		deepStrictEqual(edited, ["\x7f", "\x15"]);
+		strictEqual(routeOverlayKey("a", "permission-confirm", deps, neverMatches), true, "and are swallowed by the modal");
+		strictEqual(routePermissionOverlayKey(KITTY_ESC, deps), true);
+		strictEqual(permission.cancelledPermissions(), 1, "Esc still denies with a draft present");
+		strictEqual(routePermissionOverlayKey("s", deps), true);
+		strictEqual(permission.stoppedTurns(), 1, "s still stops with a draft present");
+
+		const empty = { ...deps, composerHasDraft: () => false };
+		strictEqual(routePermissionOverlayKey("\r", empty), true);
+		strictEqual(permission.confirmedPermissions(), 1, "an empty composer is the only state where Enter allows");
+	});
+
 	it("dedupes permission parked notices by requestId", () => {
 		const seen = new Set<string>();
 		let noticeCount = 0;

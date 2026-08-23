@@ -194,6 +194,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		cancelPendingAskUser: () => overlayAskUser?.cancelPending() ?? false,
 		finishAuth: (dismiss) => overlayAuth.finish(dismiss),
 		onPermissionOverlayClosed: () => overlayPermission?.onPermissionOverlayClosed(),
+		onOverlayClosed: () => overlayPermission?.retryPending(),
 	});
 	const closeOverlay = overlayTransitions.close;
 
@@ -230,7 +231,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
-				footerHint: (innerWidth) => permissionOverlayHint(innerWidth),
+				// Read per frame: the footer names what Enter does right now, and
+				// that depends on whether the composer holds a draft.
+				footerHint: (innerWidth) => permissionOverlayHint(innerWidth, editor.getText().length > 0),
 			});
 			tui.requestRender();
 			return true;

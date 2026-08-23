@@ -60,6 +60,14 @@ export interface OverlayPermissionLifecycle {
 	 */
 	stopTurn(): void;
 	onPermissionOverlayClosed(): void;
+	/**
+	 * Re-present whatever is still parked once no overlay holds the screen. A
+	 * request that arrived while `/context` or a picker was open could only be
+	 * announced, and nothing re-attempted the dialog when that overlay closed:
+	 * the transcript said awaiting approval, the footer said confirm, and the
+	 * operator had no key to press (issue #186).
+	 */
+	retryPending(): void;
 	dispose(): void;
 }
 
@@ -188,6 +196,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		const next = workerQueue.shift();
 		if (next) openWorker(next);
 	};
+	const retryPending = (): void => {
+		maybeOpenWorker();
+		if (deps.getOverlayState() === "closed" && deps.toolRegistry?.hasParkedCalls()) {
+			deps.toolRegistry.renotifyHead();
+		}
+	};
 
 	const unsubscribePermission =
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
@@ -310,10 +324,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			workerQueue.length = 0;
 			return;
 		}
-		maybeOpenWorker();
-		if (deps.getOverlayState() === "closed" && deps.toolRegistry?.hasParkedCalls()) {
-			deps.toolRegistry.renotifyHead();
-		}
+		retryPending();
 	};
 
 	return {
@@ -336,6 +347,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			);
 		},
 		onPermissionOverlayClosed,
+		retryPending,
 		dispose: () => {
 			unsubscribePermission();
 			unsubscribeWorker();
