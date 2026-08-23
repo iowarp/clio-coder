@@ -1156,8 +1156,12 @@ export function createDispatchBoardStore(
 	let nextSequence = 0;
 	let reconciledAtMs = Date.now();
 
-	/** Seal a run's projection on the receipt's answer, or on its own last durable message. */
-	const settleProgress = (entry: DispatchBoardEntry): void => {
+	/**
+	 * Seal a run's projection on the sealed receipt's answer. Only for the
+	 * terminal bus events: the dispatch domain writes `receipts/<runId>.json`
+	 * before it publishes one, so this is the first moment the file exists.
+	 */
+	const settleFromReceipt = (entry: DispatchBoardEntry): void => {
 		const text = readReceipt?.(entry.runId)?.text;
 		entry.progress.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
 	};
@@ -1247,7 +1251,7 @@ export function createDispatchBoardStore(
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
-			settleProgress(entry);
+			settleFromReceipt(entry);
 			// A terminal dispatch event is published only after the run's receipt is
 			// sealed at receipts/<runId>.json, so the run id is the receipt id here.
 			entry.receiptId = entry.runId;
@@ -1275,7 +1279,7 @@ export function createDispatchBoardStore(
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
-			settleProgress(entry);
+			settleFromReceipt(entry);
 			// A denied retry never reached a run, so no receipt was sealed for it;
 			// every other failure finalized through recordReceipt like a success.
 			if (payload.reason !== "retry_denied") entry.receiptId = entry.runId;
@@ -1299,7 +1303,7 @@ export function createDispatchBoardStore(
 				// wind down, so the history row can become terminal immediately.
 				entry.status = "aborted";
 				entry.finishedAtMs = Date.now();
-				settleProgress(entry);
+				entry.progress.settle();
 			} else {
 				if (isTerminalStatus(entry.status) && !wasRetrying) return;
 				entry.status = "cancelling";
@@ -1321,7 +1325,10 @@ export function createDispatchBoardStore(
 				entry.status = status;
 				if (status === "dead") {
 					entry.finishedAtMs ??= Date.now();
-					settleProgress(entry);
+					// A worker-side terminal signal arrives before any receipt is
+					// sealed, so the run's own last durable message is the best truth
+					// there is; the terminal bus event replaces it with the sealed one.
+					entry.progress.settle();
 					delete entry.retry;
 				}
 				return;
@@ -1386,7 +1393,10 @@ export function createDispatchBoardStore(
 				if (!status) return;
 				entry.status = status;
 				entry.finishedAtMs ??= Date.now();
-				settleProgress(entry);
+				// The worker says it is done before the domain seals its receipt. Settle
+				// on the durable message now so the card stops reading as live; the
+				// terminal bus event seals it on the receipt shortly after.
+				entry.progress.settle();
 				delete entry.retry;
 			}
 		}),
