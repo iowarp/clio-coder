@@ -61,6 +61,14 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"*.dump",
 	],
 	readOnlyPaths: [
+		// Clio's own operator-authority files in the project. `safety.yaml` is the
+		// policy that gates the model's tools, and `verifiers.yaml` is an argv
+		// catalog that verify() executes; a model that can author either one can
+		// widen its own permissions in two tool calls. Both are authored by the
+		// operator through the CLI (`clio-coder verifiers author` lands nothing
+		// before `--yes`), so model-side writes and deletes are refused.
+		".clio-coder/safety.yaml",
+		".clio-coder/verifiers.yaml",
 		"/etc/",
 		"/usr/",
 		"/bin/",
