@@ -96,6 +96,8 @@ export interface InteractivePresentationDeps {
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
 	getShutdownArmed?: () => boolean;
+	/** Whether a permission prompt owns the keyboard, for the composer's CONFIRM rail. */
+	isAwaitingApproval?: () => boolean;
 	getCwd?: () => string;
 	resolveVisibleEventSequence?: (event: ChatLoopEvent) => number | null;
 	resolveStreamIngress?: (
@@ -408,6 +410,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			);
 		},
 		isStreaming: () => deps.chat.isStreaming(),
+		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
 		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Shift+Enter"),

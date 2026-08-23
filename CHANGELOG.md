@@ -2,6 +2,11 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.3.5 - Unreleased
+
+### Fixed
+- A parked permission request always offers allow, deny, and stop (#186). The composer rail switches to `CONFIRM` and carries the dialog's keys while a prompt owns the keyboard, so the `Enter send` hint can no longer contradict a dialog that sits forty rows away on a tall terminal. `Enter` allows only from an empty composer: with a draft present the habitual send key is inert, both surfaces read `[Backspace] clear draft` in its place, and only deletion keys reach the editor. `Esc` is labeled `deny`, which is what it does. A request that parks while another overlay holds the screen is re-presented as soon as that overlay closes.
+
 ## 0.3.4 - 2026-08-22
 
 ### Added

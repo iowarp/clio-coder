@@ -103,6 +103,40 @@ describe("contracts/clio-editor", () => {
 		if (actionSequence.length > 0) strictEqual((lines[0] ?? "").includes(actionTagOpener), false);
 	});
 
+	/**
+	 * The v0.3.4 drive approved a `system_modify` bash call by pressing Enter on
+	 * a composer whose rail still read `Enter send` (issue #186). The dialog sits
+	 * at the vertical center of the viewport, forty rows from the composer on a
+	 * tall terminal with a long transcript, and the rail is what the operator
+	 * reads. While a prompt owns the keyboard the rail says CONFIRM and carries
+	 * the dialog's keys, at 60 columns included, where the send hint is dropped.
+	 */
+	it("switches to CONFIRM with the permission keys while an approval is pending", () => {
+		let awaiting = true;
+		const { editor } = createEditor({ isStreaming: () => true, isAwaitingApproval: () => awaiting });
+		let lines = editor.render(60).map(plain);
+		ok(lines[0]?.startsWith("CONFIRM "), lines[0]);
+		ok(lines[1]?.includes("A parked call is waiting for your decision"), lines[1]);
+		const rail = lines[2] ?? "";
+		ok(rail.includes("[Enter] allow"), `Enter allows from an empty composer: ${rail}`);
+		ok(rail.includes("[Esc] deny"), `the rail names deny: ${rail}`);
+		ok(rail.includes("[s] stop"), `the rail names stop: ${rail}`);
+		ok(!rail.includes("Enter send"), `the send hint is gone while the prompt owns input: ${rail}`);
+		for (const line of editor.render(60)) strictEqual(visibleWidth(line.replaceAll(CURSOR_MARKER, "")), 60);
+
+		editor.setText("wait, what does this do");
+		lines = editor.render(60).map(plain);
+		ok(lines[0]?.startsWith("CONFIRM "), lines[0]);
+		const draftRail = lines[lines.length - 1] ?? "";
+		ok(!draftRail.includes("[Enter]"), `a draft removes Enter from the rail: ${draftRail}`);
+		ok(draftRail.includes("[Backspace] clear draft"), `and names what clears it: ${draftRail}`);
+		ok(draftRail.includes("[Esc] deny"), draftRail);
+
+		awaiting = false;
+		lines = editor.render(60).map(plain);
+		ok(lines[0]?.startsWith("STEER "), `the rail returns to the streaming mode once the prompt resolves: ${lines[0]}`);
+	});
+
 	it("keeps streaming local-command drafts non-orange when Enter will not steer", () => {
 		const { editor } = createEditor({
 			isStreaming: () => true,

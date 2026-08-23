@@ -169,8 +169,10 @@ describe("contracts/interactive ask-user overlay lifecycle", () => {
 		strictEqual(events.filter((event) => event.startsWith("open:")).length, 1, "the cancellation latch remains set");
 		strictEqual(events.filter((event) => event.startsWith("decision:")).length, 1);
 		strictEqual(events.filter((event) => event.startsWith("submit:")).length, 1);
+		// Re-presenting the parked head once the overlay closes is not a
+		// resolution (issue #186); the resolving verbs are what must not fire.
 		strictEqual(
-			events.some((event) => event.startsWith("permission:")),
+			events.some((event) => event.startsWith("permission:") && event !== "permission:renotify"),
 			false,
 			"decision correction neither approves, denies, cancels, resumes, nor consumes a parked outward gate",
 		);

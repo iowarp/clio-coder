@@ -189,6 +189,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getModelLabel: () => editorChrome.getModelLabel(),
 		getThinkingLabel: () => editorChrome.getThinkingLabel(),
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,
+		isAwaitingApproval: () => editorChrome.isAwaitingApproval?.() ?? false,
 		willEnterSteer: (text) => editorChrome.willEnterSteer?.(text) ?? false,
 		getSubmitKeyLabel: () => editorChrome.getSubmitKeyLabel?.() ?? "Enter",
 		getNewlineKeyLabel: () => editorChrome.getNewlineKeyLabel?.() ?? "Shift+Enter",

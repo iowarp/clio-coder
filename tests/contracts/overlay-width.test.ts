@@ -125,10 +125,23 @@ describe("contracts/overlay width — permission overlay", () => {
 
 	it("shortens its own labels before dropping an action", () => {
 		// 82 columns of box: everything fits, nothing is abbreviated.
-		strictEqual(permissionOverlayHint(78), "[Enter] allow once · [s] stop turn · [Esc] close");
+		strictEqual(permissionOverlayHint(78), "[Enter] allow once · [s] stop turn · [Esc] deny");
 		// 40 columns of terminal: 38 inside the borders, where the full form does
 		// not fit and the elider would have removed the middle entry.
 		strictEqual(permissionOverlayHint(38), "[Enter] allow · [s] stop");
+	});
+
+	/**
+	 * Enter is the habitual send key, and on a safety rail the ambiguous press
+	 * resolves away from allow (issue #186). While the composer holds a draft the
+	 * footer stops promising that Enter allows and names what clears the draft.
+	 */
+	it("stops naming Enter as allow while the composer holds a draft", () => {
+		strictEqual(permissionOverlayHint(78, true), "[Backspace] clear the draft to allow · [s] stop turn · [Esc] deny");
+		strictEqual(permissionOverlayHint(56, true), "[Backspace] clear draft · [s] stop · [Esc] deny");
+		ok(!/\[Enter\]/u.test(permissionOverlayHint(38, true)), permissionOverlayHint(38, true));
+		ok(/\[s\] stop/u.test(permissionOverlayHint(38, true)), permissionOverlayHint(38, true));
+		ok(/\[Esc\] deny/u.test(permissionOverlayHint(38, true)), permissionOverlayHint(38, true));
 	});
 
 	// This surface used to hand-write those three tiers because the generic
@@ -136,7 +149,7 @@ describe("contracts/overlay width — permission overlay", () => {
 	// droppable, and the generic fitter reproduces the tiers. If the two ever
 	// disagree again, this is the case that says so.
 	it("expresses its tiers through the shared hint fitter, not a private ladder", () => {
-		strictEqual(permissionOverlayHint(50), "[Enter] allow · [s] stop · [Esc] close");
+		strictEqual(permissionOverlayHint(48), "[Enter] allow · [s] stop · [Esc] deny");
 		// Below every tier, the last thing standing is a safety action, not `close`.
 		ok(/\[s\] stop/u.test(permissionOverlayHint(20)), permissionOverlayHint(20));
 	});

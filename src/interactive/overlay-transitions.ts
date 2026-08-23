@@ -9,6 +9,12 @@ export interface OverlayTransitionsDeps {
 	cancelPendingAskUser: () => boolean;
 	finishAuth: (dismiss: boolean) => void;
 	onPermissionOverlayClosed: () => void;
+	/**
+	 * Runs after any overlay has closed and the state is back to `closed`. The
+	 * permission lifecycle uses it to re-present a call that parked while this
+	 * overlay held the screen; nothing else re-attempts that dialog.
+	 */
+	onOverlayClosed?: () => void;
 }
 
 export interface OverlayTransitions {
@@ -26,7 +32,11 @@ export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayT
 			return state;
 		},
 		set state(next) {
+			const closing = state !== "closed" && next === "closed";
 			state = next;
+			// The ask-user and auth lifecycles leave by assigning the state rather
+			// than through `close`, so the hook fires here for them.
+			if (closing) deps.onOverlayClosed?.();
 		},
 		get handle() {
 			return handle;
@@ -50,6 +60,7 @@ export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayT
 		handle?.hide();
 		handle = null;
 		if (leaving === "permission-confirm") deps.onPermissionOverlayClosed();
+		else deps.onOverlayClosed?.();
 		deps.renderContextIsland();
 		deps.renderTaskIsland();
 		deps.requestRender();

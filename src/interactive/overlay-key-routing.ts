@@ -31,6 +31,19 @@ export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
 	confirmPermission: () => void;
 	stopTurnFromPermission: () => void;
+	/**
+	 * Whether the composer holds text. Enter must not allow a parked call while
+	 * it does (issue #186): an operator who typed a message and pressed the
+	 * habitual send key meant to send, and on a safety rail the ambiguous key
+	 * resolves away from "allow". Absent means an empty composer.
+	 */
+	composerHasDraft?: () => boolean;
+	/**
+	 * Deliver a draft-editing key to the composer while the prompt owns input,
+	 * so the draft that makes Enter inert can be cleared without first denying
+	 * the call. Only the deletion keys in `isDraftEditKey` arrive here.
+	 */
+	editDraft?: (data: string) => void;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -55,10 +68,29 @@ export function isEscapeKey(data: string): boolean {
 	return matchesKey(data, "escape") && !isKeyRelease(data);
 }
 
+const DRAFT_EDIT_KEYS = ["backspace", "delete", "ctrl+u", "ctrl+w", "alt+backspace", "ctrl+k"] as const;
+
+/**
+ * The keys that only ever remove text from the composer. They are the one
+ * class of input a pending permission prompt lets through, because they
+ * cannot type a command, cannot submit, and are the way out of the inert-Enter
+ * state a draft puts the prompt in.
+ */
+export function isDraftEditKey(data: string): boolean {
+	return !isKeyRelease(data) && DRAFT_EDIT_KEYS.some((key) => matchesKey(data, key));
+}
+
 /** Pure permission overlay key router: returns true when the input was consumed. */
 export function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
 	if (matchesKey(data, "enter") && !isKeyRelease(data)) {
-		deps.confirmPermission();
+		// Consumed either way: with a draft the press changes nothing, and the
+		// composer rail says what clears it. Letting it fall through would hand
+		// Enter to the editor, which is the send path this guard exists to block.
+		if (!(deps.composerHasDraft?.() ?? false)) deps.confirmPermission();
+		return true;
+	}
+	if (deps.editDraft && isDraftEditKey(data)) {
+		deps.editDraft(data);
 		return true;
 	}
 	if (isEscapeKey(data)) {

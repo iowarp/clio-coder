@@ -82,7 +82,7 @@ export interface InteractiveInputRuntimeDeps {
 	cancelActiveEditorBash: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
-	editor: { getText(): string; setText(text: string): void };
+	editor: { getText(): string; setText(text: string): void; handleInput?(data: string): void };
 	editorSubmit: {
 		openExternalEditorForInput(): void;
 		queueFollowUpFromEditor(): void;
@@ -211,6 +211,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					cancelPermission: () => deps.overlay.closeOverlay(),
 					confirmPermission: () => deps.overlay.confirmPermission(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
+					composerHasDraft: () => deps.editor.getText().length > 0,
+					editDraft: (data) => {
+						deps.editor.handleInput?.(data);
+						deps.requestRender();
+					},
 					closeOverlay: () => deps.overlay.closeOverlay(),
 					selectPreviousDispatch: () => {
 						deps.dispatchBoard.selectPrevious();

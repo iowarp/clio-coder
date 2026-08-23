@@ -482,10 +482,16 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	 * here for the same reason as the leader flag above.
 	 */
 	let shutdownArmed = false;
+	/**
+	 * Assigned after the presentation because it renders into it. The composer
+	 * rail reads it through the optional chain before then as "no prompt".
+	 */
+	let overlayLifecycle: OverlayLifecycleController;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLeaderArmed: () => leaderArmed,
 		getShutdownArmed: () => shutdownArmed,
+		isAwaitingApproval: () => overlayLifecycle?.getState() === "permission-confirm",
 		resolveVisibleEventSequence: (event) => visibleEventIngress.get(event)?.traceSequence ?? null,
 		resolveStreamIngress: (event) => visibleEventIngress.get(event) ?? null,
 		commitFrame: (reason) => shell.commitCurrentFrame(reason === "teardown" ? 300 : 30_000),
@@ -668,7 +674,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	});
 	editor.onSubmit = editorSubmit.submitEditorText;
 
-	let overlayLifecycle: OverlayLifecycleController;
 	const interactiveTickers = createInteractiveTickers({
 		tui,
 		dispatchBoardStore,

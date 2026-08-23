@@ -4,11 +4,13 @@ import { BusChannels, type PermissionRequestedPayload } from "../../src/core/bus
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
+import { routePermissionOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import {
 	createOverlayLifecycle,
 	type OverlayLifecycleApplicationDeps,
 	type OverlayLifecycleRuntimeDeps,
 } from "../../src/interactive/overlay-lifecycle.js";
+import { permissionOverlayHint } from "../../src/interactive/permission-overlay.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../../src/tools/registry.js";
 
 interface PermissionHarness {
@@ -16,28 +18,51 @@ interface PermissionHarness {
 	lifecycle: ReturnType<typeof createOverlayLifecycle>;
 	permissionRequired: (call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void;
 	permissionRequested: (payload: PermissionRequestedPayload) => void;
+	/** The registry's parked queue, in arrival order, as the stub registry sees it. */
+	parked: Array<{ call: ClassifierCall; decision: SafetyDecision; meta: PermissionRequiredMeta }>;
+	draft: { text: string };
 }
 
-function createPermissionHarness(): PermissionHarness {
+function createPermissionHarness(options: { columns?: number } = {}): PermissionHarness {
 	const events: string[] = [];
 	let permissionRequired: PermissionHarness["permissionRequired"] = () => {};
 	let permissionRequested: PermissionHarness["permissionRequested"] = () => {};
 	let overlayNumber = 0;
+	const parked: PermissionHarness["parked"] = [];
+	const draft = { text: "" };
+	// The stub keeps the registry's queue so `renotifyHead` can do what the
+	// real one does: fire the listener again for the head parked call.
 	const toolRegistry = {
 		onPermissionRequired: (listener: PermissionHarness["permissionRequired"]) => {
-			permissionRequired = listener;
+			permissionRequired = (call, decision, meta) => {
+				if (!parked.some((entry) => entry.meta.requestId === meta.requestId)) parked.push({ call, decision, meta });
+				listener(call, decision, meta);
+			};
 			return () => events.push("unsubscribe:permission");
 		},
 		onAutonomyDenied: () => () => events.push("unsubscribe:autonomy"),
-		parkedCount: () => 1,
-		hasParkedCalls: () => false,
+		parkedCount: () => Math.max(1, parked.length),
+		hasParkedCalls: () => parked.length > 0,
 		cancelParkedCall: (requestId: string, reason: string) => {
 			events.push(`cancel:${requestId}:${reason}`);
+			const index = parked.findIndex((entry) => entry.meta.requestId === requestId);
+			if (index !== -1) parked.splice(index, 1);
 			return true;
 		},
-		cancelParkedCalls: (reason: string) => events.push(`cancel-all:${reason}`),
-		renotifyHead: () => events.push("renotify-head"),
-		resumeParkedCalls: () => Promise.resolve(),
+		cancelParkedCalls: (reason: string) => {
+			events.push(`cancel-all:${reason}`);
+			parked.length = 0;
+		},
+		renotifyHead: () => {
+			events.push("renotify-head");
+			const head = parked[0];
+			if (head) permissionRequired(head.call, head.decision, head.meta);
+		},
+		resumeParkedCalls: (grant?: { requestId?: string }) => {
+			const index = parked.findIndex((entry) => entry.meta.requestId === grant?.requestId);
+			if (index !== -1) parked.splice(index, 1);
+			return Promise.resolve();
+		},
 	} as unknown as ToolRegistry;
 	const app = {
 		toolRegistry,
@@ -65,6 +90,7 @@ function createPermissionHarness(): PermissionHarness {
 		tui: { requestRender: () => events.push("render") } as unknown as TUI,
 		footer: { refresh: () => events.push("footer") },
 		interactiveTickers: {
+			startDispatchBoardTicker: () => events.push("start-board"),
 			stopDispatchBoardTicker: () => events.push("stop-board"),
 			renderContextIsland: () => events.push("context-island"),
 			renderTaskIsland: () => events.push("task-island"),
@@ -75,20 +101,28 @@ function createPermissionHarness(): PermissionHarness {
 		},
 		chatRenderer: { applyEvent: () => events.push("chat") },
 		notify: () => {},
-		terminal: { columns: 100 },
-		dispatchBoard: {},
+		terminal: { columns: options.columns ?? 100 },
+		dispatchBoard: { resetSelection: () => {} },
 		chatPanel: {},
 		io: { stdout: () => {}, stderr: () => {} },
 		readStructuredEntries: () => [],
 		announceTaskMemorySeedOffer: () => {},
 		keybindings: {},
-		editor: { getText: () => "", setText: () => {} },
+		editor: {
+			getText: () => draft.text,
+			setText: (text: string) => {
+				draft.text = text;
+			},
+		},
 		getSlashContext: () => ({}),
-		showOverlayFrame: () => {
+		showOverlayFrame: (_tui: unknown, _body: unknown, frameOptions: { footerHint?: (innerWidth: number) => string }) => {
 			overlayNumber += 1;
 			const current = overlayNumber;
 			events.push(`show:${current}`);
-			return { hide: () => events.push(`hide:${current}`) } as unknown as OverlayHandle;
+			return {
+				hide: () => events.push(`hide:${current}`),
+				footerHint: (innerWidth: number) => frameOptions.footerHint?.(innerWidth) ?? "",
+			} as unknown as OverlayHandle;
 		},
 	} as unknown as OverlayLifecycleRuntimeDeps;
 
@@ -97,6 +131,8 @@ function createPermissionHarness(): PermissionHarness {
 		lifecycle: createOverlayLifecycle(runtime),
 		permissionRequired: (...args) => permissionRequired(...args),
 		permissionRequested: (payload) => permissionRequested(payload),
+		parked,
+		draft,
 	};
 }
 
@@ -285,6 +321,86 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			harness.events.some((event) => event.startsWith("emit:")),
 			false,
 		);
+	});
+
+	/**
+	 * A call that parks while `/context`, a picker, or the fleet board holds the
+	 * screen can only be announced. Nothing re-attempted the dialog when that
+	 * overlay closed, so the transcript said awaiting approval, the footer said
+	 * confirm, and the operator had nothing to press (issue #186). Closing the
+	 * blocking overlay now re-presents the head of the queue.
+	 */
+	it("re-presents a call that parked while another overlay held the screen", () => {
+		const harness = createPermissionHarness({ columns: 60 });
+		harness.lifecycle.toggleDispatchBoardOverlay();
+		strictEqual(harness.lifecycle.getState(), "dispatch-board");
+		harness.events.length = 0;
+
+		harness.permissionRequired(
+			{ tool: "bash", args: { command: "echo hi | tee /tmp/x" } } as ClassifierCall,
+			askDecision,
+			{
+				requestId: "req-deferred",
+				toolCallId: "tool-deferred",
+			} as PermissionRequiredMeta,
+		);
+
+		strictEqual(harness.lifecycle.getState(), "dispatch-board", "the board keeps the screen");
+		ok(harness.events.includes("notice"), `announced while it cannot show: ${harness.events.join(",")}`);
+		ok(!harness.events.some((event) => event.startsWith("show:")), "no second frame under the board");
+		harness.events.length = 0;
+
+		harness.lifecycle.closeOverlay();
+
+		strictEqual(harness.lifecycle.getState(), "permission-confirm", "the dialog opens once the board is gone");
+		ok(harness.events.includes("renotify-head"), `the queue head is re-presented: ${harness.events.join(",")}`);
+		ok(harness.events.includes("show:2"), `a 60-column terminal still gets the dialog: ${harness.events.join(",")}`);
+		ok(!harness.events.includes("notice"), "the re-presented request is not announced twice");
+	});
+
+	/**
+	 * With the dialog open, Enter allows only from an empty composer, Esc denies,
+	 * and the footer says so at 60 columns. The composer rail's own rendering of
+	 * the same keys is pinned in clio-editor.test.ts.
+	 */
+	it("allows only from an empty composer and denies on Escape at 60 columns", () => {
+		const harness = createPermissionHarness({ columns: 60 });
+		harness.draft.text = "wait, what does this do";
+		harness.permissionRequired(
+			{ tool: "bash", args: { command: "echo hi | tee /tmp/x" } } as ClassifierCall,
+			askDecision,
+			{
+				requestId: "req-draft",
+				toolCallId: "tool-draft",
+			} as PermissionRequiredMeta,
+		);
+		strictEqual(harness.lifecycle.getState(), "permission-confirm");
+		const frame = harness.events.find((event) => event.startsWith("show:"));
+		ok(frame, "the dialog opened");
+		harness.events.length = 0;
+
+		const hint = permissionOverlayHint(56, harness.draft.text.length > 0);
+		ok(!hint.includes("[Enter]"), `a draft removes Enter from the footer: ${hint}`);
+		ok(hint.includes("[Esc] deny"), `the footer names deny: ${hint}`);
+		ok(hint.includes("[s] stop"), `the footer names stop: ${hint}`);
+		strictEqual(
+			routePermissionOverlayKey("\r", {
+				cancelPermission: () => harness.lifecycle.closeOverlay(),
+				confirmPermission: () => harness.lifecycle.confirmPermission(),
+				stopTurnFromPermission: () => harness.lifecycle.stopTurnFromPermission(),
+				composerHasDraft: () => harness.draft.text.length > 0,
+			}),
+			true,
+		);
+		strictEqual(harness.lifecycle.getState(), "permission-confirm", "Enter with a draft resolved nothing");
+		ok(!harness.events.some((event) => event.includes(":granted:")), "nothing was granted");
+
+		harness.draft.text = "";
+		ok(permissionOverlayHint(56, false).includes("[Enter] allow"), "an empty composer restores Enter as allow");
+		harness.lifecycle.closeOverlay();
+		strictEqual(harness.lifecycle.getState(), "closed");
+		ok(harness.events.includes(`emit:${BusChannels.PermissionResolved}:denied:req-draft`), "Esc denied the call");
+		deepStrictEqual(harness.parked, [], "the denied call left the queue");
 	});
 
 	it("unsubscribes permission, worker, and autonomy listeners on disposal", () => {
