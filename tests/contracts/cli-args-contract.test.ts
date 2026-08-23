@@ -64,4 +64,16 @@ describe("contracts/cli-args-contract", () => {
 		match(result.stderr, /unknown global option: --definitely-not-a-global-flag/);
 		strictEqual(result.stdout.includes('"config"'), false);
 	});
+
+	/**
+	 * Every other agent CLI spells it `--resume` or `--continue`; Clio resumes
+	 * from the picker. The flag still fails closed, and the failure says where
+	 * the picker is (#191).
+	 */
+	it("points --resume at the /resume picker while still failing closed", async () => {
+		const result = await runCli(["--resume"], { env: scratch.env });
+		strictEqual(result.code, 2);
+		match(result.stderr, /unknown global option: --resume\. Sessions are resumed from inside the app/);
+		match(result.stderr, /type \/resume/);
+	});
 });

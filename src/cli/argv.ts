@@ -102,6 +102,19 @@ export function globalFlagPositionHint(arg: string, command: string): string | n
  * for the command boundary, so `--skill path --api-key SECRET paths` treated
  * SECRET as a subcommand and printed it in an error.
  */
+/**
+ * Sessions are resumed from the interactive picker, not from a flag, and the
+ * flag every other agent CLI spells `--resume` or `--continue` fails closed
+ * here. The failure names the picker so the habit lands somewhere (#191).
+ */
+function unknownGlobalOptionError(arg: string): string {
+	const bare = arg.replace(/=.*$/u, "");
+	if (bare === "--resume" || bare === "--continue" || bare === "-r" || bare === "-c") {
+		return `unknown global option: ${arg}. Sessions are resumed from inside the app: start clio-coder, then type /resume to pick one.`;
+	}
+	return `unknown global option: ${arg}`;
+}
+
 export function extractGlobalFlags(
 	argv: ReadonlyArray<string>,
 	isSubcommand: (token: string) => boolean = () => false,
@@ -156,7 +169,7 @@ export function extractGlobalFlags(
 			noSkills,
 			skillPaths,
 			rest,
-			error: `unknown global option: ${arg}`,
+			error: unknownGlobalOptionError(arg),
 			...(apiKey === undefined ? {} : { apiKey }),
 		};
 	}

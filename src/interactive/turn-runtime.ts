@@ -15,7 +15,7 @@ import {
 	type ProvidersContract,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
-	runtimeResolutionWarnings,
+	runtimeResolutionWarningsBesideThinkingNotice,
 	type TargetStatus,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -199,7 +199,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				failure?.code ?? "admission-failed",
 			);
 		}
-		for (const message of runtimeResolutionWarnings(resolved.diagnostics)) {
+		// emitThinkingClampNotice prints the one combined thinking line when the
+		// dial takes effect; the thinking diagnostics are its two halves.
+		for (const message of runtimeResolutionWarningsBesideThinkingNotice(
+			resolved.diagnostics,
+			resolved.target.modelRuntime.thinking.notice,
+		)) {
 			const key = `${targetId}|${wireModelId}|${message}`;
 			if (announcedResolutionWarnings.has(key)) continue;
 			announcedResolutionWarnings.add(key);

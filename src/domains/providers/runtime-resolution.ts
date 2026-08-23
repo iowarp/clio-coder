@@ -593,6 +593,21 @@ export function runtimeResolutionWarnings(diagnostics: ReadonlyArray<RuntimeReso
 }
 
 /**
+ * The warnings a surface that prints its own thinking-clamp line should
+ * announce. `thinking-coerced` and `thinking-<kind>` are the two halves of
+ * that one line, so when the resolved thinking carries a notice they are
+ * dropped here: an always-on model printed three lines saying one thing
+ * (issue #191). With no notice, a bare coercion is still worth a line.
+ */
+export function runtimeResolutionWarningsBesideThinkingNotice(
+	diagnostics: ReadonlyArray<RuntimeResolutionDiagnostic>,
+	thinkingNotice: string,
+): string[] {
+	if (thinkingNotice.trim().length === 0) return runtimeResolutionWarnings(diagnostics);
+	return runtimeResolutionWarnings(diagnostics.filter((entry) => !entry.code.startsWith("thinking-")));
+}
+
+/**
  * Minimum context Clio is built for, applied to every tier rather than only to
  * local-native. A hosted target that reports less than this is as unable to
  * hold a repository's worth of tool results as a local one.
