@@ -234,6 +234,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 */
 	const TARGET_PROBE_TTL_MS = 5 * 60 * 1000;
 	let lastTargetProbe: { key: string; at: number } | null = null;
+	const targetProbesInFlight = new Map<string, Promise<void>>();
 	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
 		const settings = deps.getSettings();
 		const targetId = settings.orchestrator.target?.trim();
@@ -244,16 +245,29 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const runtimeDesc = deps.providers.getRuntime(target.runtime);
 		if (!runtimeDesc || runtimeDesc.tier === "cloud") return;
 		const key = `${targetId}|${wireModelId}`;
+		const inFlight = targetProbesInFlight.get(key);
+		if (inFlight) {
+			await inFlight;
+			return;
+		}
 		const now = Date.now();
 		if (lastTargetProbe?.key === key && now - lastTargetProbe.at < TARGET_PROBE_TTL_MS) return;
 		lastTargetProbe = { key, at: now };
-		let status: Awaited<ReturnType<ProvidersContract["probeTarget"]>> = null;
+		const probe = (async (): Promise<void> => {
+			let status: Awaited<ReturnType<ProvidersContract["probeTarget"]>> = null;
+			try {
+				status = await deps.providers.probeTarget(targetId);
+			} catch {
+				// Fall back to the last known target state.
+			}
+			announceColdModel(status, targetId, wireModelId);
+		})();
+		targetProbesInFlight.set(key, probe);
 		try {
-			status = await deps.providers.probeTarget(targetId);
-		} catch {
-			// Fall back to the last known target state.
+			await probe;
+		} finally {
+			if (targetProbesInFlight.get(key) === probe) targetProbesInFlight.delete(key);
 		}
-		announceColdModel(status, targetId, wireModelId);
 	};
 
 	/** One notice per target+model+state, so a repeated probe stays quiet. */

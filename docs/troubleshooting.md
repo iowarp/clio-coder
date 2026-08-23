@@ -1,6 +1,6 @@
 # Troubleshooting & Error Remediation
 
-This guide provides concrete, actionable remediation procedures for operational errors, permission denials, target connection failures, and system diagnostics in Clio Coder `v0.3.5`.
+This guide provides concrete, actionable remediation procedures for operational errors, permission denials, target connection failures, and system diagnostics in Clio Coder `v0.3.6`.
 
 ---
 

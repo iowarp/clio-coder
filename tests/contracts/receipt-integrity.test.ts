@@ -16,7 +16,7 @@ import type {
 	RunReceiptFindingsSummary,
 	RunReceiptIntegrity,
 } from "../../src/domains/dispatch/types.js";
-import { receiptServedModelLabel } from "../../src/tools/worker-evidence.js";
+import { receiptServedModelLabel } from "../../src/tools/dispatch-event-text.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function fixtureRouteCandidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
