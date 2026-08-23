@@ -156,10 +156,17 @@ describe("contracts/live spawn", { concurrency: false }, () => {
 			const seen = JSON.parse(result.stdout) as Record<string, string>;
 			strictEqual(seen.CLIO_LIVE_SPAWN_GIVEN, "given-value");
 			strictEqual(seen.CLIO_LIVE_SPAWN_AMBIENT, undefined, "an ambient variable reached a replaceEnv child");
-			// Node adds nothing of its own on POSIX, so the map is the whole environment.
+			// Node adds nothing of its own on POSIX, so the map is the whole
+			// environment. The one exception is NODE_V8_COVERAGE: a parent running
+			// under --experimental-test-coverage stamps it on every child so the
+			// child's coverage lands in the same directory, and that happens below
+			// spawn(), after replaceEnv has already handed over the map.
 			if (POSIX) {
 				strictEqual(
-					[...Object.keys(seen)].sort().join(","),
+					Object.keys(seen)
+						.filter((key) => key !== "NODE_V8_COVERAGE")
+						.sort()
+						.join(","),
 					["CLIO_LIVE_SPAWN_GIVEN", "PATH"].sort().join(","),
 					`child environment was not exactly the given map: ${Object.keys(seen).sort().join(",")}`,
 				);
