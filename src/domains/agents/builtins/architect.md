@@ -11,7 +11,7 @@ category: plan
 capabilityClass: artifact-write
 latencyClass: deep
 projectContextTier: bounded
-budget: {toolCalls: 32, readReserve: 5, synthesis: true}
+budget: {toolCalls: 32, readReserve: 5, synthesis: true, maximum: {toolCalls: 150, readReserve: 16}}
 resultContract: {kind: architect-plan, path: .clio-coder/artifacts/PLAN.md}
 tags: [architecture, boundaries, migration]
 ---

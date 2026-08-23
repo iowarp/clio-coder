@@ -48,6 +48,11 @@ export interface WorkerProtectedArtifactState {
 }
 
 /** Concrete dispatch-time budget after recipe policy and operator clamping. */
+export interface WorkerBudgetPhase {
+	toolCalls: number;
+	readReserve: number;
+}
+
 export interface WorkerBudget {
 	/** Agent phase boundary before synthesis or bounded termination. */
 	toolCalls: number;
@@ -57,6 +62,8 @@ export interface WorkerBudget {
 	synthesis: boolean;
 	/** Independent operator-owned attempt ceiling; recipes cannot widen it. */
 	hardCap: number;
+	/** Optional ceiling that a bounded result-contract revision may activate. */
+	revision?: WorkerBudgetPhase;
 }
 
 interface WorkerSpecFields {
@@ -416,10 +423,16 @@ function validateAllowedTools(value: unknown): void {
 
 function validateWorkerBudget(value: unknown): void {
 	const budget = readRecord(value, "WorkerSpec.budget");
-	const expected = ["hardCap", "readReserve", "synthesis", "toolCalls"];
+	const expected = ["hardCap", "readReserve", "revision", "synthesis", "toolCalls"];
 	const actual = Object.keys(budget).sort();
-	if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-		throw new Error(`WorkerSpec.budget must contain exactly: ${expected.join(", ")}`);
+	if (
+		actual.some((key) => !expected.includes(key)) ||
+		actual.some((key) => key === "revision" && budget.revision === undefined)
+	) {
+		throw new Error(`WorkerSpec.budget may contain only: ${expected.join(", ")}`);
+	}
+	for (const required of ["hardCap", "readReserve", "synthesis", "toolCalls"] as const) {
+		if (!Object.hasOwn(budget, required)) throw new Error(`WorkerSpec.budget.${required} is required`);
 	}
 	for (const key of ["toolCalls", "readReserve", "hardCap"] as const) {
 		const value = budget[key];
@@ -436,6 +449,33 @@ function validateWorkerBudget(value: unknown): void {
 		throw new Error("WorkerSpec.budget.readReserve must be an integer in [0, toolCalls)");
 	}
 	if (typeof budget.synthesis !== "boolean") throw new Error("WorkerSpec.budget.synthesis must be a boolean");
+	if (budget.revision !== undefined) {
+		const revision = readRecord(budget.revision, "WorkerSpec.budget.revision");
+		const revisionKeys = Object.keys(revision).sort();
+		if (revisionKeys.length !== 2 || revisionKeys[0] !== "readReserve" || revisionKeys[1] !== "toolCalls") {
+			throw new Error("WorkerSpec.budget.revision must contain exactly: readReserve, toolCalls");
+		}
+		for (const key of ["toolCalls", "readReserve"] as const) {
+			if (typeof revision[key] !== "number" || !Number.isSafeInteger(revision[key])) {
+				throw new Error(`WorkerSpec.budget.revision.${key} must be a safe integer`);
+			}
+		}
+		if ((revision.toolCalls as number) < (budget.toolCalls as number)) {
+			throw new Error("WorkerSpec.budget.revision.toolCalls must not be smaller than WorkerSpec.budget.toolCalls");
+		}
+		if (
+			(revision.toolCalls as number) === (budget.toolCalls as number) &&
+			(revision.readReserve as number) <= (budget.readReserve as number)
+		) {
+			throw new Error("WorkerSpec.budget.revision must increase toolCalls or readReserve");
+		}
+		if ((revision.toolCalls as number) > (budget.hardCap as number)) {
+			throw new Error("WorkerSpec.budget.revision.toolCalls must not exceed WorkerSpec.budget.hardCap");
+		}
+		if ((revision.readReserve as number) < 0 || (revision.readReserve as number) >= (revision.toolCalls as number)) {
+			throw new Error("WorkerSpec.budget.revision.readReserve must be an integer in [0, toolCalls)");
+		}
+	}
 }
 
 function validateRuntimeCapabilityDecision(value: unknown, source: string): void {

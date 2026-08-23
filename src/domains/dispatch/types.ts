@@ -12,6 +12,7 @@ import type { ToolProfileName } from "../../tools/profiles.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
@@ -419,6 +420,8 @@ export interface RunEnvelope {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
+	/** Immutable recipe policy, invocation request, effective phase, and admission reasons. */
+	budget?: RunToolBudgetEnvelope;
 	/** Present only when a bounded parent briefing was sent as dynamic task data. */
 	briefing?: RunBriefingProvenance;
 	/** Sent steering provenance in stable per-run sequence order; prose is never persisted. */
@@ -679,6 +682,8 @@ export interface RunReceipt {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
+	/** Integrity-sealed recipe policy, invocation request, effective phase, and admission reasons. */
+	budget?: RunToolBudgetEnvelope;
 	/** Proof of briefing content without copying its prose into the receipt. */
 	briefing?: RunBriefingProvenance;
 	/** Sent steering provenance in stable per-run sequence order; prose is never persisted. */

@@ -37,6 +37,13 @@ import {
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
+import {
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+	type RunToolBudgetEnvelope,
+} from "../domains/dispatch/budget-envelope.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import { runCodeStep } from "../domains/dispatch/code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "../domains/dispatch/code-step-store.js";
@@ -740,6 +747,7 @@ export function statusSnapshot(): {
 			return {
 				runId: row.id,
 				agentId: row.agentId,
+				budget: row.budget ?? null,
 				runtimeKind: row.runtimeKind,
 				outcomePhase: row.status,
 				heartbeat: rowHeartbeat(row),
@@ -798,6 +806,13 @@ function runStatus(args: ReadonlyArray<string>): number {
 			process.stdout.write(
 				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  $${(row.costUsd as number).toFixed(4)}\n`,
 			);
+			const budget = row.budget as RunToolBudgetEnvelope | null;
+			if (budget !== null) {
+				process.stdout.write(`    recipe policy: ${formatBudgetPolicy(budget)}\n`);
+				process.stdout.write(`    requested envelope: ${formatBudgetRequest(budget)}\n`);
+				process.stdout.write(`    effective envelope: ${formatEffectiveBudget(budget)}\n`);
+				process.stdout.write(`    clamp or escalation reason: ${formatBudgetReasons(budget)}\n`);
+			}
 		}
 	}
 	if (snapshot.retrying.length === 0) {

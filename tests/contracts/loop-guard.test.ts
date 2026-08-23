@@ -1467,6 +1467,34 @@ describe("synthesis reserve at the cap tail", () => {
 		);
 	});
 
+	it("reopens only a prevalidated one-way result-contract revision phase", async () => {
+		const safety = unknownClassSafety();
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: 8,
+			toolCallSoftLimit: 3,
+			turnSynthesisLockout: true,
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockDiscoverySpec());
+		for (let i = 0; i < 3; i += 1) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Grep, args: { pattern: `base-${i}` } })).kind, "ok");
+		}
+		strictEqual((await registry.invoke({ tool: ToolNames.Grep, args: { pattern: "base-spent" } })).kind, "blocked");
+		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 6, readReserve: 0 }), true);
+		for (let i = 3; i < 6; i += 1) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Grep, args: { pattern: `revision-${i}` } })).kind, "ok");
+		}
+		strictEqual((await registry.invoke({ tool: ToolNames.Grep, args: { pattern: "revision-spent" } })).kind, "blocked");
+		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 5, readReserve: 0 }), false, "the phase never shrinks");
+		strictEqual(
+			guard.extendWorkerToolCallPhase({ toolCalls: 9, readReserve: 0 }),
+			false,
+			"the operator lifetime cap still wins",
+		);
+	});
+
 	it("keeps the reserve predicate mutually exclusive with the cap vocabulary", () => {
 		const reason = workerSynthesisReserveBlockReason("bash", 3, 50);
 		strictEqual(isWorkerSynthesisReserveBlockReason(reason), true);

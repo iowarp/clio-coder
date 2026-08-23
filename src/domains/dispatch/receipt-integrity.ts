@@ -76,6 +76,8 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	agentAudience: true,
 	requestOrigin: true,
 	task: true,
+	// Historical receipts omit this field, so their receipt and ledger payloads remain unchanged.
+	budget: true,
 	targetId: true,
 	wireModelId: true,
 	runtimeId: true,
@@ -179,6 +181,7 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 		agentId: envelope.agentId,
 		executionRole: envelope.executionRole,
 		task: envelope.task,
+		...(envelope.budget !== undefined ? { budget: envelope.budget } : {}),
 		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,
 		runtimeId: envelope.runtimeId,
@@ -356,6 +359,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		if (!Object.is(receiptValue, ledgerValue)) return field;
 	}
 	if (canonicalJson(receipt.briefing ?? null) !== canonicalJson(envelope.briefing ?? null)) return "briefing";
+	if (canonicalJson(receipt.budget ?? null) !== canonicalJson(envelope.budget ?? null)) return "budget";
 	if (canonicalJson(receipt.steering ?? null) !== canonicalJson(envelope.steering ?? null)) return "steering";
 	return null;
 }

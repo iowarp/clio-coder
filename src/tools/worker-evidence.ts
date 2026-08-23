@@ -1,4 +1,10 @@
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
+import {
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+} from "../domains/dispatch/budget-envelope.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
@@ -138,11 +144,21 @@ export function receiptEvidenceLabels(
 		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
 	const responseModelIdObservation = receiptResponseModelIdObservationLabel(receipt);
+	const budget =
+		receipt.budget === undefined
+			? []
+			: [
+					`budget_recipe_policy=${JSON.stringify(formatBudgetPolicy(receipt.budget))}`,
+					`budget_requested=${JSON.stringify(formatBudgetRequest(receipt.budget))}`,
+					`budget_effective=${JSON.stringify(formatEffectiveBudget(receipt.budget))}`,
+					`budget_reason=${JSON.stringify(formatBudgetReasons(receipt.budget))}`,
+				];
 	return [
 		canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
 		...(responseModelIdObservation ? [responseModelIdObservation] : []),
+		...budget,
 		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, status),
 		briefing,

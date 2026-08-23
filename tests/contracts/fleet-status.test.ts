@@ -5,7 +5,7 @@
  * rows whose only source of truth is the receipt artifact (bt-02 finding 2).
  */
 
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -67,7 +67,24 @@ describe("contracts/fleet-status", () => {
 				completedRow({ id: "newrow0000001", tokenCount: 5575, inputTokenCount: 2606, outputTokenCount: 189 }),
 				completedRow({ id: "oldrow0000001", tokenCount: 4947, receiptPath }),
 				// Running row from another process: no live meters cross-process.
-				completedRow({ id: "running000001", status: "running", endedAt: null, tokenCount: 0 }),
+				completedRow({
+					id: "running000001",
+					status: "running",
+					endedAt: null,
+					tokenCount: 0,
+					budget: {
+						version: 1,
+						policy: {
+							recipeId: "architect",
+							default: { toolCalls: 32, readReserve: 5, synthesis: true },
+							maximum: { toolCalls: 150, readReserve: 16 },
+							exact: false,
+						},
+						request: { toolCalls: 64, readReserve: 8 },
+						effective: { toolCalls: 64, readReserve: 8, synthesis: true, hardCap: 150 },
+						reasons: [],
+					},
+				}),
 			];
 			writeFileSync(join(stateDir, "runs.json"), JSON.stringify(rows, null, 2));
 
@@ -75,6 +92,7 @@ describe("contracts/fleet-status", () => {
 			strictEqual(snapshot.totals.inputTokens, 2606 + 4780);
 			strictEqual(snapshot.totals.outputTokens, 189 + 167);
 			strictEqual(snapshot.totals.totalTokens, 5575 + 4947);
+			deepStrictEqual(snapshot.running[0]?.budget, rows[2]?.budget);
 		});
 	});
 

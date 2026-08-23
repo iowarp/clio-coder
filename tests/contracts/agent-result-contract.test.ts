@@ -570,6 +570,19 @@ describe("contracts/agent result contract", () => {
 		strictEqual(result.isError, true);
 		ok(result.content[0].text.includes("Validator reason: not JSON"));
 		ok(result.content[0].text.includes("src/a.ts:1-3"));
+		ok(result.content[0].text.includes("Tool use is over"), "default callers cannot grow a repair phase");
+		const [, authorized] = resultContractRepairMessages(
+			{
+				contract: { kind: "architect-plan", path: "PLAN.md" },
+				reason: "PLAN.md missing",
+				attempt: 1,
+				anchors: [],
+				toolsAvailable: true,
+			},
+			origin,
+		);
+		ok(authorized.content[0].text.includes("You may use the admitted tools"));
+		strictEqual(authorized.content[0].text.includes("Tool use is over"), false);
 
 		// The provider transform neither orphans the pair nor synthesizes a
 		// second result for it, so the wire carries assistant{tool_calls} then

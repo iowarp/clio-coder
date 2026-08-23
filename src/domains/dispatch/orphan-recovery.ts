@@ -55,6 +55,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 		...(receipt.agentAudience !== undefined ? { agentAudience: receipt.agentAudience } : {}),
 		...(receipt.requestOrigin !== undefined ? { requestOrigin: receipt.requestOrigin } : {}),
 		task: receipt.task,
+		...(receipt.budget !== undefined ? { budget: receipt.budget } : {}),
 		...(receipt.briefing !== undefined ? { briefing: receipt.briefing } : {}),
 		...(receipt.steering !== undefined ? { steering: receipt.steering } : {}),
 		targetId: receipt.targetId,

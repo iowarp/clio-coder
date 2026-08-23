@@ -9,6 +9,14 @@ import {
 import type { SafeEventBus } from "../core/event-bus.js";
 import { rawDurationMs } from "../core/timers.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
+import {
+	cloneRunToolBudgetEnvelope,
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+	type RunToolBudgetEnvelope,
+} from "../domains/dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
 import {
 	type DispatchRequestOrigin,
@@ -72,6 +80,8 @@ export interface DispatchBoardRow {
 	wireModelId: string;
 	/** Sanitized, one-line summary of the task assigned to this run. */
 	taskSummary?: string;
+	/** Immutable budget admission provenance for this run. */
+	budget?: RunToolBudgetEnvelope;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
 	tokenCount: number;
@@ -506,6 +516,22 @@ export function renderDispatchCard(
 			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
 			: []),
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
+		...(row.budget !== undefined
+			? [
+					truncateToWidth(
+						`${cardKvKey(theme, "policy")}${theme.fg("muted", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`)}`,
+						contentWidth,
+						"…",
+						false,
+					),
+					truncateToWidth(
+						`${cardKvKey(theme, "budget")}${theme.fg("muted", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`)}`,
+						contentWidth,
+						"…",
+						false,
+					),
+				]
+			: []),
 		cardUnitsLine(theme, "telemetry", [up, down, total, ...(contextUnit !== null ? [contextUnit] : [])], contentWidth),
 	];
 	if (row.retry) {
@@ -879,6 +905,7 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 		costUsd: number;
 		costProvenance: CostProvenance;
 		outcomePhase: string;
+		budget?: RunToolBudgetEnvelope;
 	}
 > {
 	const running = new Map<
@@ -890,12 +917,14 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 			costUsd: number;
 			costProvenance: CostProvenance;
 			outcomePhase: string;
+			budget?: RunToolBudgetEnvelope;
 		}
 	>();
 	try {
 		for (const value of snapshot.running) {
 			const runId = parseRunId(value.runId);
 			if (!runId) continue;
+			const budget = cloneRunToolBudgetEnvelope(value.budget);
 			running.set(runId, {
 				inputTokens: parseFiniteNumberOrZero(value.tokens.input),
 				outputTokens: parseFiniteNumberOrZero(value.tokens.output),
@@ -903,6 +932,7 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 				costUsd: parseFiniteNumberOrZero(value.costUsd),
 				costProvenance: value.costProvenance ?? "unknown",
 				outcomePhase: value.outcomePhase,
+				...(budget !== undefined ? { budget } : {}),
 			});
 		}
 	} catch {
@@ -930,6 +960,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		targetId: entry.targetId,
 		wireModelId: entry.wireModelId,
 		...(entry.taskSummary !== undefined ? { taskSummary: entry.taskSummary } : {}),
+		...(entry.budget !== undefined ? { budget: entry.budget } : {}),
 		status: retry ? "retrying" : entry.status,
 		elapsedMs: resolveElapsedMs(entry, now),
 		tokenCount: entry.tokenCount,
@@ -1007,6 +1038,7 @@ export function createDispatchBoardStore(
 		const rerouteCount = parsePositiveInt(raw.rerouteCount) ?? previous?.rerouteCount;
 		const contextWindow = parsePositiveInt(raw.contextWindow) ?? previous?.contextWindow;
 		const taskSummary = parseTaskSummary(raw, previous?.taskSummary);
+		const budget = cloneRunToolBudgetEnvelope(raw.budget) ?? previous?.budget;
 		const entry: DispatchBoardEntry = {
 			runId,
 			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
@@ -1017,6 +1049,7 @@ export function createDispatchBoardStore(
 			targetId: parseText(raw.targetId, previous?.targetId ?? "-"),
 			wireModelId: parseText(raw.wireModelId, previous?.wireModelId ?? "-"),
 			...(taskSummary !== undefined ? { taskSummary } : {}),
+			...(budget !== undefined ? { budget } : {}),
 			status,
 			tokenCount: previous?.tokenCount ?? 0,
 			costUsd: previous?.costUsd ?? 0,
@@ -1286,6 +1319,7 @@ export function createDispatchBoardStore(
 			entry.tokenCount = live.tokenCount;
 			entry.costUsd = live.costUsd;
 			entry.costProvenance = live.costProvenance;
+			if (live.budget !== undefined) entry.budget = live.budget;
 			if (live.outcomePhase === "aborting") {
 				if (entry.status !== "completed" && entry.status !== "aborted") {
 					entry.status = "cancelling";

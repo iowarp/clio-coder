@@ -443,6 +443,42 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// loop guard counts synthesis-lock noncompliance by model round, preventing
 	// one wide parallel batch from consuming the entire denial backstop.
 	let workerModelRound = 0;
+	const loopGuardRegistration = createLoopGuardRegistration({
+		safety,
+		toolCallCap: workerBudget.hardCap,
+		toolCallSoftLimit: workerBudget.toolCalls,
+		// A worker's blocks all land in one run-long bucket, so the bound on
+		// them is a statement about this run's length, not about a turn.
+		turnBlockBudget: workerLoopBlockBudget(workerBudget.revision?.toolCalls ?? workerBudget.toolCalls),
+		toolCallSoftReadReserve: readReserve,
+		...(deliveryTools.length > 0 ? { deliveryTools } : {}),
+		turnSynthesisLockout: workerBudget.synthesis,
+		// Once locked, the next model round is forced text-only at the
+		// request level. The lockout directive alone relies on model compliance.
+		onSynthesisLockout: () => {
+			if (workerBudget.synthesis) synthesisToolLock = true;
+		},
+		...(!workerBudget.synthesis
+			? {
+					onSoftLimitFinalCallAdmitted: (toolCallId: string | undefined) => {
+						if (workerBoundFailure === null) {
+							workerBoundFailure = `worker agent budget reached (${workerBudget.toolCalls}); synthesis is disabled`;
+						}
+						// Native agent tool calls carry a stable provider id. The wildcard
+						// keeps even an invariant violation on the post-result path.
+						stopAfterToolResultCallId = toolCallId ?? STOP_AFTER_ANY_TOOL_RESULT;
+					},
+				}
+			: {}),
+		// Requiring read is correct only when reading is the whole reserve.
+		...(readReserve > 0 && deliveryTools.length === 0
+			? {
+					onSoftReadReserve: () => {
+						middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Read }]);
+					},
+				}
+			: {}),
+	});
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,
@@ -461,52 +497,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// and has no persistence sink. It can still absorb worker-local
 		// protect_path effects from snapshot rules for the rest of this run.
 		[
-			createLoopGuardRegistration({
-				safety,
-				toolCallCap: workerBudget.hardCap,
-				toolCallSoftLimit: workerBudget.toolCalls,
-				// A worker's blocks all land in one run-long bucket, so the bound on
-				// them is a statement about this run's length, not about a turn.
-				turnBlockBudget: workerLoopBlockBudget(workerBudget.toolCalls),
-				toolCallSoftReadReserve: readReserve,
-				...(deliveryTools.length > 0 ? { deliveryTools } : {}),
-				turnSynthesisLockout: workerBudget.synthesis,
-				// Once locked, the next model round is forced text-only at the
-				// request level (the tool surface is removed in onPayload below):
-				// the lockout directive alone relies on model compliance, and
-				// measured local models kept calling tools until the backstop
-				// aborted the run, or answered the forced round with tool-call
-				// markup that the loop guard then removed.
-				onSynthesisLockout: () => {
-					if (workerBudget.synthesis) {
-						synthesisToolLock = true;
-					}
-				},
-				...(!workerBudget.synthesis
-					? {
-							onSoftLimitFinalCallAdmitted: (toolCallId: string | undefined) => {
-								if (workerBoundFailure === null) {
-									workerBoundFailure = `worker agent budget reached (${workerBudget.toolCalls}); synthesis is disabled`;
-								}
-								// Native agent tool calls carry a stable provider id. The wildcard
-								// keeps even an invariant violation on the post-result path
-								// instead of reintroducing a before_tool abort.
-								stopAfterToolResultCallId = toolCallId ?? STOP_AFTER_ANY_TOOL_RESULT;
-							},
-						}
-					: {}),
-				// Forcing the next round to `read` is only correct when reading is
-				// the whole reserve. An agent with delivery tools must be able to
-				// write in its own reserve window, so it gets the steering directive
-				// without the request-level lock.
-				...(readReserve > 0 && deliveryTools.length === 0
-					? {
-							onSoftReadReserve: () => {
-								middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Read }]);
-							},
-						}
-					: {}),
-			}),
+			loopGuardRegistration,
 			createProtectedArtifactsRegistration({
 				...(input.protectedArtifactState !== undefined
 					? { initialState: { artifacts: [...input.protectedArtifactState.artifacts] } }
@@ -519,6 +510,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
+	let resultContractRevisionActive = false;
 	/** Read tool call id -> what was asked for, pending that call's result. */
 	const pendingReadCitations = new Map<string, { path: string; offset: number | null; tail: boolean }>();
 	const observedReadRanges = new Map<string, Array<readonly [number, number]>>();
@@ -702,10 +694,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (violation !== null) {
 				if (resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
 					resultContractRepairsQueued += 1;
-					// A repair round is terminal by construction, so enforce the
-					// directive's own claim that tool use is over at the request
-					// level instead of trusting the model to honor it.
-					synthesisToolLock = true;
+					if (!resultContractRevisionActive && workerBudget.revision !== undefined) {
+						resultContractRevisionActive = loopGuardRegistration.extendWorkerToolCallPhase(workerBudget.revision);
+						if (resultContractRevisionActive) {
+							synthesisToolLock = false;
+							middlewareToolChoice.reset();
+							stopAfterToolResultCallId = null;
+						}
+					}
+					const revisionToolsAvailable = resultContractRevisionActive && !synthesisToolLock;
+					// A repair without preauthorized growth remains terminal and text-only.
+					if (!revisionToolsAvailable) synthesisToolLock = true;
 					// Delivered as a paired tool exchange, never a user turn. Templates
 					// that key history rendering off the last `user` message re-render
 					// every earlier assistant turn when one is appended mid-run, which
@@ -714,7 +713,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					// bytes as a tool result (#55). The synthetic assistant call gives
 					// the result a real tool_call_id for strict endpoints (#62).
 					const repair = resultContractRepairMessages(
-						{ contract, reason: violation, attempt: resultContractRepairsQueued, anchors: observedReadAnchors() },
+						{
+							contract,
+							reason: violation,
+							attempt: resultContractRepairsQueued,
+							anchors: observedReadAnchors(),
+							...(revisionToolsAvailable ? { toolsAvailable: true } : {}),
+						},
 						{ provider: model.provider, api: model.api, model: model.id },
 					);
 					for (const message of repair) agent.followUp(message as unknown as AgentMessage);

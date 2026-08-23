@@ -135,6 +135,7 @@ import {
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
+import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "./budget-envelope.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import { capacityLeaseUsage, createNodeLeaseUsageReader } from "./capacity-lease.js";
 import type {
@@ -308,6 +309,7 @@ interface ActiveRun {
 	requestOrigin?: DispatchRequestOrigin;
 	agentId: string;
 	task: string;
+	budget?: RunToolBudgetEnvelope;
 	cwd: string;
 	/** Fleet node this run was placed on; null when no placement resolved it. */
 	node: RunNodeIdentity | null;
@@ -1288,6 +1290,7 @@ interface DispatchLifecycleStage {
 	capabilityMismatch: CapabilityMismatch | null;
 	effectiveAutonomy: AutonomyLevel;
 	budget: WorkerBudget;
+	budgetEnvelope: RunToolBudgetEnvelope;
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
 
@@ -1412,7 +1415,7 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 function assertWorkerBudgetEnforceable(runtime: RuntimeDescriptor, hasDeclaredBudget: boolean): void {
 	if (!hasDeclaredBudget || runtime.kind !== "subprocess") return;
 	throw new Error(
-		`dispatch: runtime '${runtime.id}' cannot enforce an explicit agent budget because subprocess workers do not expose per-tool mediation; choose a native or claude-sdk worker`,
+		`dispatch: runtime '${runtime.id}' cannot enforce an explicit dispatch budget because subprocess workers do not expose per-tool mediation; choose a native or claude-sdk worker`,
 	);
 }
 
@@ -1544,26 +1547,36 @@ function assertPostRuntimeToolCompatibility(
 	);
 }
 
+function workerToolCallHardCap(settings: EffectiveSettings): number {
+	const rawEnvCap = process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP?.trim();
+	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
+	return Number.isSafeInteger(parsedEnvCap)
+		? parsedEnvCap
+		: (settings?.guardrails.workerToolCallCap ?? GUARDRAIL_DEFAULTS.workerToolCallCap);
+}
+
 function resolveEffectiveWorkerBudget(input: {
+	req: DispatchRequest;
+	recipeId: string;
 	declared: ReturnType<typeof normalizeAgentSpec>["budget"];
 	allowedTools: ReadonlyArray<ToolName>;
 	settings: EffectiveSettings;
-}): WorkerBudget {
-	const rawEnvCap = process.env.CLIO_CODER_WORKER_TOOL_CALL_CAP?.trim();
-	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
-	const hardCap = Number.isSafeInteger(parsedEnvCap)
-		? parsedEnvCap
-		: (input.settings?.guardrails.workerToolCallCap ?? GUARDRAIL_DEFAULTS.workerToolCallCap);
+}): RunToolBudgetEnvelope {
+	const hardCap = workerToolCallHardCap(input.settings);
 	const declared = input.declared ?? {
 		toolCalls: hardCap,
 		readReserve: Math.min(5, Math.max(0, hardCap - 1)),
 		synthesis: true,
 	};
-	const toolCalls = Math.min(declared.toolCalls, hardCap);
-	const readReserve = input.allowedTools.includes(ToolNames.Read)
-		? Math.min(declared.readReserve, Math.max(0, toolCalls - 1))
-		: 0;
-	return { toolCalls, readReserve, synthesis: declared.synthesis, hardCap };
+	return resolveToolBudgetEnvelope({
+		recipeId: input.recipeId,
+		policy: declared,
+		...(input.req.budget === undefined ? {} : { request: input.req.budget }),
+		hardCap,
+		hasReadTool: input.allowedTools.includes(ToolNames.Read),
+		retry: (input.req.lineage?.attempt ?? 0) > 0,
+		revision: input.req.gate?.role === "builder" && input.req.gate.cycle > 1 && input.req.gate.verdict === "revise",
+	});
 }
 
 function frozenProtectedArtifactState(state: ProtectedArtifactState | undefined): ProtectedArtifactState {
@@ -3194,7 +3207,7 @@ export function createDispatchBundle(
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
-		assertWorkerBudgetEnforceable(target.runtime, spec.budget !== null);
+		assertWorkerBudgetEnforceable(target.runtime, spec.budget !== null || req.budget !== undefined);
 
 		const cwd = req.cwd ?? process.cwd();
 		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
@@ -3232,7 +3245,13 @@ export function createDispatchBundle(
 			workingContextPaths: workerWorkingContextPaths(req),
 		});
 		const systemPrompt = compiledWorkerPrompt.systemPrompt;
-		const budget = resolveEffectiveWorkerBudget({ declared: spec.budget, allowedTools: effectiveTools, settings });
+		const budgetEnvelope = resolveEffectiveWorkerBudget({
+			req,
+			recipeId: recipe.id,
+			declared: spec.budget,
+			allowedTools: effectiveTools,
+			settings,
+		});
 		// Fetch structured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
 		// (capability-class default, recipe frontmatter override).
@@ -3292,7 +3311,8 @@ export function createDispatchBundle(
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
 			effectiveAutonomy,
-			budget,
+			budget: budgetEnvelope.effective,
+			budgetEnvelope,
 			...(settings ? { settings } : {}),
 		};
 	}
@@ -4148,6 +4168,11 @@ export function createDispatchBundle(
 			return handle;
 		};
 		if (req.delegationAgentId) {
+			if (req.budget !== undefined) {
+				throw new Error(
+					"dispatch: budget envelopes cannot be enforced on an ACP delegation target; dispatch to a native or claude-sdk worker",
+				);
+			}
 			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
@@ -4584,6 +4609,7 @@ export function createDispatchBundle(
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
+				budget: lifecycle.budgetEnvelope,
 				targetId: lifecycle.target.target.id,
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
@@ -4649,6 +4675,7 @@ export function createDispatchBundle(
 			// reroute lineage depth, and the model context window for the
 			// per-worker meter. All optional so consumers degrade to local/plain.
 			const fleetIdentity = {
+				budget: lifecycle.budgetEnvelope,
 				...(placement !== undefined && placement !== null ? { node: placement.node.id } : {}),
 				...(req.gate !== undefined ? { gate: { role: req.gate.role, cycle: req.gate.cycle } } : {}),
 				...(req.reroutes !== undefined && req.reroutes.length > 0 ? { rerouteCount: req.reroutes.length } : {}),
@@ -4754,6 +4781,7 @@ export function createDispatchBundle(
 			requestOrigin: lifecycle.requestOrigin,
 			agentId: req.agentId,
 			task: req.task,
+			budget: lifecycle.budgetEnvelope,
 			cwd: lifecycle.cwd,
 			node: placement?.node ?? null,
 			aborted: false,
@@ -4828,6 +4856,7 @@ export function createDispatchBundle(
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
+				budget: lifecycle.budgetEnvelope,
 				targetId: lifecycle.target.target.id,
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
@@ -5317,6 +5346,11 @@ export function createDispatchBundle(
 		req = validation.restore(validated.spec);
 
 		if (req.delegationAgentId) {
+			if (req.budget !== undefined) {
+				throw new Error(
+					"dispatch: budget envelopes cannot be enforced on an ACP delegation target; dispatch to a native or claude-sdk worker",
+				);
+			}
 			const protectedArtifactState = getProtectedArtifactState();
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
@@ -5380,6 +5414,7 @@ export function createDispatchBundle(
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
+		assertWorkerBudgetEnforceable(target.runtime, agentSpec.budget !== null || req.budget !== undefined);
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, req.writeRoots);
 		assertProtectedArtifactsEnforceable(
@@ -5387,6 +5422,13 @@ export function createDispatchBundle(
 			target.runtime.kind !== "subprocess",
 			getProtectedArtifactState(),
 		);
+		resolveEffectiveWorkerBudget({
+			req,
+			recipeId: recipe.id,
+			declared: agentSpec.budget,
+			allowedTools: effectiveTools,
+			settings,
+		});
 		return {
 			agentId: req.agentId,
 			specFingerprint: agentSpecFingerprint(agentSpec),
@@ -5784,6 +5826,7 @@ export function createDispatchBundle(
 				runId: run.runId,
 				agentId: run.agentId,
 				task: run.task,
+				...(run.budget !== undefined ? { budget: run.budget } : {}),
 				runtimeKind: run.runtimeKind,
 				outcomePhase: run.stallKilled ? "terminating" : run.aborted ? "aborting" : "running",
 				heartbeat,

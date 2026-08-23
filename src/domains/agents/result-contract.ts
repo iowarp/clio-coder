@@ -1147,12 +1147,13 @@ export interface ResultContractRepairInput {
 	attempt: number;
 	/** `path:line` anchors from reads that succeeded in this run. */
 	anchors: ReadonlyArray<string>;
+	/** True only when admission preauthorized a larger tool-call revision phase. */
+	toolsAvailable?: boolean;
 }
 
 /**
- * One repair directive. It states the validator's reason, the exact shape, and
- * that tool use is over, so the model's only remaining move is to emit the
- * terminal document from evidence it already has.
+ * One repair directive. It states the validator's reason and exact shape. Tool
+ * use remains closed unless dispatch preauthorized a larger revision phase.
  */
 export function resultContractRepairMessage(input: ResultContractRepairInput): string {
 	const last = input.attempt >= RESULT_CONTRACT_REPAIR_LIMIT;
@@ -1161,7 +1162,9 @@ export function resultContractRepairMessage(input: ResultContractRepairInput): s
 			? "FINAL RESULT REQUIRED IN THIS RESPONSE. Your previous response still did not satisfy this run's result contract."
 			: "Your previous response did not satisfy this run's result contract.",
 		`Validator reason: ${input.reason}`,
-		"Tool use is over. Answer from the evidence you already gathered.",
+		input.toolsAvailable === true
+			? "You may use the admitted tools to repair this validator failure, then emit the required terminal result."
+			: "Tool use is over. Answer from the evidence you already gathered.",
 		`Emit exactly this shape and nothing else: ${resultContractShape(input.contract)}`,
 		"Do not add prose, code fences, or commentary around it. Do not describe work you intend to do next.",
 	];

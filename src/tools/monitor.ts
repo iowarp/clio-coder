@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import { sleep } from "../core/timers.js";
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
+import {
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+} from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
@@ -117,6 +123,14 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
 		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}`,
 	];
+	if (run.budget !== undefined) {
+		lines.push(
+			`recipe policy: ${formatBudgetPolicy(run.budget)}`,
+			`requested envelope: ${formatBudgetRequest(run.budget)}`,
+			`effective envelope: ${formatEffectiveBudget(run.budget)}`,
+			`clamp or escalation reason: ${formatBudgetReasons(run.budget)}`,
+		);
+	}
 	if (live) {
 		lines.push(
 			`live: phase=${live.outcomePhase} heartbeat=${live.heartbeat} elapsed=${Math.round(live.elapsedMs / 1000)}s tokens=${live.tokens.total}`,
@@ -143,6 +157,7 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 			tokenCount: run.tokenCount,
 			costUsd: run.costUsd,
 			costProvenance: run.costProvenance ?? "unknown",
+			budget: run.budget ?? null,
 			receiptPath: run.receiptPath,
 			running: live !== null,
 		},
