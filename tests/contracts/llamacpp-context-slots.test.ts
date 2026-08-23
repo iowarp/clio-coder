@@ -10,7 +10,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { formatContextWindow } from "../../src/cli/targets.js";
+import { formatContextWindow, residentModelsSummary } from "../../src/cli/targets.js";
 import { resolveContextWindowDetails } from "../../src/domains/providers/runtime-resolution.js";
 import {
 	llamaCppRequestContextWindow,
@@ -138,7 +138,7 @@ describe("contracts/llama.cpp per-slot context window", () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		});
 
-		it("reports the per-slot window, keeps the split on the model state, and says so in a note", async () => {
+		it("reports the per-slot window and the live router sleeping state", async () => {
 			const target: TargetDescriptor = { id: "mini", runtime: "llamacpp", url: base, defaultModel: "ornith1.5-35b-moe" };
 			ok(llamacppRuntime.probe, "the llama.cpp runtime probes");
 			const result = await llamacppRuntime.probe(target, ctx);
@@ -148,9 +148,10 @@ describe("contracts/llama.cpp per-slot context window", () => {
 			strictEqual(result.modelCapabilities?.["ornith1.5-35b-moe"]?.contextWindow, 196608, "the catalog row too");
 			strictEqual(result.modelCapabilities?.["ornith1.5-9b-dense"]?.contextWindow, 262144, "--kv-unified is undivided");
 			deepStrictEqual(result.modelStates?.["ornith1.5-35b-moe"], {
-				state: "unknown",
+				state: "unloaded",
 				contextSlots: { totalContextSize: 786432, slots: 4 },
 			});
+			strictEqual(residentModelsSummary(result.modelStates), "resident: none");
 			strictEqual(
 				result.modelStates?.["ornith1.5-35b-moe"]?.contextLength,
 				undefined,
@@ -165,7 +166,7 @@ describe("contracts/llama.cpp per-slot context window", () => {
 		it("the shared catalog probe attaches the split without claiming residency", async () => {
 			const catalog = await probeOpenAIModelCatalog(base, ctx);
 			strictEqual(catalog.modelCapabilities["ornith1.5-35b-moe"]?.contextWindow, 196608);
-			strictEqual(catalog.modelStates["ornith1.5-35b-moe"]?.state, "unknown");
+			strictEqual(catalog.modelStates["ornith1.5-35b-moe"]?.state, "unloaded");
 			strictEqual(catalog.modelStates["ornith1.5-9b-dense"]?.contextSlots, undefined);
 		});
 	});
