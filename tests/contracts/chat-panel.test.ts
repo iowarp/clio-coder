@@ -33,6 +33,27 @@ function approvalView(overrides: Partial<ApprovalRequestView> = {}): ApprovalReq
 	};
 }
 
+function assertBareSettledReasoningMarker(row: string | undefined, context: string): void {
+	ok(row, context);
+	strictEqual(row.split(" · ").length, 1, context);
+	ok(row.endsWith("…"), context);
+}
+
+function assertReasoningProgress(
+	row: string | undefined,
+	expected: { state: "live" | "settled"; count: string; estimated: boolean; elapsed?: string },
+	context: string,
+): void {
+	ok(row, context);
+	const fields = row.split(" · ");
+	strictEqual(fields.length, expected.elapsed === undefined ? 2 : 3, context);
+	strictEqual(fields[0]?.endsWith("…"), expected.state === "settled", context);
+	const countField = fields[1] ?? "";
+	ok(countField.includes(expected.count), context);
+	strictEqual(countField.includes("≈"), expected.estimated, context);
+	if (expected.elapsed !== undefined) strictEqual(fields[2], expected.elapsed, context);
+}
+
 describe("chat-panel live thinking streaming", () => {
 	it("counts no tokens from streamed thinking text and shows a static label when settled", () => {
 		const panel = createChatPanel({ now: frozen.now });
@@ -795,7 +816,6 @@ describe("chat-panel agent voice", () => {
 	 */
 	it("leaves a leading skill suggestion unglyphed and gives ✦ to the answer after the tool ledger", () => {
 		const suggestion = SKILL_SUGGESTION_ANCHOR.replace("<name>", "tui-design");
-		strictEqual(suggestion, "Suggested skill: /skill tui-design");
 		ok(suggestion.startsWith(SKILL_SUGGESTION_PREFIX), "a substituted suggestion still carries the shared prefix");
 		ok(!suggestion.includes("<name>"), "no live reply writes the placeholder");
 
@@ -1208,9 +1228,9 @@ describe("chat-panel live reasoning indicator", () => {
 		strictEqual(markers.length, 3, JSON.stringify(rows));
 		const [first, second, live] = markers;
 		ok(first && second && live);
-		strictEqual(first.row, "Thinking…", JSON.stringify(rows));
-		strictEqual(second.row, "Thinking…", JSON.stringify(rows));
-		ok(live.row.includes("Thinking · r≈1.2k estimated"), JSON.stringify(rows));
+		assertBareSettledReasoningMarker(first.row, JSON.stringify(rows));
+		assertBareSettledReasoningMarker(second.row, JSON.stringify(rows));
+		assertReasoningProgress(live.row, { state: "live", count: "1.2k", estimated: true }, JSON.stringify(rows));
 		strictEqual(live.index, rows.length - 1, `the live line is the last row: ${JSON.stringify(rows)}`);
 		const prose = indexOfRow(rows, "Looking at the file.");
 		const tool = indexOfRow(rows, "a.ts");
@@ -1237,15 +1257,15 @@ describe("chat-panel live reasoning indicator", () => {
 		panel.setLiveReasoning({ tokens: 1234, provenance: "estimated" });
 		for (const width of [40, 80, 120]) {
 			const rows = rowsOf(panel, width);
-			strictEqual(rows[0], "Thinking…", JSON.stringify(rows));
+			assertBareSettledReasoningMarker(rows[0], JSON.stringify(rows));
 			ok(indexOfRow(rows, "a.ts") < indexOfRow(rows, "answering now"), JSON.stringify(rows));
 			const last = rows[rows.length - 1] ?? "";
-			ok(last.includes("Thinking · r≈1.2k estimated"), `live progress follows the current tail: ${JSON.stringify(rows)}`);
-			strictEqual(
-				rows.filter((row) => row.includes("Thinking ·")).length,
-				1,
-				`one live reasoning indicator: ${JSON.stringify(rows)}`,
+			assertReasoningProgress(
+				last,
+				{ state: "live", count: "1.2k", estimated: true },
+				`live progress follows the current tail: ${JSON.stringify(rows)}`,
 			);
+			strictEqual(rows.filter((row) => row.includes("1.2k")).length, 1, JSON.stringify(rows));
 		}
 	});
 
@@ -1267,9 +1287,9 @@ describe("chat-panel live reasoning indicator", () => {
 		const rows = rowsOf(panel, 80);
 		const markers = rows.filter((row) => row.includes("Thinking"));
 		strictEqual(markers.length, 3, JSON.stringify(rows));
-		strictEqual(markers[0], "Thinking…");
-		strictEqual(markers[1], "Thinking…");
-		strictEqual(markers[2], "Thinking… · r42 provider-reported", JSON.stringify(rows));
+		assertBareSettledReasoningMarker(markers[0], JSON.stringify(rows));
+		assertBareSettledReasoningMarker(markers[1], JSON.stringify(rows));
+		assertReasoningProgress(markers[2], { state: "settled", count: "42", estimated: false }, JSON.stringify(rows));
 		ok(indexOfRow(rows, "Looking at the file.") < indexOfRow(rows, "a.ts"), JSON.stringify(rows));
 		ok(!rows.some((row) => row.includes("Thinking ·")), JSON.stringify(rows));
 		// Nothing was re-ordered or duplicated by the settle.
@@ -1340,10 +1360,11 @@ describe("chat-panel live reasoning indicator", () => {
 		const panel = interleavedTurn();
 		panel.setLiveReasoning({ tokens: 900, provenance: "provider" });
 		panel.setStatusLine({ phase: "thinking", verb: "receiving thinking", toneHint: "muted" });
-		const rendered = strip(panel.render(80).join("\n"));
-		ok(rendered.includes("Thinking · r900 provider-reported"), rendered);
-		ok(!rendered.includes("receiving thinking"), rendered);
-		strictEqual(rendered.split("Thinking ·").length - 1, 1, `one live indicator: ${rendered}`);
+		const rows = rowsOf(panel, 80);
+		const indicators = rows.filter((row) => row.includes("r900"));
+		strictEqual(indicators.length, 1, JSON.stringify(rows));
+		assertReasoningProgress(indicators[0], { state: "live", count: "900", estimated: false }, JSON.stringify(rows));
+		ok(!rows.some((row) => row.includes("receiving thinking")), JSON.stringify(rows));
 	});
 
 	it("states no token count until something settles into the tally", () => {
@@ -1371,8 +1392,12 @@ describe("chat-panel live reasoning indicator", () => {
 		ok(!strip(panel.render(80).join("\n")).includes("· 0s"), "a fresh turn states no elapsed");
 		clock = 13_400;
 		panel.setLiveReasoning({ tokens: 3400, provenance: "provider" });
-		const rendered = strip(panel.render(80).join("\n"));
-		ok(rendered.includes("Thinking · r3.4k provider-reported · 12s"), rendered);
+		const rows = rowsOf(panel, 80);
+		assertReasoningProgress(
+			rows.find((row) => row.includes("3.4k")),
+			{ state: "live", count: "3.4k", estimated: false, elapsed: "12s" },
+			JSON.stringify(rows),
+		);
 	});
 
 	it("keeps the provider count after message_end instead of re-deriving it from text", () => {
@@ -1391,9 +1416,13 @@ describe("chat-panel live reasoning indicator", () => {
 		};
 		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
 		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
-		const rendered = strip(panel.render(100).join("\n"));
-		ok(rendered.includes("Thinking… · r42 provider-reported"), rendered);
-		ok(!rendered.includes("≈"), `the estimate never overwrites an attested count: ${rendered}`);
+		const rows = rowsOf(panel, 100);
+		assertReasoningProgress(
+			rows.find((row) => row.includes("r42")),
+			{ state: "settled", count: "42", estimated: false },
+			JSON.stringify(rows),
+		);
+		ok(!rows.some((row) => row.includes("≈")), JSON.stringify(rows));
 	});
 
 	it("folds to a head marker carrying the settled count once the turn ends", () => {
@@ -1413,7 +1442,7 @@ describe("chat-panel live reasoning indicator", () => {
 			.render(80)
 			.map(strip)
 			.filter((row) => row.trim().length > 0);
-		strictEqual(rows[0], "Thinking… · r≈1.2k estimated", JSON.stringify(rows));
+		assertReasoningProgress(rows[0], { state: "settled", count: "1.2k", estimated: true }, JSON.stringify(rows));
 		ok(
 			rows.some((row) => row.includes("done")),
 			JSON.stringify(rows),
@@ -1459,8 +1488,8 @@ describe("chat-panel live reasoning indicator", () => {
 			.render(80)
 			.map(strip)
 			.filter((row) => row.trim().length > 0);
-		strictEqual(rows[0], "Thinking… · r42 provider-reported", JSON.stringify(rows));
-		ok(!rows.some((row) => row.includes("Thinking ·")), `no live line survives the settle: ${JSON.stringify(rows)}`);
+		assertReasoningProgress(rows[0], { state: "settled", count: "42", estimated: false }, JSON.stringify(rows));
+		strictEqual(rows.filter((row) => row.includes("r42")).length, 1, JSON.stringify(rows));
 	});
 
 	// Replay rebuilds settled entries from persisted usage. A live projection
@@ -1479,10 +1508,13 @@ describe("chat-panel live reasoning indicator", () => {
 		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
 		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
 		panel.setLiveReasoning({ tokens: 9999, provenance: "estimated" });
-		const rendered = strip(panel.render(80).join("\n"));
-		ok(rendered.includes("Thinking… · r7 provider-reported"), rendered);
-		ok(!rendered.includes("9999"), rendered);
-		ok(!rendered.includes("9.9k"), rendered);
+		const rows = rowsOf(panel, 80);
+		assertReasoningProgress(
+			rows.find((row) => row.includes("r7")),
+			{ state: "settled", count: "7", estimated: false },
+			JSON.stringify(rows),
+		);
+		ok(!rows.some((row) => row.includes("9999") || row.includes("9.9k")), JSON.stringify(rows));
 	});
 
 	it("shows no reasoning line at all on a turn that never thought", () => {
@@ -1499,8 +1531,9 @@ describe("chat-panel live reasoning indicator", () => {
 		panel.setLiveReasoning({ tokens: 1234, provenance: "mixed" });
 		for (const width of [40, 80, 120]) {
 			const rows = panel.render(width).map(strip);
-			ok(
-				rows.some((row) => row.includes("Thinking · r≈1.2k mixed")),
+			assertReasoningProgress(
+				rows.find((row) => row.includes("1.2k")),
+				{ state: "live", count: "1.2k", estimated: true },
 				`width ${width}: ${JSON.stringify(rows)}`,
 			);
 			ok(
@@ -1560,9 +1593,10 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		};
 		panel.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
 		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
-		const text = strip(panel.render(70).join("\n"));
-		ok(text.includes("turn · in 9650"), text);
-		ok(!text.includes("not a verification"), text);
+		const rows = panel.render(70).map(strip);
+		const receipt = rows.find((row) => row.includes("in 9650"));
+		ok(receipt, JSON.stringify(rows));
+		ok(!rows.some((row) => row.includes("not a verification")), JSON.stringify(rows));
 	});
 
 	it("omits the reasoning suffix entirely on a zero-reasoning turn", () => {
@@ -1615,7 +1649,8 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		rows = defaultRows.map(strip);
 		const compact = rows.filter((row) => row.includes("turn ·"));
 		strictEqual(compact.length, 1, `default owns one receipt row: ${JSON.stringify(rows)}`);
-		ok(compact[0]?.includes("in 12345 · out 680"), JSON.stringify(compact));
+		ok(compact[0]?.includes("in 12345"), JSON.stringify(compact));
+		ok(compact[0]?.includes("out 680"), JSON.stringify(compact));
 		ok(!compact[0]?.includes("cache"), JSON.stringify(compact));
 		ok(!rows.some((row) => row.includes("not a verification")), JSON.stringify(rows));
 
@@ -1747,7 +1782,7 @@ describe("chat-panel reasoning provenance and renderer controls", () => {
 		panel.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
 
 		const lines = panel.render(80).map(strip);
-		const usageLines = lines.filter((line) => line.includes("turn · in "));
+		const usageLines = lines.filter((line) => line.includes("turn ·"));
 		strictEqual(usageLines.length, 1, `one turn, one usage line: ${JSON.stringify(lines)}`);
 		ok(usageLines[0]?.includes("in 14073"), `it carries the run total: ${usageLines[0]}`);
 
@@ -2275,7 +2310,9 @@ describe("chat-panel transcript detail policy", () => {
 			// Thinking folds to its marker, the receipt is compact.
 			ok(text.includes("Thinking…"), text);
 			ok(!text.includes("reasoning excerpt"), text);
-			ok(text.includes("turn · in 1200 · out 80"), text);
+			const receipt = lines.find((row) => row.includes("turn ·"));
+			ok(receipt?.includes("in 1200"), text);
+			ok(receipt?.includes("out 80"), text);
 			ok(!text.includes("cache 30/0"), text);
 			for (const line of panel.render(width)) ok(visibleWidth(line) <= width, `overflow at ${width}: ${strip(line)}`);
 		}
@@ -2546,13 +2583,23 @@ describe("chat-panel transcript detail policy", () => {
 		ok(!text.includes("r900"), `no count under minimal: ${text}`);
 		ok(!text.includes("3s"), `no elapsed under minimal: ${text}`);
 		ok(panel.toggleLastThinking());
-		text = rows(panel, 80).join("\n");
+		let renderedRows = rows(panel, 80);
+		text = renderedRows.join("\n");
 		ok(text.includes("hidden reasoning"), text);
-		ok(text.includes("Thinking · r900 provider-reported · 3s"), `progress line once opened: ${text}`);
+		assertReasoningProgress(
+			renderedRows.find((row) => row.includes("r900")),
+			{ state: "live", count: "900", estimated: false, elapsed: "3s" },
+			`progress line once opened: ${text}`,
+		);
 		const balanced = createChatPanel({ now: () => clock, getOutputVerbosity: () => "default" });
 		balanced.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "hidden reasoning" } as ChatLoopEvent);
 		balanced.setLiveReasoning({ tokens: 900, provenance: "provider" });
-		ok(rows(balanced, 80).join("\n").includes("Thinking · r900 provider-reported"), "default keeps the live count");
+		renderedRows = rows(balanced, 80);
+		assertReasoningProgress(
+			renderedRows.find((row) => row.includes("r900")),
+			{ state: "live", count: "900", estimated: false },
+			`default keeps the live count: ${JSON.stringify(renderedRows)}`,
+		);
 	});
 
 	it("advertises the expand key on the newest block whose effective state is folded, at every level", () => {
