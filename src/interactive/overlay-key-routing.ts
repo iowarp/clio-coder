@@ -76,7 +76,7 @@ const DRAFT_EDIT_KEYS = ["backspace", "delete", "ctrl+u", "ctrl+w", "alt+backspa
  * cannot type a command, cannot submit, and are the way out of the inert-Enter
  * state a draft puts the prompt in.
  */
-export function isDraftEditKey(data: string): boolean {
+function isDraftEditKey(data: string): boolean {
 	return !isKeyRelease(data) && DRAFT_EDIT_KEYS.some((key) => matchesKey(data, key));
 }
 

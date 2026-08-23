@@ -94,7 +94,7 @@ function extractMessageText(payload: unknown): string | null {
  * `operatorText`; older ones drop the leading scaffolding. Null when nothing
  * operator-authored remains, so the caller moves on to the next turn.
  */
-export function operatorTextOfUserPayload(payload: unknown): string | null {
+function operatorTextOfUserPayload(payload: unknown): string | null {
 	if (
 		payload &&
 		typeof payload === "object" &&

@@ -1,6 +1,6 @@
 import { Editor, stripTerminalSequences, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { fitHintEntries } from "./overlay-frame.js";
-import { permissionHintEntries } from "./permission-overlay.js";
+import { permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
 
