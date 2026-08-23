@@ -8,6 +8,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Added
 - `docs/middleware-and-components.md` documents every built-in middleware registration: id, hooks, trigger, and what does not trigger it.
+- Permission and `ask_user` dialogs now derive closed consequence tiers from typed request, scope, reversibility, origin, exposure, and authority facts (#169). Conversational answers, workspace authority, outward consequences, safety-net confirmations, system changes, and worker escalations receive distinct titles and semantic tokens, while caller prose cannot lower a tier or alter the underlying decision protocol.
 
 ### Fixed
 - Proactive task memory now reuses deterministic tool-result disposition digests with explicit source provenance (#173). Operation fingerprints remain separate for loop and repeated-failure identity, while redaction and byte caps apply before diagnostics reach the task bank or background policy.

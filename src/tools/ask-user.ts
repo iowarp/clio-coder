@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { type AutonomyExposure, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
+import { classifyDecisionPresentation, decisionFactsForAnswer } from "../domains/safety/decision-presentation.js";
 import { StringEnum } from "../engine/ai.js";
 import type {
 	AskUserToolPolicy,
@@ -57,6 +58,7 @@ export interface AskUserResult {
 
 export interface AskUserCall {
 	action: AskUserAction;
+	exposure?: AutonomyExposure;
 	mode?: AskUserMode;
 	questions?: AskUserQuestion[];
 	decisions?: AskUserDecision[];
@@ -284,6 +286,7 @@ export function normalizeAskUserCall(args: Record<string, unknown>): { call?: As
 	return {
 		call: {
 			action: "ask",
+			exposure: exposure.exposure ?? DEFAULT_AUTONOMY_EXPOSURE,
 			...(mode.mode ? { mode: mode.mode } : {}),
 			questions: questions.questions,
 			...(summary ? { summary } : {}),
@@ -319,6 +322,7 @@ function createStandalonePolicy(options?: ToolInvokeOptions): AskUserToolPolicy 
 		updatedAt: now,
 		...(options?.sessionId ? { sessionId: options.sessionId } : {}),
 		...(options?.turnId ? { turnId: options.turnId } : {}),
+		exposure: DEFAULT_AUTONOMY_EXPOSURE,
 		rounds: [],
 		decisions: [],
 		inFlight: false,
@@ -333,6 +337,13 @@ function createStandalonePolicy(options?: ToolInvokeOptions): AskUserToolPolicy 
 function hydratePolicy(policy: AskUserToolPolicy, options?: ToolInvokeOptions): void {
 	if (options?.sessionId && !policy.sessionId) policy.sessionId = options.sessionId;
 	if (options?.turnId && !policy.turnId) policy.turnId = options.turnId;
+}
+
+/** Once an interview is outward, a later local round cannot lower its replay tier. */
+function mergePolicyExposure(policy: AskUserToolPolicy, exposure: AutonomyExposure): AutonomyExposure {
+	const merged = policy.exposure === "outward" || exposure === "outward" ? "outward" : "local";
+	policy.exposure = merged;
+	return merged;
 }
 
 function transcriptQuestions(questions: ReadonlyArray<AskUserQuestion>): AskUserTranscriptQuestion[] {
@@ -455,6 +466,7 @@ async function persistAskUserTranscript(
 			...(policy.endedAt ? { endedAt: policy.endedAt } : {}),
 			...(policy.sessionId ? { sessionId: policy.sessionId } : {}),
 			...(policy.turnId ? { turnId: policy.turnId } : {}),
+			exposure: policy.exposure ?? DEFAULT_AUTONOMY_EXPOSURE,
 			...(policy.summary ? { summary: policy.summary } : {}),
 			decisions: policy.decisions,
 			rounds: policy.rounds,
@@ -478,6 +490,7 @@ function compactInterview(
 		rounds: policy.rounds.length,
 		max_rounds: policy.maxCalls,
 		transcript_path: policy.transcriptPath ?? null,
+		exposure: policy.exposure ?? DEFAULT_AUTONOMY_EXPOSURE,
 		latest_answers: latestAnswers,
 		decisions: policy.decisions,
 		...(policy.summary ? { summary: policy.summary } : {}),
@@ -591,6 +604,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				return completeInterview(policy, "complete", options, call.summary, call.decisions ?? []);
 			}
 			const questions = call.questions ?? [];
+			const exposure = mergePolicyExposure(policy, call.exposure ?? DEFAULT_AUTONOMY_EXPOSURE);
 			if (call.max_rounds !== undefined) {
 				const nextLimit = policy.callCount === 0 ? call.max_rounds : Math.max(policy.maxCalls, call.max_rounds);
 				policy.maxCalls = Math.max(nextLimit, policy.callCount + 1);
@@ -632,7 +646,13 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			if (call.summary) policy.summary = call.summary;
 			const handler = deps.askUser ?? defaultAskUserHandler;
 			try {
-				const result = normalizeAskUserResult(questions, await handler(questions, options));
+				const result = normalizeAskUserResult(
+					questions,
+					await handler(questions, {
+						...options,
+						decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer(exposure)),
+					}),
+				);
 				const answeredAt = new Date().toISOString();
 				policy.callCount += 1;
 				policy.askedQuestionKeys.add(key);

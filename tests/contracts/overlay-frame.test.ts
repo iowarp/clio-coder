@@ -15,6 +15,7 @@ import {
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
 	permissionOverlayTitle,
+	permissionOverlayTone,
 } from "../../src/interactive/permission-overlay.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 
@@ -192,30 +193,28 @@ describe("contracts/overlay-frame row ownership", () => {
 	it("keeps a permission dialog beside the composer at 120 rows and re-anchors it on resize", () => {
 		const terminal = new OverlayLayoutTerminal();
 		const tui = new OverlayLayoutProbe(terminal);
-		showClioOverlayFrame(
-			tui,
-			createPermissionOverlayBody({
-				requestId: "req-layout",
-				tool: "bash",
-				actionClass: "execute",
-				axis: { kind: "net", ruleId: "bash-confirm" },
-				origin: { kind: "main" },
-				reason: "approval required",
-				target: "npm test",
-			}),
-			{
-				...PERMISSION_OVERLAY_PLACEMENT,
-				width: PERMISSION_OVERLAY_WIDTH,
-				title: permissionOverlayTitle(),
-				footerHint: permissionOverlayHint,
-			},
-		);
+		const view = {
+			requestId: "req-layout",
+			tool: "bash",
+			actionClass: "execute" as const,
+			axis: { kind: "net" as const, ruleId: "bash-confirm" },
+			origin: { kind: "main" as const },
+			reason: "approval required",
+			target: "npm test",
+		};
+		showClioOverlayFrame(tui, createPermissionOverlayBody(view), {
+			...PERMISSION_OVERLAY_PLACEMENT,
+			width: PERMISSION_OVERLAY_WIDTH,
+			title: permissionOverlayTitle(view),
+			tone: permissionOverlayTone(view),
+			footerHint: permissionOverlayHint,
+		});
 
 		const placementAt = (rows: number): { first: number; last: number } => {
 			terminal.rows = rows;
 			const base = Array.from({ length: rows }, (_, index) => `transcript row ${index}`);
 			const frame = tui.composite(base, terminal.columns, rows).map(stripAnsi);
-			const first = frame.findIndex((line) => line.includes("Allow this action once?"));
+			const first = frame.findIndex((line) => line.includes("Safety-net confirmation"));
 			let last = frame.length - 1;
 			while (last >= 0 && !frame[last]?.includes("[Esc] deny")) last -= 1;
 			ok(first >= 0 && last >= first, `permission frame is present at ${rows} rows`);
@@ -239,8 +238,13 @@ describe("contracts/overlay-frame diagnostics", () => {
 			{ severity: "warning", code: "thinking-coerced", message: "xhigh coerced to high" },
 			60,
 		);
-		ok(line.startsWith(theme.fgSequence("warning")), "warning severity renders in the amber warning token");
-		ok(!line.startsWith(theme.fgSequence("error")), "warning severity must not render red");
+		const warning = theme.fgSequence("warning");
+		if (warning.length > 0) {
+			ok(line.startsWith(warning), "warning severity renders in the amber warning token");
+			ok(!line.startsWith(theme.fgSequence("error")), "warning severity must not render red");
+		} else {
+			ok(stripAnsi(line).includes("xhigh coerced to high"), "NO_COLOR keeps the warning message legible");
+		}
 	});
 
 	it("colors an error diagnostic red", () => {
@@ -249,7 +253,12 @@ describe("contracts/overlay-frame diagnostics", () => {
 			{ severity: "error", code: "model-not-configured", message: "no model" },
 			60,
 		);
-		ok(line.startsWith(theme.fgSequence("error")), "error severity renders in the red error token");
+		const error = theme.fgSequence("error");
+		if (error.length > 0) {
+			ok(line.startsWith(error), "error severity renders in the red error token");
+		} else {
+			ok(stripAnsi(line).includes("no model"), "NO_COLOR keeps the error message legible");
+		}
 	});
 
 	it("maps severity to a stable semantic token", () => {

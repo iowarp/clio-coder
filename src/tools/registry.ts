@@ -22,6 +22,7 @@ import {
 	mapAutonomy,
 } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import { askUserExposure } from "./ask-user.js";
@@ -200,6 +201,8 @@ export interface ToolInvokeOptions {
 	correlationId?: string;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
 	askUserPolicy?: AskUserToolPolicy;
+	/** Host-derived display copy for an ask_user round. It has no admission authority. */
+	decisionPresentation?: DecisionPresentation;
 	/** Registry-authenticated one-shot operator approval for this execution. */
 	approval?: { requestId: string; requestedBy: string; actionClass: ActionClass };
 	/**
@@ -259,6 +262,8 @@ export interface AskUserToolPolicy {
 	sessionId?: string;
 	turnId?: string;
 	transcriptPath?: string;
+	/** Monotonic exposure fact for live presentation and durable replay. */
+	exposure?: AutonomyExposure;
 	summary?: string;
 	rounds: AskUserTranscriptRound[];
 	decisions: AskUserTranscriptDecision[];

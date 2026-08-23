@@ -1155,7 +1155,13 @@ function createLateEndChat(): AcpServerChat & { started: Promise<void> } {
  * bridge under the same engine id, which is what makes the request's identity
  * bindable to the `tool_call` the client already rendered.
  */
-function createIdentifiedPermissionChat(registry: ToolRegistry): AcpServerChat & { parked: Promise<void> } {
+function createIdentifiedPermissionChat(
+	registry: ToolRegistry,
+	call: { tool: ToolName; args: Record<string, unknown> } = {
+		tool: ToolNames.Bash,
+		args: { command: "sudo true" },
+	},
+): AcpServerChat & { parked: Promise<void> } {
 	const listeners = new Set<(event: Record<string, unknown>) => void>();
 	let streaming = false;
 	let resolveParked: (() => void) | null = null;
@@ -1172,14 +1178,11 @@ function createIdentifiedPermissionChat(registry: ToolRegistry): AcpServerChat &
 			emit({
 				type: "tool_execution_start",
 				toolCallId: "engine-call-1",
-				toolName: "bash",
-				args: { command: "sudo true" },
+				toolName: call.tool,
+				args: call.args,
 			});
-			const verdict = await registry.invoke(
-				{ tool: ToolNames.Bash, args: { command: "sudo true" } },
-				{ toolCallId: "engine-call-1", onParked: () => resolveParked?.() },
-			);
-			emit({ type: "tool_execution_end", toolCallId: "engine-call-1", toolName: "bash", result: verdict.kind });
+			const verdict = await registry.invoke(call, { toolCallId: "engine-call-1", onParked: () => resolveParked?.() });
+			emit({ type: "tool_execution_end", toolCallId: "engine-call-1", toolName: call.tool, result: verdict.kind });
 			const message = { role: "assistant", content: [{ type: "text", text: verdict.kind }], stopReason: "stop" };
 			emit({ type: "message_end", message });
 			emit({ type: "agent_end", messages: [message] });
@@ -3374,8 +3377,16 @@ setInterval(() => {}, 1000);
 		const chat = createIdentifiedPermissionChat(registry);
 		const { client, server } = startAcpServer({ chat, toolRegistry: registry, permissionTimeoutMs: 2000 });
 		const asks: Array<Record<string, unknown>> = [];
+		const optionNames: string[][] = [];
 		client.onRequest("session/request_permission", (params) => {
-			if (isRecord(params) && isRecord(params.toolCall)) asks.push(params.toolCall);
+			if (isRecord(params) && isRecord(params.toolCall)) {
+				asks.push(params.toolCall);
+				optionNames.push(
+					Array.isArray(params.options)
+						? params.options.map((option) => (isRecord(option) && typeof option.name === "string" ? option.name : ""))
+						: [],
+				);
+			}
 			return { outcome: { outcome: "selected", optionId: "allow-once" } };
 		});
 		const sessionId = await openSession(client);
@@ -3387,6 +3398,41 @@ setInterval(() => {}, 1000);
 		// Same id, same arguments. A client diffing the ask against the call it
 		// rendered must find nothing to diff.
 		deepStrictEqual(asks[0]?.rawInput, toolCall?.rawInput);
+		deepStrictEqual(optionNames, [["Approve workspace action once", "Deny this request"]]);
+		strictEqual(
+			(sessionUpdates(client.notifications).find((update) => update.sessionUpdate === "tool_call_update")?.status ??
+				"") !== "failed",
+			true,
+			"presentation labels do not alter the selected allow-once protocol outcome",
+		);
+		client.close();
+		strictEqual(await server, 0);
+	});
+
+	it("projects outward consequence actions through ACP without changing protocol ids", async () => {
+		const registry = createRegistry({ safety: askSafety });
+		registry.register(permissionSpec(ToolNames.AskUser, "read"));
+		const call = {
+			tool: ToolNames.AskUser,
+			args: { exposure: "outward", questions: [{ question: "Publish the report?" }] },
+		};
+		const chat = createIdentifiedPermissionChat(registry, call);
+		const { client, server } = startAcpServer({ chat, toolRegistry: registry, permissionTimeoutMs: 2000 });
+		const options: unknown[] = [];
+		client.onRequest("session/request_permission", (params) => {
+			if (isRecord(params) && Array.isArray(params.options)) options.push(...params.options);
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+
+		const sessionId = await openSession(client);
+		await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] });
+
+		deepStrictEqual(options, [
+			{ optionId: "allow-once", name: "Approve outward decision once", kind: "allow_once" },
+			{ optionId: "reject-once", name: "Deny this request", kind: "reject_once" },
+		]);
+		const terminal = sessionUpdates(client.notifications).find((update) => update.sessionUpdate === "tool_call_update");
+		strictEqual(terminal?.status, "completed", "the typed label does not alter allow-once settlement");
 		client.close();
 		strictEqual(await server, 0);
 	});

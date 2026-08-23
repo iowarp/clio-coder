@@ -13,6 +13,7 @@
 
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
+import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
 
 export interface SessionHeader {
 	type: "session";
@@ -229,6 +230,7 @@ export interface DecisionLedgerEntry extends BaseSessionEntry {
 	roundCount: number;
 	summary?: string;
 	transcriptPath?: string;
+	exposure?: AutonomyExposure;
 	decisions: DecisionRecord[];
 }
 
@@ -643,6 +645,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				v.roundCount >= 0 &&
 				isOptionalString(v.summary) &&
 				isOptionalString(v.transcriptPath) &&
+				(v.exposure === undefined || isOneOf(v.exposure, AUTONOMY_EXPOSURES)) &&
 				Array.isArray(v.decisions) &&
 				v.decisions.every(isDecisionRecord)
 			);

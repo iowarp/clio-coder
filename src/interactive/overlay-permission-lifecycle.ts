@@ -2,9 +2,11 @@ import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import type { ClassifierCall } from "../domains/safety/action-classifier.js";
+import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import { decisionActionClass } from "../domains/safety/decision-presentation.js";
+import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
 import { approvalParkedNotice, autonomyDeniedNotice, workerEscalationNotice } from "./bus-notices.js";
 import type { ToolApprovalStateEvent } from "./chat-loop.js";
@@ -29,7 +31,7 @@ interface WorkerEscalationEntry {
 	requestId: string;
 	agentId: string;
 	tool: string;
-	actionClass: string;
+	actionClass: ActionClass;
 	axis: ApprovalRequestView["axis"];
 	reason: string;
 	target?: string;
@@ -134,6 +136,7 @@ function mainApprovalRequestView(
 		...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
 			? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
 			: {}),
+		...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
 		...(target.length > 0 ? { target } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
 	};
@@ -149,7 +152,7 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 		requestId: payload.requestId,
 		agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
 		tool: typeof payload.tool === "string" ? payload.tool : "unknown",
-		actionClass: typeof payload.actionClass === "string" ? payload.actionClass : "unknown",
+		actionClass: decisionActionClass(payload.actionClass),
 		axis:
 			axisViewFromId(typeof payload.axis === "string" ? payload.axis : undefined, autonomy) ??
 			(typeof payload.ruleId === "string"

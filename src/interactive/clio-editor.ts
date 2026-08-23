@@ -22,11 +22,10 @@ export interface EditorChrome {
 	/** Whether Enter currently targets the active Clio response. */
 	isStreaming?: () => boolean;
 	/**
-	 * Whether a permission prompt owns the keyboard. The dialog that renders
-	 * it sits at the vertical center of the viewport, which on a tall terminal
-	 * with a long transcript is forty rows from the composer, and the composer
-	 * rail is what the operator reads before pressing Enter (issue #186). In
-	 * that state the rail says CONFIRM and carries the dialog's keys.
+	 * Whether a permission prompt owns the keyboard. The dialog once sat at the
+	 * vertical center of a tall viewport, far from the composer. It now anchors
+	 * above that composer, while the rail still says CONFIRM and carries the
+	 * dialog's keys whenever the prompt owns input (issues #186 and #194).
 	 */
 	isAwaitingApproval?: () => boolean;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */

@@ -341,6 +341,7 @@ export function createAskUserToolPolicy(activeTools: ReadonlyArray<{ name: strin
 		status: "idle",
 		startedAt: now,
 		updatedAt: now,
+		exposure: "local",
 		rounds: [],
 		decisions: [],
 		inFlight: false,

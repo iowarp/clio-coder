@@ -36,7 +36,7 @@ All color styling is defined in [src/interactive/theme/tokens.ts](../src/interac
 - Color is used functionally to indicate state. If removing a color does not lose information, the text is colored using `dim`, `muted`, or left unstyled.
 - `warning` amber is reserved for true warnings. Costs and neutral telemetry numbers use `muted`.
 - `accentDeep` is used only in section tags. Metric values (such as TTFT, tokens-per-second, and autonomy status) use `muted`.
-- `action` neon orange remains scarce and strictly disciplined: only while Clio is acting or a prompt owns the keyboard (e.g. running connect/probe operations, active dispatch/fleet execution, or the keyboard-owning confirmation border / `STEER` mode). It is never used for idle decoration or settled telemetry, and never appears on more than one element per screen region.
+- `action` neon orange remains scarce and strictly disciplined: only while Clio is acting, for workspace-authority and worker-escalation decision frames, or in `STEER` mode. It is never used for idle decoration or settled telemetry, and never appears on more than one element per screen region. Outward, safety-net, and system decision frames use `warning`; conversational answers use `accent`.
 - Per-surface color budgets limit noise: chip strips use at most one non-neutral token per chip, and framed cards use at most one status token alongside neutral colors.
 
 ---
@@ -144,6 +144,21 @@ All TUI overlays and cards support compact widths down to 40 columns:
 - Keybinding hints, cards, and markdown detail text wrap fluidly without horizontal clipping.
 - Settings provides a dedicated drill-down stack below 72 columns.
 
+### 4.7 Decision Consequence Frames
+
+Permission confirmation and `ask_user` use one pure consequence presentation classifier while keeping separate input and execution protocols. The classifier supplies the tier title, semantic frame token, consequence and reversibility copy, requester attribution, and display actions. Permission keeps allow-once, deny, and stop behavior. `ask_user` keeps selection, free-text, cancellation, and its compact, panel, or interview layout chosen from question shape.
+
+| Tier | Title | Token | Plain-text identity |
+| --- | --- | --- | --- |
+| Conversation | `Answer a question` | `accent` | `Conversational answer` |
+| Workspace | `Approve workspace action` | `action` | `Workspace authority` |
+| Outward | `Confirm outward consequence` | `warning` | `Outward consequence` |
+| Safety net | `Safety-net confirmation` | `warning` | `Safety-net confirmation` |
+| System | `Approve system change` | `warning` | `System change` |
+| Worker | `Worker needs approval` | `action` | `Worker escalation` |
+
+The words carry the meaning when color is disabled. Permission copy states the exact one-shot authority, whether effects are reversible, the authenticated requester and axis, and what deny and stop do. The classifier never consumes question, reason, summary, option-label, or requested-title prose, so those strings cannot select or lower a tier.
+
 ---
 
 ## 5. Screen Surfaces & State Choreography
@@ -230,6 +245,7 @@ The collapsed form is one composed ledger line:
 - Expanded calls show the primary argument in the signature and every secondary argument as a typed field list. Multiline argument bodies become line and byte facts, nested objects retain structured rendering, and safety-sensitive values remain redacted.
 - Running calls label `live output` and replace the cumulative partial result in place. Settled calls label `output` and show available exit status, result or observation counts, line count, displayed and total byte sizes, truncation, timeout, tool-token usage, dynamically added tools, context exclusion, and the full-output path. A blocked or aborted admission instead labels its `decision` and does not claim that the tool ran.
 - A call parked for one-shot approval replaces its running timer with `awaiting approval` and shows the already-sanitized action class, asking safety axis, and target below the row. These facts are transient UI state: approval, denial, abort, or settlement clears them, and they are never reconstructed from the session ledger.
+- The live permission frame derives its consequence tier from those typed facts and the authenticated origin. It anchors at bottom center with five rows reserved for the composer and footer, and it recomputes that anchor on resize. Each queued frame retains its own tier and requester.
 - Text and image tool results keep their text while rendering images as MIME and byte-size placeholders; base64 image data is never written to the terminal.
 - Successful `edit` and `write` calls render the bounded diff produced by the tool result. Live regular-screen and fullscreen rows color removed and added lines with the `error` and `success` tokens and emphasize changed words; `/resume` replay and `/export` keep the same numbered diff as plain text.
 - Operator `!` and `!!` bash commands use the same running and settled block as model-initiated bash. The block appears before the process starts, streams the throttled cumulative stdout/stderr tail, and settles in place while the existing `bashExecution` session entry remains the durable record. `!!` continues to exclude that record from model context and says so in the block.

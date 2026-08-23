@@ -66,6 +66,7 @@ describe("contracts/decision-board", () => {
 		strictEqual(entry.endedAt, "2026-08-19T10:03:00.000Z");
 		strictEqual(entry.roundCount, 1);
 		strictEqual(entry.transcriptPath, "/tmp/interviews/interview-1.json");
+		strictEqual(entry.exposure, "local");
 		deepStrictEqual(entry.decisions, [
 			{
 				key: "scope",
@@ -156,7 +157,7 @@ describe("contracts/decision-board", () => {
 	});
 
 	it("acknowledges revision appends, anchors them to the live leaf, and never fabricates failed updates", () => {
-		const initialFields = finalizedInterviewEntryFields(policy());
+		const initialFields = finalizedInterviewEntryFields(policy({ exposure: "outward" }));
 		ok(initialFields);
 		const entries = [persisted(initialFields, "1")];
 		const appended: DecisionLedgerEntryFields[] = [];
@@ -172,6 +173,7 @@ describe("contracts/decision-board", () => {
 		});
 		const revision = store.supersede("interview-1", "scope", "  Expand to all packages.  ");
 		strictEqual(revision.parentTurnId, "assistant-leaf");
+		strictEqual(revision.exposure, "outward", "replay and correction retain the strongest interview exposure");
 		strictEqual(revision.decisions[0]?.status, "superseded");
 		strictEqual(revision.decisions[0]?.correction, "Expand to all packages.");
 		strictEqual(revision.decisions[0]?.revisedAt, "2026-08-19T10:05:00.000Z");

@@ -5,12 +5,18 @@ import { BusChannels, type LoopBlockedPayload } from "../../core/bus-events.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
+import { ToolNames } from "../../core/tool-names.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../../domains/safety/autonomy.js";
+import {
+	classifyDecisionPresentation,
+	decisionFactsForPermission,
+} from "../../domains/safety/decision-presentation.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
+import { askUserExposure } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage } from "../types.js";
@@ -1265,6 +1271,19 @@ function installPermissionBridge(input: {
 	const queuedRequestDetails = new Map<string, { tool: string; actionClass: string }>();
 	const unregister = input.toolRegistry.onPermissionRequired((call, decision, meta) => {
 		if (queuedRequestIds.has(meta.requestId)) return;
+		const presentation = classifyDecisionPresentation(
+			decisionFactsForPermission({
+				tool: call.tool,
+				actionClass: decision.classification.actionClass,
+				axis: meta.axis.startsWith("net:")
+					? { kind: "safety-net", ruleId: meta.axis.slice("net:".length) || "unknown" }
+					: { kind: "autonomy", level: meta.axis.slice("autonomy:".length) || DEFAULT_AUTONOMY_LEVEL },
+				origin: { kind: "main" },
+				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
+			}),
+		);
+		const approveAction = presentation.requiredActions.find((action) => action.id === "approve-once");
+		const denyAction = presentation.requiredActions.find((action) => action.id === "deny");
 		queuedRequestIds.add(meta.requestId);
 		queuedRequestDetails.set(meta.requestId, {
 			tool: call.tool,
@@ -1381,8 +1400,16 @@ function installPermissionBridge(input: {
 									...(snapshot.locations !== undefined ? { locations: snapshot.locations } : {}),
 								},
 								options: [
-									{ optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-									{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
+									{
+										optionId: "allow-once",
+										name: approveAction?.label ?? "Approve once",
+										kind: "allow_once",
+									},
+									{
+										optionId: "reject-once",
+										name: denyAction?.label ?? "Deny this request",
+										kind: "reject_once",
+									},
 								],
 							},
 							input.permissionTimeoutMs,

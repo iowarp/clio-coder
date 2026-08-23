@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { agentSpecPolicyErrors, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import {
+	classifyDecisionPresentation,
+	decisionFactsForAnswer,
+} from "../../src/domains/safety/decision-presentation.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import {
 	type Component,
@@ -16,10 +20,11 @@ import {
 	ASK_USER_DECISION_TITLE,
 	ASK_USER_DECISION_TONE,
 	ASK_USER_SURFACE_GEOMETRY,
+	ASK_USER_WAITING_TITLE,
 	askUserSurface,
 	openAskUserOverlay,
 } from "../../src/interactive/overlays/ask-user.js";
-import { clioTheme, fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
+import { clioTheme, createClioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import type { AskUserQuestion } from "../../src/tools/ask-user.js";
 import { createAskUserTool, finalizeAskUserInterviewForHost, normalizeAskUserCall } from "../../src/tools/ask-user.js";
@@ -48,6 +53,7 @@ function askUserPolicy(maxCalls = 6): AskUserToolPolicy {
 		status: "idle",
 		startedAt: now,
 		updatedAt: now,
+		exposure: "local",
 		rounds: [],
 		decisions: [],
 		inFlight: false,
@@ -202,6 +208,43 @@ describe("contracts/ask_user", () => {
 		strictEqual(policy.callCount, 2);
 		strictEqual(third.kind, "ok");
 		ok(third.output.includes("ask_user result: round_limit_reached"));
+	});
+
+	it("keeps outward exposure monotonic and ignores caller presentation fields", async () => {
+		const policy = askUserPolicy();
+		const tiers: string[] = [];
+		const tool = createAskUserTool({
+			askUser: async (questions, options) => {
+				tiers.push(options?.decisionPresentation?.tier ?? "missing");
+				return {
+					answers: questions.map((question) => ({ question: question.question, answer: "approved" })),
+				};
+			},
+		});
+
+		await tool.run(
+			{
+				exposure: "outward",
+				questions: [{ question: "Publish the report?" }],
+				tier: "conversation",
+				title: "Harmless local choice",
+			},
+			{
+				askUserPolicy: policy,
+				decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer("local")),
+			},
+		);
+		const localRound = await tool.run(
+			{ exposure: "local", questions: [{ question: "Use the short title?" }] },
+			{ askUserPolicy: policy },
+		);
+
+		deepStrictEqual(tiers, ["outward", "outward"]);
+		strictEqual(policy.exposure, "outward");
+		strictEqual(
+			(localRound.details as { interview?: { exposure?: string } } | undefined)?.interview?.exposure,
+			"outward",
+		);
 	});
 
 	it("carries action=complete summaries through the host finalizer to one decision producer", async () => {
@@ -414,10 +457,8 @@ describe("contracts/ask-user decision visibility", () => {
 
 	it("draws a pending decision in the decision tone, not the informational frame", async () => {
 		const idle = askOverlay();
-		const waiting = idle.frame().render(90);
-		const waitingBorder = waiting[0] ?? "";
-		ok(waitingBorder.includes(clioTheme().fgSequence("frame")), "an overlay with no decision keeps the frame token");
-		ok(!waitingBorder.includes(clioTheme().fgSequence(ASK_USER_DECISION_TONE)), "and does not claim the decision tone");
+		const waitingBorder = idle.frame().render(90)[0] ?? "";
+		ok(stripAnsi(waitingBorder).includes(ASK_USER_WAITING_TITLE), stripAnsi(waitingBorder));
 
 		await askDecision((mounted) => {
 			const lines = mounted.frame().render(90);
@@ -425,9 +466,11 @@ describe("contracts/ask-user decision visibility", () => {
 			const bottom = lines[lines.length - 1] ?? "";
 			const tone = clioTheme().fgSequence(ASK_USER_DECISION_TONE);
 
-			ok(top.includes(tone), `the top border carries the decision tone: ${JSON.stringify(top)}`);
-			ok(bottom.includes(tone), `so does the bottom border: ${JSON.stringify(bottom)}`);
-			ok(!top.includes(clioTheme().fgSequence("frame")), "and no informational frame token survives on it");
+			if (tone.length > 0) {
+				ok(top.includes(tone), `the top border carries the decision tone: ${JSON.stringify(top)}`);
+				ok(bottom.includes(tone), `so does the bottom border: ${JSON.stringify(bottom)}`);
+				ok(!top.includes(clioTheme().fgSequence("frame")), "and no informational frame token survives on it");
+			}
 			ok(stripAnsi(top).includes(ASK_USER_DECISION_TITLE), stripAnsi(top));
 			// The title is bold as well as toned, so a terminal with color off still
 			// separates a decision from a panel.
@@ -435,14 +478,41 @@ describe("contracts/ask-user decision visibility", () => {
 		});
 	});
 
-	it("takes the decision tone from a theme token rather than a written-out color", () => {
-		// The token is what makes the treatment follow the palette instead of one
-		// terminal's idea of orange, in truecolor and in the 256-color fallback.
-		strictEqual(fgSequence(ASK_USER_DECISION_TONE, true), "[38;2;255;126;41m");
-		strictEqual(fgSequence(ASK_USER_DECISION_TONE, false), "[38;5;208m");
+	it("takes the local-answer tone from a theme token rather than a written-out color", () => {
+		const truecolor = createClioTheme({ color: true, truecolor: true });
+		const indexed = createClioTheme({ color: true, truecolor: false });
+		strictEqual(ASK_USER_DECISION_TONE, "accent");
+		strictEqual(truecolor.fgSequence(ASK_USER_DECISION_TONE), "[38;2;70;229;208m");
+		strictEqual(indexed.fgSequence(ASK_USER_DECISION_TONE), "[38;5;80m");
 
 		const source = readFileSync("src/interactive/overlays/ask-user.ts", "utf8");
 		ok(!/\\u001b\[|\\x1b\[|38;[25];/u.test(source), "the overlay writes no escape sequence of its own");
+	});
+
+	it("uses outward title, tone, consequence, and action copy without changing the surface", async () => {
+		const mounted = askOverlay();
+		const presentation = classifyDecisionPresentation(decisionFactsForAnswer("outward"));
+		const pending = mounted.session.ask(
+			[{ question: "Publish the result?", options: [{ label: "Publish" }, { label: "Keep local" }] }],
+			presentation,
+		);
+		try {
+			strictEqual(mounted.options()?.anchor, ASK_USER_SURFACE_GEOMETRY.compact.anchor);
+			const frame = mounted.renderFrame().map(stripAnsi);
+			ok(frame[0]?.includes("Confirm outward consequence"), frame.join("\n"));
+			ok(
+				frame.some((line) => line.includes("Outward consequence")),
+				frame.join("\n"),
+			);
+			ok(
+				frame.some((line) => line.includes("does not publish or send anything")),
+				frame.join("\n"),
+			);
+			ok(frame.at(-1)?.includes("record outward answer"), frame.join("\n"));
+		} finally {
+			mounted.session.cancel();
+			await pending;
+		}
 	});
 
 	it("makes the focused option dominant and names its key on the row", async () => {
@@ -480,13 +550,13 @@ describe("contracts/ask-user decision visibility", () => {
 	it("names the exact keys for accepting and leaving the decision", async () => {
 		await askDecision((mounted) => {
 			const hint = (mounted.child() as unknown as { footerHint: () => string }).footerHint();
-			strictEqual(hint, "[Enter] accept · [Esc] close");
+			strictEqual(hint, "[Enter] record answer · [Esc] close");
 		});
 
 		await askDecision(
 			(mounted) => {
 				const hint = (mounted.child() as unknown as { footerHint: () => string }).footerHint();
-				strictEqual(hint, "[Space] toggle · [Enter] accept · [Esc] close");
+				strictEqual(hint, "[Space] toggle · [Enter] record answer · [Esc] close");
 			},
 			{
 				question: "Which checks should run before commit?",
@@ -575,7 +645,10 @@ describe("contracts/ask-user surfaces", () => {
 		]);
 		try {
 			const lines = mounted.renderFrame();
-			ok(lines.length <= 10, `a two-option decision on a 40-row terminal draws ${lines.length} rows`);
+			ok(
+				lines.length <= ASK_USER_SURFACE_GEOMETRY.compact.maxInnerRows + 2,
+				`a two-option decision on a 40-row terminal draws ${lines.length} rows`,
+			);
 			const body = lines.slice(1, -1).map((line) => stripAnsi(line).trim());
 			strictEqual(body[body.length - 1]?.length === 0, false, `the last body row is not filler: ${body.join(" | ")}`);
 		} finally {
@@ -706,10 +779,10 @@ describe("contracts/ask-user interview workspace", () => {
 		}
 	});
 
-	it("leaves the compact and panel geometry alone", async () => {
+	it("keeps compact and panel shape selection while budgeting consequence copy", async () => {
 		deepStrictEqual(ASK_USER_SURFACE_GEOMETRY.compact, {
 			width: 68,
-			maxInnerRows: 10,
+			maxInnerRows: 14,
 			anchor: "bottom-center",
 			margin: { top: 1, right: 2, bottom: 1, left: 2 },
 		});

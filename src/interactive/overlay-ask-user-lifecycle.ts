@@ -77,7 +77,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		const activeSession = ensureSession();
 		if (!activeSession) return cancelledAskUserResult();
 		pendingCancel = cancel;
-		const result = await activeSession.ask(questions);
+		const result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
 		if (result.cancelled === true || !toolBacked) {
 			if (result.cancelled === true) cancelledForTurn = true;
 			close();

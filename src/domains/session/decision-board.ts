@@ -1,4 +1,5 @@
 import type { AskUserToolPolicy } from "../../tools/registry.js";
+import type { AutonomyExposure } from "../safety/autonomy.js";
 import type { DecisionLedgerEntry, DecisionRecord } from "./entries.js";
 
 export interface DecisionLedgerEntryFields {
@@ -11,6 +12,7 @@ export interface DecisionLedgerEntryFields {
 	roundCount: number;
 	summary?: string;
 	transcriptPath?: string;
+	exposure?: AutonomyExposure;
 	decisions: DecisionRecord[];
 }
 
@@ -83,6 +85,7 @@ export function finalizedInterviewEntryFields(policy: AskUserToolPolicy): Decisi
 		roundCount: policy.rounds.length,
 		...(policy.summary ? { summary: policy.summary } : {}),
 		...(policy.transcriptPath ? { transcriptPath: policy.transcriptPath } : {}),
+		exposure: policy.exposure ?? "local",
 		decisions: [...decisionsByKey.values()],
 	};
 }
@@ -172,6 +175,7 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 				roundCount: interview.roundCount,
 				...(interview.summary ? { summary: interview.summary } : {}),
 				...(interview.transcriptPath ? { transcriptPath: interview.transcriptPath } : {}),
+				...(interview.exposure ? { exposure: interview.exposure } : {}),
 				decisions: interview.decisions.map((decision) => {
 					if (decision.key !== selected.key) return { ...decision };
 					const next: DecisionRecord = { ...decision, status: "superseded", revisedAt };

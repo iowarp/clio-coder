@@ -21,6 +21,7 @@ interface PermissionHarness {
 	/** The registry's parked queue, in arrival order, as the stub registry sees it. */
 	parked: Array<{ call: ClassifierCall; decision: SafetyDecision; meta: PermissionRequiredMeta }>;
 	draft: { text: string };
+	frames: Array<{ title: string; tone?: string; body: string[] }>;
 }
 
 function createPermissionHarness(options: { columns?: number } = {}): PermissionHarness {
@@ -30,6 +31,7 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 	let overlayNumber = 0;
 	const parked: PermissionHarness["parked"] = [];
 	const draft = { text: "" };
+	const frames: PermissionHarness["frames"] = [];
 	// The stub keeps the registry's queue so `renotifyHead` can do what the
 	// real one does: fire the listener again for the head parked call.
 	const toolRegistry = {
@@ -115,9 +117,24 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 			},
 		},
 		getSlashContext: () => ({}),
-		showOverlayFrame: (_tui: unknown, _body: unknown, frameOptions: { footerHint?: (innerWidth: number) => string }) => {
+		showOverlayFrame: (
+			_tui: unknown,
+			body: unknown,
+			frameOptions: {
+				footerHint?: (innerWidth: number) => string;
+				title?: string | (() => string);
+				tone?: string | (() => string | undefined);
+			},
+		) => {
 			overlayNumber += 1;
 			const current = overlayNumber;
+			const title = typeof frameOptions.title === "function" ? frameOptions.title() : (frameOptions.title ?? "");
+			const tone = typeof frameOptions.tone === "function" ? frameOptions.tone() : frameOptions.tone;
+			const render =
+				typeof body === "object" && body !== null && "render" in body && typeof body.render === "function"
+					? body.render.bind(body)
+					: undefined;
+			frames.push({ title, ...(tone !== undefined ? { tone } : {}), body: render?.(80) ?? [] });
 			events.push(`show:${current}`);
 			return {
 				hide: () => events.push(`hide:${current}`),
@@ -133,6 +150,7 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 		permissionRequested: (payload) => permissionRequested(payload),
 		parked,
 		draft,
+		frames,
 	};
 }
 
@@ -321,6 +339,43 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			harness.events.some((event) => event.startsWith("emit:")),
 			false,
 		);
+	});
+
+	it("retains each queued request's tier and attribution when the next dialog opens", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequired(
+			{ tool: "write", args: { path: "src/a.ts" } },
+			{
+				kind: "ask",
+				classification: { actionClass: "write", reasons: [] },
+				rejection: { short: "write needs approval", detail: "write needs approval" },
+			} as SafetyDecision,
+			{
+				requestId: "req-workspace",
+				axis: "autonomy:suggest",
+			},
+		);
+		harness.permissionRequired(
+			{ tool: "bash", args: { command: "sudo whoami" } },
+			{
+				kind: "ask",
+				classification: { actionClass: "system_modify", reasons: ["sudo-or-doas"] },
+				rejection: { short: "system modification needs approval", detail: "system modification needs approval" },
+			} as SafetyDecision,
+			{ requestId: "req-system", axis: "net:system-modify-confirm" },
+		);
+
+		strictEqual(harness.frames.length, 1, "the queued request does not replace the active dialog");
+		strictEqual(harness.frames[0]?.title, "Approve workspace action");
+		ok(harness.frames[0]?.body.join(" ").includes("main agent through autonomy level (suggest)"));
+
+		harness.lifecycle.closeOverlay();
+
+		strictEqual(harness.frames.length, 2);
+		strictEqual(harness.frames[1]?.title, "Approve system change");
+		strictEqual(harness.frames[1]?.tone, "warning");
+		ok(harness.frames[1]?.body.join(" ").includes("main agent through safety-net rail system-modify-confirm"));
+		ok(!harness.frames[1]?.body.join(" ").includes("src/a.ts"), "the next request retains no prior target prose");
 	});
 
 	/**
