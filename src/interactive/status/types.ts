@@ -29,6 +29,14 @@ export interface DispatchOverlay {
 export interface TurnSummary {
 	elapsedMs: number;
 	modelId: string;
+	/**
+	 * The model id the server reported in its response when it differs from
+	 * the one requested. Under LM Link a request to one LM Studio host can be
+	 * served by a peer's instance of a different model, and the footer and
+	 * ledger attributed the turn to the requested id (issue #185). Absent when
+	 * the server reported the requested id or no id at all.
+	 */
+	servedModelId?: string | undefined;
 	targetId: string;
 	inputTokens: number;
 	outputTokens: number;
@@ -70,6 +78,8 @@ export interface RunTally {
 	hadEstimatedReasoning: boolean;
 	toolCount: number;
 	toolErrorCount: number;
+	/** Last `responseModel` an assistant message in the run carried, when any did. */
+	servedModelId: string | null;
 }
 
 export interface OverlayFrame {

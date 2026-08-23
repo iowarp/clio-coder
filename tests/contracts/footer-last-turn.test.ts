@@ -76,6 +76,17 @@ describe("footer last-turn metrics", () => {
 		ok(!out.includes("mini"));
 	});
 
+	/**
+	 * The one exception: when the server reported a different model than the
+	 * one requested (an LM Link peer answered), the rail still names what was
+	 * asked for and the line says what answered (issue #185).
+	 */
+	it("names the served model when it differs from the requested one", () => {
+		const out = strip(formatLastTurn(clioTheme(), makeSummary({ servedModelId: "ornith-1.5-35b-a3b" })));
+		ok(out.includes("served ornith-1.5-35b-a3b"), out);
+		ok(!strip(formatLastTurn(clioTheme(), makeSummary())).includes("served"));
+	});
+
 	it("marks slow turns, truncation, tool errors, and non-stop outcomes", () => {
 		ok(strip(formatLastTurn(clioTheme(), makeSummary({ watchdogPeak: 3 }))).includes("slow"));
 		ok(strip(formatLastTurn(clioTheme(), makeSummary({ truncated: true }))).includes("trunc"));

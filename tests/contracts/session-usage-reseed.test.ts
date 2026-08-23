@@ -162,6 +162,30 @@ describe("contracts/session usage reseed", () => {
 		strictEqual(calls[0]?.modelId, "Nemo-3.5-Lightning");
 	});
 
+	/**
+	 * Under LM Link a request to one host can be answered by a peer's instance
+	 * of a different model, and the adapter records that id as `responseModel`
+	 * only when it differs from the request. The call is attributed to the id
+	 * that answered, and both ids are kept (issue #185).
+	 */
+	it("attributes a peer-served call to the served id and keeps the requested one", () => {
+		const served = ledgerUsageCalls(
+			[assistantTurn({ ...completedCall, model: "qwen3.8-27b-dynamo", responseModel: "ornith-1.5-35b-a3b" }, "a1")],
+			{ target: "dynamo", model: "qwen3.8-27b-dynamo" },
+		);
+		strictEqual(served[0]?.modelId, "ornith-1.5-35b-a3b", "tokens belong to the model that produced them");
+		strictEqual(served[0]?.requestedModel, "qwen3.8-27b-dynamo");
+		strictEqual(served[0]?.servedModel, "ornith-1.5-35b-a3b");
+
+		const same = ledgerUsageCalls([assistantTurn({ ...completedCall, responseModel: undefined }, "a1")], {
+			target: "dynamo",
+			model: "qwen3.8-27b-dynamo",
+		});
+		strictEqual(same[0]?.modelId, "qwen3.8-27b-dynamo");
+		strictEqual(same[0]?.requestedModel, "qwen3.8-27b-dynamo");
+		strictEqual(same[0]?.servedModel, null, "no differing id reported is null, not an assertion of the request");
+	});
+
 	it("follows a modelChange row so a session that switched targets attributes each call correctly", () => {
 		const calls = ledgerUsageCalls(
 			[
@@ -175,7 +199,10 @@ describe("contracts/session usage reseed", () => {
 					modelId: "gemma-4",
 					target: "mini",
 				},
-				assistantTurn(completedCall, "a2"),
+				// The adapter records responseModel only when the server answered
+				// under a different id than the one requested; a call that got the
+				// model it asked for carries none.
+				assistantTurn({ ...completedCall, responseModel: undefined }, "a2"),
 			] as unknown as SessionEntry[],
 			{ target: "dynamo", model: "Nemo-3.5-Lightning" },
 		);

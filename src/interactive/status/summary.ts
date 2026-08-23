@@ -65,6 +65,7 @@ export function emptyRunTally(): RunTally {
 		hadEstimatedReasoning: false,
 		toolCount: 0,
 		toolErrorCount: 0,
+		servedModelId: null,
 	};
 }
 
@@ -85,8 +86,10 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	}
 	if (message.role !== "assistant") return tally;
 	const usage = (message as { usage?: UsageLike }).usage;
+	const responseModel = (message as { responseModel?: unknown }).responseModel;
 	const next: RunTally = {
 		...tally,
+		servedModelId: typeof responseModel === "string" && responseModel.length > 0 ? responseModel : tally.servedModelId,
 		inputTokens: tally.inputTokens + (usage ? finite(usage.input) : 0),
 		outputTokens: tally.outputTokens + (usage ? finite(usage.output) : 0),
 		cacheReadTokens: tally.cacheReadTokens + (usage ? finite(usage.cacheRead) : 0),
@@ -146,6 +149,7 @@ export function summaryFromRunTally(tally: RunTally, input: SummaryFromTallyInpu
 		watchdogPeak: input.watchdogPeak,
 		truncated: input.truncated === true,
 	};
+	if (tally.servedModelId !== null && tally.servedModelId !== input.modelId) summary.servedModelId = tally.servedModelId;
 	if (tally.hadProviderReasoning || tally.hadEstimatedReasoning) {
 		summary.reasoningTokens = tally.reasoningTokens;
 		const provenance: ReasoningTokenProvenance =

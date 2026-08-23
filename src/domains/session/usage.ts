@@ -24,7 +24,17 @@ import type { SessionEntry } from "./entries.js";
 /** One completed assistant API call, as the ledger recorded it. */
 export interface LedgerUsageCall {
 	providerId: string;
+	/** The model the tokens are attributed to: the served id when the server reported a different one, else the requested id. */
 	modelId: string;
+	/** The id the session asked for (the configured model, or the message's own `model`). */
+	requestedModel: string;
+	/**
+	 * The id the server reported in the response when it differed from the
+	 * request (`responseModel`), the LM Link peer case (issue #185). Null when
+	 * the server reported the requested id or none; the two are not told apart
+	 * because the adapter records a response id only when it differs.
+	 */
+	servedModel: string | null;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -93,6 +103,8 @@ export function ledgerUsageCalls(
 			calls.push({
 				providerId: currentTarget ?? "unknown",
 				modelId: currentModel ?? "unknown",
+				requestedModel: currentModel ?? "unknown",
+				servedModel: null,
 				input: usage.input,
 				output: usage.output,
 				cacheRead: usage.cacheRead,
@@ -132,9 +144,13 @@ export function ledgerUsageCalls(
 		if (totalTokens === 0) continue;
 		const cost = usage.cost;
 		const costUsd = cost && typeof cost === "object" ? numberAt(cost as Record<string, unknown>, "total") : 0;
+		const requestedModel = currentModel ?? stringAt(record, "model") ?? "unknown";
+		const servedModel = stringAt(record, "responseModel");
 		calls.push({
 			providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
-			modelId: currentModel ?? stringAt(record, "responseModel", "model") ?? "unknown",
+			modelId: servedModel ?? requestedModel,
+			requestedModel,
+			servedModel,
 			input,
 			output,
 			cacheRead,
