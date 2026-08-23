@@ -1,3 +1,4 @@
+import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
@@ -57,6 +58,8 @@ export interface OverlayGeneralOpenersDeps {
 	stateDir: string;
 	getSessionMeta: () => SessionMeta | null;
 	readSessionEntries?: ArtifactProviderDeps["readSessionEntries"];
+	/** Live settings, so `/context` can state the configured working-set policy. */
+	getSettings?: () => Readonly<ClioSettings>;
 	terminal: { columns: number };
 	dispatchBoard: ReturnType<typeof createDispatchBoardView>;
 	startDispatchBoardTicker: () => void;
@@ -112,6 +115,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				const readSessionEntries = deps.readSessionEntries;
 				if (!readSessionEntries) return null;
 				return foldWorkingSet(readSessionEntries(), deps.getSessionMeta()?.pinnedLeafTurnId ?? undefined);
+			},
+			getWorkingSetConfig: () => {
+				const workingSet = deps.getSettings?.().context.workingSet;
+				return workingSet ? { enabled: workingSet.enabled, policy: workingSet.policy } : null;
 			},
 		});
 		deps.requestRender();

@@ -354,6 +354,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		stateDir: deps.app.stateDir,
 		getSessionMeta: () => deps.app.session?.current() ?? null,
 		...(deps.app.readSessionEntries ? { readSessionEntries: deps.app.readSessionEntries } : {}),
+		...(deps.app.getSettings ? { getSettings: deps.app.getSettings } : {}),
 		terminal,
 		dispatchBoard,
 		startDispatchBoardTicker: () => interactiveTickers.startDispatchBoardTicker(),

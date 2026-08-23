@@ -170,7 +170,7 @@ context:
 
 ## What the operator sees
 
-- **`/context` overlay.** A working-set section under the category legend: the policy that produced the most recent event, evicted item count, evicted tokens, event count, recall count, and churn. Evicted tokens render as one line after the legend rather than as a meter category, because they are outside the window rather than a slice of it.
+- **`/context` overlay.** A working-set section under the category legend: the configured policy with its state (`policy structural-v1 · no events yet` until the first event, `disabled` when `context.workingSet.enabled` is off, and `(last event by <policy>)` when the setting changed after an event), evicted item count, evicted tokens, event count, recall count, and churn. Evicted tokens render as one line after the legend rather than as a meter category, because they are outside the window rather than a slice of it.
 - **Transcript.** An evicted tool row keeps its full body and gains a dim `evicted · <reason>` tag. The transcript shows the ledger, never the projection, so `/resume`, `/tree`, `/fork`, and the HTML export are unaffected by eviction.
 - **`/context recall <ref>`.** Prints the ref, why it was evicted, the token count, and the offload pointer when there is one, followed by the original body. Transcript only.
 - **Prompt cache line.** Every applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`. When the last settled run came back cold for that reason, the overlay adds `last cold turn: working-set eviction (expected)` and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.
@@ -181,7 +181,7 @@ context:
 These are tracked follow-ups, not available behavior:
 
 - **Auto-readmission.** Nothing brings an evicted body back on its own. There are no path fingerprints and no registry of what the model is likely to need next.
-- **Cost model and deferred scheduling.** Pressure is the only trigger. There is no break-even horizon, no deferred eviction plan, and no piggybacking beyond the fact that the working-set stage already runs first inside `runAutoCompact`.
+- **Cost model and deferred scheduling.** Pressure is the only trigger, and it is `compaction.threshold`, not `target`. The replay tables price every applied event by the cold prefix it re-prefills (about 29k tokens per event at a 64k budget), and batching from the threshold down to the target is what keeps one event per cycle; a trigger at the target would make every turn above 60% with one newly redundant read an event of its own, and no row in the sweep shows fewer summaries in return. There is no break-even horizon, no deferred eviction plan, and no piggybacking beyond the fact that the working-set stage already runs first inside `runAutoCompact`.
 - **Intra-turn eviction.** Eviction runs before a request is sent. A single turn whose tool results overflow the window is handled by the observation envelope's caps and by summary compaction, not by this layer.
 - **Worker runtimes.** Dispatched workers replay their own ledgers without the working-set stage.
 - **Digests.** A marker carries tool, size, and a first-line preview. The generated summaries from #165 are not embedded in it.
