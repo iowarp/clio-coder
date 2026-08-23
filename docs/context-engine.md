@@ -19,6 +19,8 @@ Local-native runtimes use a recommended minimum desired window of 128,000 tokens
 
 The `/context` overlay states which layer answered, next to the token total: `loaded`, `probed`, `configured`, `declared`, or `assumed`.
 
+A probed llama.cpp window is the share one request gets, not the server's total. llama.cpp splits `--ctx-size` evenly across `--parallel` slots unless `--kv-unified` is set, so a server started with `--ctx-size 786432 --parallel 4 --no-kv-unified` admits 196,608 tokens per request, and that is the figure autocompact and the meter plan against. The probe reads the flags (long and short forms, `-c`, `-np`, `-kvu`, and the last of `--kv-unified` or `--no-kv-unified` given) off the router's per-model status, keeps the split on the model's discovery state, and `/context` prints the derivation next to the share: `196,608 (786,432 / 4 slots)`. `clio-coder targets` does the same in its `ctx` note for the target's default model and adds a probe note naming the flags.
+
 ## Token accounting and snapshots
 
 The estimator in `context-accounting.ts` uses a four-characters-per-token family for hot-path accounting. It estimates system prompt, tools, messages, pending input, and runtime categories without calling a model tokenizer on every TUI refresh.

@@ -3,6 +3,7 @@ import { relative } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
+import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, visibleWidth } from "../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid, renderEvictedTokensLine } from "./context-meter.js";
@@ -154,7 +155,14 @@ export function renderContextLedgerLines(
 
 	if (ledger.contextWindow > 0) {
 		const source = ledger.measured ? "measured" : "≈ estimated";
-		const summary = `${formatTokens(ledger.usedTokens)} / ${formatTokens(ledger.contextWindow)} tokens (${formatContextPercent(ledger.percent)})`;
+		// `196,608 (786,432 / 4 slots)`: a llama.cpp window that is one slot's
+		// share of the server's KV budget names the split, because the bare
+		// number reads as the whole server and the meter is measured against
+		// the share (issue #187).
+		const window = ledger.contextWindowSlots
+			? formatContextWindowSlots(ledger.contextWindow, ledger.contextWindowSlots)
+			: formatTokens(ledger.contextWindow);
+		const summary = `${formatTokens(ledger.usedTokens)} / ${window} tokens (${formatContextPercent(ledger.percent)})`;
 		const provenance = contextWindowProvenanceLabel(ledger.contextWindowSource);
 		const trailer = provenance ? `${provenance} window · ${source}` : source;
 		lines.push(`${theme.fg("title", summary)} ${theme.fg("dim", "·")} ${theme.fg("muted", trailer)}`);

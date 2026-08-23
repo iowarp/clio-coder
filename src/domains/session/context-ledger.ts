@@ -16,7 +16,7 @@
  * proportional reconciliation the footer bar already performs.
  */
 
-import type { ContextWindowSource } from "../providers/index.js";
+import type { ContextWindowSlots, ContextWindowSource } from "../providers/index.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 
 /** Distinct buckets a context window is divided into for display. */
@@ -46,6 +46,8 @@ export interface BuildContextLedgerInput {
 	contextWindow: number | null;
 	/** Which layer answered `contextWindow`; omitted before a runtime resolves. */
 	contextWindowSource?: ContextWindowSource | null;
+	/** The server-side split the probed window is a share of, when there is one. */
+	contextWindowSlots?: ContextWindowSlots | null;
 	/**
 	 * Per-segment token estimates from the prompt compiler's segment manifest.
 	 * When empty, `systemPromptTokens` is used as a single opaque system bucket.
@@ -146,6 +148,12 @@ export interface ContextLedger {
 	 * the difference decides whether autocompact fires in time.
 	 */
 	contextWindowSource: ContextWindowSource | null;
+	/**
+	 * Present when `contextWindow` is one slot's share of the server's KV
+	 * budget, so the overlay can show `196,608 (786,432 / 4 slots)` instead of
+	 * a number that looks like the whole server.
+	 */
+	contextWindowSlots: ContextWindowSlots | null;
 	/** Sum of every content category (system..pending). */
 	usedTokens: number;
 	/** Autocompact headroom held in reserve above the conversation. */
@@ -346,6 +354,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		model: input.model ?? null,
 		contextWindow: window,
 		contextWindowSource: input.contextWindowSource ?? null,
+		contextWindowSlots: input.contextWindowSlots ?? null,
 		usedTokens,
 		reserveTokens,
 		freeTokens,
