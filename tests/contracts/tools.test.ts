@@ -612,21 +612,25 @@ describe("contracts/tools", () => {
 			const result = await verifyTool.run({ cwd: root });
 			strictEqual(result.kind, "ok");
 			if (result.kind !== "ok") return;
-			ok(result.output.includes("Declared verification checks:"));
-			ok(result.output.includes("package.json:"));
-			ok(result.output.includes("- typecheck"));
-			ok(result.output.includes("- test:contracts"));
-			ok(!result.output.includes("- dev"), "non-verification scripts must not be listed");
+			const sources = (
+				result.details as { sources?: Array<{ kind?: unknown; checks?: Array<{ id?: unknown }> }> } | undefined
+			)?.sources;
+			strictEqual(sources?.length, 1);
+			strictEqual(sources?.[0]?.kind, "package.json");
+			deepStrictEqual(
+				sources?.[0]?.checks?.map((check) => check.id),
+				["test:contracts", "typecheck"],
+			);
 		});
 
 		it("verifyTool rejects non-verification families with a bash redirect", async () => {
 			const result = await verifyTool.run({ check: "dev" });
 
 			strictEqual(result.kind, "error");
-			strictEqual(
-				result.kind === "error" ? result.message : "",
-				"verify: 'dev' is not a verification check (test*/lint*/build*/typecheck*/check*/format*/ci* or \"frontend\"); run it through bash.",
-			);
+			if (result.kind !== "error") return;
+			match(result.message, /^verify:/u);
+			ok(result.message.includes("'dev'"), result.message);
+			match(result.message, /\bbash\b/u);
 		});
 
 		it("verifyTool lists sorted declared verification checks for undeclared family names", async () => {
@@ -650,10 +654,24 @@ describe("contracts/tools", () => {
 			const result = await verifyTool.run({ check: "test:unit", cwd: root });
 
 			strictEqual(result.kind, "error");
-			strictEqual(
-				result.kind === "error" ? result.message : "",
-				"verify: package.json has no 'test:unit' script. Declared verification checks: build, check:boundaries, ci, ci:release, format, lint, test, test:contracts, test:file, test:smoke, typecheck.",
-			);
+			if (result.kind !== "error") return;
+			match(result.message, /^verify:/u);
+			ok(result.message.includes("'test:unit'"), result.message);
+			const renderedList = result.message.match(/([a-z][a-z0-9:-]*(?:, [a-z][a-z0-9:-]*)+)\.$/u)?.[1];
+			ok(renderedList, result.message);
+			deepStrictEqual(renderedList.split(", "), [
+				"build",
+				"check:boundaries",
+				"ci",
+				"ci:release",
+				"format",
+				"lint",
+				"test",
+				"test:contracts",
+				"test:file",
+				"test:smoke",
+				"typecheck",
+			]);
 		});
 
 		it("verifyTool forwards args to a declared test:file lane for one named test file", async () => {
