@@ -113,12 +113,34 @@ function coldReasonLabel(reason: string): string {
 	}
 }
 
+/** The operator's working-set configuration, as `/context` states it. */
+export interface WorkingSetConfigView {
+	enabled: boolean;
+	policy: string;
+}
+
 /**
  * The working-set section: what the projection has taken out of the window
  * and how often the model has asked for it back. Churn is recalls over items
  * evicted; a high number means the policy evicts what is still needed.
  */
-function renderWorkingSetLines(view: WorkingSetView): string[] {
+/**
+ * The policy line names what is configured, not what last ran. `lastPolicyId`
+ * is stamped by the first applied event, and eviction runs only when pressure
+ * crosses `compaction.threshold`, so a whole session at the shipped default
+ * read `policy none` (issue #190). With no configuration in hand (older
+ * callers) the last applied policy is still the best available claim.
+ */
+function workingSetPolicyLabel(view: WorkingSetView, config: WorkingSetConfigView | null | undefined): string {
+	if (config === null || config === undefined) return `policy ${view.lastPolicyId ?? "none"}`;
+	if (!config.enabled) return "disabled";
+	const state = view.evictionEvents === 0 ? " · no events yet" : "";
+	const lastRan =
+		view.lastPolicyId !== null && view.lastPolicyId !== config.policy ? ` (last event by ${view.lastPolicyId})` : "";
+	return `policy ${config.policy}${lastRan}${state}`;
+}
+
+function renderWorkingSetLines(view: WorkingSetView, config: WorkingSetConfigView | null | undefined): string[] {
 	const theme = clioTheme();
 	const items = view.evicted.size;
 	const summary = [
@@ -129,7 +151,7 @@ function renderWorkingSetLines(view: WorkingSetView): string[] {
 		`churn ${formatChurn(view)}`,
 	].join(" · ");
 	return [
-		`${theme.fg("muted", "working set")} ${theme.fg("dim", "·")} ${theme.fg("accent", `policy ${view.lastPolicyId ?? "none"}`)}`,
+		`${theme.fg("muted", "working set")} ${theme.fg("dim", "·")} ${theme.fg("accent", workingSetPolicyLabel(view, config))}`,
 		theme.fg("dim", summary),
 	];
 }
@@ -138,6 +160,7 @@ export function renderContextLedgerLines(
 	ledger: ContextLedger,
 	contentWidth: number,
 	workingSet?: WorkingSetView | null,
+	workingSetConfig?: WorkingSetConfigView | null,
 ): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
@@ -178,7 +201,7 @@ export function renderContextLedgerLines(
 
 	lines.push("");
 	if (workingSet) {
-		for (const line of renderWorkingSetLines(workingSet)) lines.push(line);
+		for (const line of renderWorkingSetLines(workingSet, workingSetConfig)) lines.push(line);
 		lines.push("");
 	}
 	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
@@ -251,6 +274,8 @@ export interface OpenContextOverlayOptions {
 	};
 	/** Working-set fold at the live leaf; null or absent hides the section. */
 	getWorkingSet?: () => WorkingSetView | null;
+	/** The configured `context.workingSet` block, so the policy line states what is set. */
+	getWorkingSetConfig?: () => WorkingSetConfigView | null;
 }
 
 /**
@@ -265,7 +290,12 @@ export function openContextOverlay(
 	options?: OpenContextOverlayOptions,
 ): OverlayHandle {
 	const render = (): string =>
-		renderContextLedgerLines(getLedger(), DEFAULT_CONTENT_WIDTH, options?.getWorkingSet?.() ?? null).join("\n");
+		renderContextLedgerLines(
+			getLedger(),
+			DEFAULT_CONTENT_WIDTH,
+			options?.getWorkingSet?.() ?? null,
+			options?.getWorkingSetConfig?.() ?? null,
+		).join("\n");
 	const text = new Text(render(), 0, 0);
 	const handle = showClioOverlayFrame(tui, text, {
 		anchor: "center",

@@ -137,6 +137,43 @@ describe("context overlay working-set section", () => {
 		ok(cacheLineOf(explained) !== cacheLineOf(unexplained), "an explained cold turn must drop the warning token");
 	});
 
+	/**
+	 * Both local targets showed `policy none` for a whole session at the
+	 * shipped default (issue #190): the line read the last applied policy,
+	 * which is stamped only by the first eviction event, and eviction runs only
+	 * past `compaction.threshold`. The line now states what is configured and
+	 * carries the event state beside it.
+	 */
+	it("names the configured policy with its state, not the last applied one", () => {
+		const fresh = strip(
+			renderContextLedgerLines(ledger(), 68, EMPTY_WORKING_SET_VIEW, { enabled: true, policy: "structural-v1" }).join(
+				"\n",
+			),
+		);
+		ok(fresh.includes("working set · policy structural-v1 · no events yet"), fresh);
+		ok(fresh.includes("0 evicted items · 0 tokens · 0 events"), fresh);
+
+		const disabled = strip(
+			renderContextLedgerLines(ledger(), 68, EMPTY_WORKING_SET_VIEW, { enabled: false, policy: "structural-v1" }).join(
+				"\n",
+			),
+		);
+		ok(disabled.includes("working set · disabled"), disabled);
+		ok(!disabled.includes("policy"), disabled);
+
+		// After an event the state suffix goes away, and a policy change made
+		// after that event is visible as the difference between the two.
+		const applied = strip(
+			renderContextLedgerLines(ledger(), 68, view(), { enabled: true, policy: "age-horizon" }).join("\n"),
+		);
+		ok(applied.includes("working set · policy age-horizon"), applied);
+		ok(!applied.includes("no events yet"), applied);
+		const changed = strip(
+			renderContextLedgerLines(ledger(), 68, view(), { enabled: true, policy: "structural-v1" }).join("\n"),
+		);
+		ok(changed.includes("working set · policy structural-v1 (last event by age-horizon)"), changed);
+	});
+
 	it("churn is n/a with nothing evicted, and the section is absent without a fold", () => {
 		const empty = strip(renderContextLedgerLines(ledger(), 68, EMPTY_WORKING_SET_VIEW).join("\n"));
 		ok(empty.includes("working set · policy none"), empty);
