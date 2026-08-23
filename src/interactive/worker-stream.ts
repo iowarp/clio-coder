@@ -8,6 +8,13 @@
  * to a bus, or renders; the chat panel owns presentation and the wiring owns
  * I/O, so every sequence below is testable as a pure fold.
  *
+ * What a worker is saying and doing is not decided here. That is the canonical
+ * {@link WorkerProgressSnapshot} projection in `worker-progress.ts`, which the
+ * Fleet Runs board reads from the same events, so the two surfaces cannot drift
+ * on the answer tail, the tool names, or what a call is touching. This module
+ * owns the half the board has no use for: which assignment an event belongs to,
+ * which attempt is current, and what the receipt sealed.
+ *
  * Three rules the fold enforces rather than documents:
  *
  *   - Tool *names* only. Names come exclusively from the `clio_*` telemetry
@@ -34,10 +41,16 @@ import type {
 	DispatchStartedPayload,
 	RunAbortedPayload,
 } from "../core/bus-events.js";
-import { durableAssistantTextFromEvent, WORKER_OUTPUT_MAX_BYTES } from "../domains/dispatch/event-pump.js";
 import type { RunKind } from "../domains/dispatch/types.js";
 import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
-import { truncateUtf8 } from "../tools/truncate-utf8.js";
+import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
+
+export {
+	boundSettledText,
+	WORKER_LIVE_TAIL_LINES,
+	WORKER_TOOL_NAME_LIMIT,
+	type WorkerProgressSnapshot,
+} from "./worker-progress.js";
 
 export interface WorkerAttempt {
 	runId: string;
@@ -143,23 +156,6 @@ export interface WorkerStream {
 	reset(): void;
 }
 
-/**
- * Lines of worker prose kept while a run is live. The tail is what a streaming
- * answer is about, so the head is what gets dropped; once the run settles the
- * body is replaced by the receipt-sealed answer and anchors at the head, which
- * is the same rule the thinking block already follows.
- */
-export const WORKER_LIVE_TAIL_LINES = 40;
-
-/** Distinct tool names carried on an entry. The receipt's call count carries the total. */
-export const WORKER_TOOL_NAME_LIMIT = 8;
-
-const WORKER_TEXT_TRUNCATION_MARKER = "";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
@@ -203,58 +199,6 @@ export function workerTargetLabel(runtime: WorkerRunRuntime): string {
 }
 
 /**
- * Incremental assistant prose carried by one worker event.
- *
- * Native workers slim `message_update` down to `assistantMessageEvent.delta`
- * before it crosses the NDJSON seam (src/worker/event-projection.ts); the ACP
- * mapper emits a top-level `text_delta` carrying `text`. Both spellings are
- * read here so ACP peers need no separate UI path.
- */
-function textDelta(event: unknown): string {
-	if (!isRecord(event)) return "";
-	if (event.type === "message_update") {
-		const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
-		if (assistantEvent?.type !== "text_delta") return "";
-		return typeof assistantEvent.delta === "string" ? assistantEvent.delta : "";
-	}
-	if (event.type !== "text_delta") return "";
-	if (typeof event.delta === "string") return event.delta;
-	return typeof event.text === "string" ? event.text : "";
-}
-
-/** Tool name from Clio's own telemetry. Never from `tool_execution_*`, whose args are the call's arguments. */
-function toolName(event: unknown): string | undefined {
-	if (!isRecord(event)) return undefined;
-	if (event.type !== "clio_tool_start" && event.type !== "clio_tool_finish") return undefined;
-	const payload = isRecord(event.payload) ? event.payload : null;
-	return nonEmptyString(payload?.tool);
-}
-
-function lineCount(text: string): number {
-	if (text.length === 0) return 0;
-	let lines = 1;
-	for (let index = 0; index < text.length; index += 1) {
-		if (text[index] === "\n") lines += 1;
-	}
-	return lines;
-}
-
-/** Keep the newest `WORKER_LIVE_TAIL_LINES` lines; report what that cost. */
-function boundLiveText(text: string): { text: string; dropped: number } {
-	const lines = text.split("\n");
-	if (lines.length <= WORKER_LIVE_TAIL_LINES) return { text, dropped: 0 };
-	const dropped = lines.length - WORKER_LIVE_TAIL_LINES;
-	return { text: lines.slice(dropped).join("\n"), dropped };
-}
-
-/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. */
-export function boundSettledText(text: string): { text: string; dropped: number } {
-	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, WORKER_TEXT_TRUNCATION_MARKER);
-	if (bounded === text) return { text, dropped: 0 };
-	return { text: bounded, dropped: Math.max(0, lineCount(text) - lineCount(bounded)) };
-}
-
-/**
  * Terminal facts a lifecycle payload can supply on its own. Used only when the
  * sealed receipt is unreadable, so the block still reports an honest outcome
  * instead of hanging on a spinner.
@@ -294,8 +238,20 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 	const attemptByAssignment = new Map<string, number>();
 	/** Every attempt run id to its assignment, so progress and terminal events find their entry. */
 	const assignmentByRun = new Map<string, string>();
-	/** Durable answer text observed live, per attempt; the receipt wins when it is readable. */
-	const durableTextByRun = new Map<string, string>();
+	/**
+	 * The canonical progress projection per assignment. One fold spans every
+	 * attempt of an assignment, because a failover keeps streaming into the block
+	 * the operator is already reading.
+	 */
+	const progressByAssignment = new Map<string, WorkerProgressFold>();
+
+	/** Copy the canonical projection onto the entry fields the block renders. */
+	const applyProgress = (entry: WorkerEntryState, fold: WorkerProgressFold): void => {
+		const snapshot = fold.snapshot();
+		entry.text = snapshot.tailText;
+		entry.droppedLines = snapshot.droppedLines;
+		entry.tools = [...snapshot.toolNames];
+	};
 
 	/** The entry a run id addresses, and only while that run is the entry's current attempt. */
 	const currentEntryForRun = (runId: unknown): WorkerEntryState | undefined => {
@@ -315,11 +271,10 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		// Terminal truth is the sealed answer. A run whose receipt could not be
 		// read keeps whatever durable text its own stream produced, and a run that
 		// produced none keeps the live tail rather than blanking the block.
-		const settled = nonEmptyString(facts.text) ?? nonEmptyString(durableTextByRun.get(entry.runId));
-		if (settled !== undefined) {
-			const bounded = boundSettledText(settled);
-			entry.text = bounded.text;
-			entry.droppedLines = bounded.dropped;
+		const fold = progressByAssignment.get(entry.assignmentId);
+		if (fold !== undefined) {
+			fold.settle(nonEmptyString(facts.text));
+			applyProgress(entry, fold);
 		}
 		return { kind: "updated", entry };
 	};
@@ -343,6 +298,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				delete existing.receipt;
 				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
 				assignmentByRun.set(runId, assignmentId);
+				progressByAssignment.get(assignmentId)?.restart();
 				return { kind: "updated", entry: existing };
 			}
 			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
@@ -362,43 +318,19 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			};
 			byAssignment.set(assignmentId, entry);
 			assignmentByRun.set(runId, assignmentId);
+			progressByAssignment.set(assignmentId, createWorkerProgressFold());
 			return { kind: "created", entry };
 		},
 
 		progress(payload): WorkerStreamChange | null {
 			const entry = currentEntryForRun(payload.runId);
 			if (entry === undefined || !entry.pending) return null;
-			const event = payload.event;
-			let changed = false;
-
-			const delta = textDelta(event);
-			if (delta.length > 0) {
-				const bounded = boundLiveText(entry.text + delta);
-				entry.text = bounded.text;
-				entry.droppedLines += bounded.dropped;
-				changed = true;
-			}
-
-			// A durable message_end is the answer as the receipt will seal it. An
-			// ACP peer that streamed no deltas reaches the transcript only here.
-			const durable = durableAssistantTextFromEvent(event);
-			if (durable.trim().length > 0) {
-				durableTextByRun.set(entry.runId, durable);
-				if (delta.length === 0 && entry.text.trim().length === 0) {
-					const bounded = boundLiveText(durable);
-					entry.text = bounded.text;
-					entry.droppedLines += bounded.dropped;
-				}
-				changed = true;
-			}
-
-			const tool = toolName(event);
-			if (tool !== undefined && !entry.tools.includes(tool) && entry.tools.length < WORKER_TOOL_NAME_LIMIT) {
-				entry.tools.push(tool);
-				changed = true;
-			}
-
-			return changed ? { kind: "updated", entry } : null;
+			const fold = progressByAssignment.get(entry.assignmentId);
+			// Everything the block shows about the stream comes from the canonical
+			// projection, so an event that moved nothing visible repaints nothing.
+			if (fold === undefined || !fold.observe(payload.event)) return null;
+			applyProgress(entry, fold);
+			return { kind: "updated", entry };
 		},
 
 		completed(payload): WorkerStreamChange | null {
@@ -440,7 +372,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			byAssignment.clear();
 			attemptByAssignment.clear();
 			assignmentByRun.clear();
-			durableTextByRun.clear();
+			progressByAssignment.clear();
 		},
 	};
 }

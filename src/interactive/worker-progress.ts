@@ -116,8 +116,9 @@ export interface WorkerProgressFold {
 	settle(text?: string): boolean;
 	/**
 	 * A later attempt of the same work takes over. The tail and the trail are
-	 * history the operator is already reading and stay; the current call and the
-	 * settled mark belong to the attempt that ended and go.
+	 * history the operator is already reading and stay; the current call, the
+	 * settled mark, and the previous attempt's durable answer go, because an
+	 * answer belongs to the attempt that produced it.
 	 */
 	restart(): void;
 	snapshot(): WorkerProgressSnapshot;
@@ -376,6 +377,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		restart(): void {
 			currentAction = null;
 			pendingActions.clear();
+			durable = "";
 			settled = false;
 			phase = "starting";
 			touch();
