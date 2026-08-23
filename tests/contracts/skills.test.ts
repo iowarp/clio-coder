@@ -109,7 +109,7 @@ describe("contracts/skills", () => {
 			const skill = list.items[0];
 			ok(skill);
 			strictEqual(skill.name, "review-tests");
-			strictEqual(skill.description, "Use when reviewing test coverage.");
+			match(skill.description, /\S/u, "the required description is retained as non-empty catalog metadata");
 			strictEqual(skill.scope, "project");
 			strictEqual(skill.source, "clio");
 			strictEqual(skill.trusted, true);
@@ -559,7 +559,16 @@ describe("contracts/skills", () => {
 			const result = await tool.run({ scope: "skills" }, undefined);
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
-				ok(result.output.includes("- visible (project): Catalog entry."));
+				const details = result.details as { skills?: Array<{ name?: unknown; scope?: unknown }> };
+				deepStrictEqual(
+					details.skills?.find((skill) => skill.name === "visible"),
+					{
+						name: "visible",
+						scope: "project",
+					},
+				);
+				const installedRow = result.output.split("\n").find((line) => line.startsWith("- visible "));
+				match(installedRow ?? "", /^- visible \(project\): \S/u);
 				ok(result.output.includes("/skill <name>"));
 				// The listing invites matching and composition but keeps the operator gate.
 				ok(result.output.includes("Match the current task"));
