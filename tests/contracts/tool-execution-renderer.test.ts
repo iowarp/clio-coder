@@ -61,6 +61,30 @@ describe("contracts/tool execution transcript", () => {
 		ok(rendered.includes("full output  /tmp/clio-tool-output.log"), rendered);
 	});
 
+	it("names the retention sweep when a replayed offload file is gone", () => {
+		const rendered = plain(
+			renderToolExecution(
+				{
+					toolCallId: "bash-swept",
+					toolName: "bash",
+					args: { command: "npm test" },
+					result: { content: [{ type: "text", text: "bounded output" }] },
+					isError: false,
+					resultSummary: {
+						bytes: 14,
+						truncated: true,
+						offloadPath: "/state/scratch/swept.txt",
+						offloadFileMissing: true,
+					},
+				},
+				100,
+			),
+		);
+
+		ok(rendered.includes("full output  gone after the 14-day retention sweep"), rendered);
+		ok(!rendered.includes("/state/scratch/swept.txt"), rendered);
+	});
+
 	it("summarizes mixed image content without writing its base64 payload to the terminal", () => {
 		const base64 = Buffer.from("operator-private-image-bytes", "utf8").toString("base64");
 		const rendered = plain(

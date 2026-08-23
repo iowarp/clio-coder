@@ -114,16 +114,19 @@ function localBashReplayTurn(output: string): SessionEntry {
 }
 
 describe("contracts/resume replay ledger fidelity", () => {
-	it("replays a grep tool as the collapsed one-line ledger summary, not the expanded body", () => {
+	it("says a swept replay offload is gone without statting it on repaint", () => {
 		const panel = createChatPanel();
 		rehydrateChatPanelFromTurns(panel, grepReplayTurns());
 		const rendered = strip(panel.render(100).join("\n"));
+		const repainted = strip(panel.render(100).join("\n"));
 
 		// Collapsed live-parity ledger line: grep verb + outcome facts from the
 		// observation envelope (count, bytes, offload path).
 		ok(rendered.includes("searching for"), "collapsed grep subline should show the grep verb");
 		ok(rendered.includes("261+ matches"), "collapsed line should carry the match count from the observation envelope");
-		ok(rendered.includes("full: /state/scratch/x.txt"), "collapsed line should carry the offload path");
+		ok(rendered.includes("full: gone after the 14-day retention sweep"), rendered);
+		ok(!rendered.includes("/state/scratch/x.txt"), "a swept path must not look live");
+		strictEqual(repainted, rendered, "repaint consumes the missing-file fact recorded during rehydration");
 
 		// The expanded body and its UI middle-elision must not appear in replay.
 		ok(!rendered.includes("many.txt:1:"), "replay must not render the expanded grep body");
