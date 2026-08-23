@@ -13,6 +13,7 @@
  */
 
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
@@ -22,7 +23,10 @@ import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
 
-export { classifyResourceRead };
+// The argument projection lives in the safety domain so the worker tool seam
+// scrubs by the same rules; re-exported here because this renderer is where
+// callers and tests have always reached for it.
+export { classifyResourceRead, redactToolArgs };
 
 const theme = clioTheme();
 const dim = (text: string): string => theme.fg("dim", text);
@@ -125,52 +129,6 @@ function truncate(value: string, limit: number): string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-const SECRET_KEY_RE =
-	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
-const ENV_KEY_RE = /^env(?:ironment)?$/iu;
-const SECRET_STRING_RE = /(https?:\/\/[^\s/@]+:)[^\s/@]+@/giu;
-const SECRET_URL_PARAM_RE =
-	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)[^&#\s]+/giu;
-const SECRET_ASSIGNMENT_RE =
-	/(?<![A-Z0-9_])((?:[A-Z0-9_]*(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS(?:WORD)?|PRIVATE|SECRET|TOKEN)[A-Z0-9_]*)=)[^\s;&|]+/giu;
-const SECRET_FLAG_RE =
-	/(--?(?:[a-z0-9-]*(?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[a-z0-9-]*))(=|\s+)([^\s;&|]+)/giu;
-
-function redactSecretString(value: string): string {
-	return value
-		.replace(SECRET_STRING_RE, "$1[redacted]@")
-		.replace(SECRET_URL_PARAM_RE, "$1[redacted]")
-		.replace(SECRET_ASSIGNMENT_RE, "$1[redacted]")
-		.replace(SECRET_FLAG_RE, "$1$2[redacted]");
-}
-
-function redactEnvironmentValue(value: unknown, depth: number): unknown {
-	if (depth > 8) return "[redacted nested values]";
-	if (typeof value === "string") return "[redacted]";
-	if (Array.isArray(value)) return value.map((item) => redactEnvironmentValue(item, depth + 1));
-	if (!isPlainObject(value)) return value;
-	const out: Record<string, unknown> = {};
-	for (const [childKey, childValue] of Object.entries(value)) {
-		out[childKey] = redactEnvironmentValue(childValue, depth + 1);
-	}
-	return out;
-}
-
-/** Project tool arguments for display only; execution and receipts retain the original values. */
-export function redactToolArgs(value: unknown, key = "", depth = 0): unknown {
-	if (SECRET_KEY_RE.test(key)) return "[redacted]";
-	if (ENV_KEY_RE.test(key)) return redactEnvironmentValue(value, depth);
-	if (typeof value === "string") return redactSecretString(value);
-	if (depth > 8) return "[redacted nested values]";
-	if (Array.isArray(value)) return value.map((item) => redactToolArgs(item, key, depth + 1));
-	if (!isPlainObject(value)) return value;
-	const out: Record<string, unknown> = {};
-	for (const [childKey, childValue] of Object.entries(value)) {
-		out[childKey] = redactToolArgs(childValue, childKey, depth + 1);
-	}
-	return out;
 }
 
 function readStringField(args: unknown, key: string): string | null {
