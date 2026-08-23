@@ -4,6 +4,7 @@ import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
+import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
 import { DEFAULT_DAMAGE_CONTROL_PATH_POLICY, mergePathPolicyInputs } from "./default-path-policy.js";
@@ -225,7 +226,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const rawClassification = classify(call);
 			const command = commandArg(call.args);
 			const callCwd = cwdArg(call.args, cwd);
-			const scan = damageControlScan(call);
+			const catalogCheck = resolveVerifyCatalogCheck(call, cwd);
+			const catalogCommand = catalogCheck === null ? null : catalogCheck.command.join(" ");
+			const scan = catalogCommand ?? damageControlScan(call);
 			const hit = scan ? matchSourcedRule(scan, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
@@ -335,8 +338,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// command; the one carve-out is the exit-code-only presence check
 			// (`grep -q`/`grep -sq` with a ^NAME= pattern), which is the safe
 			// protocol the credentials skill teaches.
-			if (call.tool === ToolNames.Bash && command !== null) {
-				const secretRead = evaluateBashZeroAccessRead(zeroAccessPolicy, command, callCwd);
+			const scannedCommand = call.tool === ToolNames.Bash ? command : catalogCommand;
+			if (scannedCommand !== null) {
+				const secretRead = evaluateBashZeroAccessRead(zeroAccessPolicy, scannedCommand, callCwd);
 				if (secretRead !== null) {
 					const blockInput: Omit<
 						SafetyPolicyDecision,
@@ -407,9 +411,22 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
 			if (hit?.match !== undefined) allowInput.match = hit.match;
-			// The typed execution tool (verify) is bounded by its own check
-			// allowlist, so it sits in the no-prompt set.
-			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
+			// The typed execution tool (verify) sits in the no-prompt set when the
+			// check is a package script or the frontend validator: both are bounded
+			// by the verification-script family and run a fixed argv shape. A
+			// project-catalog check runs whatever argv the workspace file declares,
+			// so it is unrecognized: auto-edit parks it for one confirmation that
+			// shows the argv, full-auto runs it, and the damage-control match and
+			// zero-access scan above have already seen the declared vector.
+			if (classification.actionClass === "execute") {
+				allowInput.execRecognition = catalogCheck === null ? "recognized" : "unrecognized";
+				if (catalogCheck !== null) {
+					allowInput.reasons = [
+						...allowInput.reasons,
+						`project verifier '${catalogCheck.id}' runs declared argv: ${catalogCommand ?? ""}`,
+					];
+				}
+			}
 			return allowDecision(base, allowInput);
 		},
 		metadata() {
@@ -956,6 +973,31 @@ function damageControlScan(call: ClassifierCall): string {
 	if (!CONTENT_BEARING_TOOLS.has(call.tool)) return serializeArgs(call.args);
 	const pathArg = call.args?.path;
 	return typeof pathArg === "string" ? pathArg : "";
+}
+
+/**
+ * The project-catalog check a verify call resolves to, or null for a listing,
+ * the frontend validator, a package script, or an id the catalog does not
+ * declare. The catalog is an argv vector the operator authored, but the file
+ * sits in the workspace, so the engine reads it fresh on every verify call and
+ * treats the declared argv exactly like a bash command string: it is what the
+ * damage-control rules and the zero-access read guard scan, and it is not in
+ * the no-prompt set. An unreadable or invalid catalog resolves to null here and
+ * fails closed in the tool itself.
+ */
+function resolveVerifyCatalogCheck(call: ClassifierCall, workspaceRoot: string): DeclaredCheck | null {
+	if (call.tool !== ToolNames.Verify) return null;
+	const check = call.args?.check;
+	if (typeof check !== "string") return null;
+	const id = check.trim();
+	if (id.length === 0 || id === "frontend") return null;
+	try {
+		const catalog = loadProjectVerifierCatalog(workspaceRoot);
+		if (!catalog.ok || catalog.source === null) return null;
+		return catalog.source.checks.find((candidate) => candidate.id === id) ?? null;
+	} catch {
+		return null;
+	}
 }
 
 function serializeArgs(args?: Record<string, unknown>): string {
