@@ -22,6 +22,7 @@ import { type SkillActivation, skillActivationFromToolDetails } from "../core/sk
 import type { ToolName } from "../core/tool-names.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
+import { type CallActionDescriptor, describeCallAction } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { validateEngineToolArguments } from "../engine/ai.js";
@@ -53,6 +54,14 @@ export interface ToolStartEvent {
 	 * event is measured on that process's monotonic clock instead.
 	 */
 	startedAt: number;
+	/**
+	 * What this call is doing, as a bounded redacted descriptor composed here
+	 * where the arguments are trusted. This is the only account of a worker's
+	 * arguments that may cross the NDJSON stdout seam; the arguments themselves
+	 * never do, so an operator surface reads a verb and an object it can show,
+	 * never an argument object it would have to sanitize itself.
+	 */
+	action?: CallActionDescriptor;
 }
 
 export interface ToolFinishEvent {
@@ -130,7 +139,16 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	// spans the call, so `durationMs` survives a clock correction mid-tool.
 	const startedAt = Date.now();
 	const startedAtClock = performance.now();
-	telemetry?.onStart?.({ tool: spec.name, posture: "operating", startedAt });
+	// The one seam that holds validated arguments and publishes telemetry, so it
+	// is where the redacted descriptor is composed. Everything downstream of here
+	// sees the descriptor and never the arguments.
+	const action = describeCallAction(spec.name, args);
+	telemetry?.onStart?.({
+		tool: spec.name,
+		posture: "operating",
+		startedAt,
+		...(action !== null ? { action } : {}),
+	});
 	// Stamped onto every finish event so a consumer can join this authoritative
 	// outcome to the engine's `tool_execution_end` for the same call.
 	const callId = input.invokeOptions?.toolCallId;

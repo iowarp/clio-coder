@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { AgentEvent, AgentMessage } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import type { AcpPromptResponse, AcpSessionUpdateParams, AcpToolCallUpdate } from "./types.js";
@@ -111,12 +112,16 @@ export class AcpEventMapper {
 			// keeps the monotonic twin, which is what the duration below spans.
 			const startedAt = Date.now();
 			this.toolStarts.set(toolCallId, performance.now());
+			// A peer's `rawInput` is its own argument object and never reaches an
+			// operator surface. The descriptor composed from it here does.
+			const action = describeCallAction(update.kind ?? title, update.rawInput);
 			out.push({
 				type: "clio_tool_start",
 				payload: {
 					tool: update.kind ?? title,
 					posture: "operating",
 					startedAt,
+					...(action !== null ? { action } : {}),
 				},
 			});
 			out.push({

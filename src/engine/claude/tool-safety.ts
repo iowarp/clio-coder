@@ -8,6 +8,7 @@ import {
 	DEFAULT_AUTONOMY_LEVEL,
 	mapAutonomy,
 } from "../../domains/safety/autonomy.js";
+import { describeCallAction } from "../../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
@@ -350,10 +351,14 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	const startedAt = Date.now();
 	const startedAtClock = performance.now();
 	const decision = evaluateClaudeToolPermission(input);
+	// Mapped args are this side's own translation of the subprocess call, so the
+	// descriptor is composed from them here rather than downstream of the seam.
+	const action = describeCallAction(decision.mapped.clioToolName, decision.mapped.args);
 	const start: ToolStartEvent = {
 		tool: decision.mapped.clioToolName,
 		posture: "operating",
 		startedAt,
+		...(action !== null ? { action } : {}),
 	};
 	input.emit({ type: "clio_tool_start", payload: start });
 	if (decision.kind === "allow") {
