@@ -39,6 +39,7 @@ import {
 	createPermissionOverlayBody,
 	describeCallTarget,
 	permissionDecisionPresentation,
+	permissionOverlayLines,
 	sanitizeCallTargetText,
 } from "../../src/interactive/permission-overlay.js";
 import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
@@ -768,13 +769,19 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		ok(body.includes("2. agent=reviewer model=model-b node=blade-b"), body);
 	});
 
-	it("permission overlay derives the call target from args and never renders the blocked wording", () => {
-		strictEqual(describeCallTarget({ command: "rm -rf build" }), "rm -rf build");
-		strictEqual(describeCallTarget({ path: "/tmp/probe.txt", content: "hello" }), "/tmp/probe.txt");
-		strictEqual(describeCallTarget({ name: ".env", source: "file" }), ".env");
-		strictEqual(describeCallTarget(undefined), "");
-		strictEqual(describeCallTarget({}), "");
-		strictEqual(describeCallTarget({ count: 3 }), '{"count":3}');
+	it("permission overlay derives allowlisted call targets and never renders the blocked wording", () => {
+		strictEqual(describeCallTarget("bash", { command: "rm -rf build" }), "rm -rf build");
+		strictEqual(
+			describeCallTarget("write", { path: "/tmp/probe.txt", content: "hello" }),
+			"/tmp/probe.txt · content=<string 5 bytes>",
+		);
+		strictEqual(
+			describeCallTarget("credential_present", { name: "OPENAI_API_KEY", source: "file" }),
+			"OPENAI_API_KEY · source=file",
+		);
+		strictEqual(describeCallTarget("read", undefined), "");
+		strictEqual(describeCallTarget("read", {}), "");
+		strictEqual(describeCallTarget("unknown_tool", { count: 3 }), "count=<number 1 value>");
 
 		const view: ApprovalRequestView = {
 			requestId: "perm-target",
@@ -783,16 +790,78 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			axis: { kind: "net", ruleId: "system-modify-confirm" },
 			origin: { kind: "main" },
 			reason: "write blocked: system_modify",
-			target: describeCallTarget({ path: "/tmp/perm-probe-test.txt", content: "hello" }),
+			target: describeCallTarget("write", { path: "/tmp/perm-probe-test.txt", content: "hello" }),
 		};
 		strictEqual(
-			describeCallTarget({ command: "echo \u001b[31mspoof\u001b[0m \u0007 done" }),
+			describeCallTarget("bash", { command: "echo \u001b[31mspoof\u001b[0m \u0007 done" }),
 			"echo spoof done",
 			"escape sequences and control bytes never reach the approval overlay",
 		);
 		const body = createPermissionOverlayBody(view).render(80).join("\n");
 		ok(body.includes("Target: /tmp/perm-probe-test.txt"), body);
 		ok(!body.includes("blocked: system_modify"), `the ask overlay must not echo blocked wording: ${body}`);
+	});
+
+	it("permission overlay names common calls without rendering an unlisted secret value", () => {
+		const cases = [
+			{
+				tool: "bash",
+				args: { command: "npm run typecheck", cwd: "packages/core" },
+				target: "npm run typecheck · cwd=packages/core",
+			},
+			{
+				tool: "edit",
+				args: { path: "src/app.ts", edits: [{ oldText: "before", newText: "after" }] },
+				target: "src/app.ts · edits=<array 1 item>",
+			},
+			{
+				tool: "verify",
+				args: { check: "test:file", path: "tests/contracts/autonomy.test.ts" },
+				target: "test:file · path=tests/contracts/autonomy.test.ts",
+			},
+			{
+				tool: "web_fetch",
+				args: { url: "https://example.com/status", method: "POST", body: "{}" },
+				target: "https://example.com/status · method=POST · body=<string 2 bytes>",
+			},
+		] as const;
+		for (const fixture of cases) {
+			const rendered = permissionOverlayLines(
+				{
+					requestId: `perm-${fixture.tool}`,
+					tool: fixture.tool,
+					actionClass: fixture.tool === "edit" ? "write" : "execute",
+					axis: { kind: "autonomy", level: "suggest" },
+					origin: { kind: "main" },
+					reason: "approval required",
+					target: describeCallTarget(fixture.tool, fixture.args),
+				},
+				160,
+			).join("\n");
+			ok(rendered.includes(`Target: ${fixture.target}`), rendered);
+		}
+
+		const secret = "sk-live-never-render-this-value";
+		const target = describeCallTarget("write", {
+			path: "notes/operator.md",
+			content: "safe body",
+			vendor_payload: secret,
+		});
+		strictEqual(target, "notes/operator.md · content=<string 9 bytes> · vendor_payload=<string 31 bytes>");
+		const frame = permissionOverlayLines(
+			{
+				requestId: "perm-secret-fixture",
+				tool: "write",
+				actionClass: "write",
+				axis: { kind: "autonomy", level: "suggest" },
+				origin: { kind: "main" },
+				reason: "approval required",
+				target,
+			},
+			160,
+		).join("\n");
+		ok(frame.includes("vendor_payload=<string 31 bytes>"), frame);
+		ok(!frame.includes(secret), frame);
 	});
 
 	it("worker escalation views render the payload's target and re-sanitize it at the trust boundary", () => {

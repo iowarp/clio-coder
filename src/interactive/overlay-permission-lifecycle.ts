@@ -124,7 +124,7 @@ function mainApprovalRequestView(
 		(axisFromDecision.kind === "net"
 			? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 			: { kind: "autonomy" as const, level: autonomy });
-	const target = describeCallTarget(call.args);
+	const target = describeCallTarget(call.tool, call.args);
 	return {
 		requestId: meta?.requestId ?? "permission-pending",
 		tool: call.tool,

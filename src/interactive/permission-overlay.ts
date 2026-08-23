@@ -26,12 +26,12 @@ export interface ApprovalRequestView {
 	/** Typed, sanitized multi-line artifact that this one approval authorizes. */
 	artifact?: { kind: "dispatch-plan"; text: string };
 	/**
-	 * One-line preview of the call's object: the command for bash, the path
-	 * for file tools, else a compact args preview. The operator is deciding
-	 * whether to allow this exact call, so the overlay must show what the
-	 * call will touch, not just the tool name. Main-agent asks derive it from
-	 * the parked call's args; worker escalations carry it in the escalation
-	 * payload. Absent only when nothing meaningful is derivable.
+	 * One-line preview of the call's allowlisted object fields. The operator is
+	 * deciding whether to allow this exact call, so the overlay must show what
+	 * the call will touch, not just the tool name. Unlisted fields appear only as
+	 * type-and-size summaries. Main-agent asks derive it from the parked call's
+	 * args; worker escalations carry it in the escalation payload. Absent only
+	 * when nothing meaningful is derivable.
 	 */
 	target?: string;
 	queueDepth?: number;
