@@ -133,6 +133,16 @@ export interface WorkerProcessOptions {
 	approvedIdentity?: ApprovedWorkerIdentity;
 	/** How long bulk output may precede the announce before the peer is refused. */
 	attestationGraceMs?: number;
+	/**
+	 * Clock behind the heartbeat stamp, defaulting to `Date.now`. The stamp stays
+	 * a wall-clock instant in production because the ledger, the receipt, and the
+	 * evidence record all serialize it as ISO-8601 for an operator to read. That
+	 * leaves a test with no honest way to assert the stamp advanced: comparing
+	 * two wall-clock reads taken either side of an interval orders them backward
+	 * on any host that resyncs its clock in between. A test injects the steppable
+	 * clock from tests/harness/clock.ts here and asserts on that instead.
+	 */
+	now?: () => number;
 }
 
 /**
@@ -181,6 +191,7 @@ export function spawnWorkerProcess(
 ): SpawnedWorker {
 	const shutdownGraceMs = opts?.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
 	const attestationGraceMs = opts?.attestationGraceMs ?? DEFAULT_ATTESTATION_GRACE_MS;
+	const now = opts?.now ?? Date.now;
 	const approved = opts?.approvedIdentity ?? approvedIdentityForSpec(spec);
 
 	const child: ChildProcess = spawn(command, [...args], {
@@ -193,7 +204,7 @@ export function spawnWorkerProcess(
 	});
 	const pid = child.pid ?? null;
 
-	const heartbeatAt = { current: Date.now() };
+	const heartbeatAt = { current: now() };
 
 	const queue = createBoundedEventQueue();
 	const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
@@ -222,7 +233,7 @@ export function spawnWorkerProcess(
 	}
 
 	function push(value: unknown): void {
-		heartbeatAt.current = Date.now();
+		heartbeatAt.current = now();
 		const w = waiters.shift();
 		if (w) {
 			w({ value, done: false });
@@ -367,7 +378,7 @@ export function spawnWorkerProcess(
 			if (!announceAccepted) failAttestation(`Invalid worker attestation: ${frame.reason}`);
 			return;
 		}
-		heartbeatAt.current = Date.now();
+		heartbeatAt.current = now();
 		if (frame.value.kind === "announce") {
 			if (announceAccepted || announceFailed) return;
 			const verdict = verifyWorkerAttestation(frame.value.attestation, approved);

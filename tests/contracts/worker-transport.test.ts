@@ -44,6 +44,7 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
+import { createTestClock } from "../harness/clock.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { type FakeSsh, installFakeSsh } from "../harness/fake-ssh.js";
 import { fixtureSettingsFingerprint } from "../harness/worker-attestation.js";
@@ -206,13 +207,29 @@ describe("ssh worker transport channel contract", () => {
 	}
 
 	it("spawns, writes the spec, streams events, and filters the announce", async () => {
-		const worker = transport("ok").spawn(TEST_SPEC, { cwd: "/shared/projects/app" });
-		const before = Date.now();
+		// The heartbeat stamp is a wall-clock instant, so asserting it advanced by
+		// reading the wall clock either side of the drain asks the host not to
+		// resync in between. It does resync, and the later stamp then reads as
+		// older than the earlier read even though every delivery path stamped.
+		// The injected clock is stepped instead, at the one point that separates
+		// the two stamping paths: the announce stamps the heartbeat before this
+		// callback runs, so a stamp at or past `afterAnnounce` can only have been
+		// taken by an event crossing the bulk lane.
+		const clock = createTestClock();
+		let afterAnnounce = 0;
+		const worker = transport("ok").spawn(TEST_SPEC, {
+			cwd: "/shared/projects/app",
+			now: clock.now,
+			onAnnounce: () => {
+				afterAnnounce = clock.advance(1_000);
+			},
+		});
 		const events = await drain(worker.events);
 		const result = await worker.promise;
 		strictEqual(result.exitCode, 0);
 		deepStrictEqual(eventTypes(events), ["message_end"]);
-		ok(worker.heartbeatAt.current >= before, "events bump the heartbeat");
+		ok(afterAnnounce > 0, "the peer announced, so the heartbeat check is not vacuous");
+		ok(worker.heartbeatAt.current >= afterAnnounce, "events bump the heartbeat");
 		const argvLines = readFileSync(fake.argvLog, "utf8").trim().split("\n");
 		const argv = JSON.parse(argvLines[argvLines.length - 1] ?? "[]") as string[];
 		ok(argv.includes("-T"));
