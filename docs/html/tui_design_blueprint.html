@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TUI Design System Blueprint (v0.3.4)</title>
+  <title>TUI Design System Blueprint (v0.3.5)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Terminal custom styles */
@@ -69,7 +69,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.4</span>
+        <span class="version-badge">Clio Coder v0.3.5</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -353,7 +353,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder TUI Blueprint &bull; Version 0.3.4 &bull; Gnosis Research Center</p>
+      <p>Clio Coder TUI Blueprint &bull; Version 0.3.5 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -387,9 +387,9 @@
 
       if (state === 'launchpad') {
         html += `
-          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.4</span></div>
+          <div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.5</span></div>
           <div style="margin-bottom:0.75rem;">
-            <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.3.4</span></div>
+            <div>&nbsp;&nbsp;<span class="tui-accent-deep">WORKSPACE</span>&nbsp;&nbsp;<span class="tui-muted">clio-coder &middot; git v0.3.5</span></div>
             <div>&nbsp;&nbsp;<span class="tui-accent-deep">ROUTE</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">local-lmstudio/qwen &middot; ready</span></div>
             <div>&nbsp;&nbsp;<span class="tui-accent-deep">NEXT</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tui-success">ctx ready &middot; type a task</span></div>
           </div>
@@ -397,12 +397,12 @@
             Ask Clio&hellip; &nbsp;/ for commands
           </div>
           <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
-            clio-coder &middot; git v0.3.4<br>
+            clio-coder &middot; git v0.3.5<br>
             <span class="tui-dim">ctx 8k/128k &middot; turn &middot; in 0 &middot; out 0</span>
           </div>
         `;
       } else {
-        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.4 &middot; clio-coder &middot; git v0.3.4 &middot; local-lmstudio/qwen &middot; ready &middot; ctx ready</span></div>`;
+        html += `<div class="terminal-header"><span>&gt;C_ Clio Coder v0.3.5 &middot; clio-coder &middot; git v0.3.5 &middot; local-lmstudio/qwen &middot; ready &middot; ctx ready</span></div>`;
         html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
 
         if (state === 'thinking') {
@@ -463,7 +463,7 @@
 
         html += `
           <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #1f354f; font-size:0.75rem; color:#8a99a4;">
-            clio-coder &middot; git v0.3.4<br>
+            clio-coder &middot; git v0.3.5<br>
             <span class="tui-dim">ctx 14k/128k &middot; turn &middot; in 1.4k &middot; out 420</span>
           </div>
         `;

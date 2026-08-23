@@ -1,6 +1,6 @@
 # Agent Client Protocol (ACP) Server
 
-This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.3.4`.
+This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.3.5`.
 
 Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 
