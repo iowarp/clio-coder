@@ -989,6 +989,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			context.resetForSession();
+			// The resumed ledger renders before the first new turn (issue #189),
+			// and the window it renders against should be the probed one rather
+			// than the catalog's, so the live capability probe the first submit
+			// would run runs now, under the same TTL; the footer refreshes on the
+			// provider-health event the probe publishes.
+			void turnRuntime.ensureLiveCapabilitiesForSelectedModel().catch(() => {});
 			state.replayedContextMessages = replayMessages ? [...replayMessages] : [];
 			if (state.runtime) {
 				state.runtime.agent.state.messages = [...state.replayedContextMessages];
