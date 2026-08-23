@@ -56,7 +56,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
 | `clio-coder evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
 | `clio-coder eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
-| `clio-coder memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
+| `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio-coder trace runs [--db PATH] [--limit N] [--json]` | List runs recorded in the durable trace mirror beside the ledger. |
 | `clio-coder trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
 | `clio-coder trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
@@ -158,7 +158,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
-| `/memory` | `/memory seed` | Inspect task memory or seed it from the newest handoff |
+| `/memory` | `/memory seed` | Inspect, promote, or seed task memory |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
 | `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
