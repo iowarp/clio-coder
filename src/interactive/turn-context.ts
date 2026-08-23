@@ -23,7 +23,12 @@ import { selectVisibleEntries } from "../domains/context/working-set/visible.js"
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
-import type { ProvidersContract } from "../domains/providers/index.js";
+import {
+	type ContextWindowDetails,
+	type ContextWindowSource,
+	type ProvidersContract,
+	resolveRuntimeTarget,
+} from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
 import {
 	AutoCompactionTrigger,
@@ -307,6 +312,75 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (landed) return 0;
 		}
 		return ceilChars(snapshot.pendingUserInput.length);
+	};
+
+	/**
+	 * The window the next turn will resolve to, read the way ensureRuntime
+	 * reads it but without building an agent. Before the first turn of a
+	 * process, /resume included, state.runtime is null, and the ledger and the
+	 * footer meter said `context window unknown · 0 tokens` until a turn ran
+	 * (issue #189). Null when no target is configured or it does not resolve,
+	 * and the overlay's "unknown" is then true.
+	 */
+	const resolveWindowWithoutRuntime = (): ContextWindowDetails | null => {
+		const settings = deps.getSettings();
+		const targetId = settings.orchestrator?.target?.trim();
+		const wireModelId = settings.orchestrator?.model?.trim();
+		if (!targetId || !wireModelId) return null;
+		const resolved = resolveRuntimeTarget(deps.providers, {
+			targetId,
+			wireModelId,
+			requestedThinkingLevel: settings.orchestrator?.thinkingLevel ?? "off",
+			use: "orchestrator",
+			requireTools: false,
+			requireOutputBudget: true,
+		});
+		return resolved.ok ? resolved.target.contextWindowDetails : null;
+	};
+
+	const CONTEXT_WINDOW_SOURCES: ReadonlySet<string> = new Set<ContextWindowSource>([
+		"catalog",
+		"probe",
+		"loaded",
+		"target-override",
+		"model-hint",
+		"descriptor-default",
+		"unknown",
+	]);
+
+	/** The snapshot stores its source as a plain string; only a known label is worth repeating. */
+	const snapshotWindowSource = (snapshot: ContextSnapshot): ContextWindowSource | null =>
+		CONTEXT_WINDOW_SOURCES.has(snapshot.contextWindowSource)
+			? (snapshot.contextWindowSource as ContextWindowSource)
+			: null;
+
+	/**
+	 * Window facts while no runtime exists: the live resolution first, then the
+	 * resumed snapshot's recorded window, which is what the previous process
+	 * measured the same messages against.
+	 */
+	const windowWithoutRuntime = (): {
+		contextWindow: number;
+		contextWindowSource: ContextWindowSource | null;
+		contextWindowSlots: ContextWindowDetails["contextWindowSlots"];
+	} => {
+		const details = resolveWindowWithoutRuntime();
+		if (details) {
+			return {
+				contextWindow: details.effectiveContextWindow,
+				contextWindowSource: details.contextWindowSource,
+				contextWindowSlots: details.contextWindowSlots,
+			};
+		}
+		const snapshot = currentContextSnapshot;
+		if (snapshot && snapshot.effectiveContextWindow > 0) {
+			return {
+				contextWindow: snapshot.effectiveContextWindow,
+				contextWindowSource: snapshotWindowSource(snapshot),
+				contextWindowSlots: null,
+			};
+		}
+		return { contextWindow: 0, contextWindowSource: null, contextWindowSlots: null };
 	};
 
 	const liveContextEstimate = (agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate => {
@@ -846,8 +920,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		contextUsage(): ContextUsageSnapshot {
-			if (!state.runtime) return contextUsageSnapshot(null, 0);
-			const effectiveWindow = state.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+			const effectiveWindow = state.runtime
+				? state.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow
+				: windowWithoutRuntime().contextWindow;
 			if (!currentContextSnapshot) {
 				return contextUsageSnapshot(null, effectiveWindow);
 			}
@@ -867,29 +942,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const settings = deps.getSettings();
 			const compactionThreshold = settings.compaction?.threshold ?? null;
 			const compactionAuto = settings.compaction?.auto !== false;
-			if (!state.runtime) {
-				return buildContextLedger({
-					provider: settings.orchestrator?.target ?? null,
-					model: settings.orchestrator?.model ?? null,
-					contextWindow: 0,
-					compactionThreshold,
-					compactionAuto,
-				});
-			}
-			const windowDetails = state.runtime.runtimeResolution.contextWindowDetails;
-			const effectiveWindow = windowDetails.effectiveContextWindow;
-
-			const provider = state.runtime.targetId ?? settings.orchestrator?.target ?? null;
-			const model = state.runtime.wireModelId ?? settings.orchestrator?.model ?? null;
+			// Without a runtime (before the first turn of this process, /resume
+			// included) the window comes from the live resolution or the resumed
+			// snapshot, and the token facts from the snapshot: the resumed
+			// messages are the ones it measured.
+			const window = state.runtime
+				? {
+						contextWindow: state.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+						contextWindowSource: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSource,
+						contextWindowSlots: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSlots,
+					}
+				: windowWithoutRuntime();
+			const provider = state.runtime?.targetId ?? settings.orchestrator?.target ?? null;
+			const model = state.runtime?.wireModelId ?? settings.orchestrator?.model ?? null;
+			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
 
 			if (!currentContextSnapshot) {
 				return buildContextLedger({
 					provider,
 					model,
-					contextWindow: effectiveWindow,
-					contextWindowSource: windowDetails.contextWindowSource,
-					contextWindowSlots: windowDetails.contextWindowSlots,
-					toolCount: state.runtime.agent.state.tools.length,
+					...window,
+					toolCount: liveToolCount,
 					compactionThreshold,
 					compactionAuto,
 					promptCache: lastPromptCache,
@@ -904,16 +977,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return buildContextLedger({
 				provider,
 				model,
-				contextWindow: effectiveWindow,
-				contextWindowSource: windowDetails.contextWindowSource,
-				contextWindowSlots: windowDetails.contextWindowSlots,
+				...window,
 				compactionThreshold,
 				compactionAuto,
 				systemPromptTokens: currentContextSnapshot.categories.system,
 				toolSchemaTokens: currentContextSnapshot.categories.tools,
 				// Persisted snapshots strip the captured schemas; fall back to
 				// the live agent state after a session resume.
-				toolCount: currentContextSnapshot.activeToolSchemas?.length ?? state.runtime.agent.state.tools.length,
+				toolCount: currentContextSnapshot.activeToolSchemas?.length ?? liveToolCount,
 				messageTokens: currentContextSnapshot.categories.messages,
 				agentsTokens: currentContextSnapshot.categories.agents,
 				skillsTokens: currentContextSnapshot.categories.skills,
