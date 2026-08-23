@@ -231,6 +231,21 @@ describe("worker progress settlement and attempts", () => {
 		ok(snapshot.tailText.includes("first attempt output"));
 		ok(fold.observe(textDelta(" plus the retry")));
 	});
+
+	it("never settles a retry on the answer the previous attempt sealed", () => {
+		const fold = createWorkerProgressFold();
+		fold.observe(messageEnd("the first attempt's answer"));
+		fold.settle();
+		fold.restart();
+		strictEqual(fold.durableText(), "");
+		// The tail is history the operator is already reading and carries over; the
+		// previous attempt's durable answer does not, so a retry that produces
+		// nothing durable settles on its own tail rather than on attempt one's.
+		fold.observe(textDelta("\nthe retry got this far"));
+		fold.settle();
+		const tail = fold.snapshot().tailText;
+		ok(tail.endsWith("the retry got this far"), tail);
+	});
 });
 
 describe("worker progress redraw discipline", () => {
