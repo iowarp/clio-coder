@@ -549,6 +549,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice,
 		toolStartTimes,
 	});
+	// A fresh ledger and footer render before the first submit. Start the same
+	// live capability probe that submit and resume use so those boot surfaces
+	// refresh to the probed model window as soon as provider discovery lands.
+	// The turn runtime's target and model TTL keeps the first submit from
+	// repeating the request.
+	void turnRuntime.ensureLiveCapabilitiesForSelectedModel().catch(() => {});
 
 	// --- bus subscriptions --------------------------------------------------
 

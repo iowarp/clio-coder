@@ -236,6 +236,47 @@ function isAssistantMessageEntry(entry: SessionEntry): entry is Extract<SessionE
 }
 
 describe("contracts/chat-loop compaction and terminal notices", () => {
+	it("probes the selected live model at boot before the first submit", async () => {
+		const configured = settings();
+		const targetProviders = providers("local-native");
+		const status = targetProviders.list()[0];
+		ok(status);
+		if (status.target.capabilities) delete status.target.capabilities.contextWindow;
+		let probeCalls = 0;
+		let probeLanded: (() => void) | null = null;
+		const landed = new Promise<void>((resolve) => {
+			probeLanded = resolve;
+		});
+		targetProviders.probeTarget = async () => {
+			probeCalls += 1;
+			status.capabilities = { ...status.capabilities, contextWindow: 196_608 };
+			status.probeCapabilities = { contextWindow: 196_608 };
+			status.probeModelId = "model";
+			status.discoveredModelStates = {
+				model: { state: "loaded", contextSlots: { totalContextSize: 786_432, slots: 4 } },
+			};
+			probeLanded?.();
+			return status;
+		};
+
+		const loop = createChatLoop({
+			getSettings: () => configured,
+			providers: targetProviders,
+			knownTargets: () => new Set(["test-target"]),
+			createAgent: createFakeAgentFactory(async () => {
+				throw new Error("no turn should run in a boot probe contract");
+			}),
+		} as never);
+		await landed;
+
+		strictEqual(probeCalls, 1, "boot starts one live target probe");
+		const ledger = loop.contextLedger();
+		strictEqual(ledger.contextWindow, 196_608);
+		strictEqual(ledger.contextWindowSource, "probe");
+		deepStrictEqual(ledger.contextWindowSlots, { totalContextSize: 786_432, slots: 4 });
+		loop.dispose();
+	});
+
 	it("emits an out-of-run notice as a typed notice event without fabricating agent_end", async () => {
 		const events: ChatLoopEvent[] = [];
 		const unconfigured = settings();
