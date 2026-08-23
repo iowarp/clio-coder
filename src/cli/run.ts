@@ -30,6 +30,7 @@ import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
+import { receiptServedModelLabel } from "../tools/worker-evidence.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
@@ -488,7 +489,8 @@ function formatReceipt(r: RunReceipt): string {
 	const reasoning =
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.targetId} model=${r.wireModelId} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
+	const served = receiptServedModelLabel(r);
+	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.targetId} model=${r.wireModelId}${served ? ` ${served}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {

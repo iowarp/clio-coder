@@ -497,7 +497,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	}
 	if (usageRows.length > 0) {
 		out("");
-		out("  tokens by model (from session ledgers, provider-reported; served id when it differed from the request)");
+		out("  tokens by model (from session ledgers, provider-reported; served id when present, unknown when omitted)");
 		process.stdout.write(
 			indent(
 				formatColumns([
@@ -505,7 +505,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					...usageRows.map((row) => [
 						row.providerId,
 						row.modelId,
-						requestedModelsLabel(row.modelId, row.requestedModels, row.servedCalls),
+						requestedModelsLabel(row.modelId, row.requestedModels),
 						String(row.totals.apiCalls),
 						String(row.totals.input),
 						String(row.totals.output),
@@ -615,8 +615,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
  * `same` when every call asked for the id that served it, otherwise the ids
  * that were asked for, so a peer-served row reads as what it is.
  */
-function requestedModelsLabel(servedModelId: string, requested: ReadonlySet<string>, servedCalls: number): string {
-	if (servedCalls === 0 && requested.size === 1 && requested.has(servedModelId)) return "same";
+function requestedModelsLabel(servedModelId: string, requested: ReadonlySet<string>): string {
+	if (requested.size === 1 && requested.has(servedModelId)) return "same";
 	return [...requested].sort().join(",");
 }
 

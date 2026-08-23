@@ -459,7 +459,7 @@ export function assistantSessionPayload(
 	const raw = message as unknown as Record<string, unknown>;
 	if (Array.isArray(raw.content)) payload.content = raw.content;
 	if (thinking.length > 0) payload.thinking = thinking;
-	for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId", "diagnostics"]) {
+	for (const key of ["usage", "api", "provider", "model", "servedModel", "responseModel", "responseId", "diagnostics"]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}
 	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {

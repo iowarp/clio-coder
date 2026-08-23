@@ -574,7 +574,7 @@ describe("contracts/usage-report token and cost facts", () => {
 	it("prints the totals and the per-model table in the text report", () => {
 		ok(stdout.includes("tokens in window: 10437 over 2 model calls"), stdout);
 		ok(stdout.includes("provider-reported cost in window: $0.3000"), stdout);
-		ok(stdout.includes("tokens by model (from session ledgers, provider-reported; served id when it differed"), stdout);
+		ok(stdout.includes("tokens by model (from session ledgers, provider-reported; served id when present"), stdout);
 		ok(stdout.includes("requested"), "the table names what was asked for beside what answered (#185)");
 		ok(stdout.includes("dynamo"), stdout);
 	});
