@@ -568,7 +568,11 @@ describe("contracts/skills", () => {
 				// Footer anchor: exact reply shape after the entries, with a
 				// no-match guard so routine tasks stay suggestion-free.
 				ok(result.output.includes("Suggested skill: /skill <name>"));
-				ok(result.output.includes("wait for the operator to run it"));
+				// Inline and non-blocking (issue #184): the suggestion precedes the
+				// work, it never replaces it, and the operator is the only loader.
+				ok(result.output.includes("continue the task in the same turn without it"));
+				ok(result.output.includes("only the operator can run it"));
+				ok(!/\bwait\b/u.test(result.output), `the footer must not tell the model to wait: ${result.output}`);
 				ok(result.output.includes("If none match, do not mention skills."));
 			}
 		});
@@ -943,8 +947,9 @@ describe("contracts/skills", () => {
 				ok(denied.message.includes("only the operator can activate a skill"));
 				ok(denied.message.includes("do not retry this load"));
 				ok(denied.message.includes("Suggested skill: /skill <name>"));
-				ok(denied.message.includes("wait for the operator"));
-				ok(denied.message.includes("otherwise continue without skills"));
+				ok(denied.message.includes("continue the task without it; only the operator can run it"));
+				ok(!/\bwait\b/u.test(denied.message), `the denial must not tell the model to wait: ${denied.message}`);
+				ok(denied.message.includes("Otherwise continue without skills"));
 			}
 
 			// An empty pending policy behaves identically to an absent one.

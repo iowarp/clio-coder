@@ -104,7 +104,7 @@ describe("contracts/skills-reminder", () => {
 				ok(effect.message.includes("[Skills] 4 installed"));
 				ok(effect.message.includes('context(scope="skills")'));
 				ok(effect.message.includes(SKILL_SUGGESTION_ANCHOR));
-				ok(effect.message.includes("load only on operator request"));
+				ok(effect.message.includes("Only the operator loads a skill"));
 				ok(effect.message.includes("do not mention skills"));
 			}
 
@@ -194,6 +194,70 @@ describe("contracts/skills-reminder", () => {
 				ok(result.output.includes(SKILL_SUGGESTION_ANCHOR));
 			}
 			ok(skillsReminderMessage(1).includes(SKILL_SUGGESTION_ANCHOR));
+		});
+
+		/**
+		 * "and wait for the operator" cost a 27B model a 40-second first turn with
+		 * zero repository reads (issue #184): it read the wait as the task. The
+		 * suggestion is one inline line and the turn continues without the skill.
+		 */
+		it("never instructs the model to wait after suggesting", () => {
+			for (const message of [skillsReminderMessage(1), skillsReminderMessage(9, 30), skillsReminderMessage(0, 12)]) {
+				ok(!/\bwait(?:s|ing|ed)?\b/iu.test(message), `no wait instruction: ${message}`);
+				ok(message.includes("continue the task in the same turn"), message);
+				ok(message.includes("Only the operator loads a skill"), message);
+			}
+		});
+
+		it("requests a continuation when a turn ends on the suggestion with only the listing behind it", () => {
+			const registration = createSkillsReminderRegistration({ countModelVisibleSkills: () => 3 });
+			const turnEnd = (text: string, metadata: NonNullable<MiddlewareHookInput["metadata"]>): MiddlewareHookInput => ({
+				hook: "turn_end",
+				sessionId: "s-1",
+				text,
+				metadata,
+			});
+			const stalled = turnEnd(
+				[
+					"Suggested skill: /skill context-prime",
+					"",
+					"This skill primes the session with repository context before exploring.",
+					"Run /skill context-prime to load it. If you'd rather skip it, say so and I'll explore the tree directly.",
+				].join("\n"),
+				{ turnToolCalls: 2, turnToolNames: "context,context", stopReason: "stop" },
+			);
+			const effects = registration.evaluate(stalled);
+			strictEqual(effects.length, 1);
+			strictEqual(effects[0]?.kind, "request_continuation");
+			ok(
+				effects[0]?.kind === "request_continuation" &&
+					effects[0].message.includes("Continue the task now without the skill"),
+				JSON.stringify(effects),
+			);
+
+			// The same reply after real work is a finished turn with an offer attached.
+			const worked = turnEnd(stalled.text ?? "", {
+				turnToolCalls: 5,
+				turnToolNames: "context,read,read,grep,read",
+				stopReason: "stop",
+			});
+			strictEqual(registration.evaluate(worked).length, 0, "reads mean the task was attempted");
+
+			// A reply that never suggested a skill is the generic detector's business.
+			const plain = turnEnd("The bug is at src/statskit/core.py:26: the divisor is off by one.", {
+				turnToolCalls: 0,
+				turnToolNames: "",
+				stopReason: "stop",
+			});
+			strictEqual(registration.evaluate(plain).length, 0);
+
+			// An aborted or length-cut turn is not a wait.
+			strictEqual(
+				registration.evaluate(
+					turnEnd(stalled.text ?? "", { turnToolCalls: 2, turnToolNames: "context,context", stopReason: "length" }),
+				).length,
+				0,
+			);
 		});
 	});
 });

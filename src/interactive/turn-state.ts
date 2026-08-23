@@ -97,6 +97,8 @@ export interface ChatTurnState {
 	toolProseAssessedChars: number;
 	/** Tool calls observed in the current turn; feeds turn_end metadata. */
 	turnToolCalls: number;
+	/** Names of those calls, in order, so turn_end can tell a listing-only turn from a working one. */
+	turnToolNames: string[];
 	/** A `[worker result]` note the operator shared entered this turn, as the prompt or as a steer; feeds turn_end metadata. */
 	turnSharedWorkerNote: boolean;
 	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
@@ -123,6 +125,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		streamStallReason: null,
 		toolProseAssessedChars: 0,
 		turnToolCalls: 0,
+		turnToolNames: [],
 		turnSharedWorkerNote: false,
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,

@@ -4,7 +4,11 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## 0.3.5 - Unreleased
 
+### Added
+- `docs/middleware-and-components.md` documents every built-in middleware registration: id, hooks, trigger, and what does not trigger it.
+
 ### Fixed
+- A skill suggestion no longer costs the first turn on local models (#184). Every surface that teaches the protocol (the first-turn reminder, the `context(scope="skills")` listing footer, and the operator-gate denial) now says to open with the `Suggested skill:` line and continue the task in the same turn; none instructs the model to wait. A turn that makes the suggestion and stops with only listing calls behind it is continued once with a reminder that only the operator loads a skill.
 - A llama.cpp context window is the per-request share, not the server total (#187). `--ctx-size` is split evenly across `--parallel` slots unless `--kv-unified`, so a router started with `--ctx-size 786432 --parallel 4 --no-kv-unified` now resolves to a 196,608-token window instead of 786,432, which is where autocompact was armed at a size the server would never admit. The probe reads the long and short flag spellings and the last kv flag given, `/context` prints `196,608 (786,432 / 4 slots)` with `probed window`, and `clio-coder targets` names the split in its `ctx` note and a probe note.
 - A parked permission request always offers allow, deny, and stop (#186). The composer rail switches to `CONFIRM` and carries the dialog's keys while a prompt owns the keyboard, so the `Enter send` hint can no longer contradict a dialog that sits forty rows away on a tall terminal. `Enter` allows only from an empty composer: with a draft present the habitual send key is inert, both surfaces read `[Backspace] clear draft` in its place, and only deletion keys reach the editor. `Esc` is labeled `deny`, which is what it does. A request that parks while another overlay holds the screen is re-presented as soon as that overlay closes.
 

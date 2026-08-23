@@ -664,6 +664,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 1. Accept the prompt: reset per-turn accounting, freeze the tool
 			// surface, fire turn_start, and assemble the submitted text.
 			state.turnToolCalls = 0;
+			state.turnToolNames = [];
 			state.turnSharedWorkerNote = isWorkerShareNote(text);
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
