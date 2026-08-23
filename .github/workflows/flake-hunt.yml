@@ -1,0 +1,48 @@
+name: flake-hunt
+
+# Everything that is worth knowing but not worth waiting for on every push.
+# Two things live here: the shuffled smoke reruns that hunt order- and
+# timing-dependent flakes, and the Node 24 lane that proves the CLI still
+# works above its `engines` floor of >=22.19. Neither gates a merge, so
+# neither belongs in the push path.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake-hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      # The SciCode adapter contract grades through `uv run`.
+      - name: Install uv
+        run: pipx install uv
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      # The full gate on both lanes. On 22 this duplicates what push already
+      # proved; on 24 it is the only signal the project gets.
+      - name: Release gate
+        run: npm run ci:release
+      # Seeded shuffle of the smoke lane, twice over. Order and timing flakes
+      # do not reproduce on a single deterministic pass.
+      - name: Repeat smoke lane
+        run: npm run test:repeat
