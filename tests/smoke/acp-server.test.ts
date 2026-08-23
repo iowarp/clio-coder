@@ -555,8 +555,8 @@ describe("clio-coder acp real-server smoke", { concurrency: false }, () => {
 			strictEqual(toolCall.kind, "edit");
 			strictEqual(toolCall.status, "pending");
 			deepStrictEqual(permission.params.options, [
-				{ optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-				{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
+				{ optionId: "allow-once", name: "Approve workspace action once", kind: "allow_once" },
+				{ optionId: "reject-once", name: "Deny this request", kind: "reject_once" },
 			]);
 			const started = updatesOfKind(client, "tool_call");
 			deepStrictEqual(toolCall.locations, [{ path: join(project, "note.txt") }]);
