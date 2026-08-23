@@ -20,15 +20,34 @@ function textDelta(delta: string): unknown {
 	return { type: "message_update", assistantMessageEvent: { type: "text_delta", delta } };
 }
 
-function toolStart(tool: string, action?: { verb: string; object?: string; truncated?: boolean }): unknown {
+function toolStart(
+	tool: string,
+	action?: { verb: string; object?: string; truncated?: boolean },
+	toolCallId?: string,
+): unknown {
 	return {
 		type: "clio_tool_start",
-		payload: { tool, posture: "operating", startedAt: 1, ...(action ? { action } : {}) },
+		payload: {
+			tool,
+			posture: "operating",
+			startedAt: 1,
+			...(toolCallId !== undefined ? { toolCallId } : {}),
+			...(action ? { action } : {}),
+		},
 	};
 }
 
-function toolFinish(tool: string): unknown {
-	return { type: "clio_tool_finish", payload: { tool, posture: "operating", durationMs: 5, outcome: "ok" } };
+function toolFinish(tool: string, toolCallId?: string): unknown {
+	return {
+		type: "clio_tool_finish",
+		payload: {
+			tool,
+			posture: "operating",
+			durationMs: 5,
+			outcome: "ok",
+			...(toolCallId !== undefined ? { toolCallId } : {}),
+		},
+	};
 }
 
 function messageEnd(text: string): unknown {
@@ -76,6 +95,52 @@ describe("worker progress projection", () => {
 });
 
 describe("worker progress tool activity", () => {
+	it("pairs concurrent calls of one tool by id", () => {
+		const fold = createWorkerProgressFold();
+		fold.observe(toolStart("bash", { verb: "running", object: "npm run lint" }, "bash-1"));
+		fold.observe(toolStart("bash", { verb: "running", object: "npm run typecheck" }, "bash-2"));
+		fold.observe(toolFinish("bash", "bash-1"));
+		let snapshot = fold.snapshot();
+		deepStrictEqual(snapshot.recentActions, [
+			{ tool: "bash", toolCallId: "bash-1", descriptor: { verb: "running", object: "npm run lint" } },
+		]);
+		deepStrictEqual(snapshot.currentAction, {
+			tool: "bash",
+			toolCallId: "bash-2",
+			descriptor: { verb: "running", object: "npm run typecheck" },
+		});
+		strictEqual(snapshot.phase, "tool");
+
+		fold.observe(toolFinish("bash", "bash-2"));
+		snapshot = fold.snapshot();
+		deepStrictEqual(
+			snapshot.recentActions.map((action) => [action.toolCallId, action.descriptor?.object]),
+			[
+				["bash-2", "npm run typecheck"],
+				["bash-1", "npm run lint"],
+			],
+		);
+		strictEqual(snapshot.currentAction, null);
+		strictEqual(snapshot.phase, "waiting");
+	});
+
+	it("falls back to last-started name matching when ids are absent", () => {
+		const fold = createWorkerProgressFold();
+		fold.observe(toolStart("read", { verb: "reading", object: "src/first.ts" }));
+		fold.observe(toolStart("read", { verb: "reading", object: "src/second.ts" }));
+		fold.observe(toolFinish("read"));
+		let snapshot = fold.snapshot();
+		strictEqual(snapshot.recentActions[0]?.descriptor?.object, "src/second.ts");
+		strictEqual(snapshot.currentAction?.descriptor?.object, "src/first.ts");
+
+		// A producer that adds the id only to its finish still uses the legacy
+		// name fallback and keeps the start rather than dropping the activity.
+		fold.observe(toolFinish("read", "finish-only-id"));
+		snapshot = fold.snapshot();
+		strictEqual(snapshot.recentActions[0]?.descriptor?.object, "src/first.ts");
+		strictEqual(snapshot.currentAction, null);
+	});
+
 	it("carries the tool name plus its typed descriptor while the call runs", () => {
 		const fold = createWorkerProgressFold();
 		fold.observe(toolStart("read", { verb: "reading", object: "src/app.ts" }));

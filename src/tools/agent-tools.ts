@@ -46,6 +46,12 @@ export type ToolOutcome = "ok" | "error" | "blocked";
 
 export interface ToolStartEvent {
 	tool: string;
+	/**
+	 * The engine's id for this call, when the producer has one. New producers
+	 * put the same id on start and finish so concurrent calls of one tool remain
+	 * independently attributable. Optional for direct callers and old streams.
+	 */
+	toolCallId?: string;
 	posture: "operating";
 	/**
 	 * Wall-clock anchor for the instant the call began, for a human correlating
@@ -139,20 +145,21 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	// spans the call, so `durationMs` survives a clock correction mid-tool.
 	const startedAt = Date.now();
 	const startedAtClock = performance.now();
+	// Stamped onto both lifecycle events so a concurrent finish resolves only
+	// the start for its own engine call. Direct callers may legitimately omit it.
+	const callId = input.invokeOptions?.toolCallId;
+	const withCallId = callId === undefined ? {} : { toolCallId: callId };
 	// The one seam that holds validated arguments and publishes telemetry, so it
 	// is where the redacted descriptor is composed. Everything downstream of here
 	// sees the descriptor and never the arguments.
 	const action = describeCallAction(spec.name, args);
 	telemetry?.onStart?.({
 		tool: spec.name,
+		...withCallId,
 		posture: "operating",
 		startedAt,
 		...(action !== null ? { action } : {}),
 	});
-	// Stamped onto every finish event so a consumer can join this authoritative
-	// outcome to the engine's `tool_execution_end` for the same call.
-	const callId = input.invokeOptions?.toolCallId;
-	const withCallId = callId === undefined ? {} : { toolCallId: callId };
 	const invokeOpts: ToolInvokeOptions = {};
 	if (input.invokeOptions) Object.assign(invokeOpts, input.invokeOptions);
 	if (signal) invokeOpts.signal = signal;

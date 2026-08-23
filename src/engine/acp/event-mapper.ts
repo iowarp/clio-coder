@@ -119,6 +119,7 @@ export class AcpEventMapper {
 				type: "clio_tool_start",
 				payload: {
 					tool: update.kind ?? title,
+					toolCallId,
 					posture: "operating",
 					startedAt,
 					...(action !== null ? { action } : {}),
@@ -147,6 +148,7 @@ export class AcpEventMapper {
 				type: "clio_tool_finish",
 				payload: {
 					tool: update.kind ?? title,
+					toolCallId,
 					posture: "operating",
 					durationMs: Math.round(performance.now() - startedAtClock),
 					outcome: isError ? "error" : "ok",

@@ -76,6 +76,8 @@ export type WorkerProgressPhase = "starting" | "thinking" | "writing" | "tool" |
 /** One tool call as an operator surface may show it: the name plus its redacted descriptor. */
 export interface WorkerAction {
 	tool: string;
+	/** Correlation identity carried by new streams. Absent on legacy events. */
+	toolCallId?: string;
 	/** Absent when the runtime emitted no descriptor, so the name stands alone. */
 	descriptor?: CallActionDescriptor;
 }
@@ -94,7 +96,7 @@ export interface WorkerProgressSnapshot {
 	droppedLines: number;
 	/** Bytes refused by the rate window or cut from an oversized line. */
 	droppedBytes: number;
-	/** The call executing now; null between calls and once settled. */
+	/** The most recently started call still executing; null between calls and once settled. */
 	currentAction: WorkerAction | null;
 	/** Finished calls, newest first, bounded by {@link WORKER_ACTION_TRAIL_LIMIT}. */
 	recentActions: ReadonlyArray<WorkerAction>;
@@ -168,12 +170,14 @@ function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
 	const payload = isRecord(event.payload) ? event.payload : null;
 	const tool = nonEmptyString(payload?.tool);
 	if (tool === undefined) return null;
+	const toolCallId = nonEmptyString(payload?.toolCallId);
 	const raw = isRecord(payload?.action) ? (payload.action as Partial<CallActionDescriptor>) : undefined;
 	const verb = nonEmptyString(raw?.verb);
-	if (verb === undefined) return { tool };
+	if (verb === undefined) return { tool, ...(toolCallId !== undefined ? { toolCallId } : {}) };
 	const object = nonEmptyString(raw?.object);
 	return {
 		tool,
+		...(toolCallId !== undefined ? { toolCallId } : {}),
 		descriptor: {
 			verb,
 			...(object !== undefined ? { object } : {}),
@@ -257,8 +261,10 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	const toolNames: string[] = [];
 	let settled = false;
 	let durable = "";
-	/** Start descriptors awaiting their finish, keyed by tool name. */
-	const pendingActions = new Map<string, WorkerAction>();
+	/** Starts still awaiting a finish, oldest first. */
+	const pendingActions: WorkerAction[] = [];
+	/** New streams resolve exact starts through this index. */
+	const pendingActionsById = new Map<string, WorkerAction>();
 	let windowStartMs = 0;
 	let windowBytes = 0;
 	let cached: WorkerProgressSnapshot | null = EMPTY_SNAPSHOT;
@@ -311,6 +317,22 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		return touch();
 	};
 
+	const removePendingAction = (action: WorkerAction): void => {
+		const index = pendingActions.lastIndexOf(action);
+		if (index >= 0) pendingActions.splice(index, 1);
+		if (action.toolCallId !== undefined && pendingActionsById.get(action.toolCallId) === action) {
+			pendingActionsById.delete(action.toolCallId);
+		}
+	};
+
+	const lastPendingActionForTool = (tool: string): WorkerAction | undefined => {
+		for (let index = pendingActions.length - 1; index >= 0; index -= 1) {
+			const candidate = pendingActions[index];
+			if (candidate?.tool === tool) return candidate;
+		}
+		return undefined;
+	};
+
 	return {
 		observe(event: unknown, nowMs = Date.now()): boolean {
 			if (!isRecord(event) || settled) return false;
@@ -337,21 +359,31 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			const action = toolEventAction(event);
 			if (action !== null && event.type === "clio_tool_start") {
-				pendingActions.set(action.tool, action);
+				if (action.toolCallId !== undefined) {
+					const duplicate = pendingActionsById.get(action.toolCallId);
+					if (duplicate !== undefined) removePendingAction(duplicate);
+					pendingActionsById.set(action.toolCallId, action);
+				}
+				pendingActions.push(action);
 				currentAction = action;
 				noteToolName(action.tool);
 				touch();
 				setPhase("tool");
 				changed = true;
 			} else if (action !== null && event.type === "clio_tool_finish") {
-				const finished = pendingActions.get(action.tool) ?? action;
-				pendingActions.delete(action.tool);
-				currentAction = null;
+				// An id is authoritative when both sides carry it. If either side came
+				// from an older or incomplete producer, retain the historical name match.
+				const finished =
+					(action.toolCallId !== undefined ? pendingActionsById.get(action.toolCallId) : undefined) ??
+					lastPendingActionForTool(action.tool) ??
+					action;
+				removePendingAction(finished);
+				currentAction = pendingActions[pendingActions.length - 1] ?? null;
 				recentActions.unshift(finished);
 				if (recentActions.length > WORKER_ACTION_TRAIL_LIMIT) recentActions.length = WORKER_ACTION_TRAIL_LIMIT;
-				noteToolName(action.tool);
+				noteToolName(finished.tool);
 				touch();
-				setPhase("waiting");
+				setPhase(currentAction === null ? "waiting" : "tool");
 				changed = true;
 			}
 
@@ -367,7 +399,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				droppedLines = bounded.dropped;
 			}
 			currentAction = null;
-			pendingActions.clear();
+			pendingActions.length = 0;
+			pendingActionsById.clear();
 			settled = true;
 			phase = "settled";
 			touch();
@@ -376,7 +409,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 		restart(): void {
 			currentAction = null;
-			pendingActions.clear();
+			pendingActions.length = 0;
+			pendingActionsById.clear();
 			durable = "";
 			settled = false;
 			phase = "starting";

@@ -43,14 +43,14 @@ import type {
 } from "../core/bus-events.js";
 import type { RunKind } from "../domains/dispatch/types.js";
 import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
-import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
+import { createWorkerProgressFold, type WorkerProgressFold, type WorkerProgressSnapshot } from "./worker-progress.js";
 
 export {
 	boundSettledText,
 	WORKER_LIVE_TAIL_LINES,
 	WORKER_TOOL_NAME_LIMIT,
-	type WorkerProgressSnapshot,
 } from "./worker-progress.js";
+export type { WorkerProgressSnapshot };
 
 export interface WorkerAttempt {
 	runId: string;
@@ -108,6 +108,8 @@ export interface WorkerEntryState {
 	droppedLines: number;
 	/** Distinct tool names in first-use order, bounded. */
 	tools: string[];
+	/** Canonical live projection. Absent only on receipt-based session replay. */
+	progress?: WorkerProgressSnapshot;
 	/** Every attempt of this assignment, oldest first. */
 	attempts: WorkerAttempt[];
 	pending: boolean;
@@ -251,6 +253,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		entry.text = snapshot.tailText;
 		entry.droppedLines = snapshot.droppedLines;
 		entry.tools = [...snapshot.toolNames];
+		entry.progress = snapshot;
 	};
 
 	/** The entry a run id addresses, and only while that run is the entry's current attempt. */
@@ -298,11 +301,16 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				delete existing.receipt;
 				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
 				assignmentByRun.set(runId, assignmentId);
-				progressByAssignment.get(assignmentId)?.restart();
+				const progress = progressByAssignment.get(assignmentId);
+				if (progress !== undefined) {
+					progress.restart();
+					applyProgress(existing, progress);
+				}
 				return { kind: "updated", entry: existing };
 			}
 			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
 			attemptByAssignment.set(assignmentId, payload.attempt);
+			const progress = createWorkerProgressFold();
 			const entry: WorkerEntryState = {
 				assignmentId,
 				runId,
@@ -312,13 +320,14 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				text: "",
 				droppedLines: 0,
 				tools: [],
+				progress: progress.snapshot(),
 				attempts: [{ runId, targetLabel: workerTargetLabel(runtime) }],
 				pending: true,
 				...(payload.parentToolCallId !== undefined ? { parentToolCallId: payload.parentToolCallId } : {}),
 			};
 			byAssignment.set(assignmentId, entry);
 			assignmentByRun.set(runId, assignmentId);
-			progressByAssignment.set(assignmentId, createWorkerProgressFold());
+			progressByAssignment.set(assignmentId, progress);
 			return { kind: "created", entry };
 		},
 

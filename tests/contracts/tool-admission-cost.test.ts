@@ -93,6 +93,25 @@ describe("contracts/tool admission cost and concurrency", () => {
 		strictEqual(terminal.content[0]?.type === "text" ? terminal.content[0].text : "", "terminal result");
 	});
 
+	it("puts the engine call id on both native telemetry events", async () => {
+		const registry = registryWith(() => "full-auto", [readToolSpec(ToolNames.Read, 0)]);
+		const starts: string[] = [];
+		const finishes: string[] = [];
+		const tool = resolveAgentTools({
+			registry,
+			telemetry: {
+				onStart: (event) => starts.push(event.toolCallId ?? "missing"),
+				onFinish: (event) => finishes.push(event.toolCallId ?? "missing"),
+			},
+		})[0];
+		ok(tool);
+
+		await tool.execute("read-call-1", {});
+
+		deepStrictEqual(starts, ["read-call-1"]);
+		deepStrictEqual(finishes, starts);
+	});
+
 	it("resolves effective autonomy without re-deriving settings per call", async () => {
 		// Stand in for the orchestrator's effective-settings view: the saved
 		// snapshot is stable, the session routing/override state is unchanged, so

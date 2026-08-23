@@ -122,6 +122,53 @@ describe("fleet runs worker progress", () => {
 		}
 	});
 
+	it("attributes concurrent calls of one tool independently on Fleet Runs", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			started(bus, "run-1");
+			progress(bus, "run-1", {
+				type: "clio_tool_start",
+				payload: {
+					tool: "bash",
+					toolCallId: "bash-1",
+					action: { verb: "running", object: "npm run lint" },
+				},
+			});
+			progress(bus, "run-1", {
+				type: "clio_tool_start",
+				payload: {
+					tool: "bash",
+					toolCallId: "bash-2",
+					action: { verb: "running", object: "npm run typecheck" },
+				},
+			});
+			progress(bus, "run-1", {
+				type: "clio_tool_finish",
+				payload: { tool: "bash", toolCallId: "bash-1", outcome: "ok" },
+			});
+			let row = store.rows()[0] as DispatchBoardRow;
+			strictEqual(row.progress?.recentActions[0]?.toolCallId, "bash-1");
+			strictEqual(row.progress?.recentActions[0]?.descriptor?.object, "npm run lint");
+			strictEqual(row.progress?.currentAction?.toolCallId, "bash-2");
+			const running = card(row, { expanded: true });
+			ok(running.includes("bash running npm run typecheck"), running);
+
+			progress(bus, "run-1", {
+				type: "clio_tool_finish",
+				payload: { tool: "bash", toolCallId: "bash-2", outcome: "ok" },
+			});
+			row = store.rows()[0] as DispatchBoardRow;
+			deepStrictEqual(
+				row.progress?.recentActions.map((action) => action.toolCallId),
+				["bash-2", "bash-1"],
+			);
+			strictEqual(row.progress?.currentAction, null);
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
 	it("ignores tool_execution_start, whose args are the call's literal arguments", () => {
 		const bus = createSafeEventBus();
 		const store = createDispatchBoardStore(bus);

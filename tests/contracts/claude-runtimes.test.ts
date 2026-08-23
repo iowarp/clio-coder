@@ -94,12 +94,17 @@ describe("contracts/claude runtimes safety bridge", () => {
 			safety: createWorkerSafety({ cwd: process.cwd() }),
 			cwd: process.cwd(),
 			autonomy: "read-only",
+			toolCallId: "write-1",
 			emit: (event) => events.push(event),
 		});
 		strictEqual(decision.kind, "deny");
 
 		const finish = events.find((event) => event.type === "clio_tool_finish");
+		const start = events.find((event) => event.type === "clio_tool_start");
+		ok(start && start.type === "clio_tool_start");
 		ok(finish && finish.type === "clio_tool_finish");
+		strictEqual(start.payload.toolCallId, "write-1");
+		strictEqual(finish.payload.toolCallId, start.payload.toolCallId);
 		strictEqual(finish.payload.decision, "blocked");
 		strictEqual(finish.payload.outcome, "blocked");
 		// The final reasonCode must describe the autonomy axis, not repeat the
