@@ -982,7 +982,7 @@ describe("contracts/dispatch", () => {
 		try {
 			await rejects(
 				() => bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "bounded work" }),
-				/cannot enforce an explicit agent budget/,
+				/cannot enforce an explicit dispatch budget/,
 			);
 			strictEqual(spawned, false);
 		} finally {
