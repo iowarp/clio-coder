@@ -53,9 +53,10 @@ export interface ClioPermissionEscalatedEvent {
 		tool: string;
 		summary: string;
 		/**
-		 * Sanitized one-line preview of the call's object (command, path, or
-		 * compact args), so the operator's approval overlay can show what the
-		 * call will touch. The args themselves never cross the stdout seam.
+		 * Sanitized one-line preview of the call's allowlisted object fields, so
+		 * the operator's approval overlay can show what the call will touch.
+		 * Unlisted fields carry only type-and-size summaries, and the args
+		 * themselves never cross the stdout seam.
 		 */
 		target?: string;
 		axis?: string;

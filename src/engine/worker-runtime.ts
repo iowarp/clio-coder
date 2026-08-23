@@ -920,9 +920,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
 			activeEscalation = { requestId, tool: call.tool, actionClass, callKey, timer };
 			// The operator decides on this exact call, so the escalation carries a
-			// sanitized preview of its object; the args stay inside the worker. The
-			// cap bounds the NDJSON line, and the overlay truncates further.
-			const target = describeCallTarget(call.args).slice(0, 200);
+			// sanitized allowlisted preview of its object. Unlisted fields cross only
+			// as type-and-size summaries, and the args stay inside the worker.
+			const target = describeCallTarget(call.tool, call.args);
 			emit({
 				type: "clio_permission_escalated",
 				payload: {

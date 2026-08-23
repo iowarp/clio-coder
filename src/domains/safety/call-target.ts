@@ -62,6 +62,9 @@ export interface CallActionDescriptor {
  */
 export const CALL_ACTION_OBJECT_MAX_CHARS = 64;
 
+/** Maximum characters carried by the approval overlay's one-line call target. */
+export const CALL_TARGET_MAX_CHARS = 120;
+
 /**
  * The verb and object field for each tool Clio ships, plus the ACP tool kinds
  * a delegated peer reports. A tool absent from this table gets the neutral
@@ -102,6 +105,53 @@ const CALL_ACTION_VOCABULARY: Readonly<Record<string, { verb: string; field: str
  */
 const CALL_ACTION_OBJECT_FIELDS = ["path", "file_path", "command", "pattern", "query", "url"] as const;
 
+/**
+ * Argument fields whose values may reach the approval overlay for each tool.
+ * Fields are ordered by decision value: the first present field is the plain
+ * target, and any later present fields are labeled facts. Everything outside
+ * the tool's list is described only by type and size.
+ */
+const CALL_TARGET_FIELDS: Readonly<Record<string, ReadonlyArray<string>>> = {
+	read: ["path", "offset", "limit", "tail"],
+	grep: ["pattern", "path", "mode", "glob", "ignore_case", "literal", "context", "limit", "include_ignored"],
+	find: ["pattern", "path", "order", "limit", "include_ignored"],
+	ls: ["path", "limit"],
+	code_nav: ["mode", "query", "limit"],
+	context: ["scope", "query", "name", "limit", "ref", "include_tree"],
+	credential_present: ["name", "source", "file"],
+	write: ["path"],
+	edit: ["path"],
+	bash: ["command", "cwd", "timeout_ms", "output_policy"],
+	git: ["op", "path", "cached", "stat", "name_only", "limit", "cwd", "timeout_ms", "max_output_bytes"],
+	verify: ["check", "path", "browser", "cwd", "timeout_ms", "max_output_bytes"],
+	dispatch: [
+		"list",
+		"mode",
+		"agent",
+		"target",
+		"model",
+		"node",
+		"autonomy",
+		"tool_profile",
+		"thinking_level",
+		"detach",
+		"timeout_ms",
+	],
+	monitor: ["run_id", "mode"],
+	steer: ["run_id", "action"],
+	tasks: ["action", "id"],
+	ledger: ["action", "kind", "path", "line", "target", "passed", "since"],
+	web_fetch: ["url", "method", "timeout_ms", "max_bytes", "format"],
+	ask_user: ["action", "mode", "max_rounds", "exposure"],
+	artifact: ["kind", "path", "title"],
+	// ACP tool kinds use only fields whose meaning the protocol defines.
+	execute: ["command", "cwd"],
+	search: ["query", "path"],
+	fetch: ["url", "method"],
+	delete: ["path"],
+	move: ["path", "target"],
+};
+
 /** Sanitize, scrub, and bound one candidate object string. Null when nothing is left. */
 function boundActionObject(value: unknown): { object: string; truncated: boolean } | null {
 	if (typeof value !== "string") return null;
@@ -141,22 +191,66 @@ export function describeCallAction(
 	return { verb, object: bounded.object, ...(bounded.truncated ? { truncated: true } : {}) };
 }
 
-/**
- * Derive the operator-facing object of a call for the approval overlay: the
- * command for bash, a path for file tools, else a compact args preview.
- * Returns an empty string when nothing meaningful is derivable, so callers
- * can omit the Target row instead of rendering a blank.
- */
-export function describeCallTarget(args: Record<string, unknown> | undefined): string {
-	if (!args) return "";
-	const str = (value: unknown): string | null =>
-		typeof value === "string" && value.trim().length > 0 ? oneLine(sanitizeForDisplay(value)).trim() || null : null;
-	const candidate = str(args.command) ?? str(args.path) ?? str(args.file_path) ?? str(args.name) ?? str(args.pattern);
-	if (candidate) return candidate;
-	try {
-		const json = JSON.stringify(args);
-		return json === "{}" || json === undefined ? "" : oneLine(sanitizeForDisplay(json)).slice(0, 120);
-	} catch {
-		return "";
+function renderAllowedTargetValue(value: unknown): string | null {
+	if (typeof value === "string") {
+		const rendered = sanitizeCallTargetText(redactSecretString(value));
+		return rendered.length > 0 ? rendered : null;
 	}
+	if (typeof value === "number" && Number.isFinite(value)) return String(value);
+	if (typeof value === "boolean") return String(value);
+	return null;
+}
+
+function countLabel(count: number, singular: string, plural: string): string {
+	return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/** Describe an argument without copying any part of its value into display text. */
+function summarizeUnlistedTargetValue(value: unknown): string {
+	if (typeof value === "string") {
+		return `<string ${countLabel(Buffer.byteLength(value, "utf8"), "byte", "bytes")}>`;
+	}
+	if (Array.isArray(value)) return `<array ${countLabel(value.length, "item", "items")}>`;
+	if (value !== null && typeof value === "object") {
+		return `<object ${countLabel(Object.keys(value).length, "field", "fields")}>`;
+	}
+	if (value === null) return "<null 0 values>";
+	if (typeof value === "undefined") return "<undefined 0 values>";
+	return `<${typeof value} 1 value>`;
+}
+
+function targetFieldName(value: string): string {
+	return sanitizeCallTargetText(value).slice(0, 32) || "field";
+}
+
+/**
+ * Derive the operator-facing object of a call for the approval overlay. Only
+ * values in the named tool's allowlist may render. Every other argument is
+ * summarized by its field name, type, and size, so an unexpected credential
+ * or pasted document still informs the decision without disclosing content.
+ * Returns an empty string when the call carries no arguments.
+ */
+export function describeCallTarget(tool: string, args: Record<string, unknown> | undefined): string {
+	if (!args) return "";
+	const allowedFields = CALL_TARGET_FIELDS[tool] ?? [];
+	const allowed = new Set(allowedFields);
+	const parts: string[] = [];
+	for (const field of allowedFields) {
+		if (!(field in args)) continue;
+		if (isSecretArgKey(field)) {
+			parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(args[field])}`);
+			continue;
+		}
+		const rendered = renderAllowedTargetValue(args[field]);
+		if (rendered === null) {
+			parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(args[field])}`);
+			continue;
+		}
+		parts.push(parts.length === 0 ? rendered : `${targetFieldName(field)}=${rendered}`);
+	}
+	for (const [field, value] of Object.entries(args)) {
+		if (allowed.has(field)) continue;
+		parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(value)}`);
+	}
+	return sanitizeCallTargetText(parts.join(" · ")).slice(0, CALL_TARGET_MAX_CHARS);
 }
