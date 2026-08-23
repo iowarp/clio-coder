@@ -168,7 +168,15 @@ function normalizeModelState(raw: string | undefined): ProbeModelStatus["state"]
 	if (!value) return undefined;
 	if (value === "loaded" || value === "ready" || value === "running" || value === "active") return "loaded";
 	if (value === "loading" || value === "pending" || value === "queued" || value === "starting") return "loading";
-	if (value === "unloaded" || value === "not-loaded" || value === "idle" || value === "stopped") return "unloaded";
+	if (
+		value === "unloaded" ||
+		value === "not-loaded" ||
+		value === "idle" ||
+		value === "sleeping" ||
+		value === "stopped"
+	) {
+		return "unloaded";
+	}
 	if (value === "failed" || value === "error" || value === "errored") return "failed";
 	if (value === "unknown") return "unknown";
 	return undefined;
