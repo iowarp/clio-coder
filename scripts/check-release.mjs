@@ -34,8 +34,12 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // in #66: about 19MB of vendored tree-sitter grammars (dist/assets/grammars/),
 // Clio's own source (src/**), and her code map (dist/assets/codewiki.json)
 // ride inside the tarball so the install needs neither grammar collection.
-const MAX_TARBALL_BYTES = 15_000_000;
-const MAX_UNPACKED_BYTES = 40_000_000;
+// Raised for 0.3.6 by operator decision: the unpacked ceiling moves to 50MB to
+// carry this release's added source, and the tarball ceiling tightens to 10MB
+// because the measured artifact sits near 6MB and a jump past 10MB would mean
+// a packaging defect rather than growth.
+const MAX_TARBALL_BYTES = 10_000_000;
+const MAX_UNPACKED_BYTES = 50_000_000;
 
 const FORBIDDEN = [
 	{
