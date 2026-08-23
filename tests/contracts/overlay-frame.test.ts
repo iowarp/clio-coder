@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Component, OverlayHandle, OverlayOptions, TUI } from "../../src/engine/tui.js";
-import { visibleWidth } from "../../src/engine/tui.js";
+import type { Component, OverlayHandle, OverlayOptions, Terminal, TUI } from "../../src/engine/tui.js";
+import { TuiAltScreen, visibleWidth } from "../../src/engine/tui.js";
 import {
 	ClioOverlayFrame,
 	diagnosticSeverityToken,
@@ -9,6 +9,13 @@ import {
 	runtimeResolutionDiagnosticLine,
 	showClioOverlayFrame,
 } from "../../src/interactive/overlay-frame.js";
+import {
+	createPermissionOverlayBody,
+	PERMISSION_OVERLAY_PLACEMENT,
+	PERMISSION_OVERLAY_WIDTH,
+	permissionOverlayHint,
+	permissionOverlayTitle,
+} from "../../src/interactive/permission-overlay.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "gu");
@@ -17,6 +24,34 @@ const stripAnsi = (text: string): string => text.replace(ANSI, "");
 
 function bodyOf(lines: string[]): Component {
 	return { render: () => lines, invalidate: () => undefined };
+}
+
+class OverlayLayoutTerminal implements Terminal {
+	columns = 140;
+	rows = 120;
+	readonly kittyProtocolActive = false;
+	start(): void {}
+	stop(): void {}
+	drainInput(): Promise<void> {
+		return Promise.resolve();
+	}
+	write(): void {}
+	moveBy(): void {}
+	hideCursor(): void {}
+	showCursor(): void {}
+	clearLine(): void {}
+	clearFromCursor(): void {}
+	clearScreen(): void {}
+	setTitle(): void {}
+	setProgress(): void {}
+}
+
+class OverlayLayoutProbe extends TuiAltScreen {
+	override requestRender(): void {}
+
+	composite(lines: string[], width: number, height: number): string[] {
+		return this.compositeOverlays(lines, width, height);
+	}
 }
 
 describe("contracts/overlay-frame row ownership", () => {
@@ -152,6 +187,48 @@ describe("contracts/overlay-frame row ownership", () => {
 			"center",
 		]);
 		strictEqual(frameAlignForAnchor(undefined), "center");
+	});
+
+	it("keeps a permission dialog beside the composer at 120 rows and re-anchors it on resize", () => {
+		const terminal = new OverlayLayoutTerminal();
+		const tui = new OverlayLayoutProbe(terminal);
+		showClioOverlayFrame(
+			tui,
+			createPermissionOverlayBody({
+				requestId: "req-layout",
+				tool: "bash",
+				actionClass: "execute",
+				axis: { kind: "net", ruleId: "bash-confirm" },
+				origin: { kind: "main" },
+				reason: "approval required",
+				target: "npm test",
+			}),
+			{
+				...PERMISSION_OVERLAY_PLACEMENT,
+				width: PERMISSION_OVERLAY_WIDTH,
+				title: permissionOverlayTitle(),
+				footerHint: permissionOverlayHint,
+			},
+		);
+
+		const placementAt = (rows: number): { first: number; last: number } => {
+			terminal.rows = rows;
+			const base = Array.from({ length: rows }, (_, index) => `transcript row ${index}`);
+			const frame = tui.composite(base, terminal.columns, rows).map(stripAnsi);
+			const first = frame.findIndex((line) => line.includes("Allow this action once?"));
+			let last = frame.length - 1;
+			while (last >= 0 && !frame[last]?.includes("[Esc] deny")) last -= 1;
+			ok(first >= 0 && last >= first, `permission frame is present at ${rows} rows`);
+			return { first, last };
+		};
+
+		const tall = placementAt(120);
+		strictEqual(tall.last, 114, "five rows remain clear for the composer and footer");
+		ok(tall.first >= 100, `the dialog stays in the bottom sixth, beginning at row ${tall.first}`);
+
+		const resized = placementAt(72);
+		strictEqual(resized.last, 66, "the bottom clearance is recomputed at the resized height");
+		strictEqual(tall.first - resized.first, 48, "the dialog follows the 48-row resize instead of keeping its old row");
 	});
 });
 

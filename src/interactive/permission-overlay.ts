@@ -31,6 +31,16 @@ const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
 
 export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
 
+/**
+ * Keep the decision next to the composer rail that mirrors its keys. The
+ * terminal engine resolves this anchor on every layout pass, so the five-row
+ * clearance remains attached to the bottom edge after a resize.
+ */
+export const PERMISSION_OVERLAY_PLACEMENT = {
+	anchor: "bottom-center",
+	margin: { bottom: 5 },
+} as const;
+
 class PermissionOverlayBody implements Component {
 	constructor(private readonly view: ApprovalRequestView) {}
 
