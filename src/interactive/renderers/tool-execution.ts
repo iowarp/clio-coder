@@ -389,6 +389,10 @@ function offloadPathOf(finished: ToolExecutionFinished): string | null {
 	return isPlainObject(resultSize) ? stringField(resultSize, "offloadPath") : null;
 }
 
+function offloadFileMissing(finished: ToolExecutionFinished): boolean {
+	return finished.resultSummary?.offloadFileMissing === true;
+}
+
 function shownBytesOf(finished: ToolExecutionFinished): number | null {
 	const observation = observationOf(finished);
 	const fromObservation = numberField(observation, "shownBytes");
@@ -468,7 +472,12 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
 		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
-		offload: offloadPath !== null ? dim(` · full: ${offloadPath}`) : "",
+		offload:
+			offloadPath === null
+				? ""
+				: offloadFileMissing(finished)
+					? dim(" · full: gone after the 14-day retention sweep")
+					: dim(` · full: ${offloadPath}`),
 	};
 }
 
@@ -1072,7 +1081,10 @@ function renderOutputMeta(
 function renderOutputFooter(finished: ToolExecutionFinished, width: number, isError: boolean): string[] {
 	const out: string[] = [];
 	const offloadPath = isNonExecutedOutcome(finished.outcome) ? null : offloadPathOf(finished);
-	if (offloadPath !== null) out.push(...indentAndWrap(`${yellow("full output")}  ${offloadPath}`, width, isError));
+	if (offloadPath !== null) {
+		const pointer = offloadFileMissing(finished) ? "gone after the 14-day retention sweep" : offloadPath;
+		out.push(...indentAndWrap(`${yellow("full output")}  ${pointer}`, width, isError));
+	}
 	const hint =
 		stringField(resultSizeOf(finished), "followUpHint") ?? stringField(finished.resultSummary ?? null, "followUpHint");
 	if (hint !== null) out.push(...indentAndWrap(`${dim("next")}  ${hint}`, width, isError));

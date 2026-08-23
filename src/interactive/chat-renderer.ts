@@ -13,6 +13,7 @@
  * `isTransparentAssistantWrapper`.
  */
 
+import { existsSync } from "node:fs";
 import { ToolNames } from "../core/tool-names.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
@@ -44,7 +45,7 @@ import type { AgentMessage } from "../engine/types.js";
 import { toolPresentationPolicy } from "../tools/presentation.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
-import { isSelfExplainingAbort } from "./chat-loop-messages.js";
+import { isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
@@ -672,6 +673,19 @@ interface ReplayToolResult {
 	blockReason?: string;
 }
 
+/**
+ * Resolve a replayed offload pointer once, when the ledger row becomes a
+ * display event. Terminal repaints consume the recorded fact and never touch
+ * the filesystem.
+ */
+function replayResultSummary(result: ReplayToolResult): Record<string, unknown> | undefined {
+	const summary = result.resultSummary ?? toolResultSummary(result.result);
+	const offloadPath =
+		typeof summary.offloadPath === "string" && summary.offloadPath.length > 0 ? summary.offloadPath : null;
+	if (offloadPath === null) return result.resultSummary;
+	return { ...summary, offloadFileMissing: !existsSync(offloadPath) };
+}
+
 function extractToolResult(entry: MessageEntry): ReplayToolResult {
 	const payload = entry.payload;
 	const obj = payloadObject(payload);
@@ -1132,6 +1146,7 @@ export function rehydrateChatPanelFromTurns(
 				}
 				if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
+					const resultSummary = replayResultSummary(result);
 					const evictedReason = workingSet.evicted.get(entry.turnId)?.reason;
 					const fallbackId = result.id ?? pendingToolIds.pop() ?? null;
 					if (fallbackId) {
@@ -1144,7 +1159,7 @@ export function rehydrateChatPanelFromTurns(
 							result: displayReplayToolResult(result.result, options.unboundedToolBodies === true),
 							isError: result.isError,
 							...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
-							...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
+							...(resultSummary !== undefined ? { resultSummary } : {}),
 							...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
 							...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
 							...(evictedReason !== undefined ? { evictedReason } : {}),
@@ -1158,7 +1173,7 @@ export function rehydrateChatPanelFromTurns(
 									result: displayReplayToolResult(result.result, options.unboundedToolBodies === true),
 									isError: result.isError,
 									...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
-									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
+									...(resultSummary !== undefined ? { resultSummary } : {}),
 									...(result.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
 									...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
 									...(evictedReason !== undefined ? { evictedReason } : {}),

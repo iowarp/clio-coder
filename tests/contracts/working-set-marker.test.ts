@@ -65,6 +65,9 @@ test("marker: an offloaded body carries the pointer instead of a preview", () =>
 		'[evicted ref=01J8 reason=age_horizon tool=bash size=2 lines/17B offload=/state/scratch/session-1/call-1.txt recall=context(scope="recall", ref="01J8")]',
 	);
 	assert.equal(marker.includes("preview="), false);
+	// #203 changes only the transcript projection. The persisted marker keeps
+	// the original pointer bytes even if the retention sweep later removes it.
+	assert.equal(marker.includes("offload=/state/scratch/session-1/call-1.txt"), true);
 });
 
 test("marker: preview collapses whitespace, escapes quotes, and stops at 120 chars", () => {
