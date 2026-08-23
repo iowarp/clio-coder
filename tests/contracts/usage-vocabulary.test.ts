@@ -24,7 +24,14 @@ const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]
 function costRow(overrides: Partial<CostRow> = {}): CostRow {
 	return {
 		providerId: "openai",
-		modelId: "gpt-5",
+		attributedModelId: "gpt-5",
+		requestedModelIds: ["gpt-5"],
+		responseModelIdObservationCounts: {
+			reportedCalls: 65,
+			notReportedCalls: 0,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 0,
+		},
 		runs: 3,
 		tokens: 5_000,
 		input: 3_000,

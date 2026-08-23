@@ -11,6 +11,7 @@
  * footer consumes the session sum through `ObservabilityContract.sessionTokens()`.
  */
 
+import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
 import { type CostProvenance, normalizeCostProvenance } from "../providers/index.js";
 
 export interface CostAmount {
@@ -112,7 +113,9 @@ export interface UsageBreakdown {
 
 export interface CostEntry {
 	providerId: string;
-	modelId: string;
+	attributedModelId: string;
+	requestedModelIds: string[];
+	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
 	tokens: number;
 	usd: number;
 	provenance: CostProvenance;
@@ -127,11 +130,15 @@ export interface CostEntry {
 export interface CostTracker {
 	accumulate(
 		providerId: string,
-		modelId: string,
+		attributedModelId: string,
 		tokens: number,
 		usd?: number,
 		breakdown?: Partial<UsageBreakdown>,
 		provenance?: CostProvenance,
+		modelIdFacts?: {
+			requestedModelIds: ReadonlyArray<string>;
+			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
+		},
 	): number;
 	sessionTotal(): number;
 	sessionCost(): CostAggregate;
@@ -149,7 +156,7 @@ export function createCostTracker(): CostTracker {
 	let total = 0;
 	const totals = emptyBreakdown();
 	return {
-		accumulate(providerId, modelId, tokens, usd, breakdown, costProvenance) {
+		accumulate(providerId, attributedModelId, tokens, usd, breakdown, costProvenance, modelIdFacts) {
 			const resolvedUsd = usd ?? 0;
 			const provenance = normalizeCostProvenance(costProvenance);
 			const input = breakdown?.input ?? 0;
@@ -160,7 +167,16 @@ export function createCostTracker(): CostTracker {
 			const apiCalls = breakdown?.apiCalls;
 			log.push({
 				providerId,
-				modelId,
+				attributedModelId,
+				requestedModelIds: [...(modelIdFacts?.requestedModelIds ?? [attributedModelId])],
+				responseModelIdObservationCounts: modelIdFacts
+					? { ...modelIdFacts.responseModelIdObservationCounts }
+					: {
+							reportedCalls: 0,
+							notReportedCalls: 0,
+							notObservedCalls: apiCalls ?? 1,
+							legacyDifferenceOnlyCalls: 0,
+						},
 				tokens,
 				usd: resolvedUsd,
 				provenance,

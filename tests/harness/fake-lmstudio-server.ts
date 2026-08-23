@@ -63,8 +63,8 @@ export async function startFakeLmStudioServer(
 		greeting?: boolean;
 		failLoads?: number;
 		hostIdentity?: "dynamo" | "zbook";
-		/** `model` field stamped on every chat completion chunk; an LM Link peer answers under its own id. */
-		servedModel?: string;
+		/** `model` field stamped on every chat completion chunk; an LM Link peer reports its own id. */
+		reportedModelId?: string;
 		/** Overrides the chat response content type for adapter boundary tests. */
 		chatContentType?: string;
 	} = {},
@@ -276,15 +276,15 @@ export async function startFakeLmStudioServer(
 					options.chatContentType,
 				);
 			}
-			const served = options.servedModel !== undefined ? { model: options.servedModel } : {};
+			const reportedModel = options.reportedModelId !== undefined ? { model: options.reportedModelId } : {};
 			return sse(
 				response,
 				[
 					...(reasoningEnabled
-						? [{ ...served, choices: [{ index: 0, delta: { role: "assistant", reasoning: "Short thought." } }] }]
+						? [{ ...reportedModel, choices: [{ index: 0, delta: { role: "assistant", reasoning: "Short thought." } }] }]
 						: []),
-					{ ...served, choices: [{ index: 0, delta: { content: "Visible answer." }, finish_reason: "stop" }] },
-					{ ...served, choices: [], usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 } },
+					{ ...reportedModel, choices: [{ index: 0, delta: { content: "Visible answer." }, finish_reason: "stop" }] },
+					{ ...reportedModel, choices: [], usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 } },
 				],
 				options.chatContentType,
 			);

@@ -18,6 +18,7 @@ function makeSummary(overrides: Partial<TurnSummary> = {}): TurnSummary {
 	return {
 		elapsedMs: 4000,
 		modelId: "qwen3-coder",
+		responseModelIdObservation: { state: "not-observed" },
 		targetId: "mini",
 		inputTokens: 11,
 		outputTokens: 339,
@@ -52,7 +53,7 @@ function idleAgent(lastTurn: TurnSummary | null): AgentWorkFacts {
 describe("footer last-turn metrics", () => {
 	it("formats a completed turn elegantly: stop, time, tokens, reasoning, tools", () => {
 		const out = strip(formatLastTurn(clioTheme(), makeSummary()));
-		strictEqual(out, "✓ 4.0s · ↑11 ↓339 · r315 · 2 tools");
+		strictEqual(out, "✓ 4.0s · ↑11 ↓339 · r315 · 2 tools · response model id observation not observed");
 	});
 
 	// Every footer surface reads the same projection as the transcript, so an
@@ -77,14 +78,38 @@ describe("footer last-turn metrics", () => {
 	});
 
 	/**
-	 * The one exception: when the server reported a different model than the
-	 * one requested (an LM Link peer answered), the rail still names what was
-	 * asked for and the line says what answered (issue #185).
+	 * The line names exactly what was observed while the editor rail continues
+	 * to identify the configured model.
 	 */
-	it("names the served model when it differs from the requested one", () => {
-		const out = strip(formatLastTurn(clioTheme(), makeSummary({ servedModelId: "ornith-1.5-35b-a3b" })));
-		ok(out.includes("served ornith-1.5-35b-a3b"), out);
-		ok(!strip(formatLastTurn(clioTheme(), makeSummary())).includes("served"));
+	it("names every response model id observation state", () => {
+		const reported = strip(
+			formatLastTurn(
+				clioTheme(),
+				makeSummary({
+					responseModelIdObservation: { state: "reported", reportedModelId: "ornith-1.5-35b-a3b" },
+				}),
+			),
+		);
+		ok(reported.includes("response model id observation reported ornith-1.5-35b-a3b"), reported);
+		ok(
+			strip(formatLastTurn(clioTheme(), makeSummary({ responseModelIdObservation: { state: "not-reported" } }))).includes(
+				"response model id observation not reported",
+			),
+		);
+		ok(strip(formatLastTurn(clioTheme(), makeSummary())).includes("response model id observation not observed"));
+		ok(
+			strip(
+				formatLastTurn(
+					clioTheme(),
+					makeSummary({
+						responseModelIdObservation: {
+							state: "legacy-difference-only",
+							differingModelId: "legacy-peer",
+						},
+					}),
+				),
+			).includes("response model id observation legacy difference-only legacy-peer"),
+		);
 	});
 
 	it("marks slow turns, truncation, tool errors, and non-stop outcomes", () => {

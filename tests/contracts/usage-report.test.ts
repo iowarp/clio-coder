@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -501,7 +501,15 @@ describe("contracts/usage-report token and cost facts", () => {
 			turnId,
 			parentTurnId: null,
 			timestamp,
-			payload: { text: "done", stopReason: "stop", provider: "dynamo", responseModel: "Nemo-3.5", usage, ...extra },
+			payload: {
+				text: "done",
+				stopReason: "stop",
+				provider: "dynamo",
+				model: "Nemo-requested",
+				responseModel: "Nemo-3.5",
+				usage,
+				...extra,
+			},
 		});
 	}
 
@@ -564,9 +572,16 @@ describe("contracts/usage-report token and cost facts", () => {
 	});
 
 	it("attributes the calls to the provider and model the ledger recorded", () => {
-		const model = facts(rows, "model-usage").find((row) => row.modelId === "Nemo-3.5");
+		const model = facts(rows, "model-usage").find((row) => row.attributedModelId === "Nemo-3.5");
 		ok(model, `expected a model-usage fact: ${JSON.stringify(rows)}`);
 		strictEqual(model?.providerId, "dynamo");
+		deepStrictEqual(model?.requestedModelIds, ["Nemo-requested"]);
+		deepStrictEqual(model?.responseModelIdObservationCounts, {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 2,
+		});
 		strictEqual(model?.apiCalls, 2);
 		strictEqual(model?.totalTokens, 10437);
 	});
@@ -574,9 +589,95 @@ describe("contracts/usage-report token and cost facts", () => {
 	it("prints the totals and the per-model table in the text report", () => {
 		ok(stdout.includes("tokens in window: 10437 over 2 model calls"), stdout);
 		ok(stdout.includes("provider-reported cost in window: $0.3000"), stdout);
-		ok(stdout.includes("tokens by model (from session ledgers, provider-reported; served id when present"), stdout);
-		ok(stdout.includes("requested"), "the table names what was asked for beside what answered (#185)");
+		ok(stdout.includes("tokens by attributed model (from session ledgers and provider-reported usage)"), stdout);
+		ok(stdout.includes("requested model ids"), "the table names what was asked for beside the attribution");
+		ok(stdout.includes("response model id observation"), stdout);
+		ok(stdout.includes("legacy difference-only 2"), stdout);
+		ok(!/\bsame\b/.test(stdout), "requested ids are values rather than the literal string same");
 		ok(stdout.includes("dynamo"), stdout);
+	});
+});
+
+describe("contracts/usage-report response model id observations", () => {
+	const scratch = makeScratchHome("clio-usage-model-id-observations-");
+	let rows: JsonRow[] = [];
+	let stdout = "";
+
+	function assistantLine(turnId: string, payload: Record<string, unknown>): string {
+		return JSON.stringify({
+			kind: "message",
+			role: "assistant",
+			turnId,
+			parentTurnId: null,
+			timestamp: RECENT,
+			payload: {
+				text: "done",
+				stopReason: "stop",
+				provider: "dynamo",
+				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+				...payload,
+			},
+		});
+	}
+
+	before(async () => {
+		const sessions = join(scratch.dir, "state", "sessions", "repohash");
+		writeJsonl(join(sessions, "sess-observations", "current.jsonl"), [
+			assistantLine("reported", {
+				model: "requested-a",
+				responseModel: "reported-model",
+				responseModelIdObservation: { state: "reported", reportedModelId: "reported-model" },
+			}),
+			assistantLine("not-reported", {
+				model: "requested-b",
+				responseModelIdObservation: { state: "not-reported" },
+			}),
+			assistantLine("not-observed", {
+				model: "requested-c",
+				responseModel: "fallback-model",
+				responseModelIdObservation: { state: "not-observed" },
+			}),
+			assistantLine("legacy", { model: "requested-d", responseModel: "legacy-model" }),
+		]);
+		const json = await runUsage(scratch, ["report", "--json"]);
+		strictEqual(json.code, 0, json.stderr);
+		rows = parseJsonl(json.stdout);
+		stdout = (await runUsage(scratch, ["report"])).stdout;
+	});
+	after(() => scratch.cleanup());
+
+	it("keeps every current state and the historical shape distinct", () => {
+		const byAttributedModel = new Map(facts(rows, "model-usage").map((row) => [String(row.attributedModelId), row]));
+		deepStrictEqual(byAttributedModel.get("reported-model")?.responseModelIdObservationCounts, {
+			reportedCalls: 1,
+			notReportedCalls: 0,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 0,
+		});
+		deepStrictEqual(byAttributedModel.get("unknown")?.responseModelIdObservationCounts, {
+			reportedCalls: 0,
+			notReportedCalls: 1,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 0,
+		});
+		deepStrictEqual(byAttributedModel.get("fallback-model")?.responseModelIdObservationCounts, {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 1,
+			legacyDifferenceOnlyCalls: 0,
+		});
+		deepStrictEqual(byAttributedModel.get("legacy-model")?.responseModelIdObservationCounts, {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 1,
+		});
+	});
+
+	it("prints the same state names as the other usage surfaces", () => {
+		for (const label of ["reported 1", "not reported 1", "not observed 1", "legacy difference-only 1"]) {
+			ok(stdout.includes(label), `missing ${label}:\n${stdout}`);
+		}
 	});
 });
 

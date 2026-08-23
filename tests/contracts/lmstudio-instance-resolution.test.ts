@@ -22,8 +22,8 @@ afterEach(async () => {
 	await Promise.all(fixtures.splice(0).map((fixture) => fixture.close()));
 });
 
-async function fake(hostIdentity: "dynamo" | "zbook", servedModel?: string): Promise<FakeLmStudioFixture> {
-	const fixture = await startFakeLmStudioServer({ hostIdentity, ...(servedModel ? { servedModel } : {}) });
+async function fake(hostIdentity: "dynamo" | "zbook", reportedModelId?: string): Promise<FakeLmStudioFixture> {
+	const fixture = await startFakeLmStudioServer({ hostIdentity, ...(reportedModelId ? { reportedModelId } : {}) });
 	fixtures.push(fixture);
 	return fixture;
 }
@@ -126,7 +126,7 @@ describe("contracts/lmstudio host and instance identity", () => {
 	 * the instance that answered, which the footer and usage ledger read as
 	 * `responseModel` when it differs from the request.
 	 */
-	it("warns about an LM Link peer once per process and records the served id", async () => {
+	it("warns about an LM Link peer once per process and records the reported id", async () => {
 		const dynamoServer = await fake("dynamo", "ornith-1.5-35b-a3b");
 		const zbookServer = await fake("zbook");
 		const dynamo = target(dynamoServer, "dynamo");
@@ -148,43 +148,49 @@ describe("contracts/lmstudio host and instance identity", () => {
 		strictEqual(peerWarnings[0]?.detail?.requestedModel, "qwen3.8-27b-zbook");
 
 		const done = first.find((event) => event.type === "done") as
-			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| { message?: { responseModelIdObservation?: unknown; responseModel?: unknown } }
 			| undefined;
-		strictEqual(done?.message?.servedModel, "ornith-1.5-35b-a3b");
-		strictEqual(done?.message?.responseModel, "ornith-1.5-35b-a3b", "the served id rides on the assistant message");
+		deepStrictEqual(done?.message?.responseModelIdObservation, {
+			state: "reported",
+			reportedModelId: "ornith-1.5-35b-a3b",
+		});
+		strictEqual(done?.message?.responseModel, "ornith-1.5-35b-a3b", "the differing response id rides on the message");
 	});
 
 	it("distinguishes an echoed model id from an omitted one", async () => {
 		const echoedServer = await fake("dynamo", "qwen3.8-27b-dynamo");
 		const echoed = await drainChat(target(echoedServer, "dynamo"), "qwen3.8-27b-dynamo");
 		const echoedDone = echoed.find((event) => event.type === "done") as
-			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| { message?: { responseModelIdObservation?: unknown; responseModel?: unknown } }
 			| undefined;
-		strictEqual(echoedDone?.message?.servedModel, "qwen3.8-27b-dynamo");
+		deepStrictEqual(echoedDone?.message?.responseModelIdObservation, {
+			state: "reported",
+			reportedModelId: "qwen3.8-27b-dynamo",
+		});
 		strictEqual(echoedDone?.message?.responseModel, undefined);
 
 		const omittedServer = await fake("dynamo");
 		const omitted = await drainChat(target(omittedServer, "dynamo"), "qwen3.8-27b-dynamo");
 		const omittedDone = omitted.find((event) => event.type === "done") as
-			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| { message?: { responseModelIdObservation?: unknown; responseModel?: unknown } }
 			| undefined;
-		strictEqual(omittedDone?.message?.servedModel, null);
+		deepStrictEqual(omittedDone?.message?.responseModelIdObservation, { state: "not-reported" });
 		strictEqual(omittedDone?.message?.responseModel, undefined);
 	});
 
-	it("leaves servedModel absent when the response is not an observed event stream", async () => {
+	it("records that model-id presence was not observed outside an event stream", async () => {
 		const server = await startFakeLmStudioServer({
 			hostIdentity: "dynamo",
-			servedModel: "qwen3.8-27b-dynamo",
+			reportedModelId: "qwen3.8-27b-dynamo",
 			chatContentType: "text/plain",
 		});
 		fixtures.push(server);
 		const events = await drainChat(target(server, "dynamo"), "qwen3.8-27b-dynamo");
 		const done = events.find((event) => event.type === "done") as
-			| { message?: { servedModel?: unknown; responseModel?: unknown } }
+			| { message?: { responseModelIdObservation?: unknown; responseModel?: unknown } }
 			| undefined;
 		ok(done?.message);
-		strictEqual(Object.hasOwn(done.message, "servedModel"), false);
+		deepStrictEqual(done.message.responseModelIdObservation, { state: "not-observed" });
 		strictEqual(done.message.responseModel, undefined);
 	});
 

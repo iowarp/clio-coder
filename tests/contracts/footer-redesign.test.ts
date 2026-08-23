@@ -267,6 +267,7 @@ describe("IT3: Metric strip", () => {
 	const mockLastTurn = {
 		elapsedMs: 3000,
 		modelId: "model",
+		responseModelIdObservation: { state: "not-observed" as const },
 		targetId: "prov",
 		inputTokens: 500,
 		outputTokens: 150,
@@ -495,6 +496,7 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		lastTurn: {
 			elapsedMs: 2500,
 			modelId: "model",
+			responseModelIdObservation: { state: "not-observed" },
 			targetId: "prov",
 			inputTokens: 400,
 			outputTokens: 100,

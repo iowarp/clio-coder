@@ -7,12 +7,15 @@
  */
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { ResponseModelIdObservationCounts } from "../../src/core/response-model-id.js";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
 
 interface Recorded {
 	providerId: string;
-	modelId: string;
+	attributedModelId: string;
+	requestedModelIds: ReadonlyArray<string>;
+	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
 	tokens: number;
 	costUsd?: number;
 	apiCalls?: number;
@@ -30,10 +33,13 @@ function makeSink(): {
 			resetSession: () => {
 				resets += 1;
 			},
-			recordTokens: (providerId, modelId, tokens, costUsd, breakdown) => {
+			recordTokens: (providerId, attributedModelId, tokens, costUsd, breakdown, _costProvenance, modelIdFacts) => {
+				if (!modelIdFacts) throw new Error("reseed omitted response model id facts");
 				calls.push({
 					providerId,
-					modelId,
+					attributedModelId,
+					requestedModelIds: modelIdFacts.requestedModelIds,
+					responseModelIdObservationCounts: { ...modelIdFacts.responseModelIdObservationCounts },
 					tokens,
 					...(costUsd !== undefined ? { costUsd } : {}),
 					...(breakdown?.apiCalls !== undefined ? { apiCalls: breakdown.apiCalls } : {}),
@@ -101,6 +107,12 @@ describe("contracts/session usage reseed", () => {
 			calls.map((call) => call.providerId),
 			["llamacpp", "llamacpp"],
 		);
+		deepStrictEqual(calls[0]?.responseModelIdObservationCounts, {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 1,
+		});
 	});
 
 	// The symptom from the other end: resuming into a session and sending
@@ -159,7 +171,7 @@ describe("contracts/session usage reseed", () => {
 			model: "Nemo-3.5-Lightning",
 		});
 		strictEqual(calls[0]?.providerId, "dynamo", "not the runtime name from the payload");
-		strictEqual(calls[0]?.modelId, "Nemo-3.5-Lightning");
+		strictEqual(calls[0]?.attributedModelId, "Nemo-3.5-Lightning");
 	});
 
 	/**
@@ -168,43 +180,88 @@ describe("contracts/session usage reseed", () => {
 	 * only when it differs from the request. The call is attributed to the id
 	 * that answered, and both ids are kept (issue #185).
 	 */
-	it("attributes a peer-served call to the served id and keeps the requested one", () => {
-		const served = ledgerUsageCalls(
+	it("labels a pre-#193 peer response as the legacy difference-only shape", () => {
+		const legacyDifference = ledgerUsageCalls(
 			[assistantTurn({ ...completedCall, model: "qwen3.8-27b-dynamo", responseModel: "ornith-1.5-35b-a3b" }, "a1")],
 			{ target: "dynamo", model: "qwen3.8-27b-dynamo" },
 		);
-		strictEqual(served[0]?.modelId, "ornith-1.5-35b-a3b", "tokens belong to the model that produced them");
-		strictEqual(served[0]?.requestedModel, "qwen3.8-27b-dynamo");
-		strictEqual(served[0]?.servedModel, "ornith-1.5-35b-a3b");
+		strictEqual(legacyDifference[0]?.attributedModelId, "ornith-1.5-35b-a3b");
+		strictEqual(legacyDifference[0]?.requestedModelId, "qwen3.8-27b-dynamo");
+		deepStrictEqual(legacyDifference[0]?.responseModelIdObservation, {
+			state: "legacy-difference-only",
+			differingModelId: "ornith-1.5-35b-a3b",
+		});
 
 		const legacy = ledgerUsageCalls([assistantTurn({ ...completedCall, responseModel: undefined }, "a1")], {
 			target: "dynamo",
 			model: "qwen3.8-27b-dynamo",
 		});
-		strictEqual(legacy[0]?.modelId, "qwen3.8-27b-dynamo");
-		strictEqual(legacy[0]?.requestedModel, "qwen3.8-27b-dynamo");
-		strictEqual(
-			legacy[0]?.servedModel,
-			null,
-			"a historical row keeps the attribution it had before presence was recorded",
-		);
+		strictEqual(legacy[0]?.attributedModelId, "qwen3.8-27b-dynamo");
+		strictEqual(legacy[0]?.requestedModelId, "qwen3.8-27b-dynamo");
+		deepStrictEqual(legacy[0]?.responseModelIdObservation, {
+			state: "legacy-difference-only",
+			differingModelId: null,
+		});
 	});
 
-	it("distinguishes an echoed response model from an omitted one", () => {
-		const echoed = ledgerUsageCalls([assistantTurn({ ...completedCall, servedModel: "qwen3.8-27b-dynamo" }, "a1")], {
-			target: "dynamo",
-			model: "qwen3.8-27b-dynamo",
+	it("distinguishes reported, not-reported, and not-observed response model ids", () => {
+		const reported = ledgerUsageCalls(
+			[
+				assistantTurn(
+					{
+						...completedCall,
+						responseModelIdObservation: { state: "reported", reportedModelId: "qwen3.8-27b-dynamo" },
+					},
+					"a1",
+				),
+			],
+			{
+				target: "dynamo",
+				model: "qwen3.8-27b-dynamo",
+			},
+		);
+		strictEqual(reported[0]?.attributedModelId, "qwen3.8-27b-dynamo");
+		deepStrictEqual(reported[0]?.responseModelIdObservation, {
+			state: "reported",
+			reportedModelId: "qwen3.8-27b-dynamo",
 		});
-		strictEqual(echoed[0]?.modelId, "qwen3.8-27b-dynamo");
-		strictEqual(echoed[0]?.servedModel, "qwen3.8-27b-dynamo");
 
-		const omitted = ledgerUsageCalls([assistantTurn({ ...completedCall, servedModel: null }, "a1")], {
-			target: "dynamo",
-			model: "qwen3.8-27b-dynamo",
-		});
-		strictEqual(omitted[0]?.modelId, "unknown");
-		strictEqual(omitted[0]?.requestedModel, "qwen3.8-27b-dynamo");
-		strictEqual(omitted[0]?.servedModel, null);
+		const notReported = ledgerUsageCalls(
+			[
+				assistantTurn(
+					{
+						...completedCall,
+						responseModelIdObservation: { state: "not-reported" },
+					},
+					"a1",
+				),
+			],
+			{
+				target: "dynamo",
+				model: "qwen3.8-27b-dynamo",
+			},
+		);
+		strictEqual(notReported[0]?.attributedModelId, "unknown");
+		deepStrictEqual(notReported[0]?.responseModelIdObservation, { state: "not-reported" });
+
+		const notObserved = ledgerUsageCalls(
+			[
+				assistantTurn(
+					{
+						...completedCall,
+						responseModel: undefined,
+						responseModelIdObservation: { state: "not-observed" },
+					},
+					"a1",
+				),
+			],
+			{
+				target: "dynamo",
+				model: "qwen3.8-27b-dynamo",
+			},
+		);
+		strictEqual(notObserved[0]?.attributedModelId, "qwen3.8-27b-dynamo");
+		deepStrictEqual(notObserved[0]?.responseModelIdObservation, { state: "not-observed" });
 	});
 
 	it("follows a modelChange row so a session that switched targets attributes each call correctly", () => {
@@ -228,7 +285,7 @@ describe("contracts/session usage reseed", () => {
 			{ target: "dynamo", model: "Nemo-3.5-Lightning" },
 		);
 		deepStrictEqual(
-			calls.map((call) => `${call.providerId}/${call.modelId}`),
+			calls.map((call) => `${call.providerId}/${call.attributedModelId}`),
 			["dynamo/Nemo-3.5-Lightning", "mini/gemma-4"],
 		);
 	});

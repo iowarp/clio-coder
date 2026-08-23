@@ -1,3 +1,4 @@
+import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
 import type { TargetStatus } from "../providers/contract.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { AccountabilitySummary } from "./accountability.js";
@@ -132,11 +133,15 @@ export interface ObservabilityContract {
 	 */
 	recordTokens(
 		providerId: string,
-		modelId: string,
+		attributedModelId: string,
 		tokens: number,
 		costUsd?: number,
 		breakdown?: Partial<UsageBreakdown>,
 		costProvenance?: CostProvenance,
+		modelIdFacts?: {
+			requestedModelIds: ReadonlyArray<string>;
+			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
+		},
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;

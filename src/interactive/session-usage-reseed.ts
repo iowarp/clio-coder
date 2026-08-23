@@ -14,6 +14,11 @@
  * only the sink wiring between that fold and the observability projection.
  */
 
+import {
+	addResponseModelIdObservationCount,
+	emptyResponseModelIdObservationCounts,
+	type ResponseModelIdObservationCounts,
+} from "../core/response-model-id.js";
 import { ledgerUsageCalls, type SessionEntry, type SessionUsageDefaults } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 
@@ -22,7 +27,7 @@ export interface SessionUsageSink {
 	resetSession(): void;
 	recordTokens(
 		providerId: string,
-		modelId: string,
+		attributedModelId: string,
 		tokens: number,
 		costUsd?: number,
 		breakdown?: {
@@ -35,6 +40,10 @@ export interface SessionUsageSink {
 			apiCalls?: number;
 		},
 		costProvenance?: never,
+		modelIdFacts?: {
+			requestedModelIds: ReadonlyArray<string>;
+			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
+		},
 	): void;
 }
 
@@ -61,14 +70,31 @@ export function reseedSessionUsageFromLedger(
 	sink.resetSession();
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
 	for (const call of ledgerUsageCalls(scoped, defaults)) {
-		sink.recordTokens(call.providerId, call.modelId, call.totalTokens, call.costUsd, {
-			input: call.input,
-			output: call.output,
-			cacheRead: call.cacheRead,
-			cacheWrite: call.cacheWrite,
-			reasoningTokens: call.reasoningTokens,
-			totalTokens: call.totalTokens,
-			apiCalls: call.apiCalls ?? 1,
-		});
+		const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
+		addResponseModelIdObservationCount(
+			responseModelIdObservationCounts,
+			call.responseModelIdObservation,
+			call.apiCalls ?? 1,
+		);
+		sink.recordTokens(
+			call.providerId,
+			call.attributedModelId,
+			call.totalTokens,
+			call.costUsd,
+			{
+				input: call.input,
+				output: call.output,
+				cacheRead: call.cacheRead,
+				cacheWrite: call.cacheWrite,
+				reasoningTokens: call.reasoningTokens,
+				totalTokens: call.totalTokens,
+				apiCalls: call.apiCalls ?? 1,
+			},
+			undefined,
+			{
+				requestedModelIds: [call.requestedModelId],
+				responseModelIdObservationCounts,
+			},
+		);
 	}
 }

@@ -19,6 +19,7 @@ import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModels } from "../../core/residency-protection.js";
+import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import {
 	responseSchemaConflictsWithTools,
 	runtimeSpeaksResponseSchemaDialect,
@@ -3473,7 +3474,7 @@ export function createDispatchBundle(
 					role?: string;
 					usage?: unknown;
 					model?: unknown;
-					servedModel?: unknown;
+					responseModelIdObservation?: unknown;
 					responseModel?: unknown;
 					responseId?: unknown;
 					stopReason?: unknown;
@@ -3523,13 +3524,16 @@ export function createDispatchBundle(
 				tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
 				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
 				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
-				const model = readStringOrNull(event.message.model);
-				const servedModel = readStringOrNull(event.message.servedModel);
-				const responseModel = readStringOrNull(event.message.responseModel);
-				const responseId = readStringOrNull(event.message.responseId);
-				if (model !== null || servedModel !== null || responseModel !== null || responseId !== null) {
-					upstreamResponses.push({ model, servedModel, responseModel, responseId });
-				}
+				const requestedModelId = readStringOrNull(event.message.model);
+				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
+				const differingResponseModelId = readStringOrNull(event.message.responseModel);
+				const providerResponseId = readStringOrNull(event.message.responseId);
+				upstreamResponses.push({
+					requestedModelId,
+					responseModelIdObservation,
+					differingResponseModelId,
+					providerResponseId,
+				});
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
 					if (message !== null) failureMessage = message;
@@ -4374,7 +4378,7 @@ export function createDispatchBundle(
 					role?: string;
 					usage?: unknown;
 					model?: unknown;
-					servedModel?: unknown;
+					responseModelIdObservation?: unknown;
 					responseModel?: unknown;
 					responseId?: unknown;
 					stopReason?: unknown;
@@ -4480,13 +4484,16 @@ export function createDispatchBundle(
 				tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
 				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
 				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
-				const model = readStringOrNull(event.message.model);
-				const servedModel = readStringOrNull(event.message.servedModel);
-				const responseModel = readStringOrNull(event.message.responseModel);
-				const responseId = readStringOrNull(event.message.responseId);
-				if (model !== null || servedModel !== null || responseModel !== null || responseId !== null) {
-					upstreamResponses.push({ model, servedModel, responseModel, responseId });
-				}
+				const requestedModelId = readStringOrNull(event.message.model);
+				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
+				const differingResponseModelId = readStringOrNull(event.message.responseModel);
+				const providerResponseId = readStringOrNull(event.message.responseId);
+				upstreamResponses.push({
+					requestedModelId,
+					responseModelIdObservation,
+					differingResponseModelId,
+					providerResponseId,
+				});
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
 					if (message !== null) failureMessage = message;

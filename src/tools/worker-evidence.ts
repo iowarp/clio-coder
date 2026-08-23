@@ -2,7 +2,7 @@ import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
-import { receiptServedModelLabel } from "./dispatch-event-text.js";
+import { receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
 
 /** Matches a source citation the parent can independently spot-check. */
 const SOURCE_CITATION_PATTERN = /([\w./~-]+):(\d+)/g;
@@ -137,12 +137,12 @@ export function receiptEvidenceLabels(
 			sections.length > 0 ? ` sections:${[...sections].sort().join(",")}` : ""
 		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
-	const served = receiptServedModelLabel(receipt);
+	const responseModelIdObservation = receiptResponseModelIdObservationLabel(receipt);
 	return [
 		canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
-		...(served ? [served] : []),
+		...(responseModelIdObservation ? [responseModelIdObservation] : []),
 		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, status),
 		briefing,

@@ -1,4 +1,5 @@
 import type { OutputVerbosity } from "../../core/defaults.js";
+import { responseModelIdObservationLabel } from "../../core/response-model-id.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	type CostAggregate,
@@ -725,11 +726,17 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 	}
 	if (summary.watchdogPeak >= 2) parts.push(theme.fg("warning", "slow"));
 	if (summary.truncated) parts.push(theme.fg("warning", "trunc"));
-	// The one case the model is named here: the rail shows what was asked for,
-	// and this says what answered when the two differ (issue #185).
-	if (summary.servedModelId !== undefined) {
-		parts.push(theme.fg("warning", `served ${abbreviateModelId(summary.servedModelId)}`));
-	}
+	const observation = summary.responseModelIdObservation;
+	const observedId =
+		observation.state === "reported"
+			? observation.reportedModelId
+			: observation.state === "legacy-difference-only"
+				? observation.differingModelId
+				: null;
+	const observationText = `response model id observation ${responseModelIdObservationLabel(observation)}${
+		observedId === null ? "" : ` ${abbreviateModelId(observedId)}`
+	}`;
+	parts.push(theme.fg("warning", observationText));
 	return parts.join(theme.fg("dim", " · "));
 }
 

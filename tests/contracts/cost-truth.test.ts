@@ -48,6 +48,7 @@ const IDLE: AgentStatus = {
 const LAST_TURN: TurnSummary = {
 	elapsedMs: 13_000,
 	modelId: "Nemo-3.5-Lightning",
+	responseModelIdObservation: { state: "not-observed" },
 	targetId: "dynamo",
 	inputTokens: 14_073,
 	outputTokens: 198,
@@ -103,7 +104,14 @@ function footerStrip(cost: Parameters<typeof buildMetricStrip>[5], turn: TurnSum
 function overlayBody(cost: Parameters<typeof formatCostOverlayBodyLines>[0], rows: number): string {
 	const entries = Array.from({ length: rows }, () => ({
 		providerId: "dynamo",
-		modelId: "Nemo-3.5-Lightning",
+		attributedModelId: "Nemo-3.5-Lightning",
+		requestedModelIds: ["Nemo-3.5-Lightning"],
+		responseModelIdObservationCounts: {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 2,
+			legacyDifferenceOnlyCalls: 0,
+		},
 		runs: 1,
 		tokens: 24_675,
 		input: 14_073,

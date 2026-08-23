@@ -16,7 +16,7 @@ import type {
 	RunReceiptFindingsSummary,
 	RunReceiptIntegrity,
 } from "../../src/domains/dispatch/types.js";
-import { receiptServedModelLabel } from "../../src/tools/dispatch-event-text.js";
+import { receiptResponseModelIdObservationLabel } from "../../src/tools/dispatch-event-text.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function fixtureRouteCandidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
@@ -48,18 +48,41 @@ const sampleSummary: RunReceiptFindingsSummary = {
 };
 
 describe("contracts/receipt-integrity", () => {
-	it("renders an omitted response model as unknown", () => {
+	it("renders every response model id observation state with the shared vocabulary", () => {
 		strictEqual(
-			receiptServedModelLabel({
-				upstreamResponses: [{ model: "model-a", servedModel: null, responseModel: null, responseId: "response-1" }],
+			receiptResponseModelIdObservationLabel({
+				upstreamResponses: [
+					{
+						requestedModelId: "model-a",
+						responseModelIdObservation: { state: "reported", reportedModelId: "model-a-2026" },
+						differingResponseModelId: "model-a-2026",
+						providerResponseId: "response-1",
+					},
+					{
+						requestedModelId: "model-b",
+						responseModelIdObservation: { state: "not-reported" },
+						differingResponseModelId: null,
+						providerResponseId: "response-2",
+					},
+					{
+						requestedModelId: "model-c",
+						responseModelIdObservation: { state: "not-observed" },
+						differingResponseModelId: null,
+						providerResponseId: "response-3",
+					},
+				],
 			}),
-			"served=unknown",
+			"response_model_id_observation=reported:model-a-2026,not-reported,not-observed",
 		);
+	});
+
+	it("labels receipt response fields written before #193 as legacy difference-only", () => {
+		const historical = {
+			upstreamResponses: [{ model: "model-a", responseModel: "peer-model", responseId: "response-1" }],
+		} as unknown as Pick<RunReceipt, "upstreamResponses">;
 		strictEqual(
-			receiptServedModelLabel({
-				upstreamResponses: [{ model: "model-a", servedModel: "model-a", responseModel: null, responseId: "response-1" }],
-			}),
-			"served=model-a",
+			receiptResponseModelIdObservationLabel(historical),
+			"response_model_id_observation=legacy-difference-only:peer-model",
 		);
 	});
 
@@ -279,7 +302,12 @@ describe("contracts/receipt-integrity", () => {
 			failureMessage: "diagnostic retained for evidence",
 			costProvenance: "known",
 			upstreamResponses: [
-				{ model: "model-a", servedModel: "model-a-2026", responseModel: "model-a-2026", responseId: "response-1" },
+				{
+					requestedModelId: "model-a",
+					responseModelIdObservation: { state: "reported", reportedModelId: "model-a-2026" },
+					differingResponseModelId: "model-a-2026",
+					providerResponseId: "response-1",
+				},
 			],
 			output: { state: "final", text: "the durable final answer", bytes: 24, truncated: false },
 			promptSignature: required(envelope.promptSignature, "promptSignature"),

@@ -1,4 +1,9 @@
 import {
+	addResponseModelIdObservationCounts,
+	type ResponseModelIdObservationCounts,
+	responseModelIdObservationCountsLabel,
+} from "../core/response-model-id.js";
+import {
 	aggregateCostAmounts,
 	type CostAggregate,
 	type CostEntry,
@@ -16,7 +21,9 @@ export const COST_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 export interface CostRow {
 	providerId: string;
-	modelId: string;
+	attributedModelId: string;
+	requestedModelIds: string[];
+	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
 	runs: number;
 	tokens: number;
 	input: number;
@@ -33,9 +40,17 @@ function formatTokens(n: number): string {
 }
 
 export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow[] {
-	const grouped = new Map<string, { row: Omit<CostRow, "cost">; entries: CostEntry[] }>();
+	const grouped = new Map<
+		string,
+		{
+			row: Omit<CostRow, "cost" | "requestedModelIds" | "responseModelIdObservationCounts">;
+			requestedModelIds: Set<string>;
+			responseModelIdObservationCounts: ResponseModelIdObservationCounts;
+			entries: CostEntry[];
+		}
+	>();
 	for (const entry of entries) {
-		const key = `${entry.providerId}::${entry.modelId}`;
+		const key = `${entry.providerId}::${entry.attributedModelId}`;
 		const existing = grouped.get(key);
 		if (existing) {
 			existing.row.runs += 1;
@@ -46,13 +61,18 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			existing.row.cacheWrite += entry.cacheWrite;
 			existing.row.reasoningTokens += entry.reasoningTokens;
 			existing.row.apiCalls += entry.apiCalls ?? 1;
+			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
+			addResponseModelIdObservationCounts(
+				existing.responseModelIdObservationCounts,
+				entry.responseModelIdObservationCounts,
+			);
 			existing.entries.push(entry);
 			continue;
 		}
 		grouped.set(key, {
 			row: {
 				providerId: entry.providerId,
-				modelId: entry.modelId,
+				attributedModelId: entry.attributedModelId,
 				runs: 1,
 				tokens: entry.tokens,
 				input: entry.input,
@@ -62,22 +82,31 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				reasoningTokens: entry.reasoningTokens,
 				apiCalls: entry.apiCalls ?? 1,
 			},
+			requestedModelIds: new Set(entry.requestedModelIds),
+			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
 			entries: [entry],
 		});
 	}
-	const rows = Array.from(grouped.values(), ({ row, entries }) => ({
+	const rows = Array.from(grouped.values(), ({ row, entries, requestedModelIds, responseModelIdObservationCounts }) => ({
 		...row,
+		requestedModelIds: [...requestedModelIds].sort(),
+		responseModelIdObservationCounts,
 		cost: aggregateCostAmounts(entries.map((entry) => ({ usd: entry.usd, provenance: entry.provenance }))),
 	}));
 	rows.sort((a, b) => {
 		if (a.providerId !== b.providerId) return a.providerId < b.providerId ? -1 : 1;
-		if (a.modelId !== b.modelId) return a.modelId < b.modelId ? -1 : 1;
+		if (a.attributedModelId !== b.attributedModelId) return a.attributedModelId < b.attributedModelId ? -1 : 1;
 		return 0;
 	});
 	return rows;
 }
 
-function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "modelId" | "cost"> {
+function sumRows(
+	rows: ReadonlyArray<CostRow>,
+): Omit<
+	CostRow,
+	"providerId" | "attributedModelId" | "requestedModelIds" | "responseModelIdObservationCounts" | "cost"
+> {
 	return rows.reduce(
 		(acc, row) => ({
 			runs: acc.runs + row.runs,
@@ -156,6 +185,8 @@ function modelBlock(row: CostRow): string[] {
 	// block with token rows and no cost row.
 	const cost = formatCostAggregate(row.cost);
 	return kvBlock([
+		["requested model ids", row.requestedModelIds.join(", ")],
+		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
 		["turns", formatTokens(row.runs)],
 		["model calls", formatTokens(row.apiCalls)],
 		...(cost === null ? [] : [["cost", cost] as const]),
@@ -185,7 +216,7 @@ export function formatCostOverlayBodyLines(
 	} else {
 		for (const [index, row] of rows.entries()) {
 			if (index > 0) lines.push("");
-			lines.push(theme.style("accent", `${row.providerId} · ${row.modelId}`, { bold: true }));
+			lines.push(theme.style("accent", `${row.providerId} · attributed model ${row.attributedModelId}`, { bold: true }));
 			for (const line of modelBlock(row)) {
 				lines.push(line);
 			}
