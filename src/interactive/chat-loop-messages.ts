@@ -7,6 +7,13 @@
 
 import { randomUUID } from "node:crypto";
 import { settingsPath } from "../core/config.js";
+import {
+	addResponseModelIdObservationCount,
+	emptyResponseModelIdObservationCounts,
+	type ResponseModelIdObservation,
+	type ResponseModelIdObservationCounts,
+	responseModelIdObservationFromRecord,
+} from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
@@ -356,6 +363,9 @@ export interface RunUsageSummary {
 	apiCalls: number;
 	hadReasoning: boolean;
 	hadUsage: boolean;
+	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
+	lastResponseModelIdObservation: ResponseModelIdObservation;
+	lastDifferingResponseModelId: string | null;
 }
 
 /**
@@ -380,6 +390,9 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		apiCalls: 0,
 		hadReasoning: false,
 		hadUsage: false,
+		responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
+		lastResponseModelIdObservation: { state: "not-observed" },
+		lastDifferingResponseModelId: null,
 	};
 	for (const raw of messages) {
 		const message = raw as
@@ -397,8 +410,15 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 			  };
 		if (!message || typeof message !== "object") continue;
 		if (message.role !== "assistant") continue;
+		const record = message as unknown as Record<string, unknown>;
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") continue;
+		summary.lastResponseModelIdObservation = responseModelIdObservationFromRecord(record, "not-observed");
+		addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, summary.lastResponseModelIdObservation);
+		summary.lastDifferingResponseModelId =
+			typeof record.responseModel === "string" && record.responseModel.trim().length > 0
+				? record.responseModel.trim()
+				: null;
 		summary.hadUsage = true;
 		summary.apiCalls += 1;
 		const input = typeof usage.input === "number" ? usage.input : 0;
@@ -459,7 +479,8 @@ export function assistantSessionPayload(
 	const raw = message as unknown as Record<string, unknown>;
 	if (Array.isArray(raw.content)) payload.content = raw.content;
 	if (thinking.length > 0) payload.thinking = thinking;
-	for (const key of ["usage", "api", "provider", "model", "servedModel", "responseModel", "responseId", "diagnostics"]) {
+	payload.responseModelIdObservation = responseModelIdObservationFromRecord(raw, "not-observed");
+	for (const key of ["usage", "api", "provider", "model", "responseModel", "responseId", "diagnostics"]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}
 	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {

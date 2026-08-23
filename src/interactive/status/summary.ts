@@ -1,3 +1,4 @@
+import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import { estimateReasoningTextTokens, extractReasoningTokens } from "../../domains/session/context-accounting.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ReasoningTokenProvenance, RunTally, TurnStopReason, TurnSummary, WatchdogTier } from "./types.js";
@@ -65,7 +66,7 @@ export function emptyRunTally(): RunTally {
 		hadEstimatedReasoning: false,
 		toolCount: 0,
 		toolErrorCount: 0,
-		servedModelId: null,
+		responseModelIdObservation: { state: "not-observed" },
 	};
 }
 
@@ -86,10 +87,10 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	}
 	if (message.role !== "assistant") return tally;
 	const usage = (message as { usage?: UsageLike }).usage;
-	const responseModel = (message as { responseModel?: unknown }).responseModel;
+	const record = message as unknown as Record<string, unknown>;
 	const next: RunTally = {
 		...tally,
-		servedModelId: typeof responseModel === "string" && responseModel.length > 0 ? responseModel : tally.servedModelId,
+		responseModelIdObservation: responseModelIdObservationFromRecord(record, "not-observed"),
 		inputTokens: tally.inputTokens + (usage ? finite(usage.input) : 0),
 		outputTokens: tally.outputTokens + (usage ? finite(usage.output) : 0),
 		cacheReadTokens: tally.cacheReadTokens + (usage ? finite(usage.cacheRead) : 0),
@@ -148,8 +149,8 @@ export function summaryFromRunTally(tally: RunTally, input: SummaryFromTallyInpu
 		...(input.stopDetail !== undefined ? { stopDetail: input.stopDetail } : {}),
 		watchdogPeak: input.watchdogPeak,
 		truncated: input.truncated === true,
+		responseModelIdObservation: tally.responseModelIdObservation,
 	};
-	if (tally.servedModelId !== null && tally.servedModelId !== input.modelId) summary.servedModelId = tally.servedModelId;
 	if (tally.hadProviderReasoning || tally.hadEstimatedReasoning) {
 		summary.reasoningTokens = tally.reasoningTokens;
 		const provenance: ReasoningTokenProvenance =

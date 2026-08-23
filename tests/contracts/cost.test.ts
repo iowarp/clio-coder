@@ -104,7 +104,16 @@ describe("contracts/cost provenance algebra", () => {
 		strictEqual(normalizeCostProvenance(undefined), "unknown");
 		const tracker = createCostTracker();
 		tracker.accumulate("provider", "model", 10, 0);
-		deepStrictEqual(tracker.entries()[0]?.provenance, "unknown");
+		const entry = tracker.entries()[0];
+		deepStrictEqual(entry?.provenance, "unknown");
+		strictEqual(entry?.attributedModelId, "model");
+		deepStrictEqual(entry?.requestedModelIds, ["model"]);
+		deepStrictEqual(entry?.responseModelIdObservationCounts, {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 1,
+			legacyDifferenceOnlyCalls: 0,
+		});
 		deepStrictEqual(tracker.sessionCost(), {
 			knownUsd: 0,
 			hasEstimated: false,

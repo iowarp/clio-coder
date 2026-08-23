@@ -1,5 +1,11 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import {
+	addResponseModelIdObservationCount,
+	emptyResponseModelIdObservationCounts,
+	type ResponseModelIdObservationCounts,
+	responseModelIdObservationCountsLabel,
+} from "../core/response-model-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
@@ -86,6 +92,10 @@ function emptyUsageTotals(): UsageTotals {
 		totalTokens: 0,
 		costUsd: 0,
 	};
+}
+
+function addResponseModelIdObservation(counts: ResponseModelIdObservationCounts, call: LedgerUsageCall): void {
+	addResponseModelIdObservationCount(counts, call.responseModelIdObservation, call.apiCalls ?? 1);
 }
 
 function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
@@ -321,27 +331,33 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	// Token and cost facts fold the same per-call usage the `/cost` overlay
 	// reseeds from, through the same session-domain function, so the report and
 	// the overlay cannot disagree about what a session spent.
-	// Keyed by the model that served the call, so tokens a LM Link peer served
-	// under a different id are its row, not the requested model's (issue #185);
-	// the requested ids behind a row are kept for the fact and the table.
+	// Keyed by the model id accounting attributes the call to. A reported LM
+	// Link peer id gets its own row, while an observed omission becomes unknown.
+	// Requested ids and observation-state counts remain alongside that row.
 	const usageByModel = new Map<
 		string,
-		{ providerId: string; modelId: string; requestedModels: Set<string>; servedCalls: number; totals: UsageTotals }
+		{
+			providerId: string;
+			attributedModelId: string;
+			requestedModelIds: Set<string>;
+			responseModelIdObservationCounts: ResponseModelIdObservationCounts;
+			totals: UsageTotals;
+		}
 	>();
 	const usageTotals = emptyUsageTotals();
 	for (const session of sessions) {
 		for (const call of session.usageCalls) {
 			addUsageCall(usageTotals, call);
-			const key = `${call.providerId}::${call.modelId}`;
+			const key = `${call.providerId}::${call.attributedModelId}`;
 			const entry = usageByModel.get(key) ?? {
 				providerId: call.providerId,
-				modelId: call.modelId,
-				requestedModels: new Set<string>(),
-				servedCalls: 0,
+				attributedModelId: call.attributedModelId,
+				requestedModelIds: new Set<string>(),
+				responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
 				totals: emptyUsageTotals(),
 			};
-			entry.requestedModels.add(call.requestedModel);
-			if (call.servedModel !== null) entry.servedCalls += 1;
+			entry.requestedModelIds.add(call.requestedModelId);
+			addResponseModelIdObservation(entry.responseModelIdObservationCounts, call);
 			addUsageCall(entry.totals, call);
 			usageByModel.set(key, entry);
 		}
@@ -434,9 +450,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					kind: "fact",
 					fact: "model-usage",
 					providerId: row.providerId,
-					modelId: row.modelId,
-					requestedModels: [...row.requestedModels].sort(),
-					servedCalls: row.servedCalls,
+					attributedModelId: row.attributedModelId,
+					requestedModelIds: [...row.requestedModelIds].sort(),
+					responseModelIdObservationCounts: row.responseModelIdObservationCounts,
 					...row.totals,
 				});
 			}
@@ -497,15 +513,28 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	}
 	if (usageRows.length > 0) {
 		out("");
-		out("  tokens by model (from session ledgers, provider-reported; served id when present, unknown when omitted)");
+		out("  tokens by attributed model (from session ledgers and provider-reported usage)");
 		process.stdout.write(
 			indent(
 				formatColumns([
-					["provider", "model", "requested", "calls", "input", "output", "cache read", "reasoning", "tokens", "cost"],
+					[
+						"provider",
+						"attributed model",
+						"requested model ids",
+						"response model id observation",
+						"calls",
+						"input",
+						"output",
+						"cache read",
+						"reasoning",
+						"tokens",
+						"cost",
+					],
 					...usageRows.map((row) => [
 						row.providerId,
-						row.modelId,
-						requestedModelsLabel(row.modelId, row.requestedModels),
+						row.attributedModelId,
+						[...row.requestedModelIds].sort().join(","),
+						responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts),
 						String(row.totals.apiCalls),
 						String(row.totals.input),
 						String(row.totals.output),
@@ -609,15 +638,6 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	}
 	return 0;
-}
-
-/**
- * `same` when every call asked for the id that served it, otherwise the ids
- * that were asked for, so a peer-served row reads as what it is.
- */
-function requestedModelsLabel(servedModelId: string, requested: ReadonlySet<string>): string {
-	if (requested.size === 1 && requested.has(servedModelId)) return "same";
-	return [...requested].sort().join(",");
 }
 
 function indent(text: string): string {

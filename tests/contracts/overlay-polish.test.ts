@@ -188,7 +188,14 @@ function settings(target = "mock", model = "model-a", threshold?: number): ClioS
 function costEntry(tokens: number, usd: number): CostEntry {
 	return {
 		providerId: "mock",
-		modelId: "model-a",
+		attributedModelId: "model-a",
+		requestedModelIds: ["model-a"],
+		responseModelIdObservationCounts: {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 1,
+			legacyDifferenceOnlyCalls: 0,
+		},
 		tokens,
 		usd,
 		provenance: "known",

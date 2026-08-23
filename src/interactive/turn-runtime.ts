@@ -7,6 +7,7 @@
 
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
+import { attributedModelId } from "../core/response-model-id.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import {
@@ -733,7 +734,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
 					deps.observability.recordTokens(
 						localRuntime.targetId,
-						localRuntime.wireModelId,
+						attributedModelId(
+							summary.lastResponseModelIdObservation,
+							localRuntime.wireModelId,
+							summary.lastDifferingResponseModelId,
+						),
 						summary.tokens,
 						summary.costUsd,
 						{
@@ -746,6 +751,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							apiCalls: summary.apiCalls,
 						},
 						localRuntime.runtimeResolution.costProvenance,
+						{
+							requestedModelIds: [localRuntime.wireModelId],
+							responseModelIdObservationCounts: summary.responseModelIdObservationCounts,
+						},
 					);
 				}
 				if (summary.output > 0 && firstAssistantDeltaAt !== null) {

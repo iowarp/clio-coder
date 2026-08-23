@@ -21,6 +21,7 @@ function summary(overrides: Partial<TurnSummary> = {}): TurnSummary {
 	return {
 		elapsedMs: 1000,
 		modelId: "m",
+		responseModelIdObservation: { state: "not-observed" },
 		targetId: "t",
 		inputTokens: 10,
 		outputTokens: 20,

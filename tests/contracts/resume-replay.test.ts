@@ -1,9 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import {
 	assistantSessionPayload,
 	noticeMessage,
+	sumRunUsage,
 	terminalFailureFromAssistantMessage,
 } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -261,6 +262,38 @@ describe("contracts/resume replay transcript notices", () => {
 		const rendered = strip(panel.render(80).join("\n"));
 		ok(rendered.includes("[Clio Coder] active response cancelled."), "the notice replays");
 		ok(!rendered.includes("[aborted]"), "the notice explains itself and carries no error line");
+	});
+
+	it("persists an explicit not-observed state when no adapter observation is present", () => {
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: "done" }],
+			stopReason: "stop",
+		} as Parameters<typeof assistantSessionPayload>[0];
+		const payload = assistantSessionPayload(message, null);
+		deepStrictEqual(payload.responseModelIdObservation, { state: "not-observed" });
+	});
+
+	it("counts each response model id observation in a multi-call run", () => {
+		const assistant = (responseModelIdObservation: Record<string, unknown>) =>
+			({
+				role: "assistant",
+				content: [],
+				stopReason: "stop",
+				responseModelIdObservation,
+				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+			}) as unknown as Parameters<typeof sumRunUsage>[0][number];
+		const summary = sumRunUsage([
+			assistant({ state: "reported", reportedModelId: "model-a" }),
+			assistant({ state: "not-reported" }),
+		]);
+		deepStrictEqual(summary.responseModelIdObservationCounts, {
+			reportedCalls: 1,
+			notReportedCalls: 1,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 0,
+		});
+		deepStrictEqual(summary.lastResponseModelIdObservation, { state: "not-reported" });
 	});
 
 	/**

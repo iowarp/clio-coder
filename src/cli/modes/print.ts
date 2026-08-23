@@ -1,4 +1,8 @@
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import {
+	addResponseModelIdObservationCounts,
+	emptyResponseModelIdObservationCounts,
+} from "../../core/response-model-id.js";
 import { withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
@@ -187,6 +191,10 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 }
 
 function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSummary {
+	const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
+	addResponseModelIdObservationCounts(responseModelIdObservationCounts, left.responseModelIdObservationCounts);
+	addResponseModelIdObservationCounts(responseModelIdObservationCounts, right.responseModelIdObservationCounts);
+	const last = right.hadUsage ? right : left;
 	return {
 		tokens: left.tokens + right.tokens,
 		costUsd: left.costUsd + right.costUsd,
@@ -197,7 +205,10 @@ function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSum
 		reasoning: left.reasoning + right.reasoning,
 		apiCalls: left.apiCalls + right.apiCalls,
 		hadReasoning: left.hadReasoning || right.hadReasoning,
-		hadUsage: true,
+		hadUsage: left.hadUsage || right.hadUsage,
+		responseModelIdObservationCounts,
+		lastResponseModelIdObservation: last.lastResponseModelIdObservation,
+		lastDifferingResponseModelId: last.lastDifferingResponseModelId,
 	};
 }
 

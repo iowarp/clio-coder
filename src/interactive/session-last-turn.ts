@@ -17,6 +17,7 @@
  * back off replayed thinking text.
  */
 
+import { type ResponseModelIdObservation, responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import { rawDurationMs } from "../core/timers.js";
 import { extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry, SessionUsageDefaults } from "../domains/session/index.js";
@@ -133,7 +134,10 @@ export function lastTurnSummaryFromLedger(
 	let toolErrorCount = 0;
 	let targetId = turn.targetId;
 	let modelId = turn.modelId;
-	let servedModelId: string | null = null;
+	let responseModelIdObservation: ResponseModelIdObservation = {
+		state: "legacy-difference-only",
+		differingModelId: null,
+	};
 
 	for (const row of turn.rows) {
 		const record = payloadRecord(row.payload);
@@ -150,7 +154,7 @@ export function lastTurnSummaryFromLedger(
 		if (reason && reason !== "stop") stopReason = reason;
 		targetId = targetId ?? nonEmptyString(record, "provider", "api");
 		modelId = modelId ?? nonEmptyString(record, "model");
-		servedModelId = nonEmptyString(record, "responseModel") ?? servedModelId;
+		responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
 		const usage = payloadRecord(record.usage);
 		if (!usage) continue;
 		inputTokens += positiveNumber(usage.input);
@@ -179,8 +183,8 @@ export function lastTurnSummaryFromLedger(
 		stopReason,
 		watchdogPeak: 0,
 		truncated: false,
+		responseModelIdObservation,
 	};
-	if (servedModelId !== null && servedModelId !== summary.modelId) summary.servedModelId = servedModelId;
 	if (sawReasoning) {
 		summary.reasoningTokens = reasoningTokens;
 		summary.reasoningTokenProvenance = "provider";

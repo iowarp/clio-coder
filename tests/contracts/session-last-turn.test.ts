@@ -6,7 +6,7 @@
  * the branch the reader had just left, next to totals that had already moved.
  * The line is now folded from the newest turn on the same active path.
  */
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionEntry } from "../../src/domains/session/index.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
@@ -43,7 +43,6 @@ function assistantTurn(
 			text: "done",
 			stopReason: "stop",
 			provider: "llamacpp",
-			responseModel: "Nemo-3.5-Lightning",
 			usage,
 			...overrides,
 		},
@@ -129,12 +128,15 @@ describe("contracts/last turn on the active branch", () => {
 		strictEqual(summary?.stopReason, "length");
 		strictEqual(summary?.targetId, "dynamo", "the target the modelChange row named, as /cost attributes it");
 		strictEqual(summary?.modelId, "Nemo-3.5-Lightning");
-		strictEqual(summary?.servedModelId, undefined, "the served id is named only when it differs");
+		deepStrictEqual(summary?.responseModelIdObservation, {
+			state: "legacy-difference-only",
+			differingModelId: null,
+		});
 		strictEqual(summary?.reasoningTokens, 7);
 		strictEqual(summary?.reasoningTokenProvenance, "provider");
 	});
 
-	it("carries the served model a peer answered under, as the live footer did (#185)", () => {
+	it("labels a pre-#193 peer response as a legacy difference-only observation", () => {
 		const entries: SessionEntry[] = [
 			{
 				kind: "modelChange",
@@ -156,7 +158,27 @@ describe("contracts/last turn on the active branch", () => {
 		];
 		const summary = lastTurnSummaryFromLedger(entries, {}, "a1");
 		strictEqual(summary?.modelId, "qwen3.8-27b-dynamo", "what was requested");
-		strictEqual(summary?.servedModelId, "ornith-1.5-35b-a3b", "what answered");
+		deepStrictEqual(summary?.responseModelIdObservation, {
+			state: "legacy-difference-only",
+			differingModelId: "ornith-1.5-35b-a3b",
+		});
+	});
+
+	it("keeps the three current response model id observations explicit", () => {
+		const usage = { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11 };
+		const summarize = (responseModelIdObservation: Record<string, unknown>) =>
+			lastTurnSummaryFromLedger(
+				[userTurn("u1", null, at(0)), assistantTurn("a1", "u1", at(0, 5), usage, { responseModelIdObservation })],
+				{},
+				"a1",
+			)?.responseModelIdObservation;
+
+		deepStrictEqual(summarize({ state: "reported", reportedModelId: "model-a" }), {
+			state: "reported",
+			reportedModelId: "model-a",
+		});
+		deepStrictEqual(summarize({ state: "not-reported" }), { state: "not-reported" });
+		deepStrictEqual(summarize({ state: "not-observed" }), { state: "not-observed" });
 	});
 
 	/**

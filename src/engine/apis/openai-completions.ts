@@ -16,6 +16,7 @@ import {
 	type Usage,
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import {
 	type AppliedThinking,
 	type ResolvedModelRuntimeCapabilities,
@@ -38,8 +39,8 @@ import type { EngineApiProvider } from "./types.js";
 
 declare module "@earendil-works/pi-ai" {
 	interface AssistantMessage {
-		/** The model id present in an OpenAI-compatible response, or null when the response omitted it. */
-		servedModel?: string | null;
+		/** Direct observation of model-id presence in an OpenAI-compatible response. */
+		responseModelIdObservation?: ResponseModelIdObservation;
 	}
 }
 
@@ -91,15 +92,15 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-interface ServedModelCapture {
-	model: string | null;
+interface ResponseModelIdCapture {
+	reportedModelId: string | null;
 	observed: boolean;
 	done: boolean;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
 
-function observeServedModelLine(line: string, capture: ServedModelCapture): void {
+function observeResponseModelIdLine(line: string, capture: ResponseModelIdCapture): void {
 	if (capture.done) return;
 	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
 	if (!normalized.startsWith("data:")) return;
@@ -110,7 +111,7 @@ function observeServedModelLine(line: string, capture: ServedModelCapture): void
 		if (!isPlainRecord(payload)) return;
 		const model = payload.model;
 		if (typeof model === "string" && model.trim().length > 0) {
-			capture.model = model.trim();
+			capture.reportedModelId = model.trim();
 			capture.done = true;
 		}
 	} catch {
@@ -119,14 +120,18 @@ function observeServedModelLine(line: string, capture: ServedModelCapture): void
 	}
 }
 
-function observeServedModelBytes(chunk: Uint8Array | undefined, capture: ServedModelCapture, flush = false): void {
+function observeResponseModelIdBytes(
+	chunk: Uint8Array | undefined,
+	capture: ResponseModelIdCapture,
+	flush = false,
+): void {
 	if (capture.done || !capture.decoder) return;
 	capture.buffer += chunk ? capture.decoder.decode(chunk, { stream: !flush }) : capture.decoder.decode();
 	let newline = capture.buffer.indexOf("\n");
 	while (newline >= 0) {
 		const line = capture.buffer.slice(0, newline);
 		capture.buffer = capture.buffer.slice(newline + 1);
-		observeServedModelLine(line, capture);
+		observeResponseModelIdLine(line, capture);
 		if (capture.done) {
 			capture.buffer = "";
 			capture.decoder = null;
@@ -135,13 +140,13 @@ function observeServedModelBytes(chunk: Uint8Array | undefined, capture: ServedM
 		newline = capture.buffer.indexOf("\n");
 	}
 	if (flush && capture.buffer.length > 0) {
-		observeServedModelLine(capture.buffer, capture);
+		observeResponseModelIdLine(capture.buffer, capture);
 		capture.buffer = "";
 	}
 	if (capture.done || flush) capture.decoder = null;
 }
 
-function captureServedModelResponse(response: Response, capture: ServedModelCapture): Response {
+function captureResponseModelId(response: Response, capture: ResponseModelIdCapture): Response {
 	if (!response.body || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
 		return response;
 	}
@@ -149,12 +154,12 @@ function captureServedModelResponse(response: Response, capture: ServedModelCapt
 		new TransformStream<Uint8Array, Uint8Array>({
 			transform(chunk, controller) {
 				capture.observed = true;
-				if (!capture.done) observeServedModelBytes(chunk, capture);
+				if (!capture.done) observeResponseModelIdBytes(chunk, capture);
 				controller.enqueue(chunk);
 			},
 			flush() {
 				capture.observed = true;
-				if (!capture.done) observeServedModelBytes(undefined, capture, true);
+				if (!capture.done) observeResponseModelIdBytes(undefined, capture, true);
 			},
 		}),
 	);
@@ -165,12 +170,12 @@ function captureServedModelResponse(response: Response, capture: ServedModelCapt
 	});
 }
 
-function withServedModelCapture<TOptions extends StreamOptions>(
+function withResponseModelIdCapture<TOptions extends StreamOptions>(
 	options: TOptions,
 	sourceFactory: (capturedOptions: TOptions) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
-	const capture: ServedModelCapture = {
-		model: null,
+	const capture: ResponseModelIdCapture = {
+		reportedModelId: null,
 		observed: false,
 		done: false,
 		buffer: "",
@@ -180,15 +185,20 @@ function withServedModelCapture<TOptions extends StreamOptions>(
 		options.fetch ?? ((input, init) => globalThis.fetch(input, init));
 	const capturedOptions = {
 		...options,
-		fetch: async (input, init) => captureServedModelResponse(await fetchImpl(input, init), capture),
+		fetch: async (input, init) => captureResponseModelId(await fetchImpl(input, init), capture),
 	} as TOptions;
 	const source = sourceFactory(capturedOptions);
 	const annotated = createAssistantMessageEventStream();
 	(async () => {
 		try {
 			for await (const event of source) {
-				if (capture.observed && event.type === "done") event.message.servedModel = capture.model;
-				else if (capture.observed && event.type === "error") event.error.servedModel = capture.model;
+				const observation: ResponseModelIdObservation = capture.observed
+					? capture.reportedModelId === null
+						? { state: "not-reported" }
+						: { state: "reported", reportedModelId: capture.reportedModelId }
+					: { state: "not-observed" };
+				if (event.type === "done") event.message.responseModelIdObservation = observation;
+				else if (event.type === "error") event.error.responseModelIdObservation = observation;
 				annotated.push(event as AssistantMessageEvent);
 			}
 			annotated.end();
@@ -852,15 +862,17 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withServedModelCapture(withRemainingContextBudget(model, effectiveContext, withSamplers), (capturedOptions) =>
-								withLocalResidency(
-									model,
-									{
-										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-										...(options?.signal !== undefined ? { signal: options.signal } : {}),
-									},
-									(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
-								),
+							withResponseModelIdCapture(
+								withRemainingContextBudget(model, effectiveContext, withSamplers),
+								(capturedOptions) =>
+									withLocalResidency(
+										model,
+										{
+											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+											...(options?.signal !== undefined ? { signal: options.signal } : {}),
+										},
+										(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
+									),
 							),
 							resolved.family === "gemma-4",
 						),
@@ -882,15 +894,17 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
-							withServedModelCapture(withRemainingContextBudget(model, effectiveContext, withSamplers), (capturedOptions) =>
-								withLocalResidency(
-									model,
-									{
-										...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-										...(options?.signal !== undefined ? { signal: options.signal } : {}),
-									},
-									(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
-								),
+							withResponseModelIdCapture(
+								withRemainingContextBudget(model, effectiveContext, withSamplers),
+								(capturedOptions) =>
+									withLocalResidency(
+										model,
+										{
+											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+											...(options?.signal !== undefined ? { signal: options.signal } : {}),
+										},
+										(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
+									),
 							),
 							resolved.family === "gemma-4",
 						),

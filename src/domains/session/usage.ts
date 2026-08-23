@@ -1,8 +1,8 @@
 /**
  * Fold a session ledger's assistant turns into the per-call usage the rest of
  * Clio reports: tokens in and out, cache reads and writes, reasoning tokens,
- * and provider-reported cost, attributed to the target and wire model that
- * served each call.
+ * and provider-reported cost, attributed to the target and observed model id
+ * for each call.
  *
  * This lives in the session domain because the ledger is the only durable
  * record of what a session spent, and three surfaces read it: the `/cost`
@@ -19,21 +19,22 @@
  * counting it would add an API call worth nothing.
  */
 
+import {
+	attributedModelId,
+	type ResponseModelIdObservation,
+	responseModelIdObservationFromRecord,
+} from "../../core/response-model-id.js";
 import type { SessionEntry } from "./entries.js";
 
 /** One completed assistant API call, as the ledger recorded it. */
 export interface LedgerUsageCall {
 	providerId: string;
-	/** The model the tokens are attributed to, or `unknown` when the server omitted its model id. */
-	modelId: string;
+	/** Model id the accounting row uses, or `unknown` when an observed response omitted it. */
+	attributedModelId: string;
 	/** The id the session asked for (the configured model, or the message's own `model`). */
-	requestedModel: string;
-	/**
-	 * The id the server reported in the response. Null means the adapter saw an
-	 * OpenAI-compatible response with no model id. Historical rows that predate
-	 * `servedModel` retain their prior `responseModel` fallback.
-	 */
-	servedModel: string | null;
+	requestedModelId: string;
+	/** Direct presence observation, with the pre-#193 difference-only shape labeled separately. */
+	responseModelIdObservation: ResponseModelIdObservation;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -80,8 +81,8 @@ function stringAt(source: Record<string, unknown>, ...keys: string[]): string | 
  * payload instead split one endpoint into two blocks in `/cost`, so a single
  * `node-a` target on `llamacpp` rendered as two providers whose turn counts
  * diverged with every resume. `modelChange` rows are replayed in order so a
- * session that switched targets mid-way attributes each call to the one that
- * served it.
+ * session that switched targets mid-way attributes each call to the active
+ * target.
  */
 export function ledgerUsageCalls(
 	entries: ReadonlyArray<SessionEntry>,
@@ -101,9 +102,9 @@ export function ledgerUsageCalls(
 			if (!usage || usage.totalTokens <= 0) continue;
 			calls.push({
 				providerId: currentTarget ?? "unknown",
-				modelId: currentModel ?? "unknown",
-				requestedModel: currentModel ?? "unknown",
-				servedModel: null,
+				attributedModelId: currentModel ?? "unknown",
+				requestedModelId: currentModel ?? "unknown",
+				responseModelIdObservation: { state: "not-observed" },
 				input: usage.input,
 				output: usage.output,
 				cacheRead: usage.cacheRead,
@@ -143,14 +144,14 @@ export function ledgerUsageCalls(
 		if (totalTokens === 0) continue;
 		const cost = usage.cost;
 		const costUsd = cost && typeof cost === "object" ? numberAt(cost as Record<string, unknown>, "total") : 0;
-		const requestedModel = currentModel ?? stringAt(record, "model") ?? "unknown";
-		const hasServedModelPresence = Object.hasOwn(record, "servedModel");
-		const servedModel = hasServedModelPresence ? stringAt(record, "servedModel") : stringAt(record, "responseModel");
+		const requestedModelId = currentModel ?? stringAt(record, "model") ?? "unknown";
+		const differingResponseModelId = stringAt(record, "responseModel");
+		const responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
 		calls.push({
 			providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
-			modelId: hasServedModelPresence ? (servedModel ?? "unknown") : (servedModel ?? requestedModel),
-			requestedModel,
-			servedModel,
+			attributedModelId: attributedModelId(responseModelIdObservation, requestedModelId, differingResponseModelId),
+			requestedModelId,
+			responseModelIdObservation,
 			input,
 			output,
 			cacheRead,

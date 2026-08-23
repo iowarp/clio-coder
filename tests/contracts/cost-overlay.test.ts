@@ -11,7 +11,14 @@ const theme = clioTheme();
 function row(overrides: Partial<CostRow> = {}): CostRow {
 	return {
 		providerId: "openai",
-		modelId: "gpt-5",
+		attributedModelId: "gpt-5",
+		requestedModelIds: ["gpt-5"],
+		responseModelIdObservationCounts: {
+			reportedCalls: 4,
+			notReportedCalls: 0,
+			notObservedCalls: 0,
+			legacyDifferenceOnlyCalls: 0,
+		},
 		runs: 3,
 		tokens: 5_000,
 		input: 3_000,
@@ -48,8 +55,12 @@ describe("cost overlay", () => {
 
 	it("renders the provider · model heading in bold accent", () => {
 		const lines = formatCostOverlayBodyLines(costAggregateForAmount(1.5, "known"), 8_000, [row()], 80);
-		const expectedHeading = theme.style("accent", "openai · gpt-5", { bold: true });
+		const expectedHeading = theme.style("accent", "openai · attributed model gpt-5", { bold: true });
 		ok(lines.includes(expectedHeading), "the per-model heading is a bold accent provider · model line");
+		const body = strip(lines.join("\n"));
+		ok(body.includes("requested model ids"), body);
+		ok(body.includes("response model id observation"), body);
+		ok(body.includes("reported 4"), body);
 	});
 
 	it("draws the summary/detail divider in the frame token", () => {
@@ -87,7 +98,7 @@ describe("cost overlay", () => {
 			formatCostOverlayBodyLines(
 				mixed,
 				8_000,
-				[row({ cost: estimated }), row({ modelId: "unknown", cost: unknown })],
+				[row({ cost: estimated }), row({ attributedModelId: "unknown", cost: unknown })],
 				80,
 			).join("\n"),
 		);
@@ -103,7 +114,14 @@ describe("cost overlay", () => {
 	it("preserves provenance while grouping repeated provider-model entries", () => {
 		const base = {
 			providerId: "openai",
-			modelId: "gpt-5",
+			attributedModelId: "gpt-5",
+			requestedModelIds: ["gpt-5-requested"],
+			responseModelIdObservationCounts: {
+				reportedCalls: 1,
+				notReportedCalls: 0,
+				notObservedCalls: 0,
+				legacyDifferenceOnlyCalls: 0,
+			},
 			tokens: 10,
 			input: 6,
 			output: 4,
@@ -113,12 +131,26 @@ describe("cost overlay", () => {
 		};
 		const rows = aggregateCostEntries([
 			{ ...base, usd: 0.42, provenance: "known" },
-			{ ...base, usd: 0, provenance: "unknown" },
+			{
+				...base,
+				requestedModelIds: ["gpt-5-alternate-request"],
+				responseModelIdObservationCounts: {
+					reportedCalls: 0,
+					notReportedCalls: 1,
+					notObservedCalls: 0,
+					legacyDifferenceOnlyCalls: 0,
+				},
+				usd: 0,
+				provenance: "unknown",
+			},
 		]);
 		strictEqual(rows.length, 1);
 		strictEqual(rows[0]?.runs, 2);
 		strictEqual(rows[0]?.cost.knownUsd, 0.42);
 		strictEqual(rows[0]?.cost.hasUnknown, true);
+		strictEqual(rows[0]?.requestedModelIds.join(","), "gpt-5-alternate-request,gpt-5-requested");
+		strictEqual(rows[0]?.responseModelIdObservationCounts.reportedCalls, 1);
+		strictEqual(rows[0]?.responseModelIdObservationCounts.notReportedCalls, 1);
 	});
 
 	it("aligns primary values in a tight column and hangs the cache-read annotation dim after the number", () => {
@@ -156,7 +188,14 @@ describe("cost overlay", () => {
 		const lines = formatCostOverlayBodyLines(
 			costAggregateForAmount(1.5, "known"),
 			8_000,
-			[row(), row({ providerId: "anthropic", modelId: "claude-sonnet-5", cost: costAggregateForAmount(0, "known_free") })],
+			[
+				row(),
+				row({
+					providerId: "anthropic",
+					attributedModelId: "claude-sonnet-5",
+					cost: costAggregateForAmount(0, "known_free"),
+				}),
+			],
 			80,
 		);
 		for (const line of lines) {

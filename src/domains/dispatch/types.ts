@@ -6,6 +6,7 @@
  * are pure data: no class methods, no engine refs.
  */
 
+import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { AgentAudience } from "../agents/spec.js";
@@ -615,11 +616,10 @@ export interface RunReceiptReproducibility {
 }
 
 export interface RunReceiptUpstreamResponse {
-	model: string | null;
-	/** Model id present in the response, or null when the adapter observed its absence. */
-	servedModel: string | null;
-	responseModel: string | null;
-	responseId: string | null;
+	requestedModelId: string | null;
+	responseModelIdObservation: ResponseModelIdObservation;
+	differingResponseModelId: string | null;
+	providerResponseId: string | null;
 }
 
 /**

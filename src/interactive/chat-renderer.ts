@@ -441,7 +441,7 @@ function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number): Agent
 			"api",
 			"provider",
 			"model",
-			"servedModel",
+			"responseModelIdObservation",
 			"responseModel",
 			"responseId",
 			"diagnostics",
