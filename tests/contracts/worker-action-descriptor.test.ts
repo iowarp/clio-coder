@@ -17,7 +17,7 @@ import {
 } from "../../src/domains/safety/call-target.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
-import type { ToolStartEvent } from "../../src/tools/agent-tools.js";
+import type { ToolFinishEvent, ToolStartEvent } from "../../src/tools/agent-tools.js";
 
 const ESC = String.fromCharCode(27);
 
@@ -89,7 +89,7 @@ describe("worker action descriptor", () => {
 });
 
 describe("action descriptor transport", () => {
-	it("rides the ACP tool start event without the peer's raw input", () => {
+	it("rides the ACP tool lifecycle with one id and without the peer's raw input", () => {
 		const mapper = new AcpEventMapper();
 		const events = mapper.mapUpdate({
 			update: {
@@ -106,7 +106,24 @@ describe("action descriptor transport", () => {
 				(event as { type?: unknown }).type === "clio_tool_start",
 		);
 		const payload = start?.payload as ToolStartEvent | undefined;
+		strictEqual(payload?.toolCallId, "call-1");
 		deepStrictEqual(payload?.action, { verb: "reading", object: "src/app.ts" });
 		ok(!JSON.stringify(payload).includes("sk-live-9"), JSON.stringify(payload));
+
+		const completed = mapper.mapUpdate({
+			update: {
+				sessionUpdate: "tool_call_update",
+				toolCallId: "call-1",
+				title: "Read file",
+				kind: "read",
+				status: "completed",
+			},
+		});
+		const finish = completed.find(
+			(event): event is Extract<ClioWorkerEvent, { type: "clio_tool_finish" }> =>
+				(event as { type?: unknown }).type === "clio_tool_finish",
+		);
+		const finishPayload = finish?.payload as ToolFinishEvent | undefined;
+		strictEqual(finishPayload?.toolCallId, payload?.toolCallId);
 	});
 });

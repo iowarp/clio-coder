@@ -413,9 +413,15 @@ function permissionResultForDecision(
 	return result;
 }
 
-function decideToolUse(input: PermissionGateInput, toolName: string, toolInput: unknown): ClaudeToolPermissionDecision {
+function decideToolUse(
+	input: PermissionGateInput,
+	toolCallId: string | undefined,
+	toolName: string,
+	toolInput: unknown,
+): ClaudeToolPermissionDecision {
 	return emitClaudeToolPermissionDecision({
 		toolName,
+		...(toolCallId !== undefined ? { toolCallId } : {}),
 		input: coerceToolInput(toolInput),
 		safety: input.safety,
 		cwd: input.cwd,
@@ -447,7 +453,7 @@ function decideToolUseOnce(
 	toolInput: unknown,
 ): ClaudeToolPermissionDecision {
 	return decideClaudeSdkToolUseOnce(input.handledToolDecisions, toolUseID, () =>
-		decideToolUse(input, toolName, toolInput),
+		decideToolUse(input, toolUseID, toolName, toolInput),
 	);
 }
 

@@ -318,6 +318,54 @@ describe("worker transcript blocks", () => {
 		ok(!rendered.includes("/etc/shadow"), rendered);
 	});
 
+	it("attributes concurrent calls of one tool independently in transcript state", () => {
+		const h = harness();
+		h.push(h.worker.started(started()));
+		for (const [toolCallId, object] of [
+			["read-1", "src/one.ts"],
+			["read-2", "src/two.ts"],
+		] as const) {
+			h.push(
+				h.worker.progress({
+					runId: "r1",
+					agentId: "coder",
+					event: {
+						type: "clio_tool_start",
+						payload: { tool: "read", toolCallId, action: { verb: "reading", object } },
+					},
+				}),
+			);
+		}
+		h.push(
+			h.worker.progress({
+				runId: "r1",
+				agentId: "coder",
+				event: { type: "clio_tool_finish", payload: { tool: "read", toolCallId: "read-1", outcome: "ok" } },
+			}),
+		);
+
+		let progress = h.panel.workerStates()[0]?.progress;
+		strictEqual(progress?.recentActions[0]?.toolCallId, "read-1");
+		strictEqual(progress?.recentActions[0]?.descriptor?.object, "src/one.ts");
+		strictEqual(progress?.currentAction?.toolCallId, "read-2");
+		strictEqual(progress?.currentAction?.descriptor?.object, "src/two.ts");
+		ok(h.render().includes(`${GLYPH.phaseTool} read`), h.render());
+
+		h.push(
+			h.worker.progress({
+				runId: "r1",
+				agentId: "coder",
+				event: { type: "clio_tool_finish", payload: { tool: "read", toolCallId: "read-2", outcome: "ok" } },
+			}),
+		);
+		progress = h.panel.workerStates()[0]?.progress;
+		deepStrictEqual(
+			progress?.recentActions.map((action) => action.toolCallId),
+			["read-2", "read-1"],
+		);
+		strictEqual(progress?.currentAction, null);
+	});
+
 	it("points to /view when the live tail dropped lines", () => {
 		const h = harness();
 		h.push(h.worker.started(started()));

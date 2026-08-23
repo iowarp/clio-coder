@@ -13,6 +13,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Fixed
 - Approval overlays now derive call targets from a per-tool field allowlist. Unlisted arguments are shown only by field name, type, and size, so an unexpected credential or pasted document cannot be copied into the rendered frame (#200).
+- Worker tool starts and finishes now share a call id when their producer has one. The transcript and Fleet Runs pair concurrent calls by that id, while older streams without ids continue to match by tool name (#201).
 
 ## 0.3.6 - 2026-08-23
 

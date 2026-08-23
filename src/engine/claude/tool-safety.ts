@@ -69,6 +69,8 @@ export interface EvaluateClaudeToolPermissionInput {
 export interface EmitClaudeToolPermissionInput extends EvaluateClaudeToolPermissionInput {
 	emit(event: ClioWorkerEvent): void;
 	onPermission?: "deny" | "fail";
+	/** SDK tool-use id shared by the start and finish telemetry events. */
+	toolCallId?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -325,9 +327,11 @@ function emitToolFinish(
 	outcome: ToolFinishEvent["outcome"],
 	reason: string,
 	reasonCode?: string,
+	toolCallId?: string,
 ): void {
 	const event: ToolFinishEvent = {
 		tool: mapped.clioToolName,
+		...(toolCallId !== undefined ? { toolCallId } : {}),
 		posture: "operating",
 		durationMs: Math.round(performance.now() - startedAtClock),
 		outcome,
@@ -351,11 +355,13 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	const startedAt = Date.now();
 	const startedAtClock = performance.now();
 	const decision = evaluateClaudeToolPermission(input);
+	const toolCallId = input.toolCallId?.trim() ? input.toolCallId : undefined;
 	// Mapped args are this side's own translation of the subprocess call, so the
 	// descriptor is composed from them here rather than downstream of the seam.
 	const action = describeCallAction(decision.mapped.clioToolName, decision.mapped.args);
 	const start: ToolStartEvent = {
 		tool: decision.mapped.clioToolName,
+		...(toolCallId !== undefined ? { toolCallId } : {}),
 		posture: "operating",
 		startedAt,
 		...(action !== null ? { action } : {}),
@@ -370,6 +376,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 			"ok",
 			decision.reason,
 			decision.reasonCode,
+			toolCallId,
 		);
 		return decision;
 	}
@@ -396,6 +403,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 		"blocked",
 		decision.reason,
 		decision.reasonCode,
+		toolCallId,
 	);
 	return decision;
 }
