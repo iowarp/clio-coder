@@ -216,6 +216,33 @@ describe("fleet runs worker progress settlement", () => {
 		}
 	});
 
+	it("settles agent_end on the durable message, then reseals it on the receipt", () => {
+		const bus = createSafeEventBus();
+		let receiptReads = 0;
+		const store = createDispatchBoardStore(bus, undefined, (): WorkerReceiptFacts => {
+			receiptReads += 1;
+			return { outcome: "succeeded", text: "the sealed answer" };
+		});
+		try {
+			started(bus, "run-1");
+			progress(bus, "run-1", delta("a provisional draft"));
+			progress(bus, "run-1", {
+				type: "message_end",
+				message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "durable answer" }] },
+			});
+			progress(bus, "run-1", { type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] });
+			// The worker is done before the domain has sealed anything, so nothing
+			// has gone looking for a receipt that cannot exist yet.
+			strictEqual(receiptReads, 0);
+			strictEqual(store.rows()[0]?.progress?.tailText, "durable answer");
+			completed(bus, "run-1");
+			strictEqual(receiptReads, 1);
+			strictEqual(store.rows()[0]?.progress?.tailText, "the sealed answer");
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
 	it("keeps the run's own durable message when no receipt could be read", () => {
 		const bus = createSafeEventBus();
 		const store = createDispatchBoardStore(bus, undefined, () => null);
