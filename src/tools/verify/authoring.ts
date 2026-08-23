@@ -12,6 +12,7 @@ import {
 import path from "node:path";
 import { isMap, isSeq, parseDocument, stringify, type YAMLMap } from "yaml";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
+import { parseTomlDocument, tomlTableAt } from "../../core/toml.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import type { ToolResult } from "../registry.js";
@@ -288,8 +289,13 @@ function cargoProposals(workspaceRoot: string, diagnostics: string[]): RawPropos
 		diagnostics.push(`${relative}: ${text.message}; Cargo discovery skipped.`);
 		return [];
 	}
-	const workspace = /^\s*\[workspace(?:\]|\.)/mu.test(text);
-	const packageManifest = /^\s*\[package\]/mu.test(text);
+	const document = parseTomlDocument(text);
+	if (document === null) {
+		diagnostics.push(`${relative}: invalid TOML; Cargo discovery skipped.`);
+		return [];
+	}
+	const workspace = tomlTableAt(document, ["workspace"]) !== null;
+	const packageManifest = tomlTableAt(document, ["package"]) !== null;
 	if (!workspace && !packageManifest) {
 		diagnostics.push(`${relative}: no [package] or [workspace] declaration was found; Cargo discovery skipped.`);
 		return [];
@@ -364,72 +370,67 @@ function cmakeProposals(workspaceRoot: string, diagnostics: string[]): RawPropos
 	return proposals;
 }
 
-function tomlSections(text: string): Map<string, string[]> {
-	const sections = new Map<string, string[]>();
-	let active = "";
-	for (const line of text.split(/\r?\n/u)) {
-		const header = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/u.exec(line);
-		if (header?.[1] !== undefined) {
-			active = header[1].trim();
-			if (!sections.has(active)) sections.set(active, []);
-			continue;
-		}
-		if (active.length > 0) sections.get(active)?.push(line);
-	}
-	return sections;
-}
-
-function declaredScriptName(line: string): string | null {
-	const match = /^\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_.:-]+))\s*=\s*(?:"[^"]+"|'[^']+')\s*(?:#.*)?$/u.exec(line);
-	return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
-}
-
 function pythonProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
 	const proposals: RawProposal[] = [];
 	const pyprojectPath = "pyproject.toml";
 	const pyproject = regularFileText(path.join(workspaceRoot, pyprojectPath), workspaceRoot);
 	if (pyproject instanceof Error) diagnostics.push(`${pyprojectPath}: ${pyproject.message}; Python discovery skipped.`);
 	if (typeof pyproject === "string") {
-		const sections = tomlSections(pyproject);
-		for (const [section, module, id, description, tags] of [
-			["tool.pytest.ini_options", "pytest", "python-pytest", "Run the declared pytest suite", ["python", "test"]],
-			["tool.tox", "tox", "python-tox", "Run the declared tox environments", ["python", "test"]],
-			["tool.nox", "nox", "python-nox", "Run the declared nox sessions", ["python", "test"]],
-		] as const) {
-			if (!sections.has(section)) continue;
-			proposals.push({
-				preferredId: id,
-				description,
-				command: ["python", "-m", module],
-				cwd: ".",
-				timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-				tags: [...tags],
-				provenance: {
-					kind: "python-runner",
-					path: pyprojectPath,
-					detail: `[${section}]`,
-					authority: "toolchain-defined",
-				},
-			});
-		}
-		for (const section of ["project.scripts", "tool.poetry.scripts"]) {
-			for (const line of sections.get(section) ?? []) {
-				const name = declaredScriptName(line);
-				if (name === null || !isVerificationScriptName(name)) continue;
+		const document = parseTomlDocument(pyproject);
+		if (document === null) {
+			diagnostics.push(`${pyprojectPath}: invalid TOML; Python discovery skipped.`);
+		} else {
+			for (const [path, section, module, id, description, tags] of [
+				[
+					["tool", "pytest", "ini_options"],
+					"tool.pytest.ini_options",
+					"pytest",
+					"python-pytest",
+					"Run the declared pytest suite",
+					["python", "test"],
+				],
+				[["tool", "tox"], "tool.tox", "tox", "python-tox", "Run the declared tox environments", ["python", "test"]],
+				[["tool", "nox"], "tool.nox", "nox", "python-nox", "Run the declared nox sessions", ["python", "test"]],
+			] as const) {
+				if (tomlTableAt(document, path) === null) continue;
 				proposals.push({
-					preferredId: `python-${slug(name, "check")}`,
-					description: `Run declared Python entry point '${name}'`,
-					command: [name],
+					preferredId: id,
+					description,
+					command: ["python", "-m", module],
 					cwd: ".",
 					timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-					tags: [slug(name.split(/[:.-]/u)[0] ?? "python", "python"), "python"],
+					tags: [...tags],
 					provenance: {
 						kind: "python-runner",
 						path: pyprojectPath,
-						detail: `[${section}] entry '${name}'`,
-						authority: "project-declared",
+						detail: `[${section}]`,
+						authority: "toolchain-defined",
 					},
 				});
+			}
+			for (const [path, section] of [
+				[["project", "scripts"], "project.scripts"],
+				[["tool", "poetry", "scripts"], "tool.poetry.scripts"],
+			] as const) {
+				const scripts = tomlTableAt(document, path);
+				if (scripts === null) continue;
+				for (const [name, target] of Object.entries(scripts)) {
+					if (typeof target !== "string" || !isVerificationScriptName(name)) continue;
+					proposals.push({
+						preferredId: `python-${slug(name, "check")}`,
+						description: `Run declared Python entry point '${name}'`,
+						command: [name],
+						cwd: ".",
+						timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
+						tags: [slug(name.split(/[:.-]/u)[0] ?? "python", "python"), "python"],
+						provenance: {
+							kind: "python-runner",
+							path: pyprojectPath,
+							detail: `[${section}] entry '${name}'`,
+							authority: "project-declared",
+						},
+					});
+				}
 			}
 		}
 	}

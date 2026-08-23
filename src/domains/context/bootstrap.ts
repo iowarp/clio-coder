@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
+import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { classifyProjectPreload, type ProjectPreloadClass } from "../prompts/preload.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
@@ -15,7 +16,7 @@ import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tr
 import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { hasTomlTable, type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
+import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 import {
@@ -49,6 +50,8 @@ export interface BootstrapIo {
 export interface BootstrapGenerateInput {
 	cwd: string;
 	expectedProjectName?: string;
+	/** Operation-scoped parsed TOML documents shared by bootstrap consumers. */
+	tomlFiles?: TomlFileReader;
 	projectType: ProjectType;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
@@ -211,8 +214,8 @@ function projectNameFrom(metadata: ProjectMetadata, cwd: string): string {
 	return titleFromPackageName(parse(cwd).base || "Project");
 }
 
-function projectName(cwd: string): string {
-	return projectNameFrom(readProjectMetadata(cwd), cwd);
+function projectName(cwd: string, tomlFiles: TomlFileReader): string {
+	return projectNameFrom(readProjectMetadata(cwd, tomlFiles), cwd);
 }
 
 function projectTypeLabel(projectType: ProjectType): string {
@@ -270,8 +273,9 @@ function resolveDefaultIdentity(
 	cwd: string,
 	projectType: ProjectType,
 	files: ReadonlyArray<SiblingContextFile>,
+	tomlFiles: TomlFileReader,
 ): DeterministicIdentity {
-	const metadata = readProjectMetadata(cwd);
+	const metadata = readProjectMetadata(cwd, tomlFiles);
 	const name = projectNameFrom(metadata, cwd);
 	const context = allContextText(files);
 	if (/Clio owns the agent loop/i.test(context) && /pi-(?:ai|SDK)/i.test(context)) {
@@ -303,8 +307,8 @@ function resolveDefaultIdentity(
  * which tells a reader nothing the directory name did not. A model sentence is
  * strictly better than that, and only than that.
  */
-function stabilizedIdentity(input: BootstrapGenerateInput, modelIdentity: unknown): string {
-	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles);
+function stabilizedIdentity(input: BootstrapGenerateInput, modelIdentity: unknown, tomlFiles: TomlFileReader): string {
+	const deterministic = resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles, tomlFiles);
 	const model = typeof modelIdentity === "string" ? modelIdentity.trim() : "";
 	if (deterministic.bare && model.length > 0) return model;
 	return deterministic.text;
@@ -504,23 +508,21 @@ function cmakeVerificationLines(cwd: string): string[] {
  * other way. Tox wins when both are declared because it typically wraps the
  * pytest run.
  */
-function pythonVerificationLines(cwd: string): string[] {
-	let pyproject = "";
-	try {
-		pyproject = readFileSync(join(cwd, "pyproject.toml"), "utf8");
-	} catch {
-		pyproject = "";
-	}
-	if (existsSync(join(cwd, "tox.ini")) || hasTomlTable(pyproject, "tool.tox")) {
+function pythonVerificationLines(cwd: string, tomlFiles: TomlFileReader): string[] {
+	const pyproject = tomlFiles.read("pyproject.toml");
+	if (existsSync(join(cwd, "tox.ini")) || (pyproject !== null && tomlTableAt(pyproject, ["tool", "tox"]))) {
 		return ["Run `tox` before handoff."];
 	}
-	if (existsSync(join(cwd, "pytest.ini")) || hasTomlTable(pyproject, "tool.pytest.ini_options")) {
+	if (
+		existsSync(join(cwd, "pytest.ini")) ||
+		(pyproject !== null && tomlTableAt(pyproject, ["tool", "pytest", "ini_options"]))
+	) {
 		return ["Run `pytest` before handoff."];
 	}
 	return [];
 }
 
-function verificationSection(cwd: string): ClioMdSection | null {
+function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSection | null {
 	const scripts = packageScripts(cwd);
 	const pm = packageManager(cwd);
 	const hasScript = (name: string) => typeof scripts[name] === "string";
@@ -557,7 +559,8 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	// Cargo's commands are defined by the toolchain, not by each project, so
 	// naming them for any Cargo workspace carries the same confidence as a
 	// declared package script.
-	if (existsSync(join(cwd, "Cargo.toml"))) {
+	const cargo = tomlFiles.read("Cargo.toml");
+	if (cargo !== null && (tomlTableAt(cargo, ["package"]) || tomlTableAt(cargo, ["workspace"]))) {
 		lines.push("Run `cargo build` and `cargo test` before handoff.");
 	}
 	// Go's commands are defined by the toolchain, not by each project, so
@@ -566,7 +569,7 @@ function verificationSection(cwd: string): ClioMdSection | null {
 	if (existsSync(join(cwd, "go.mod"))) {
 		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
 	}
-	lines.push(...pythonVerificationLines(cwd));
+	lines.push(...pythonVerificationLines(cwd, tomlFiles));
 	if (lines.length === 0) return null;
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
@@ -717,6 +720,7 @@ function stabilizeGeneratedOutput(
 	onModelSectionRetained?: () => void,
 	groundModelOutput = false,
 ): BootstrapStructuredOutput {
+	const tomlFiles = input.tomlFiles ?? createTomlFileReader(input.cwd);
 	const existing = input.existingClioMd;
 	const conventions: string[] = [];
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
@@ -727,7 +731,7 @@ function stabilizeGeneratedOutput(
 	for (const invariant of existing?.invariants ?? []) pushUnique(invariants, invariant);
 	for (const invariant of inferInvariants(input.siblingFiles)) pushUnique(invariants, invariant);
 
-	const verification = verificationSection(input.cwd);
+	const verification = verificationSection(input.cwd, tomlFiles);
 	const inferredSections = inferHeuristicSections(input);
 	const existingSections = existing?.sections ?? [];
 	const ordinarySections: ClioMdSection[] = [];
@@ -754,8 +758,8 @@ function stabilizeGeneratedOutput(
 	}
 	return {
 		...base,
-		projectName: existing?.projectName ?? projectName(input.cwd),
-		identity: existing?.identity ?? stabilizedIdentity(input, base.identity),
+		projectName: existing?.projectName ?? projectName(input.cwd, tomlFiles),
+		identity: existing?.identity ?? stabilizedIdentity(input, base.identity, tomlFiles),
 		conventions: conventions.slice(0, 6),
 		invariants: invariants.slice(0, 3),
 		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
@@ -819,9 +823,11 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
  * unavailable or fails.
  */
 function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapStructuredOutput {
-	return stabilizeGeneratedOutput(input, {
-		projectName: projectName(input.cwd),
-		identity: resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles).text,
+	const tomlFiles = input.tomlFiles ?? createTomlFileReader(input.cwd);
+	const sharedInput = input.tomlFiles ? input : { ...input, tomlFiles };
+	return stabilizeGeneratedOutput(sharedInput, {
+		projectName: projectName(input.cwd, tomlFiles),
+		identity: resolveDefaultIdentity(input.cwd, input.projectType, input.siblingFiles, tomlFiles).text,
 		conventions: inferConventions(input.cwd, input.siblingFiles, input.codewiki),
 		invariants: inferInvariants(input.siblingFiles),
 		sections: inferHeuristicSections(input),
@@ -1229,6 +1235,7 @@ function codewikiEntryPoints(codewiki: Codewiki, limit = 6): string[] {
 
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
 	const cwd = input.cwd ?? process.cwd();
+	const tomlFiles = createTomlFileReader(cwd);
 	const projectType = detectProjectType(cwd);
 	progress(input, {
 		phase: "scan",
@@ -1327,7 +1334,8 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		});
 		output = await (input.generate ?? heuristicBootstrapOutput)({
 			cwd,
-			expectedProjectName: projectName(cwd),
+			expectedProjectName: projectName(cwd, tomlFiles),
+			tomlFiles,
 			projectType,
 			siblingFiles,
 			adoption,
@@ -1342,7 +1350,8 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		output = stabilizeGeneratedOutput(
 			{
 				cwd,
-				expectedProjectName: projectName(cwd),
+				expectedProjectName: projectName(cwd, tomlFiles),
+				tomlFiles,
 				projectType,
 				siblingFiles,
 				adoption,
@@ -1372,7 +1381,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	} else {
 		output = existingParsed
 			? bootstrapOutputFromParsed(existingParsed)
-			: await heuristicBootstrapOutput({ cwd, projectType, siblingFiles, adoption, codewiki });
+			: await heuristicBootstrapOutput({ cwd, tomlFiles, projectType, siblingFiles, adoption, codewiki });
 		progress(input, {
 			phase: "generate",
 			status: "completed",

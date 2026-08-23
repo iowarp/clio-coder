@@ -278,6 +278,128 @@ describe("contracts/bootstrap", () => {
 		strictEqual(verification, undefined, verification?.body);
 	});
 
+	it("does not treat a header-looking line in a basic multiline string as tox configuration", async () => {
+		writeFileSync(
+			join(scratch, "pyproject.toml"),
+			[
+				"[project]",
+				'name = "fixture"',
+				'description = """',
+				"Migration notes:",
+				"[tool.tox]",
+				"is no longer used.",
+				'"""',
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
+	it("does not treat a header-looking line in a literal multiline string as pytest configuration", async () => {
+		writeFileSync(
+			join(scratch, "pyproject.toml"),
+			[
+				"[project]",
+				'name = "fixture"',
+				"description = '''",
+				"Migration notes:",
+				"[tool.pytest.ini_options]",
+				"is no longer used.",
+				"'''",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
+	it("recognizes runner tables expressed with dotted, quoted, and inline keys", async () => {
+		for (const [name, pyproject, command] of [
+			["dotted", 'project.name = "fixture"\ntool.tox.env_list = ["py312"]\n', "`tox`"],
+			[
+				"quoted",
+				'[project]\nname = "fixture"\n\n[tool."pytest".ini_options] # project tests\ntestpaths = ["tests"]\n',
+				"`pytest`",
+			],
+			["inline", 'project = { name = "fixture" }\ntool = { tox = { env_list = ["py312"] } }\n', "`tox`"],
+		] as const) {
+			const cwd = join(scratch, name);
+			mkdirSync(cwd, { recursive: true });
+			writeFileSync(join(cwd, "pyproject.toml"), pyproject, "utf8");
+			writeFileSync(join(cwd, "main.py"), "def main() -> None: ...\n", "utf8");
+			const result = await runBootstrap({ cwd, confirmGitignore: () => true });
+			const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+			ok(verification, `${name} keys must declare a runner`);
+			ok(verification.body.includes(command), verification.body);
+		}
+	});
+
+	it("does not treat literal dotted names or arrays of tables as runner tables", async () => {
+		writeFileSync(
+			join(scratch, "pyproject.toml"),
+			[
+				"[project]",
+				'name = "fixture"',
+				"",
+				'["tool.tox"]',
+				'enabled = "not a nested tool table"',
+				"",
+				"[[tool.pytest.ini_options]]",
+				'path = "tests"',
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
+	it("fails safely on malformed TOML without inventing verification commands", async () => {
+		writeFileSync(join(scratch, "pyproject.toml"), '[project]\nname = "fixture"\n[tool.tox\n', "utf8");
+		writeFileSync(join(scratch, "Cargo.toml"), '[package]\nname = "fixture"\ndescription = [\n', "utf8");
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "main.rs"), "fn main() {}\n", "utf8");
+
+		const result = await runBootstrap({ cwd: scratch, confirmGitignore: () => true });
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
+	it("reuses one pyproject parse across metadata and runner detection", async () => {
+		const pyprojectPath = join(scratch, "pyproject.toml");
+		writeFileSync(pyprojectPath, '[project]\nname = "fixture"\n', "utf8");
+		writeFileSync(join(scratch, "main.py"), "def main() -> None: ...\n", "utf8");
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate(input) {
+				writeFileSync(pyprojectPath, '[project]\nname = "fixture"\n\n[tool.tox]\nenv_list = ["py312"]\n', "utf8");
+				return {
+					projectName: input.expectedProjectName ?? "fixture",
+					identity: "fixture is a Python project.",
+					conventions: [],
+					invariants: [],
+				};
+			},
+		});
+		const verification = result.output.sections?.find((section) => section.title === "Verification expectations");
+		strictEqual(verification, undefined, verification?.body);
+	});
+
 	it("measures the local import extension instead of reading it off the stack", async () => {
 		writeFileSync(
 			join(scratch, "package.json"),
