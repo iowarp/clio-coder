@@ -14,6 +14,7 @@ import {
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
 	permissionOverlayTitle,
+	permissionOverlayTone,
 } from "./permission-overlay.js";
 
 export * from "./overlay-key-routing.js";
@@ -231,7 +232,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			overlayTransitions.handle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
 				...PERMISSION_OVERLAY_PLACEMENT,
 				width: PERMISSION_OVERLAY_WIDTH,
-				title: permissionOverlayTitle(),
+				title: permissionOverlayTitle(view),
+				tone: permissionOverlayTone(view),
 				// Read per frame: the footer names what Enter does right now, and
 				// that depends on whether the composer holds a draft.
 				footerHint: (innerWidth) => permissionOverlayHint(innerWidth, editor.getText().length > 0),

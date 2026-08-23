@@ -1,4 +1,9 @@
 import {
+	classifyDecisionPresentation,
+	type DecisionPresentation,
+	decisionFactsForAnswer,
+} from "../../domains/safety/decision-presentation.js";
+import {
 	type Component,
 	Input,
 	matchesKey,
@@ -18,16 +23,14 @@ import { type ClioToken, clioTheme, dotSep, GLYPH, screenTitle } from "../theme/
 import { nextContentScrollOffset, type ViewScrollAction } from "../view/view-overlay.js";
 
 /**
- * The border and title token while a decision is pending.
- *
- * Orange is the token that means Clio is acting, and a prompt holding the
- * keyboard is the moment the operator has to act with it. Everything
- * informational keeps the teal frame, so the one border that is not teal is the
- * one asking for an answer. All three surfaces carry it: what changes between
- * them is the size and the place, never the signal.
+ * The default title and border token for a local conversational answer.
+ * Outward and other consequence tiers replace both values with their typed
+ * presentation. All ask_user surfaces carry the same classified signal.
  */
-export const ASK_USER_DECISION_TONE: ClioToken = "action";
-export const ASK_USER_DECISION_TITLE = "Decision required";
+const DEFAULT_ASK_USER_PRESENTATION = classifyDecisionPresentation(decisionFactsForAnswer("local"));
+
+export const ASK_USER_DECISION_TONE: ClioToken = DEFAULT_ASK_USER_PRESENTATION.semanticToken;
+export const ASK_USER_DECISION_TITLE = DEFAULT_ASK_USER_PRESENTATION.title;
 export const ASK_USER_WAITING_TITLE = "Ask User";
 
 /**
@@ -73,7 +76,7 @@ interface AskUserSurfaceGeometry {
  * `ASK_USER_FRAME_AND_MARGIN_ROWS` counts alongside the two border rows.
  */
 export const ASK_USER_SURFACE_GEOMETRY: Record<AskUserSurface, AskUserSurfaceGeometry> = {
-	compact: { width: 68, maxInnerRows: 10, anchor: "bottom-center", margin: { top: 1, right: 2, bottom: 1, left: 2 } },
+	compact: { width: 68, maxInnerRows: 14, anchor: "bottom-center", margin: { top: 1, right: 2, bottom: 1, left: 2 } },
 	panel: { width: 88, maxInnerRows: 18, anchor: "center", margin: 1 },
 	// The interview is a workspace, not a modal. A cap of 42 turned a 66-row
 	// terminal into a centered box with twenty blank rows around it, so the
@@ -111,7 +114,7 @@ export interface OpenAskUserOverlayDeps {
 }
 
 export interface AskUserOverlaySession extends OverlayHandle {
-	ask(questions: ReadonlyArray<AskUserQuestion>): Promise<AskUserResult>;
+	ask(questions: ReadonlyArray<AskUserQuestion>, presentation?: DecisionPresentation): Promise<AskUserResult>;
 	cancel(): void;
 	close(): void;
 	isWaiting(): boolean;
@@ -242,16 +245,21 @@ class AskUserOverlayView implements Component {
 	private contentRegionHeight = 1;
 	/** Rows the scroll region wanted on the last render. */
 	private contentTotalRows = 0;
+	private presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION;
 
 	constructor(private readonly deps: AskUserOverlayViewDeps) {}
 
-	begin(questions: ReadonlyArray<AskUserQuestion>): Promise<AskUserResult> {
+	begin(
+		questions: ReadonlyArray<AskUserQuestion>,
+		presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION,
+	): Promise<AskUserResult> {
 		if (this.phase === "closed") return Promise.resolve(cancelledAskUserResult());
 		if (this.resolveCurrent) return Promise.resolve(cancelledAskUserResult());
 		this.phase = "asking";
 		this.index = 0;
 		this.status = "";
 		this.questions = [...questions];
+		this.presentation = presentation;
 		this.states = this.questions.map((question) => createQuestionState(question));
 		this.list = null;
 		this.input = null;
@@ -286,6 +294,14 @@ class AskUserOverlayView implements Component {
 
 	currentSurface(): AskUserSurface {
 		return this.surface;
+	}
+
+	decisionTitle(): string {
+		return this.presentation.title;
+	}
+
+	decisionTone(): ClioToken {
+		return this.presentation.semanticToken;
 	}
 
 	invalidate(): void {
@@ -358,10 +374,17 @@ class AskUserOverlayView implements Component {
 		const statusLines = this.status.length > 0 ? ["", fitLine(clioTheme().fg("dim", this.status), safeWidth)] : [];
 		const headerLine = this.renderQuestionHeader(question, safeWidth);
 		const headerLines = headerLine.length > 0 ? [headerLine] : [];
-		const spent = headerLines.length + statusLines.length + 1 + controlLines.length;
-		const questionLines = wrapTextWithAnsi(question.question, safeWidth).slice(0, Math.max(1, maxRows - spent));
+		const bottom = [...statusLines, "", ...controlLines];
+		const topBudget = Math.max(1, maxRows - bottom.length);
+		const contextLines = this.renderDecisionContext(safeWidth);
+		const top = [
+			contextLines[0] ?? "",
+			...headerLines,
+			...wrapTextWithAnsi(question.question, safeWidth),
+			...contextLines.slice(1),
+		].slice(0, topBudget);
 
-		return [...headerLines, ...questionLines, ...statusLines, "", ...controlLines].slice(0, maxRows);
+		return [...top, ...bottom].slice(0, maxRows);
 	}
 
 	/**
@@ -380,7 +403,12 @@ class AskUserOverlayView implements Component {
 		const headerLine = this.renderQuestionHeader(question, width);
 		const headerLines = headerLine.length > 0 ? [headerLine] : [];
 		const stripLines = [this.renderQuestionStrip(width), ""];
-		const content = [...wrapTextWithAnsi(question.question, width), ...this.renderAnswerLedger(width)];
+		const content = [
+			...wrapTextWithAnsi(question.question, width),
+			"",
+			...this.renderDecisionContext(width),
+			...this.renderAnswerLedger(width),
+		];
 
 		// Chrome sheds from the outside in when the terminal is too short to carry
 		// all of it: the round strip first, then the header, then the status, and
@@ -460,36 +488,52 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		if (!question || !state) return buildHint([]);
+		const recordAnswer =
+			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
+			"record answer";
 		if (state.mode === "text") {
 			return this.questions.length > 1
 				? this.withScrollHint([
-						{ key: "Enter", verb: "submit" },
+						{ key: "Enter", verb: recordAnswer },
 						{ key: "Alt+Left/Right", verb: "question" },
 					])
-				: this.withScrollHint([{ key: "Enter", verb: "submit" }]);
+				: this.withScrollHint([{ key: "Enter", verb: recordAnswer }]);
 		}
-		// `accept` rather than `select` or `commit`: the footer of a decision prompt
-		// has one job, which is to name the key that answers it. Esc keeps the
-		// product's one word for the way out, since it closes the prompt and the
-		// interview together.
+		// The classified action label distinguishes recording an answer from
+		// granting authority. Esc keeps the product's one word for the way out,
+		// since it closes the prompt and the interview together.
 		if (question.multi_select === true) {
 			return this.questions.length > 1
 				? this.withScrollHint([
 						{ key: "Left/Right", verb: "question" },
 						{ key: "Space", verb: "toggle" },
-						{ key: "Enter", verb: "accept" },
+						{ key: "Enter", verb: recordAnswer },
 					])
 				: this.withScrollHint([
 						{ key: "Space", verb: "toggle" },
-						{ key: "Enter", verb: "accept" },
+						{ key: "Enter", verb: recordAnswer },
 					]);
 		}
 		return this.questions.length > 1
 			? this.withScrollHint([
 					{ key: "Left/Right", verb: "question" },
-					{ key: "Enter", verb: "accept" },
+					{ key: "Enter", verb: recordAnswer },
 				])
-			: this.withScrollHint([{ key: "Enter", verb: "accept" }]);
+			: this.withScrollHint([{ key: "Enter", verb: recordAnswer }]);
+	}
+
+	private renderDecisionContext(width: number): string[] {
+		const theme = clioTheme();
+		const tier = theme.style(this.presentation.semanticToken, this.presentation.tierLabel, { bold: true });
+		const requested = theme.fg("dim", `requested by ${this.presentation.requestedByCopy}`);
+		const effect = `${theme.fg("dim", "Effect:")} ${theme.fg("muted", this.presentation.authorizationCopy)}`;
+		return [
+			fitLine(`${tier}${dotSep(theme)}${requested}`, width),
+			...wrapTextWithAnsi(effect, width).map((line) => fitLine(line, width)),
+			...wrapTextWithAnsi(theme.fg("muted", this.presentation.reversibilityCopy), width).map((line) =>
+				fitLine(line, width),
+			),
+		];
 	}
 
 	/**
@@ -1012,8 +1056,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 			// the terminal has left after the margins.
 			...(geometry.maxInnerRows > 0 ? { maxHeight: geometry.maxInnerRows + ASK_USER_FRAME_ROWS } : {}),
 			margin: geometry.margin,
-			title: () => (view.isDecisionPending() ? ASK_USER_DECISION_TITLE : ASK_USER_WAITING_TITLE),
-			tone: () => (view.isDecisionPending() ? ASK_USER_DECISION_TONE : undefined),
+			title: () => (view.isDecisionPending() ? view.decisionTitle() : ASK_USER_WAITING_TITLE),
+			tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 			footerHint: () => view.footerHint(),
 		});
 		mounted = surface;
@@ -1034,7 +1078,7 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		focus: () => handle?.focus(),
 		unfocus: (options) => (options ? handle?.unfocus(options) : handle?.unfocus()),
 		isFocused: () => handle?.isFocused() ?? false,
-		ask: (questions) => view.begin(questions),
+		ask: (questions, presentation) => view.begin(questions, presentation),
 		cancel: () => view.cancel(),
 		close,
 		hide: close,

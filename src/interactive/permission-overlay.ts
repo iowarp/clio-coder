@@ -1,6 +1,14 @@
+import type { ActionClass } from "../domains/safety/action-classifier.js";
+import type { AutonomyExposure } from "../domains/safety/autonomy.js";
+import {
+	classifyDecisionPresentation,
+	type DecisionPresentation,
+	decisionFactsForPermission,
+} from "../domains/safety/decision-presentation.js";
 import type { Component } from "../engine/tui.js";
 import { fitHintEntries } from "./overlay-frame.js";
 import { permissionHintEntries } from "./permission-hint.js";
+import type { ClioToken } from "./theme/index.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -9,9 +17,11 @@ export { permissionHintEntries } from "./permission-hint.js";
 export interface ApprovalRequestView {
 	requestId: string;
 	tool: string;
-	actionClass: string;
+	actionClass: ActionClass;
 	axis: { kind: "net"; ruleId: string } | { kind: "autonomy"; level: string };
 	origin: { kind: "main" } | { kind: "worker"; agentId: string; runId: string };
+	/** Admission-normalized exposure. Caller prose never supplies presentation fields. */
+	exposure?: AutonomyExposure;
 	reason: string;
 	/** Typed, sanitized multi-line artifact that this one approval authorizes. */
 	artifact?: { kind: "dispatch-plan"; text: string };
@@ -101,20 +111,27 @@ function wrapArtifactLine(value: string, max: number): string[] {
 	return lines;
 }
 
-function axisLabel(axis: ApprovalRequestView["axis"], style: ApprovalRequestView["origin"]["kind"]): string {
-	if (axis.kind === "net") return `safety-net rail ${axis.ruleId}`;
-	return style === "worker" ? `autonomy level ${axis.level}` : `autonomy level (${axis.level})`;
+export function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPresentation {
+	return classifyDecisionPresentation(
+		decisionFactsForPermission({
+			tool: view.tool,
+			actionClass: view.actionClass,
+			axis:
+				view.axis.kind === "net"
+					? { kind: "safety-net", ruleId: view.axis.ruleId }
+					: { kind: "autonomy", level: view.axis.level },
+			origin: view.origin,
+			...(view.exposure !== undefined ? { exposure: view.exposure } : {}),
+		}),
+	);
 }
 
-function askedBy(view: ApprovalRequestView): string {
-	if (view.origin.kind === "worker") {
-		return `worker ${view.origin.agentId} (run ${view.origin.runId}), ${axisLabel(view.axis, "worker")}`;
-	}
-	return axisLabel(view.axis, "main");
+export function permissionOverlayTitle(view: ApprovalRequestView): string {
+	return permissionDecisionPresentation(view).title;
 }
 
-export function permissionOverlayTitle(): string {
-	return "Allow this action once?";
+export function permissionOverlayTone(view: ApprovalRequestView): ClioToken {
+	return permissionDecisionPresentation(view).semanticToken;
 }
 
 /**
@@ -126,11 +143,9 @@ export function permissionOverlayHint(innerWidth: number, composerHasDraft = fal
 	return fitHintEntries(permissionHintEntries(composerHasDraft), innerWidth - 3);
 }
 
-const SAFETY_SENTENCES: ReadonlyArray<string> = [
-	"Parked until you decide; allow or deny applies to this call only.",
-	"Stopping the turn denies it and ends the run, so nothing asks again.",
-	"Hard-blocked actions remain blocked.",
-];
+function actionConsequence(presentation: DecisionPresentation, id: "deny" | "stop"): string {
+	return presentation.requiredActions.find((action) => action.id === id)?.consequence ?? "";
+}
 
 /**
  * The overlay's body, laid out for the width the frame gives it.
@@ -142,15 +157,15 @@ const SAFETY_SENTENCES: ReadonlyArray<string> = [
  */
 export function permissionOverlayLines(view: ApprovalRequestView, width: number): string[] {
 	const content = Math.max(8, Math.floor(width));
+	const presentation = permissionDecisionPresentation(view);
 	// The parked call is awaiting a decision, not blocked: the raw rejection
 	// short ("<tool> blocked: <class>") is never rendered here because its
 	// wording contradicts the ask. Tool, Target, Action, and the asking axis
 	// carry everything the operator needs to decide.
 	const lines = [
-		field("Tool: ", view.tool, content),
+		field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
 		...(view.target !== undefined && view.target.length > 0 ? [field("Target: ", view.target, content)] : []),
-		field("Action: ", view.actionClass, content),
-		field("Asked by: ", askedBy(view), content),
+		...wrapSentence(`Requested by: ${presentation.requestedByCopy}`, content),
 		...(view.artifact !== undefined
 			? [
 					"",
@@ -159,7 +174,12 @@ export function permissionOverlayLines(view: ApprovalRequestView, width: number)
 				]
 			: []),
 		"",
-		...SAFETY_SENTENCES.flatMap((sentence) => wrapSentence(sentence, content)),
+		...wrapSentence(`Approval: ${presentation.authorizationCopy}`, content),
+		...wrapSentence(`Consequence: ${presentation.consequenceCopy}`, content),
+		...wrapSentence(presentation.reversibilityCopy, content),
+		...wrapSentence(`Deny: ${actionConsequence(presentation, "deny")}`, content),
+		...wrapSentence(`Stop: ${actionConsequence(presentation, "stop")}`, content),
+		...wrapSentence("Hard-blocked actions remain blocked.", content),
 	];
 	if (view.queueDepth !== undefined && view.queueDepth > 1) {
 		lines.splice(lines.indexOf(""), 0, `1 of ${view.queueDepth} parked`);

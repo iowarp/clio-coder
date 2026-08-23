@@ -667,6 +667,7 @@ hard block.
 - The monitor tool reports the node and reroute lineage on `status`, `list`,
   and `collect`.
 - `clio-coder fleet status [--json]` shows the durable ledger view cross-process.
+- A worker permission escalation uses the `Worker escalation` consequence tier in operator presentation. The tier names the worker agent and run and describes where the one-shot answer returns. It does not approve the request, change the worker's inherited autonomy, or weaken the safety net; the existing worker escalation protocol remains the only resolution path.
 
 ## Speculation observer
 

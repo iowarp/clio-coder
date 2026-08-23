@@ -40,6 +40,27 @@ The `system_modify` confirm is level-invariant, so it is enforced and attributed
 
 The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Autonomy & Safety section.
 
+### Consequence tier is presentation, not authority
+
+Every operator decision also receives one closed consequence tier. The tier explains what the already-required decision can affect. It never decides whether a call runs, never changes the autonomy level, and never overrides a safety-net verdict. Registry admission still follows the enforcement path below before any presentation is built.
+
+| Consequence tier | Trusted facts that select it | Operator-facing meaning |
+| --- | --- | --- |
+| Conversational answer | A local `ask_user` question that records an answer | Records an answer without granting tool authority. |
+| Workspace authority | A main-agent one-shot approval whose bounded scope is the workspace | Authorizes only the presented call. Workspace changes can be reviewed and reverted when the action class supports that. |
+| Outward consequence | Typed `exposure: outward` | The answer concerns a step that can reach people or systems outside the workspace. The interview itself does not publish or send anything. |
+| Safety-net confirmation | An always-on confirm rail | The safety net requires a one-shot operator decision independently of the autonomy level. |
+| System change | `system_modify`, destructive, unknown, or otherwise system-scoped consequences | The effect reaches outside the workspace or cannot be safely bounded, and reversibility is unknown. |
+| Worker escalation | An authenticated dispatched-worker origin | The parked decision belongs to the named worker run and returns only to that exact request. |
+
+The classifier reads the request kind, the enforced safety or autonomy axis, normalized local or outward exposure, derived reversibility and scope, authenticated main-agent or worker origin, and whether the surface records an answer or grants one-shot authority. Model-authored questions, reasons, summaries, option labels, titles, and color names do not enter the classifier. Worker and system facts take conservative precedence, and an unknown action class uses the system tier. An interview that has reached outward exposure keeps that tier for later rounds and durable replay, so a later local declaration cannot visually lower it.
+
+These three concepts answer different questions:
+
+- The autonomy level decides when the registry allows, parks, or denies an action class.
+- The safety-net axis identifies an always-on rule that can block or require confirmation at every autonomy level.
+- The consequence tier explains the scope, reversibility, requester, and effect of a decision that the enforced axes have already produced.
+
 ---
 
 ## Enforcement path
@@ -286,7 +307,7 @@ Evidence raises a warn-level external-bypass finding for bypassed runs and an in
 
 ## Approvals
 
-An `ask` can come from either axis: a safety-net confirm rail (damage-control `ask` rule, project `requireConfirmation`, `system_modify`) or the autonomy mapping. The permission overlay names the asking axis on its `Asked by:` line, and the transcript carries an `[approval]` notice for every parked call.
+An `ask` can come from either axis: a safety-net confirm rail (damage-control `ask` rule, project `requireConfirmation`, `system_modify`) or the autonomy mapping. The permission overlay names the authenticated requester and asking axis on its `Requested by:` lines, and the transcript carries an `[approval]` notice for every parked call.
 
 Every approvable ask has one canonical identity: a `requestId` minted at the approvals plane. The `PermissionRequested` and `PermissionResolved` bus payloads and the audit permission rows all carry it, along with `origin` (who asked), `axis` (which rail or level), and `decidedBy` (who or what answered), so a request joins its resolution on one key across the bus, the ledger, and receipts, and every request resolves exactly once. Worker escalations forward their full decision provenance (reasons, reason code, rule id, policy source), so the overlay names the real asking rail for a worker exactly as it does for the main agent.
 
@@ -295,7 +316,7 @@ How an ask resolves depends on the context:
 ### Interactive TUI Behavior
 
 In interactive mode, a permission request opens a queued overlay prompt immediately in the TUI, and the composer rail switches to `CONFIRM` with the same keys for as long as the prompt owns the keyboard.
-- **Queued Overlays:** If multiple tools or worker dispatches require permission during a single turn, the TUI queues the requests. Closing one overlay automatically pops the next permission overlay in the queue. A request that arrives while a different overlay (a picker, `/context`, the fleet board) holds the screen is announced with an `[approval]` notice and re-presented the moment that overlay closes.
+- **Queued Overlays:** If multiple tools or worker dispatches require permission during a single turn, the TUI queues the requests. Closing one overlay automatically pops the next permission overlay in the queue. Each queued request retains its consequence tier and authenticated requester. A request that arrives while a different overlay (a picker, `/context`, the fleet board) holds the screen is announced with an `[approval]` notice and re-presented the moment that overlay closes.
 - **Operator Options:** `Enter` grants permission once, which resumes only the parked tool call without changing the overall operating posture; the one-shot grant is scoped to the presented request's `requestId`. `Esc` denies only the presented request and advances the queue; the next parked call re-presents. `s` denies it and ends the turn. Cancel-all is reserved for shutdown, an aborted turn, headless runs, and transport failure, where no operator can answer.
 - **Enter never doubles as send:** `Enter` allows only from an empty composer. While the composer holds a draft, `Enter` does nothing, both surfaces say `[Backspace] clear draft` in its place, and only deletion keys reach the editor. An operator who typed a message and pressed the habitual send key cannot approve a parked call by accident; on a safety rail the ambiguous key resolves away from allow.
 

@@ -1,3 +1,4 @@
+import { classifyDecisionPresentation, decisionFactsForAnswer } from "../../domains/safety/decision-presentation.js";
 import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/entries.js";
 import {
 	type Component,
@@ -73,10 +74,11 @@ function selectableRows(interviews: ReadonlyArray<DecisionLedgerEntry>): Selecta
 
 function interviewHeader(interview: DecisionLedgerEntry, width: number, now: number): string[] {
 	const theme = clioTheme();
+	const presentation = classifyDecisionPresentation(decisionFactsForAnswer(interview.exposure ?? "local"));
 	const rounds = `${interview.roundCount} round${interview.roundCount === 1 ? "" : "s"}`;
 	const status =
 		interview.interviewStatus === "complete" ? theme.fg("success", "complete") : theme.fg("warning", "cancelled");
-	const heading = `${theme.fg("accent", relativeTime(interview.endedAt, now))}${theme.fg("dim", " · ")}${theme.fg("muted", rounds)}${theme.fg("dim", " · ")}${status}`;
+	const heading = `${theme.style(presentation.semanticToken, presentation.tierLabel, { bold: true })}${theme.fg("dim", " · ")}${theme.fg("accent", relativeTime(interview.endedAt, now))}${theme.fg("dim", " · ")}${theme.fg("muted", rounds)}${theme.fg("dim", " · ")}${status}`;
 	const lines = [fitLine(heading, width)];
 	if (interview.summary) {
 		lines.push(...wrapTextWithAnsi(theme.fg("dim", interview.summary), width).map((line) => fitLine(line, width)));

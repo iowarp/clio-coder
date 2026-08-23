@@ -89,9 +89,16 @@ describe("contracts/decisions-overlay", () => {
 
 	it("groups newest interviews, renders state and correction receipts, and survives 40 columns", () => {
 		const older = interview({ interviewId: "older", endedAt: "2026-08-18T10:03:00.000Z" });
-		const newer = interview({ interviewId: "newer", interviewStatus: "cancelled", summary: "Operator cancelled." });
+		const newer = interview({
+			interviewId: "newer",
+			interviewStatus: "cancelled",
+			exposure: "outward",
+			summary: "Operator cancelled.",
+		});
 		const lines = formatDecisionsOverlayBodyLines([newer, older], 0, null, 40, Date.parse("2026-08-19T10:05:00.000Z"));
 		const text = stripAnsi(lines.join("\n"));
+		ok(text.includes("Outward consequence"), text);
+		ok(text.includes("Conversational answer"), text);
 		ok(text.indexOf("cancelled") < text.lastIndexOf("complete"), text);
 		ok(text.includes("2 rounds"), text);
 		ok(text.includes("Scope: Only the interactive"), text);

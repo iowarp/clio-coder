@@ -20,6 +20,10 @@ import {
 	mapAutonomy,
 } from "../../src/domains/safety/autonomy.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
+import {
+	classifyDecisionPresentation,
+	decisionFactsForPermission,
+} from "../../src/domains/safety/decision-presentation.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { formatModelRejection } from "../../src/domains/safety/rejection-feedback.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
@@ -34,6 +38,7 @@ import {
 	askAxis,
 	createPermissionOverlayBody,
 	describeCallTarget,
+	permissionDecisionPresentation,
 	sanitizeCallTargetText,
 } from "../../src/interactive/permission-overlay.js";
 import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
@@ -615,7 +620,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		ok(notice.text.includes(".clio-coder/safety.yaml"));
 
 		const body = createPermissionOverlayBody(approvalViewForDecision("bash", decision, "auto-edit")).render(60);
-		ok(body.includes("Asked by: autonomy level (auto-edit)"), body.join("\n"));
+		ok(body.join(" ").includes("Requested by: main agent through autonomy level (auto-edit)"), body.join("\n"));
 	});
 
 	it("carries the invoke toolCallId on permission-required metadata", async () => {
@@ -650,10 +655,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		match(notice.text, /^\[approval\] bash parked \(git_destructive\): safety-net rail \S+ asks for confirmation\./);
 
 		const body = createPermissionOverlayBody(approvalViewForDecision("bash", decision, "full-auto")).render(60);
-		ok(
-			body.some((line) => line.startsWith("Asked by: safety-net rail")),
-			body.join("\n"),
-		);
+		ok(body.join(" ").includes("Requested by: main agent through safety-net rail"), body.join("\n"));
 	});
 
 	it("system_modify names the builtin confirm rail as the asking axis", async () => {
@@ -680,7 +682,10 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		);
 
 		const body = createPermissionOverlayBody(approvalViewForDecision("bash", ask.decision, "full-auto")).render(80);
-		ok(body.includes("Asked by: safety-net rail system-modify-confirm"), body.join("\n"));
+		ok(
+			body.join(" ").includes("Requested by: main agent through safety-net rail system-modify-confirm"),
+			body.join("\n"),
+		);
 	});
 
 	it("permission overlay renders real approval request views", () => {
@@ -694,17 +699,17 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			target: "git stash drop",
 			queueDepth: 2,
 		};
-		deepStrictEqual(createPermissionOverlayBody(mainView).render(80), [
-			"Tool: bash",
-			"Target: git stash drop",
-			"Action: execute",
-			"Asked by: autonomy level (auto-edit)",
-			"1 of 2 parked",
-			"",
-			"Parked until you decide; allow or deny applies to this call only.",
-			"Stopping the turn denies it and ends the run, so nothing asks again.",
-			"Hard-blocked actions remain blocked.",
-		]);
+		const mainBody = createPermissionOverlayBody(mainView).render(80).join(" ").replace(/\s+/gu, " ");
+		strictEqual(permissionDecisionPresentation(mainView).tier, "workspace");
+		ok(mainBody.includes("Tool: bash · Action: execute"), mainBody);
+		ok(mainBody.includes("Target: git stash drop"), mainBody);
+		ok(mainBody.includes("Requested by: main agent through autonomy level (auto-edit)"), mainBody);
+		ok(mainBody.includes("1 of 2 parked"), mainBody);
+		ok(mainBody.includes("Approval authorizes one execute call to bash"), mainBody);
+		ok(mainBody.includes("does not change the autonomy level"), mainBody);
+		ok(mainBody.includes("Reversible: not guaranteed"), mainBody);
+		ok(mainBody.includes("Deny: Denies only the presented request and advances the queue."), mainBody);
+		ok(mainBody.includes("Stop: Denies every parked request from this turn and ends the run."), mainBody);
 
 		const workerNetView: ApprovalRequestView = {
 			requestId: "perm-worker-net",
@@ -714,15 +719,13 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			origin: { kind: "worker", agentId: "scout", runId: "r-abc" },
 			reason: "bash requires execute confirmation",
 		};
-		deepStrictEqual(createPermissionOverlayBody(workerNetView).render(80), [
-			"Tool: bash",
-			"Action: execute",
-			"Asked by: worker scout (run r-abc), safety-net rail bash-command-substitution",
-			"",
-			"Parked until you decide; allow or deny applies to this call only.",
-			"Stopping the turn denies it and ends the run, so nothing asks again.",
-			"Hard-blocked actions remain blocked.",
-		]);
+		const workerNetBody = createPermissionOverlayBody(workerNetView).render(80).join(" ").replace(/\s+/gu, " ");
+		strictEqual(permissionDecisionPresentation(workerNetView).tier, "worker");
+		ok(
+			workerNetBody.includes("Requested by: worker scout (run r-abc) through safety-net rail bash-command-substitution"),
+			workerNetBody,
+		);
+		ok(workerNetBody.includes("A dispatched worker is parked."), workerNetBody);
 
 		const workerAutonomyView: ApprovalRequestView = {
 			requestId: "perm-worker-autonomy",
@@ -732,15 +735,12 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			origin: { kind: "worker", agentId: "coder", runId: "r-def" },
 			reason: "write requires write confirmation",
 		};
-		deepStrictEqual(createPermissionOverlayBody(workerAutonomyView).render(80), [
-			"Tool: write",
-			"Action: write",
-			"Asked by: worker coder (run r-def), autonomy level suggest",
-			"",
-			"Parked until you decide; allow or deny applies to this call only.",
-			"Stopping the turn denies it and ends the run, so nothing asks again.",
-			"Hard-blocked actions remain blocked.",
-		]);
+		const workerAutonomyBody = createPermissionOverlayBody(workerAutonomyView).render(80).join(" ").replace(/\s+/gu, " ");
+		strictEqual(permissionDecisionPresentation(workerAutonomyView).tier, "worker");
+		ok(
+			workerAutonomyBody.includes("Requested by: worker coder (run r-def) through autonomy level (suggest)"),
+			workerAutonomyBody,
+		);
 	});
 
 	it("permission overlay renders every line of a resolved dispatch plan", () => {
@@ -893,10 +893,20 @@ describe("contracts/autonomy approvals contexts", () => {
 		const registry = registryAt("auto-edit");
 		const headlessReason =
 			"clio-coder run cannot confirm permission requests; rerun interactively to approve this action.";
-		registry.onPermissionRequired(() => {
+		let projectedTier = "";
+		registry.onPermissionRequired((call, decision, meta) => {
+			projectedTier = classifyDecisionPresentation(
+				decisionFactsForPermission({
+					tool: call.tool,
+					actionClass: decision.classification.actionClass,
+					axis: { kind: "autonomy", level: meta.axis.slice("autonomy:".length) },
+					origin: { kind: "main" },
+				}),
+			).tier;
 			registry.cancelParkedCalls(headlessReason);
 		});
 		const verdict = await registry.invoke(bashCall("echo hello"));
+		strictEqual(projectedTier, "workspace");
 		strictEqual(verdict.kind, "blocked");
 		ok(verdict.kind === "blocked" && verdict.reason === headlessReason);
 	});

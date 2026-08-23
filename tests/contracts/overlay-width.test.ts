@@ -34,6 +34,7 @@ import {
 	permissionOverlayHint,
 	permissionOverlayLines,
 	permissionOverlayTitle,
+	permissionOverlayTone,
 } from "../../src/interactive/permission-overlay.js";
 import {
 	formatCompositeTasksOverlayBodyLines,
@@ -66,10 +67,11 @@ function approvalView(overrides: Partial<ApprovalRequestView> = {}): ApprovalReq
 function permissionFrameLines(view: ApprovalRequestView, width: number): string[] {
 	const frame = new ClioOverlayFrame(
 		createPermissionOverlayBody(view),
-		permissionOverlayTitle(),
+		permissionOverlayTitle(view),
 		(innerWidth) => permissionOverlayHint(innerWidth),
 		PERMISSION_OVERLAY_WIDTH,
 		"center",
+		permissionOverlayTone(view),
 	);
 	return frame.render(width).map(stripAnsi);
 }
@@ -86,12 +88,14 @@ describe("contracts/overlay width — permission overlay", () => {
 		}
 	});
 
-	it("wraps the safety sentences instead of cutting them mid-word", () => {
+	it("wraps the consequence sentences instead of cutting them mid-word", () => {
 		for (const width of WIDTHS) {
 			const body = permissionOverlayLines(approvalView(), width).join(" ").replace(/\s+/gu, " ");
 			for (const sentence of [
-				"Parked until you decide; allow or deny applies to this call only.",
-				"Stopping the turn denies it and ends the run, so nothing asks again.",
+				"Approval authorizes one execute call to bash. It does not change the autonomy level.",
+				"Reversible: not guaranteed. Effects that already ran or reached an outward system may remain.",
+				"Deny: Denies only the presented request and advances the queue.",
+				"Stop: Denies every parked request from this turn and ends the run.",
 				"Hard-blocked actions remain blocked.",
 			]) {
 				ok(body.includes(sentence), `at ${width} cols the overlay lost "${sentence}"`);

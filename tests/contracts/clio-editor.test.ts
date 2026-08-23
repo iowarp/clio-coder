@@ -105,11 +105,11 @@ describe("contracts/clio-editor", () => {
 
 	/**
 	 * The v0.3.4 drive approved a `system_modify` bash call by pressing Enter on
-	 * a composer whose rail still read `Enter send` (issue #186). The dialog sits
-	 * at the vertical center of the viewport, forty rows from the composer on a
-	 * tall terminal with a long transcript, and the rail is what the operator
-	 * reads. While a prompt owns the keyboard the rail says CONFIRM and carries
-	 * the dialog's keys, at 60 columns included, where the send hint is dropped.
+	 * a composer whose rail still read `Enter send` (issue #186). The dialog now
+	 * anchors above the composer (issue #194), and the rail remains the closest
+	 * key guide. While a prompt owns the keyboard the rail says CONFIRM and
+	 * carries the dialog's keys, at 60 columns included, where the send hint is
+	 * dropped.
 	 */
 	it("switches to CONFIRM with the permission keys while an approval is pending", () => {
 		let awaiting = true;
