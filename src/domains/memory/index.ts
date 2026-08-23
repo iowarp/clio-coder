@@ -7,6 +7,20 @@ export {
 	selectApprovedMemory,
 } from "./operations.js";
 export {
+	applyScopeIdentity,
+	MEMORY_PROMOTION_SCOPES,
+	type MemoryPromotionScope,
+	type MemoryPromotionSource,
+	type MemoryPromotionSourceRedaction,
+	type MemoryScopeSelection,
+	memoryAgentIdentity,
+	memoryRecordFromPromotion,
+	memoryRuntimeIdentity,
+	memoryScopeIdentityKey,
+	proposeMemoryPromotion,
+	validateMemoryScopeSelection,
+} from "./promotion.js";
+export {
 	buildMemoryPromptSection,
 	MEMORY_PROMPT_DEFAULT_MAX_ITEMS,
 	MEMORY_PROMPT_DEFAULT_SCOPES,
@@ -46,7 +60,9 @@ export {
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
 export {
+	type LegacyTaskMemoryHandoffSnapshot,
 	parseTaskMemoryHandoffSnapshot,
+	type ReviewedTaskMemoryHandoffSnapshot,
 	readNewestTaskMemoryHandoff,
 	renderTaskMemoryHandoffSnapshot,
 	renderTaskMemoryHandoffSource,
@@ -57,9 +73,11 @@ export {
 	type TaskMemoryHandoffArtifact,
 	type TaskMemoryHandoffEntry,
 	type TaskMemoryHandoffOffer,
+	type TaskMemoryHandoffRedaction,
 	type TaskMemoryHandoffSeedOutcome,
 	type TaskMemoryHandoffSeedResult,
 	type TaskMemoryHandoffSnapshot,
+	type TaskMemoryHandoffSourceProvenance,
 	taskMemoryHandoffSeedOffer,
 	taskMemoryHandoffSnapshot,
 } from "./task-memory-handoff.js";
@@ -112,12 +130,16 @@ export {
 	taskMemoryTracePath,
 } from "./task-memory-trace.js";
 export type {
+	MemoryAgentIdentity,
+	MemoryPromotionRedaction,
 	MemoryProposalResult,
 	MemoryPruneResult,
 	MemoryRecord,
+	MemoryRecordProvenance,
 	MemoryRecordValidationResult,
 	MemoryRepositoryIdentity,
 	MemoryRetrievalOptions,
+	MemoryRuntimeIdentity,
 	MemoryScope,
 	MemoryStatus,
 	MemoryStoreFile,

@@ -2,7 +2,12 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
-import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
+import {
+	canonicalMemoryRepositoryIdentity,
+	loadMemoryRecordsSync,
+	type MemoryRecord,
+	proposeMemoryPromotion,
+} from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
@@ -225,6 +230,32 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "memory";
 		deps.transitions.handle = openMemoryOverlayFactory(deps.tui, deps.getTaskMemoryStatus, () => records, {
 			onClose: deps.closeOverlay,
+			onPromote: async (entry, scope) => {
+				const meta = deps.getSessionMeta();
+				if (!meta) throw new Error("memory promotion requires an active session");
+				const selection =
+					scope === "global"
+						? ({ scope: "global", acknowledgeGlobal: true } as const)
+						: (() => {
+								const repository = canonicalMemoryRepositoryIdentity(meta.cwd);
+								if (repository === null) {
+									throw new Error("repo promotion requires a canonical active repository identity");
+								}
+								return { scope: "repo", repository } as const;
+							})();
+				const result = await proposeMemoryPromotion(
+					deps.dataDir,
+					{
+						kind: "task-bank-entry",
+						sessionId: meta.id,
+						evidenceRefs: [`session-${meta.id}`],
+						entry,
+					},
+					selection,
+				);
+				records = loadMemoryRecordsSync(deps.dataDir);
+				return result;
+			},
 		});
 		deps.requestRender();
 	};

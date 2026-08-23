@@ -2,7 +2,13 @@ import { isAbsolute } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
-import type { MemoryRecord, MemoryRepositoryIdentity, MemoryRetrievalOptions } from "./types.js";
+import type {
+	MemoryAgentIdentity,
+	MemoryRecord,
+	MemoryRepositoryIdentity,
+	MemoryRetrievalOptions,
+	MemoryRuntimeIdentity,
+} from "./types.js";
 
 export async function approveMemoryRecord(
 	dataDir: string,
@@ -31,12 +37,16 @@ export function selectApprovedMemory(
 	if (options.tokenBudget <= 0) return [];
 	const allowedScopes = options.scopes === undefined ? null : new Set(options.scopes);
 	const activeRepository = canonicalActiveRepository(options.activeRepository);
+	const activeRuntime = validActiveNamedIdentity(options.activeRuntime, "runtime");
+	const activeAgent = validActiveNamedIdentity(options.activeAgent, "agent");
 	const candidates = sortMemoryRecords(records)
 		.filter((record) => record.approved)
 		.filter((record) => record.evidenceRefs.length > 0)
 		.filter((record) => record.regressions === undefined || record.regressions.length === 0)
 		.filter((record) => allowedScopes === null || allowedScopes.has(record.scope))
 		.filter((record) => repositoryApplies(record, activeRepository))
+		.filter((record) => runtimeApplies(record, activeRuntime))
+		.filter((record) => agentApplies(record, activeAgent))
 		.sort(compareRetrievalPriority);
 	const selected: MemoryRecord[] = [];
 	let spent = 0;
@@ -55,6 +65,8 @@ export function estimateMemoryTokens(record: MemoryRecord): number {
 		record.key,
 		record.lesson,
 		...(record.repository === undefined ? [] : [record.repository.kind, record.repository.key]),
+		...(record.runtime === undefined ? [] : [record.runtime.kind, record.runtime.key]),
+		...(record.agent === undefined ? [] : [record.agent.kind, record.agent.key]),
 		...record.evidenceRefs,
 		...record.appliesWhen,
 		...record.avoidWhen,
@@ -80,6 +92,21 @@ function cloneRecord(record: MemoryRecord): MemoryRecord {
 	if (record.regressions !== undefined) next.regressions = [...record.regressions];
 	if (record.rejectedAt !== undefined) next.rejectedAt = record.rejectedAt;
 	if (record.repository !== undefined) next.repository = { ...record.repository };
+	if (record.runtime !== undefined) next.runtime = { ...record.runtime };
+	if (record.agent !== undefined) next.agent = { ...record.agent };
+	if (record.provenance !== undefined) {
+		next.provenance = {
+			...record.provenance,
+			...(record.provenance.redaction === undefined
+				? {}
+				: {
+						redaction: {
+							...record.provenance.redaction,
+							sourceFields: [...record.provenance.redaction.sourceFields],
+						},
+					}),
+		};
+	}
 	return next;
 }
 
@@ -113,6 +140,36 @@ function repositoryApplies(record: MemoryRecord, activeRepository: MemoryReposit
 	// record without it never enters any repository prompt.
 	if (record.repository === undefined) return false;
 	return record.repository.kind === activeRepository.kind && record.repository.key === activeRepository.key;
+}
+
+function runtimeApplies(record: MemoryRecord, activeRuntime: MemoryRuntimeIdentity | null): boolean {
+	if (record.scope !== "runtime") return true;
+	if (activeRuntime === null || record.runtime === undefined) return false;
+	return record.runtime.kind === activeRuntime.kind && record.runtime.key === activeRuntime.key;
+}
+
+function agentApplies(record: MemoryRecord, activeAgent: MemoryAgentIdentity | null): boolean {
+	if (record.scope !== "agent") return true;
+	if (activeAgent === null || record.agent === undefined) return false;
+	return record.agent.kind === activeAgent.kind && record.agent.key === activeAgent.key;
+}
+
+function validActiveNamedIdentity<T extends "runtime" | "agent">(
+	identity: { kind: T; key: string } | null | undefined,
+	kind: T,
+): { kind: T; key: string } | null {
+	if (
+		identity === null ||
+		identity === undefined ||
+		identity.kind !== kind ||
+		identity.key.length === 0 ||
+		identity.key.length > 256 ||
+		identity.key.trim() !== identity.key ||
+		/[\0\r\n\t ]/u.test(identity.key)
+	) {
+		return null;
+	}
+	return { kind, key: identity.key };
 }
 
 function isUsableAbsoluteRepositoryPath(value: string): boolean {

@@ -375,4 +375,52 @@ describe("contracts/memory overlay", () => {
 		// The overlay reads the bank; it never writes to it.
 		deepStrictEqual(operatorStatus().bank.version, 1);
 	});
+
+	it("promotes only selected public entries and separately acknowledges global scope", async () => {
+		const calls: Array<{ id: string; scope: "repo" | "global" }> = [];
+		const memory = new MemoryOverlayView(
+			operatorStatus,
+			() => [],
+			() => {},
+			() => {},
+			{
+				onPromote: async (entry, scope) => {
+					calls.push({ id: entry.id, scope });
+					return {
+						created: true,
+						record: {
+							...durableRecord(false),
+							id: "mem-00000000000000aa",
+							lesson: entry.content,
+							scope,
+						},
+					};
+				},
+			},
+		);
+
+		memory.render(96);
+		memory.handleInput("p");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		deepStrictEqual(calls, [], "private status is never handed to promotion");
+		ok(stripAnsi(memory.render(96).join("\n")).includes("select a knowledge or procedural"));
+
+		memory.handleInput(DOWN);
+		memory.handleInput("p");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		deepStrictEqual(calls, [{ id: "tm-k-2", scope: "repo" }]);
+
+		memory.handleInput("g");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		strictEqual(calls.length, 1, "first global action only arms the acknowledgement");
+		ok(stripAnsi(memory.render(96).join("\n")).includes("press g again to acknowledge"));
+		memory.handleInput("g");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		deepStrictEqual(calls, [
+			{ id: "tm-k-2", scope: "repo" },
+			{ id: "tm-k-2", scope: "global" },
+		]);
+		ok(memory.getHint().includes("[p] propose repo"));
+		ok(memory.getHint().includes("[g] propose global"));
+	});
 });

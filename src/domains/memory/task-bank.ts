@@ -37,8 +37,9 @@ export interface SaveTaskMemoryOptions {
 }
 
 /**
- * Per-session execution memory. This deliberately has no durable store or
- * approval flow: it is authoritative working state for one active task.
+ * Per-session execution memory. The bank stays transient and authoritative
+ * for one active task. Selected non-private entries can enter the separate
+ * durable store only through the reviewed promotion service.
  */
 export class TaskMemoryBank {
 	readonly #knowledgeCap: number;

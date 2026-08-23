@@ -2,9 +2,13 @@ import { isAbsolute, resolve } from "node:path";
 import {
 	MEMORY_SCOPES,
 	MEMORY_VERSION,
+	type MemoryAgentIdentity,
+	type MemoryPromotionRedaction,
 	type MemoryRecord,
+	type MemoryRecordProvenance,
 	type MemoryRecordValidationResult,
 	type MemoryRepositoryIdentity,
+	type MemoryRuntimeIdentity,
 	type MemoryScope,
 	type MemoryStoreValidationResult,
 	type MemoryValidationIssue,
@@ -65,6 +69,9 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 			"approved",
 			"rejectedAt",
 			"repository",
+			"runtime",
+			"agent",
+			"provenance",
 		],
 		issues,
 	);
@@ -93,6 +100,9 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	const approved = readBoolean(value, `${path}.approved`, issues);
 	const rejectedAt = readOptionalIsoString(value, `${path}.rejectedAt`, issues);
 	const repository = readOptionalMemoryRepositoryIdentity(value, `${path}.repository`, issues);
+	const runtime = readOptionalNamedIdentity(value, `${path}.runtime`, "runtime", issues);
+	const agent = readOptionalNamedIdentity(value, `${path}.agent`, "agent", issues);
+	const provenance = readOptionalMemoryProvenance(value, `${path}.provenance`, issues);
 	if (approved === true && rejectedAt !== undefined) {
 		issues.push({ path: `${path}.rejectedAt`, message: "approved records must not be rejected" });
 	}
@@ -101,6 +111,18 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	}
 	if (repository === undefined && scope === "repo") {
 		issues.push({ path: `${path}.repository`, message: "repo scope requires repository applicability" });
+	}
+	if (runtime !== undefined && scope !== null && scope !== "runtime") {
+		issues.push({ path: `${path}.runtime`, message: "runtime applicability requires runtime scope" });
+	}
+	if (runtime === undefined && scope === "runtime") {
+		issues.push({ path: `${path}.runtime`, message: "runtime scope requires runtime applicability" });
+	}
+	if (agent !== undefined && scope !== null && scope !== "agent") {
+		issues.push({ path: `${path}.agent`, message: "agent applicability requires agent scope" });
+	}
+	if (agent === undefined && scope === "agent") {
+		issues.push({ path: `${path}.agent`, message: "agent scope requires agent applicability" });
 	}
 	if (
 		id === null ||
@@ -132,6 +154,9 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	if (regressions !== undefined) record.regressions = regressions;
 	if (rejectedAt !== undefined) record.rejectedAt = rejectedAt;
 	if (repository !== undefined) record.repository = repository;
+	if (runtime !== undefined) record.runtime = runtime;
+	if (agent !== undefined) record.agent = agent;
+	if (provenance !== undefined) record.provenance = provenance;
 	return record;
 }
 
@@ -160,8 +185,161 @@ function readOptionalMemoryRepositoryIdentity(
 	return { kind, key };
 }
 
+function readOptionalNamedIdentity<T extends "runtime" | "agent">(
+	record: Record<string, unknown>,
+	path: string,
+	kind: T,
+	issues: MemoryValidationIssue[],
+): (T extends "runtime" ? MemoryRuntimeIdentity : MemoryAgentIdentity) | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	rejectUnexpectedFields(value, path, ["kind", "key"], issues);
+	const actualKind = readString(value, `${path}.kind`, issues);
+	if (actualKind !== null && actualKind !== kind) {
+		issues.push({ path: `${path}.kind`, message: `expected ${kind}` });
+	}
+	const key = readString(value, `${path}.key`, issues);
+	if (key !== null && !isValidNamedIdentityKey(key)) {
+		issues.push({ path: `${path}.key`, message: `expected valid ${kind} identity` });
+	}
+	if (actualKind !== kind || key === null || !isValidNamedIdentityKey(key)) return undefined;
+	return { kind, key } as T extends "runtime" ? MemoryRuntimeIdentity : MemoryAgentIdentity;
+}
+
+function readOptionalMemoryProvenance(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryRecordProvenance | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	rejectUnexpectedFields(
+		value,
+		path,
+		[
+			"sourceKind",
+			"evidenceId",
+			"sourceSessionId",
+			"sourceEntryId",
+			"sourceEntryKind",
+			"sourceEntryCreatedAt",
+			"sourceEntryLastTouchedAt",
+			"redaction",
+		],
+		issues,
+	);
+	const sourceKind = readString(value, `${path}.sourceKind`, issues);
+	if (sourceKind !== null && !["evidence", "task-bank-entry", "handoff-snapshot"].includes(sourceKind)) {
+		issues.push({ path: `${path}.sourceKind`, message: "expected evidence, task-bank-entry, or handoff-snapshot" });
+	}
+	const evidenceId = readOptionalSourceString(value, `${path}.evidenceId`, issues);
+	const sourceSessionId = readOptionalSourceString(value, `${path}.sourceSessionId`, issues);
+	const sourceEntryId = readOptionalSourceString(value, `${path}.sourceEntryId`, issues);
+	const sourceEntryKind = readOptionalSourceString(value, `${path}.sourceEntryKind`, issues);
+	if (sourceEntryKind !== undefined && sourceEntryKind !== "knowledge" && sourceEntryKind !== "procedural") {
+		issues.push({ path: `${path}.sourceEntryKind`, message: "expected knowledge or procedural" });
+	}
+	const sourceEntryCreatedAt = readOptionalIsoString(value, `${path}.sourceEntryCreatedAt`, issues);
+	const sourceEntryLastTouchedAt = readOptionalIsoString(value, `${path}.sourceEntryLastTouchedAt`, issues);
+	const redaction = readOptionalPromotionRedaction(value, `${path}.redaction`, issues);
+	if (sourceKind === "evidence") {
+		if (evidenceId === undefined)
+			issues.push({ path: `${path}.evidenceId`, message: "evidence source requires evidence id" });
+		if (sourceEntryId !== undefined || sourceEntryKind !== undefined) {
+			issues.push({ path, message: "evidence source must not carry task-memory entry fields" });
+		}
+	}
+	if (sourceKind === "task-bank-entry" || sourceKind === "handoff-snapshot") {
+		if (sourceSessionId === undefined) {
+			issues.push({ path: `${path}.sourceSessionId`, message: "promotion source requires session id" });
+		}
+		if (sourceEntryId === undefined) {
+			issues.push({ path: `${path}.sourceEntryId`, message: "promotion source requires entry id" });
+		}
+		if (sourceEntryKind !== "knowledge" && sourceEntryKind !== "procedural") {
+			issues.push({ path: `${path}.sourceEntryKind`, message: "promotion source requires entry kind" });
+		}
+		if (redaction === undefined) {
+			issues.push({ path: `${path}.redaction`, message: "promotion source requires redaction provenance" });
+		}
+	}
+	if (sourceKind === null || !["evidence", "task-bank-entry", "handoff-snapshot"].includes(sourceKind)) {
+		return undefined;
+	}
+	const provenance: MemoryRecordProvenance = { sourceKind: sourceKind as MemoryRecordProvenance["sourceKind"] };
+	if (evidenceId !== undefined) provenance.evidenceId = evidenceId;
+	if (sourceSessionId !== undefined) provenance.sourceSessionId = sourceSessionId;
+	if (sourceEntryId !== undefined) provenance.sourceEntryId = sourceEntryId;
+	if (sourceEntryKind === "knowledge" || sourceEntryKind === "procedural") {
+		provenance.sourceEntryKind = sourceEntryKind;
+	}
+	if (sourceEntryCreatedAt !== undefined) provenance.sourceEntryCreatedAt = sourceEntryCreatedAt;
+	if (sourceEntryLastTouchedAt !== undefined) provenance.sourceEntryLastTouchedAt = sourceEntryLastTouchedAt;
+	if (redaction !== undefined) provenance.redaction = redaction;
+	return provenance;
+}
+
+function readOptionalPromotionRedaction(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryPromotionRedaction | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	rejectUnexpectedFields(value, path, ["appliedBeforePersistence", "replacementCount", "sourceFields"], issues);
+	const appliedBeforePersistence = readBoolean(value, `${path}.appliedBeforePersistence`, issues);
+	if (appliedBeforePersistence !== null && appliedBeforePersistence !== true) {
+		issues.push({ path: `${path}.appliedBeforePersistence`, message: "expected true" });
+	}
+	const replacementCount = readNumber(value, `${path}.replacementCount`, issues);
+	if (replacementCount !== null && (!Number.isInteger(replacementCount) || replacementCount < 0)) {
+		issues.push({ path: `${path}.replacementCount`, message: "expected non-negative integer" });
+	}
+	const sourceFields = readStringArray(value, `${path}.sourceFields`, issues);
+	if (appliedBeforePersistence !== true || replacementCount === null || sourceFields === null) return undefined;
+	return { appliedBeforePersistence, replacementCount, sourceFields };
+}
+
+function readOptionalSourceString(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): string | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (typeof value !== "string" || !isValidSourceValue(value)) {
+		issues.push({ path, message: "expected valid non-empty source value" });
+		return undefined;
+	}
+	return value;
+}
+
 function isNormalizedAbsoluteRepositoryPath(value: string): boolean {
 	return !/[\0\r\n]/u.test(value) && isAbsolute(value) && resolve(value) === value;
+}
+
+function isValidNamedIdentityKey(value: string): boolean {
+	return value.length > 0 && value.length <= 256 && value.trim() === value && !/[\0\r\n\t ]/u.test(value);
+}
+
+function isValidSourceValue(value: string): boolean {
+	return value.length > 0 && value.length <= 1_024 && value.trim() === value && !/[\0\r\n]/u.test(value);
 }
 
 function rejectUnexpectedFields(

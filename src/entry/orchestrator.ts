@@ -1555,8 +1555,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemorySection: () => {
 			try {
 				const records = loadMemoryRecordsSync(clioDataDir());
+				const settings = getCurrentSettings();
+				const targetId = session?.current()?.target ?? settings.orchestrator?.target;
+				const runtimeId = targetId ? providers.getTarget(targetId)?.runtime : undefined;
 				return buildMemoryPromptSection(records, {
+					scopes: ["global", "repo", "runtime"],
 					activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
+					activeRuntime: runtimeId === undefined ? null : { kind: "runtime", key: runtimeId },
 				}).section;
 			} catch {
 				return "";
@@ -1564,7 +1569,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getTaskMemoryHandoffSource: () => {
 			ensureTaskMemorySession();
-			return renderTaskMemoryHandoffSource(taskMemoryBank.snapshot());
+			const meta = session?.current();
+			if (!meta) throw new Error("task memory handoff requires an active session");
+			const settings = getCurrentSettings();
+			const targetId = meta.target ?? settings.orchestrator?.target;
+			const runtimeId = targetId ? providers.getTarget(targetId)?.runtime : undefined;
+			return renderTaskMemoryHandoffSource(taskMemoryBank.snapshot(), {
+				sessionId: meta.id,
+				evidenceRefs: [`session-${meta.id}`],
+				runtimeIds: runtimeId === undefined ? [] : [runtimeId],
+				agentIds: [],
+			});
 		},
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;

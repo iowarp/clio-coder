@@ -357,3 +357,10 @@ Two shapes, both ending at something the user can act on.
 ### 8.2 Memory Step Rows
 
 `/memory` activity rows read `<trigger> <decision> <reason>`, followed by `<N>w` when the step wrote to the bank and `<N> cited` when it cited entries, then the tier and latency. `describeTaskMemoryActivity` is the one place that builds this string.
+
+Knowledge and procedural task-bank rows expose `p` to propose the selected
+entry for the active canonical repository and `g` to propose it globally.
+Global scope requires a second `g` press on the same entry after the warning
+line appears. Status rows are labeled private and neither action can promote
+them. Both actions create unapproved durable proposals, show the resulting
+memory ID, and leave approval to the separate reviewed memory lifecycle.

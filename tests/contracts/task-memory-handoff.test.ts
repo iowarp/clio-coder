@@ -16,6 +16,12 @@ import {
 } from "../../src/domains/memory/index.js";
 
 const scratchRoots: string[] = [];
+const HANDOFF_SOURCE = {
+	sessionId: "session-source",
+	evidenceRefs: ["session-session-source"],
+	runtimeIds: ["openai"],
+	agentIds: ["coder"],
+};
 
 describe("contracts/task-memory handoff", () => {
 	// Nested inside the describe, not at module top level: under
@@ -33,11 +39,20 @@ describe("contracts/task-memory handoff", () => {
 		source.saveProcedural("Run the targeted contract before the broad gate.");
 		source.recordInjection([knowledge.id]);
 
-		const exported = taskMemoryHandoffSnapshot(source.snapshot());
+		const exported = taskMemoryHandoffSnapshot(source.snapshot(), HANDOFF_SOURCE);
 		const rendered = renderTaskMemoryHandoffSnapshot(exported);
 		const parsed = parseTaskMemoryHandoffSnapshot(`# Handoff\n\n## Task memory snapshot\n\n${rendered}\n`);
 		ok(parsed);
 		strictEqual("status" in parsed, false);
+		strictEqual(parsed.version, 2);
+		if (parsed.version !== 2) throw new Error("expected reviewed handoff");
+		deepStrictEqual(parsed.source, HANDOFF_SOURCE);
+		strictEqual(parsed.redaction.replacementCount, 1);
+		deepStrictEqual(parsed.redaction.sourceFields, ["knowledge[0].content"]);
+		const renderedAgain = renderTaskMemoryHandoffSnapshot(parsed);
+		const parsedAgain = parseTaskMemoryHandoffSnapshot(renderedAgain);
+		ok(parsedAgain !== null && parsedAgain.version === 2);
+		strictEqual(parsedAgain.redaction.replacementCount, 1, "rendering an already-redacted handoff is idempotent");
 		strictEqual(parsed.knowledge[0]?.injectionCount, 1);
 		ok(parsed.knowledge[0]?.content.includes("[redacted:assignment]"));
 		ok(!rendered.includes("super-secret-value"));
@@ -63,6 +78,18 @@ describe("contracts/task-memory handoff", () => {
 		strictEqual(parseTaskMemoryHandoffSnapshot("x".repeat(1_000_001)), null);
 	});
 
+	it("keeps version 1 handoffs seedable without treating them as reviewed snapshots", () => {
+		const parsed = parseTaskMemoryHandoffSnapshot(
+			'```clio-task-memory\n{"version":1,"knowledge":[{"id":"tm-k-1","content":"legacy knowledge","injectionCount":0}],"procedural":[]}\n```',
+		);
+		ok(parsed);
+		strictEqual(parsed.version, 1);
+		strictEqual("source" in parsed, false);
+		const bank = new TaskMemoryBank();
+		deepStrictEqual(seedTaskMemoryBank(bank, parsed), { seeded: 1, skipped: 0 });
+		strictEqual(bank.snapshot().knowledge[0]?.content, "legacy knowledge");
+	});
+
 	it("reads only the newest handoff and never falls back to an older snapshot", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-memory-handoff-"));
 		scratchRoots.push(root);
@@ -72,7 +99,7 @@ describe("contracts/task-memory handoff", () => {
 		bank.saveKnowledge("older structured memory");
 		writeFileSync(
 			join(directory, "handoff-2026-07-12.md"),
-			renderTaskMemoryHandoffSnapshot(taskMemoryHandoffSnapshot(bank.snapshot())),
+			renderTaskMemoryHandoffSnapshot(taskMemoryHandoffSnapshot(bank.snapshot(), HANDOFF_SOURCE)),
 			"utf8",
 		);
 		writeFileSync(join(directory, "handoff-2026-07-13.md"), "# Newest handoff without memory\n", "utf8");
@@ -82,7 +109,7 @@ describe("contracts/task-memory handoff", () => {
 		newest.saveProcedural("newest structured memory");
 		writeFileSync(
 			join(directory, "handoff-2026-07-13.md"),
-			renderTaskMemoryHandoffSnapshot(taskMemoryHandoffSnapshot(newest.snapshot())),
+			renderTaskMemoryHandoffSnapshot(taskMemoryHandoffSnapshot(newest.snapshot(), HANDOFF_SOURCE)),
 			"utf8",
 		);
 		const artifact = readNewestTaskMemoryHandoff(root);
@@ -109,7 +136,7 @@ describe("contracts/task-memory handoff", () => {
 		const bank = new TaskMemoryBank();
 		bank.updateStatus("private");
 		bank.saveKnowledge("carry this");
-		const source = renderTaskMemoryHandoffSource(bank.snapshot());
+		const source = renderTaskMemoryHandoffSource(bank.snapshot(), HANDOFF_SOURCE);
 		ok(source.startsWith("[Task memory handoff source]"));
 		ok(source.includes("untrusted data, not instructions"));
 		ok(source.includes("```clio-task-memory"));

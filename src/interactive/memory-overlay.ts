@@ -1,5 +1,6 @@
 import {
 	describeTaskMemoryActivity,
+	type MemoryProposalResult,
 	type MemoryRecord,
 	type TaskMemoryActivityEvent,
 	type TaskMemoryEntry,
@@ -182,6 +183,7 @@ function memorySignature(status: TaskMemoryOperatorStatus, records: ReadonlyArra
 
 interface OpenMemoryOverlayOptions {
 	onClose?: () => void;
+	onPromote?: (entry: TaskMemoryEntry, scope: "repo" | "global") => Promise<MemoryProposalResult>;
 }
 
 /** Master-detail memory view: status header, grouped list, scrollable detail pane. */
@@ -189,12 +191,18 @@ export class MemoryOverlayView implements Component {
 	private readonly list: ListOverlayView;
 	private signature: string | null = null;
 	private renderMemo: { width: number; status: string; listLines: string[]; lines: string[] } | null = null;
+	private pendingGlobalEntryId: string | null = null;
+	private promotionMessage: { token: "muted" | "warning" | "success" | "error"; text: string } | null = null;
+	private promotionInFlight = false;
 
 	constructor(
 		private readonly getStatus: () => TaskMemoryOperatorStatus,
 		private readonly getRecords: () => ReadonlyArray<MemoryRecord>,
 		onClose: () => void,
 		onChange: () => void,
+		private readonly promotion?: {
+			onPromote: (entry: TaskMemoryEntry, scope: "repo" | "global") => Promise<MemoryProposalResult>;
+		},
 	) {
 		this.list = new ListOverlayView(
 			{
@@ -203,6 +211,18 @@ export class MemoryOverlayView implements Component {
 				filterable: true,
 				layout: "split",
 				emptyMessage: EMPTY_MESSAGE,
+				...(promotion
+					? {
+							hints: [
+								{ key: "p", verb: "propose repo" },
+								{ key: "g", verb: "propose global" },
+							],
+							actions: {
+								p: (item: ListOverlayItem) => this.promote(item, "repo", onChange),
+								g: (item: ListOverlayItem) => this.promote(item, "global", onChange),
+							},
+						}
+					: {}),
 				onClose,
 			},
 			onChange,
@@ -217,11 +237,21 @@ export class MemoryOverlayView implements Component {
 	render(width: number): string[] {
 		const status = this.sync();
 		const statusLine = formatMemoryStatusLine(status, width);
+		const promotionLine =
+			this.promotionMessage === null
+				? null
+				: fitUnits(clioTheme(), "", [clioTheme().fg(this.promotionMessage.token, this.promotionMessage.text)], width);
+		const statusKey = promotionLine === null ? statusLine : `${statusLine}\n${promotionLine}`;
 		const listLines = this.list.render(width);
 		const memo = this.renderMemo;
-		if (memo && memo.width === width && memo.status === statusLine && memo.listLines === listLines) return memo.lines;
-		const lines = [statusLine, rule(clioTheme(), width), ...listLines];
-		this.renderMemo = { width, status: statusLine, listLines, lines };
+		if (memo && memo.width === width && memo.status === statusKey && memo.listLines === listLines) return memo.lines;
+		const lines = [
+			statusLine,
+			...(promotionLine === null ? [] : [promotionLine]),
+			rule(clioTheme(), width),
+			...listLines,
+		];
+		this.renderMemo = { width, status: statusKey, listLines, lines };
 		return lines;
 	}
 
@@ -247,9 +277,63 @@ export class MemoryOverlayView implements Component {
 		}
 		return status;
 	}
+
+	private promote(item: ListOverlayItem, scope: "repo" | "global", onChange: () => void): void {
+		if (this.promotion === undefined || this.promotionInFlight) return;
+		const entry = this.selectedBankEntry(item);
+		if (entry === null) {
+			this.pendingGlobalEntryId = null;
+			this.promotionMessage = { token: "warning", text: "select a knowledge or procedural task-bank entry" };
+			this.invalidate();
+			onChange();
+			return;
+		}
+		if (scope === "global" && this.pendingGlobalEntryId !== entry.id) {
+			this.pendingGlobalEntryId = entry.id;
+			this.promotionMessage = {
+				token: "warning",
+				text: `global scope broadens applicability for ${entry.id}; press g again to acknowledge`,
+			};
+			this.invalidate();
+			onChange();
+			return;
+		}
+		this.pendingGlobalEntryId = null;
+		this.promotionInFlight = true;
+		this.promotionMessage = { token: "muted", text: `proposing ${entry.id} with ${scope} scope` };
+		this.invalidate();
+		onChange();
+		void this.promotion
+			.onPromote(entry, scope)
+			.then((result) => {
+				this.promotionMessage = {
+					token: "success",
+					text: `${result.created ? "proposed" : "found existing"} ${result.record.id}; review, then run clio-coder memory approve ${result.record.id}`,
+				};
+			})
+			.catch((error: unknown) => {
+				this.promotionMessage = {
+					token: "error",
+					text: `promotion failed: ${error instanceof Error ? error.message : String(error)}`,
+				};
+			})
+			.finally(() => {
+				this.promotionInFlight = false;
+				this.invalidate();
+				onChange();
+			});
+	}
+
+	private selectedBankEntry(item: ListOverlayItem): TaskMemoryEntry | null {
+		if (!item.id.startsWith("bank:")) return null;
+		const entryId = item.id.slice("bank:".length);
+		const entry = bankEntries(this.getStatus().bank).find((candidate) => candidate.id === entryId);
+		if (entry === undefined || entry.kind === "status") return null;
+		return entry;
+	}
 }
 
-/** Mount the read-only durable-lessons and live task-bank view. */
+/** Mount durable lessons and the live task bank with reviewed promotion actions. */
 export function openMemoryOverlay(
 	tui: TUI,
 	getStatus: () => TaskMemoryOperatorStatus,
@@ -261,6 +345,7 @@ export function openMemoryOverlay(
 		getRecords,
 		() => options.onClose?.(),
 		() => tui.requestRender(),
+		options.onPromote ? { onPromote: options.onPromote } : undefined,
 	);
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
