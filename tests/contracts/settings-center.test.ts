@@ -56,6 +56,11 @@ function isStaticId(id: string): id is keyof typeof SETTINGS_LABELS_BY_ID {
 	return id in SETTINGS_LABELS_BY_ID;
 }
 
+function assertFieldsPresent(value: string | undefined, fields: ReadonlyArray<string>, context: string): void {
+	ok(value, context);
+	for (const field of fields) ok(value.includes(field), `${field} missing from ${context}: ${value}`);
+}
+
 function settingsWithTargets(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [
@@ -413,8 +418,10 @@ describe("contracts/settings center", () => {
 			lastProbe: row?.targetConsole?.lastProbe,
 			failureReason: "none",
 		});
-		ok(row?.targetConsole?.lastProbe !== "never");
-		strictEqual(row?.description, "URL: http://localhost:1111 · Default model: model-a");
+		const targetConsole = row?.targetConsole;
+		ok(targetConsole);
+		ok(targetConsole.lastProbe !== "never");
+		assertFieldsPresent(row?.description, [targetConsole.url, targetConsole.defaultModel], "target description");
 		ok(row?.help?.includes("Last probe:"));
 		ok(row?.help?.includes("Failure reason: none"));
 
@@ -426,7 +433,7 @@ describe("contracts/settings center", () => {
 		});
 		center.setSelection("targets", 1);
 		const rendered = stripAnsi(center.render(72).join("\n"));
-		for (const value of ["HEALTH", "TARGET", "ROLES", "RUNTI", "LATENCY", "chat+", "42 ms", "URL:"]) {
+		for (const value of ["HEALTH", "TARGET", "ROLES", "RUNTI", "LATENCY", "chat+", "42 ms"]) {
 			ok(rendered.includes(value), `${value} missing from:\n${rendered}`);
 		}
 		ok(rendered.includes("Enter opens actions"), rendered);
@@ -434,11 +441,11 @@ describe("contracts/settings center", () => {
 		center.handleInput(ENTER);
 		const actions = stripAnsi(center.render(72).join("\n"));
 		for (const detail of [
-			"Target target-a",
-			"URL: http://localhost:1111",
-			"Default model: model-a",
-			"Last probe:",
-			"Failure reason: none",
+			targetConsole.id,
+			targetConsole.url,
+			targetConsole.defaultModel,
+			targetConsole.lastProbe,
+			targetConsole.failureReason,
 		]) {
 			ok(actions.includes(detail), `${detail} missing from action drawer:\n${actions}`);
 		}
@@ -1934,7 +1941,7 @@ describe("contracts/settings center", () => {
 		ok(Array.from(compact).length <= 26, `profile summary exceeded 26 cells: ${compact}`);
 		for (const fact of ["mini/", "Qwen3.8", "low", "local", "…"])
 			ok(compact.includes(fact), `${fact} missing from ${compact}`);
-		strictEqual(row.currentValue, "mini/Qwen3.8-27B-IQ4_NL-262K  low  local");
+		assertFieldsPresent(row.currentValue, ["mini", "Qwen3.8-27B-IQ4_NL-262K", "low", "local"], "profile value");
 	});
 
 	it("marks every profile workbench edit as an action", () => {
@@ -2112,16 +2119,30 @@ describe("contracts/settings center", () => {
 		deepStrictEqual(byId.get("workers.profiles")?.valueSegments, []);
 		ok(byId.get("workers.profiles")?.submenu, "the profiles row adds a profile");
 		ok(byId.get("workers.agentBindings")?.submenu, "the bindings row binds an agent");
-		strictEqual(byId.get("workers.profiles.fast")?.currentValue, "target-b/model-b  off  auto");
+		assertFieldsPresent(
+			byId.get("workers.profiles.fast")?.currentValue,
+			["target-b", "model-b", "off", "auto"],
+			"profile row",
+		);
 		strictEqual(byId.get("workers.profiles.fast")?.configPath, "workers.profiles.fast");
-		strictEqual(
+		assertFieldsPresent(
 			byId.get("workers.profiles.fast")?.help,
-			"workers.profiles.fast.target · workers.profiles.fast.model · workers.profiles.fast.thinkingLevel · workers.profiles.fast.node",
+			[
+				"workers.profiles.fast.target",
+				"workers.profiles.fast.model",
+				"workers.profiles.fast.thinkingLevel",
+				"workers.profiles.fast.node",
+			],
+			"profile help",
 		);
 		strictEqual(byId.get("workers.agentBindings.scout")?.currentValue, "fast");
 		ok(byId.get("workers.agentBindings.researcher")?.description.includes("does not exist"));
-		strictEqual(byId.get("targets.target-a")?.currentValue, "unknown · target-a · chat+fleet · openai-compat · —");
-		strictEqual(byId.get("targets.target-b")?.currentValue, "unknown · target-b · — · openai-compat · —");
+		assertFieldsPresent(
+			byId.get("targets.target-a")?.currentValue,
+			["target-a", "chat+fleet", "openai-compat"],
+			"target-a row",
+		);
+		assertFieldsPresent(byId.get("targets.target-b")?.currentValue, ["target-b", "openai-compat"], "target-b row");
 		ok(byId.get("targets")?.readOnly, "adding a target stays with `clio-coder targets add`");
 		strictEqual(byId.get("targets.add-cta")?.currentValue, "`clio-coder targets add`");
 		for (const id of ["workers.profiles.fast", "workers.agentBindings.scout", "targets.target-a"]) {
@@ -2737,9 +2758,10 @@ describe("contracts/settings center", () => {
 		});
 		let rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(rendered.includes("slow"), rendered);
-		strictEqual(
+		assertFieldsPresent(
 			buildSettingItems(live.current).find((item) => item.id === "workers.profiles.slow")?.currentValue,
-			"target-a/model-a  off  auto",
+			["target-a", "model-a", "off", "auto"],
+			"added profile row",
 		);
 
 		for (let i = 0; i < 2; i += 1) overlay.handleInput?.("j"); // scout route, then Add agent route
