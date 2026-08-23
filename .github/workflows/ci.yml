@@ -17,59 +17,29 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [22, 24]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      # One lane, pinned to the `engines` floor. Forward-compatibility on
+      # newer Node runs weekly in flake-hunt.yml instead of doubling every
+      # push.
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22
           cache: npm
-      - name: Install fd-find and ripgrep
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fd-find ripgrep
-      # The SciCode adapter contract runs benchmark grading through uv.
+      # fd and ripgrep are deliberately not installed. src/tools/executables.ts
+      # resolves both at runtime and falls back when they are absent, and the
+      # whole suite passes with both off PATH, so the apt-get step bought
+      # nothing. uv is different: benchmarks/community/scicode/scicode_clio.py
+      # runs under `uv run`, and the SciCode adapter contract fails without it.
       - name: Install uv
         run: pipx install uv
       - run: npm ci --prefer-offline --no-audit --no-fund
-      # One job, one set of checks, run in full on both node lanes. Typecheck,
-      # lint, the skills pin check, the build, the sharded test suite, the
-      # trace-viewer suite, and the packaging audit all run here; `npm run
-      # build` inside `ci` leaves dist/ in place for the steps below, so
-      # smoke's dist-spawning tests already ran once by the time this step
-      # returns.
+      # The whole gate: typecheck, Biome, hygiene, skill pins, build, the
+      # sharded suite, the trace-viewer suite, and the packaging audit.
+      # Nothing else runs on push or PR. `npm run build` inside `ci` leaves
+      # dist/ in place, so smoke's dist-spawning tests are covered here.
       - name: Release gate
         run: npm run ci:release
-      # A second, coverage-instrumented full run for the PR's coverage
-      # summary. Distinct from the gate above: that one uses the sharded
-      # runner for speed, this one pays node's per-file coverage
-      # instrumentation to get an accurate range map. pipefail keeps tee from
-      # masking a failing suite.
-      #
-      # This is the one step that stays pinned to a single lane, and the
-      # distinction is deliberate: a check runs on every node version because
-      # runtime behavior can differ between them, but coverage is a report
-      # about the suite rather than about a runtime. Running it twice would
-      # pay the most expensive step in the workflow a second time to post the
-      # same numbers to the summary twice.
-      - name: Tests with coverage summary
-        if: matrix.node-version == 22
-        run: |
-          set -o pipefail
-          npm run test:coverage | tee coverage.txt
-          {
-            echo "### Coverage summary"
-            echo '```'
-            sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Shuffled reruns of the smoke lane catch order- and timing-dependent
-      # flakes that one deterministic pass cannot.
-      - name: Repeat smoke lane
-        run: npm run test:repeat

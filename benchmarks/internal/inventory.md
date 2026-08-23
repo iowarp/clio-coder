@@ -24,8 +24,7 @@ with the answer.
 | `tests/contracts/eval-soak-suite.test.ts` | eval runner, in-process, with a fake Clio | stub that seals receipts on purpose | The soak gate can fail: a receipt that does not authenticate, or no receipt at all, fails the gate; the fixture's known-answer test is red before repair. Now loads all four soak YAMLs. | keep, extended |
 | `tests/contracts/scicode-adapter.test.ts`, `benchmark-token-accounting.test.ts` | the Python adapters as subprocesses | fake `clio-coder run --json` | The adapters generate tasks, grade a JSON-reference fixture, and fold usage from `message_end` exactly once. | keep; these are what keep `clio_usage.py` honest |
 | `scripts/shard-tests.mjs` (`npm test`) | test runner | n/a | Deterministic lane assignment by measured cost. | keep |
-| `scripts/test-coverage.mjs` (`npm run test:coverage`) | test runner | n/a | Coverage run on a disk-backed tmp. CI, one Node lane. | keep |
-| `scripts/repeat-tests.mjs` (`npm run test:repeat`) | test runner | n/a | The smoke lane in a seeded shuffle, twice; catches order and timing flakes. CI. Load-bearing: `.github/workflows/ci.yml` runs it. The boundary lane it once carried is gone (now hygiene under lint), which is why the default pattern is smoke only. | **moved** from `tests/harness/` to `scripts/`: it is a runner, not a harness |
+| `scripts/repeat-tests.mjs` (`npm run test:repeat`) | test runner | n/a | The smoke lane in a seeded shuffle, twice; catches order and timing flakes. CI. Load-bearing: `.github/workflows/flake-hunt.yml` runs it weekly. The boundary lane it once carried is gone (now hygiene under lint), which is why the default pattern is smoke only. | **moved** from `tests/harness/` to `scripts/`: it is a runner, not a harness |
 | `scripts/check-hygiene.ts` (`npm run lint`) | static | n/a | Import boundaries, script pins, doc drift, packaging. | keep |
 
 ### Harness modules (`tests/harness/`)
@@ -88,7 +87,7 @@ Each survives because it does something Clio cannot: fetch an external dataset, 
 
 ## Answers to the open questions
 
-- **Is `repeat-tests.mjs` load-bearing?** Yes. `.github/workflows/ci.yml` runs `npm run test:repeat` as the shuffled smoke rerun, and the hygiene check pins the script. The boundary lane it used to carry is gone; smoke is what remains. Moved to `scripts/`.
+- **Is `repeat-tests.mjs` load-bearing?** Yes. `.github/workflows/flake-hunt.yml` runs `npm run test:repeat` as the weekly shuffled smoke rerun, and the hygiene check pins the script. The boundary lane it used to carry is gone; smoke is what remains. Moved to `scripts/`.
 - **One command with modes, or four purposes?** Three purposes and one duplicate. Smoke (does the target answer), recon and fleet-dispatch (does the model behave as documented; two scenarios of one kind), and the lifecycle matrix (a copy of CI). They shared one preamble, which is now `live-target.ts`; they keep separate entry points because their assertions share nothing.
 - **Which stub fixtures are still referenced?** All three: `openai-compat-fixture.ts` by eleven suites, `fake-lmstudio-server.ts` by the three LM Studio contracts, `fake-ssh.ts` by `worker-transport`.
 - **Does `benchmarks/soak` have a runner?** Yes: `clio-coder eval run --suite <file> --target <id> --model <m>`. `clio-soak.yaml` was exercised by a contract test; the other three were loaded by nothing, and now are.

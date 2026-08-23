@@ -352,61 +352,80 @@ function checkCiScripts(): void {
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
 	expectScript("live:smoke", "node --import tsx benchmarks/internal/live-smoke.ts");
 	expectScript("test:repeat", "node scripts/repeat-tests.mjs");
-	if (!scripts["test:coverage"]?.includes("--experimental-test-coverage")) {
-		fail("ci-scripts", "scripts.test:coverage must set --experimental-test-coverage");
-	}
-	if (!scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'")) {
-		fail("ci-scripts", "scripts.test:coverage must scope coverage to src/**/*.ts");
-	}
 	expectScript("prepublishOnly", "npm run ci:release");
 
-	// Hosted CI is one job. The node-version matrix applies to the same work
-	// on both lanes: no step may single out a lane with `if:`, so neither lane
-	// can pass while silently skipping half the gate.
+	// The push and PR path is one job, one lane, one step of real work. The
+	// lane is pinned to the `engines` floor, because that is the runtime the
+	// project promises; newer Node is forward-compatibility news, not a merge
+	// gate, and lives in flake-hunt.yml. Anything added here is paid by every
+	// push, so the shape is pinned rather than left to drift back.
 	const ciCommands = runCommands(".github/workflows/ci.yml", "ci");
 	const ciSteps = workflowJob(".github/workflows/ci.yml", "ci").steps;
 	const setupNode = ciSteps.find((step) => step.uses === "actions/setup-node@v6");
-	const nodeVersions = matrixValues(".github/workflows/ci.yml", "ci", "node-version");
-	if (JSON.stringify(nodeVersions) !== JSON.stringify([22, 24])) {
-		fail("ci-scripts", `ci.yml matrix node-version must be [22, 24], got ${JSON.stringify(nodeVersions)}`);
+	const enginesFloor = (
+		JSON.parse(readRoot("package.json")) as {
+			engines?: { node?: string };
+		}
+	).engines?.node;
+	const floorMajor = Number(enginesFloor?.replace(/[^0-9.]/g, "").split(".")[0]);
+	if (matrixValues(".github/workflows/ci.yml", "ci", "node-version").length > 0) {
+		fail("ci-scripts", "ci.yml must not run a node-version matrix on push/PR; put extra lanes in flake-hunt.yml");
 	}
-	if (setupNode?.with?.["node-version"] !== "$" + "{{ matrix.node-version }}") {
-		fail("ci-scripts", "ci.yml setup-node must read node-version from the matrix");
+	if (setupNode?.with?.["node-version"] !== floorMajor) {
+		fail(
+			"ci-scripts",
+			`ci.yml setup-node must pin node ${floorMajor} to match the engines floor ${enginesFloor}, got ${setupNode?.with?.["node-version"]}`,
+		);
 	}
-	if (ciCommands.includes("npm run test:live")) {
-		fail("ci-scripts", "ordinary CI must not run live/model-dependent smoke tests");
-	}
-	// A check runs on every node lane, because runtime behavior can differ
-	// between versions and a check pinned to one lane leaves the other
-	// unverified. A report describes the suite rather than a runtime, so
-	// running it twice pays for the same numbers twice. The coverage summary
-	// is the one report here, and it is named rather than pattern-matched so
-	// that adding a second pinned step is a deliberate edit to this list.
-	const REPORT_STEPS = new Set(["Tests with coverage summary"]);
-	const gatedSteps = ciSteps.filter((step) => typeof step.if === "string" && !REPORT_STEPS.has(step.name ?? ""));
+	const gatedSteps = ciSteps.filter((step) => typeof step.if === "string");
 	if (gatedSteps.length > 0) {
 		fail(
 			"ci-scripts",
-			`no ci.yml check may gate on matrix.node-version: ${gatedSteps.map((step) => step.name ?? step.run).join(", ")}`,
+			`no ci.yml step may carry an if: condition on a single-lane job: ${gatedSteps.map((step) => step.name ?? step.run).join(", ")}`,
 		);
 	}
 	const gateStep = ciSteps.find((step) => step.run === "npm run ci:release");
 	if (!gateStep) {
-		fail("ci-scripts", "ci.yml must run the full release gate on every lane");
+		fail("ci-scripts", "ci.yml must run the full release gate");
 	}
-	const coverageStep = ciSteps.find((step) => step.run?.includes("npm run test:coverage"));
-	if (!coverageStep) {
-		fail("ci-scripts", "ci.yml must run the coverage-instrumented suite");
+	// `npm ci`, uv, and the gate are the whole job. A second suite run, a
+	// coverage pass, a shuffled rerun, or an apt install all belong somewhere
+	// that is not the push path. uv earns its place because the SciCode
+	// adapter contract runs its grader under `uv run` and fails without it;
+	// fd and ripgrep do not, because the tools fall back when they are absent.
+	const allowedCiCommands = new Set([
+		"npm ci --prefer-offline --no-audit --no-fund",
+		"pipx install uv",
+		"npm run ci:release",
+	]);
+	const strayCommands = ciCommands.filter((command) => !allowedCiCommands.has(command));
+	if (strayCommands.length > 0) {
+		fail("ci-scripts", `ci.yml runs commands outside npm ci and the gate: ${strayCommands.join(", ")}`);
 	}
-	if (!coverageStep?.run?.includes("set -o pipefail")) {
-		fail("ci-scripts", "the coverage run must set -o pipefail so tee cannot mask a failing suite");
+
+	// The flake hunt carries what push no longer does: the shuffled smoke
+	// reruns and the above-floor node lane. It never runs on push or PR.
+	const flakeTriggers = Object.keys((workflow(".github/workflows/flake-hunt.yml").on ?? {}) as object);
+	for (const trigger of ["push", "pull_request"]) {
+		if (flakeTriggers.includes(trigger)) {
+			fail("ci-scripts", `flake-hunt.yml must not trigger on ${trigger}`);
+		}
 	}
-	const repeatStep = ciSteps.find((step) => step.run === "npm run test:repeat");
-	if (!repeatStep) {
-		fail("ci-scripts", "ci.yml must run the shuffled repeat lane on every lane");
+	if (!flakeTriggers.includes("schedule")) {
+		fail("ci-scripts", "flake-hunt.yml must run on a schedule, otherwise nothing ever hunts flakes");
 	}
-	if (ciCommands.includes("npm run test") || ciCommands.includes("npm run build")) {
-		fail("ci-scripts", "no ci.yml step may run the plain suite or build outside npm run ci:release");
+	const flakeCommands = runCommands(".github/workflows/flake-hunt.yml", "flake-hunt");
+	if (!flakeCommands.includes("npm run test:repeat")) {
+		fail("ci-scripts", "flake-hunt.yml must run the shuffled repeat lane");
+	}
+	const flakeNodeVersions = matrixValues(".github/workflows/flake-hunt.yml", "flake-hunt", "node-version");
+	if (!flakeNodeVersions.includes(floorMajor)) {
+		fail("ci-scripts", `flake-hunt.yml must include the engines floor ${floorMajor} in its node-version matrix`);
+	}
+	for (const command of [...ciCommands, ...flakeCommands]) {
+		if (command.includes("test:live")) {
+			fail("ci-scripts", "ordinary CI must not run live/model-dependent smoke tests");
+		}
 	}
 
 	// Release triggers from version tags and refuses a tag that disagrees with
@@ -419,6 +438,18 @@ function checkCiScripts(): void {
 	const releaseCommands = runCommands(".github/workflows/release.yml", "release");
 	if (!releaseCommands.some((command) => command.includes("does not match tag"))) {
 		fail("ci-scripts", "release.yml must refuse a tag that disagrees with package.json's version");
+	}
+	// The tag runs its own gate rather than querying whether some other
+	// workflow already passed for the SHA. Rerunning four minutes of checks is
+	// cheaper than a release that blocks on an unrelated run finishing.
+	if (!releaseCommands.includes("npm run ci:release")) {
+		fail("ci-scripts", "release.yml must run npm run ci:release itself, not inherit another workflow's verdict");
+	}
+	if (releaseCommands.some((command) => command.includes("gh run list"))) {
+		fail("ci-scripts", "release.yml must not gate on another workflow's run status");
+	}
+	if (!releaseCommands.some((command) => command.includes("release-notes.md"))) {
+		fail("ci-scripts", "release.yml must build the release body from the CHANGELOG.md section");
 	}
 
 	// npm publish is a manual maintainer step: no publish path anywhere in the

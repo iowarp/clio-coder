@@ -38,8 +38,9 @@ Run against the exact final candidate with `NO_COLOR` unset and
    integrity, version coherence between `package.json` and the top
    `CHANGELOG.md` heading, the forbidden-file list, the required runtime
    resources, and the tarball and unpacked size budgets)
-9. Step 8 again under the other supported Node major. Both Node 22 and
-   Node 24 must be green; the repo is developed against 22.22.3 and 24.9.0.
+9. Optional: step 8 again under Node 24. Hosted CI gates on Node 22 alone,
+   the `engines` floor; the weekly `flake-hunt` workflow carries Node 24.
+   Repeat locally only when the cut touches runtime-sensitive code.
 10. `npm run live:smoke -- --target <id>` for one real headless turn through
     the built binary against a configured target, which is the one release
     check a deterministic suite cannot give. The packaged-install lifecycle
@@ -101,17 +102,18 @@ confirming the exact SHA and the commands.
 
 ## Part 5: exact-SHA CI, tag, GitHub Release
 
-20. Wait for the `ci` workflow the `main` push triggers. Both the Node 22 and
-    Node 24 jobs must succeed on the exact release SHA. A red or pending run
-    blocks the tag; a flake is rerun only with concrete evidence, never
-    silenced with an unrelated change.
+20. The `main` push triggers the `ci` workflow. It is a useful signal but no
+    longer a gate on tagging, because `release.yml` runs the same gate on the
+    tagged tree itself. A red run still blocks the cut; investigate it rather
+    than tagging around it, and never silence a flake with an unrelated
+    change.
 21. Reconfirm that tag `v0.3.4` and the GitHub Release do not exist, then
     `git tag -a v0.3.4 -m "Clio Coder 0.3.4"` on the green SHA and
     `git push origin v0.3.4`.
-22. The tag push triggers `.github/workflows/release.yml`, which requires a
-    successful `ci` run for the tagged SHA, verifies the tag matches
-    `package.json`, builds and audits the artifact, extracts the `## 0.3.4`
-    section of `CHANGELOG.md` as the release body, and attaches the tarball.
+22. The tag push triggers `.github/workflows/release.yml`, which verifies the
+    tag matches `package.json`, runs `npm run ci:release` on the tagged tree,
+    extracts the `## 0.3.4` section of `CHANGELOG.md` as the release body, and
+    attaches the tarball.
     Do not create a release by hand. Verify the run's SHA, the notes, the
     attached tarball, and the URL.
 
