@@ -41,7 +41,7 @@ export function isSecretArgKey(key: string): boolean {
 }
 
 /** Whether an argument key names an environment block, whose every string value is a candidate secret. */
-export function isEnvironmentArgKey(key: string): boolean {
+function isEnvironmentArgKey(key: string): boolean {
 	return ENV_KEY_RE.test(key);
 }
 

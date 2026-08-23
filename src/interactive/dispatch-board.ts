@@ -529,7 +529,7 @@ function progressAnswerLines(
 	}
 	const shown = wrapped.slice(Math.max(0, wrapped.length - WORKER_PROGRESS_CARD_ROWS));
 	const hiddenRows = wrapped.length - shown.length;
-	const rail = theme.fg("dim", "│ ");
+	const rail = theme.fg("dim", `${GLYPH.rail} `);
 	const body = shown.map((row) => `${rail}${theme.fg("muted", row)}`);
 	const hiddenLines = progress.droppedLines + hiddenRows;
 	if (hiddenLines > 0 || progress.droppedBytes > 0) {
