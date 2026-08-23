@@ -33,7 +33,7 @@ import {
 } from "../domains/observability/index.js";
 import type { CostProvenance } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
@@ -50,6 +50,13 @@ import {
 	screenTitle,
 	spinnerFrame,
 } from "./theme/index.js";
+import {
+	createWorkerProgressFold,
+	type WorkerAction,
+	type WorkerProgressFold,
+	type WorkerProgressSnapshot,
+} from "./worker-progress.js";
+import type { WorkerReceiptReader } from "./worker-stream.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -104,10 +111,17 @@ export interface DispatchBoardRow {
 	contextWindow?: number;
 	/** Last assistant message's input+cacheRead+output: current context occupancy. */
 	lastContextTokens?: number;
-	/** Tool currently executing in the worker; null between calls. */
+	/** Tool currently executing in the worker; null between calls. Projected from `progress`. */
 	currentTool?: string | null;
-	/** Recently finished tools, newest first, bounded. */
+	/** Recently finished tools, newest first, bounded. Projected from `progress`. */
 	recentTools?: ReadonlyArray<string>;
+	/**
+	 * The canonical worker-progress projection for this run: the bounded answer
+	 * tail, the phase, and the redacted action descriptors. The same projection
+	 * the transcript's worker block reads, so opening a run here shows what the
+	 * worker is doing rather than a richer spinner.
+	 */
+	progress?: WorkerProgressSnapshot;
 	/**
 	 * Id of the receipt sealed for this run (`receipts/<runId>.json`, the id
 	 * `clio-coder trace` takes). Set only once a terminal dispatch event has
@@ -136,7 +150,10 @@ export function isDispatchBoardRowCancellable(row: DispatchBoardRow): boolean {
 }
 
 interface DispatchBoardEntry
-	extends Omit<DispatchBoardRow, "elapsedMs" | "recentTools" | "lastContextTokens" | "currentTool" | "retry"> {
+	extends Omit<
+		DispatchBoardRow,
+		"elapsedMs" | "recentTools" | "lastContextTokens" | "currentTool" | "retry" | "progress"
+	> {
 	sequence: number;
 	enqueuedAtMs: number;
 	startedAtMs: number | null;
@@ -149,15 +166,19 @@ interface DispatchBoardEntry
 	finishedAtMs: number | null;
 	durationMs: number | null;
 	lastContextTokens: number;
-	currentTool: string | null;
-	recentTools: string[];
+	/**
+	 * The one fold that reads this run's worker events. Tool activity and the
+	 * answer tail are its output, so the board no longer interprets the stream
+	 * alongside the transcript.
+	 */
+	progress: WorkerProgressFold;
 	retry?: DispatchRetryPresentation;
 }
 
-/** Bound on the recent-tool trail rendered on a card. */
-const RECENT_TOOL_TRAIL_LIMIT = 4;
 /** Keep raw task text out of long-lived TUI rows and bound hostile/user-sized input. */
 const TASK_SUMMARY_MAX_WIDTH = 240;
+/** Rows of worker prose an expanded card shows before it defers to `/view`. */
+const WORKER_PROGRESS_CARD_ROWS = 6;
 
 interface WorkerEventShape {
 	type?: unknown;
@@ -443,11 +464,92 @@ function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): str
 	return remainingMs === 0 ? "now" : `in ${formatCompactMs(remainingMs)}`;
 }
 
+/**
+ * One action as a phrase: the tool name, then the verb and object of its
+ * redacted descriptor. The descriptor was bounded and scrubbed at the worker
+ * seam, so this composes text and never inspects an argument.
+ */
+function actionPhrase(action: WorkerAction): string {
+	const descriptor = action.descriptor;
+	if (descriptor === undefined) return action.tool;
+	const object = descriptor.object === undefined ? "" : ` ${descriptor.object}${descriptor.truncated ? "…" : ""}`;
+	return `${action.tool} ${descriptor.verb}${object}`;
+}
+
+/** The phase word an expanded card names, or null for a phase that says nothing new. */
+function progressPhaseUnit(theme: ClioTheme, progress: WorkerProgressSnapshot): string | null {
+	switch (progress.phase) {
+		case "thinking":
+			// The phase only. Reasoning content never reaches an operator surface.
+			return theme.fg("reason", `${GLYPH.phaseThinking} thinking`);
+		case "writing":
+			return theme.fg("accent", `${GLYPH.phaseWriting} writing`);
+		case "tool":
+			return theme.fg("action", `${GLYPH.phaseTool} tool`);
+		case "waiting":
+			return theme.fg("info", `${GLYPH.phaseWaiting} waiting`);
+		case "settled":
+		case "starting":
+			return null;
+	}
+}
+
+/** The `doing` row: the phase, then the running call or the most recent one, with its object. */
+function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, contentWidth: number): string | null {
+	const phase = progressPhaseUnit(theme, progress);
+	const current = progress.currentAction;
+	const recent = progress.recentActions[0];
+	const units: string[] = [];
+	if (phase !== null) units.push(phase);
+	if (current !== null) units.push(theme.fg("muted", actionPhrase(current)));
+	else if (recent !== undefined) units.push(theme.fg("dim", `last ${actionPhrase(recent)}`));
+	if (units.length === 0) return null;
+	return cardUnitsLine(theme, "doing", units, contentWidth);
+}
+
+/**
+ * The `answer` block: the newest rows of the worker's bounded prose on a rail,
+ * then what is not shown and where to read it. Wrapping happens before the row
+ * cap, so the block is at most {@link WORKER_PROGRESS_CARD_ROWS} rows tall
+ * whatever the terminal width, and a streaming answer cannot make the card grow
+ * under the operator.
+ */
+function progressAnswerLines(
+	theme: ClioTheme,
+	progress: WorkerProgressSnapshot,
+	runId: string,
+	contentWidth: number,
+): string[] {
+	if (progress.tailText.length === 0) return [];
+	const gutter = CARD_KV_KEY_WIDTH + 1;
+	const railWidth = Math.max(1, contentWidth - gutter - 2);
+	const wrapped: string[] = [];
+	for (const line of progress.tailText.split("\n")) {
+		for (const row of wrapTextWithAnsi(sanitizeCallTargetText(line), railWidth)) wrapped.push(row);
+	}
+	const shown = wrapped.slice(Math.max(0, wrapped.length - WORKER_PROGRESS_CARD_ROWS));
+	const hiddenRows = wrapped.length - shown.length;
+	const rail = theme.fg("dim", "│ ");
+	const body = shown.map((row) => `${rail}${theme.fg("muted", row)}`);
+	const hiddenLines = progress.droppedLines + hiddenRows;
+	if (hiddenLines > 0 || progress.droppedBytes > 0) {
+		const facts = [
+			...(hiddenLines > 0 ? [`${hiddenLines} more line${hiddenLines === 1 ? "" : "s"}`] : []),
+			...(progress.droppedBytes > 0 ? [`${progress.droppedBytes} bytes outran the view`] : []),
+			`/view dispatch:${runId}`,
+		];
+		body.push(`${rail}${theme.fg("dim", truncateToWidth(facts.join(" · "), railWidth, "…", false))}`);
+	}
+	// The key labels the block once and the rest hangs under it, which is the
+	// card's key-value grammar applied to a body rather than to one value.
+	return body.map((row, index) => `${index === 0 ? cardKvKey(theme, "answer") : " ".repeat(gutter)}${row}`);
+}
+
 export function renderDispatchCard(
 	row: DispatchBoardRow,
 	width: number,
 	evidence?: RunEvidencePresentation,
-	options: { selected?: boolean } = {},
+	options: { selected?: boolean; expanded?: boolean } = {},
 ): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(0, width - 4);
@@ -559,6 +661,13 @@ export function renderDispatchCard(
 		];
 		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
 	}
+	// Live worker progress is expanded detail, never a default row: five running
+	// scouts must stay five compact cards until the operator opens one.
+	if (options.expanded === true && row.progress) {
+		const doing = progressActionLine(theme, row.progress, contentWidth);
+		if (doing !== null) bodyLines.push(doing);
+		bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth));
+	}
 	if (row.steerAcknowledgement) {
 		bodyLines.push(
 			cardUnitsLine(
@@ -636,6 +745,8 @@ export function formatDispatchBoardLines(
 	width = 76,
 	observability?: ObservabilitySnapshot,
 	selectedRunId?: string | null,
+	/** Whether the selected row renders its worker-progress detail. Off by default. */
+	detailExpanded = false,
 ): string[] {
 	if (rows.length === 0) {
 		const theme = clioTheme();
@@ -649,6 +760,7 @@ export function formatDispatchBoardLines(
 	const cards = rows.map((row) =>
 		renderDispatchCard(row, width, deriveRunEvidenceState(observability, row.runId), {
 			selected: row.runId === selectedRunId,
+			expanded: detailExpanded && row.runId === selectedRunId,
 		}),
 	);
 	const body: string[] = [];
@@ -674,6 +786,9 @@ export interface DispatchBoardView extends Component {
 	selectPrevious(): void;
 	selectNext(): void;
 	resetSelection(): void;
+	/** Open or close the selected row's worker-progress detail. */
+	toggleDetail(): void;
+	detailExpanded(): boolean;
 }
 
 export function createDispatchBoardView(
@@ -681,6 +796,9 @@ export function createDispatchBoardView(
 	observability: () => ObservabilitySnapshot | undefined,
 ): DispatchBoardView {
 	let selectedRunId: string | null = null;
+	// Detail is a property of the operator's attention, not of a run, so it
+	// follows the cursor rather than pinning to the row it was opened on.
+	let expanded = false;
 
 	const normalizeSelection = (currentRows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow | null => {
 		if (currentRows.length === 0) {
@@ -705,7 +823,7 @@ export function createDispatchBoardView(
 		render(width: number): string[] {
 			const currentRows = rows();
 			normalizeSelection(currentRows);
-			return formatDispatchBoardLines(currentRows, Math.max(1, width), observability(), selectedRunId);
+			return formatDispatchBoardLines(currentRows, Math.max(1, width), observability(), selectedRunId, expanded);
 		},
 		selectedRow(): DispatchBoardRow | null {
 			return normalizeSelection(rows());
@@ -718,7 +836,14 @@ export function createDispatchBoardView(
 		},
 		resetSelection(): void {
 			selectedRunId = null;
+			expanded = false;
 			normalizeSelection(rows());
+		},
+		toggleDetail(): void {
+			expanded = !expanded;
+		},
+		detailExpanded(): boolean {
+			return expanded;
 		},
 		invalidate(): void {},
 	};
@@ -950,7 +1075,9 @@ function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 
 function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 	const retry = entry.retry;
+	const progress = entry.progress.snapshot();
 	return {
+		progress,
 		runId: entry.runId,
 		agentId: entry.agentId,
 		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),
@@ -977,8 +1104,10 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
 		lastContextTokens: entry.lastContextTokens,
 		...(entry.receiptId !== undefined ? { receiptId: entry.receiptId } : {}),
-		currentTool: retry ? null : entry.currentTool,
-		recentTools: [...entry.recentTools],
+		// Both tool fields are views of the one projection, so the compact card and
+		// the expanded detail can never disagree about what is running.
+		currentTool: retry ? null : (progress.currentAction?.tool ?? null),
+		recentTools: progress.recentActions.map((action) => action.tool),
 		...(retry ? { retry: { ...retry } } : {}),
 		...(entry.steerAcknowledgement ? { steerAcknowledgement: { ...entry.steerAcknowledgement } } : {}),
 	};
@@ -1011,6 +1140,12 @@ function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 export function createDispatchBoardStore(
 	bus: SafeEventBus,
 	snapshot?: () => DispatchSnapshot,
+	/**
+	 * Sealed terminal facts for a finished run. Settlement replaces the
+	 * provisional live tail with the receipt's answer where one can be read; the
+	 * run's own durable message stands in where it cannot.
+	 */
+	readReceipt?: WorkerReceiptReader,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
@@ -1020,6 +1155,12 @@ export function createDispatchBoardStore(
 	const entries = new Map<string, DispatchBoardEntry>();
 	let nextSequence = 0;
 	let reconciledAtMs = Date.now();
+
+	/** Seal a run's projection on the receipt's answer, or on its own last durable message. */
+	const settleProgress = (entry: DispatchBoardEntry): void => {
+		const text = readReceipt?.(entry.runId)?.text;
+		entry.progress.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
+	};
 
 	// Payloads arrive typed off the bus, but the board keeps its runtime
 	// parsing (parse* helpers) because events are not validated at runtime.
@@ -1070,8 +1211,7 @@ export function createDispatchBoardStore(
 			...(contextWindow !== undefined ? { contextWindow } : {}),
 			lastContextTokens: previous?.lastContextTokens ?? 0,
 			...(previous?.receiptId !== undefined ? { receiptId: previous.receiptId } : {}),
-			currentTool: previous?.currentTool ?? null,
-			recentTools: previous?.recentTools ?? [],
+			progress: previous?.progress ?? createWorkerProgressFold(),
 			...(previous?.retry ? { retry: { ...previous.retry } } : {}),
 			...(previous?.steerAcknowledgement ? { steerAcknowledgement: { ...previous.steerAcknowledgement } } : {}),
 		};
@@ -1107,7 +1247,7 @@ export function createDispatchBoardStore(
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
-			entry.currentTool = null;
+			settleProgress(entry);
 			// A terminal dispatch event is published only after the run's receipt is
 			// sealed at receipts/<runId>.json, so the run id is the receipt id here.
 			entry.receiptId = entry.runId;
@@ -1135,7 +1275,7 @@ export function createDispatchBoardStore(
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
-			entry.currentTool = null;
+			settleProgress(entry);
 			// A denied retry never reached a run, so no receipt was sealed for it;
 			// every other failure finalized through recordReceipt like a success.
 			if (payload.reason !== "retry_denied") entry.receiptId = entry.runId;
@@ -1159,7 +1299,7 @@ export function createDispatchBoardStore(
 				// wind down, so the history row can become terminal immediately.
 				entry.status = "aborted";
 				entry.finishedAtMs = Date.now();
-				entry.currentTool = null;
+				settleProgress(entry);
 			} else {
 				if (isTerminalStatus(entry.status) && !wasRetrying) return;
 				entry.status = "cancelling";
@@ -1181,7 +1321,7 @@ export function createDispatchBoardStore(
 				entry.status = status;
 				if (status === "dead") {
 					entry.finishedAtMs ??= Date.now();
-					entry.currentTool = null;
+					settleProgress(entry);
 					delete entry.retry;
 				}
 				return;
@@ -1192,7 +1332,9 @@ export function createDispatchBoardStore(
 				entry.failoverHops = (entry.failoverHops ?? 0) + 1;
 				entry.status = "running";
 				entry.finishedAtMs = null;
-				entry.currentTool = null;
+				// The projection keeps the tail the operator is reading and drops the
+				// finished attempt's live state, exactly as the transcript block does.
+				entry.progress.restart();
 				delete entry.retry;
 				return;
 			}
@@ -1216,20 +1358,10 @@ export function createDispatchBoardStore(
 					entry.ttftMs = Math.round(performance.now() - entry.startedAtClockMs);
 				}
 			}
-			if (type === "clio_tool_start") {
-				const payload = (workerEvent as { payload?: { tool?: unknown } }).payload;
-				const tool = parseNonEmptyString(payload?.tool);
-				if (tool !== undefined) entry.currentTool = tool;
-			}
-			if (type === "clio_tool_finish") {
-				const payload = (workerEvent as { payload?: { tool?: unknown } }).payload;
-				const tool = parseNonEmptyString(payload?.tool);
-				entry.currentTool = null;
-				if (tool !== undefined) {
-					entry.recentTools.unshift(tool);
-					if (entry.recentTools.length > RECENT_TOOL_TRAIL_LIMIT) entry.recentTools.length = RECENT_TOOL_TRAIL_LIMIT;
-				}
-			}
+			// The one fold that reads worker prose and tool activity. Everything the
+			// board says about what a worker is saying or touching comes from here,
+			// so the board and the transcript block cannot tell two stories.
+			entry.progress.observe(payload.event);
 			if (type === "clio_steer_received") {
 				const steerPayload = (workerEvent as { payload?: { chars?: unknown } }).payload;
 				entry.steerAcknowledgement = {
@@ -1254,7 +1386,7 @@ export function createDispatchBoardStore(
 				if (!status) return;
 				entry.status = status;
 				entry.finishedAtMs ??= Date.now();
-				entry.currentTool = null;
+				settleProgress(entry);
 				delete entry.retry;
 			}
 		}),
@@ -1303,7 +1435,8 @@ export function createDispatchBoardStore(
 					now,
 				);
 			if (entry) {
-				entry.currentTool = null;
+				// A waiting retry has no live worker; the row projection already
+				// renders a retrying row with no current tool.
 				entry.retry = { ...projection.retry };
 				if (entry.taskSummary === undefined && projection.taskSummary !== undefined) {
 					entry.taskSummary = projection.taskSummary;

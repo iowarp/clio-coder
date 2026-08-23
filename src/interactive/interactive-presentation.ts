@@ -39,6 +39,7 @@ import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
 import { formatTargetLabel } from "./theme/index.js";
 import { createWelcomeDashboard, type WelcomeDashboardComponent } from "./welcome-dashboard.js";
+import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 export interface PresentationTickerHandle {
@@ -244,7 +245,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
-	const dispatchBoardStore = factories.createDispatchBoardStore(deps.bus, () => deps.dispatch.snapshot());
+	// The board settles a finished run on the same sealed receipt the transcript
+	// block reads, so the two surfaces agree on a worker's terminal answer.
+	const dispatchBoardStore = factories.createDispatchBoardStore(
+		deps.bus,
+		() => deps.dispatch.snapshot(),
+		(runId) => readWorkerReceiptFacts(runId),
+	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus);
 
 	const footerToolCounts = new Map<string, number>();

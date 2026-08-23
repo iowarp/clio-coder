@@ -52,6 +52,8 @@ export interface DispatchBoardOverlayKeyDeps {
 	selectNextDispatch: () => void;
 	steerSelectedDispatch: () => void;
 	cancelSelectedDispatch: () => void;
+	/** Open or close the selected run's worker-progress detail. */
+	toggleSelectedDispatchDetail: () => void;
 }
 
 interface CloseOverlayKeyDeps {
@@ -128,6 +130,12 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	}
 	if (matchesKey(data, "x")) {
 		deps.cancelSelectedDispatch();
+		return true;
+	}
+	// Worker progress is expanded detail the operator asks for. The default list
+	// stays compact so a fan-out of scouts costs one card each.
+	if (matchesKey(data, "enter")) {
+		deps.toggleSelectedDispatchDetail();
 		return true;
 	}
 	return false;

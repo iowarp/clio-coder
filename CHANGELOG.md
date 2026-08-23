@@ -2,6 +2,15 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Added
+- The `Alt+W` Fleet Runs board shows live worker progress on operator request (#168). `Enter` opens the selected run's detail: the phase, the running call as `<tool> <verb> <object>`, and the bounded tail of the worker's own prose with a `/view dispatch:<runId>` link to the rest. The default list stays compact, so a fan-out of scouts costs one card each until an operator opens one.
+
+### Changed
+- The Fleet Runs board and the transcript's worker block now read one bounded projection of the dispatch event stream instead of folding it separately, so the two surfaces cannot disagree about what a worker is saying or touching. The projection keeps 40 lines and 4096 bytes of answer tail, 8 distinct tool names, and 4 recent actions, and accepts 16 KB of streamed bytes per 250 ms; what the bounds refuse is counted and named rather than dropped silently.
+- Worker tool activity now carries a redacted action descriptor beside the tool name. The descriptor is composed where the arguments are trusted (the tool registry's admission path, the Claude tool mapper, and the ACP update mapper) from a fixed verb vocabulary and a fixed argument-field allowlist, with credentials scrubbed, escape sequences stripped, and the result bounded to 64 characters. Raw argument objects still never cross the worker stdout seam, and reasoning content is still never displayed.
+
 ## 0.3.6 - 2026-08-23
 
 0.3.5 was published by mistake and withdrawn; its content ships here.
