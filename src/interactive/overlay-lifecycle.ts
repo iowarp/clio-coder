@@ -10,6 +10,7 @@ import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import {
 	createPermissionOverlayBody,
+	PERMISSION_OVERLAY_PLACEMENT,
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
 	permissionOverlayTitle,
@@ -228,7 +229,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			if (overlayTransitions.state !== "closed") return false;
 			overlayTransitions.state = "permission-confirm";
 			overlayTransitions.handle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
-				anchor: "center",
+				...PERMISSION_OVERLAY_PLACEMENT,
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(),
 				// Read per frame: the footer names what Enter does right now, and
