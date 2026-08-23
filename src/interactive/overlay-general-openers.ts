@@ -268,6 +268,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const dispatchBoardHint = (): string => {
 		const row = deps.dispatchBoard.selectedRow();
 		const entries = [{ key: "↑↓", verb: "select" }];
+		if (row) entries.push({ key: "Enter", verb: deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail" });
 		if (row && isDispatchBoardRowSteerable(row)) entries.push({ key: "s", verb: "steer" });
 		if (row && isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel" });
 		return buildHint(entries);

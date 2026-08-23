@@ -56,6 +56,7 @@ function makeDeps(): {
 	selectedNext: () => number;
 	steeredDispatches: () => number;
 	cancelledDispatches: () => number;
+	toggledDetail: () => number;
 } {
 	let closeCount = 0;
 	let cancelPermissionCount = 0;
@@ -66,6 +67,7 @@ function makeDeps(): {
 	let selectNextCount = 0;
 	let steerDispatchCount = 0;
 	let cancelDispatchCount = 0;
+	let toggleDetailCount = 0;
 	const deps: OverlayKeyDeps = {
 		closeOverlay: () => {
 			closeCount += 1;
@@ -91,6 +93,9 @@ function makeDeps(): {
 		cancelSelectedDispatch: () => {
 			cancelDispatchCount += 1;
 		},
+		toggleSelectedDispatchDetail: () => {
+			toggleDetailCount += 1;
+		},
 		cancelAskUser: () => {
 			cancelAskUserCount += 1;
 		},
@@ -106,6 +111,7 @@ function makeDeps(): {
 		selectedNext: () => selectNextCount,
 		steeredDispatches: () => steerDispatchCount,
 		cancelledDispatches: () => cancelDispatchCount,
+		toggledDetail: () => toggleDetailCount,
 	};
 }
 

@@ -76,6 +76,7 @@ export interface InteractiveInputRuntimeDeps {
 	dispatchBoard: {
 		selectPrevious(): void;
 		selectNext(): void;
+		toggleDetail(): void;
 	};
 	steerSelectedDispatch: () => void;
 	cancelSelectedDispatch: () => void;
@@ -223,6 +224,10 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					},
 					selectNextDispatch: () => {
 						deps.dispatchBoard.selectNext();
+						deps.requestRender();
+					},
+					toggleSelectedDispatchDetail: () => {
+						deps.dispatchBoard.toggleDetail();
 						deps.requestRender();
 					},
 					steerSelectedDispatch: deps.steerSelectedDispatch,

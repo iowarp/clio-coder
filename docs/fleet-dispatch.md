@@ -662,6 +662,27 @@ hard block.
   renders `local`), gate badges (`gate reviewer c2`), reroute badges, live
   tool activity (names only; arguments never cross the worker stdout seam),
   and a per-worker context meter.
+- `Enter` on the selected Fleet Runs row opens its worker detail: the phase,
+  the running call with a redacted action descriptor (`bash running npm
+  test`), and the bounded tail of the worker's own prose. The default list
+  stays compact, so a fan-out of scouts costs one card each until an operator
+  opens one. Detail follows the cursor rather than pinning to a run.
+- The board and the transcript worker block read one projection
+  (`src/interactive/worker-progress.ts`), so they cannot disagree about what a
+  worker is saying or touching. It keeps 40 lines and 4096 bytes of tail, 8
+  distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
+  250 ms; what the bounds refuse is counted and named on the card beside the
+  `/view dispatch:<runId>` deep link.
+- Action descriptors are composed where the arguments are trusted: the tool
+  registry's admission path, the Claude tool mapper, and the ACP update
+  mapper. Each reads a fixed verb vocabulary and a fixed argument-field
+  allowlist, scrubs credentials, strips escape sequences, and bounds the
+  result to 64 characters before it crosses the worker stdout seam. Raw
+  argument objects never cross at all.
+- Reasoning content is never displayed. The detail may name a `thinking`
+  phase and the usage facts the card already carries, never the text.
+- Settlement replaces the provisional tail with the sealed receipt's answer;
+  a run whose receipt cannot be read keeps its own last durable message.
 - The context meter renders the worker's last-message context occupancy
   against the model's context window: healthy below 80 percent, warn from 80,
   critical from 95.

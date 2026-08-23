@@ -41,7 +41,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 			openDecisionsOverlayState: () => events.push("decisions:open"),
 		},
 		refreshFooter: () => events.push("footer:refresh"),
-		dispatchBoard: { selectPrevious: () => {}, selectNext: () => {} },
+		dispatchBoard: { selectPrevious: () => {}, selectNext: () => {}, toggleDetail: () => {} },
 		steerSelectedDispatch: () => {},
 		cancelSelectedDispatch: () => {},
 		cancelActiveEditorBash: () => false,

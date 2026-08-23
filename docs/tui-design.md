@@ -312,13 +312,22 @@ The `/settings` overlay is a full-screen transactional control center:
 - **Scoped Models Checklist**: Settings → `Models` provides a provider-backed checklist subview with target-level and target/model items, checked current selections, `Space` to toggle, and capability details in the inspector. Unresolved model references are preserved under an `Unavailable` group.
 - **Narrow Terminal Drill-Down Navigation**: Below 72 columns, Settings transitions from a split view to a modal drill-down stack (section list → section rows → detail drawer) with a breadcrumb and `Esc` moving up one level before closing. Includes `/` filtering across label, path, and description, narrowing per keystroke like `/model` and `/resume`. Below 60 columns, side margins are removed for full-width presentation.
 
-### 7.2 Task and Decision Boards
+### 7.2 Fleet Runs Board
+
+The `Alt+W` board renders one card per run. The default list is compact: run id, route, task, status, telemetry, retry, tool names, and proof. `Enter` opens the selected run's worker detail, which adds two rows to that card and nothing to any other:
+
+- **`doing`**: the phase (`◐ thinking` in `reason`, `◑ writing` in `accent`, `⚙ tool` in `action`, `◔ waiting` in `info`) followed by the running call as `<tool> <verb> <object>`, or the last finished call as `last <tool> <verb> <object>`. The verb and object come from a descriptor composed at the worker seam; raw arguments never reach the renderer.
+- **`answer`**: the newest rows of the worker's bounded prose on a `│` rail with a hanging indent under the key, then a dim row naming the lines and bytes the bounds refused and the `/view dispatch:<runId>` deep link.
+
+Wrapping happens before the row cap, so the block is at most six rows tall at any width and a streaming answer cannot make the card grow under the operator. Detail follows the cursor rather than pinning to a run, and closing the board closes it. Reasoning text is never rendered; the `thinking` phase word is the whole of what the board says about it.
+
+### 7.3 Task and Decision Boards
 
 - **Composite Tasks Board (`/tasks`, `Alt+B`)**: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered `/view` path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.
 - **Settled Decisions Board (`/decisions`, `Alt+D`)**: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.
 - **Approved editor overrides**: `Alt+B` and `Alt+D` are deliberate application-input boundary overrides of Pi's editor word-back and word-delete chords. Clio routes them before the editor so the two global boards remain one chord away. They are explicit exceptions to the general rule that Clio app bindings avoid Pi editor reserves, and users may rebind the Clio actions in `settings.yaml`.
 
-### 7.3 Slash Autocomplete Command Palette
+### 7.4 Slash Autocomplete Command Palette
 - **Grouped Palette**: Typing `/` opens a grouped command palette (ordered by `Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints and formatted descriptions.
 - **One Canonical Spelling**: Autocomplete, help, and parsing expose the same unique slash-command names; no alias rows compete with canonical commands.
 
