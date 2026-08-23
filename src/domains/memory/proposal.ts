@@ -2,8 +2,15 @@ import { createHash } from "node:crypto";
 import type { EvidenceFinding, EvidenceOverview, EvidenceTag } from "../evidence/index.js";
 import { inspectEvidence } from "../evidence/index.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
+import {
+	applyScopeIdentity,
+	type MemoryScopeSelection,
+	memoryScopeIdentityKey,
+	validateMemoryScopeSelection,
+} from "./promotion.js";
 import { loadMemoryRecords, upsertMemoryRecord } from "./store.js";
 import type { MemoryProposalResult, MemoryRecord, MemoryRepositoryIdentity, MemoryScope } from "./types.js";
+import { validateMemoryRecord } from "./validate.js";
 
 const LESSON_MAX_CHARS = 240;
 const APPLY_MAX_CHARS = 160;
@@ -23,12 +30,16 @@ const TAG_PRIORITY = [
 	"unknown",
 ] as const satisfies ReadonlyArray<EvidenceTag>;
 
-export async function proposeMemoryFromEvidence(dataDir: string, evidenceId: string): Promise<MemoryProposalResult> {
+export async function proposeMemoryFromEvidence(
+	dataDir: string,
+	evidenceId: string,
+	selection?: MemoryScopeSelection,
+): Promise<MemoryProposalResult> {
 	const evidence = await inspectEvidence(dataDir, evidenceId);
-	const existing = (await loadMemoryRecords(dataDir)).find((record) => record.id === memoryIdFromEvidence(evidenceId));
+	const record = memoryRecordFromEvidence(evidence.overview, evidence.findings, selection);
+	const existing = (await loadMemoryRecords(dataDir)).find((candidate) => candidate.id === record.id);
 	if (existing !== undefined) return { record: existing, created: false };
 
-	const record = memoryRecordFromEvidence(evidence.overview, evidence.findings);
 	await upsertMemoryRecord(dataDir, record);
 	return { record, created: true };
 }
@@ -41,13 +52,24 @@ export function memoryIdFromEvidence(evidenceId: string): string {
 export function memoryRecordFromEvidence(
 	overview: EvidenceOverview,
 	findings: ReadonlyArray<EvidenceFinding>,
+	selection?: MemoryScopeSelection,
 ): MemoryRecord {
 	const tags = overview.tags;
 	const primaryTag = primaryEvidenceTag(tags);
 	const repository = inferRepository(overview);
-	const scope = inferScope(overview, repository);
+	const validatedSelection =
+		selection === undefined
+			? undefined
+			: validateMemoryScopeSelection(selection, {
+					runtimeIds: overview.runtimeIds,
+					agentIds: overview.agentIds,
+				});
+	const scope = validatedSelection?.scope ?? inferScope(overview, repository);
 	const record: MemoryRecord = {
-		id: memoryIdFromEvidence(overview.evidenceId),
+		id:
+			validatedSelection === undefined
+				? memoryIdFromEvidence(overview.evidenceId)
+				: memoryIdFromEvidenceScope(overview.evidenceId, memoryScopeIdentityKey(validatedSelection)),
 		scope,
 		key: `evidence:${overview.evidenceId}`,
 		lesson: truncateText(buildLesson(overview, findings, primaryTag), LESSON_MAX_CHARS),
@@ -57,9 +79,31 @@ export function memoryRecordFromEvidence(
 		confidence: confidenceForEvidence(overview, findings),
 		createdAt: overview.generatedAt,
 		approved: false,
+		provenance: {
+			sourceKind: "evidence",
+			evidenceId: overview.evidenceId,
+			...(overview.sessionId === null ? {} : { sourceSessionId: overview.sessionId }),
+		},
 	};
-	if (scope === "repo" && repository !== null) record.repository = repository;
-	return record;
+	if (validatedSelection !== undefined) applyScopeIdentity(record, validatedSelection);
+	else if (scope === "repo" && repository !== null) record.repository = repository;
+	else if (scope === "runtime" && overview.runtimeIds[0] !== undefined) {
+		record.runtime = { kind: "runtime", key: overview.runtimeIds[0] };
+	} else if (scope === "agent" && overview.agentIds[0] !== undefined) {
+		record.agent = { kind: "agent", key: overview.agentIds[0] };
+	}
+	const validated = validateMemoryRecord(record);
+	if (!validated.valid) {
+		throw new Error(
+			`evidence memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+		);
+	}
+	return validated.record;
+}
+
+function memoryIdFromEvidenceScope(evidenceId: string, scopeKey: string): string {
+	const digest = createHash("sha256").update(`${evidenceId}\n${scopeKey}`, "utf8").digest("hex").slice(0, 16);
+	return `mem-${digest}`;
 }
 
 /**

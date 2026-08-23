@@ -393,7 +393,7 @@ export interface SlashCommandContext {
 		done(id: string): UserTask;
 		drop(id: string): UserTask;
 	};
-	/** Open the read-only `/memory` overlay: approved lessons and the live task bank. */
+	/** Open `/memory` for approved lessons, the live task bank, and reviewed promotion. */
 	openMemory: () => void;
 	/** Opt-in import from the newest structured handoff; absent when the host has no task bank. */
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
@@ -1036,7 +1036,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "memory",
-		description: "Inspect task memory or seed it from the newest handoff",
+		description: "Inspect, promote, or seed task memory",
 		group: "Inspect",
 		kinds: ["memory", "memory-seed"],
 		subcommandDescriptions: { seed: "Seed the task bank from the newest handoff" },

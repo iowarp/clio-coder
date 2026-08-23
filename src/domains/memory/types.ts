@@ -18,6 +18,33 @@ export interface MemoryRepositoryIdentity {
 	key: string;
 }
 
+export interface MemoryRuntimeIdentity {
+	kind: "runtime";
+	key: string;
+}
+
+export interface MemoryAgentIdentity {
+	kind: "agent";
+	key: string;
+}
+
+export interface MemoryPromotionRedaction {
+	appliedBeforePersistence: true;
+	replacementCount: number;
+	sourceFields: string[];
+}
+
+export interface MemoryRecordProvenance {
+	sourceKind: "evidence" | "task-bank-entry" | "handoff-snapshot";
+	evidenceId?: string;
+	sourceSessionId?: string;
+	sourceEntryId?: string;
+	sourceEntryKind?: "knowledge" | "procedural";
+	sourceEntryCreatedAt?: string;
+	sourceEntryLastTouchedAt?: string;
+	redaction?: MemoryPromotionRedaction;
+}
+
 export interface MemoryRecord {
 	id: string;
 	scope: MemoryScope;
@@ -34,6 +61,12 @@ export interface MemoryRecord {
 	rejectedAt?: string;
 	/** Preferred repository applicability for `repo` records. */
 	repository?: MemoryRepositoryIdentity;
+	/** Exact runtime applicability for `runtime` records. */
+	runtime?: MemoryRuntimeIdentity;
+	/** Exact agent applicability for `agent` records. */
+	agent?: MemoryAgentIdentity;
+	/** Source and pre-persistence redaction facts for reviewed proposals. */
+	provenance?: MemoryRecordProvenance;
 }
 
 export interface MemoryStoreFile {
@@ -71,4 +104,8 @@ export interface MemoryRetrievalOptions {
 	tokenBudget: number;
 	/** Missing or unknown identity excludes every repository-scoped record. */
 	activeRepository?: MemoryRepositoryIdentity | null;
+	/** Missing or unknown identity excludes every runtime-scoped record. */
+	activeRuntime?: MemoryRuntimeIdentity | null;
+	/** Missing or unknown identity excludes every agent-scoped record. */
+	activeAgent?: MemoryAgentIdentity | null;
 }

@@ -1,5 +1,11 @@
 import { estimateMemoryTokens, selectApprovedMemory } from "./operations.js";
-import type { MemoryRecord, MemoryRepositoryIdentity, MemoryScope } from "./types.js";
+import type {
+	MemoryAgentIdentity,
+	MemoryRecord,
+	MemoryRepositoryIdentity,
+	MemoryRuntimeIdentity,
+	MemoryScope,
+} from "./types.js";
 
 export const MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET = 400;
 export const MEMORY_PROMPT_DEFAULT_MAX_ITEMS = 5;
@@ -20,6 +26,10 @@ export interface MemoryPromptOptions {
 	maxItems?: number;
 	/** Missing or unknown identity leaves global memory eligible but excludes repo memory. */
 	activeRepository?: MemoryRepositoryIdentity | null;
+	/** Missing or unknown identity excludes runtime-scoped memory. */
+	activeRuntime?: MemoryRuntimeIdentity | null;
+	/** Missing or unknown identity excludes agent-scoped memory. */
+	activeAgent?: MemoryAgentIdentity | null;
 }
 
 /**
@@ -40,6 +50,8 @@ export function selectMemoryForPrompt(
 		scopes,
 		tokenBudget,
 		activeRepository: options.activeRepository ?? null,
+		activeRuntime: options.activeRuntime ?? null,
+		activeAgent: options.activeAgent ?? null,
 	});
 	return selected.slice(0, maxItems);
 }
@@ -67,11 +79,19 @@ export function renderMemoryPromptSection(records: ReadonlyArray<MemoryRecord>):
 }
 
 function renderApplicability(record: MemoryRecord): string {
-	if (record.scope !== "repo") return `scope=${record.scope}`;
-	if (record.repository !== undefined) {
-		return `scope=repo, repository=${JSON.stringify(`${record.repository.kind}:${record.repository.key}`)}`;
+	if (record.scope === "repo") {
+		if (record.repository !== undefined) {
+			return `scope=repo, repository=${JSON.stringify(`${record.repository.kind}:${record.repository.key}`)}`;
+		}
+		return "scope=repo, repository=unknown";
 	}
-	return "scope=repo, repository=unknown";
+	if (record.scope === "runtime") {
+		return `scope=runtime, runtime=${JSON.stringify(record.runtime?.key ?? "unknown")}`;
+	}
+	if (record.scope === "agent") {
+		return `scope=agent, agent=${JSON.stringify(record.agent?.key ?? "unknown")}`;
+	}
+	return `scope=${record.scope}`;
 }
 
 /** Convenience for callers that want a single end-to-end build step. */

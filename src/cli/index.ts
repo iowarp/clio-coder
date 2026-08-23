@@ -60,7 +60,7 @@ Usage:
   clio-coder fleet list|run|status|drain|resume  fleet contracts, status, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder eval                 run, report, or compare local eval task files
-  clio-coder memory               list, propose, approve, reject, or prune memory
+  clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages

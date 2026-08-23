@@ -246,7 +246,8 @@ Mutation-report receipts are grounded directly against observed tool events reco
 
 ```bash
 clio-coder memory list
-clio-coder memory propose --from-evidence <evidenceId>
+clio-coder memory propose --from-evidence <evidenceId> [scope options]
+clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
 clio-coder memory prune --stale
@@ -267,6 +268,8 @@ The store is capped at `500` records and is sorted by scope, key, creation time,
 ```mermaid
 stateDiagram-v2
     evidence --> proposed: propose --from-evidence
+    taskBank --> proposed: /memory selected-entry action
+    redactedHandoff --> proposed: promote --from-handoff
     proposed --> approved: approve <id>
     proposed --> rejected: reject <id>
     approved --> rejected: reject <id>
@@ -276,6 +279,45 @@ stateDiagram-v2
 ```
 
 Records must cite at least one evidence ID to be considered for prompt injection. Rejected records remain in the store until stale pruning so the same bad lesson is not immediately re-proposed from the same evidence.
+
+Task-bank promotion is a reviewed export from transient execution memory. The
+`/memory` overlay offers repo and global proposal actions only on selected
+knowledge and procedural rows. Status remains private and cannot enter the
+promotion service. The first global action arms a warning, and the second
+action acknowledges the broader applicability. A successful action writes an
+unapproved record and names the separate `memory approve` command required to
+make it injectable.
+
+The CLI consumes a version 2 `clio-task-memory` handoff snapshot. Omitting
+`--entry` proposes every knowledge and procedural entry; repeating `--entry`
+selects exact entry IDs. Version 2 snapshots carry source session, evidence,
+runtime, agent, timestamps, and export-redaction facts. Version 1 snapshots
+remain seedable but cannot be promoted because they do not carry source
+session or evidence provenance.
+
+Every promotion redacts secret-shaped values before `records.json` is written.
+The durable provenance block records the source kind, session, selected entry,
+entry class and timestamps, plus the replacement count and source field paths.
+Promotion never approves its own output.
+
+### Explicit scope selection
+
+Reviewed scope options are closed to four choices:
+
+| Scope | Required selection | Validation |
+| --- | --- | --- |
+| `repo` | `--repository <canonical-absolute-path>` | The path must exist and already equal its canonical absolute identity. Symlink aliases and paths containing unresolved segments are rejected. |
+| `global` | `--acknowledge-global` | The acknowledgement is separate from `--scope global`. |
+| `runtime` | `--runtime <id>` | The ID must be valid and must occur in the source provenance. |
+| `agent` | `--agent <id>` | The ID must be valid and must occur in the source provenance. |
+
+The same options may be added to `memory propose --from-evidence`. With no
+scope option, evidence proposals keep the existing inference order. An
+explicit repository may differ from the repository that produced the
+evidence, which supports a reviewed lesson about repository A learned while
+working in repository B. Runtime and agent overrides may only select an exact
+identity already recorded by the evidence. Global scope always requires its
+own acknowledgement. No inference path widens an explicit choice.
 
 ---
 
@@ -287,7 +329,7 @@ Defaults:
 
 | Constraint | Default |
 | --- | --- |
-| Scopes | `global`, `repo` |
+| Base scopes | `global`, `repo` |
 | Token budget | `400` estimated tokens |
 | Max records | `5` |
 | Required status | `approved: true` |
@@ -295,6 +337,12 @@ Defaults:
 | Suppression | Records with active `regressions[]` entries are skipped |
 
 Rendered memory lines always cite record ID, scope, lesson, and evidence IDs. The prompt tells the model not to extrapolate beyond cited findings.
+
+Interactive main-agent sessions additionally admit records for the exact
+active runtime. `clio-coder run --agent` admits records for the exact resolved
+runtime and selected agent. Runtime and agent records use structured identity
+fields; `appliesWhen` text cannot grant either applicability. Missing,
+malformed, or different active identities exclude those records.
 
 ### Repository-scoped identity
 
@@ -308,15 +356,27 @@ Every `scope: "repo"` record must carry:
 
 The structured `repository` field is the only applicability mechanism: store validation rejects repo records without it, and `appliesWhen` tokens never grant repository applicability. There is intentionally no automatic path rewrite for moved repositories or worktrees: a filesystem move produces a different identity and the record simply stops applying until it is re-scoped with new evidence.
 
+Runtime and agent records follow the same fail-closed shape:
+
+```json
+{ "runtime": { "kind": "runtime", "key": "openai" } }
+```
+
+```json
+{ "agent": { "kind": "agent", "key": "coder" } }
+```
+
+Only the field matching the record scope is present.
+
 ---
 
 ## Recommended workflow
 
 1. Build evidence from the run/session/eval that taught the lesson.
 2. Inspect the evidence and findings.
-3. Propose memory from the evidence.
-4. Review the proposed lesson for correctness and scope.
-5. Approve only if it is durable and useful.
+3. Propose memory from the evidence, or promote selected public task memory from `/memory` or a redacted handoff.
+4. Review the proposed lesson, source provenance, redaction facts, and exact scope.
+5. Approve only if it is durable and useful under that scope.
 6. Reject incorrect or overbroad records.
 7. Prune stale records periodically.
 

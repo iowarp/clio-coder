@@ -393,8 +393,27 @@ async function runDispatch(
 	let memorySection = "";
 	try {
 		const records = loadMemoryRecordsSync(clioDataDir());
+		const boundProfileName = parsed.agentProfile ?? effectiveSettings.workers.agentBindings[parsed.agentId];
+		const boundProfile = boundProfileName ? effectiveSettings.workers.profiles[boundProfileName] : undefined;
+		const configuredRuntime = (targetId: string | undefined): string | undefined =>
+			effectiveSettings.targets.find((target) => target.id === targetId)?.runtime;
+		const profileRuntimeId = configuredRuntime(boundProfile?.target);
+		// The memory section is compiled before fleet routing settles. Admit a
+		// runtime-scoped record only when every permitted initial and fallback
+		// route is constrained to the same runtime.
+		const memoryRuntimeId =
+			parsed.target !== undefined
+				? configuredRuntime(parsed.target)
+				: boundProfileName !== undefined
+					? parsed.agentRuntime === profileRuntimeId
+						? profileRuntimeId
+						: undefined
+					: parsed.agentRuntime;
 		memorySection = buildMemoryPromptSection(records, {
+			scopes: ["global", "repo", "runtime", "agent"],
 			activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
+			activeRuntime: memoryRuntimeId === undefined ? null : { kind: "runtime", key: memoryRuntimeId },
+			activeAgent: { kind: "agent", key: parsed.agentId },
 		}).section;
 	} catch (err) {
 		process.stderr.write(
