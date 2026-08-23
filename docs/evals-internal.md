@@ -1,7 +1,7 @@
 # Internal Eval Suites
 
 > [!TIP]
-> **Interactive Spec Available:** Interactive blueprints are available for internal evaluation suites at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) and soak benchmark suites at [docs/html/soak_blueprint.html](html/soak_blueprint.html) (Version: 0.3.5).
+> **Interactive Spec Available:** Interactive blueprints are available for internal evaluation suites at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) and soak benchmark suites at [docs/html/soak_blueprint.html](html/soak_blueprint.html) (Version: 0.3.6).
 
 Private suites should live outside this repository. Keep datasets, prompts,
 live fleet coordinates, calibration outputs, and raw run artifacts in a private

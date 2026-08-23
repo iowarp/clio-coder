@@ -2,6 +2,7 @@ import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
+import { receiptServedModelLabel } from "./dispatch-event-text.js";
 
 /** Matches a source citation the parent can independently spot-check. */
 const SOURCE_CITATION_PATTERN = /([\w./~-]+):(\d+)/g;
@@ -9,13 +10,6 @@ const SOURCE_CITATION_PATTERN = /([\w./~-]+):(\d+)/g;
 export interface SourceCitation {
 	path: string;
 	line: number;
-}
-
-/** Human projection of the response model facts carried by a new receipt. */
-export function receiptServedModelLabel(receipt: Pick<RunReceipt, "upstreamResponses">): string | null {
-	const responses = receipt.upstreamResponses?.filter((response) => Object.hasOwn(response, "servedModel")) ?? [];
-	if (responses.length === 0) return null;
-	return `served=${responses.map((response) => response.servedModel ?? "unknown").join(",")}`;
 }
 
 function sourceCitations(text: string): SourceCitation[] {

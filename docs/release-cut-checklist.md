@@ -1,6 +1,6 @@
-# v0.3.5 Release-Cut Checklist
+# v0.3.6 Release-Cut Checklist
 
-The ordered steps that turn the prepared `v0.3.5` branch into a published
+The ordered steps that turn the prepared `v0.3.6` branch into a published
 release. Everything above the line marked **AUTHORIZATION BOUNDARY** is
 repeatable and reversible and is run locally before the cut. Everything below
 it is external or irreversible and needs an explicit decision from the
@@ -11,13 +11,13 @@ state of every step.
 
 | Item | State |
 | --- | --- |
-| Branch | `v0.3.5`, local only; pushed with the explicit refspec `refs/heads/v0.3.5` when the operator decides, never as a bare name that a tag could shadow |
-| `package.json` version | `0.3.5`; the top `CHANGELOG.md` heading is `## 0.3.5 - 2026-08-23` |
-| `main` | `2518f301`, the published `v0.3.4` commit; it is an ancestor of `v0.3.5` and moves only at Part 4. |
+| Branch | `v0.3.6`, local only; pushed with the explicit refspec `refs/heads/v0.3.6` when the operator decides, never as a bare name that a tag could shadow |
+| `package.json` version | `0.3.6`; the top `CHANGELOG.md` heading is `## 0.3.6 - 2026-08-23` |
+| `main` | `2518f301`, the published `v0.3.4` commit; it is an ancestor of `v0.3.6` and moves only at Part 4. |
 | `origin/main` | `2518f301`, matching the published `v0.3.4` commit |
-| Tags | none for 0.3.5, local or remote |
-| GitHub Release | none for 0.3.5 |
-| npm registry | `@iowarp/clio-coder@0.3.5` absent; `latest` is `0.3.4` |
+| Tags | none for 0.3.6, local or remote |
+| GitHub Release | none for 0.3.6 |
+| npm registry | `@iowarp/clio-coder@0.3.6` absent; `latest` is `0.3.4` |
 | Commit provenance identity | Post-release maintainer follow-up, not a gate: verifying `clio-coder@iowarp.ai` on IOWarp-controlled GitHub and GitLab identities (such as `clio-coder-bot` or `iowarp-clio`, with `assets/clio-coder-avatar-512.png` as the avatar) only changes how those platforms render the trailers. |
 
 ---
@@ -59,22 +59,22 @@ Run against the exact final candidate with `NO_COLOR` unset and
 ## Part 2: version and notes (repeatable)
 
 13. Files carrying a version reference, to update together if the number
-    changes: `package.json` and `package-lock.json`, the `## 0.3.5 - <date>`
-    heading in `CHANGELOG.md`, the `(Version: 0.3.5)` markers in `docs/*.md`,
-    the `Blueprint (v0.3.5)` titles in `docs/html/*.html`, the `--branch`
+    changes: `package.json` and `package-lock.json`, the `## 0.3.6 - <date>`
+    heading in `CHANGELOG.md`, the `(Version: 0.3.6)` markers in `docs/*.md`,
+    the `Blueprint (v0.3.6)` titles in `docs/html/*.html`, the `--branch`
     pin in the README install block (the hygiene lint checks it), and the
     measured-at figures in `scripts/check-release.mjs` if the package size
     moved materially.
-14. Confirm the `## 0.3.5` section of `CHANGELOG.md` describes every
+14. Confirm the `## 0.3.6` section of `CHANGELOG.md` describes every
     user-visible behavior change, including the ones that alter existing
     behavior, and carries no Workbench release narrative. The release workflow
     uses this section verbatim as the GitHub Release body.
 15. Re-run `npm run ci:release` after any version edit and commit as one
-    commit on `v0.3.5`.
+    commit on `v0.3.6`.
 
 ## Part 3: present the gate
 
-16. Report to the operator before touching `main`: the exact final `v0.3.5`
+16. Report to the operator before touching `main`: the exact final `v0.3.6`
     SHA and clean status, the commits added since the handoff SHA, the gate
     commands with pass/fail totals for both Node majors, the package version
     and changelog heading, the tarball audit, the clean-install results and any
@@ -93,9 +93,9 @@ confirming the exact SHA and the commands.
 ## Part 4: fast-forward `main`
 
 17. `git fetch origin` immediately before integrating; require `origin/main`
-    to be an ancestor of the reviewed `v0.3.5` tip and confirm no other
+    to be an ancestor of the reviewed `v0.3.6` tip and confirm no other
     worktree has `main` checked out.
-18. `git checkout main && git merge --ff-only v0.3.5`. No merge commit, no
+18. `git checkout main && git merge --ff-only v0.3.6`. No merge commit, no
     rebase, no reset. Verify `main` equals the reviewed SHA and is clean.
 19. `git fetch origin` once more; stop on any unexpected remote movement. Then
     `git push origin main`. Never `--force` or `--force-with-lease`.
@@ -107,12 +107,12 @@ confirming the exact SHA and the commands.
     tagged tree itself. A red run still blocks the cut; investigate it rather
     than tagging around it, and never silence a flake with an unrelated
     change.
-21. Reconfirm that tag `v0.3.5` and the GitHub Release do not exist, then
-    `git tag -a v0.3.5 -m "Clio Coder 0.3.5"` on the green SHA and
-    `git push origin refs/tags/v0.3.5`.
+21. Reconfirm that tag `v0.3.6` and the GitHub Release do not exist, then
+    `git tag -a v0.3.6 -m "Clio Coder 0.3.6"` on the green SHA and
+    `git push origin refs/tags/v0.3.6`.
 22. The tag push triggers `.github/workflows/release.yml`, which verifies the
     tag matches `package.json`, runs `npm run ci:release` on the tagged tree,
-    extracts the `## 0.3.5` section of `CHANGELOG.md` as the release body, and
+    extracts the `## 0.3.6` section of `CHANGELOG.md` as the release body, and
     attaches the tarball.
     Do not create a release by hand. Verify the run's SHA, the notes, the
     attached tarball, and the URL.
@@ -120,7 +120,7 @@ confirming the exact SHA and the commands.
 ## Part 6: npm publication (irreversible)
 
 23. `npm whoami` and confirm the registry and account; reconfirm
-    `@iowarp/clio-coder@0.3.5` is still absent.
+    `@iowarp/clio-coder@0.3.6` is still absent.
 24. Obtain the operator's explicit dist-tag decision. `latest` makes this the
     default install for every user; `--tag next` keeps `0.3.4` as the default.
 25. Run `npm publish` (or `npm publish --tag next`) once. `prepublishOnly`
@@ -130,13 +130,13 @@ confirming the exact SHA and the commands.
 
 ## Part 7: post-publish verification and follow-ups
 
-27. `npm view @iowarp/clio-coder@0.3.5` and the selected dist-tag.
+27. `npm view @iowarp/clio-coder@0.3.6` and the selected dist-tag.
 28. On a clean machine, `npm install -g @iowarp/clio-coder` from the registry
     rather than from a local tarball, then repeat step 12 against it, plus
     `configure` to a real target and one real turn when one is authorized.
     This is the only step that tests what users actually receive.
 29. From an installation of 0.3.4, verify `clio-coder upgrade` finds and
-    applies 0.3.5.
+    applies 0.3.6.
 30. Record the SHA, CI URL, tag, GitHub Release URL, npm version and dist-tag,
     tarball evidence, and the post-publish verification in the release report.
 31. Maintainer follow-up, independent of the release: verify the commit
