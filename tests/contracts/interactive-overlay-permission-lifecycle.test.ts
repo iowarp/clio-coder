@@ -348,7 +348,7 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			{
 				kind: "ask",
 				classification: { actionClass: "write", reasons: [] },
-				rejection: { short: "write needs approval", detail: "write needs approval" },
+				rejection: { short: "write needs approval", detail: "write needs approval", hints: [] },
 			} as SafetyDecision,
 			{
 				requestId: "req-workspace",
@@ -360,7 +360,11 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			{
 				kind: "ask",
 				classification: { actionClass: "system_modify", reasons: ["sudo-or-doas"] },
-				rejection: { short: "system modification needs approval", detail: "system modification needs approval" },
+				rejection: {
+					short: "system modification needs approval",
+					detail: "system modification needs approval",
+					hints: [],
+				},
 			} as SafetyDecision,
 			{ requestId: "req-system", axis: "net:system-modify-confirm" },
 		);
