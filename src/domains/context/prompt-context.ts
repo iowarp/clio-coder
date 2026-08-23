@@ -20,6 +20,10 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
  * context-init preload reporting, and `clio-coder config inspect`, so every surface
  * measures the same text the session prompt would preload.
  */
+/** The one line that stands in for a handbook this workspace does not have. */
+export const HANDBOOK_ABSENT_FRAGMENT =
+	"<handbook>none: this workspace has no CLIO-CODER.md, so do not read one; learn the repository from its files, and the operator can run /context init to write a handbook</handbook>";
+
 export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const projectType = detectProjectType(cwd);
 	const pieces = [renderProjectTypeFragment(projectType)];
@@ -30,6 +34,10 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	for (const issue of loadedClioMd.errors) {
 		warnings.push(`clio: malformed ${issue.path} ignored: ${issue.error}`);
 	}
+	// Said where the handbook would have been: a model that sees no project
+	// context spends its first tool call reading CLIO-CODER.md and gets
+	// ENOENT, while the operator's header already says it is missing (#191).
+	if (loadedClioMd.files.length === 0 && loadedClioMd.errors.length === 0) pieces.push(HANDBOOK_ABSENT_FRAGMENT);
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
 		const state = readClioState(cwd);

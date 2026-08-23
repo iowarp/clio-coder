@@ -18,7 +18,11 @@ import {
 	resolveModelReference,
 } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
-import { resolveRuntimeTarget, runtimeResolutionWarnings } from "../../src/domains/providers/runtime-resolution.js";
+import {
+	resolveRuntimeTarget,
+	runtimeResolutionWarnings,
+	runtimeResolutionWarningsBesideThinkingNotice,
+} from "../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
 import { synthesizeOpenAICompatModel } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -370,6 +374,34 @@ describe("contracts/providers", () => {
 		ok(
 			runtimeResolutionWarnings(resolution.diagnostics).includes(unverified.message),
 			"and it must survive the filter every human-facing surface reads",
+		);
+	});
+
+	/**
+	 * An always-on reasoning model produced three notices per target change that
+	 * said one thing: the `thinking-coerced` warning, the `thinking-always-on`
+	 * warning, and the combined clamp line the chat prints from the resolved
+	 * thinking notice (issue #191). The two halves are dropped when the combined
+	 * line exists; a coercion with no notice behind it keeps its own line.
+	 */
+	it("drops the thinking halves a combined clamp line already says", () => {
+		const diagnostics = [
+			{ severity: "warning" as const, code: "thinking-coerced", message: "thinking medium resolved to forced" },
+			{
+				severity: "warning" as const,
+				code: "thinking-always-on",
+				message: "medium was ignored because thinking is always on",
+			},
+			{ severity: "warning" as const, code: "context-window-low", message: "Target offers 8192 context tokens" },
+			{ severity: "info" as const, code: "thinking-applied", message: "applied" },
+		];
+		deepStrictEqual(
+			runtimeResolutionWarningsBesideThinkingNotice(diagnostics, "medium was ignored because thinking is always on"),
+			["Target offers 8192 context tokens"],
+		);
+		deepStrictEqual(
+			runtimeResolutionWarningsBesideThinkingNotice(diagnostics, "   "),
+			runtimeResolutionWarnings(diagnostics),
 		);
 	});
 

@@ -97,6 +97,7 @@ export {
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
 	runtimeResolutionWarnings,
+	runtimeResolutionWarningsBesideThinkingNotice,
 	runtimeTargetSnapshot,
 } from "./runtime-resolution.js";
 export {

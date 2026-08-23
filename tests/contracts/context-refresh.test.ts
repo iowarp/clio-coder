@@ -18,6 +18,7 @@ import {
 	wikiDir,
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
+import { HANDBOOK_ABSENT_FRAGMENT } from "../../src/domains/context/prompt-context.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
 const scratchRoots: string[] = [];
@@ -204,6 +205,25 @@ describe("contracts/context-refresh", () => {
 		strictEqual(result.clioMd, "absent");
 		ok(existsSync(join(cwd, ".clio-coder", "codewiki.json")));
 		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), false);
+	});
+
+	/**
+	 * With the header already saying the handbook is missing, the model still
+	 * spent its first tool call reading CLIO-CODER.md and got ENOENT (#191). The
+	 * absence is stated where the handbook would have been injected, and only
+	 * there: a malformed handbook is a warning, not an absence.
+	 */
+	it("states in the prompt that no handbook exists instead of leaving the slot empty", async () => {
+		const cwd = scratchProject();
+		const rendered = renderPromptContext(cwd);
+		ok(rendered.text.includes(HANDBOOK_ABSENT_FRAGMENT), rendered.text);
+		ok(rendered.text.includes("do not read one"), rendered.text);
+		deepStrictEqual(rendered.handbookFiles, []);
+
+		writeFileSync(join(cwd, "CLIO-CODER.md"), "# Fixture\n\nA project with a handbook.\n", "utf8");
+		const withHandbook = renderPromptContext(cwd);
+		ok(!withHandbook.text.includes("<handbook>none"), withHandbook.text);
+		ok(withHandbook.text.includes("# Fixture"), withHandbook.text);
 	});
 
 	/**
