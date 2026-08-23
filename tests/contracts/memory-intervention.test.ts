@@ -7,6 +7,7 @@ import {
 	MEMORY_INTERVENTION_REGISTRATION_ID,
 } from "../../src/domains/middleware/memory-intervention.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { TOOL_RESULT_DIGEST_MAX_BYTES, type ToolResultDigest } from "../../src/tools/result-disposition.js";
 
 function toolInput(
 	hook: "before_tool" | "after_tool",
@@ -35,6 +36,27 @@ function execute(
 ): ReadonlyArray<MiddlewareEffect> {
 	registration.evaluate(toolInput("before_tool", call, args));
 	return registration.evaluate(toolInput("after_tool", call, args, resultKind, errorMessage));
+}
+
+function executeWithDigest(
+	registration: ReturnType<typeof createMemoryInterventionRegistration>,
+	call: number,
+	args: Readonly<Record<string, unknown>>,
+	digest: ToolResultDigest,
+	errorMessage: string,
+): ReadonlyArray<MiddlewareEffect> {
+	registration.evaluate(toolInput("before_tool", call, args));
+	return registration.evaluate({
+		...toolInput("after_tool", call, args, "error", errorMessage),
+		toolResultDigest: digest,
+	});
+}
+
+function promptedTrajectory(userPrompt: string): ReadonlyArray<Record<string, unknown>> {
+	const marker = "Recent completed tool trajectory:";
+	const at = userPrompt.indexOf(marker);
+	if (at === -1) throw new Error("memory prompt omitted its trajectory");
+	return JSON.parse(userPrompt.slice(at + marker.length).trim()) as ReadonlyArray<Record<string, unknown>>;
 }
 
 const SILENT_MODEL_RESPONSE = "<operations>[]</operations>\n<no_intervention/>";
@@ -109,6 +131,87 @@ describe("contracts/memory intervention rules tier", () => {
 		ok(effect?.kind === "annotate_tool_result");
 		match(effect.message, /failed with TS2345: Argument of type A is not assignable to B/u);
 		ok(!effect.message.includes("at line 12"));
+	});
+
+	it("keeps operation identity separate and sanitizes canonical digests before memory", async () => {
+		const bank = new TaskMemoryBank();
+		const prompts: string[] = [];
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getModelClient: () => ({
+				async complete(request) {
+					prompts.push(request.userPrompt);
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+		const args = { command: "npm run test:file -- stable.test.ts" };
+		const secret = "api_key=abcdefghijklmnop";
+		const provenance = {
+			producer: "code",
+			source: "canonical-result-disposition",
+			algorithm: "redacted-context-digest-v1",
+			contextMode: "summary",
+		} as const;
+
+		executeWithDigest(
+			registration,
+			1,
+			args,
+			{ text: `first failure ${secret} ${"x".repeat(400)}`, provenance },
+			`raw first failure ${secret}`,
+		);
+		executeWithDigest(
+			registration,
+			2,
+			args,
+			{ text: `second failure ${secret}`, provenance },
+			`raw second failure ${secret}`,
+		);
+		await registration.runPromptedStep({ deterministicTrigger: false, task: "inspect stable failure identity" });
+
+		const bankText = JSON.stringify(bank.snapshot());
+		strictEqual(bank.snapshot().procedural.length, 1, "one operation fingerprint updates one failure record");
+		strictEqual(bankText.includes(secret), false);
+		strictEqual(prompts.length, 1);
+		strictEqual(prompts[0]?.includes(secret), false);
+		const trajectory = promptedTrajectory(prompts[0] ?? "");
+		strictEqual(trajectory.length, 2);
+		strictEqual(trajectory[0]?.operationFingerprint, trajectory[1]?.operationFingerprint);
+		strictEqual("fingerprint" in (trajectory[0] ?? {}), false);
+		strictEqual(trajectory[0]?.resultDigest === trajectory[1]?.resultDigest, false);
+		for (const step of trajectory) {
+			ok(Buffer.byteLength(String(step.resultDigest), "utf8") <= TOOL_RESULT_DIGEST_MAX_BYTES);
+			const digestProvenance = step.resultDigestProvenance as Record<string, unknown>;
+			strictEqual(digestProvenance.source, "canonical-result-disposition");
+			strictEqual(digestProvenance.contextMode, "summary");
+			strictEqual(digestProvenance.redactions, 1);
+		}
+	});
+
+	it("records a safe legacy provenance when canonical summaries are unavailable", async () => {
+		const bank = new TaskMemoryBank();
+		const prompts: string[] = [];
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getModelClient: () => ({
+				async complete(request) {
+					prompts.push(request.userPrompt);
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+		const secret = "api_key=abcdefghijklmnop";
+		execute(registration, 1, { command: "legacy failing command" }, "error", `failed with ${secret}`);
+		await registration.runPromptedStep({ deterministicTrigger: false, task: "inspect legacy fallback" });
+
+		strictEqual(JSON.stringify(bank.snapshot()).includes(secret), false);
+		strictEqual(prompts[0]?.includes(secret), false);
+		const trajectory = promptedTrajectory(prompts[0] ?? "");
+		const provenance = trajectory[0]?.resultDigestProvenance as Record<string, unknown>;
+		strictEqual(provenance.source, "legacy-fallback");
+		strictEqual(provenance.algorithm, "redacted-legacy-digest-v1");
+		strictEqual(provenance.redactions, 1);
 	});
 
 	it("annotates a repeated failure again in a later turn", () => {

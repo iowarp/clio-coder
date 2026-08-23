@@ -133,7 +133,7 @@ it runs detached from it.
 | Interval | After `memory.intervention.everyNTools` completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path. |
 | Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. |
 | Loop signal | Reuses the orchestrator loop guard's verdict; it does not infer a second competing loop detector. |
-| Repeated failure | The rules tier records failed tool fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
+| Repeated failure | The rules tier records failed operation fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
 | Post-compaction | The first turn start after compaction restores status and knowledge once, without a model call, because compaction is precisely where execution facts leave the active window. |
 
 ### Two delivery channels
@@ -145,11 +145,13 @@ repeated failure uses exactly one of them:
 
 - **Mid-turn annotation.** The second identical failure appends one cited
   `Memory:` advisory to that tool's own result, through the existing
-  `annotate_tool_result` effect the loop guard already uses. The advisory digest
-  takes the first line of the tool error that names a problem, falling back to
-  the first line when no line names one. The model reads it on its very next round.
-  This is spent once per fingerprint per turn and re-earned in a later turn, because
-  the same command failing again after an operator turn is news again.
+  `annotate_tool_result` effect the loop guard already uses. The advisory uses
+  the canonical result-disposition digest when one is available. Older hook
+  producers fall back to the first tool-error line that names a problem. Every
+  digest is redacted and byte-capped before it reaches the task bank. The model
+  reads the advisory on its very next round. This is spent once per operation
+  fingerprint per turn and re-earned in a later turn, because the same command
+  failing again after an operator turn is news again.
 - **Next-turn reminder.** Post-compaction reactivation and any background-model
   reminder ride the `inject_reminder` buffer into the next submitted turn, inside
   the visible `<system-reminder>` block, and persist in the session ledger.
@@ -319,15 +321,23 @@ operation while leaving deterministic protection active.
 Measured on the shipped prompt against `google/gemma-4-26b-a4b-qat`, across ten
 live steps and forty controlled runs on the same route.
 
-The tier writes `update_status` reliably and `save_knowledge` rarely, and that is
-correct rather than broken. A trajectory step carries the tool name, a bounded
-call description, an outcome, and a result digest. On success the digest is an
-opaque result fingerprint, so a window of successful reads tells the model which
-files were touched and nothing about what is in them. There is no durable fact in
-that input, and a status line is the only faithful thing to write about it.
+Earlier measurements found that the tier wrote `update_status` reliably and
+`save_knowledge` rarely. At that time a successful trajectory step carried an
+opaque result fingerprint, so a window of successful reads told the model which
+files were touched and nothing about what was in them.
 
-Three candidate causes were ruled out by controlled runs that changed one
-variable at a time:
+A current trajectory step keeps two fields with different jobs. The operation
+fingerprint identifies repeated calls and remains derived only from the tool name
+and arguments. The result digest is human-readable diagnostic content from the
+canonical result-disposition projection, with explicit source provenance. Secret
+redaction and a 240-byte cap apply before the digest reaches the task bank or the
+background request. A metadata-only disposition contributes outcome facts and no
+captured body. Results without a canonical disposition use a redacted deterministic
+fallback, so older tool producers remain useful without gaining a second model
+summarizer.
+
+Three candidate causes were ruled out in the earlier implementation by
+controlled runs that changed one variable at a time:
 
 - rewriting the prompt's second worked example to carry a `save_knowledge` moved
   nothing, and made the model emit no operations at all in four of five runs;

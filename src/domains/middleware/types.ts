@@ -1,3 +1,5 @@
+import type { ToolResultDigest } from "../../tools/result-disposition.js";
+
 /**
  * The five lifecycle events of the unified middleware layer (w3 cutover).
  * Every event has a live producer: the registry fires before_tool/after_tool
@@ -86,6 +88,8 @@ export interface MiddlewareHookInput {
 	toolArgs?: Readonly<Record<string, unknown>>;
 	/** Structured result details, supplied by the registry on after_tool. Read-only by contract. */
 	toolResultDetails?: Readonly<Record<string, unknown>>;
+	/** Bounded deterministic diagnostic supplied by the result-disposition layer on after_tool. */
+	toolResultDigest?: Readonly<ToolResultDigest>;
 	/**
 	 * Free text attached to the hook occurrence; on turn_end this is the final
 	 * assistant message text. The one typed exception to the scalar `metadata`

@@ -19,13 +19,14 @@ import type { ToolResult, ToolSpec } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import {
 	deterministicDiagnosticSummary,
+	TOOL_RESULT_DIGEST_MAX_BYTES,
 	type ToolResultDisposition,
 	type ToolResultDispositionMetadata,
 	toolResultContextText,
 	toolResultPresentationPolicy,
 	toolResultPresentationText,
 } from "../../src/tools/result-disposition.js";
-import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { shapeToolResult, toolResultDigestFor } from "../../src/tools/result-shaping.js";
 
 const roots: string[] = [];
 const savedEnv = {
@@ -189,6 +190,103 @@ describe("contracts/tool-result disposition", () => {
 		}
 	});
 
+	it("produces stable safe task-memory digests for every canonical result state", () => {
+		const secret = "api_key=abcdefghijklmnop";
+		const cases: ReadonlyArray<{
+			name: string;
+			mode: "bounded" | "summary" | "metadata-only";
+			result: ToolResult;
+			expected: ReadonlyArray<string>;
+		}> = [
+			{
+				name: "success",
+				mode: "summary",
+				result: { kind: "ok", output: `compiled 42 files\n${secret}`, details: { outcome: "success", exitCode: 0 } },
+				expected: ["kind=ok", 'outcome="success"', "compiled 42 files", "[redacted:assignment]"],
+			},
+			{
+				name: "failure",
+				mode: "bounded",
+				result: {
+					kind: "error",
+					message: `fatal: build failed\n${secret}`,
+					details: { outcome: "nonzero", exitCode: 2 },
+				},
+				expected: ["kind=error", 'outcome="nonzero"', "exitCode=2", "fatal: build failed"],
+			},
+			{
+				name: "timeout",
+				mode: "bounded",
+				result: {
+					kind: "error",
+					message: "bash: command timed out after 50ms",
+					details: { outcome: "timeout", exitCode: null, timedOut: true, signal: "SIGTERM" },
+				},
+				expected: ['outcome="timeout"', "timedOut=true", 'signal="SIGTERM"'],
+			},
+			{
+				name: "truncation",
+				mode: "summary",
+				result: {
+					kind: "error",
+					message: `${"noisy output\n".repeat(200)}fatal: output cap reached`,
+					details: { outcome: "output-cap", exitCode: null, outputCapped: true },
+				},
+				expected: ["truncated=true", 'outcome="output-cap"', "outputCapped=true"],
+			},
+			{
+				name: "metadata-only",
+				mode: "metadata-only",
+				result: {
+					kind: "error",
+					message: `excluded body ${secret}`,
+					details: { outcome: "nonzero", exitCode: 7 },
+				},
+				expected: ["mode=metadata-only", 'outcome="nonzero"', "exitCode=7"],
+			},
+		];
+
+		for (const testCase of cases) {
+			const declared = disposition(testCase.mode, "folded", 512);
+			const spec = mockSpec(declared, testCase.result, 512);
+			const first = toolResultDigestFor(spec, testCase.result, declared);
+			const second = toolResultDigestFor(spec, testCase.result, declared);
+
+			deepStrictEqual(first, second, testCase.name);
+			strictEqual(first.provenance.source, "canonical-result-disposition", testCase.name);
+			strictEqual(first.provenance.producer, "code", testCase.name);
+			strictEqual(first.provenance.contextMode, testCase.mode, testCase.name);
+			ok(Buffer.byteLength(first.text, "utf8") <= TOOL_RESULT_DIGEST_MAX_BYTES, testCase.name);
+			strictEqual(first.text.includes(secret), false, testCase.name);
+			for (const expected of testCase.expected) ok(first.text.includes(expected), `${testCase.name}: ${first.text}`);
+			if (testCase.mode === "metadata-only") {
+				strictEqual(first.text.includes("excluded body"), false, first.text);
+			}
+		}
+	});
+
+	it("uses a deterministic redacted fallback when no canonical disposition exists", () => {
+		const secret = "api_key=abcdefghijklmnop";
+		const result: ToolResult = { kind: "ok", output: `legacy result ${secret}` };
+		const spec = mockSpec(undefined, result);
+		const first = toolResultDigestFor(spec, result);
+		const second = toolResultDigestFor(spec, result);
+
+		deepStrictEqual(first, second);
+		strictEqual(first.provenance.source, "legacy-fallback");
+		strictEqual(first.provenance.algorithm, "redacted-legacy-digest-v1");
+		strictEqual(first.text.includes(secret), false);
+		ok(first.text.includes("legacy result api_key=[redacted:assignment]"), first.text);
+		ok(Buffer.byteLength(first.text, "utf8") <= TOOL_RESULT_DIGEST_MAX_BYTES);
+
+		const omitted = toolResultDigestFor(mockSpec(undefined, { kind: "ok", output: "" }, 96), {
+			kind: "ok",
+			output: `${"visible prefix ".repeat(20)}${secret}`,
+		});
+		strictEqual(omitted.text.includes(secret), false);
+		strictEqual(omitted.text.includes("[redacted:assignment]"), false, "omitted legacy content never reaches the digest");
+	});
+
 	it("downgrades full explicitly at the hard budget and retains the offload artifact", () => {
 		const stateDir = useStateDir();
 		const source = `${"payload🙂".repeat(300)}\nfinal failure evidence`;
@@ -293,6 +391,10 @@ describe("contracts/tool-result disposition", () => {
 		if (verdict.kind !== "ok") throw new Error("expected admitted result");
 		strictEqual(afterInputs.length, 1);
 		strictEqual(afterInputs[0]?.metadata?.resultBytes, Buffer.byteLength("raw tool body", "utf8"));
+		strictEqual(afterInputs[0]?.toolResultDigest?.provenance.source, "canonical-result-disposition");
+		strictEqual(afterInputs[0]?.toolResultDigest?.provenance.contextMode, "summary");
+		ok(afterInputs[0]?.toolResultDigest?.text.includes("raw tool body"));
+		strictEqual(afterInputs[0]?.toolResultDigest?.text.includes("middleware appended once"), false);
 		const applied = metadata(verdict.result);
 		strictEqual(applied.applications, 1);
 		strictEqual(

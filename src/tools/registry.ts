@@ -27,8 +27,8 @@ import { detectValidationCommand } from "../domains/safety/protected-artifacts.j
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
-import type { ToolResultDisposition } from "./result-disposition.js";
-import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult } from "./result-shaping.js";
+import type { ToolResultDigest, ToolResultDisposition } from "./result-disposition.js";
+import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
 
 /**
  * Tool registry. Admission point for every tool call. Delegates classification
@@ -421,13 +421,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);
 				const result = await spec.run(preparedArgs, options);
-				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
+				const digest = toolResultDigestFor(spec, result, resultDisposition);
+				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition);
 				return { kind: "ok", result: finalResult, decision };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				const result: ToolResult = { kind: "error", message };
-				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
+				const digest = toolResultDigestFor(spec, result, resultDisposition);
+				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				return {
 					kind: "ok",
 					result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition),
@@ -446,9 +448,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		decision: SafetyDecision,
 		options: ToolInvokeOptions | undefined,
 		result?: ToolResult,
+		resultDigest?: ToolResultDigest,
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
-		const input = buildToolHookInput(hook, spec, call, decision, "operating", options, result);
+		const input = buildToolHookInput(hook, spec, call, decision, "operating", options, result, resultDigest);
 		const effects = deps.middleware.runHook(input).effects;
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
@@ -1135,6 +1138,7 @@ function buildToolHookInput(
 	posture: string,
 	options: ToolInvokeOptions | undefined,
 	result: ToolResult | undefined,
+	resultDigest: ToolResultDigest | undefined,
 ): MiddlewareHookInput {
 	const metadata: Record<string, MiddlewareMetadataValue> = {
 		posture,
@@ -1171,6 +1175,7 @@ function buildToolHookInput(
 	};
 	if (call.args !== undefined) input.toolArgs = call.args;
 	if (result?.details !== undefined) input.toolResultDetails = result.details;
+	if (resultDigest !== undefined) input.toolResultDigest = resultDigest;
 	if (options?.runId !== undefined) input.runId = options.runId;
 	if (options?.sessionId !== undefined) input.sessionId = options.sessionId;
 	if (options?.turnId !== undefined) input.turnId = options.turnId;

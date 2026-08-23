@@ -1,3 +1,4 @@
+import type { ToolResultDigestProvenance } from "../../tools/result-disposition.js";
 import {
 	buildMemoryInterventionUserPrompt,
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
@@ -30,10 +31,11 @@ export const TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS = 4_000;
 export interface TaskMemoryTrajectoryStep {
 	step: number;
 	toolName: string;
-	fingerprint: string;
+	operationFingerprint: string;
 	callDescription: string;
 	outcome: "ok" | "error";
 	resultDigest: string;
+	resultDigestProvenance: ToolResultDigestProvenance;
 }
 
 export interface TaskMemoryModelRequest {
