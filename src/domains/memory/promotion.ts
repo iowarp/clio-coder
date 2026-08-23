@@ -37,8 +37,8 @@ export interface MemoryPromotionSource {
 }
 
 interface ScopeSourceIdentities {
-	runtimeIds: ReadonlyArray<string>;
-	agentIds: ReadonlyArray<string>;
+	runtimeIds?: ReadonlyArray<string>;
+	agentIds?: ReadonlyArray<string>;
 }
 
 /**
@@ -68,14 +68,14 @@ export function validateMemoryScopeSelection(
 			return selection;
 		case "runtime": {
 			const runtime = normalizeNamedIdentity(selection.runtime, "runtime");
-			if (!source.runtimeIds.includes(runtime.key)) {
+			if (!(source.runtimeIds ?? []).includes(runtime.key)) {
 				throw new Error(`runtime identity '${runtime.key}' does not match the promotion source`);
 			}
 			return { scope: "runtime", runtime };
 		}
 		case "agent": {
 			const agent = normalizeNamedIdentity(selection.agent, "agent");
-			if (!source.agentIds.includes(agent.key)) {
+			if (!(source.agentIds ?? []).includes(agent.key)) {
 				throw new Error(`agent identity '${agent.key}' does not match the promotion source`);
 			}
 			return { scope: "agent", agent };
