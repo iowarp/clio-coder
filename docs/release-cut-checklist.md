@@ -13,11 +13,12 @@ state of every step.
 | --- | --- |
 | Branch | `v0.3.6`, local only; pushed with the explicit refspec `refs/heads/v0.3.6` when the operator decides, never as a bare name that a tag could shadow |
 | `package.json` version | `0.3.6`; the top `CHANGELOG.md` heading is `## 0.3.6 - 2026-08-23` |
-| `main` | `2518f301`, the published `v0.3.4` commit; it is an ancestor of `v0.3.6` and moves only at Part 4. |
-| `origin/main` | `2518f301`, matching the published `v0.3.4` commit |
+| `main` | `590fda7d`, which already carries the v0.3.5 content and the CI diet; it is an ancestor of `v0.3.6` and moves only at Part 4. |
+| `origin/main` | `590fda7d`, matching `main` with the v0.3.5 content and the CI diet |
 | Tags | none for 0.3.6, local or remote |
 | GitHub Release | none for 0.3.6 |
 | npm registry | `@iowarp/clio-coder@0.3.6` absent; `latest` is `0.3.4` |
+| npm history | `@iowarp/clio-coder` has published versions 0.3.0 through 0.3.4, with `latest` at 0.3.4. Version 0.3.5 was published and withdrawn, so `@iowarp/clio-coder@0.3.5` can never be reused. |
 | Commit provenance identity | Post-release maintainer follow-up, not a gate: verifying `clio-coder@iowarp.ai` on IOWarp-controlled GitHub and GitLab identities (such as `clio-coder-bot` or `iowarp-clio`, with `assets/clio-coder-avatar-512.png` as the avatar) only changes how those platforms render the trailers. |
 
 ---
