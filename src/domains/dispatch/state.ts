@@ -42,6 +42,7 @@ export interface FleetRunRecord {
 	endedAt: string | null;
 	resumedFrom: string | null;
 	steps: Array<{ stepId: string; result: ExecutionStepResult }>;
+	dynamicPlans?: Array<{ stepId: string; hash: string }>;
 }
 
 export interface LedgerOptions {

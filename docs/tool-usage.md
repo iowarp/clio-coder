@@ -261,7 +261,7 @@ Argument tolerance: `tasks` sent as a JSON string is parsed and a single object 
 
 Output is one batch-shaped summary even for a single task: a header `dispatch (<mode>) total=N failed=M`, the assignment id list, then one terminal-attempt receipt line per assignment (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker's final assistant text. `details = {mode, assignmentIds, receiptCount, failedCount, runs[]}`, and each `runs[]` entry carries distinct `assignmentId` and terminal `runId` fields plus the structured `verification` state and `receiptIntegrity` result. There is no `runIds` compatibility alias. Any terminal attempt with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a `note=` marker; do not treat such a run as validated work.
 
-The summary separates five things that must never be conflated: `receipt_integrity=verified/v18/sha256` comes only from verification against the ledger; `host_verification=<status>` describes orchestrator-executed declared checks; `evidence_verification=<state>/<basis>` describes worker-tool validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
+The summary separates five things that must never be conflated: `receipt_integrity=verified/v19/sha256` comes only from verification against the ledger; `host_verification=<status>` describes orchestrator-executed declared checks; `evidence_verification=<state>/<basis>` describes worker-tool validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
 
 Exit zero is insufficient without a durable deliverable. A successful native or ACP run must seal a nonempty `output.state="final"`. Otherwise it fails with `worker_final_output_missing`; any unfinished text remains partial diagnostics and automatic retry is suppressed. Live tool-use preambles never replace a missing receipt answer.
 
@@ -269,7 +269,7 @@ Sealed receipts are the durable evidence; worker prose remains advisory until ve
 
 ```text
 dispatch(list=true)
-dispatch(agent="debugger", task="Adversarially verify the strict v18 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
+dispatch(agent="debugger", task="Adversarially verify the strict v19 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
 dispatch(tasks=["Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion"])
 dispatch(tasks=[
   {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes"},

@@ -35,7 +35,7 @@ describe("fleet contracts", () => {
 		// v4 adds enforced write boundaries. A readonly contract parses unchanged
 		// under it, because readonly is exactly the empty allowlist v4 enforces.
 		strictEqual(parseFleetContract(valid.replace("version: 1", "version: 4"), "fleet.md").version, 4);
-		throws(() => parseFleetContract(valid.replace("version: 1", "version: 5"), "fleet.md"), /version/);
+		strictEqual(parseFleetContract(valid.replace("version: 1", "version: 5"), "fleet.md").version, 5);
 	});
 	it("unknown fleet keys are rejected", () =>
 		throws(

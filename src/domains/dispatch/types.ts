@@ -321,7 +321,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 18;
+	version: 19;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -749,6 +749,8 @@ export interface RunReceipt {
 	council?: RunCouncilProvenance;
 	/** Plan-approval provenance; present only on runs of an approval-gated plan. */
 	plan?: RunPlanProvenance;
+	/** Version 5 fleet gate artifact authored by this run. */
+	fleetGate?: { path: string; pathHash: string };
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
 	/** Effective project-context tier for this run; absent on receipts written before this field landed. */

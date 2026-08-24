@@ -35,6 +35,7 @@ export type FleetOnFailure = "stop" | "continue";
  * allowlist stated out loud.
  */
 export const FLEET_WRITE_BOUNDARY_VERSION = 4;
+export const FLEET_DYNAMIC_STEP_VERSION = 5;
 
 /**
  * Upper bound on any declared loop. A loop is bounded in the contract, and the
@@ -63,6 +64,34 @@ export interface FleetContractAgentStep {
 	scope: FleetStepScope;
 	dependencies: ReadonlyArray<string>;
 	writes?: ReadonlyArray<string>;
+	target?: string;
+	profile?: string;
+}
+
+export interface FleetContractGateStep {
+	kind: "gate";
+	id: string;
+	agent: string;
+	path: string;
+	run: string;
+	scope: "workspace";
+	dependencies: ReadonlyArray<string>;
+	target?: string;
+	profile?: string;
+}
+
+export interface FleetContractPlanStep {
+	kind: "plan";
+	id: string;
+	agent: string;
+	roster: ReadonlyArray<string>;
+	maxTasks: number;
+	proposals: boolean;
+	scope: FleetStepScope;
+	dependencies: ReadonlyArray<string>;
+	writes?: ReadonlyArray<string>;
+	target?: string;
+	profile?: string;
 }
 
 /**
@@ -89,7 +118,15 @@ export interface FleetContractCodeStep {
 /** The verification half of a loop: the question that decides continuation. */
 export type FleetContractLoopCheck =
 	| { kind: "code"; command: string; scope: FleetStepScope; writes?: ReadonlyArray<string> }
-	| { kind: "agent"; agent: string; scope: FleetStepScope; writes?: ReadonlyArray<string> };
+	| {
+			kind: "agent";
+			agent: string;
+			scope: FleetStepScope;
+			writes?: ReadonlyArray<string>;
+			target?: string;
+			profile?: string;
+	  }
+	| { kind: "gate"; gate: string };
 
 /** The repair half. Always an agent: a deterministic repair is just a check. */
 export interface FleetContractLoopRepair {
@@ -97,6 +134,8 @@ export interface FleetContractLoopRepair {
 	agent: string;
 	scope: FleetStepScope;
 	writes?: ReadonlyArray<string>;
+	target?: string;
+	profile?: string;
 }
 
 /**
@@ -120,7 +159,12 @@ export interface FleetContractLoopStep {
 	repair: FleetContractLoopRepair;
 }
 
-export type FleetContractStep = FleetContractAgentStep | FleetContractCodeStep | FleetContractLoopStep;
+export type FleetContractStep =
+	| FleetContractAgentStep
+	| FleetContractCodeStep
+	| FleetContractLoopStep
+	| FleetContractGateStep
+	| FleetContractPlanStep;
 
 /**
  * Contract schema version.
@@ -137,7 +181,7 @@ export type FleetContractStep = FleetContractAgentStep | FleetContractCodeStep |
  * A version literal gives that reader a clear refusal instead of an obscure
  * unknown-property error deep in a step.
  */
-export type FleetContractVersion = 1 | 2 | 3 | 4;
+export type FleetContractVersion = 1 | 2 | 3 | 4 | 5;
 
 export interface FleetContract {
 	version: FleetContractVersion;
@@ -147,6 +191,7 @@ export interface FleetContract {
 	maxWorkers: number;
 	budgetUsd: number | null;
 	onFailure: FleetOnFailure;
+	writers?: 1;
 	/** Prompt template body with unresolved {{var}} placeholders. */
 	body: string;
 	path: string;
@@ -183,6 +228,12 @@ function writesSchema(version: FleetContractVersion) {
 		: {};
 }
 
+function routeSchema(version: FleetContractVersion) {
+	return version >= FLEET_DYNAMIC_STEP_VERSION
+		? { target: Type.Optional(Type.String({ minLength: 1 })), profile: Type.Optional(Type.String({ minLength: 1 })) }
+		: {};
+}
+
 function agentStepSchema(version: FleetContractVersion) {
 	return Type.Object(
 		{
@@ -192,6 +243,41 @@ function agentStepSchema(version: FleetContractVersion) {
 			scope: FleetScopeSchema,
 			dependencies: Type.Array(Type.String({ minLength: 1 })),
 			...writesSchema(version),
+			...routeSchema(version),
+		},
+		{ additionalProperties: false },
+	);
+}
+
+function gateStepSchema() {
+	return Type.Object(
+		{
+			kind: Type.Literal("gate"),
+			id: Type.String({ minLength: 1 }),
+			agent: Type.String({ minLength: 1 }),
+			path: Type.String({ minLength: 1 }),
+			run: Type.String({ minLength: 1 }),
+			scope: Type.Optional(Type.Literal("workspace")),
+			dependencies: Type.Array(Type.String({ minLength: 1 })),
+			...routeSchema(5),
+		},
+		{ additionalProperties: false },
+	);
+}
+
+function planStepSchema() {
+	return Type.Object(
+		{
+			kind: Type.Literal("plan"),
+			id: Type.String({ minLength: 1 }),
+			agent: Type.Optional(Type.String({ minLength: 1 })),
+			roster: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 16 }),
+			maxTasks: Type.Integer({ minimum: 1, maximum: 16 }),
+			proposals: Type.Optional(Type.Boolean()),
+			scope: FleetScopeSchema,
+			dependencies: Type.Array(Type.String({ minLength: 1 })),
+			...writesSchema(5),
+			...routeSchema(5),
 		},
 		{ additionalProperties: false },
 	);
@@ -230,12 +316,21 @@ function loopStepSchema(version: FleetContractVersion) {
 					},
 					{ additionalProperties: false },
 				),
+				...(version >= FLEET_DYNAMIC_STEP_VERSION
+					? [
+							Type.Object(
+								{ kind: Type.Literal("gate"), gate: Type.String({ minLength: 1 }) },
+								{ additionalProperties: false },
+							),
+						]
+					: []),
 				Type.Object(
 					{
 						kind: Type.Literal("agent"),
 						agent: Type.String({ minLength: 1 }),
 						scope: FleetScopeSchema,
 						...writesSchema(version),
+						...routeSchema(version),
 					},
 					{ additionalProperties: false },
 				),
@@ -246,6 +341,7 @@ function loopStepSchema(version: FleetContractVersion) {
 					agent: Type.String({ minLength: 1 }),
 					scope: FleetScopeSchema,
 					...writesSchema(version),
+					...routeSchema(version),
 				},
 				{ additionalProperties: false },
 			),
@@ -257,6 +353,15 @@ function loopStepSchema(version: FleetContractVersion) {
 function stepSchema(version: FleetContractVersion) {
 	if (version === 1) return agentStepSchema(1);
 	if (version === 2) return Type.Union([agentStepSchema(2), codeStepSchema(2)]);
+	if (version === 5) {
+		return Type.Union([
+			agentStepSchema(version),
+			codeStepSchema(version),
+			loopStepSchema(version),
+			gateStepSchema(),
+			planStepSchema(),
+		]);
+	}
 	return Type.Union([agentStepSchema(version), codeStepSchema(version), loopStepSchema(version)]);
 }
 
@@ -270,6 +375,7 @@ function frontmatterSchema(version: FleetContractVersion) {
 			maxWorkers: Type.Integer({ minimum: 1 }),
 			budgetUsd: Type.Optional(Type.Number()),
 			onFailure: Type.Union([Type.Literal("stop"), Type.Literal("continue")]),
+			...(version >= FLEET_DYNAMIC_STEP_VERSION ? { writers: Type.Optional(Type.Literal(1)) } : {}),
 		},
 		{ additionalProperties: false },
 	);
@@ -280,11 +386,12 @@ const SCHEMAS: Readonly<Record<FleetContractVersion, ReturnType<typeof frontmatt
 	2: frontmatterSchema(2),
 	3: frontmatterSchema(3),
 	4: frontmatterSchema(4),
+	5: frontmatterSchema(5),
 };
 
 function contractVersion(frontmatter: Record<string, unknown>): FleetContractVersion | null {
 	const value = frontmatter.version;
-	return value === 1 || value === 2 || value === 3 || value === 4 ? value : null;
+	return value === 1 || value === 2 || value === 3 || value === 4 || value === 5 ? value : null;
 }
 
 function firstSchemaError(frontmatter: Record<string, unknown>, version: FleetContractVersion): string | null {
@@ -299,15 +406,38 @@ function fleetsDir(cwd: string): string {
 }
 
 type RawStep = {
-	kind?: "agent" | "code" | "loop";
+	kind?: "agent" | "code" | "loop" | "gate" | "plan";
 	id: string;
 	agent?: string;
 	command?: string;
 	commitFrom?: string[];
 	writes?: string[];
 	maxAttempts?: number;
-	check?: { kind: "code" | "agent"; command?: string; agent?: string; scope: FleetStepScope; writes?: string[] };
-	repair?: { kind?: "agent"; agent: string; scope: FleetStepScope; writes?: string[] };
+	check?: {
+		kind: "code" | "agent" | "gate";
+		command?: string;
+		agent?: string;
+		gate?: string;
+		scope: FleetStepScope;
+		writes?: string[];
+		target?: string;
+		profile?: string;
+	};
+	repair?: {
+		kind?: "agent";
+		agent: string;
+		scope: FleetStepScope;
+		writes?: string[];
+		target?: string;
+		profile?: string;
+	};
+	target?: string;
+	profile?: string;
+	path?: string;
+	run?: string;
+	roster?: string[];
+	maxTasks?: number;
+	proposals?: boolean;
 } & Pick<FleetContractAgentStep, "scope"> & { dependencies: string[] };
 
 /** Normalized declaration, or nothing when this version declares no boundary. */
@@ -316,6 +446,36 @@ function normalizedWrites(writes: string[] | undefined): { writes?: ReadonlyArra
 }
 
 function normalizeStep(step: RawStep): FleetContractStep {
+	const route = (value: { target?: string; profile?: string }): { target?: string; profile?: string } => ({
+		...(value.target !== undefined ? { target: value.target } : {}),
+		...(value.profile !== undefined ? { profile: value.profile } : {}),
+	});
+	if (step.kind === "gate") {
+		return {
+			kind: "gate",
+			id: step.id,
+			agent: step.agent ?? "",
+			path: step.path ?? "",
+			run: step.run ?? "",
+			scope: "workspace",
+			dependencies: [...step.dependencies],
+			...route(step),
+		};
+	}
+	if (step.kind === "plan") {
+		return {
+			kind: "plan",
+			id: step.id,
+			agent: step.agent ?? "architect",
+			roster: [...(step.roster ?? [])],
+			maxTasks: step.maxTasks ?? 0,
+			proposals: step.proposals ?? false,
+			scope: step.scope,
+			dependencies: [...step.dependencies],
+			...normalizedWrites(step.writes),
+			...route(step),
+		};
+	}
 	if (step.kind === "loop") {
 		const check = step.check as NonNullable<RawStep["check"]>;
 		const repair = step.repair as NonNullable<RawStep["repair"]>;
@@ -327,8 +487,22 @@ function normalizeStep(step: RawStep): FleetContractStep {
 			check:
 				check.kind === "code"
 					? { kind: "code", command: check.command ?? "", scope: check.scope, ...normalizedWrites(check.writes) }
-					: { kind: "agent", agent: check.agent ?? "", scope: check.scope, ...normalizedWrites(check.writes) },
-			repair: { kind: "agent", agent: repair.agent, scope: repair.scope, ...normalizedWrites(repair.writes) },
+					: check.kind === "gate"
+						? { kind: "gate", gate: check.gate ?? "" }
+						: {
+								kind: "agent",
+								agent: check.agent ?? "",
+								scope: check.scope,
+								...normalizedWrites(check.writes),
+								...route(check),
+							},
+			repair: {
+				kind: "agent",
+				agent: repair.agent,
+				scope: repair.scope,
+				...normalizedWrites(repair.writes),
+				...route(repair),
+			},
 		};
 	}
 	if (step.kind === "code") {
@@ -349,6 +523,7 @@ function normalizeStep(step: RawStep): FleetContractStep {
 		scope: step.scope,
 		dependencies: [...step.dependencies],
 		...normalizedWrites(step.writes),
+		...route(step),
 	};
 }
 
@@ -406,6 +581,13 @@ export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path
 		}
 	}
 	for (const step of contract.steps) {
+		if (step.kind === "loop" && step.check.kind === "gate") {
+			const gateId = step.check.gate;
+			const gate = contract.steps.find((candidate) => candidate.id === gateId);
+			if (gate?.kind !== "gate") {
+				throw new Error(`fleet contract ${contract.path}: loop '${step.id}' names unknown gate '${gateId}'`);
+			}
+		}
 		for (const dependency of step.dependencies) {
 			if (dependency === step.id) throw new Error(`fleet contract ${contract.path}: step '${step.id}' depends on itself`);
 			if (!declared.has(dependency)) {
@@ -484,8 +666,16 @@ export function fleetStepBoundaries(contract: Pick<FleetContract, "steps" | "ver
 	};
 	for (const step of contract.steps) {
 		if (step.kind === "loop") {
-			add(`${step.id}.check`, step.check.scope, step.check.writes);
+			if (step.check.kind === "gate") {
+				const gateId = step.check.gate;
+				const gate = contract.steps.find((candidate) => candidate.id === gateId);
+				if (gate?.kind === "gate") add(`${step.id}.check`, "workspace", [gate.path]);
+			} else add(`${step.id}.check`, step.check.scope, step.check.writes);
 			add(`${step.id}.repair`, step.repair.scope, step.repair.writes);
+			continue;
+		}
+		if (step.kind === "gate") {
+			add(step.id, "workspace", [step.path]);
 			continue;
 		}
 		add(step.id, step.scope, step.writes);
@@ -515,10 +705,14 @@ function validateWriteBoundaries(contract: Pick<FleetContract, "steps" | "versio
 		const declared: Array<{ id: string; scope: FleetStepScope; writes: ReadonlyArray<string> | undefined }> =
 			step.kind === "loop"
 				? [
-						{ id: `${step.id}.check`, scope: step.check.scope, writes: step.check.writes },
+						...(step.check.kind === "gate"
+							? []
+							: [{ id: `${step.id}.check`, scope: step.check.scope, writes: step.check.writes }]),
 						{ id: `${step.id}.repair`, scope: step.repair.scope, writes: step.repair.writes },
 					]
-				: [{ id: step.id, scope: step.scope, writes: step.writes }];
+				: step.kind === "gate"
+					? []
+					: [{ id: step.id, scope: step.scope, writes: step.writes }];
 		for (const position of declared) {
 			if (position.scope === "readonly" && position.writes !== undefined) {
 				throw new Error(
@@ -559,11 +753,10 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 	const { frontmatter, body } = parseFrontmatter(raw, sourcePath);
 	const version = contractVersion(frontmatter);
 	if (version === null) {
-		throw new Error(
-			`fleet contract ${sourcePath}: version must be 1 (agent steps), 2 (agent and code steps), 3 (adds bounded loops and commit steps), or 4 (adds enforced write boundaries)`,
-		);
+		throw new Error(`fleet contract ${sourcePath}: version must be 1, 2, 3, 4, or 5`);
 	}
 	if (version < FLEET_WRITE_BOUNDARY_VERSION) assertNoWritesBefore(frontmatter, sourcePath, version);
+	if (version < FLEET_DYNAMIC_STEP_VERSION) assertNoV5FieldsBefore(frontmatter, sourcePath, version);
 	const schemaError = firstSchemaError(frontmatter, version);
 	if (schemaError !== null) {
 		throw new Error(`fleet contract ${sourcePath}: ${schemaError}`);
@@ -576,6 +769,7 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 		maxWorkers: number;
 		budgetUsd?: number;
 		onFailure: FleetOnFailure;
+		writers?: 1;
 	};
 	if (fm.budgetUsd !== undefined && !(fm.budgetUsd > 0)) {
 		throw new Error(`fleet contract ${sourcePath}: budgetUsd must be a positive number`);
@@ -592,12 +786,47 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 		maxWorkers: fm.maxWorkers,
 		budgetUsd: fm.budgetUsd ?? null,
 		onFailure: fm.onFailure,
+		...(fm.writers === 1 ? { writers: 1 as const } : {}),
 		body: trimmedBody,
 		path: sourcePath,
 	};
 	validateFleetGraph(contract);
 	validateWriteBoundaries(contract);
+	validateV5Declarations(contract);
 	return contract;
+}
+
+function validateV5Declarations(contract: FleetContract): void {
+	if (contract.version < FLEET_DYNAMIC_STEP_VERSION) return;
+	const route = (id: string, value: { target?: string; profile?: string }): void => {
+		if (value.target !== undefined && value.profile !== undefined) {
+			throw new Error(`fleet contract ${contract.path}: step '${id}' may declare target or profile, never both`);
+		}
+	};
+	for (const step of contract.steps) {
+		if (step.kind === "agent" || step.kind === "plan" || step.kind === "gate") route(step.id, step);
+		if (step.kind === "plan" && new Set(step.roster).size !== step.roster.length) {
+			throw new Error(`fleet contract ${contract.path}: plan step '${step.id}' roster contains duplicate agents`);
+		}
+		if (step.kind === "gate") {
+			let normalized: ReadonlyArray<string>;
+			try {
+				normalized = normalizeWriteBoundary([step.path]);
+			} catch (error) {
+				throw new Error(
+					`fleet contract ${contract.path}: gate '${step.id}' path is invalid: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			if (normalized[0] !== step.path.replaceAll("\\", "/")) {
+				throw new Error(
+					`fleet contract ${contract.path}: gate '${step.id}' path must be normalized and repository-relative`,
+				);
+			}
+		}
+		if (step.kind !== "loop") continue;
+		if (step.check.kind === "agent") route(`${step.id}.check`, step.check);
+		route(`${step.id}.repair`, step.repair);
+	}
 }
 
 /**
@@ -619,6 +848,34 @@ function assertNoWritesBefore(frontmatter: Record<string, unknown>, sourcePath: 
 	}
 }
 
+function assertNoV5FieldsBefore(frontmatter: Record<string, unknown>, sourcePath: string, version: number): void {
+	const forbidden = ["target", "profile"] as const;
+	if ("writers" in frontmatter) {
+		throw new Error(
+			`fleet contract ${sourcePath}: 'writers' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
+		);
+	}
+	for (const value of Array.isArray(frontmatter.steps) ? frontmatter.steps : []) {
+		if (typeof value !== "object" || value === null) continue;
+		const step = value as Record<string, unknown>;
+		if (step.kind === "plan" || step.kind === "gate") {
+			throw new Error(
+				`fleet contract ${sourcePath}: kind '${String(step.kind)}' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
+			);
+		}
+		for (const candidate of [step, step.check, step.repair]) {
+			if (typeof candidate !== "object" || candidate === null) continue;
+			for (const field of forbidden) {
+				if (field in candidate) {
+					throw new Error(
+						`fleet contract ${sourcePath}: '${field}' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
+					);
+				}
+			}
+		}
+	}
+}
+
 /** Every loop in the contract, in declaration order. */
 export function fleetLoopSteps(contract: FleetContract): FleetContractLoopStep[] {
 	return contract.steps.filter((step): step is FleetContractLoopStep => step.kind === "loop");
@@ -634,6 +891,7 @@ export function fleetCodeSteps(contract: FleetContract): Array<{ id: string; com
 	const steps: Array<{ id: string; command: string }> = [];
 	for (const step of contract.steps) {
 		if (step.kind === "code") steps.push({ id: step.id, command: step.command });
+		else if (step.kind === "gate") steps.push({ id: step.id, command: step.run });
 		else if (step.kind === "loop" && step.check.kind === "code") {
 			steps.push({ id: fleetLoopCheckStepId(step.id, 1), command: step.check.command });
 		}

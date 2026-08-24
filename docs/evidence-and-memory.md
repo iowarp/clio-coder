@@ -148,11 +148,11 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
-- **Cryptographic Coverage**: Current receipts use strict v18 and authenticate every current receipt field, including briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, and council provenance, against the reconstructed ledger. Every version other than v18 is rejected; there is no historical receipt reader.
+- **Cryptographic Coverage**: Current receipts use strict v19 and authenticate every current receipt field, including briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, against the reconstructed ledger. Every version other than v19 is rejected; there is no historical receipt reader.
 
 | Version | Verification policy | Compatibility policy |
 |---|---|---|
-| v18 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
+| v19 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
 | Any other version | No reader | Rejected; remove or archive the incompatible state rather than expecting migration |
 
 Receipt integrity and evidence verification answer different questions. The

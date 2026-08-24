@@ -15,6 +15,10 @@ import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunRe
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
+	/** Coordinator-owned result contract override for a fleet plan step. */
+	resultContractOverride?: ResultContract;
+	/** Gate path whose post-run hash is sealed into this step's receipt. */
+	fleetGateReceipt?: { path: string };
 	/** Orchestrator-prepared task worktree state. Model arguments cannot author it. */
 	taskWorktree?: {
 		root: string;

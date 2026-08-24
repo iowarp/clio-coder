@@ -112,18 +112,18 @@ describe("commit attribution message policy", () => {
 		}
 	});
 
-	it("adds only a full, directly relevant, integrity-valid receipt-v18 digest", () => {
+	it("adds only a full, directly relevant, integrity-valid receipt-v19 digest", () => {
 		const digest = "a".repeat(64);
 		const valid: CommitAttributionEvidence = {
 			materiallyAssisted: true,
-			receipt: { version: 18, algorithm: "sha256", digest, integrityValid: true, directlyRelevant: true },
+			receipt: { version: 19, algorithm: "sha256", digest, integrityValid: true, directlyRelevant: true },
 		};
-		match(attributeCommitMessage(subject, valid), new RegExp(`Clio-Evidence: receipt-v18/sha256:${digest}`));
+		match(attributeCommitMessage(subject, valid), new RegExp(`Clio-Evidence: receipt-v19/sha256:${digest}`));
 		strictEqual(
 			attributeCommitMessage(subject, {
 				...valid,
 				receipt: {
-					version: 18,
+					version: 19,
 					algorithm: "sha256",
 					digest: digest.slice(0, 32),
 					integrityValid: true,
@@ -340,7 +340,7 @@ describe("managed prepare-commit-msg attribution", () => {
 			...prepared.env,
 			CLIO_CODER_COMMIT_TESTED: "1",
 			CLIO_CODER_COMMIT_REVIEWED: "1",
-			CLIO_CODER_COMMIT_EVIDENCE: `receipt-v18/sha256:${"b".repeat(64)}`,
+			CLIO_CODER_COMMIT_EVIDENCE: `receipt-v19/sha256:${"b".repeat(64)}`,
 		};
 		strictEqual(spawnSync("git", ["-C", root, "commit", "-q", "-m", "Forged"], { env: forged }).status, 0);
 		const attributed = message(root);

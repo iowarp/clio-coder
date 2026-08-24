@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { readSettings } from "../core/config.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { clioConfigDir } from "../core/xdg.js";
 import {
@@ -40,6 +41,28 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 	const specs = discoverSpecs(cwd);
 	const byId = new Map(specs.map((spec) => [spec.id, spec]));
 	const resolved = new Set<string>();
+	const settings = readSettings();
+	const targetIds = new Set(settings.targets.map((target) => target.id));
+	const profileIds = new Set(Object.keys(settings.workers?.profiles ?? {}));
+	for (const step of contract.steps) {
+		const positions =
+			step.kind === "loop"
+				? [
+						...(step.check.kind === "agent" ? [{ id: `${step.id}.check`, route: step.check }] : []),
+						{ id: `${step.id}.repair`, route: step.repair },
+					]
+				: step.kind === "agent" || step.kind === "gate" || step.kind === "plan"
+					? [{ id: step.id, route: step }]
+					: [];
+		for (const position of positions) {
+			if (position.route.target !== undefined && !targetIds.has(position.route.target)) {
+				throw new Error(`unknown target '${position.route.target}' at step '${position.id}'`);
+			}
+			if (position.route.profile !== undefined && !profileIds.has(position.route.profile)) {
+				throw new Error(`unknown profile '${position.route.profile}' at step '${position.id}'`);
+			}
+		}
+	}
 	const plan = compileFleetExecutionPlan({
 		contract,
 		task: prompt,
@@ -71,7 +94,14 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 			return {
 				requestedAuthority: spec.capabilityClass,
 				approvedAuthority: spec.capabilityClass,
-				expectedResultContract: context.gateRole === "reviewer" ? "verifier-report" : spec.resultContract.kind,
+				expectedResultContract:
+					context.planRole === true
+						? "delegation-plan"
+						: context.gateAuthorRole === true
+							? "artifact-report"
+							: context.gateRole === "reviewer"
+								? "verifier-report"
+								: spec.resultContract.kind,
 				executionRole: withAttemptRole(role, context.attempt),
 			};
 		},

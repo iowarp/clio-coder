@@ -1834,7 +1834,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// A gate role that overrides the recipe contract gets no worker-side repair,
 	// for the same reason it gets no recipe validation.
 	if (appliesRecipeResultContract(input.req.gate?.role) && input.recipe?.resultContract) {
-		spec.resultContract = input.recipe.resultContract;
+		spec.resultContract = input.req.resultContractOverride ?? input.recipe.resultContract;
 	}
 	const product = input.req.product ?? input.recipe?.product;
 	if (product) spec.product = product;
@@ -4847,6 +4847,15 @@ export function createDispatchBundle(
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
+			const fleetGate = (() => {
+				if (req.fleetGateReceipt === undefined) return null;
+				try {
+					const content = readFileSync(resolvePath(lifecycle.cwd, req.fleetGateReceipt.path));
+					return { path: req.fleetGateReceipt.path, pathHash: createHash("sha256").update(content).digest("hex") };
+				} catch {
+					return { path: req.fleetGateReceipt.path, pathHash: createHash("sha256").update("").digest("hex") };
+				}
+			})();
 			// Sealed from the stored board, never from anything the worker said
 			// about itself. Absent when the run had no ledger.
 			const ledgerContribution = (() => {
@@ -4894,6 +4903,7 @@ export function createDispatchBundle(
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
+				...(fleetGate !== null ? { fleetGate } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
 				rulesApplied: lifecycle.rulesApplied,
@@ -5122,7 +5132,7 @@ export function createDispatchBundle(
 				const capturedOutput = outputCapture.snapshot();
 				const observedRunEffects = runEffects.snapshot();
 				const appliedResultContract = appliesRecipeResultContract(req.gate?.role)
-					? (lifecycle.recipe?.resultContract ?? null)
+					? (req.resultContractOverride ?? lifecycle.recipe?.resultContract ?? null)
 					: null;
 				const resultContract = validateRecipeResult({
 					contract: appliedResultContract,
@@ -5186,7 +5196,8 @@ export function createDispatchBundle(
 					finalDetail = [finalDetail, describeUngroundedValidations(validationGrounding)].filter(Boolean).join("; ");
 				}
 				const hasTerminalArtifact =
-					lifecycle.recipe?.resultContract.kind === "architect-plan" && resultValidation?.conformance === "pass";
+					(req.resultContractOverride ?? lifecycle.recipe?.resultContract)?.kind === "architect-plan" &&
+					resultValidation?.conformance === "pass";
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput) && !hasTerminalArtifact) {
 					finalOutcome = "failed";
 					outcomeCode = "worker_final_output_missing";

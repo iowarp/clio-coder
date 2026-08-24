@@ -53,11 +53,26 @@ export function formatWriteBoundary(writes: ReadonlyArray<string> | undefined): 
 export function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
 	const loop = step.loop === undefined ? "" : ` (${step.loop.loopId} ${step.loop.role} ${step.loop.attempt})`;
 	if (step.kind === "code") {
-		return `code ${step.stepId}${loop} · command ${step.commandId ?? "?"} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
+		const gate = step.gate === undefined ? "" : ` · gate path ${step.gate.path}`;
+		return `code ${step.stepId}${loop} · command ${step.commandId ?? "?"}${gate} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
 	}
 	const route = step.route === undefined ? "route unresolved" : `${step.route.targetId} ▸ ${step.route.wireModelId}`;
 	const node = step.route === undefined ? "" : ` · node ${step.route.nodeId}`;
-	return `agent ${step.stepId}${loop} · ${step.agentId ?? "?"} · ${route}${node} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
+	const declaredRoute =
+		step.target !== undefined
+			? ` · target ${step.target}`
+			: step.profile !== undefined
+				? ` · profile ${step.profile}`
+				: "";
+	const gate =
+		step.gate !== undefined
+			? ` · gate path ${step.gate.path} · run ${"commandId" in step.gate ? step.gate.commandId : "?"} · baseline ${"commandId" in step.gate ? step.gate.commandId : "?"}`
+			: "";
+	const dynamicPlan =
+		step.plan === undefined
+			? ""
+			: ` · roster ${step.plan.roster.join(", ")} · maxTasks ${step.plan.maxTasks}${step.plan.proposals ? " · proposals" : ""}`;
+	return `agent ${step.stepId}${loop} · ${step.agentId ?? "?"} · ${route}${node}${declaredRoute}${gate}${dynamicPlan} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
 }
 
 function formatBudgetLine(preview: FleetRunPreview): string {

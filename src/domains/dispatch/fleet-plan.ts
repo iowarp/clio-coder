@@ -42,6 +42,10 @@ export interface FleetPlanAgentContext {
 	attempt: number;
 	/** Set when this node is a loop's verification, which is a gate position. */
 	gateRole?: "reviewer";
+	target?: string;
+	profile?: string;
+	planRole?: true;
+	gateAuthorRole?: true;
 }
 
 export interface FleetPlanAgentResolution {
@@ -97,7 +101,7 @@ function declaredLoops(steps: ReadonlyArray<FleetContractStep>): Map<string, Exe
 		}
 		loops.set(step.id, {
 			id: step.id,
-			checkKind: step.check.kind,
+			checkKind: step.check.kind === "gate" ? "code" : step.check.kind,
 			maxAttempts: step.maxAttempts,
 			checkStepIds,
 			repairStepIds,
@@ -127,6 +131,10 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		dependencies: ReadonlyArray<string>,
 		writes: ReadonlyArray<string> | undefined,
 		loop?: { loopId: string; role: "check" | "repair"; attempt: number },
+		extra?: {
+			gate?: { path: string; commandId: string };
+			plan?: { roster: ReadonlyArray<string>; maxTasks: number; proposals: boolean };
+		},
 	): ExecutionPlanStepInput => {
 		const resolved = resolveAgent(context);
 		return {
@@ -142,14 +150,49 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			executionRole: resolved.executionRole,
 			...boundary(context.scope, writes),
 			...(loop !== undefined ? { loop } : {}),
+			...(context.target !== undefined ? { target: context.target } : {}),
+			...(context.profile !== undefined ? { profile: context.profile } : {}),
+			...extra,
 		};
 	};
+	const routeOf = (value: { target?: string; profile?: string }): { target?: string; profile?: string } => ({
+		...(value.target !== undefined ? { target: value.target } : {}),
+		...(value.profile !== undefined ? { profile: value.profile } : {}),
+	});
 
 	for (const step of contract.steps) {
 		const dependencies = expandDependencies(step.dependencies, loops);
 		if (step.kind === "agent") {
 			steps.push(
-				agentNode({ stepId: step.id, agentId: step.agent, scope: step.scope, attempt: 0 }, dependencies, step.writes),
+				agentNode(
+					{ stepId: step.id, agentId: step.agent, scope: step.scope, attempt: 0, ...routeOf(step) },
+					dependencies,
+					step.writes,
+				),
+			);
+			continue;
+		}
+		if (step.kind === "gate") {
+			steps.push(
+				agentNode(
+					{ stepId: step.id, agentId: step.agent, scope: "workspace", attempt: 0, gateAuthorRole: true, ...routeOf(step) },
+					dependencies,
+					[step.path],
+					undefined,
+					{ gate: { path: step.path, commandId: step.run } },
+				),
+			);
+			continue;
+		}
+		if (step.kind === "plan") {
+			steps.push(
+				agentNode(
+					{ stepId: step.id, agentId: step.agent, scope: step.scope, attempt: 0, planRole: true, ...routeOf(step) },
+					dependencies,
+					step.writes,
+					undefined,
+					{ plan: { roster: [...step.roster], maxTasks: step.maxTasks, proposals: step.proposals } },
+				),
 			);
 			continue;
 		}
@@ -185,6 +228,21 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 					// when a workspace step lands after it.
 					verification: true,
 				});
+			} else if (step.check.kind === "gate") {
+				const gateId = step.check.gate;
+				const gate = contract.steps.find((candidate) => candidate.id === gateId);
+				if (gate?.kind !== "gate") throw new Error(`fleet plan: gate '${gateId}' failed to resolve`);
+				steps.push({
+					kind: "code",
+					id: checkId,
+					commandId: gate.run,
+					scope: "readonly",
+					dependencies: checkDependencies,
+					writes: [],
+					loop: membership,
+					verification: true,
+					gate: { gateId: gate.id, path: gate.path },
+				});
 			} else {
 				steps.push(
 					agentNode(
@@ -194,6 +252,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 							scope: step.check.scope,
 							attempt: 0,
 							gateRole: "reviewer",
+							...routeOf(step.check),
 						},
 						checkDependencies,
 						step.check.writes,
@@ -205,7 +264,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			const repairId = loop.repairStepIds[attempt - 1] ?? "";
 			steps.push(
 				agentNode(
-					{ stepId: repairId, agentId: step.repair.agent, scope: step.repair.scope, attempt },
+					{ stepId: repairId, agentId: step.repair.agent, scope: step.repair.scope, attempt, ...routeOf(step.repair) },
 					[checkId],
 					step.repair.writes,
 					{ loopId: loop.id, role: "repair", attempt },
@@ -218,6 +277,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		topology: "fleet",
 		rootTask: task,
 		maxWorkers: contract.maxWorkers,
+		...(contract.writers === 1 ? { writers: 1 as const } : {}),
 		onFailure: contract.onFailure,
 		steps,
 		loops: [...loops.values()],

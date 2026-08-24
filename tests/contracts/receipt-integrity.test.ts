@@ -173,7 +173,7 @@ describe("contracts/receipt-integrity", () => {
 		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
 		// Every shape before routing intent became required is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -184,7 +184,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 18);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 19);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -308,6 +308,7 @@ describe("contracts/receipt-integrity", () => {
 			gate: required(envelope.gate, "gate"),
 			council: required(envelope.council, "council"),
 			plan: required(envelope.plan, "plan"),
+			fleetGate: { path: "tests/acceptance.mjs", pathHash: "7".repeat(64) },
 			personaOverride: required(envelope.personaOverride, "personaOverride"),
 			briefing: required(envelope.briefing, "briefing"),
 			intent: {

@@ -57,6 +57,10 @@ export interface FleetRunPreviewStep {
 	writes: ReadonlyArray<string> | undefined;
 	/** Loop membership for a node a bounded loop unrolled to. */
 	loop?: { loopId: string; role: "check" | "repair"; attempt: number };
+	target?: string;
+	profile?: string;
+	gate?: { path: string; commandId: string } | { gateId: string; path: string };
+	plan?: { roster: ReadonlyArray<string>; maxTasks: number; proposals: boolean };
 }
 
 export interface FleetRunPreviewWave {
@@ -107,6 +111,8 @@ export interface FleetRunPreviewInput {
 		stepId: string;
 		agentId: string;
 		scope: "readonly" | "workspace";
+		target?: string;
+		profile?: string;
 	}) => FleetRunPreviewRoute | null;
 	/** Contract and registry loaders, overridable so tests project a fixture. */
 	load?: (workspaceRoot: string, name: string) => { contract: FleetContract; commands: FleetCommandRegistry | null };
@@ -183,7 +189,14 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					approvedAuthority: spec.capabilityClass,
 					// A gate decider answers the coordinator's question, so its
 					// postcondition is the gate result contract, not its recipe's.
-					expectedResultContract: context.gateRole === "reviewer" ? "verifier-report" : spec.resultContract.kind,
+					expectedResultContract:
+						context.planRole === true
+							? "delegation-plan"
+							: context.gateAuthorRole === true
+								? "artifact-report"
+								: context.gateRole === "reviewer"
+									? "verifier-report"
+									: spec.resultContract.kind,
 					executionRole: withAttemptRole(requestRole, context.attempt),
 				};
 			},
@@ -220,8 +233,6 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		}
 	}
 
-	if (diagnostics.length > 0) return fail();
-
 	const boundaries = new Map(fleetStepBoundaries(contract).map((entry) => [entry.id, entry.writes]));
 	const byId = new Map(plan.steps.map((step) => [step.id, step]));
 	const waves: FleetRunPreviewWave[] = plan.waves.map((wave, index) => ({
@@ -235,6 +246,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 				scope: step.scope,
 				writes: declared,
 				...(step.loop !== undefined ? { loop: { ...step.loop } } : {}),
+				...(step.gate !== undefined ? { gate: { ...step.gate } } : {}),
 			};
 			if (step.kind === "code") {
 				const command = commands?.commands.get(step.commandId);
@@ -247,17 +259,33 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					},
 				];
 			}
-			const route = input.resolveRoute?.({ stepId: step.id, agentId: step.agentId, scope: step.scope }) ?? null;
+			let route: FleetRunPreviewRoute | null = null;
+			try {
+				route =
+					input.resolveRoute?.({
+						stepId: step.id,
+						agentId: step.agentId,
+						scope: step.scope,
+						...(step.target !== undefined ? { target: step.target } : {}),
+						...(step.profile !== undefined ? { profile: step.profile } : {}),
+					}) ?? null;
+			} catch (error) {
+				diagnostics.push(`step '${step.id}' route preflight failed: ${describeError(error)}`);
+			}
 			return [
 				{
 					...base,
 					kind: "agent" as const,
 					agentId: step.agentId,
+					...(step.target !== undefined ? { target: step.target } : {}),
+					...(step.profile !== undefined ? { profile: step.profile } : {}),
+					...(step.plan !== undefined ? { plan: { ...step.plan, roster: [...step.plan.roster] } } : {}),
 					...(route !== null ? { route } : {}),
 				},
 			];
 		}),
 	}));
+	if (diagnostics.length > 0) return fail();
 
 	return {
 		ok: true,
