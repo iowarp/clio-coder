@@ -41,6 +41,15 @@ export type { EvidenceIndexRow } from "./evidence-index.js";
 export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from "./evidence-index.js";
 export { ObservabilityManifest } from "./manifest.js";
 export type { MetricsView } from "./metrics.js";
+export type { OutOfTurnUsage, OutOfTurnUsageReadResult, OutOfTurnUsageRow } from "./out-of-turn-usage.js";
+export {
+	appendOutOfTurnUsageRow,
+	MAX_OUT_OF_TURN_USAGE_ROWS,
+	OUT_OF_TURN_USAGE_DIR,
+	OUT_OF_TURN_USAGE_FILE,
+	outOfTurnUsagePath,
+	readOutOfTurnUsageRows,
+} from "./out-of-turn-usage.js";
 export type { ObservabilityProjection, ProjectionReadModel } from "./projection.js";
 export {
 	createObservabilityProjection,

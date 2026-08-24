@@ -9,6 +9,7 @@ import {
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
+import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
 import { loadSkills } from "../domains/resources/index.js";
 import {
 	type LedgerUsageCall,
@@ -23,9 +24,10 @@ import { formatColumns, printError } from "./shared.js";
 const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
 
 Cross-session usage analyzer (experimental, read-only). Reads the local usage
-archive (receipts, session ledgers, audit rows, evidence index, memory store)
-and reports facts plus improvement opportunities, every line citing ids and
-counts. Nothing is written or stored; suggestions are printed only.
+archive (receipts, session ledgers, the out-of-turn usage store, audit rows,
+evidence index, memory store) and reports facts plus improvement opportunities,
+every line citing ids and counts. Nothing is written or stored; suggestions are
+printed only.
 
 Flags:
   --repo <path>   restrict sessions (and runs via the run ledger) to one repo
@@ -96,6 +98,54 @@ function emptyUsageTotals(): UsageTotals {
 
 function addResponseModelIdObservation(counts: ResponseModelIdObservationCounts, call: LedgerUsageCall): void {
 	addResponseModelIdObservationCount(counts, call.responseModelIdObservation, call.apiCalls ?? 1);
+}
+
+/**
+ * How the folded calls split between the session's own turns and the rounds
+ * that were billed beside it. A `/btw` side question and a `/handoff` round are
+ * real spend and belong in the token and cost totals, but neither is a turn:
+ * they never entered the session. `turns` therefore subtracts them from the
+ * folded row count, which is exactly what the `/cost` overlay does.
+ */
+interface CallOrigins {
+	rows: number;
+	sideQuestions: number;
+	handoffs: number;
+}
+
+function emptyCallOrigins(): CallOrigins {
+	return { rows: 0, sideQuestions: 0, handoffs: 0 };
+}
+
+function turnsOf(origins: CallOrigins): number {
+	return origins.rows - origins.sideQuestions - origins.handoffs;
+}
+
+function hasLabelledCall(origins: CallOrigins): boolean {
+	return origins.sideQuestions > 0 || origins.handoffs > 0;
+}
+
+function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
+	origins.rows += 1;
+	if (row.label === "side-question") origins.sideQuestions += 1;
+	else origins.handoffs += 1;
+}
+
+/** The out-of-turn store keeps its own usage shape; fold it as one completed call. */
+function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
+	return {
+		providerId: row.target,
+		attributedModelId: row.attributedModelId,
+		requestedModelId: row.attributedModelId,
+		responseModelIdObservation: { state: "not-observed" },
+		input: row.usage.input,
+		output: row.usage.output,
+		cacheRead: row.usage.cacheRead,
+		cacheWrite: row.usage.cacheWrite,
+		reasoningTokens: row.usage.reasoning,
+		totalTokens: row.usage.totalTokens,
+		costUsd: row.usage.costUsd,
+	};
 }
 
 function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
@@ -250,6 +300,13 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		(receipt) => repoRunIds === null || repoRunIds.has(receipt.runId),
 	);
 	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
+	// Side questions and handoff rounds append nothing to the session ledger by
+	// design, so their spend lives in its own store and is folded in here.
+	const outOfTurn = readOutOfTurnUsageRows(stateDir);
+	for (const error of outOfTurn.errors) diagnostics.notes.push(error);
+	const outOfTurnRows = outOfTurn.rows.filter(
+		(row) => inWindow(row.timestamp, windowStart, now) && (repoHash === undefined || row.repoIdentity === repoHash),
+	);
 	const auditRows = await readAuditRows(stateDir);
 	diagnostics.malformedAuditRows = auditRows.errors.length;
 	const auditInWindow = auditRows.rows.filter((row) => row.ts !== null && inWindow(row.ts, windowStart, now));
@@ -345,23 +402,36 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	>();
 	const usageTotals = emptyUsageTotals();
+	const callOrigins = emptyCallOrigins();
+	const foldCall = (call: LedgerUsageCall): void => {
+		addUsageCall(usageTotals, call);
+		const key = `${call.providerId}::${call.attributedModelId}`;
+		const entry = usageByModel.get(key) ?? {
+			providerId: call.providerId,
+			attributedModelId: call.attributedModelId,
+			requestedModelIds: new Set<string>(),
+			responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
+			totals: emptyUsageTotals(),
+		};
+		entry.requestedModelIds.add(call.requestedModelId);
+		addResponseModelIdObservation(entry.responseModelIdObservationCounts, call);
+		addUsageCall(entry.totals, call);
+		usageByModel.set(key, entry);
+	};
 	for (const session of sessions) {
 		for (const call of session.usageCalls) {
-			addUsageCall(usageTotals, call);
-			const key = `${call.providerId}::${call.attributedModelId}`;
-			const entry = usageByModel.get(key) ?? {
-				providerId: call.providerId,
-				attributedModelId: call.attributedModelId,
-				requestedModelIds: new Set<string>(),
-				responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
-				totals: emptyUsageTotals(),
-			};
-			entry.requestedModelIds.add(call.requestedModelId);
-			addResponseModelIdObservation(entry.responseModelIdObservationCounts, call);
-			addUsageCall(entry.totals, call);
-			usageByModel.set(key, entry);
+			foldCall(call);
+			callOrigins.rows += 1;
 		}
 	}
+	for (const row of outOfTurnRows) {
+		foldCall(outOfTurnUsageCall(row));
+		addOutOfTurnRow(callOrigins, row);
+	}
+	// Token and cost facts need one of their two inputs on disk. A machine whose
+	// session store is gone can still have recorded out-of-turn spend, and
+	// dropping those rows would report money that was spent as nothing at all.
+	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
 	const usageRows = [...usageByModel.values()].sort(
 		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
 	);
@@ -443,8 +513,22 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		if (presence.receiptsPresent) emit({ kind: "fact", fact: "dispatch-runs", value: receipts.length });
 		else emit({ kind: "fact", fact: "receipt-store-missing", path: presence.receiptsPath });
 		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
-		if (presence.sessionsPresent) {
-			emit({ kind: "fact", fact: "tokens", ...usageTotals });
+		if (usageMeasurable) {
+			// The origin split is emitted only when something out of turn was
+			// recorded, so a report over an archive with no `/btw` or `/handoff`
+			// round in it stays byte-identical to what it printed before.
+			emit({
+				kind: "fact",
+				fact: "tokens",
+				...usageTotals,
+				...(hasLabelledCall(callOrigins)
+					? {
+							turns: turnsOf(callOrigins),
+							sideQuestions: callOrigins.sideQuestions,
+							handoffs: callOrigins.handoffs,
+						}
+					: {}),
+			});
 			for (const row of usageRows) {
 				emit({
 					kind: "fact",
@@ -505,10 +589,18 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		out(`  receipt store missing at ${presence.receiptsPath}`);
 	}
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
-	if (presence.sessionsPresent) {
+	if (usageMeasurable) {
 		out(
 			`  tokens in window: ${usageTotals.totalTokens} over ${usageTotals.apiCalls} model calls (input ${usageTotals.input}, output ${usageTotals.output}, cache read ${usageTotals.cacheRead}, cache write ${usageTotals.cacheWrite}, reasoning ${usageTotals.reasoningTokens})`,
 		);
+		if (hasLabelledCall(callOrigins)) {
+			// Only printed when a labelled call is in the window. Over an archive
+			// with none, these three lines would say nothing the line above does
+			// not already say, and their absence keeps the older output intact.
+			out(`  turns in window: ${turnsOf(callOrigins)}`);
+			if (callOrigins.sideQuestions > 0) out(`  side questions in window: ${callOrigins.sideQuestions}`);
+			if (callOrigins.handoffs > 0) out(`  handoffs in window: ${callOrigins.handoffs}`);
+		}
 		out(`  provider-reported cost in window: $${usageTotals.costUsd.toFixed(4)}`);
 	}
 	if (usageRows.length > 0) {

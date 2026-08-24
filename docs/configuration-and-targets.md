@@ -472,10 +472,11 @@ The Settings Center organizes all configuration under four non-selectable group 
 | **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, and `budget.concurrency` (restart required). |
 | **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, and `compaction.excludeLastTurns`. |
 | **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, and `retry.maxDelayMs`. |
-| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), and `theme`. |
+| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), `terminal.notify`, and `theme`. |
+| **EXPERIENCE** | Watchdog (`watchdog`) | `watchdog.enabled`, `watchdog.target`, and `watchdog.cadenceToolCalls`. The two optional keys are editable text rows that render their absence as `(session target)` and `(turn end only)`; submitting an empty value removes the key from `settings.yaml` rather than storing a blank. |
 | **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
 
-`retry.streamStallMs`, `terminal.notify`, and the `watchdog` block have no Settings Center row; edit them in `settings.yaml`.
+`retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
 
 Label to config path mapping:
 
@@ -522,6 +523,10 @@ Label to config path mapping:
 | TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
 | Fullscreen scrollbar | `terminal.fullscreenScrollbar` (`hidden`, `auto`, or `always`, restart required) |
 | Smooth streaming | `terminal.smoothStreaming` (`off`, `auto`, or `on`, live) |
+| Desktop notifications | `terminal.notify` |
+| Turn-end watchdog | `watchdog.enabled` |
+| Watchdog target | `watchdog.target` (blank clears the key) |
+| Watchdog cadence (tools) | `watchdog.cadenceToolCalls` (integer ≥ 1; blank clears the key) |
 | Theme | `theme` |
 | Runtime plugins | `runtimePlugins` |
 | Clio commit provenance | `attribution.gitCommits` (`enabled` or `disabled`, live) |
@@ -652,7 +657,9 @@ briefing, so mid-turn scope drift is visible before the turn ends. At most one
 watchdog run is in flight at a time; a trigger that arrives while one is running
 is dropped and counted rather than queued. Headless and ACP runs never fire the
 watchdog regardless of the setting, because neither has an operator reading a
-transcript. There is no Settings Center row for the block; edit `settings.yaml`.
+transcript. The block has its own Settings Center section under EXPERIENCE ›
+Watchdog; clearing the target or the cadence row removes that key from
+`settings.yaml` rather than writing an empty value.
 
 ### Delegation
 
@@ -689,7 +696,8 @@ finished`, `batch <shortId> settled`, `approval needed`), so no prompt text, fil
 path, or model output ever leaves the process in a notification. Clio emits OSC
 777 by default and OSC 9 on iTerm2, Windows Terminal, and ConEmu, never both for
 one event. Headless, ACP, and non-TTY runs never emit one regardless of the
-setting.
+setting. The knob has a Settings Center row under EXPERIENCE › Terminal,
+labeled `Desktop notifications`.
 
 Recently selected models are runtime state and live in `recent-models.json` under the state directory, not here. A `state.recentModels` key in `settings.yaml` is an unknown-key error.
 
