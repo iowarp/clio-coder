@@ -3493,7 +3493,7 @@ setInterval(() => {}, 1000);
 				answerLate = () => resolvePermission({ outcome: { outcome: "selected", optionId: "allow-once" } });
 			});
 		});
-		const started = Date.now();
+		const started = performance.now();
 		const sessionId = await openSession(client);
 		const prompt = client.request<{ stopReason: string }>("session/prompt", {
 			sessionId,
@@ -3502,7 +3502,7 @@ setInterval(() => {}, 1000);
 		await asked;
 		await client.request("session/cancel", { sessionId });
 		strictEqual((await prompt).stopReason, "cancelled");
-		ok(Date.now() - started < 2000, "cancel must settle the parked permission inside the bound");
+		ok(performance.now() - started < 2000, "cancel must settle the parked permission inside the bound");
 		strictEqual(resolutions.length, 1);
 		strictEqual(resolutions[0]?.status, "denied");
 		strictEqual(resolutions[0]?.decidedBy, "cancelled");

@@ -283,7 +283,7 @@ describe("contracts/ask_user", () => {
 
 	it("direct fallback handler returns cancelled without blocking", async () => {
 		const tool = createAskUserTool();
-		const startedAt = Date.now();
+		const startedAt = performance.now();
 		const result = await tool.run({
 			questions: [
 				{
@@ -294,7 +294,7 @@ describe("contracts/ask_user", () => {
 		});
 
 		strictEqual(result.kind, "ok");
-		strictEqual(Date.now() - startedAt < 100, true);
+		strictEqual(performance.now() - startedAt < 100, true);
 		ok(result.output.includes("ask_user result: cancelled"));
 		const details = result.details as
 			| { answers?: unknown[]; cancelled?: true; interview?: { status?: string } }
