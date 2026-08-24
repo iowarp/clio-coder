@@ -10,6 +10,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
+import { openDetachedBatchViews } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -28,6 +29,7 @@ import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController } from "./editor-submit.js";
+import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
 import { createInteractivePresentation } from "./interactive-presentation.js";
@@ -541,6 +543,16 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	} = presentation;
 	refreshPresentationFooter = () => footer.refresh();
 	const agentProgress = createAgentProgress(terminal);
+	// Desktop notifications are a protocol write on the terminal owner, issued
+	// outside any render transaction, so the sequence carries frameId null and
+	// never lands inside a frame. A non-TTY process never emits one even when
+	// `CLIO_CODER_INTERACTIVE=1` forced the interactive surface on.
+	const desktopNotifications = createInteractiveDesktopNotifications({
+		write: (data) => terminal.write(data),
+		enabled: () => deps.getSettings?.().terminal.notify ?? false,
+		interactiveTty: () => process.stdout.isTTY === true,
+		getOpenBatches: () => openDetachedBatchViews(deps.dispatch),
+	});
 	const busNoticeSink = {
 		appendReplayBlock: (renderBlock: Parameters<typeof chatPanel.appendReplayBlock>[0]) =>
 			chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "bus-notice"),
@@ -570,6 +582,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
+		onTurnEnded: () => desktopNotifications.turnEnded(),
 		refreshLiveWorkspaceGit,
 		refreshFooter: () => footer.refresh(),
 		requestRender: () => tui.requestRender(),
@@ -628,6 +641,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openSkillsHub: () => openSkillsHubState(),
 		openCost: () => openCostOverlayState(),
+		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openDecisions: () => openDecisionsOverlayState(),
@@ -714,11 +728,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		keybindings,
 		editor,
 		getSlashContext: () => slashRuntime.context,
+		onOperatorParked: () => desktopNotifications.approvalParked(),
 	});
 	const {
 		closeOverlay,
 		openAskUserOverlayState,
 		openCostOverlayState,
+		openSideQuestionOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		openTasksOverlayState,
@@ -810,6 +826,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		renderContextIsland: interactiveTickers.renderContextIsland,
 		requestRender: () => tui.requestRender(),
 		notify,
+		onDispatchSettled: () => desktopNotifications.dispatchSettled(),
 		// The reducer mutates one state object per assignment, so the panel is
 		// handed that object rather than a copy: a streamed delta reaches the
 		// screen by invalidating a cached render, not by rebuilding the entry.

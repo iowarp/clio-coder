@@ -86,6 +86,11 @@ export interface OverlayLifecycleRuntimeDeps {
 	keybindings: ReturnType<typeof import("./keybinding-manager.js").createKeybindingManager>;
 	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "render" | "setText">;
 	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
+	/**
+	 * A worker permission or ask_user request parked waiting for the operator.
+	 * Wired to the desktop notification; absent hosts simply do not notify.
+	 */
+	onOperatorParked?: () => void;
 	showOverlayFrame?: typeof showClioOverlayFrame;
 	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
 	openAskUserOverlay?: typeof import("./overlays/ask-user.js").openAskUserOverlay;
@@ -127,6 +132,8 @@ export interface OverlayLifecycleController {
 	openDecisionsOverlayState(): void;
 	openMemoryOverlayState(): void;
 	openViewOverlayState(initialFilter?: string): void;
+	/** `/btw <question>`: one side-question round rendered in its own overlay. */
+	openSideQuestionOverlayState(question: string): void;
 	openModelOverlayState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(): void;
@@ -253,6 +260,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				source: "stream_cancel",
 				auditReason: "operator stopped the turn at a permission prompt",
 			}),
+		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
 	});
 
 	overlayAskUser = createOverlayAskUserLifecycle({
@@ -270,6 +278,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		requestRender: () => tui.requestRender(),
 		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
 		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
+		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
 	});
 
 	const overlayModelSelectors = createOverlayModelSelectors({
@@ -370,6 +379,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openDecisionsOverlayFactory ? { openDecisionsOverlay: openDecisionsOverlayFactory } : {}),
 		...(openMemoryOverlayFactory ? { openMemoryOverlay: openMemoryOverlayFactory } : {}),
 		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
+		askSideQuestion: (question, options) => deps.app.chat.askSideQuestion(question, options),
 	});
 
 	const openResumeOverlayState = overlaySessions.openResume;
@@ -383,6 +393,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openDecisionsOverlayState = overlayGeneralOpeners.openDecisions;
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
+	const openSideQuestionOverlayState = overlayGeneralOpeners.openSideQuestion;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 
 	return {
@@ -402,6 +413,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openDecisionsOverlayState,
 		openMemoryOverlayState,
 		openViewOverlayState,
+		openSideQuestionOverlayState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,

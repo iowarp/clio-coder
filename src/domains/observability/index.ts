@@ -30,6 +30,7 @@ export {
 	type CostAggregate,
 	type CostAmount,
 	type CostEntry,
+	type CostEntryLabel,
 	costAggregateForAmount,
 	costWasMeasured,
 	emptyCostAggregate,

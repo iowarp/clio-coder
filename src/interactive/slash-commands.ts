@@ -57,6 +57,8 @@ type SlashCommandVariant =
 	| { kind: "run-usage" }
 	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean }
 	| { kind: "delegate-usage" }
+	| { kind: "btw"; question: string }
+	| { kind: "btw-usage" }
 	| { kind: "agents" }
 	| { kind: "cost" }
 	| { kind: "context-view" }
@@ -380,6 +382,13 @@ export interface SlashCommandContext {
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openCost: () => void;
+	/**
+	 * `/btw <question>`: one model round beside the session, answered in an
+	 * overlay. Nothing about it enters the transcript, the ledger, or the task
+	 * board, so the workers a fleet run briefs never see the question or its
+	 * answer.
+	 */
+	openSideQuestion: (question: string) => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
@@ -848,6 +857,29 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				);
 				ctx.render();
 			})();
+		},
+	},
+	{
+		name: "btw",
+		description: "Ask a side question that never enters the session transcript",
+		group: "Run",
+		kinds: ["btw", "btw-usage"],
+		args: {
+			positionals: [{ name: "question", required: true, rest: true }],
+		},
+		fromArgs(parsed) {
+			const question = parsed.rest?.trim() ?? "";
+			if (parsed.error || question.length === 0) return { kind: "btw-usage" };
+			return { kind: "btw", question };
+		},
+		handle(command, ctx) {
+			if (command.kind === "btw-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "btw");
+				if (entry) ctx.notice("info", usageNotice(entry));
+				return;
+			}
+			if (command.kind !== "btw") return;
+			ctx.openSideQuestion(command.question);
 		},
 	},
 	{

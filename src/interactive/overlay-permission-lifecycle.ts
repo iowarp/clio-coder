@@ -50,6 +50,12 @@ export interface OverlayPermissionLifecycleDeps {
 	requestRender(): void;
 	/** End the in-flight run, carrying the text the operator will see. */
 	stopActiveTurn(reason: string): void;
+	/**
+	 * A worker permission request parked waiting for the operator. Fired once per
+	 * request, on the same dedup the operator-facing surfaces use, so a
+	 * re-presented dialog does not notify twice.
+	 */
+	onOperatorParked?(): void;
 }
 
 export interface OverlayPermissionLifecycle {
@@ -184,6 +190,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let pendingWorker: Pick<WorkerEscalationEntry, "agentId" | "requestId" | "runId"> | null = null;
 	const workerQueue: WorkerEscalationEntry[] = [];
 	const announcedRequestIds = new Set<string>();
+	/** Worker escalations already surfaced, so one request parks the operator once. */
+	const announcedWorkerRequestIds = new Set<string>();
 	let confirmed = false;
 	let stopping = false;
 
@@ -245,8 +253,10 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const unsubscribeWorker = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
 		const entry = workerEscalationEntry(payload, deps.getAutonomy());
 		if (!entry) return;
+		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
 		const notice = workerEscalationNotice(payload);
 		if (notice !== null) deps.appendNotice(notice.level, notice.text);
+		deps.onOperatorParked?.();
 		workerQueue.push(entry);
 		maybeOpenWorker();
 	});

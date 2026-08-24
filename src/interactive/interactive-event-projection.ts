@@ -77,6 +77,11 @@ export interface InteractiveEventProjectionDeps {
 	setLastTurnSummary: (summary: TurnSummary) => void;
 	startTerminalProgress: () => void;
 	stopTerminalProgress: () => void;
+	/**
+	 * One model turn reached its end. Wired to the desktop notification; absent
+	 * on hosts that do not own a terminal to notify through.
+	 */
+	onTurnEnded?: () => void;
 	refreshLiveWorkspaceGit: (force: boolean) => void;
 	refreshFooter: () => void;
 	requestRender: () => void;
@@ -214,7 +219,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.chat.onEvent((event) => {
 			const showProgress = deps.getSettings?.().terminal.showTerminalProgress ?? false;
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
-			else if (event.type === "agent_end") deps.stopTerminalProgress();
+			else if (event.type === "agent_end") {
+				deps.stopTerminalProgress();
+				deps.onTurnEnded?.();
+			}
 		}),
 		deps.bus.on(BusChannels.RunAborted, () => {
 			deps.stopTerminalProgress();

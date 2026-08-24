@@ -137,6 +137,7 @@ function createHarness(entries: SessionEntry[] = fixture()) {
 		openAskUser: async () => ({ answers: [], cancelled: true }),
 		openSkillsHub: () => undefined,
 		openCost: () => undefined,
+		openSideQuestion: () => undefined,
 		openContextView: () => undefined,
 		openTasks: () => undefined,
 		openDecisions: () => undefined,

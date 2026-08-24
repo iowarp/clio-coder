@@ -14,6 +14,11 @@ export interface OverlayAskUserLifecycleDeps {
 	requestRender(): void;
 	registerHandler?(handler: AskUserHandler): () => void;
 	openAskUserOverlay?: typeof openAskUserOverlay;
+	/**
+	 * An ask_user request parked waiting for the operator. Fired when the
+	 * overlay session opens, not per question, so one interview notifies once.
+	 */
+	onOperatorParked?(): void;
 }
 
 export interface OverlayAskUserLifecycle {
@@ -61,6 +66,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		deps.setOverlayState("ask-user");
 		session = openSession(deps.tui, { onCancel: () => pendingCancel?.() });
 		deps.setOverlayHandle(session);
+		deps.onOperatorParked?.();
 		deps.requestRender();
 		return session;
 	};

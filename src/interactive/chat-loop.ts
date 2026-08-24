@@ -26,7 +26,7 @@ import type { ObservabilityContract } from "../domains/observability/contract.js
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { runtimeTargetSnapshot } from "../domains/providers/index.js";
+import { runtimeTargetSnapshot, targetRequiresAuth } from "../domains/providers/index.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/context-accounting.js";
@@ -54,6 +54,7 @@ import {
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
+import { runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
@@ -184,6 +185,13 @@ export interface ChatSubmitOptions {
 	onAdmitted?: () => void;
 }
 
+/**
+ * Placeholder key a target that needs no auth still has to be handed. Mirrors
+ * the turn runtime's own local fallback, so a `/btw` round against a local
+ * server authenticates exactly the way a turn against it does.
+ */
+const LOCAL_SIDE_QUESTION_API_KEY = "clio-local-target";
+
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
 const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";
 const ENGINE_ACTIVE_PROMPT_ERROR =
@@ -211,6 +219,24 @@ export interface ChatCancelOptions {
 	/** Short audit reason string. Defaults to a source-appropriate phrase. */
 	auditReason?: string;
 }
+
+export interface SideQuestionOptions {
+	/** Cancels the round. Esc and Ctrl+C in the overlay abort through it. */
+	signal?: AbortSignal;
+	/** Streamed answer text so the overlay fills as the provider produces it. */
+	onDelta?: (partialText: string) => void;
+}
+
+/**
+ * How a `/btw` round ended. `refused` is a round that never started (a turn was
+ * in flight, or no orchestrator target is configured); `failed` is a round that
+ * started and the provider rejected.
+ */
+export type SideQuestionOutcome =
+	| { status: "answered"; text: string }
+	| { status: "aborted"; text: string }
+	| { status: "refused"; reason: string }
+	| { status: "failed"; reason: string };
 
 export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
@@ -250,6 +276,17 @@ export interface ChatLoop {
 	 * notice so the `/context compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;
+	/**
+	 * `/btw`: answer one side question against the session's active target,
+	 * model, and compiled message history without starting a turn.
+	 *
+	 * Nothing this produces reaches the session ledger, the transcript, the
+	 * context ledger, or the footer token counters; the message history is read,
+	 * never mutated. The round's provider usage is still reported to `/cost`,
+	 * labeled as a side question, because money was spent. Refused outright
+	 * while a turn is in flight rather than queued.
+	 */
+	askSideQuestion(question: string, options?: SideQuestionOptions): Promise<SideQuestionOutcome>;
 	/**
 	 * Drop or replace the chat-loop's in-memory state after a session switch
 	 * (/resume, /fork, /new). `leafTurnId` is the id the next user turn
@@ -292,6 +329,12 @@ export interface CreateChatLoopDeps {
 	 */
 	prompts?: PromptsContract;
 	createAgent?: typeof createEngineAgent;
+	/**
+	 * The `/btw` round. Defaults to the real provider call; contracts inject a
+	 * stub so they can assert what a side question does to the session without
+	 * standing up a provider, exactly as `createAgent` does for a turn.
+	 */
+	runSideQuestion?: typeof runSideQuestion;
 	/**
 	 * Return the current session's entries for token estimation. The chat-loop
 	 * calls this on every submit so the auto-compaction threshold sees the
@@ -399,6 +442,7 @@ export function reloadProtectedArtifactsForSession(
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
+	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState(deps.getSettings().orchestrator.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
@@ -1022,6 +1066,82 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			recovery.cancelRetryCountdown();
 			queues.reset();
 			middlewareToolChoice.reset();
+		},
+
+		async askSideQuestion(question: string, options: SideQuestionOptions = {}): Promise<SideQuestionOutcome> {
+			const text = question.trim();
+			if (text.length === 0) {
+				return { status: "refused", reason: "a side question needs a question" };
+			}
+			// Never queued. A side question exists to be answered now, beside a run
+			// the operator is watching; holding it until the run settles would
+			// deliver it after the moment it was asked in had passed.
+			if (state.streaming) {
+				return { status: "refused", reason: "a turn is in flight; /btw runs beside the session, not in its queue" };
+			}
+			let agentRuntime: AgentRuntime | null;
+			try {
+				agentRuntime = turnRuntime.ensureRuntime();
+			} catch (err) {
+				return { status: "refused", reason: err instanceof Error ? err.message : String(err) };
+			}
+			if (!agentRuntime) {
+				return { status: "refused", reason: notConfiguredNotice() };
+			}
+			const resolution = agentRuntime.runtimeResolution;
+			let apiKey: string | undefined;
+			try {
+				apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
+					? (
+							await deps.providers.auth.resolveForTarget(
+								resolution.target,
+								resolution.runtime,
+								options.signal ? { signal: options.signal } : undefined,
+							)
+						).apiKey
+					: LOCAL_SIDE_QUESTION_API_KEY;
+			} catch (err) {
+				return { status: "refused", reason: err instanceof Error ? err.message : String(err) };
+			}
+			let result: SideQuestionResult;
+			try {
+				result = await sideQuestionRound({
+					model: agentRuntime.agent.state.model,
+					// Read-only: runSideQuestion copies before appending its own
+					// message, so the live agent's history is untouched.
+					messages: agentRuntime.agent.state.messages,
+					question: text,
+					...(apiKey !== undefined ? { apiKey } : {}),
+					...(options.signal ? { signal: options.signal } : {}),
+					...(options.onDelta ? { onDelta: options.onDelta } : {}),
+				});
+			} catch (err) {
+				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+			}
+			// Billed like any other call, so it is reported. It is recorded through
+			// the cost surface only: turn persistence, the working-set ledger,
+			// compaction inputs, and the footer counters never see it.
+			if (result.usage && deps.observability) {
+				deps.observability.recordTokens(
+					agentRuntime.targetId,
+					agentRuntime.wireModelId,
+					result.usage.totalTokens,
+					result.usage.costUsd,
+					{
+						input: result.usage.input,
+						output: result.usage.output,
+						cacheRead: result.usage.cacheRead,
+						cacheWrite: result.usage.cacheWrite,
+						reasoningTokens: result.usage.reasoning,
+						totalTokens: result.usage.totalTokens,
+						apiCalls: 1,
+					},
+					resolution.costProvenance,
+					undefined,
+					"side-question",
+				);
+			}
+			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
 		},
 
 		async compact(instructions?: string): Promise<void> {

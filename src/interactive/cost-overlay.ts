@@ -32,6 +32,8 @@ export interface CostRow {
 	cacheWrite: number;
 	reasoningTokens: number;
 	apiCalls: number;
+	/** Calls in this row that were `/btw` side questions rather than turns. */
+	sideQuestions: number;
 	cost: CostAggregate;
 }
 
@@ -61,6 +63,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			existing.row.cacheWrite += entry.cacheWrite;
 			existing.row.reasoningTokens += entry.reasoningTokens;
 			existing.row.apiCalls += entry.apiCalls ?? 1;
+			if (entry.label === "side-question") existing.row.sideQuestions += 1;
 			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
 			addResponseModelIdObservationCounts(
 				existing.responseModelIdObservationCounts,
@@ -81,6 +84,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				cacheWrite: entry.cacheWrite,
 				reasoningTokens: entry.reasoningTokens,
 				apiCalls: entry.apiCalls ?? 1,
+				sideQuestions: entry.label === "side-question" ? 1 : 0,
 			},
 			requestedModelIds: new Set(entry.requestedModelIds),
 			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
@@ -117,8 +121,19 @@ function sumRows(
 			cacheWrite: acc.cacheWrite + row.cacheWrite,
 			reasoningTokens: acc.reasoningTokens + row.reasoningTokens,
 			apiCalls: acc.apiCalls + row.apiCalls,
+			sideQuestions: acc.sideQuestions + row.sideQuestions,
 		}),
-		{ runs: 0, tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, apiCalls: 0 },
+		{
+			runs: 0,
+			tokens: 0,
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			reasoningTokens: 0,
+			apiCalls: 0,
+			sideQuestions: 0,
+		},
 	);
 }
 
@@ -166,9 +181,13 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 	// unknown` it printed for a target that reports no pricing. The token rows
 	// below are measured and stay either way. See formatCostAggregate.
 	const cost = formatCostAggregate(totalCost);
+	// A side question is billed like anything else and is counted here, but it is
+	// deliberately not a turn: it never entered the session, so `turns` above
+	// excludes it and this row says how much of the spend sat beside the session.
 	return kvBlock([
-		["turns", formatTokens(totals.runs)],
+		["turns", formatTokens(totals.runs - totals.sideQuestions)],
 		["model calls", formatTokens(totals.apiCalls)],
+		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
@@ -187,8 +206,9 @@ function modelBlock(row: CostRow): string[] {
 	return kvBlock([
 		["requested model ids", row.requestedModelIds.join(", ")],
 		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
-		["turns", formatTokens(row.runs)],
+		["turns", formatTokens(row.runs - row.sideQuestions)],
 		["model calls", formatTokens(row.apiCalls)],
+		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],
