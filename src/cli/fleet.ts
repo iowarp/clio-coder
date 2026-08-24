@@ -2,6 +2,9 @@
  * `clio-coder fleet` operator surface.
  *
  *   clio-coder fleet list                      enumerate .clio-coder/fleets/*.md with validity
+ *   clio-coder fleet new <name> --from <name>  copy a shipped contract into the project
+ *   clio-coder fleet validate|graph <name>     inspect a contract without executing it
+ *   clio-coder fleet commands init             draft a repository command registry
  *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
  *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
@@ -70,7 +73,7 @@ import {
 } from "../domains/dispatch/gate-decisions.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { openLedger } from "../domains/dispatch/state.js";
+import { type FleetRunRecord, openLedger, readFleetRun, writeFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { createWriteBoundaryEnforcer, preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
@@ -92,7 +95,12 @@ Repo-owned fleet contracts and the dispatch status surface.
 
 Subcommands:
   list                          list .clio-coder/fleets/*.md contracts with validation status
+  new <name> --from <builtin>   copy build-review, build-test, or sdlc into this repository
+  validate <name> [--json]      run the fleet execution preflight without side effects
+  graph <name> [--json]         print compiled waves, loops, scopes, and write boundaries
+  commands init                 draft a commented command registry from declared project entries
   run <name> [--var k=v ...]    preflight and execute a fleet contract
+       [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
   drain [--json]                deny new execution starts for up to one hour
@@ -109,6 +117,11 @@ Notes:
 function fail(message: string): number {
 	process.stderr.write(`clio-coder fleet: ${message}\n`);
 	return 2;
+}
+
+function refuse(message: string): number {
+	process.stderr.write(`clio-coder fleet: ${message}\n`);
+	return 1;
 }
 
 function parseVars(args: ReadonlyArray<string>): { vars: Record<string, string>; rest: string[]; error?: string } {
@@ -264,8 +277,12 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	const { vars, rest, error } = parseVars(args);
 	if (error !== undefined) return fail(error);
 	const json = rest.includes("--json");
+	const resumeIndex = rest.indexOf("--resume");
+	const resumeId = resumeIndex === -1 ? undefined : rest[resumeIndex + 1];
+	if (resumeIndex !== -1 && (resumeId === undefined || resumeId.startsWith("-")))
+		return fail("--resume requires a run id");
 	const name = rest.find((arg) => !arg.startsWith("-"));
-	if (!name) return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--json]");
+	if (!name) return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]");
 
 	// Phase 1: zero-side-effect validation. Parse and render strictly before
 	// any domain boots or any process spawns.
@@ -361,6 +378,47 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		await loaded.stop();
 		return fail(`preflight failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
+	let resumed: FleetRunRecord | null = null;
+	const replayed = new Map<string, import("../domains/dispatch/execution-scheduler.js").ExecutionStepResult>();
+	if (resumeId !== undefined) {
+		resumed = readFleetRun(resumeId);
+		if (resumed === null) {
+			await loaded.stop();
+			return refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`);
+		}
+		if (resumed.fleet !== contract.name) {
+			await loaded.stop();
+			return refuse(`resume run '${resumeId}' belongs to fleet '${resumed.fleet}', not '${contract.name}'`);
+		}
+		if (JSON.stringify(Object.entries(resumed.vars).sort()) !== JSON.stringify(Object.entries(vars).sort())) {
+			await loaded.stop();
+			return refuse(`resume run '${resumeId}' used different --var values`);
+		}
+		if (resumed.planHash !== plan.hash) {
+			process.stderr.write(`clio-coder fleet: resume plan hash differs: prior=${resumed.planHash} current=${plan.hash}\n`);
+			const priorSteps = resumed.planSteps ?? resumed.stepIds;
+			const currentSteps = plan.steps;
+			const width = Math.max(priorSteps.length, currentSteps.length);
+			for (let index = 0; index < width; index += 1) {
+				const before = priorSteps[index] ?? "(missing)";
+				const after = currentSteps[index] ?? "(missing)";
+				if (JSON.stringify(before) === JSON.stringify(after)) continue;
+				const beforeId = typeof before === "string" ? before : ((before as { id?: string }).id ?? "(missing)");
+				const afterId = typeof after === "string" ? after : ((after as { id?: string }).id ?? "(missing)");
+				process.stderr.write(`  step ${index + 1}: ${beforeId} -> ${afterId}\n`);
+				process.stderr.write(`    prior: ${JSON.stringify(before)}\n`);
+				process.stderr.write(`    current: ${JSON.stringify(after)}\n`);
+			}
+			await loaded.stop();
+			return 1;
+		}
+		const priorByStep = new Map(resumed.steps.map((entry) => [entry.stepId, entry.result]));
+		for (const step of plan.steps) {
+			const result = priorByStep.get(step.id);
+			if (result === undefined || !result.succeeded || !result.integrityValid) break;
+			replayed.set(step.id, result);
+		}
+	}
 	const boundaryByStep = new Map(plan.steps.map((step) => [step.id, step.writes]));
 	const boundaryEnforcer = createWriteBoundaryEnforcer({
 		root: process.cwd(),
@@ -374,8 +432,42 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	process.stderr.write(
 		`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
 	);
+	const fleetRunRecord: FleetRunRecord = {
+		version: 1,
+		id: fleetRootId,
+		fleet: contract.name,
+		planHash: plan.hash,
+		stepIds: plan.steps.map((step) => step.id),
+		planSteps: plan.steps.map((step) => structuredClone(step)),
+		vars: { ...vars },
+		startedAt: new Date().toISOString(),
+		endedAt: null,
+		resumedFrom: resumed?.id ?? null,
+		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
+	};
+	await writeFleetRun(fleetRunRecord);
+	for (const [stepId, result] of replayed) {
+		if (json)
+			process.stdout.write(
+				`${JSON.stringify({ stepId, status: "replayed", receipt: { runId: result.terminalRunId, digest: result.receiptDigest } })}\n`,
+			);
+		else
+			process.stdout.write(
+				`step ${stepId}: replayed terminal-run=${result.terminalRunId} receipt=${result.receiptDigest}\n`,
+			);
+	}
 	const receipts: RunReceipt[] = [];
 	const receiptsByStep = new Map<string, RunReceipt>();
+	for (const [stepId, result] of replayed) {
+		try {
+			const receipt = JSON.parse(
+				readFileSync(join(clioStateDir(), "receipts", `${result.terminalRunId}.json`), "utf8"),
+			) as RunReceipt;
+			receiptsByStep.set(stepId, receipt);
+		} catch {
+			// Deterministic code results and unavailable historical receipts need no agent receipt projection.
+		}
+	}
 	const planStep = (stepId: string) => plan.steps.find((entry) => entry.id === stepId);
 	const attributionEnabled = config?.get().attribution.gitCommits ?? true;
 	// Freshness is coordinator-owned execution state. Worker prose cannot set
@@ -415,7 +507,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					executionRole: step.executionRole,
 					task: step.task,
 					requestOrigin: "user",
-					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+					lineage: { parentRunId: resumed?.id ?? fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
 					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
 				};
 				const resolution = dispatch.preview?.(request);
@@ -452,7 +544,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					task: step.task,
 					predecessorHandoffs: handoffs,
 					requestOrigin: "user",
-					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt, depth: 1 },
+					lineage: { parentRunId: resumed?.id ?? fleetRootId, rootRunId: fleetRootId, attempt, depth: 1 },
 					reservation,
 					...(ledger !== undefined ? { ledger } : {}),
 					...(step.loop?.role === "check"
@@ -591,9 +683,11 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					output: result.output,
 				});
 				independentReviewFresh = decided.verdict === "pass" && correlation.independent;
-				const staged = stagePendingGateDecision(decided.draft);
-				const { path: decisionPath } = materializePendingGateDecision(staged);
-				if (!json) {
+				const replaying = replayed.has(step.id);
+				const decisionPath = replaying
+					? null
+					: materializePendingGateDecision(stagePendingGateDecision(decided.draft)).path;
+				if (!json && decisionPath !== null) {
 					process.stdout.write(
 						`loop ${loop.id} cycle ${attempt}: ${decided.draft.outcome}${decided.draft.detail === undefined ? "" : ` (${decided.draft.detail})`} decision=${decisionPath}\n`,
 					);
@@ -615,14 +709,23 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				if (ownerId === NO_WORKER_RESERVATION) return;
 				dispatch.reservations?.rollbackUnconsumed(ownerId);
 			},
+			onStepSettled: async (step, result) => {
+				fleetRunRecord.steps.push({ stepId: step.id, result });
+				await writeFleetRun(fleetRunRecord);
+			},
+			replayed,
 		});
 	} catch (err) {
+		fleetRunRecord.endedAt = new Date().toISOString();
+		await writeFleetRun(fleetRunRecord);
 		await dispatch.drain();
 		await loaded.stop();
 		return fail(err instanceof Error ? err.message : String(err));
 	}
 	await dispatch.drain();
 	await loaded.stop();
+	fleetRunRecord.endedAt = new Date().toISOString();
+	await writeFleetRun(fleetRunRecord);
 	// A loop is judged by whether it converged, not attempt by attempt: a red
 	// verification that a later attempt fixed is the loop working as declared,
 	// and a node a resolved loop made unnecessary never had to run at all.
@@ -867,6 +970,14 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	switch (sub) {
 		case "list":
 			return runList(args.slice(1));
+		case "new":
+			return (await import("./fleet-new.js")).runFleetNew(args.slice(1));
+		case "validate":
+			return (await import("./fleet-validate.js")).runFleetValidate(args.slice(1));
+		case "graph":
+			return (await import("./fleet-graph.js")).runFleetGraph(args.slice(1));
+		case "commands":
+			return (await import("./fleet-commands.js")).runFleetCommands(args.slice(1));
 		case "run":
 			return runFleet(args.slice(1));
 		case "status":

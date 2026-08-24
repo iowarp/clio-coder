@@ -21,6 +21,14 @@ import {
 
 export type DeclaredCheckDiscoveryResult = { ok: true; sources: DeclaredCheckSource[] } | { ok: false; reason: string };
 
+export interface DeclaredProjectEntry {
+	id: string;
+	command: string[];
+	path: string;
+	detail: string;
+	kind: "package-script" | "just-recipe" | "make-target";
+}
+
 function repositoryRelativeCwd(workspaceRoot: string, resolved: string): string {
 	const relative = path.relative(workspaceRoot, resolved);
 	return relative.length === 0 ? "." : relative.split(path.sep).join("/");
@@ -41,6 +49,60 @@ function packageCheckSource(packageRoot: string, workspaceRoot: string): Declare
 		packageDeclaredCheck(id, packagePath, cwd, packageTag(id)),
 	);
 	return { kind: "package.json", path: packagePath, checks };
+}
+
+/** Discover every exact project-declared entry without promoting it to a verifier check. */
+export function discoverDeclaredProjectEntriesAtRoot(workspaceRoot: string): DeclaredProjectEntry[] {
+	const entries: DeclaredProjectEntry[] = [];
+	const packagePath = path.join(workspaceRoot, "package.json");
+	if (existsSync(packagePath)) {
+		const pkg = parsePackageJson(packagePath);
+		if (pkg.ok) {
+			for (const name of Object.keys(pkg.scripts).sort()) {
+				if (typeof pkg.scripts[name] !== "string") continue;
+				entries.push({
+					id: name,
+					command: ["npm", "run", name],
+					path: "package.json",
+					detail: `package.json script '${name}'`,
+					kind: "package-script",
+				});
+			}
+		}
+	}
+	for (const relative of ["justfile", "Justfile"] as const) {
+		const filePath = path.join(workspaceRoot, relative);
+		if (!existsSync(filePath)) continue;
+		const text = readFileSync(filePath, "utf8");
+		for (const match of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_-]*)\s*(?:[^:=\n]*)?:\s*(?:#.*)?$/gmu)) {
+			const name = match[1];
+			if (name === undefined || name.startsWith("_")) continue;
+			entries.push({
+				id: name,
+				command: ["just", name],
+				path: relative,
+				detail: `just recipe '${name}'`,
+				kind: "just-recipe",
+			});
+		}
+		break;
+	}
+	const makePath = path.join(workspaceRoot, "Makefile");
+	if (existsSync(makePath)) {
+		const text = readFileSync(makePath, "utf8");
+		for (const match of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])[^\n]*$/gmu)) {
+			const name = match[1];
+			if (name === undefined || name.startsWith(".")) continue;
+			entries.push({
+				id: name,
+				command: ["make", name],
+				path: "Makefile",
+				detail: `Makefile target '${name}'`,
+				kind: "make-target",
+			});
+		}
+	}
+	return entries;
 }
 
 function providerCollision(sources: ReadonlyArray<DeclaredCheckSource>): string | null {

@@ -456,6 +456,20 @@ Fleet contracts support schema versions 1 through 4:
 - Version 3: Adds bounded check/repair loops and commit steps with `commitFrom` message sources.
 - Version 4 (`FLEET_WRITE_BOUNDARY_VERSION = 4`): Introduces per-step declared write boundaries (`writes`) and orchestrator post-step enforcement.
 
+### Fleet authoring
+
+The fleet CLI provides five authoring and inspection operations:
+
+- `clio-coder fleet new <name> --from <builtin>` copies one of `build-review`, `build-test`, or `sdlc` into `.clio-coder/fleets/<name>.md`. The command requires a safe file stem and refuses to replace an existing contract.
+- `clio-coder fleet validate <name> [--json]` parses the contract, validates its graph and command bindings, resolves every agent, and compiles the execution plan. It creates no state directory, ledger row, reservation, worker, or receipt.
+- `clio-coder fleet graph <name> [--json]` renders the compiled waves with each step kind, agent or command, scope, and write boundary. Bounded loops also show their check and repair nodes beneath the loop identifier.
+- `clio-coder fleet commands init` discovers declared package scripts, just recipes, Makefile targets, and supported `pyproject.toml` script and tool entries. It writes a fully commented `.clio-coder/fleets/commands.yaml` draft. Uncommenting an entry confirms its exact argument vector, and an existing registry is never replaced.
+- `clio-coder fleet run <name> --resume <runId>` starts a new fleet run after replaying the successful, integrity-valid prefix recorded for the named prior fleet run.
+
+Run resumption is separate from `clio-coder fleet resume`, which continues to reopen dispatch admission after an operator drain. A resumable fleet run records its contract name, rendered plan hash, ordered step identifiers, variables, and receipt references in the durable fleet ledger. The new run records the prior fleet run as its resume parent. Replayed steps are reported as `replayed`, retain their original receipt or code-report references, and do not create new receipts.
+
+The current contract must compile to the same plan hash. A mismatch refuses before execution and prints the changed positions in the ordered step list. Variables must exactly match the original run. A different value, an added value, or an omitted value is refused even when the resulting task text would otherwise be similar.
+
 ### Per-step write boundaries (Contract v4)
 
 Contract v4 requires every step to declare its write boundary using the `writes` allowlist property. Steps with scope `readonly` declare an empty allowlist (`[]`).

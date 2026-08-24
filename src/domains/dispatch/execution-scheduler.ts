@@ -83,6 +83,8 @@ export interface ExecutionLoopDecisionInput {
 }
 
 export interface ExecutionSchedulerAdapter {
+	/** Successful prefix results that retain their original receipt references. */
+	replayed?: ReadonlyMap<string, ExecutionStepResult>;
 	preflight(step: ExecutionPlanAgentStep): ExecutionPlanAdmission;
 	reserve(plan: ExecutionPlan, admissions: ReadonlyArray<ExecutionPlanAdmission>): { ownerId: string };
 	run(
@@ -131,6 +133,8 @@ export interface ExecutionSchedulerAdapter {
 	cancel(assignmentId: string): void;
 	release(ownerId: string): void;
 	releaseUnconsumed(ownerId: string): void;
+	/** Persist a settled result after boundary enforcement and before a dependent starts. */
+	onStepSettled?(step: ExecutionPlanStep, result: ExecutionStepResult): void | Promise<void>;
 }
 export interface ExecutionPlanResult {
 	planHash: string;
@@ -175,6 +179,7 @@ export async function executePlan(
 	adapter: ExecutionSchedulerAdapter,
 	signal?: AbortSignal,
 ): Promise<ExecutionPlanResult> {
+	const replayed = adapter.replayed ?? new Map<string, ExecutionStepResult>();
 	const stepsById = new Map(plan.steps.map((step) => [step.id, step]));
 	const loopsById = new Map(plan.loops.map((loop) => [loop.id, loop]));
 	const agentSteps: ExecutionPlanAgentStep[] = [];
@@ -188,7 +193,7 @@ export async function executePlan(
 		if (step.approvedAuthority === null || step.approvedAuthority !== step.requestedAuthority) {
 			throw new Error(`execution plan: step '${step.id}' lacks its requested authority grant`);
 		}
-		agentSteps.push(step);
+		if (!replayed.has(step.id)) agentSteps.push(step);
 	}
 	for (const loop of plan.loops) {
 		if (loop.checkKind === "agent" && adapter.decideLoop === undefined) {
@@ -253,6 +258,42 @@ export async function executePlan(
 		results.set(step.id, result);
 		if (isWorkspaceMutator(step)) lastMutationSeq = sequence;
 	};
+	for (const step of plan.steps) {
+		const result = replayed.get(step.id);
+		if (result === undefined) continue;
+		if (!result.succeeded || !result.integrityValid) {
+			throw new Error(`execution plan: replayed step '${step.id}' is not a completed successful step`);
+		}
+		recordCompletion(step, result);
+		if (step.loop?.role === "check" && step.kind === "code") {
+			checkPassed.set(step.id, result.succeeded);
+			attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
+		}
+		if (step.loop?.role === "check" && step.kind === "agent") {
+			const loop = loopsById.get(step.loop.loopId);
+			const decide = adapter.decideLoop;
+			if (loop === undefined || decide === undefined) {
+				throw new Error(`execution plan: replayed loop check '${step.id}' has no decider`);
+			}
+			const decision = await decide({
+				loop,
+				step,
+				attempt: step.loop.attempt,
+				terminalAttempt: step.loop.attempt >= loop.maxAttempts,
+				result,
+				priorResults: results,
+			});
+			checkPassed.set(step.id, decision.resolved);
+			attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
+			if (decision.findings !== null) loopFindings.set(`${loop.id}:${step.loop.attempt}`, decision.findings);
+			if (decision.needsDecision !== undefined && decision.needsDecision !== null) {
+				needsDecision.push(decision.needsDecision);
+			}
+		}
+		if (step.loop?.role === "repair") {
+			repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
+		}
+	}
 
 	/**
 	 * A failed predecessor normally disqualifies its dependents. Two deliberate
@@ -491,6 +532,7 @@ export async function executePlan(
 			const admitted = wave.flatMap((id) => {
 				const step = stepsById.get(id);
 				if (!step) throw new Error(`execution plan: unknown scheduled step '${id}'`);
+				if (results.has(id)) return [];
 				if (isUnneeded(step)) {
 					unneeded.add(step.id);
 					return [];
@@ -560,6 +602,7 @@ export async function executePlan(
 				for (const { step, result } of settled) {
 					running.set(step.id, { assignmentId: result.assignmentId });
 					recordCompletion(step, result);
+					await adapter.onStepSettled?.(step, result);
 					if (step.loop?.role === "repair") {
 						repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
 					}
