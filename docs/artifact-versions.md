@@ -10,7 +10,7 @@ Clio Coder strictly versions every persistent or network-transported data struct
 
 | Artifact / Subsystem | Current Version | Symbol / Type & Source Location | Persisted Path / Wire Location | Schema Semantics & Version Differences | Mismatch Handling |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Run Receipt** | `17` | `RUN_RECEIPT_INTEGRITY_VERSION = 17`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 17 covers all base provenance fields, routing intent, quality labels, `validationGrounding`, and `capabilityMismatch`. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
+| **Run Receipt** | `18` | `RUN_RECEIPT_INTEGRITY_VERSION = 18`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 18 covers all base provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, and council provenance. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
 | **Session Ledger** | `3` | `CURRENT_SESSION_FORMAT_VERSION = 3`<br>`src/engine/session.ts:66` | `<stateDir>/sessions/<cwdHash>/<sessionId>/` (`meta.json`, `current.jsonl`, `tree.json`) | Append-only ledger format with UUIDv7 turn IDs, session header line, and tree graph linkage. | Automated migration via `src/domains/session/migrations/` on `/resume`. Earlier unmigratable versions rejected. |
 | **Worker Spec** | `3` | `WORKER_SPEC_VERSION = 3`<br>`src/worker/spec-contract.ts:22` | Subprocess `stdin` control plane JSON payload | Worker invocation parameters, tool surface profile, and execution bounds. | Fail-closed preflight rejection before worker activation. |
 | **Worker Runtime Descriptor** | `2` | `WORKER_RUNTIME_DESCRIPTOR_VERSION = 2`<br>`src/worker/spec-contract.ts:23` | Worker attestation descriptor payload | Attestation descriptor for worker runtime environment and hardware facts. | Attestation mismatch causes immediate process termination. |
@@ -38,9 +38,9 @@ export function computeReceiptDigest(receipt: RunReceiptV15): string {
 ```
 
 Receipt verification checks:
-1. `integrity.version === 17`.
+1. `integrity.version === 18`.
 2. Calculated SHA-256 matches `integrity.digest`.
-3. All optional fields present in the schema (`validationGrounding`, `capabilityMismatch`, `steering`, `gate`, `plan`, `briefing`) conform to the strict v17 specification.
+3. All optional fields present in the schema (`validationGrounding`, `capabilityMismatch`, `steering`, `gate`, `council`, `plan`, `briefing`) conform to the strict v18 specification.
 
 ---
 

@@ -225,6 +225,7 @@ const TOOL_PROFILE_NAMES = [
 	"minimal-local",
 	"science-local",
 	"full-agent",
+	"council-read-only",
 ] as const satisfies ReadonlyArray<ToolProfileName>;
 const WORKER_PRODUCTS = ["orientation"] as const satisfies ReadonlyArray<AgentProduct>;
 const TARGET_LIFECYCLES = ["user-managed", "clio-managed"] as const;

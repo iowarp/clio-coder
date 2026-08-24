@@ -123,6 +123,11 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
 		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}`,
 	];
+	if (run.council !== undefined || run.gate?.role === "synthesis") {
+		lines.push(
+			`council: role=${run.gate?.role === "synthesis" ? "synthesis" : "member"} group=${run.council?.group ?? run.gate?.group ?? "unknown"}${run.council?.label ? ` label=${run.council.label}` : ""}`,
+		);
+	}
 	if (run.budget !== undefined) {
 		lines.push(
 			`recipe policy: ${formatBudgetPolicy(run.budget)}`,
@@ -158,6 +163,15 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 			costUsd: run.costUsd,
 			costProvenance: run.costProvenance ?? "unknown",
 			budget: run.budget ?? null,
+			...(run.council !== undefined || run.gate?.role === "synthesis"
+				? {
+						council: {
+							role: run.gate?.role === "synthesis" ? "synthesis" : "member",
+							group: run.council?.group ?? run.gate?.group ?? null,
+							...(run.council !== undefined ? { label: run.council.label, round: run.council.round } : {}),
+						},
+					}
+				: {}),
 			receiptPath: run.receiptPath,
 			running: live !== null,
 		},

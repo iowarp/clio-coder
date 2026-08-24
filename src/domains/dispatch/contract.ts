@@ -232,6 +232,16 @@ export interface DispatchContract {
 		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
 	}>;
 
+	/** Seal a coordinator-only council synthesis receipt without invoking a model. */
+	sealCouncilSynthesis?(input: {
+		group: string;
+		round: number;
+		kind: "none" | "vote";
+		text: string;
+		subjects: ReadonlyArray<{ runId: string; digest: string | null }>;
+		template: RunReceipt;
+	}): Promise<RunReceipt>;
+
 	/** List runs from the ledger. */
 	listRuns(status?: RunStatus): ReadonlyArray<RunEnvelope>;
 

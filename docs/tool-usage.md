@@ -235,7 +235,12 @@ Arguments:
 
 - `task` (required for the singular form unless `list:true`). One worker assignment/instruction string. It is distinct from briefing.
 - `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, cwd, briefing, intent, gate}` objects. Per-item fields override the top-level defaults below. Supplying both `task` and `tasks` is an error.
-- `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. A single task always runs down the sequential path.
+- `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. `pipeline`, `compete`, and `council` select their named topologies. A single ordinary task always runs down the sequential path.
+- `roster` (council only). Names one `workers.rosters` entry. Supply exactly one of `roster` or `members`.
+- `members` (council only). Supplies two to five inline `{label,target,model?,thinking?}` entries.
+- `synthesis` (council only). Accepts `none`, `judge`, or `vote`; the default is `none`.
+- `rounds` (council only). Accepts an integer from 1 through 3; the default is 1.
+- `judge` (council only with judge synthesis, or compete). Accepts optional `agent`, `model`, `target`, and `node` route fields.
 - `detach` (optional boolean). For parallel fan-out, returns the durable batch id and assignment ids after registration while the shared event consumer continues in the background. An assignment id equals its first attempt's run id. This is the parent model's route to mid-run monitor/steer; ordinary synchronous, sequential, and pipeline calls auto-wait for each assignment's terminal attempt.
 - `list` (optional boolean). Returns the agent catalog instead of dispatching.
 - `agent` (optional). Default agent recipe for items that do not name one; default `coder`. `agent_id` is accepted as an alias inside items.
@@ -256,7 +261,7 @@ Argument tolerance: `tasks` sent as a JSON string is parsed and a single object 
 
 Output is one batch-shaped summary even for a single task: a header `dispatch (<mode>) total=N failed=M`, the assignment id list, then one terminal-attempt receipt line per assignment (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker's final assistant text. `details = {mode, assignmentIds, receiptCount, failedCount, runs[]}`, and each `runs[]` entry carries distinct `assignmentId` and terminal `runId` fields plus the structured `verification` state and `receiptIntegrity` result. There is no `runIds` compatibility alias. Any terminal attempt with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a `note=` marker; do not treat such a run as validated work.
 
-The summary separates five things that must never be conflated: `receipt_integrity=verified/v17/sha256` comes only from verification against the ledger; `host_verification=<status>` describes orchestrator-executed declared checks; `evidence_verification=<state>/<basis>` describes worker-tool validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
+The summary separates five things that must never be conflated: `receipt_integrity=verified/v18/sha256` comes only from verification against the ledger; `host_verification=<status>` describes orchestrator-executed declared checks; `evidence_verification=<state>/<basis>` describes worker-tool validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
 
 Exit zero is insufficient without a durable deliverable. A successful native or ACP run must seal a nonempty `output.state="final"`. Otherwise it fails with `worker_final_output_missing`; any unfinished text remains partial diagnostics and automatic retry is suppressed. Live tool-use preambles never replace a missing receipt answer.
 
@@ -264,7 +269,7 @@ Sealed receipts are the durable evidence; worker prose remains advisory until ve
 
 ```text
 dispatch(list=true)
-dispatch(agent="debugger", task="Adversarially verify the strict v17 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
+dispatch(agent="debugger", task="Adversarially verify the strict v18 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
 dispatch(tasks=["Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion"])
 dispatch(tasks=[
   {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes"},

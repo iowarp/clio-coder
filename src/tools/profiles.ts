@@ -1,8 +1,13 @@
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 
-export type ToolProfileName = "minimal-local" | "science-local" | "full-agent";
+export type ToolProfileName = "minimal-local" | "science-local" | "full-agent" | "council-read-only";
 
-export const TOOL_PROFILE_NAMES: ReadonlyArray<ToolProfileName> = ["minimal-local", "science-local", "full-agent"];
+export const TOOL_PROFILE_NAMES: ReadonlyArray<Exclude<ToolProfileName, "council-read-only">> = [
+	"minimal-local",
+	"science-local",
+	"full-agent",
+];
+const ALL_TOOL_PROFILE_NAMES: ReadonlyArray<ToolProfileName> = [...TOOL_PROFILE_NAMES, "council-read-only"];
 const CODEWIKI_TOOL_NAMES: ReadonlyArray<BuiltinToolName> = [ToolNames.CodeNav];
 
 export interface ToolProfileContext {
@@ -24,14 +29,23 @@ const MINIMAL_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
 ];
 
 const SCIENCE_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [...MINIMAL_LOCAL_TOOLS, ToolNames.Verify];
+const COUNCIL_READ_ONLY_TOOLS: ReadonlyArray<BuiltinToolName> = [
+	ToolNames.Read,
+	ToolNames.Grep,
+	ToolNames.Find,
+	ToolNames.Ls,
+	ToolNames.CodeNav,
+	ToolNames.Context,
+];
 
 const NARROW_TOOL_PROFILES: Readonly<Record<Exclude<ToolProfileName, "full-agent">, ReadonlySet<BuiltinToolName>>> = {
 	"minimal-local": new Set(MINIMAL_LOCAL_TOOLS),
 	"science-local": new Set(SCIENCE_LOCAL_TOOLS),
+	"council-read-only": new Set(COUNCIL_READ_ONLY_TOOLS),
 };
 
 export function isToolProfileName(value: string): value is ToolProfileName {
-	return (TOOL_PROFILE_NAMES as ReadonlyArray<string>).includes(value);
+	return (ALL_TOOL_PROFILE_NAMES as ReadonlyArray<string>).includes(value);
 }
 
 /**
@@ -72,7 +86,7 @@ export function applyToolProfile(
 		const allowed = NARROW_TOOL_PROFILES[profile];
 		profiled = unique.filter((tool): tool is BuiltinToolName => isBuiltinToolName(tool) && allowed.has(tool));
 	}
-	return applyCodewikiWorkerPolicy(profiled, context);
+	return profile === "council-read-only" ? profiled : applyCodewikiWorkerPolicy(profiled, context);
 }
 
 function uniquePreservingOrder(tools: ReadonlyArray<ToolName>): ToolName[] {

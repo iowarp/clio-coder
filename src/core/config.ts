@@ -19,7 +19,9 @@ import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
+	COUNCIL_MEMBER_LABEL_PATTERN,
 	DEFAULT_SETTINGS,
+	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
 	type ThinkingLevel,
 } from "./defaults.js";
@@ -1179,6 +1181,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			issues.unknownKeys("workers", raw.workers, [
 				"default",
 				"profiles",
+				"rosters",
 				"agentBindings",
 				"maxRetries",
 				"onPermission",
@@ -1218,6 +1221,75 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						profiles[name] = profile;
 					}
 					settings.workers.profiles = profiles;
+				}
+			}
+			if ("rosters" in raw.workers) {
+				if (!isPlainObject(raw.workers.rosters)) {
+					issues.add("workers.rosters", `expected a map, got ${describe(raw.workers.rosters)}`);
+				} else {
+					const rosters: ClioSettings["workers"]["rosters"] = {};
+					for (const [rawName, rawRoster] of Object.entries(raw.workers.rosters)) {
+						const name = rawName.trim();
+						const path = `workers.rosters.${name}`;
+						if (!name) {
+							issues.add("workers.rosters", "empty roster name");
+							continue;
+						}
+						if (!isPlainObject(rawRoster)) {
+							issues.add(path, `expected a map, got ${describe(rawRoster)}`);
+							continue;
+						}
+						issues.unknownKeys(path, rawRoster, ["members"]);
+						if (!Array.isArray(rawRoster.members)) {
+							issues.add(`${path}.members`, "expected a list");
+							continue;
+						}
+						if (rawRoster.members.length < 2 || rawRoster.members.length > 5) {
+							issues.add(`${path}.members`, "expected 2 to 5 members");
+						}
+						const members: ClioSettings["workers"]["rosters"][string]["members"] = [];
+						const labels = new Set<string>();
+						for (const [index, rawMember] of rawRoster.members.entries()) {
+							const memberPath = `${path}.members[${index}]`;
+							if (!isPlainObject(rawMember)) {
+								issues.add(memberPath, `expected a map, got ${describe(rawMember)}`);
+								continue;
+							}
+							issues.unknownKeys(memberPath, rawMember, ["label", "target", "model", "thinking", "color"]);
+							const label = expectString(issues, `${memberPath}.label`, rawMember.label);
+							const target = expectString(issues, `${memberPath}.target`, rawMember.target);
+							if (label !== undefined && !COUNCIL_MEMBER_LABEL_PATTERN.test(label)) {
+								issues.add(`${memberPath}.label`, "expected [a-z][a-z0-9_-]{0,31}");
+							}
+							if (label !== undefined && labels.has(label)) issues.add(`${memberPath}.label`, "duplicate label");
+							if (label !== undefined) labels.add(label);
+							if (target !== undefined && !settings.targets.some((entry) => entry.id === target)) {
+								issues.add(`${memberPath}.target`, `unknown target '${target}'`);
+							}
+							const model =
+								rawMember.model === undefined ? undefined : expectString(issues, `${memberPath}.model`, rawMember.model);
+							const thinking =
+								rawMember.thinking === undefined
+									? undefined
+									: expectEnum(issues, `${memberPath}.thinking`, rawMember.thinking, THINKING_LEVELS);
+							const color =
+								rawMember.color === undefined ? undefined : expectString(issues, `${memberPath}.color`, rawMember.color);
+							if (color !== undefined && !THEME_NAMED_COLORS.includes(color as never) && !/^#[0-9a-fA-F]{6}$/u.test(color)) {
+								issues.add(`${memberPath}.color`, "expected a theme named color or 6-digit hex color");
+							}
+							if (label === undefined || target === undefined) continue;
+							members.push({
+								label,
+								target,
+								...(model ? { model } : {}),
+								...(thinking ? { thinking } : {}),
+								...(color ? { color } : {}),
+							});
+						}
+						if (rawRoster.members.length >= 2 && rawRoster.members.length <= 5 && members.length === rawRoster.members.length)
+							rosters[name] = { members };
+					}
+					settings.workers.rosters = rosters;
 				}
 			}
 			if ("agentBindings" in raw.workers) {

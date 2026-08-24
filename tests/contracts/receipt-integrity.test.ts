@@ -173,7 +173,7 @@ describe("contracts/receipt-integrity", () => {
 		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
 		// Every shape before routing intent became required is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -184,7 +184,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 17);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 18);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -250,6 +250,7 @@ describe("contracts/receipt-integrity", () => {
 				cycle: 1,
 				subjects: [{ runId: "builder", digest: "a".repeat(64) }],
 			},
+			council: { group: "council-1", label: "alpha", round: 1 },
 			plan: {
 				hash: "b".repeat(64),
 				topology: "parallel",
@@ -305,6 +306,7 @@ describe("contracts/receipt-integrity", () => {
 			reroutes: required(envelope.reroutes, "reroutes"),
 			pipeline: required(envelope.pipeline, "pipeline"),
 			gate: required(envelope.gate, "gate"),
+			council: required(envelope.council, "council"),
 			plan: required(envelope.plan, "plan"),
 			personaOverride: required(envelope.personaOverride, "personaOverride"),
 			briefing: required(envelope.briefing, "briefing"),

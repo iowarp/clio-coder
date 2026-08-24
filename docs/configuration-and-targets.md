@@ -174,6 +174,17 @@ workers:
     model: your-model-id
     thinkingLevel: off
   profiles: {}
+  rosters:
+    design:
+      members:
+        - label: local-a
+          target: local-lmstudio
+          model: your-model-id
+          thinking: medium
+          color: accent
+        - label: local-b
+          target: local-vllm
+          color: "#5ba8ff"
   agentBindings: {}
   maxRetries: 2
   onPermission: deny
@@ -565,6 +576,15 @@ These are saved defaults, not a live control surface. See [Live routing vs saved
 
 ### Safety and worker policy
 
+`workers.rosters.<name>.members` defines council membership beside
+`workers.profiles`. Every member accepts `label`, `target`, and the optional
+keys `model`, `thinking`, and `color`. Labels must match
+`[a-z][a-z0-9_-]{0,31}` and must be unique inside the roster. A roster contains
+two to five members. Colors accept a theme token such as `accent`, `success`,
+or `reason`, or a six-digit hexadecimal value such as `#5ba8ff`. Unknown roster
+and member keys are rejected during configuration load. The existing settings
+watcher validates and publishes roster changes with every other hot reload.
+
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
 | `autonomy` | `auto-edit` | `read-only`, `suggest`, `auto-edit`, `full-auto` | immediately |
@@ -574,6 +594,7 @@ These are saved defaults, not a live control surface. See [Live routing vs saved
 | `workers.maxRetries` | `2` | integer ≥ 0 | next dispatch |
 | `workers.resilienceCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
 | `workers.profiles` | `{}` | map of profile name to a target/model/thinking choice | next dispatch |
+| `workers.rosters` | `{}` | map of roster name to 2 to 5 council members | next dispatch |
 | `workers.agentBindings` | `{}` | map of agent id to a key present in `workers.profiles` | next dispatch |
 | `skills.trustProjectCompatRoots` | `false` | boolean | restart |
 

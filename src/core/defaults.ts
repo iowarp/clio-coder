@@ -32,6 +32,31 @@ export interface WorkerTarget {
 }
 
 export type WorkerProfiles = Record<string, WorkerTarget>;
+export const COUNCIL_MEMBER_LABEL_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
+export const THEME_NAMED_COLORS = [
+	"accent",
+	"accentDeep",
+	"action",
+	"success",
+	"warning",
+	"error",
+	"info",
+	"reason",
+	"dim",
+	"muted",
+	"title",
+	"frame",
+	"frameStrong",
+] as const;
+export type ThemeNamedColor = (typeof THEME_NAMED_COLORS)[number];
+export interface WorkerRosterMember {
+	label: string;
+	target: string;
+	model?: string;
+	thinking?: ThinkingLevel;
+	color?: ThemeNamedColor | string;
+}
+export type WorkerRosters = Record<string, { members: WorkerRosterMember[] }>;
 /** Map of agent id -> workers.profiles key. Empty means no agent is pinned to a profile. */
 export type WorkerAgentBindings = Record<string, string>;
 
@@ -56,6 +81,7 @@ export interface WorkerEscalationSettings {
 export interface WorkersSettings {
 	default: WorkerTarget;
 	profiles: WorkerProfiles;
+	rosters: WorkerRosters;
 	agentBindings: WorkerAgentBindings;
 	/**
 	 * Bounded automatic retries for a dispatched worker run whose outcome is
@@ -343,6 +369,7 @@ export const DEFAULT_SETTINGS = {
 			thinkingLevel: "off" as ThinkingLevel,
 		} as WorkerTarget,
 		profiles: {} as WorkerProfiles,
+		rosters: {} as WorkerRosters,
 		agentBindings: {} as WorkerAgentBindings,
 		maxRetries: 2,
 		onPermission: "deny" as WorkerPermissionMode,
@@ -529,6 +556,7 @@ workers:
     model: null
     thinkingLevel: off
   profiles: {}
+  rosters: {}
   # Example profile entry:
   # profiles:
   #   fast-local:

@@ -207,11 +207,11 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 
 ### 5.2 Canonical Receipt Integrity Serialization
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 17`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 18`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
 
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
-- **Coverage**: Includes every current receipt field and reconstructible ledger field, including route intent/decision/quality, execution role, worker identity, result-contract conformance, node/reroute/gate/plan provenance, briefing, steering, task worktree application, and `outcomeCode`.
+- **Coverage**: Includes every current receipt field and reconstructible ledger field, including route intent/decision/quality, execution role, worker identity, result-contract conformance, node/reroute/gate/plan/council provenance, briefing, steering, task worktree application, and `outcomeCode`.
 
 Integrity is only the artifact-integrity axis of the canonical trust status.
 The other axes are validation grounding, independent review, context

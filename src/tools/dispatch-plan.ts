@@ -32,7 +32,15 @@ import { isRoutingIntent, type RoutingIntent } from "../domains/dispatch/routing
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import { prepareDispatchArguments } from "./dispatch-arguments.js";
 
-export type DispatchPlanTopology = "parallel" | "sequential" | "pipeline" | "review" | "compete" | "detached" | "fleet";
+export type DispatchPlanTopology =
+	| "parallel"
+	| "sequential"
+	| "pipeline"
+	| "review"
+	| "compete"
+	| "council"
+	| "detached"
+	| "fleet";
 
 export type DispatchPlanSource = null | {
 	kind: "scout-transition";
@@ -63,7 +71,8 @@ export interface DispatchPlanTaskView {
 	/** Effective configured target id used as the execution pin. */
 	target?: string;
 	/** Coordinator role when the topology expands one user task into several runs. */
-	role?: "task" | "builder" | "reviewer" | "candidate" | "judge";
+	role?: "task" | "builder" | "reviewer" | "candidate" | "judge" | "member" | "synthesis";
+	council?: { label: string; color?: string; round: number; rounds: number; synthesis: "none" | "judge" | "vote" };
 	/** One-based source task or gate cycle/candidate number. */
 	position?: number;
 	/** Normalized advisory posture and hard bounds sealed into the plan. */
@@ -126,6 +135,7 @@ export interface ResolvedDispatchPlanArtifact {
 				| "worktreeDestination"
 				| "nodeHost"
 				| "role"
+				| "council"
 				| "position"
 				| "allowedCandidates"
 				| "intent"
@@ -154,7 +164,7 @@ export interface ResolvedDispatchPlanArtifact {
 export function withResolvedPlanTaskPin(
 	request: DispatchRequest,
 	task: ResolvedDispatchPlanArtifact["tasks"][number] | undefined,
-	options: { pinTask?: boolean } = {},
+	options: { pinTask?: boolean; pinBriefing?: boolean } = {},
 ): DispatchRequest {
 	if (task === undefined) return request;
 	const {
@@ -188,7 +198,13 @@ export function withResolvedPlanTaskPin(
 			? {}
 			: { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }),
 		task: options.pinTask === false ? request.task : task.task,
-		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
+		...(options.pinBriefing === false
+			? request.briefing !== undefined
+				? { briefing: request.briefing }
+				: {}
+			: task.briefing !== undefined
+				? { briefing: task.briefing }
+				: {}),
 		...(task.worktree === true
 			? {
 					worktree: true as const,
@@ -301,6 +317,7 @@ function canonicalCandidates(value: unknown): DispatchFailoverCandidate[] | null
 function topologyOf(args: Record<string, unknown>): DispatchPlanTopology {
 	if (isRecord(args.apply_winner)) return "compete";
 	if (args.mode === "compete") return "compete";
+	if (args.mode === "council") return "council";
 	if (args.review === true || isRecord(args.review)) return "review";
 	if (args.detach === true) return "detached";
 	if (args.mode === "sequential") return "sequential";
@@ -350,6 +367,11 @@ function renderPlanText(
 		lines.push(
 			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task=${JSON.stringify(safeField(task.task))}`,
 		);
+		if (task.council !== undefined) {
+			lines.push(
+				`    council label=${safeField(task.council.label)} color=${safeField(task.council.color ?? "none")} round=${task.council.round} rounds=${task.council.rounds} synthesis=${task.council.synthesis}`,
+			);
+		}
 		if (task.worktree === true)
 			lines.push(
 				`    worktree=true apply=${task.apply ?? "merge"} destination=${safeField(task.worktreeDestination ?? "unresolved")}`,
@@ -419,6 +441,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"nodeHost",
 		"target",
 		"role",
+		"council",
 		"position",
 		"routingIntent",
 		"failover",
@@ -462,11 +485,27 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		value.role !== "builder" &&
 		value.role !== "reviewer" &&
 		value.role !== "candidate" &&
-		value.role !== "judge"
+		value.role !== "judge" &&
+		value.role !== "member" &&
+		value.role !== "synthesis"
 	) {
 		return false;
 	}
 	if (value.position !== undefined && (!Number.isInteger(value.position) || Number(value.position) < 1)) return false;
+	if (value.council !== undefined) {
+		if (
+			!isRecord(value.council) ||
+			typeof value.council.label !== "string" ||
+			value.council.label.length === 0 ||
+			(value.council.color !== undefined && typeof value.council.color !== "string") ||
+			!Number.isInteger(value.council.round) ||
+			Number(value.council.round) < 1 ||
+			!Number.isInteger(value.council.rounds) ||
+			Number(value.council.rounds) < 1 ||
+			(value.council.synthesis !== "none" && value.council.synthesis !== "judge" && value.council.synthesis !== "vote")
+		)
+			return false;
+	}
 	if (value.nodeKind !== "local" && value.nodeKind !== "ssh") return false;
 	if (value.nodeKind === "ssh" && (typeof value.nodeHost !== "string" || value.nodeHost.trim().length === 0))
 		return false;
@@ -527,6 +566,7 @@ const RESULT_CONTRACT_KINDS = new Set<ResultContract["kind"]>([
 	"architect-plan",
 	"scout-report",
 	"verifier-report",
+	"council-report",
 	"debugger-report",
 	"research-report",
 	"mutation-report",
@@ -644,6 +684,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 		value.topology !== "pipeline" &&
 		value.topology !== "review" &&
 		value.topology !== "compete" &&
+		value.topology !== "council" &&
 		value.topology !== "detached" &&
 		value.topology !== "fleet"
 	) {
@@ -731,6 +772,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 				: {}),
 			...(task.nodeHost !== undefined ? { nodeHost: task.nodeHost.trim() } : {}),
 			...(task.role !== undefined ? { role: task.role } : {}),
+			...(task.council !== undefined ? { council: { ...task.council } } : {}),
 			...(task.position !== undefined ? { position: task.position } : {}),
 			...(task.intent !== undefined ? { intent: structuredClone(task.intent) } : {}),
 			...(task.resolvedVerification !== undefined
@@ -799,6 +841,7 @@ export function describeDispatchPlan(rawArgs: Record<string, unknown> | undefine
 		(tasks.length > 1 ||
 			source !== null ||
 			topology === "compete" ||
+			topology === "council" ||
 			remote ||
 			tasks.some((task) => task.failover === "approved") ||
 			confirmation !== undefined ||

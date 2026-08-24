@@ -47,7 +47,7 @@ export function isExecutionRole(value: unknown): value is ExecutionRole {
  * statistics belong to: every compete candidate occupies a distinct `candidate`
  * position but they are all ordinary `builder` routes.
  */
-export type GateTopologyRole = "builder" | "reviewer" | "candidate" | "judge";
+export type GateTopologyRole = "builder" | "reviewer" | "candidate" | "judge" | "member" | "synthesis";
 
 /**
  * Facts the role is derived from. `capabilityClass` and `resultContractKind`
@@ -86,6 +86,8 @@ export function deriveExecutionRole(input: ExecutionRoleInput): ExecutionRole {
 	if (input.attempt > 0) return "recovery";
 	if (input.gateRole === "reviewer") return "reviewer";
 	if (input.gateRole === "judge") return "judge";
+	if (input.gateRole === "synthesis") return "judge";
+	if (input.gateRole === "member") return "researcher";
 	if (input.gateRole === "builder" || input.gateRole === "candidate") return "builder";
 	if (input.resultContractKind === "verifier-report") return "verifier";
 	if (input.capabilityClass === "read-only") return "researcher";

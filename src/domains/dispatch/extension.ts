@@ -3655,6 +3655,7 @@ export function createDispatchBundle(
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 			});
@@ -3812,6 +3813,7 @@ export function createDispatchBundle(
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
@@ -4672,6 +4674,7 @@ export function createDispatchBundle(
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
@@ -4692,6 +4695,7 @@ export function createDispatchBundle(
 				budget: lifecycle.budgetEnvelope,
 				...(placement !== undefined && placement !== null ? { node: placement.node.id } : {}),
 				...(req.gate !== undefined ? { gate: { role: req.gate.role, cycle: req.gate.cycle } } : {}),
+				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.reroutes !== undefined && req.reroutes.length > 0 ? { rerouteCount: req.reroutes.length } : {}),
 				...(lifecycle.target.modelCapabilities !== undefined &&
 				lifecycle.target.modelCapabilities !== null &&
@@ -4888,6 +4892,7 @@ export function createDispatchBundle(
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
@@ -5812,6 +5817,87 @@ export function createDispatchBundle(
 		};
 	}
 
+	async function sealCouncilSynthesis(input: {
+		group: string;
+		round: number;
+		kind: "none" | "vote";
+		text: string;
+		subjects: ReadonlyArray<{ runId: string; digest: string | null }>;
+		template: RunReceipt;
+	}): Promise<RunReceipt> {
+		const l = requireLedger();
+		const runId = newRunId();
+		const task = `Council ${input.kind} synthesis`;
+		const gate = { role: "synthesis" as const, group: input.group, cycle: input.round, subjects: [...input.subjects] };
+		const council = { group: input.group, label: "synthesis", round: input.round };
+		const created = l.create({
+			id: runId,
+			agentId: "council-synthesis",
+			executionRole: "judge",
+			requestOrigin: "internal",
+			task,
+			targetId: input.template.targetId,
+			wireModelId: input.template.wireModelId,
+			runtimeId: input.template.runtimeId,
+			runtimeKind: input.template.runtimeKind,
+			sessionId: input.template.sessionId,
+			cwd: input.template.reproducibility?.cwd ?? process.cwd(),
+		});
+		const endedAt = new Date().toISOString();
+		l.update(runId, {
+			status: "completed",
+			outcome: "succeeded",
+			endedAt,
+			exitCode: 0,
+			gate,
+			council,
+			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
+		});
+		const receipt = l.recordReceipt(runId, {
+			runId,
+			agentId: "council-synthesis",
+			executionRole: "judge",
+			requestOrigin: "internal",
+			task,
+			targetId: input.template.targetId,
+			wireModelId: input.template.wireModelId,
+			runtimeId: input.template.runtimeId,
+			runtimeKind: input.template.runtimeKind,
+			startedAt: created.startedAt,
+			endedAt,
+			outcome: "succeeded",
+			outcomeDetail: null,
+			exitCode: 0,
+			tokenCount: 0,
+			inputTokenCount: 0,
+			outputTokenCount: 0,
+			reasoningTokenCount: 0,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
+			costUsd: 0,
+			costProvenance: "unknown",
+			compiledPromptHash: null,
+			staticCompositionHash: null,
+			clioVersion: readClioVersion(),
+			piMonoVersion: readPiMonoVersion(),
+			platform: process.platform,
+			nodeVersion: process.version,
+			toolCalls: 0,
+			toolStats: [],
+			verification: { state: "unverified", basis: "no-validation-tool" },
+			routingIntent: defaultRoutingIntent({}),
+			quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
+			reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
+			sessionId: input.template.sessionId,
+			gate,
+			council,
+			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
+		});
+		await l.persist();
+		return receipt;
+	}
+
 	const extension: DomainExtension = {
 		async start() {
 			// No in-memory executor survives a process restart, so every active
@@ -6046,6 +6132,7 @@ export function createDispatchBundle(
 		protectedArtifactState: () => getProtectedArtifactState(),
 		dispatch,
 		dispatchBatch,
+		sealCouncilSynthesis,
 		listRuns(status) {
 			const l = requireLedger();
 			return status ? l.list({ status }) : l.list();
