@@ -159,6 +159,7 @@ import {
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
+import { hostVerificationRejection, runHostVerification } from "./host-verification.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
 	configuredJointNodes,
@@ -3614,6 +3615,7 @@ export function createDispatchBundle(
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
+				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
 				targetId,
 				wireModelId,
 				runtimeId,
@@ -3787,6 +3789,7 @@ export function createDispatchBundle(
 				executionRole: envelope.executionRole,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
+				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
 				targetId,
 				wireModelId,
 				runtimeId,
@@ -3913,6 +3916,7 @@ export function createDispatchBundle(
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
+				...(receipt.hostVerification !== undefined ? { hostVerification: receipt.hostVerification.status } : {}),
 				...(receipt.skillActivations && receipt.skillActivations.length > 0
 					? { skillActivations: [...receipt.skillActivations] }
 					: {}),
@@ -4444,7 +4448,8 @@ export function createDispatchBundle(
 			if (
 				event.type === "clio_run_outcome" &&
 				isRunOutcomeCode(event.payload?.outcomeCode) &&
-				event.payload.outcomeCode !== "worker_final_output_missing"
+				event.payload.outcomeCode !== "worker_final_output_missing" &&
+				event.payload.outcomeCode !== "host_verification_rejected"
 			) {
 				if (acceptsOutcomeCodeEvents) {
 					trustedOutcomeCodes.add(event.payload.outcomeCode);
@@ -5004,6 +5009,7 @@ export function createDispatchBundle(
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
+				...(receipt.hostVerification !== undefined ? { hostVerification: receipt.hostVerification.status } : {}),
 				...(receipt.skillActivations && receipt.skillActivations.length > 0
 					? { skillActivations: [...receipt.skillActivations] }
 					: {}),
@@ -5173,6 +5179,19 @@ export function createDispatchBundle(
 					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
 					failureMessage = finalDetail;
 				}
+				const hostVerification = await runHostVerification({
+					runId: envelope.id,
+					request: req,
+					workerSuccessful: finalOutcome === "succeeded",
+					onDiagnostic: (error) => reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
+				});
+				const hostRejection = hostVerificationRejection(hostVerification);
+				if (hostRejection !== null && finalOutcome === "succeeded") {
+					finalOutcome = "failed";
+					outcomeCode = hostRejection.outcomeCode;
+					finalDetail = hostRejection.detail;
+					failureMessage = finalDetail;
+				}
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode);
 				const receiptDraft = buildReceiptDraft(
@@ -5186,6 +5205,7 @@ export function createDispatchBundle(
 					sealedResultContractFact,
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
+				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,

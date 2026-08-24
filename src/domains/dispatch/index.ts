@@ -93,6 +93,16 @@ export {
 	readGateDecisionArtifactsForRunIds,
 	verifyGateDecisionArtifact,
 } from "./gate-decisions.js";
+export { runHostVerification, workspaceFingerprint } from "./host-verification.js";
+export type { DispatchIntent, DispatchIntentVerification } from "./intent.js";
+export {
+	DISPATCH_INTENT_PATH_ENTRY_BYTES_CAP,
+	DISPATCH_INTENT_PATH_LIST_CAP,
+	DISPATCH_INTENT_TIMEOUT_MIN_MS,
+	DISPATCH_INTENT_VERIFICATION_CAP,
+	isDispatchIntent,
+	normalizeDispatchIntent,
+} from "./intent.js";
 export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export { createRouteHistoryStore } from "./route-history.js";
@@ -104,6 +114,8 @@ export type {
 	ReceiptVerificationState,
 	RunBriefingProvenance,
 	RunEnvelope,
+	RunHostVerification,
+	RunHostVerificationCheck,
 	RunKind,
 	RunOutcomeCode,
 	RunReceipt,

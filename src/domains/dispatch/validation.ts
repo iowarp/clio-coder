@@ -19,6 +19,7 @@ import {
 } from "./execution-handoff.js";
 import { isExecutionRole } from "./execution-role.js";
 import { COMPETE_STANCES, type CompeteStance } from "./gate-role-prompts.js";
+import { type DispatchIntent, isDispatchIntent } from "./intent.js";
 import { isRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type {
 	DispatchRequestOrigin,
@@ -134,6 +135,8 @@ export interface JobSpec {
 	 * per-tool calls (subprocess).
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/** Normalized model-declared path, output, and host verification intent. */
+	intent?: DispatchIntent;
 	requestOrigin?: DispatchRequestOrigin;
 	/**
 	 * Threaded output from the previous pipeline step. Set only by the dispatch
@@ -201,6 +204,7 @@ const KNOWN_KEYS = new Set([
 	"trustProjectCompatRoots",
 	"responseSchema",
 	"writeRoots",
+	"intent",
 	"requestOrigin",
 	"pipelineInput",
 	"predecessorHandoffs",
@@ -457,6 +461,15 @@ export function validateJobSpec(spec: unknown): Validated {
 			errors.push("writeRoots must be a non-empty array of non-empty strings");
 		}
 	}
+	if ("intent" in spec && spec.intent !== undefined && !isDispatchIntent(spec.intent)) {
+		errors.push("intent must be a normalized dispatch intent");
+	}
+	if (isDispatchIntent(spec.intent) && spec.intent.writeRoots.length > 0 && Array.isArray(spec.writeRoots)) {
+		const jobCwd = typeof spec.cwd === "string" && spec.cwd.length > 0 ? spec.cwd : process.cwd();
+		const legacy = [...new Set(spec.writeRoots.map((root) => path.resolve(jobCwd, String(root))))].sort();
+		const declared = [...new Set(spec.intent.writeRoots.map((root) => path.resolve(jobCwd, root)))].sort();
+		if (JSON.stringify(legacy) !== JSON.stringify(declared)) errors.push("intent_write_roots_contradiction");
+	}
 
 	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
 		if (typeof spec.requestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
@@ -555,13 +568,18 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));
 	if (typeof spec.trustProjectCompatRoots === "boolean") out.trustProjectCompatRoots = spec.trustProjectCompatRoots;
 	if (responseSchema) out.responseSchema = responseSchema;
-	if (
+	if (isDispatchIntent(spec.intent)) out.intent = structuredClone(spec.intent);
+	const effectiveWriteRoots =
 		Array.isArray(spec.writeRoots) &&
 		spec.writeRoots.length > 0 &&
 		spec.writeRoots.every((root) => typeof root === "string" && root.length > 0)
-	) {
+			? spec.writeRoots
+			: isDispatchIntent(spec.intent) && spec.intent.writeRoots.length > 0
+				? spec.intent.writeRoots
+				: undefined;
+	if (effectiveWriteRoots !== undefined) {
 		const jobCwd = typeof spec.cwd === "string" && spec.cwd.length > 0 ? spec.cwd : process.cwd();
-		out.writeRoots = spec.writeRoots.map((root) => path.resolve(jobCwd, String(root)));
+		out.writeRoots = effectiveWriteRoots.map((root) => path.resolve(jobCwd, String(root)));
 	}
 	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;

@@ -148,11 +148,11 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
-- **Cryptographic Coverage**: Current receipts use strict v15 and authenticate every current receipt field, including briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, and result-contract conformance, against the reconstructed ledger. Every version other than v15 is rejected; there is no historical receipt reader.
+- **Cryptographic Coverage**: Current receipts use strict v16 and authenticate every current receipt field, including briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, and result-contract conformance, against the reconstructed ledger. Every version other than v16 is rejected; there is no historical receipt reader.
 
 | Version | Verification policy | Compatibility policy |
 |---|---|---|
-| v15 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
+| v16 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
 | Any other version | No reader | Rejected; remove or archive the incompatible state rather than expecting migration |
 
 Receipt integrity and evidence verification answer different questions. The
@@ -227,7 +227,7 @@ finish-contract records without changing receipt-owned axes. Findings such as
 domain artifacts remain in the receipt, gate, audit, and trace files.
 
 The canonical aggregate is an additive projection for downstream work. Receipt
-integrity remains version 15, evidence bundles remain version 1, gate decisions
+integrity remains version 16, evidence bundles remain version 1, gate decisions
 remain version 2, and no persisted receipt field or cryptographic algorithm
 changes.
 

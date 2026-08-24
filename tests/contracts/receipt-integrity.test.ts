@@ -86,12 +86,18 @@ describe("contracts/receipt-integrity", () => {
 		);
 	});
 
-	it("seals a receipt with a findings summary and round-trips verification", () => {
+	it("keeps evidence verification and round-trips host verification", () => {
 		const envelope = fixtureEnvelope();
-		const draft: RunReceiptDraft = { ...fixtureReceiptDraft(envelope), findingsSummary: sampleSummary };
+		const draft: RunReceiptDraft = {
+			...fixtureReceiptDraft(envelope),
+			findingsSummary: sampleSummary,
+			hostVerification: { status: "verified", checks: [] },
+		};
 		const receipt = withReceiptIntegrity(draft, envelope);
 
 		strictEqual(receipt.integrity.version, RUN_RECEIPT_INTEGRITY_VERSION);
+		strictEqual(receipt.verification.state, "unverified");
+		deepStrictEqual(receipt.hostVerification, { status: "verified", checks: [] });
 		deepStrictEqual(receipt.findingsSummary, sampleSummary);
 		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
 	});
@@ -167,7 +173,7 @@ describe("contracts/receipt-integrity", () => {
 		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
 		// Every shape before routing intent became required is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -178,7 +184,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 15);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 16);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -302,6 +308,14 @@ describe("contracts/receipt-integrity", () => {
 			plan: required(envelope.plan, "plan"),
 			personaOverride: required(envelope.personaOverride, "personaOverride"),
 			briefing: required(envelope.briefing, "briefing"),
+			intent: {
+				version: 1,
+				readRoots: ["src"],
+				writeRoots: ["tests"],
+				relevantPaths: ["src/domains/dispatch/types.ts"],
+				expectedOutputs: ["dist/cli.js"],
+				verification: [{ check: "test", timeoutMs: 30_000 }],
+			},
 			steering: required(envelope.steering, "steering"),
 			outcomeCode: required(envelope.outcomeCode, "outcomeCode"),
 			projectContext: {
@@ -328,6 +342,21 @@ describe("contracts/receipt-integrity", () => {
 			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 3 }],
 			toolActivity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false },
 			verification: { state: "verified", basis: "validation-tool" },
+			hostVerification: {
+				status: "verified",
+				checks: [
+					{
+						check: "test",
+						argv: ["npm", "run", "test"],
+						cwd: "/workspace",
+						exitCode: 0,
+						durationMs: 42,
+						memo: false,
+						outputTail: "pass",
+						artifactPath: "/state/artifacts/run/test.log",
+					},
+				],
+			},
 			skillActivations: [
 				{
 					name: "test-skill",

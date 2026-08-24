@@ -37,6 +37,7 @@ export function routeValidationProjection(
 		// Presentation-only parentage stamped by the calling tool, on the same
 		// terms: a model must not be able to author it.
 		parentToolCallId,
+		resolvedVerification,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -54,6 +55,9 @@ export function routeValidationProjection(
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
 			...(ledger !== undefined ? { ledger } : {}),
 			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
+			...(resolvedVerification !== undefined
+				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
+				: {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};

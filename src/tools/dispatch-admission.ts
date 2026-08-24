@@ -3,6 +3,7 @@ import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dis
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
+import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
@@ -35,6 +36,7 @@ import type {
 	DispatchToolDeps,
 } from "./dispatch-types.js";
 import type { ToolSpec } from "./registry.js";
+import { discoverDeclaredChecks } from "./verify/scripts.js";
 
 /**
  * The six identity-sensitive stores which bind synchronous admission to the
@@ -165,6 +167,28 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				approvedAuthorities: ["read-only", "verification", "artifact-write", "workspace-edit"],
 				authorityBasis: deps.getAutonomy?.() === "full-auto" ? "full-auto-policy" : "operator-plan-approval",
 			},
+			resolveIntent(rawIntent, cwd) {
+				const discovery = discoverDeclaredChecks(cwd);
+				if (!discovery.ok) return { ok: false, message: `verification_catalog_invalid: ${discovery.reason}` };
+				const declared = discovery.sources.flatMap((source) => source.checks);
+				const byId = new Map(declared.map((check) => [check.id, check]));
+				const normalized = normalizeDispatchIntent(rawIntent, byId);
+				if (!normalized.ok) return { ok: false, message: `${normalized.reason}: ${normalized.message}` };
+				return {
+					ok: true,
+					intent: normalized.intent,
+					resolvedVerification: normalized.intent.verification.map((entry) => {
+						const check = byId.get(entry.check);
+						if (check === undefined) throw new Error(`resolved verification check '${entry.check}' disappeared`);
+						return {
+							check: entry.check,
+							argv: [...check.command],
+							cwd: resolve(process.cwd(), check.cwd),
+							timeoutMs: entry.timeoutMs,
+						};
+					}),
+				};
+			},
 		});
 	const trustExecution = (args: Record<string, unknown>, snapshot: DispatchExecutionSnapshot) => {
 		state.trustedExecutionSnapshots.set(args, deepFreeze(structuredClone(snapshot)));
@@ -217,6 +241,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 	): ResolvedPlanTask => {
 		const resolution = deps.dispatch.preview?.(request);
 		if (resolution === undefined) throw new Error("dispatch preview is unavailable");
+		if (request.resolvedVerification?.length && resolution.runtimeId === "claude-code") {
+			throw new Error("verification_unsupported_runtime: claude-code subprocess dispatch cannot run host verification");
+		}
 		const pinned = request.node !== undefined || request.target !== undefined || request.model !== undefined;
 		const approvedCandidates =
 			pinned || request.failover !== "approved"
@@ -248,6 +275,10 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			...(failover === "approved" ? { allowedCandidates: approvedCandidates.map((candidate) => ({ ...candidate })) } : {}),
 			role,
 			position,
+			...(request.intent !== undefined ? { intent: structuredClone(request.intent) } : {}),
+			...(request.resolvedVerification !== undefined
+				? { resolvedVerification: request.resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
+				: {}),
 		};
 		state.taskResolutions.set(task, resolution);
 		return task;
@@ -397,9 +428,15 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			if (parsed.requests.length !== 1 || parsed.requests[0] === undefined) {
 				return shapeRejection(args, REVIEW_SINGLE_TASK_MESSAGE);
 			}
+			if (parsed.requests.some((request) => (request.resolvedVerification?.length ?? 0) > 0)) {
+				return shapeRejection(args, "verification_unsupported_for_mode: review requests cannot run host verification");
+			}
 		}
 		if (mode === "compete" && (parsed.requests.length !== 1 || parsed.requests[0] === undefined)) {
 			return shapeRejection(args, COMPETE_SINGLE_TASK_MESSAGE);
+		}
+		if (mode === "compete" && parsed.requests.some((request) => (request.resolvedVerification?.length ?? 0) > 0)) {
+			return shapeRejection(args, "verification_unsupported_for_mode: compete requests cannot run host verification");
 		}
 		const competeResult = mode === "compete" ? competeSettingsFromArgs(args) : undefined;
 		if (competeResult !== undefined && !competeResult.ok) return shapeRejection(args, competeResult.message);
@@ -490,7 +527,20 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				topology === "compete" ||
 				tasks.some((task) => task.node !== "local" || task.failover === "approved");
 			if (!planScale) {
-				const marked = markPrepared(args);
+				const marked = parsed.requests.some((request) => request.intent !== undefined)
+					? markPrepared(
+							withResolvedDispatchPlan(args, {
+								version: 3,
+								topology,
+								source: null,
+								maxWorkers: null,
+								onFailure: null,
+								tasks,
+								costCeilingUsd: resolvedCostCeiling(),
+								deadlineMs: null,
+							}),
+						)
+					: markPrepared(args);
 				return trustExecution(marked, dispatchExecutionSnapshot(marked, snapshotFields));
 			}
 			const marked = markReservedPlan(args, {

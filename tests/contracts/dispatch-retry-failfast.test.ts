@@ -11,6 +11,7 @@ describe("contracts/dispatch retry fail-fast classifier", () => {
 			"loop_guard_tools_disabled_exhausted",
 			"result_contract_exhausted",
 			"worker_final_output_missing",
+			"host_verification_rejected",
 		];
 		for (const code of codes) strictEqual(isDeterministicOutcomeCode(code), true);
 	});

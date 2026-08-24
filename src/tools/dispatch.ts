@@ -46,6 +46,34 @@ const DispatchBudgetSchema = Type.Object(
 	},
 );
 
+const DispatchVerificationSchema = Type.Array(
+	Type.Object(
+		{
+			check: Type.String({ description: "Declared verification check id. This is not a shell command." }),
+			timeout_ms: Type.Optional(
+				Type.Integer({ minimum: 1, description: "Requested timeout within the declared check bounds." }),
+			),
+		},
+		{ additionalProperties: false },
+	),
+	{ maxItems: 8 },
+);
+
+const DispatchIntentSchema = Type.Object(
+	{
+		read_roots: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+		write_roots: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+		relevant_paths: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+		expected_outputs: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+		verification: Type.Optional(DispatchVerificationSchema),
+	},
+	{
+		additionalProperties: false,
+		description:
+			"Typed repository-relative path and output intent. Verification checks are declared ids from package scripts or .clio-coder/verifiers.yaml, not shell commands.",
+	},
+);
+
 /**
  * Stable, lightweight dispatch surface. Admission remains synchronous so the
  * policy decision and provisional reservation are bound to the exact argument
@@ -131,6 +159,12 @@ export function createDispatchTool(
 							model: Type.Optional(Type.String()),
 							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
 							cwd: Type.Optional(Type.String()),
+							intent: Type.Optional(DispatchIntentSchema),
+							gate: Type.Optional(
+								Type.String({
+									description: "Shorthand for one intent.verification declared check id. This is not a shell command.",
+								}),
+							),
 						}),
 					]),
 					{ description: "Tasks to dispatch; a single object or string is accepted and wrapped." },
@@ -206,6 +240,12 @@ export function createDispatchTool(
 			briefing: Type.Optional(
 				Type.String({
 					description: `Separate bounded parent context/data for task, or the shared default for tasks; never worker instructions and never a task replacement. Max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
+				}),
+			),
+			intent: Type.Optional(DispatchIntentSchema),
+			gate: Type.Optional(
+				Type.String({
+					description: "Shorthand for one intent.verification declared check id. This is not a shell command.",
 				}),
 			),
 			persona: Type.Optional(

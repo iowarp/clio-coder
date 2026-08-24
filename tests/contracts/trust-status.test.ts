@@ -48,7 +48,7 @@ const QUALITY_EMPTY: RunReceiptQuality = {
 function currentReceipt(overrides: Partial<PersistedRunReceiptTrustFacts> = {}): PersistedRunReceiptTrustFacts {
 	return {
 		runId: "run-154",
-		integrity: { version: 15, algorithm: "sha256", digest: DIGEST_A },
+		integrity: { version: 16, algorithm: "sha256", digest: DIGEST_A },
 		verification: { state: "verified", basis: "validation-tool" },
 		quality: QUALITY_EMPTY,
 		projectContext: { tier: "bounded", chars: 240, contentHash: DIGEST_B },
