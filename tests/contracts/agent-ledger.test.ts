@@ -91,7 +91,7 @@ import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/wor
  * the ledger contribution field existed. A receipt without a contribution must
  * still digest to exactly this.
  */
-const PRE_LEDGER_RECEIPT_DIGEST = "f89365b07440c782c3fbc2dec793ee7a57e9339add631635f60d6825316a0ff3";
+const V17_BASE_RECEIPT_DIGEST = "2b829e6acfd3243129388907f0559417134d32f162d84920f1c0729d3f68694e";
 
 /**
  * Attested tool signature for `allowedTools: ["read", "grep"]`, computed on the
@@ -812,13 +812,13 @@ describe("contracts/agent-ledger hub", () => {
 // ---------------------------------------------------------------------------
 
 describe("contracts/agent-ledger receipt", () => {
-	it("digests a receipt without a contribution exactly as it did before the field existed", () => {
+	it("keeps the v17 base receipt digest stable without a ledger contribution", () => {
 		const envelope = fixtureEnvelope();
 		const draft = fixtureReceiptDraft(envelope);
 		const integrity = computeReceiptIntegrity(draft, envelope);
 		strictEqual(integrity.version, RUN_RECEIPT_INTEGRITY_VERSION);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 16, "the v16 receipt digest is stable without a ledger contribution");
-		strictEqual(integrity.digest, PRE_LEDGER_RECEIPT_DIGEST);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 17, "the v17 receipt digest covers task worktree application");
+		strictEqual(integrity.digest, V17_BASE_RECEIPT_DIGEST);
 	});
 
 	it("covers the contribution in integrity and digests it distinctly when present", () => {
@@ -834,7 +834,7 @@ describe("contracts/agent-ledger receipt", () => {
 		const draft: RunReceiptDraft = { ...fixtureReceiptDraft(envelope), ledgerContribution: contribution };
 		const sealed = computeReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.version, RUN_RECEIPT_INTEGRITY_VERSION);
-		ok(sealed.digest !== PRE_LEDGER_RECEIPT_DIGEST, "a sealed contribution is inside the digest");
+		ok(sealed.digest !== V17_BASE_RECEIPT_DIGEST, "a sealed contribution is inside the digest");
 
 		const tampered: RunReceiptDraft = {
 			...draft,

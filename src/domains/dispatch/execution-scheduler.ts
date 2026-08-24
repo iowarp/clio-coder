@@ -164,6 +164,12 @@ function isWorkspaceMutator(step: ExecutionPlanStep): boolean {
 	return step.verification !== true && step.commitFrom === undefined;
 }
 
+/** A token writer either declares a non-empty agent boundary or may mutate workspace state. */
+function isExecutionPlanWriter(step: ExecutionPlanStep): boolean {
+	if (step.kind === "agent" && (step.writes?.length ?? 0) > 0) return true;
+	return isWorkspaceMutator(step);
+}
+
 export async function executePlan(
 	plan: ExecutionPlan,
 	adapter: ExecutionSchedulerAdapter,
@@ -495,71 +501,84 @@ export async function executePlan(
 				}
 				return [{ step, handoffs: handoffsFor(step) }];
 			});
-			const launch = admitted.filter(
-				(entry): entry is { step: ExecutionPlanAgentStep; handoffs: ExecutionHandoff[] } => entry.step.kind === "agent",
-			);
-			const codeWork = admitted.filter(
-				(entry): entry is { step: ExecutionPlanCodeStep; handoffs: ExecutionHandoff[] } => entry.step.kind === "code",
-			);
-			const boundaryWindow = `wave-${waveIndex}`;
-			const enforced = openBoundary(
-				boundaryWindow,
-				admitted.map((entry) => entry.step),
-			);
-			const started = await Promise.all(
-				launch.map(async ({ step, handoffs }) => ({
-					step,
-					handle: await adapter.run(step, handoffs, { ownerId: reservation.ownerId, memberId: step.id }, ledger),
-				})),
-			);
-			for (const { step, handle } of started) running.set(step.id, { assignmentId: handle.assignmentId });
-			const onSettled = (step: ExecutionPlanStep, result: ExecutionStepResult): void => {
-				if (isPlanFailure(step, result) && plan.onFailure === "stop") {
-					stopped = true;
-					for (const [runningStepId, owned] of running) {
-						if (runningStepId !== step.id && owned.assignmentId !== null) adapter.cancel(owned.assignmentId);
+			const admissionGroups: Array<typeof admitted> = [];
+			if (plan.writers === 1) {
+				const readers = admitted.filter(({ step }) => !isExecutionPlanWriter(step));
+				const writers = admitted.filter(({ step }) => isExecutionPlanWriter(step));
+				if (writers.length === 0) admissionGroups.push(readers);
+				else {
+					admissionGroups.push([...readers, ...(writers[0] === undefined ? [] : [writers[0]])]);
+					for (const writer of writers.slice(1)) admissionGroups.push([writer]);
+				}
+			} else admissionGroups.push(admitted);
+			for (const [groupIndex, group] of admissionGroups.entries()) {
+				if (stopped || signal?.aborted) break;
+				const launch = group.filter(
+					(entry): entry is { step: ExecutionPlanAgentStep; handoffs: ExecutionHandoff[] } => entry.step.kind === "agent",
+				);
+				const codeWork = group.filter(
+					(entry): entry is { step: ExecutionPlanCodeStep; handoffs: ExecutionHandoff[] } => entry.step.kind === "code",
+				);
+				const boundaryWindow = groupIndex === 0 ? `wave-${waveIndex}` : `wave-${waveIndex}-writer-${groupIndex + 1}`;
+				const enforced = openBoundary(
+					boundaryWindow,
+					group.map((entry) => entry.step),
+				);
+				const started = await Promise.all(
+					launch.map(async ({ step, handoffs }) => ({
+						step,
+						handle: await adapter.run(step, handoffs, { ownerId: reservation.ownerId, memberId: step.id }, ledger),
+					})),
+				);
+				for (const { step, handle } of started) running.set(step.id, { assignmentId: handle.assignmentId });
+				const onSettled = (step: ExecutionPlanStep, result: ExecutionStepResult): void => {
+					if (isPlanFailure(step, result) && plan.onFailure === "stop") {
+						stopped = true;
+						for (const [runningStepId, owned] of running) {
+							if (runningStepId !== step.id && owned.assignmentId !== null) adapter.cancel(owned.assignmentId);
+						}
+						codeAbort.abort();
+						adapter.releaseUnconsumed(reservation.ownerId);
 					}
-					codeAbort.abort();
+				};
+				const ran = await Promise.all([
+					...started.map(async ({ step, handle }) => {
+						const result = await handle.result;
+						onSettled(step, result);
+						return { step: step as ExecutionPlanStep, result };
+					}),
+					...codeWork.map(async ({ step, handoffs }) => {
+						const result = await runCodeStepNode(step, handoffs);
+						onSettled(step, result);
+						return { step: step as ExecutionPlanStep, result };
+					}),
+				]);
+				// The boundary is settled before anything is recorded or handed on, so
+				// a rolled-back step never appears upstream of the work it would have
+				// contaminated.
+				const settled = await closeBoundary(boundaryWindow, enforced, ran);
+				for (const { step, result } of settled) {
+					running.set(step.id, { assignmentId: result.assignmentId });
+					recordCompletion(step, result);
+					if (step.loop?.role === "repair") {
+						repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
+					}
+					running.delete(step.id);
+				}
+				// Loop continuation is decided after the wave settles, so a gate's
+				// verdict is read from a sealed result rather than from a live stream.
+				for (const { step, result } of settled) await settleCheck(step, result);
+				// A loop that spent its last attempt without converging ends the run
+				// under a stop policy, whether the verdict came from an exit code or
+				// from a gate that answered "no" perfectly well.
+				const exhausted = settled.some(({ step }) => {
+					const loop = step.loop?.role === "check" ? loopOf(step) : null;
+					return loop !== null && step.loop !== undefined && step.loop.attempt >= loop.maxAttempts && !loopResolved(loop);
+				});
+				if ((exhausted || settled.some(({ step, result }) => isPlanFailure(step, result))) && plan.onFailure === "stop") {
+					stopped = true;
 					adapter.releaseUnconsumed(reservation.ownerId);
 				}
-			};
-			const ran = await Promise.all([
-				...started.map(async ({ step, handle }) => {
-					const result = await handle.result;
-					onSettled(step, result);
-					return { step: step as ExecutionPlanStep, result };
-				}),
-				...codeWork.map(async ({ step, handoffs }) => {
-					const result = await runCodeStepNode(step, handoffs);
-					onSettled(step, result);
-					return { step: step as ExecutionPlanStep, result };
-				}),
-			]);
-			// The boundary is settled before anything is recorded or handed on, so
-			// a rolled-back step never appears upstream of the work it would have
-			// contaminated.
-			const settled = await closeBoundary(boundaryWindow, enforced, ran);
-			for (const { step, result } of settled) {
-				running.set(step.id, { assignmentId: result.assignmentId });
-				recordCompletion(step, result);
-				if (step.loop?.role === "repair") {
-					repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
-				}
-				running.delete(step.id);
-			}
-			// Loop continuation is decided after the wave settles, so a gate's
-			// verdict is read from a sealed result rather than from a live stream.
-			for (const { step, result } of settled) await settleCheck(step, result);
-			// A loop that spent its last attempt without converging ends the run
-			// under a stop policy, whether the verdict came from an exit code or
-			// from a gate that answered "no" perfectly well.
-			const exhausted = settled.some(({ step }) => {
-				const loop = step.loop?.role === "check" ? loopOf(step) : null;
-				return loop !== null && step.loop !== undefined && step.loop.attempt >= loop.maxAttempts && !loopResolved(loop);
-			});
-			if ((exhausted || settled.some(({ step, result }) => isPlanFailure(step, result))) && plan.onFailure === "stop") {
-				stopped = true;
-				adapter.releaseUnconsumed(reservation.ownerId);
 			}
 		}
 		return {

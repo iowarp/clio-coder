@@ -106,6 +106,8 @@ export interface ExecutionPlan {
 	topology: ExecutionPlanTopology;
 	rootTask: string;
 	maxWorkers: number;
+	/** Serialize writer admission when set. The only supported value in this cut is one. */
+	writers?: 1;
 	onFailure: ExecutionPlanFailurePolicy;
 	steps: ReadonlyArray<ExecutionPlanStep>;
 	loops: ReadonlyArray<ExecutionPlanLoop>;
@@ -240,6 +242,7 @@ function checkLoops(steps: ReadonlyArray<ExecutionPlanStep>, loops: ReadonlyArra
 function checkWriteBoundaryWaves(
 	steps: ReadonlyArray<ExecutionPlanStep>,
 	waves: ReadonlyArray<ReadonlyArray<string>>,
+	writerLimit?: 1,
 ): void {
 	const byId = new Map(steps.map((step) => [step.id, step]));
 	for (const [index, wave] of waves.entries()) {
@@ -250,7 +253,7 @@ function checkWriteBoundaryWaves(
 		const declared = members.filter((step) => step.writes !== undefined);
 		if (declared.length === 0) continue;
 		const undeclared = members.filter((step) => step.writes === undefined);
-		if (undeclared.length > 0) {
+		if (undeclared.length > 0 && writerLimit !== 1) {
 			throw new Error(
 				`execution plan: wave ${index} mixes boundary-enforced steps (${declared
 					.map((step) => step.id)
@@ -260,7 +263,7 @@ function checkWriteBoundaryWaves(
 			);
 		}
 		const writers = declared.filter((step) => (step.writes?.length ?? 0) > 0);
-		if (writers.length > 1) {
+		if (writers.length > 1 && writerLimit !== 1) {
 			throw new Error(
 				`execution plan: wave ${index} schedules ${writers.length} steps that may write (${writers
 					.map((step) => step.id)
@@ -273,6 +276,9 @@ function checkWriteBoundaryWaves(
 }
 
 export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
+	if (input.writers !== undefined && input.writers !== 1) {
+		throw new Error("execution plan: writers must be 1 when present");
+	}
 	const steps = canonicalSteps(input.steps);
 	const loops = (input.loops ?? []).map((loop) => ({
 		...loop,
@@ -281,12 +287,13 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	}));
 	checkLoops(steps, loops);
 	const waves = executionPlanWaves(steps, input.maxWorkers);
-	checkWriteBoundaryWaves(steps, waves);
+	checkWriteBoundaryWaves(steps, waves, input.writers);
 	const canonical = {
 		version: 4 as const,
 		topology: input.topology,
 		rootTask: input.rootTask,
 		maxWorkers: input.maxWorkers,
+		...(input.writers === 1 ? { writers: 1 as const } : {}),
 		onFailure: input.onFailure,
 		steps,
 		loops,

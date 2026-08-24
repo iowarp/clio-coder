@@ -49,11 +49,11 @@ Co-authored-by: Clio Coder <clio-coder@iowarp.ai>
 Existing human trailers stay in place. A Clio trailer already present in any
 letter case is respected rather than repeated, line endings are normalized only
 while attribution is enabled, and repeated processing is idempotent. When a directly relevant
-receipt-v16 digest passes integrity verification, Clio may additionally add the
+receipt-v17 digest passes integrity verification, Clio may additionally add the
 full digest:
 
 ```text
-Clio-Evidence: receipt-v16/sha256:<64-character digest>
+Clio-Evidence: receipt-v17/sha256:<64-character digest>
 ```
 
 Clio does not invent, shorten, or add an unrelated digest. The role trailers do

@@ -52,6 +52,9 @@ export interface DispatchPlanTaskView {
 	task: string;
 	/** Exact canonical bounded briefing approved for this task. */
 	briefing?: string;
+	worktree?: true;
+	apply?: "merge" | "preserve";
+	worktreeDestination?: string;
 	model?: string;
 	node?: string;
 	/** Effective transport identity; host is authenticated for SSH placement. */
@@ -117,7 +120,16 @@ export interface ResolvedDispatchPlanArtifact {
 			Required<Pick<DispatchPlanTaskView, "routingIntent">> &
 			Pick<
 				DispatchPlanTaskView,
-				"briefing" | "nodeHost" | "role" | "position" | "allowedCandidates" | "intent" | "resolvedVerification"
+				| "briefing"
+				| "worktree"
+				| "apply"
+				| "worktreeDestination"
+				| "nodeHost"
+				| "role"
+				| "position"
+				| "allowedCandidates"
+				| "intent"
+				| "resolvedVerification"
 			> &
 			Required<
 				Pick<
@@ -177,6 +189,13 @@ export function withResolvedPlanTaskPin(
 			: { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }),
 		task: options.pinTask === false ? request.task : task.task,
 		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
+		...(task.worktree === true
+			? {
+					worktree: true as const,
+					apply: task.apply ?? "merge",
+					...(task.worktreeDestination === undefined ? {} : { taskWorktreeDestination: task.worktreeDestination }),
+				}
+			: {}),
 		...(task.intent !== undefined ? { intent: structuredClone(task.intent) } : {}),
 		...(task.resolvedVerification !== undefined
 			? { resolvedVerification: task.resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
@@ -234,6 +253,12 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 		};
 		const briefing = "briefing" in record ? str(record.briefing) : str(args.briefing);
 		if (briefing !== undefined) view.briefing = briefing;
+		const worktree = "worktree" in record ? record.worktree : args.worktree;
+		if (worktree === true) {
+			view.worktree = true;
+			const apply = "apply" in record ? record.apply : args.apply;
+			view.apply = apply === "preserve" ? "preserve" : "merge";
+		}
 		const model = str(record.model) ?? sharedModel;
 		if (model !== undefined) view.model = model;
 		const node = str(record.node) ?? sharedNode;
@@ -325,6 +350,10 @@ function renderPlanText(
 		lines.push(
 			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task=${JSON.stringify(safeField(task.task))}`,
 		);
+		if (task.worktree === true)
+			lines.push(
+				`    worktree=true apply=${task.apply ?? "merge"} destination=${safeField(task.worktreeDestination ?? "unresolved")}`,
+			);
 		if (task.allowedCandidates !== undefined) {
 			for (const [candidateIndex, candidate] of task.allowedCandidates.entries()) {
 				lines.push(
@@ -381,6 +410,9 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"agent",
 		"task",
 		"briefing",
+		"worktree",
+		"apply",
+		"worktreeDestination",
 		"model",
 		"node",
 		"nodeKind",
@@ -441,6 +473,10 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.nodeKind === "local" && value.nodeHost !== undefined) return false;
 	if (value.briefing !== undefined && (typeof value.briefing !== "string" || value.briefing.trim().length === 0))
 		return false;
+	if (value.worktree !== undefined && value.worktree !== true) return false;
+	if (value.apply !== undefined && value.apply !== "merge" && value.apply !== "preserve") return false;
+	if (value.apply !== undefined && value.worktree !== true) return false;
+	if (value.worktreeDestination !== undefined && typeof value.worktreeDestination !== "string") return false;
 	if (failoverModeOf(value.failover) === undefined) return false;
 	if (!isRoutingIntent(value.routingIntent)) return false;
 	if (value.routeApproval !== null && !isApprovedAssignmentRoute(value.routeApproval)) return false;
@@ -668,6 +704,13 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			agent: task.agent.trim(),
 			task: task.task.trim(),
 			...(task.briefing !== undefined ? { briefing: task.briefing.trim() } : {}),
+			...(task.worktree === true
+				? {
+						worktree: true as const,
+						apply: task.apply ?? "merge",
+						...(task.worktreeDestination === undefined ? {} : { worktreeDestination: task.worktreeDestination }),
+					}
+				: {}),
 			model: task.model.trim(),
 			node: task.node.trim(),
 			nodeKind: task.nodeKind,

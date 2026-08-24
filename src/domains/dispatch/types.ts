@@ -314,7 +314,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 16;
+	version: 17;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -790,6 +790,15 @@ export interface RunReceipt {
 	verification: RunReceiptVerification;
 	/** Orchestrator-executed declared checks. Worker self-report never populates this field. */
 	hostVerification?: RunHostVerification;
+	/** Isolated writer checkout and its collect-time application result. */
+	worktree?: {
+		path: string;
+		branch: string;
+		diffHash: string;
+		apply: "merge" | "preserve";
+		applied: boolean;
+		reason?: string;
+	};
 	/** Required normalized routing request, sealed without task or prompt data. */
 	routingIntent: RoutingIntent;
 	/** Required routing-quality facts known at receipt finalization. */
@@ -812,8 +821,7 @@ export interface RunReceipt {
 	 * What this run contributed to its dispatch's agent ledger. Optional and
 	 * absent unless the run had a ledger, following validationGrounding and
 	 * capabilityMismatch: receiptDigestFields skips undefined, so a receipt
-	 * without one digests exactly as it did before this landed and
-	 * RUN_RECEIPT_INTEGRITY_VERSION stays where it is.
+	 * without one omits the field from canonical serialization.
 	 */
 	ledgerContribution?: RunLedgerContribution;
 	/**

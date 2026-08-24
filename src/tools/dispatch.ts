@@ -159,6 +159,10 @@ export function createDispatchTool(
 							model: Type.Optional(Type.String()),
 							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
 							cwd: Type.Optional(Type.String()),
+							worktree: Type.Optional(Type.Literal(true, { description: "Run this writer in an isolated git worktree." })),
+							apply: Type.Optional(
+								StringEnum(["merge", "preserve"], { description: "Merge successful work by default, or preserve its branch." }),
+							),
 							intent: Type.Optional(DispatchIntentSchema),
 							gate: Type.Optional(
 								Type.String({
@@ -175,6 +179,17 @@ export function createDispatchTool(
 					description:
 						"Run tasks concurrently (default), one at a time, as a pipeline where each task receives the previous task's output as input data, or as a compete where N candidates build the same single task in scratch worktrees and a judge picks the winner.",
 				}),
+			),
+			writers: Type.Optional(
+				Type.Literal(1, {
+					description: "Serialize writer admission in declared task order while readers continue concurrently.",
+				}),
+			),
+			worktree: Type.Optional(
+				Type.Literal(true, { description: "Run a singular writer task in an isolated git worktree." }),
+			),
+			apply: Type.Optional(
+				StringEnum(["merge", "preserve"], { description: "Merge successful work by default, or preserve its branch." }),
 			),
 			detach: Type.Optional(
 				Type.Boolean({

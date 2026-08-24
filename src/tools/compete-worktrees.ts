@@ -33,8 +33,15 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { hostname } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { RunKind } from "../domains/dispatch/types.js";
+import {
+	commitWorktreePath,
+	isCanonicalWorktreePathInside,
+	mergeWorktreeBranch,
+	protectedPathsChangedByWorktreeBranch,
+	worktreeBranchDiffStat,
+} from "./task-worktree.js";
 
 export interface CandidateWorktree {
 	index: number;
@@ -300,20 +307,7 @@ function isCanonicalDirectoryAt(path: string): boolean {
  * be mistaken for a child of `/group-a` as it can with textual startsWith.
  */
 export function isCanonicalPathInside(parent: string, candidate: string): boolean {
-	let canonicalParent: string;
-	let canonicalCandidate: string;
-	try {
-		canonicalParent = realpathSync(parent);
-	} catch {
-		canonicalParent = resolve(parent);
-	}
-	try {
-		canonicalCandidate = realpathSync(candidate);
-	} catch {
-		canonicalCandidate = resolve(candidate);
-	}
-	const rel = relative(canonicalParent, canonicalCandidate);
-	return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+	return isCanonicalWorktreePathInside(parent, candidate);
 }
 
 function manifestFromUnknown(value: unknown): CompeteGroupManifest | null {
@@ -557,29 +551,12 @@ export function createCandidateWorktree(
  * builder changed nothing (an empty candidate is a legitimate ranking fact).
  */
 export function commitCandidateWork(worktree: CandidateWorktree, message: string): boolean {
-	git(worktree.path, ["add", "-A"]);
-	const staged = git(worktree.path, ["status", "--porcelain"]);
-	if (staged.length === 0) return false;
-	git(worktree.path, [
-		"-c",
-		`user.name=${COMPETE_COMMIT_IDENTITY}`,
-		"-c",
-		`user.email=${COMPETE_COMMIT_IDENTITY}@local`,
-		"commit",
-		"-m",
-		message,
-		"--no-verify",
-	]);
-	return true;
+	return commitWorktreePath(worktree.path, COMPETE_COMMIT_IDENTITY, message);
 }
 
 /** One-line stat summary of what a candidate branch changed relative to HEAD. */
 export function candidateDiffStat(root: string, branch: string): string {
-	try {
-		return git(root, ["diff", "--shortstat", `HEAD...${branch}`]) || "no changes";
-	} catch {
-		return "diff unavailable";
-	}
+	return worktreeBranchDiffStat(root, branch);
 }
 
 /**
@@ -592,31 +569,7 @@ export function protectedPathsChangedByCompeteBranch(
 	branch: string,
 	protectedPaths: ReadonlyArray<string>,
 ): string[] {
-	const canonical = canonicalRoot(root);
-	const protectedInside = protectedPaths
-		.map((path) => resolve(path))
-		.filter((path) => {
-			const rel = relative(canonical, path);
-			return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-		});
-	if (protectedInside.length === 0) return [];
-	const changed = git(canonical, ["diff", "--name-only", "-z", "--no-renames", `HEAD...${branch}`])
-		.split("\0")
-		.filter((path) => path.length > 0)
-		.map((path) => resolve(canonical, path));
-	const blocked = new Set<string>();
-	for (const candidate of changed) {
-		for (const protectedPath of protectedInside) {
-			const rel = relative(protectedPath, candidate);
-			if (
-				candidate === protectedPath ||
-				(rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-			) {
-				blocked.add(protectedPath);
-			}
-		}
-	}
-	return [...blocked].sort();
+	return protectedPathsChangedByWorktreeBranch(root, branch, protectedPaths);
 }
 
 function registeredWorktreePaths(root: string): string[] {
@@ -687,26 +640,7 @@ export function removeCandidateWorktree(
  * the merge and reports failure so the operator decides.
  */
 export function mergeWinnerBranch(root: string, branch: string): { ok: true } | { ok: false; reason: string } {
-	try {
-		git(root, [
-			"-c",
-			`user.name=${COMPETE_COMMIT_IDENTITY}`,
-			"-c",
-			`user.email=${COMPETE_COMMIT_IDENTITY}@local`,
-			"merge",
-			"--no-edit",
-			"--no-verify",
-			branch,
-		]);
-		return { ok: true };
-	} catch (err) {
-		try {
-			git(root, ["merge", "--abort"]);
-		} catch {
-			// No merge in progress; nothing to abort.
-		}
-		return { ok: false, reason: err instanceof Error ? (err.message.split("\n")[0] ?? "merge failed") : String(err) };
-	}
+	return mergeWorktreeBranch(root, branch, COMPETE_COMMIT_IDENTITY);
 }
 
 /**

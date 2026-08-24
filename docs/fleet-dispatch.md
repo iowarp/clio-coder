@@ -204,6 +204,42 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
 | Agent automation | `agent: "auto"` | Baselines candidate agent from task shape via shared classifier (`coder`, `tester`, `documenter`, `verifier`, `researcher`, `scout`); advisory unless activated. |
 
+### Single-writer token
+
+A parallel batch may declare `writers: 1`. One is the only accepted value in
+this release, and omission retains ordinary parallel admission. The scheduler
+admits at most one write-scope step at a time. An agent step with a nonempty
+`writes` allowlist is a writer, as is a workspace-scope step that may mutate
+the checkout. Read-scope steps and agent steps with `writes: []` remain
+concurrent. Waiting writers follow the plan's declared step order and then the
+request order. Agent ledger claims remain advisory and do not enforce the
+token.
+
+The first checkout writer acquires a process-owned lease under the Clio state
+directory. Its key is the canonical checkout path, and its record contains the
+owner pid, process birth token, and acquisition time. A live sibling process
+causes admission to fail with `checkout_writer_lease_held` and the holder pid.
+A dead owner or reused pid is reclaimed. The lease remains held until the last
+writer settles, including writers collected from detached batches. Read-only
+runs never acquire it.
+
+### Worktree per task
+
+A singular writer or an item in `tasks` may declare `worktree: true` and
+`apply: "merge" | "preserve"`. The default is `merge`. Clio creates
+`.clio-coder/worktrees/<runId>/` on `clio/task/<runId>`, maps the worker cwd and
+protected artifacts into that checkout, and runs declared host verification
+there. The approved execution snapshot renders both fields and freezes the
+parent checkout as the merge destination.
+
+After a successful worker and successful host verification, merge application
+commits the task branch, rechecks protected paths, and uses the same guarded
+merge path as compete. A conflict fails closed with
+`worktree_merge_conflict` and preserves the branch and worktree. Preserve
+application never merges and reports the branch. A detached task applies when its run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
+Admission refuses a non-git checkout, a read-only agent, compete mode, or an
+explicit cwd outside the parent checkout with a named reason.
+
 ### Typed intent and host-run verification
 
 The singular request and every object in `tasks` accept an optional `intent`:
@@ -573,7 +609,7 @@ assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
 Assignment status, attempt ids, and terminal run id are stored separately in
-`assignments.json` while each attempt keeps its own strict v16 receipt.
+`assignments.json` while each attempt keeps its own strict v17 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
@@ -587,7 +623,7 @@ closed while a winner remains unapplied.
 
 ## Receipts
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 16`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 17`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
@@ -605,6 +641,8 @@ include:
 - `hostVerification`: host-run status and the resolved check evidence, including
   argv, cwd, exit code, duration, memo provenance, bounded output tail, and
   optional artifact path.
+- `worktree`: task worktree path, branch, diff hash, requested application,
+  applied status, and an optional closed failure reason.
 - `steering`: ordered byte/hash/timestamp and acknowledgement provenance for
   successfully written steers; steering prose is never stored.
 - `outcomeCode`: the stable terminal classifier, including
@@ -634,7 +672,7 @@ policy all consume that same final classification.
 Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
 reports whether Clio observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v16/sha256` alongside
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v17/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_requested`.
 A host-executed successful check projects onto canonical validation grounding as

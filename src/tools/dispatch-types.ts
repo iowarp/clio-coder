@@ -33,6 +33,7 @@ export interface DispatchRunExecutionSnapshot {
 	readonly planView: DispatchPlanView;
 	readonly requests: ReadonlyArray<DispatchRequest>;
 	readonly mode: DispatchMode;
+	readonly writers: 1 | undefined;
 	readonly review: DispatchReviewSettings | undefined;
 	readonly compete: DispatchCompeteSettings | undefined;
 	readonly detach: boolean;

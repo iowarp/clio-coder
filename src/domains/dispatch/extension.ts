@@ -40,6 +40,12 @@ import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runti
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
+import {
+	applyTaskWorktree,
+	cleanupTaskWorktree,
+	createTaskWorktree,
+	gitCheckoutRoot,
+} from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
 	serializeWorkerRuntimeDescriptor,
@@ -138,6 +144,7 @@ import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./ba
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "./budget-envelope.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
 import { capacityLeaseUsage, createNodeLeaseUsageReader } from "./capacity-lease.js";
+import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	DispatchAdmissionObserver,
 	DispatchContract,
@@ -210,7 +217,7 @@ import { createRouteObserver, type RouteObservationHandle, type RouteObserver } 
 import { reduceRouteQuality } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
 import { detectRunIdentity } from "./run-identity.js";
-import { type Ledger, openLedger } from "./state.js";
+import { type Ledger, newRunId, openLedger } from "./state.js";
 import {
 	countToolCalls,
 	hasPotentiallyMutatingAttempt,
@@ -3611,6 +3618,7 @@ export function createDispatchBundle(
 		let identity!: ReturnType<typeof detectRunIdentity>;
 		try {
 			envelope = ledgerRef.create({
+				...(req.runIdHint !== undefined ? { id: req.runIdHint } : {}),
 				agentId: req.agentId,
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				requestOrigin: lifecycle.requestOrigin,
@@ -4609,6 +4617,7 @@ export function createDispatchBundle(
 		let identity!: ReturnType<typeof detectRunIdentity>;
 		try {
 			envelope = ledgerRef.create({
+				...(req.runIdHint !== undefined ? { id: req.runIdHint } : {}),
 				agentId: req.agentId,
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				agentAudience: lifecycle.agentAudience,
@@ -5192,6 +5201,19 @@ export function createDispatchBundle(
 					finalDetail = hostRejection.detail;
 					failureMessage = finalDetail;
 				}
+				let worktreeReceipt: RunReceiptDraft["worktree"];
+				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
+					worktreeReceipt = applyTaskWorktree({
+						worktree: req.taskWorktree,
+						apply: req.apply ?? "merge",
+						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
+					});
+					if (worktreeReceipt.reason !== undefined) {
+						finalOutcome = "failed";
+						finalDetail = worktreeReceipt.reason;
+						failureMessage = finalDetail;
+					}
+				}
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode);
 				const receiptDraft = buildReceiptDraft(
@@ -5206,6 +5228,7 @@ export function createDispatchBundle(
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
 				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
+				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -5236,6 +5259,13 @@ export function createDispatchBundle(
 				ledgerRef.update(envelope.id, ledgerPatch);
 				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation.decision));
 				await ledgerRef.persist();
+				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
+					try {
+						cleanupTaskWorktree(req.taskWorktree, true);
+					} catch (cleanupError) {
+						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
+					}
+				}
 				active.delete(envelope.id);
 				recordTargetOutcome(
 					lifecycle.target.target.id,
@@ -5323,10 +5353,58 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
+		let prepared = req;
+		let createdWorktree: DispatchRequest["taskWorktree"];
+		let writerLease: CheckoutWriterLease | undefined;
+		const writerRecipe = agents.get(req.agentId);
+		if (writerRecipe !== null && normalizeAgentSpec(writerRecipe).capabilityClass === "workspace-edit") {
+			const checkout = req.taskWorktree?.root ?? gitCheckoutRoot(req.cwd ?? process.cwd());
+			if (checkout !== null) writerLease = acquireCheckoutWriterLease({ checkout });
+		}
+		if (req.worktree === true && req.taskWorktree === undefined) {
+			const requestedCwd = resolvePath(req.cwd ?? process.cwd());
+			const root = gitCheckoutRoot(requestedCwd);
+			if (root === null) throw new Error("worktree_non_git_checkout");
+			if (req.taskWorktreeDestination !== undefined && root !== req.taskWorktreeDestination) {
+				writerLease?.release();
+				throw new Error("dispatch: worktree merge destination differs from the approved execution snapshot");
+			}
+			const runId = newRunId();
+			let taskWorktree: NonNullable<DispatchRequest["taskWorktree"]>;
+			try {
+				taskWorktree = createTaskWorktree(root, runId);
+			} catch (error) {
+				writerLease?.release();
+				throw error;
+			}
+			createdWorktree = taskWorktree;
+			const cwdRelative = relative(root, requestedCwd);
+			const workerCwd = resolvePath(taskWorktree.path, cwdRelative);
+			const writeRoots = req.writeRoots?.map((entry) => {
+				const rel = relative(root, entry);
+				return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? entry : resolvePath(taskWorktree.path, rel);
+			});
+			prepared = {
+				...req,
+				runIdHint: runId,
+				taskWorktree,
+				cwd: workerCwd,
+				protectedArtifactRemap: { sourceRoot: root, workerRoot: taskWorktree.path },
+				...(writeRoots === undefined ? {} : { writeRoots }),
+			};
+		}
 		let handle: Awaited<ReturnType<typeof dispatchAttempt>>;
 		try {
-			handle = await dispatchAttempt(req, observer);
+			handle = await dispatchAttempt(prepared, observer);
 		} catch (error) {
+			writerLease?.release();
+			if (createdWorktree !== undefined) {
+				try {
+					cleanupTaskWorktree(createdWorktree, true);
+				} catch (cleanupError) {
+					reportDispatchDiagnostic(`clean task worktree ${createdWorktree.runId} after admission failure`, cleanupError);
+				}
+			}
 			if (req.reservation !== undefined && req.lineage === undefined) {
 				rollbackDispatchReservation(req.reservation.ownerId, now());
 			}
@@ -5334,7 +5412,7 @@ export function createDispatchBundle(
 		}
 		// Requests carrying lineage are internal attempts (retry or nested
 		// orchestration) and retain the per-attempt handle contract.
-		if (req.lineage) return handle;
+		if (req.lineage) return { ...handle, finalPromise: handle.finalPromise.finally(() => writerLease?.release()) };
 
 		const assignment = assignments.open(handle.runId, assignmentPolicyFor(handle.effectiveRequest));
 		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
@@ -5347,9 +5425,10 @@ export function createDispatchBundle(
 		const reservation = req.reservation;
 		const terminal =
 			reservation === undefined
-				? assignment.terminal
+				? assignment.terminal.finally(() => writerLease?.release())
 				: assignment.terminal.finally(() => {
 						releaseDispatchReservationMember(reservation.ownerId, reservation.memberId, now());
+						writerLease?.release();
 					});
 		return { runId: handle.runId, events: assignment.events, finalPromise: terminal };
 	}

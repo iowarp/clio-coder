@@ -122,6 +122,10 @@ export interface JobSpec {
 	 */
 	denyTools?: ReadonlyArray<string>;
 	cwd?: string;
+	/** Run this writer in an isolated git worktree. */
+	worktree?: true;
+	/** How a successful isolated writer is applied to its parent checkout. */
+	apply?: "merge" | "preserve";
 	memorySection?: string;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
@@ -198,6 +202,8 @@ const KNOWN_KEYS = new Set([
 	"toolProfile",
 	"denyTools",
 	"cwd",
+	"worktree",
+	"apply",
 	"memorySection",
 	"noSkills",
 	"skillPaths",
@@ -418,6 +424,13 @@ export function validateJobSpec(spec: unknown): Validated {
 			errors.push("cwd must be a non-empty string");
 		}
 	}
+	if ("worktree" in spec && spec.worktree !== undefined && spec.worktree !== true) {
+		errors.push("worktree must be true when present");
+	}
+	if ("apply" in spec && spec.apply !== undefined && spec.apply !== "merge" && spec.apply !== "preserve") {
+		errors.push("apply must be merge or preserve");
+	}
+	if (spec.apply !== undefined && spec.worktree !== true) errors.push("apply requires worktree: true");
 
 	if ("memorySection" in spec && spec.memorySection !== undefined) {
 		if (typeof spec.memorySection !== "string") {
@@ -563,6 +576,8 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.toolProfile === "string" && isToolProfileName(spec.toolProfile)) out.toolProfile = spec.toolProfile;
 	if (Array.isArray(spec.denyTools)) out.denyTools = spec.denyTools.map((tool) => String(tool));
 	if (typeof spec.cwd === "string") out.cwd = spec.cwd;
+	if (spec.worktree === true) out.worktree = true;
+	if (spec.apply === "merge" || spec.apply === "preserve") out.apply = spec.apply;
 	if (typeof spec.memorySection === "string") out.memorySection = spec.memorySection;
 	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;
 	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));

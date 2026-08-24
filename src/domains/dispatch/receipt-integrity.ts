@@ -10,7 +10,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 16;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 17;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -98,8 +98,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	personaOverride: true,
 	projectContext: true,
 	// Always set on receipts written after #104 landed; absent only on older
-	// receipts, which digest exactly as they did before these fields existed,
-	// so the integrity version stays where it is.
+	// receipts, which omit these fields from canonical serialization.
 	rulesApplied: true,
 	operatorProfileApplied: true,
 	exitCode: true,
@@ -130,6 +129,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	toolActivity: true,
 	verification: true,
 	hostVerification: true,
+	worktree: true,
 	routingIntent: true,
 	quality: true,
 	skillActivations: true,
@@ -145,7 +145,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	validationGrounding: true,
 	capabilityMismatch: true,
 	// Same reasoning: absent unless the run had an agent ledger, so a receipt
-	// without one digests byte-identically to one produced before it existed.
+	// without one omits the field from canonical serialization.
 	ledgerContribution: true,
 	sessionId: true,
 	briefing: true,

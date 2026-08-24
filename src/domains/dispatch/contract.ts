@@ -15,6 +15,19 @@ import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunRe
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
+	/** Orchestrator-prepared task worktree state. Model arguments cannot author it. */
+	taskWorktree?: {
+		root: string;
+		runId: string;
+		path: string;
+		branch: string;
+		base: string;
+		ownerToken: string;
+	};
+	/** Run identity allocated before task worktree creation. Model arguments cannot author it. */
+	runIdHint?: string;
+	/** Parent checkout frozen by plan approval for task worktree application. */
+	taskWorktreeDestination?: string;
 	/** Admission-resolved commands. Model text never enters these argv vectors. */
 	resolvedVerification?: ReadonlyArray<{
 		check: string;

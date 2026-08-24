@@ -38,6 +38,9 @@ export function routeValidationProjection(
 		// terms: a model must not be able to author it.
 		parentToolCallId,
 		resolvedVerification,
+		taskWorktree,
+		runIdHint,
+		taskWorktreeDestination,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -58,6 +61,9 @@ export function routeValidationProjection(
 			...(resolvedVerification !== undefined
 				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
 				: {}),
+			...(taskWorktree !== undefined ? { taskWorktree } : {}),
+			...(runIdHint !== undefined ? { runIdHint } : {}),
+			...(taskWorktreeDestination !== undefined ? { taskWorktreeDestination } : {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};
