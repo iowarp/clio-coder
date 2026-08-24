@@ -31,6 +31,8 @@ Default config file:
 
 Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interop.json, interviews, scratch); cache holds disposable derived files.
 
+The `library` settings block configures the private resource catalog. `library.catalog` is an optional path and defaults to `<configDir>/library.yaml`. `library.remote` is an optional git remote URL, and the catalog repository must name that git remote `library`. `library.sync` defaults to `false`, which makes sync and push refuse before spawning git. `library.confirmedRemote` is written by `clio-coder library remote confirm <url>` and must exactly match `library.remote` before sync or push can run. Confirmation sets both values when `library.remote` is unset and refuses a differing configured URL with `library_remote_mismatch`. See [resource-library.md](resource-library.md).
+
 `clio-coder paths --json` prints the resolved directories and is the single source of truth for scripts.
 
 ---
@@ -597,6 +599,10 @@ watcher validates and publishes roster changes with every other hot reload.
 | `workers.rosters` | `{}` | map of roster name to 2 to 5 council members | next dispatch |
 | `workers.agentBindings` | `{}` | map of agent id to a key present in `workers.profiles` | next dispatch |
 | `skills.trustProjectCompatRoots` | `false` | boolean | restart |
+| `library.catalog` | `null` | string or null | immediately |
+| `library.remote` | `null` | string or null | immediately |
+| `library.confirmedRemote` | `null` | string or null | immediately |
+| `library.sync` | `false` | boolean | immediately |
 
 ### Git commit provenance
 

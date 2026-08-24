@@ -39,6 +39,7 @@ current source, tests, and `CHANGELOG.md`.
 | Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](scientific-validation.md) ([Interactive Blueprint](html/validation_blueprint.html)) |
 | Falsifiable Change Manifest JSON templates, auditability, and `clio-coder evolve` | [evolution.md](evolution.md) ([Interactive Blueprint](html/evolution_blueprint.html)) |
 | Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](documentation-guide.md) ([Interactive Blueprint](html/documentation_blueprint.html)) |
+| Typed resource catalogs, private synchronization, installation roots, and library CLI | [resource-library.md](resource-library.md) |
 | Interface layout, colors palette, Unicode character vocabulary, and drawing choreography | [tui-design.md](tui-design.md) ([Interactive Blueprint](html/tui_design_blueprint.html)) |
 | NDJSON parent-child socket protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) ([Interactive Blueprint](html/worker_dispatch_blueprint.html)) |
 | Multi-node fleet dispatch: process-safe admission, attested workers, measured routing, activation, agent automation, topologies, and receipts | [fleet-dispatch.md](fleet-dispatch.md) ([Interactive Blueprint](html/fleet_dispatch_blueprint.html)) |

@@ -246,6 +246,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["ext", extensionsCommand],
 	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],
 	["skills", async (subArgs) => (await import("./skills.js")).runSkillsCommand(subArgs)],
+	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],

@@ -35,6 +35,8 @@ import { loadSkills, type Skill } from "./loader.js";
  */
 
 export type MarketplaceSkillOrigin = "catalog" | "index";
+export type LibraryEntryKind = "skill" | "agent" | "prompt" | "fleet";
+export type LibraryRequirementRef = `${LibraryEntryKind}:${string}`;
 
 /**
  * The diagnostic that means "nothing is wrong, nothing is configured". Callers
@@ -44,6 +46,7 @@ export type MarketplaceSkillOrigin = "catalog" | "index";
 export const MARKETPLACE_UNCONFIGURED = "no local skill marketplace catalog or index configured";
 
 export interface MarketplaceSkill {
+	kind: LibraryEntryKind;
 	name: string;
 	description: string;
 	/** Local path or URL accepted by `clio-coder skills install`. */
@@ -53,6 +56,7 @@ export interface MarketplaceSkill {
 	/** Catalog grouping ("git", "research", ...); absent in a flat catalog. */
 	category?: string;
 	origin: MarketplaceSkillOrigin;
+	requires?: LibraryRequirementRef[];
 }
 
 export type MarketplaceStatus = "installed" | "installable" | "unavailable";
@@ -131,7 +135,7 @@ function indexAudit(value: unknown): MarketplaceSkill["audit"] {
 	return value === "pass" || value === "warn" || value === "fail" || value === "unknown" ? value : undefined;
 }
 
-function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill[] {
+function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): MarketplaceSkill[] {
 	try {
 		const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as unknown;
 		const rawSkills = Array.isArray(parsed)
@@ -139,7 +143,7 @@ function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill
 			: parsed && typeof parsed === "object" && Array.isArray((parsed as { skills?: unknown }).skills)
 				? (parsed as { skills: unknown[] }).skills
 				: [];
-		return rawSkills.filter(isIndexSkill).map((skill) => {
+		return rawSkills.filter(isIndexSkill).flatMap((skill): MarketplaceSkill[] => {
 			const record = skill as unknown as Record<string, unknown>;
 			// Version, audit and category are published by `npm run skills:pin`.
 			// They are advisory display metadata; an index entry stays installable
@@ -147,15 +151,35 @@ function indexSkills(indexPath: string, diagnostics: string[]): MarketplaceSkill
 			const version = optionalString(record.version);
 			const audit = indexAudit(record.audit);
 			const category = optionalString(record.category);
-			return {
-				name: skill.name.trim(),
-				description: skill.description.trim(),
-				sourceUrl: skill.sourceUrl.trim(),
-				...(version ? { version } : {}),
-				...(audit ? { audit } : {}),
-				...(category ? { category } : {}),
-				origin: "index" as const,
-			};
+			if (record.kind !== undefined && !["skill", "agent", "prompt", "fleet"].includes(String(record.kind))) {
+				diagnostics.push(`skill marketplace index entry has unsupported kind: ${skill.name}`);
+				return [];
+			}
+			if (
+				record.requires !== undefined &&
+				(!Array.isArray(record.requires) || record.requires.some((entry) => typeof entry !== "string"))
+			) {
+				diagnostics.push(`library_requirement_malformed: ${skill.name}`);
+				return [];
+			}
+			const kind: LibraryEntryKind =
+				record.kind === "agent" || record.kind === "prompt" || record.kind === "fleet" ? record.kind : "skill";
+			const requires = Array.isArray(record.requires)
+				? record.requires.filter((entry): entry is LibraryRequirementRef => typeof entry === "string")
+				: undefined;
+			return [
+				{
+					kind,
+					name: skill.name.trim(),
+					description: skill.description.trim(),
+					sourceUrl: skill.sourceUrl.trim(),
+					...(version ? { version } : {}),
+					...(audit ? { audit } : {}),
+					...(category ? { category } : {}),
+					...(requires ? { requires } : {}),
+					origin: "index" as const,
+				},
+			];
 		});
 	} catch (err) {
 		diagnostics.push(`skill marketplace index unreadable: ${err instanceof Error ? err.message : String(err)}`);
@@ -226,6 +250,7 @@ function catalogEntry(skill: Skill, catalogDir: string): MarketplaceSkill {
 		...(skill.provenance?.audit ? { audit: skill.provenance.audit } : {}),
 		...(category ? { category } : {}),
 		origin: "catalog",
+		kind: "skill",
 	};
 }
 
@@ -256,7 +281,7 @@ export function discoverMarketplaceSkills(options: DiscoverMarketplaceOptions = 
 		options.indexPath === null ? null : (options.indexPath ?? process.env.CLIO_CODER_SKILL_MARKETPLACE_INDEX ?? null);
 	const resolvedIndexPath = indexPath ?? defaultIndexPath();
 	if (options.indexPath !== null && resolvedIndexPath && existsSync(resolvedIndexPath)) {
-		for (const skill of indexSkills(resolvedIndexPath, diagnostics)) {
+		for (const skill of parseMarketplaceIndex(resolvedIndexPath, diagnostics)) {
 			if (seen.has(skill.name)) continue;
 			seen.add(skill.name);
 			skills.push(skill);

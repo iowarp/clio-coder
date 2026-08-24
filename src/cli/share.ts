@@ -15,7 +15,7 @@ const HELP = `clio-coder share <command>
 Export and import portable Clio project/resource archives.
 
 Commands:
-  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]
+  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions]
   clio-coder share import <path> [--dry-run] [--force] [--project|--user] [--json]
   clio-coder share inspect <path> [--json]
 
@@ -36,6 +36,8 @@ interface Parsed {
 	includeContext?: boolean;
 	includePrompts?: boolean;
 	includeSkills?: boolean;
+	includeAgents?: boolean;
+	includeFleets?: boolean;
 	includeSettings?: boolean;
 	includeExtensions?: boolean;
 }
@@ -93,6 +95,12 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 			case "--skills":
 				out.includeSkills = true;
 				break;
+			case "--agents":
+				out.includeAgents = true;
+				break;
+			case "--fleets":
+				out.includeFleets = true;
+				break;
 			case "--settings":
 				out.includeSettings = true;
 				break;
@@ -103,6 +111,8 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				out.includeContext = true;
 				out.includePrompts = true;
 				out.includeSkills = true;
+				out.includeAgents = true;
+				out.includeFleets = true;
 				out.includeSettings = true;
 				out.includeExtensions = true;
 				break;
@@ -152,6 +162,8 @@ function exportOptions(parsed: Parsed): ShareExportOptions {
 		...(parsed.includeContext !== undefined ? { includeContext: parsed.includeContext } : {}),
 		...(parsed.includePrompts !== undefined ? { includePrompts: parsed.includePrompts } : {}),
 		...(parsed.includeSkills !== undefined ? { includeSkills: parsed.includeSkills } : {}),
+		...(parsed.includeAgents !== undefined ? { includeAgents: parsed.includeAgents } : {}),
+		...(parsed.includeFleets !== undefined ? { includeFleets: parsed.includeFleets } : {}),
 		...(parsed.includeSettings !== undefined ? { includeSettings: parsed.includeSettings } : {}),
 		...(parsed.includeExtensions !== undefined ? { includeExtensions: parsed.includeExtensions } : {}),
 	};

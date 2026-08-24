@@ -280,6 +280,8 @@ Options:
 | `--skills` | Include skills. |
 | `--settings` | Include non-secret settings fragment. |
 | `--extensions` | Include extension bundle files, excluding extension `state.json`. |
+| `--agents` | Include agent recipe files. |
+| `--fleets` | Include fleet contract files. |
 | `--all` | Include every supported resource class. |
 
 If no include flags are supplied, export includes all supported classes for the selected scope.
@@ -295,6 +297,8 @@ clio-coder share import project.clio-coder-share.json --force
 ```
 
 Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten and supported settings-fragment keys are merged into the current settings file.
+
+Archives accept `agent` and `fleet` file entry types alongside prompts and skills. Agent entries import into the user agent root and must pass the recipe parser and policy checks. Fleet entries import into the user fleet root and must pass `parseFleetContract` before any write. Dry-run plans report both types by kind.
 
 Aliases:
 
