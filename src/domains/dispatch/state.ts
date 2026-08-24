@@ -25,9 +25,24 @@ import { resolveGuardrail } from "../../core/guardrails.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
+
+export interface FleetRunRecord {
+	version: 1;
+	id: string;
+	fleet: string;
+	planHash: string;
+	stepIds: string[];
+	planSteps: unknown[];
+	vars: Record<string, string>;
+	startedAt: string;
+	endedAt: string | null;
+	resumedFrom: string | null;
+	steps: Array<{ stepId: string; result: ExecutionStepResult }>;
+}
 
 export interface LedgerOptions {
 	maxRuns?: number;
@@ -72,6 +87,23 @@ function runsPath(): string {
 
 function receiptPathFor(runId: string): string {
 	return join(clioStateDir(), "receipts", `${runId}.json`);
+}
+
+function fleetRunPath(runId: string): string {
+	return join(clioStateDir(), "fleet-runs", `${runId}.json`);
+}
+
+export function readFleetRun(runId: string): FleetRunRecord | null {
+	try {
+		const parsed = JSON.parse(readFileSync(fleetRunPath(runId), "utf8")) as FleetRunRecord;
+		return parsed.version === 1 && parsed.id === runId ? structuredClone(parsed) : null;
+	} catch {
+		return null;
+	}
+}
+
+export async function writeFleetRun(record: FleetRunRecord): Promise<void> {
+	await atomicWrite(fleetRunPath(record.id), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 function readRuns(): RunEnvelope[] {

@@ -66,6 +66,9 @@ Many Clio CLI subcommands provide structured JSON output for integration with sc
 | `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
 | `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |
 | `clio-coder fleet status` | `--json` | JSON snapshot object with `generatedAt`, `admission` (`open` or `draining`), `running`, `retrying`, and `totals`. Each run row carries its `node`, defaulting to `local`. |
+| `clio-coder fleet validate` | `--json` | JSON report with `valid`, `fleet`, and either successful `checks` plus `planHash` or failure `diagnostics`. Validation failures exit `1`; usage errors exit `2`. |
+| `clio-coder fleet graph` | `--json` | JSON object with `fleet`, `planHash`, compiled `waves`, and expanded `loops`. Contract failures exit `1`; usage errors exit `2`. |
+| `clio-coder fleet run --resume` | `--json` | NDJSON step records include `status: "replayed"` and the original receipt reference for replayed prefix steps. Plan or variable mismatches exit `1`. |
 | `clio-coder trace runs` | `--json` | JSON array of trace run records. |
 | `clio-coder trace sql` | Positional query | JSON array of rows returned by the read-only SQLite query. A single `SELECT` or read-only `WITH` statement is accepted; multiple statements and mutating keywords are refused with exit code 2. |
 | `clio-coder paths` | `--json` | JSON object mapping platform directory names to absolute paths. |

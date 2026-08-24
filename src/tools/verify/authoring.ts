@@ -24,7 +24,7 @@ import {
 	parseProjectVerifierCatalogText,
 } from "./catalog.js";
 import { verifyTool } from "./index.js";
-import { discoverDeclaredChecksAtRoot } from "./scripts.js";
+import { discoverDeclaredChecksAtRoot, discoverDeclaredProjectEntriesAtRoot } from "./scripts.js";
 
 export type VerifierProposalAuthority = "project-declared" | "toolchain-defined";
 
@@ -34,6 +34,8 @@ export type VerifierSignalKind =
 	| "cargo"
 	| "cmake-preset"
 	| "python-runner"
+	| "just-recipe"
+	| "make-target"
 	| "go-module"
 	| "validation-contract"
 	| "manual-entry";
@@ -147,6 +149,12 @@ export interface VerifierAuthoringWorkflowOptions {
 	confirmed?: boolean;
 	decide: (context: VerifierAuthoringDecisionContext) => VerifierAuthoringDecision | Promise<VerifierAuthoringDecision>;
 	runCheck?: (id: string) => Promise<ToolResult>;
+}
+
+export interface DeclaredProjectCommand {
+	id: string;
+	command: string[];
+	provenance: VerifierProvenance;
 }
 
 interface RawProposal {
@@ -464,6 +472,58 @@ function pythonProposals(workspaceRoot: string, diagnostics: string[]): RawPropo
 		});
 	}
 	return proposals;
+}
+
+/**
+ * Discover exact invocation vectors from project declarations for fleet command
+ * authoring. This shares the verifier authoring readers and provenance model,
+ * while retaining entries that are not verification-family names.
+ */
+export function discoverDeclaredProjectCommands(workspaceRoot = process.cwd()): DeclaredProjectCommand[] {
+	const commands: DeclaredProjectCommand[] = [];
+	const add = (id: string, command: string[], pathValue: string, detail: string, kind: VerifierSignalKind): void => {
+		commands.push({
+			id,
+			command,
+			provenance: { kind, path: pathValue, detail, authority: "project-declared" },
+		});
+	};
+	for (const entry of discoverDeclaredProjectEntriesAtRoot(workspaceRoot)) {
+		add(entry.id, entry.command, entry.path, entry.detail, entry.kind);
+	}
+	const pyprojectText = regularFileText(path.join(workspaceRoot, "pyproject.toml"), workspaceRoot);
+	if (typeof pyprojectText === "string") {
+		const document = parseTomlDocument(pyprojectText);
+		if (document !== null) {
+			for (const [tablePath, label] of [
+				[["project", "scripts"], "project.scripts"],
+				[["tool", "poetry", "scripts"], "tool.poetry.scripts"],
+			] as const) {
+				const scripts = tomlTableAt(document, tablePath);
+				if (scripts === null) continue;
+				for (const [name, target] of Object.entries(scripts).sort(([left], [right]) => compareCodepoints(left, right))) {
+					if (typeof target === "string") add(name, [name], "pyproject.toml", `[${label}] entry '${name}'`, "python-runner");
+				}
+			}
+			for (const [tablePath, module, id, label] of [
+				[["tool", "pytest", "ini_options"], "pytest", "pytest", "tool.pytest.ini_options"],
+				[["tool", "tox"], "tox", "tox", "tool.tox"],
+				[["tool", "nox"], "nox", "nox", "tool.nox"],
+			] as const) {
+				if (tomlTableAt(document, tablePath) !== null)
+					add(id, ["python", "-m", module], "pyproject.toml", `[${label}]`, "python-runner");
+			}
+		}
+	}
+	const seen = new Set<string>();
+	return commands.filter((entry) => {
+		let id = slug(entry.id, "command");
+		let suffix = 2;
+		while (seen.has(id)) id = `${slug(entry.id, "command")}-${suffix++}`;
+		seen.add(id);
+		entry.id = id;
+		return true;
+	});
 }
 
 function goProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
