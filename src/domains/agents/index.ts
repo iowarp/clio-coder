@@ -63,15 +63,20 @@ export { parseAgentBudget } from "./recipe.js";
 export { parseAgentRecipeSchema, recipeSchemaFieldNames } from "./recipe-schema.js";
 export type { AgentRecipeDiagnostic } from "./registry.js";
 export type {
+	OracleResult,
 	ResultAuthorship,
 	ResultContract,
 	ResultContractQuality,
 	ResultContractValidation,
 	ScoutResult,
+	VerifierCheck,
+	VerifierResult,
 } from "./result-contract.js";
 export {
+	parseOracleResult,
 	parseResultContract,
 	parseScoutResult,
+	parseVerifierResult,
 	resultContractAuthorship,
 	resultContractDigest,
 	validateRecipeResult,

@@ -162,6 +162,22 @@ export interface TerminalSettings {
 	notify: boolean;
 }
 
+/**
+ * The opt-in turn-end watchdog. Off by default: it spends a worker run per
+ * mutating turn, and an operator who has not asked for that must not pay for
+ * it. `target` routes the run somewhere cheap, typically a local model, and
+ * falls back to the session's active target when unset. `cadenceToolCalls`
+ * additionally fires the watchdog every N tool calls inside a turn, which is
+ * how mid-turn scope drift becomes visible before the turn ends.
+ */
+export interface WatchdogSettings {
+	enabled: boolean;
+	/** Target id the watchdog run is dispatched to; the session's active target when unset. */
+	target?: string;
+	/** Mid-turn cadence in tool calls; no mid-turn firing when unset. */
+	cadenceToolCalls?: number;
+}
+
 export interface ModelSelectorSettings {
 	/** Exact target/model refs shown in the focused model picker. */
 	favorites: string[];
@@ -319,6 +335,7 @@ export const DEFAULT_SETTINGS = {
 			timeoutMs: 180_000,
 		},
 	},
+	watchdog: { enabled: false } as WatchdogSettings,
 	workers: {
 		default: {
 			target: null as string | null,
@@ -490,6 +507,17 @@ memory:
     windowSteps: 8
     maxTokens: 400
     timeoutMs: 180000
+
+# Opt-in turn-end watchdog. When enabled, a turn that changed the tree is
+# reviewed by one read-only verifier run briefed with the turn's coalesced diff
+# and the task board's current scope; its blockers become one transcript notice
+# and nothing else. Set target to route the run at a cheap local model. Set
+# cadenceToolCalls to also fire every N tool calls inside a turn. Headless and
+# ACP runs never fire it.
+watchdog:
+  enabled: false
+  # target: local-lmstudio
+  # cadenceToolCalls: 20
 
 # Worker targets for dispatch. \`default\` preserves the legacy behavior when a
 # recipe or request does not specify an override. \`profiles\` are named

@@ -707,6 +707,7 @@ describe("contracts/slash-spec", () => {
 			"run",
 			"delegate",
 			"btw",
+			"oracle",
 			"agents",
 			"targets",
 			"cost",

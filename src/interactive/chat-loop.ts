@@ -428,6 +428,12 @@ export interface CreateChatLoopDeps {
 	 */
 	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
 	/**
+	 * The same seam for findings that are for the operator rather than the model.
+	 * The watchdog uses it: its run settles after the turn it reviewed, and its
+	 * blockers become one transcript notice that never enters model context.
+	 */
+	registerDeferredNoticeSink?: (sink: (text: string) => void) => void;
+	/**
 	 * Host-finalizer seam for branch-anchored interview snapshots. Called once,
 	 * after the ask-user host finalizer has settled the policy and its transcript.
 	 */
@@ -545,6 +551,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	try {
 		deps.registerDeferredReminderSink?.((message) => middleware.injectDeferredReminder(message));
+		deps.registerDeferredNoticeSink?.((text) => middleware.emitDeferredNotice(text));
 	} catch {
 		// A background observer losing its delivery path must not stop the loop
 		// from starting; it simply stays silent.

@@ -41,7 +41,7 @@ describe("contracts/agents", () => {
 	it("loads shipped recipes as explicit strict specs", () => {
 		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
-		strictEqual(recipes.length, 12);
+		strictEqual(recipes.length, 13);
 		for (const entry of recipes) {
 			strictEqual(entry.version, 1);
 			ok(entry.body.trim().length > 0);

@@ -11,6 +11,15 @@ export type ResultContract =
 	| { kind: "research-report" }
 	| { kind: "mutation-report" }
 	| { kind: "provenance-report" }
+	/**
+	 * The advisory answer `/oracle` asks for. It exists as its own kind because
+	 * the answer shape is the whole point of the command: a verdict, the
+	 * strongest challenge the advisor can mount, the evidence that would change
+	 * its mind, and the prior decisions it read. Folding it onto
+	 * `research-report` would ask for claims and evidence instead, and the
+	 * challenge and the reversal condition would have nowhere to go.
+	 */
+	| { kind: "oracle-report" }
 	| { kind: "external-delegation" }
 	/**
 	 * The run's postcondition is the artifact it left on disk, so its terminal
@@ -209,6 +218,17 @@ export interface VerifierCheck {
 export interface VerifierResult {
 	verdict: "pass" | "fail";
 	checks: ReadonlyArray<VerifierCheck>;
+}
+
+/**
+ * Parsed `oracle-report` payload. `/oracle` renders these four fields into the
+ * operator note it hands the main agent, so the shape is the answer shape.
+ */
+export interface OracleResult {
+	verdict: string;
+	challenge: string;
+	changesMyMind: string;
+	citedDecisions: ReadonlyArray<string>;
 }
 
 /**
@@ -665,6 +685,47 @@ export function parseVerifierResult(output: string | null): VerifierResult | nul
 }
 
 /**
+ * An advisory opinion is never a correctness signal about the route that
+ * produced it, so conformance is judged on the shape alone and quality stays
+ * `unmeasured`. `citedDecisions` may be empty: an honest advisor that found no
+ * settled decision bearing on the question must be able to say so.
+ */
+function validateOracle(contract: ResultContract, output: string | null): ResultContractValidation {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	const value = parsed.value;
+	if (
+		!hasOnlyKeys(value, ["verdict", "challenge", "changesMyMind", "citedDecisions"]) ||
+		!string(value.verdict) ||
+		!string(value.challenge) ||
+		!string(value.changesMyMind) ||
+		!Array.isArray(value.citedDecisions) ||
+		value.citedDecisions.some((entry) => !string(entry))
+	) {
+		return failure(
+			contract,
+			"unmeasured",
+			'Oracle result must carry verdict, challenge, changesMyMind, and a citedDecisions array of strings, for example {"verdict":"consistent with decision routing.target","challenge":"...","changesMyMind":"...","citedDecisions":["routing.target"]}',
+		);
+	}
+	return success(contract, "unmeasured", value);
+}
+
+/** Parse an oracle answer under the same schema its recipe contract enforces. */
+export function parseOracleResult(output: string | null): OracleResult | null {
+	const validation = validateOracle({ kind: "oracle-report" }, output);
+	if (validation.conformance !== "pass") return null;
+	const parsed = parseJson(output);
+	if (!parsed.ok) return null;
+	return {
+		verdict: String(parsed.value.verdict),
+		challenge: String(parsed.value.challenge),
+		changesMyMind: String(parsed.value.changesMyMind),
+		citedDecisions: (parsed.value.citedDecisions as ReadonlyArray<string>).map((entry) => String(entry)),
+	};
+}
+
+/**
  * A code step's result is always `unmeasured` for routing quality. A red suite
  * is evidence about the repository, not about the route that ran the command,
  * and code steps are not routes: they never reach route history or the routing
@@ -1044,6 +1105,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateMutation(input.contract, input);
 		case "provenance-report":
 			return validateProvenance(input.contract, input.output);
+		case "oracle-report":
+			return validateOracle(input.contract, input.output);
 		case "external-delegation":
 			return success(input.contract, "unmeasured", { external: true });
 		case "artifact-report":
@@ -1128,6 +1191,8 @@ function resultContractShape(contract: ResultContract): string {
 			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"optional: one line"}';
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
+		case "oracle-report":
+			return '{"verdict":"one line","challenge":"the strongest objection you can mount","changesMyMind":"the evidence that would reverse the verdict","citedDecisions":["decision key or task id you relied on"]}';
 		case "external-delegation":
 			return "any final text";
 		case "artifact-report":
@@ -1257,6 +1322,7 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
 		"research-report",
 		"mutation-report",
 		"provenance-report",
+		"oracle-report",
 		"external-delegation",
 		"artifact-report",
 		"context-handbook",

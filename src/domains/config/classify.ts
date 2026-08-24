@@ -28,6 +28,10 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"modelSelector",
 	"terminal.smoothStreaming",
 	"attribution.gitCommits",
+	// The watchdog registration reads its settings live on every trigger, so
+	// enabling it, retargeting it, or changing its cadence takes effect on the
+	// next turn boundary without a restart or a session-routing patch.
+	"watchdog",
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
