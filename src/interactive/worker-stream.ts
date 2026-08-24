@@ -113,6 +113,12 @@ export interface WorkerEntryState {
 	/** Every attempt of this assignment, oldest first. */
 	attempts: WorkerAttempt[];
 	pending: boolean;
+	/**
+	 * Council provenance, present only on a run of a council group. `/share`
+	 * reads it so a member's answer reaches the main agent under the roster label
+	 * the operator watched it under, rather than as one unattributed voice.
+	 */
+	council?: { group: string; label: string; color?: string; round: number };
 	receipt?: WorkerReceiptSummary;
 	/** Agent origin: the tool call whose execution spawned this run. */
 	parentToolCallId?: string;
@@ -323,6 +329,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				progress: progress.snapshot(),
 				attempts: [{ runId, targetLabel: workerTargetLabel(runtime) }],
 				pending: true,
+				...(payload.council !== undefined ? { council: { ...payload.council } } : {}),
 				...(payload.parentToolCallId !== undefined ? { parentToolCallId: payload.parentToolCallId } : {}),
 			};
 			byAssignment.set(assignmentId, entry);

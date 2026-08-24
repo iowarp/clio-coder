@@ -39,6 +39,7 @@ import type { OracleDigestSources } from "./oracle.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
 	type ContextClearCommandOptions,
+	type CouncilDispatchOutcome,
 	dispatchSlashCommand,
 	type InitCommandOptions,
 	parseSlashCommand,
@@ -120,6 +121,13 @@ export interface InteractiveSlashRuntimeDeps {
 	startHandoff: (goal: string) => void;
 	/** Run one `/fleet run <name>`: approval preview first, dispatch only on accept. */
 	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
+	/**
+	 * Run one `/council <task>`: the prepared dispatch-tool arguments go through
+	 * the ordinary tool-admission path, so supervised autonomy parks the call and
+	 * the approval overlay opens before any member runs. Absent on a host with no
+	 * tool registry, in which case `/council` says so.
+	 */
+	runCouncilDispatch?: (args: Readonly<Record<string, unknown>>) => Promise<CouncilDispatchOutcome>;
 	openContextView: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
@@ -382,6 +390,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		oracleBriefing: oracleBriefingSources,
 		startHandoff: deps.startHandoff,
 		...(deps.startFleetRun ? { startFleetRun: deps.startFleetRun } : {}),
+		...(deps.getSettings ? { getWorkerRosters: () => deps.getSettings?.().workers.rosters ?? {} } : {}),
+		...(deps.runCouncilDispatch ? { runCouncilDispatch: deps.runCouncilDispatch } : {}),
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
 		openDecisions: deps.openDecisions,

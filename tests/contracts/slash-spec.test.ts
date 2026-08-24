@@ -708,6 +708,7 @@ describe("contracts/slash-spec", () => {
 			"delegate",
 			"btw",
 			"oracle",
+			"council",
 			"agents",
 			"targets",
 			"cost",

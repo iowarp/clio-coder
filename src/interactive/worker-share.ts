@@ -11,6 +11,7 @@
  * Pure: no I/O, no bus, no session.
  */
 
+import type { CouncilReport } from "../domains/agents/result-contract.js";
 import { WORKER_OUTPUT_MAX_BYTES } from "../domains/dispatch/event-pump.js";
 import { truncateUtf8 } from "../tools/truncate-utf8.js";
 import { type WorkerEntryState, workerAskedByModel } from "./worker-stream.js";
@@ -56,10 +57,64 @@ export const WORKER_SHARE_ORIGIN = "shared by the operator";
  * produced no text is not worth a turn.
  */
 export function formatWorkerShareNote(facts: WorkerShareFacts): string | null {
-	const text = facts.text.trim();
+	return shareNote(facts, facts.text);
+}
+
+/** The header every shared note carries, plus one bounded body under it. */
+function shareNote(facts: WorkerShareFacts, body: string): string | null {
+	const text = body.trim();
 	if (text.length === 0) return null;
 	const header = `${WORKER_SHARE_NOTE_PREFIX} ${facts.agentId} · run ${facts.runId} · ${outcomeWord(facts.outcome)} · ${WORKER_SHARE_ORIGIN}`;
 	return `${header}\n${truncateUtf8(text, WORKER_SHARE_MAX_BYTES, SHARE_TRUNCATION_MARKER)}`;
+}
+
+/** One member's answer under its roster label, or its failure when it produced none. */
+function councilMemberLine(member: CouncilReport["members"][number]): string {
+	if (member.failed !== undefined) return `[${member.label}] failed: ${member.failed.reason}`;
+	const verdict = member.verdict === undefined ? "" : ` (verdict ${member.verdict})`;
+	return `[${member.label}]${verdict} ${member.answer.trim()}`;
+}
+
+/** The synthesis line: what the council concluded, and how it concluded it. */
+function councilSynthesisLines(synthesis: CouncilReport["synthesis"]): string[] {
+	if (synthesis.kind === "none") return ["[synthesis none] the members answered separately; no synthesis was run."];
+	const facts = [
+		...(synthesis.verdict !== undefined ? [`verdict ${synthesis.verdict}`] : []),
+		...(synthesis.tally !== undefined
+			? [
+					`tally ${Object.entries(synthesis.tally)
+						.map(([key, count]) => `${key}=${count}`)
+						.join(" ")}`,
+				]
+			: []),
+		...(synthesis.judgeRunId !== undefined ? [`judge run ${synthesis.judgeRunId}`] : []),
+	];
+	const head = `[synthesis ${synthesis.kind}]${facts.length > 0 ? ` ${facts.join(" · ")}` : ""}`;
+	const text = synthesis.text?.trim() ?? "";
+	return text.length > 0 ? [head, text] : [head];
+}
+
+/**
+ * A whole council as one operator note: every member's labelled answer, in the
+ * order the report seals them, then the synthesis. Sharing a synthesis run id
+ * means sharing what the council decided, and the members' answers are what it
+ * decided from, so they travel together in one bounded block rather than as
+ * several notes the main agent would have to reassemble.
+ */
+export function formatCouncilShareNote(facts: WorkerShareFacts, report: CouncilReport): string | null {
+	const finalRound = report.members.reduce((highest, member) => Math.max(highest, member.round), 1);
+	const body = [
+		...report.members.filter((member) => member.round === finalRound).map(councilMemberLine),
+		...councilSynthesisLines(report.synthesis),
+	].join("\n\n");
+	return shareNote(facts, body);
+}
+
+/** One council member's answer, labelled with the roster label the operator watched it under. */
+export function formatCouncilMemberShareNote(facts: WorkerShareFacts, label: string): string | null {
+	const text = facts.text.trim();
+	if (text.length === 0) return null;
+	return shareNote(facts, `[${label}] ${text}`);
 }
 
 /**

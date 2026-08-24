@@ -28,6 +28,7 @@ import { APPLICATION_DOUBLE_TAP_MS, type ApplicationController } from "./applica
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
+import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController } from "./editor-submit.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
@@ -603,6 +604,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// The overlay reads the report this process already produced at boot; it
 	// never probes on a keystroke.
 	const interop = deps.interop;
+	// `/council` reaches execution only through the tool registry, so the
+	// approval overlay this application already installs on it is the same one an
+	// operator-typed council parks.
+	const toolRegistry = deps.toolRegistry;
 	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
 	const slashRuntime = createInteractiveSlashRuntime({
 		io,
@@ -647,6 +652,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		startHandoff: (goal) => startHandoffState(goal),
 		startFleetRun: (name, vars) => startFleetRunState(name, vars),
+		...(toolRegistry ? { runCouncilDispatch: (args) => dispatchCouncilThroughRegistry(toolRegistry, args) } : {}),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openDecisions: () => openDecisionsOverlayState(),
