@@ -18,7 +18,6 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -35,7 +34,6 @@ import {
 	loadFleetCommands,
 	loadFleetContract,
 	renderFleetPrompt,
-	resultContractAuthorship,
 } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -48,35 +46,22 @@ import {
 	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
-import { runCodeStep } from "../domains/dispatch/code-step.js";
-import { codeStepDir, writeCodeStepRecord } from "../domains/dispatch/code-step-store.js";
-import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import {
-	type ExecutionPlan,
-	type ExecutionPlanCodeStep,
-	executionPlanAncestors,
-} from "../domains/dispatch/execution-plan.js";
-import {
-	agentRoleFactsResolver,
-	gateRouteCorrelation,
-	requestExecutionRole,
-	withAttemptRole,
-} from "../domains/dispatch/execution-role.js";
-import { type ExecutionPlanResult, executePlan } from "../domains/dispatch/execution-scheduler.js";
-import { deriveFleetCommitAttribution } from "../domains/dispatch/fleet-commit-attribution.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
+import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import {
-	decideReviewGate,
-	type GateDecisionCorrelation,
-	materializePendingGateDecision,
-	stagePendingGateDecision,
-} from "../domains/dispatch/gate-decisions.js";
-import { DispatchDomainModule } from "../domains/dispatch/index.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { type FleetRunRecord, openLedger, readFleetRun, writeFleetRun } from "../domains/dispatch/state.js";
+	DispatchDomainModule,
+	type ExecuteFleetRunInput,
+	executeFleetRun,
+	type FleetRunOutcome,
+	planFleetResume,
+	readFleetRun,
+} from "../domains/dispatch/index.js";
+import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
-import { createWriteBoundaryEnforcer, preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
+import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
@@ -146,25 +131,6 @@ function parseVars(args: ReadonlyArray<string>): { vars: Record<string, string>;
 	}
 	return { vars, rest };
 }
-
-/** Sealed independence facts between the work under review and its reviewer. */
-function fleetGateCorrelation(subject: RunReceipt, decider: RunReceipt): GateDecisionCorrelation {
-	const facts = (receipt: RunReceipt) => ({
-		agentId: receipt.agentId,
-		targetId: receipt.targetId,
-		wireModelId: receipt.wireModelId,
-		runtimeId: receipt.runtimeId,
-		nodeId: receipt.node?.id ?? "local",
-	});
-	const { agent, target, modelFamily, runtime, node, independent } = gateRouteCorrelation(
-		facts(subject),
-		facts(decider),
-	);
-	return { agent, target, modelFamily, runtime, node, independent };
-}
-
-/** Owner id for a plan with no model runs; it holds nothing to release. */
-const NO_WORKER_RESERVATION = "fleet-no-worker-reservation";
 
 function newFleetRootId(): string {
 	return `fleet-${randomBytes(6).toString("hex")}`;
@@ -284,20 +250,14 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	const name = rest.find((arg) => !arg.startsWith("-"));
 	if (!name) return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]");
 
-	// Phase 1: zero-side-effect validation. Parse and render strictly before
-	// any domain boots or any process spawns.
 	let contract: FleetContract;
 	let prompt: string;
 	let commands: FleetCommandRegistry | null;
 	try {
 		contract = loadFleetContract(process.cwd(), name);
 		prompt = renderFleetPrompt(contract.body, vars);
-		// loadFleetContract already refused any unregistered command id; this
-		// read is the binding the runner executes.
 		commands = loadFleetCommands(process.cwd());
 	} catch (err) {
-		// The listing calls this state `setup` and says how to leave it; the run
-		// path is where a user meets it with intent, so it says the same thing.
 		if (err instanceof FleetCommandRegistryMissingError) {
 			process.stderr.write(`clio-coder fleet: ${err.message}\n  ${FLEET_COMMANDS_REMEDY}\n`);
 			return 2;
@@ -330,7 +290,6 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		await loaded.stop();
 		return fail("required domains unavailable (dispatch/agents/safety)");
 	}
-
 	const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
 	const preflightError = preflightFleet(contract, { agents, safety, scheduling });
 	if (preflightError !== null) {
@@ -339,7 +298,6 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	const fleetRootId = newFleetRootId();
-	let planOutcome: ExecutionPlanResult;
 	let plan: ExecutionPlan;
 	try {
 		plan = compileFleetExecutionPlan({
@@ -358,8 +316,6 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				return {
 					requestedAuthority: spec.capabilityClass,
 					approvedAuthority: spec.capabilityClass,
-					// A gate decider answers the coordinator's question, so its
-					// postcondition is the gate result contract, not its recipe's.
 					expectedResultContract: context.gateRole === "reviewer" ? "verifier-report" : spec.resultContract.kind,
 					executionRole: withAttemptRole(requestRole, context.attempt),
 				};
@@ -369,410 +325,134 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		await loaded.stop();
 		return fail(err instanceof Error ? err.message : String(err));
 	}
-	// A declared boundary is verified against the checkout, so the checkout has
-	// to be one this can read. Refused here, before any spawn, rather than
-	// discovered as an unenforceable claim halfway through the run.
 	try {
 		preflightWriteBoundaries(plan, process.cwd());
 	} catch (err) {
 		await loaded.stop();
 		return fail(`preflight failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
-	let resumed: FleetRunRecord | null = null;
-	const replayed = new Map<string, import("../domains/dispatch/execution-scheduler.js").ExecutionStepResult>();
+
+	let resume: ExecuteFleetRunInput["resume"];
 	if (resumeId !== undefined) {
-		resumed = readFleetRun(resumeId);
-		if (resumed === null) {
+		const record = readFleetRun(resumeId);
+		if (record === null) {
 			await loaded.stop();
 			return refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`);
 		}
-		if (resumed.fleet !== contract.name) {
-			await loaded.stop();
-			return refuse(`resume run '${resumeId}' belongs to fleet '${resumed.fleet}', not '${contract.name}'`);
-		}
-		if (JSON.stringify(Object.entries(resumed.vars).sort()) !== JSON.stringify(Object.entries(vars).sort())) {
-			await loaded.stop();
-			return refuse(`resume run '${resumeId}' used different --var values`);
-		}
-		if (resumed.planHash !== plan.hash) {
-			process.stderr.write(`clio-coder fleet: resume plan hash differs: prior=${resumed.planHash} current=${plan.hash}\n`);
-			const priorSteps = resumed.planSteps ?? resumed.stepIds;
-			const currentSteps = plan.steps;
-			const width = Math.max(priorSteps.length, currentSteps.length);
-			for (let index = 0; index < width; index += 1) {
-				const before = priorSteps[index] ?? "(missing)";
-				const after = currentSteps[index] ?? "(missing)";
-				if (JSON.stringify(before) === JSON.stringify(after)) continue;
-				const beforeId = typeof before === "string" ? before : ((before as { id?: string }).id ?? "(missing)");
-				const afterId = typeof after === "string" ? after : ((after as { id?: string }).id ?? "(missing)");
-				process.stderr.write(`  step ${index + 1}: ${beforeId} -> ${afterId}\n`);
-				process.stderr.write(`    prior: ${JSON.stringify(before)}\n`);
-				process.stderr.write(`    current: ${JSON.stringify(after)}\n`);
+		const planned = planFleetResume(record, plan, contract, vars);
+		if (!planned.ok) {
+			if (planned.reason === "fleet-name") {
+				await loaded.stop();
+				return refuse(`resume run '${resumeId}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`);
+			}
+			if (planned.reason === "vars") {
+				await loaded.stop();
+				return refuse(`resume run '${resumeId}' used different --var values`);
+			}
+			process.stderr.write(
+				`clio-coder fleet: resume plan hash differs: prior=${planned.priorHash} current=${planned.currentHash}\n`,
+			);
+			for (const entry of planned.diff) {
+				process.stderr.write(`  step ${entry.index + 1}: ${entry.priorId} -> ${entry.currentId}\n`);
+				process.stderr.write(`    prior: ${JSON.stringify(entry.prior)}\n`);
+				process.stderr.write(`    current: ${JSON.stringify(entry.current)}\n`);
 			}
 			await loaded.stop();
 			return 1;
 		}
-		const priorByStep = new Map(resumed.steps.map((entry) => [entry.stepId, entry.result]));
-		for (const step of plan.steps) {
-			const result = priorByStep.get(step.id);
-			if (result === undefined || !result.succeeded || !result.integrityValid) break;
-			replayed.set(step.id, result);
-		}
+		resume = { record, replayed: planned.replayed };
 	}
-	const boundaryByStep = new Map(plan.steps.map((step) => [step.id, step.writes]));
-	const boundaryEnforcer = createWriteBoundaryEnforcer({
-		root: process.cwd(),
-		rootId: fleetRootId,
-		boundaryFor: (stepId) => boundaryByStep.get(stepId),
-		onVerdict(verdict, path) {
-			if (verdict.reason === null) return;
-			process.stderr.write(`write boundary ${verdict.window}: ${verdict.detail ?? verdict.reason} record=${path}\n`);
-		},
-	});
+
 	process.stderr.write(
 		`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
 	);
-	const fleetRunRecord: FleetRunRecord = {
-		version: 1,
-		id: fleetRootId,
-		fleet: contract.name,
-		planHash: plan.hash,
-		stepIds: plan.steps.map((step) => step.id),
-		planSteps: plan.steps.map((step) => structuredClone(step)),
-		vars: { ...vars },
-		startedAt: new Date().toISOString(),
-		endedAt: null,
-		resumedFrom: resumed?.id ?? null,
-		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
-	};
-	await writeFleetRun(fleetRunRecord);
-	for (const [stepId, result] of replayed) {
-		if (json)
-			process.stdout.write(
-				`${JSON.stringify({ stepId, status: "replayed", receipt: { runId: result.terminalRunId, digest: result.receiptDigest } })}\n`,
-			);
-		else
-			process.stdout.write(
-				`step ${stepId}: replayed terminal-run=${result.terminalRunId} receipt=${result.receiptDigest}\n`,
-			);
-	}
-	const receipts: RunReceipt[] = [];
-	const receiptsByStep = new Map<string, RunReceipt>();
-	for (const [stepId, result] of replayed) {
-		try {
-			const receipt = JSON.parse(
-				readFileSync(join(clioStateDir(), "receipts", `${result.terminalRunId}.json`), "utf8"),
-			) as RunReceipt;
-			receiptsByStep.set(stepId, receipt);
-		} catch {
-			// Deterministic code results and unavailable historical receipts need no agent receipt projection.
-		}
-	}
-	const planStep = (stepId: string) => plan.steps.find((entry) => entry.id === stepId);
-	const attributionEnabled = config?.get().attribution.gitCommits ?? true;
-	// Freshness is coordinator-owned execution state. Worker prose cannot set
-	// either flag: a successful deterministic verification sets the first, and
-	// an integrity-valid independent gate decision sets the second. Any later
-	// workspace agent invalidates both before a commit may read them.
-	let validationFresh = false;
-	let independentReviewFresh = false;
-
-	/**
-	 * The commit message is the words of the agent that produced the work, and
-	 * only that agent's. Candidates are consulted newest first; when none of
-	 * them authored one, code writes a deterministic line rather than inventing
-	 * a sentence or reusing somebody else's.
-	 */
-	const commitMessageFor = (
-		step: ExecutionPlanCodeStep,
-		priorResults: ReadonlyMap<string, { output: string }>,
-	): string => {
-		for (const candidate of step.commitFrom ?? []) {
-			const source = planStep(candidate);
-			const result = priorResults.get(candidate);
-			if (source === undefined || source.kind !== "agent" || result === undefined) continue;
-			const resultContract = agents.getSpec(source.agentId)?.resultContract ?? null;
-			if (resultContract === null) continue;
-			const authored = resultContractAuthorship(resultContract, result.output);
-			if (authored.commitMessage !== null) return authored.commitMessage;
-			if (authored.summary !== null) return `clio(${fleetRootId}): ${authored.summary}`;
-		}
-		return `clio(${fleetRootId}): ${contract.name} ${step.id}`;
-	};
+	let outcome: FleetRunOutcome;
 	try {
-		planOutcome = await executePlan(plan, {
-			preflight(step) {
-				const request: DispatchRequest = {
-					agentId: step.agentId,
-					executionRole: step.executionRole,
-					task: step.task,
-					requestOrigin: "user",
-					lineage: { parentRunId: resumed?.id ?? fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
-					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
-				};
-				const resolution = dispatch.preview?.(request);
-				if (!resolution) throw new Error(`fleet preflight cannot resolve step '${step.id}'`);
-				return { step, costUpperBoundUsd: resolution.costUpperBoundUsd, nodeId: resolution.node.id };
-			},
-			reserve(_plan, admissions) {
-				// A fleet of deterministic steps admits no worker and holds no
-				// capacity. The reservation authority refuses an empty reservation,
-				// correctly: there is nothing to reserve, so nothing is asked of it.
-				if (admissions.length === 0) return { ownerId: NO_WORKER_RESERVATION };
-				const reservation = dispatch.reservations?.prepare({
-					topology: "parallel",
-					tasks: admissions.map((admission) => ({
-						memberId: admission.step.id,
-						wave: plan.waves.findIndex((wave) => wave.includes(admission.step.id)),
-						resolution: dispatch.preview?.({
-							agentId: admission.step.agentId,
-							executionRole: admission.step.executionRole,
-							task: admission.step.task,
-						}) as NonNullable<ReturnType<NonNullable<DispatchContract["preview"]>>>,
-					})),
-				});
-				if (!reservation) throw new Error("fleet whole-plan reservation is unavailable");
-				return { ownerId: reservation.ownerId };
-			},
-			async run(step, handoffs, reservation, ledger) {
-				// A loop repair is attempt n of the same logical work, so it enters
-				// the run ledger as one: recovery evidence, not a fresh observation.
-				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
-				const request: DispatchRequest = {
-					agentId: step.agentId,
-					executionRole: step.executionRole,
-					task: step.task,
-					predecessorHandoffs: handoffs,
-					requestOrigin: "user",
-					lineage: { parentRunId: resumed?.id ?? fleetRootId, rootRunId: fleetRootId, attempt, depth: 1 },
-					reservation,
-					...(ledger !== undefined ? { ledger } : {}),
-					...(step.loop?.role === "check"
-						? {
-								gate: {
-									role: "reviewer" as const,
-									group: `${fleetRootId}:${step.loop.loopId}`,
-									cycle: step.loop.attempt,
-									subjects: handoffs.map((handoff) => ({
-										runId: handoff.terminalRunId,
-										digest: handoff.receiptDigest,
-									})),
-								},
-							}
-						: {}),
-					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
-				};
-				const handle = await dispatch.dispatch(request);
-				void (async () => {
-					for await (const _event of handle.events) {
-						/* background display drain */
-					}
-				})().catch(() => {});
-				return {
-					assignmentId: handle.runId,
-					result: handle.finalPromise.then((receipt) => {
-						if (step.scope === "workspace") {
-							validationFresh = false;
-							independentReviewFresh = false;
-						}
-						receipts.push(receipt);
-						receiptsByStep.set(step.id, receipt);
-						const envelope = dispatch.getRun(receipt.runId);
-						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;
-						const succeeded = receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded");
-						if (json) process.stdout.write(`${JSON.stringify(receipt)}\n`);
-						else
-							process.stdout.write(
-								`step ${step.id} ${step.agentId}: ${succeeded ? "succeeded" : "failed"} assignment=${handle.runId} terminal-run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}\n`,
-							);
-						return {
-							stepId: step.id,
-							assignmentId: handle.runId,
-							terminalRunId: receipt.runId,
-							receiptDigest: receipt.integrity.digest,
-							output: receipt.output?.state === "final" ? receipt.output.text : "",
-							succeeded,
-							integrityValid,
-						};
-					}),
-				};
-			},
-			async runCode(step, _handoffs, signal, priorResults) {
-				const command = commands?.commands.get(step.commandId);
-				if (command === undefined) throw new Error(`fleet code step '${step.id}' has no registered command`);
-				const isCommit = step.commitFrom !== undefined;
-				const evidence = isCommit
-					? deriveFleetCommitAttribution({
-							plan,
-							step,
-							priorResults,
-							validationFresh,
-							independentReviewFresh,
-						})
-					: null;
-				if (!isCommit && step.scope === "workspace" && step.verification !== true) {
-					validationFresh = false;
-					independentReviewFresh = false;
+		outcome = await executeFleetRun({
+			plan,
+			contractName: contract.name,
+			commands,
+			workspaceRoot: process.cwd(),
+			fleetRootId,
+			dispatch,
+			agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+			attributionEnabled: config?.get().attribution.gitCommits ?? true,
+			vars,
+			...(resume !== undefined ? { resume } : {}),
+			onStepSettled(step) {
+				if (step.replayed === true && step.result !== undefined) {
+					if (json)
+						process.stdout.write(
+							`${JSON.stringify({ stepId: step.stepId, status: "replayed", receipt: { runId: step.result.terminalRunId, digest: step.result.receiptDigest } })}\n`,
+						);
+					else
+						process.stdout.write(
+							`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
+						);
+					return;
 				}
-				const originalMessage = isCommit ? commitMessageFor(step, priorResults) : null;
-				const outcome = await runCodeStep({
-					stepId: step.id,
-					command,
-					workspaceRoot: process.cwd(),
-					artifactDir: codeStepDir(fleetRootId),
-					signal,
-					...(isCommit && evidence !== null && originalMessage !== null
-						? {
-								substitutions: {
-									commitMessage: attributeCommitMessage(originalMessage, evidence, attributionEnabled),
-								},
-								requireWorkspaceChanges: true,
-								commitAttribution: { enabled: attributionEnabled, evidence },
-							}
-						: {}),
-				});
-				if (step.verification === true) validationFresh = outcome.report.passed;
-				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
-				if (json) process.stdout.write(`${JSON.stringify({ codeStep: outcome.record })}\n`);
-				else
-					process.stdout.write(
-						`step ${step.id} code:${command.id}: ${outcome.report.passed ? "passed" : "failed"} exit=${outcome.report.exitCode} ${outcome.record.durationMs}ms record=${recordPath}\n`,
-					);
-				return {
-					stepId: step.id,
-					assignmentId: outcome.record.runId,
-					terminalRunId: outcome.record.runId,
-					receiptDigest: outcome.record.reportDigest,
-					output: outcome.output,
-					succeeded: outcome.report.passed,
-					// The runner authored this report itself, so its provenance is
-					// valid by construction; only the command's verdict can be red.
-					integrityValid: true,
-				};
-			},
-			async decideLoop({ loop, step, attempt, terminalAttempt, result }) {
-				// Reuse the coordinator's existing review policy verbatim: pass ends
-				// the loop, a failure with attempts left earns one repair, and the
-				// same failure at the bound is simply the terminal answer. `revise`
-				// is never a verdict the reviewed model authors.
-				const decider = receiptsByStep.get(step.id);
-				// The subject is the work under review: the most recent agent run
-				// upstream of this verification. A direct dependency is not enough,
-				// because a loop's declared dependency is another loop's
-				// deterministic check, which produced no receipt at all.
-				const ancestors = executionPlanAncestors(plan, step.id);
-				let subject: RunReceipt | undefined;
-				for (const [stepId, receipt] of receiptsByStep) {
-					if (ancestors.has(stepId)) subject = receipt;
+				if (step.receipt !== undefined) {
+					if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
+					else
+						process.stdout.write(
+							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=$${step.costUsd.toFixed(4)}\n`,
+						);
+					return;
 				}
-				if (decider === undefined || subject === undefined) {
-					return {
-						resolved: false,
-						findings: null,
-						needsDecision: `loop '${loop.id}' cycle ${attempt} has no sealed reviewer or subject receipt`,
-					};
+				if (step.codeStep !== undefined) {
+					if (json) process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
+					else
+						process.stdout.write(
+							`step ${step.stepId} code:${step.commandId}: ${step.succeeded ? "passed" : "failed"} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
+						);
 				}
-				const correlation = fleetGateCorrelation(subject, decider);
-				const decided = decideReviewGate({
-					group: `${fleetRootId}:${loop.id}`,
-					cycle: attempt,
-					terminalCycle: terminalAttempt,
-					subjects: [{ runId: subject.runId, digest: subject.integrity.digest }],
-					decider: { runId: decider.runId, digest: decider.integrity.digest },
-					correlation,
-					output: result.output,
-				});
-				independentReviewFresh = decided.verdict === "pass" && correlation.independent;
-				const replaying = replayed.has(step.id);
-				const decisionPath = replaying
-					? null
-					: materializePendingGateDecision(stagePendingGateDecision(decided.draft)).path;
-				if (!json && decisionPath !== null) {
-					process.stdout.write(
-						`loop ${loop.id} cycle ${attempt}: ${decided.draft.outcome}${decided.draft.detail === undefined ? "" : ` (${decided.draft.detail})`} decision=${decisionPath}\n`,
-					);
-				}
-				return {
-					resolved: decided.verdict === "pass",
-					findings: decided.findings,
-					needsDecision: decided.needsDecision,
-				};
 			},
-			beginWriteBoundary: (window, stepIds) => boundaryEnforcer.begin(window, stepIds),
-			verifyWriteBoundary: (window, stepIds) => boundaryEnforcer.verify(window, stepIds),
-			cancel: (assignmentId) => dispatch.abort(assignmentId),
-			release: (ownerId) => {
-				if (ownerId === NO_WORKER_RESERVATION) return;
-				dispatch.reservations?.rollbackUnconsumed(ownerId);
+			onNotice(text, kind) {
+				if (kind === "write-boundary") process.stderr.write(`${text}\n`);
+				else if (kind === "gate" && !json) process.stdout.write(`${text}\n`);
 			},
-			releaseUnconsumed: (ownerId) => {
-				if (ownerId === NO_WORKER_RESERVATION) return;
-				dispatch.reservations?.rollbackUnconsumed(ownerId);
-			},
-			onStepSettled: async (step, result) => {
-				fleetRunRecord.steps.push({ stepId: step.id, result });
-				await writeFleetRun(fleetRunRecord);
-			},
-			replayed,
 		});
 	} catch (err) {
-		fleetRunRecord.endedAt = new Date().toISOString();
-		await writeFleetRun(fleetRunRecord);
 		await dispatch.drain();
 		await loaded.stop();
 		return fail(err instanceof Error ? err.message : String(err));
 	}
 	await dispatch.drain();
 	await loaded.stop();
-	fleetRunRecord.endedAt = new Date().toISOString();
-	await writeFleetRun(fleetRunRecord);
-	// A loop is judged by whether it converged, not attempt by attempt: a red
-	// verification that a later attempt fixed is the loop working as declared,
-	// and a node a resolved loop made unnecessary never had to run at all.
-	const required = plan.steps.filter((step) => step.loop === undefined && !planOutcome.unneeded.includes(step.id));
-	const failedLoops = planOutcome.loops.filter((loop) => !loop.resolved);
-	const succeededSteps = required.filter((step) => planOutcome.results.get(step.id)?.succeeded === true).length;
-	const resolvedLoops = planOutcome.loops.length - failedLoops.length;
+
 	if (json) {
 		process.stdout.write(
 			`${JSON.stringify({
 				fleet: contract.name,
 				rootId: fleetRootId,
 				planHash: plan.hash,
-				loops: planOutcome.loops,
-				revalidated: planOutcome.revalidated,
-				unneeded: planOutcome.unneeded,
-				skipped: planOutcome.skipped,
-				needsDecision: planOutcome.needsDecision,
-				writeBoundaries: planOutcome.writeBoundaries,
+				loops: outcome.result.loops,
+				revalidated: outcome.result.revalidated,
+				unneeded: outcome.result.unneeded,
+				skipped: outcome.result.skipped,
+				needsDecision: outcome.result.needsDecision,
+				writeBoundaries: outcome.result.writeBoundaries,
 			})}\n`,
 		);
 	} else {
-		const spentUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
 		process.stdout.write(
-			`fleet ${contract.name}: ${succeededSteps}/${required.length} steps succeeded, ${resolvedLoops}/${planOutcome.loops.length} loops resolved, total cost $${spentUsd.toFixed(4)}\n`,
+			`fleet ${contract.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost $${outcome.totalCostUsd.toFixed(4)}\n`,
 		);
-		for (const loop of planOutcome.loops) {
+		for (const loop of outcome.result.loops)
 			process.stdout.write(
 				`  loop ${loop.loopId}: ${loop.reason} after ${loop.attempts} verification(s) and ${loop.repairs} repair(s)\n`,
 			);
-		}
-		if (planOutcome.revalidated.length > 0) {
+		if (outcome.result.revalidated.length > 0)
 			process.stdout.write(
-				`  staleness: re-ran ${planOutcome.revalidated.join(", ")} because a workspace step landed after the last green\n`,
+				`  staleness: re-ran ${outcome.result.revalidated.join(", ")} because a workspace step landed after the last green\n`,
 			);
-		}
-		for (const message of planOutcome.needsDecision) process.stdout.write(`  needs operator decision: ${message}\n`);
-		for (const boundary of planOutcome.writeBoundaries) {
+		for (const message of outcome.result.needsDecision) process.stdout.write(`  needs operator decision: ${message}\n`);
+		for (const boundary of outcome.result.writeBoundaries) {
 			if (!boundary.violated) continue;
 			process.stdout.write(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
 		}
 	}
-	const cleanRun =
-		failedLoops.length === 0 &&
-		planOutcome.skipped.length === 0 &&
-		required.every((step) => planOutcome.results.get(step.id)?.succeeded === true);
-	return cleanRun ? 0 : 1;
+	return outcome.cleanRun ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------

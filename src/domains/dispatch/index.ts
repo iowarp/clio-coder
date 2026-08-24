@@ -89,12 +89,15 @@ export {
 export { type CompileFleetPlanInput, compileFleetExecutionPlan } from "./fleet-plan.js";
 export type {
 	ExecuteFleetRunInput,
+	FleetResumePlan,
+	FleetResumeRefusal,
+	FleetResumeStepDiff,
 	FleetRunAgentAccess,
 	FleetRunOutcome,
 	FleetRunStepEvent,
 	FleetRunStepOutcome,
 } from "./fleet-run.js";
-export { executeFleetRun, fleetPlanWaveIndex } from "./fleet-run.js";
+export { executeFleetRun, fleetPlanWaveIndex, planFleetResume } from "./fleet-run.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,
@@ -118,6 +121,8 @@ export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.j
 export { reduceRouteQuality } from "./route-quality.js";
 export type { RouteExplanation, RoutingIntent } from "./routing-intent.js";
 export { explainRouteDecision, parseRoutingIntent, preferLocalTie, routingIntentRejection } from "./routing-intent.js";
+export type { FleetRunRecord } from "./state.js";
+export { readFleetRun, writeFleetRun } from "./state.js";
 export type {
 	ReceiptVerificationState,
 	RunBriefingProvenance,

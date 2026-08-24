@@ -474,6 +474,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			dispatch: deps.dispatch,
 			agents: { getSpec: (agentId) => agents.getSpec(agentId) },
 			attributionEnabled: deps.getSettings?.().attribution.gitCommits ?? true,
+			vars: preview.vars,
 			onStepDispatched: (event) => {
 				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
 			},
