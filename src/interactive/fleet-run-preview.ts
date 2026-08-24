@@ -74,6 +74,8 @@ export interface FleetRunPreviewBudget {
 
 export interface FleetRunPreview {
 	name: string;
+	/** Variables rendered into the plan and sealed into its durable run record. */
+	vars: Readonly<Record<string, string>>;
 	planHash: string;
 	waves: ReadonlyArray<FleetRunPreviewWave>;
 	budget: FleetRunPreviewBudget;
@@ -259,6 +261,16 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 
 	return {
 		ok: true,
-		preview: { name: contract.name, planHash: plan.hash, waves, budget, plan, contract, commands, task },
+		preview: {
+			name: contract.name,
+			vars: { ...input.vars },
+			planHash: plan.hash,
+			waves,
+			budget,
+			plan,
+			contract,
+			commands,
+			task,
+		},
 	};
 }

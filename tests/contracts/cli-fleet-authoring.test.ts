@@ -1,8 +1,17 @@
-import { match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { parseFleetCommands, parseFleetContract, renderFleetPrompt } from "../../src/domains/agents/index.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
+import {
+	compileFleetExecutionPlan,
+	executeFleetRun,
+	type FleetRunRecord,
+	planFleetResume,
+} from "../../src/domains/dispatch/index.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 function contract(name: string, steps: string, body = "Run the declared workflow."): string {
@@ -194,5 +203,154 @@ describe("contracts/cli-fleet-authoring", () => {
 		strictEqual(changed.code, 1);
 		match(changed.stderr, /resume plan hash differs/);
 		match(changed.stderr, /step 2: second -> changed/);
+	});
+
+	it("plans only an integrity-valid prefix and returns typed resume refusals", () => {
+		const parsed = parseFleetContract(
+			contract(
+				"planner",
+				[
+					"  - id: first",
+					"    kind: code",
+					"    command: first",
+					"    scope: readonly",
+					"    dependencies: []",
+					"  - id: second",
+					"    kind: code",
+					"    command: second",
+					"    scope: readonly",
+					"    dependencies: [first]",
+				].join("\n"),
+			),
+			"planner.md",
+		);
+		const plan = compileFleetExecutionPlan({
+			contract: parsed,
+			task: "plan",
+			resolveAgent: () => {
+				throw new Error("the planner fixture has no agent steps");
+			},
+		});
+		const result = (stepId: string, succeeded = true, integrityValid = true): ExecutionStepResult => ({
+			stepId,
+			assignmentId: `assignment-${stepId}`,
+			terminalRunId: `run-${stepId}`,
+			receiptDigest: `digest-${stepId}`,
+			output: stepId,
+			succeeded,
+			integrityValid,
+		});
+		const record: FleetRunRecord = {
+			version: 1,
+			id: "fleet-prior",
+			fleet: parsed.name,
+			planHash: plan.hash,
+			stepIds: plan.steps.map((step) => step.id),
+			planSteps: plan.steps.map((step) => structuredClone(step)),
+			vars: { mode: "one" },
+			startedAt: "2026-01-01T00:00:00.000Z",
+			endedAt: "2026-01-01T00:00:01.000Z",
+			resumedFrom: null,
+			steps: [
+				{ stepId: "first", result: result("first") },
+				{ stepId: "second", result: result("second", true, false) },
+			],
+		};
+		const prefix = planFleetResume(record, plan, parsed, { mode: "one" });
+		strictEqual(prefix.ok, true);
+		if (prefix.ok) deepStrictEqual([...prefix.replayed.keys()], ["first"]);
+		deepStrictEqual(planFleetResume({ ...record, fleet: "another" }, plan, parsed, { mode: "one" }), {
+			ok: false,
+			reason: "fleet-name",
+			priorFleet: "another",
+			currentFleet: "planner",
+		});
+		deepStrictEqual(planFleetResume(record, plan, parsed, { mode: "two" }), { ok: false, reason: "vars" });
+		const changed = {
+			...plan,
+			hash: "changed",
+			steps: [{ ...plan.steps[0], id: "renamed" }, plan.steps[1]],
+		} as typeof plan;
+		const refusal = planFleetResume(record, changed, parsed, { mode: "one" });
+		strictEqual(refusal.ok, false);
+		if (!refusal.ok && refusal.reason === "plan-hash") {
+			strictEqual(refusal.priorHash, plan.hash);
+			strictEqual(refusal.currentHash, "changed");
+			deepStrictEqual(
+				refusal.diff.map((entry) => [entry.index, entry.priorId, entry.currentId]),
+				[[0, "first", "renamed"]],
+			);
+		}
+	});
+
+	it("resumes a domain-started run and records its lineage through the shared executor", async () => {
+		const fleetDir = join(repo, ".clio-coder", "fleets");
+		const steps = [
+			"  - id: first",
+			"    kind: code",
+			"    command: first",
+			"    scope: readonly",
+			"    dependencies: []",
+			"  - id: second",
+			"    kind: code",
+			"    command: second",
+			"    scope: readonly",
+			"    dependencies: [first]",
+		].join("\n");
+		const contractText = contract("domain-replay", steps);
+		const failingCommands = 'version: 1\ncommands:\n  first:\n    argv: ["true"]\n  second:\n    argv: ["false"]\n';
+		writeFileSync(join(fleetDir, "domain-replay.md"), contractText);
+		writeFileSync(join(fleetDir, "commands.yaml"), failingCommands);
+		const parsed = parseFleetContract(contractText, join(fleetDir, "domain-replay.md"));
+		const commands = parseFleetCommands(failingCommands, join(fleetDir, "commands.yaml"));
+		const plan = compileFleetExecutionPlan({
+			contract: parsed,
+			task: renderFleetPrompt(parsed.body, {}),
+			resolveAgent: () => {
+				throw new Error("the domain resume fixture has no agent steps");
+			},
+		});
+		const stateDir = String(scratch.env.CLIO_CODER_STATE_DIR);
+		mkdirSync(join(stateDir, "fleet-runs"), { recursive: true });
+		const previousState = process.env.CLIO_CODER_STATE_DIR;
+		process.env.CLIO_CODER_STATE_DIR = stateDir;
+		try {
+			const first = await executeFleetRun({
+				plan,
+				contractName: parsed.name,
+				commands,
+				workspaceRoot: repo,
+				fleetRootId: "fleet-domain-start",
+				dispatch: { abort() {} } as unknown as DispatchContract,
+				agents: { getSpec: () => null },
+				attributionEnabled: false,
+				vars: {},
+			});
+			strictEqual(first.cleanRun, false);
+		} finally {
+			if (previousState === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = previousState;
+		}
+		const initialRecord = JSON.parse(
+			readFileSync(join(stateDir, "fleet-runs", "fleet-domain-start.json"), "utf8"),
+		) as FleetRunRecord;
+		strictEqual(initialRecord.resumedFrom, null);
+		strictEqual(typeof initialRecord.endedAt, "string");
+		writeFileSync(
+			join(fleetDir, "commands.yaml"),
+			'version: 1\ncommands:\n  first:\n    argv: ["true"]\n  second:\n    argv: ["true"]\n',
+		);
+		const resumed = await runCli(["fleet", "run", "domain-replay", "--resume", "fleet-domain-start"], {
+			cwd: repo,
+			env: scratch.env,
+		});
+		strictEqual(resumed.code, 0, `stdout=${resumed.stdout}\nstderr=${resumed.stderr}`);
+		match(resumed.stdout, /step first: replayed terminal-run=/);
+		const resumedId = /root=(fleet-[a-f0-9]+)/u.exec(resumed.stderr)?.[1];
+		strictEqual(typeof resumedId, "string", resumed.stderr);
+		const resumedRecord = JSON.parse(
+			readFileSync(join(stateDir, "fleet-runs", `${String(resumedId)}.json`), "utf8"),
+		) as FleetRunRecord;
+		strictEqual(resumedRecord.resumedFrom, "fleet-domain-start");
 	});
 });
