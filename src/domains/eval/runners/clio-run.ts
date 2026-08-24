@@ -1,11 +1,5 @@
 import { shellQuote } from "../../../core/shell-quote.js";
-import {
-	dispatchCountFromJsonl,
-	evidenceMetricsFromReceipt,
-	receiptFromRunJsonStdout,
-	scoutDispatchCountFromJsonl,
-	wikiStaleAcknowledgedFromJsonl,
-} from "../metrics/evidence.js";
+import { evidenceMetricsFromReceipt, receiptFromRunJsonStdout } from "../metrics/evidence.js";
 import { streamInvariantMetrics } from "../metrics/invariants.js";
 import { tokenMetricEntries } from "../metrics/token-stream.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
@@ -58,9 +52,6 @@ export async function runClioRunRunner(
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,
 			"verifier.exitCode": result.exitCode,
-			"dispatch.count": dispatchCountFromJsonl(toolMetricStream),
-			"dispatch.scoutCount": scoutDispatchCountFromJsonl(toolMetricStream),
-			"wiki.staleAcknowledged": wikiStaleAcknowledgedFromJsonl(toolMetricStream),
 			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt)),
 			...(receipt === null
 				? {}

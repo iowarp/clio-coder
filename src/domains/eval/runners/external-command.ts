@@ -1,14 +1,6 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import {
-	addChaosObservations,
-	chaosMetricEntries,
-	createChaosFold,
-	EMPTY_CHAOS_OBSERVATION,
-	type EvalChaosObservation,
-	parseChaosMarker,
-} from "../metrics/chaos-stream.js";
-import {
 	addFleetLoopObservations,
 	createFleetLoopFold,
 	EMPTY_FLEET_LOOP_OBSERVATION,
@@ -53,8 +45,6 @@ export interface ShellCommandResult {
 	usage: EvalTokenStreamUsage;
 	/** Wire-stream structural invariants folded live, for the same reason. */
 	streamInvariants: EvalStreamInvariants;
-	/** Strict SIGINT harness marker folded live from stdout. */
-	chaos: EvalChaosObservation;
 	fleetLoops: EvalFleetLoopObservation;
 	stderr: string;
 	wallTimeMs: number;
@@ -84,7 +74,6 @@ export async function runExternalCommandRunner(
 	// is reported as unmeasured, never as zero cost.
 	let usage = UNMEASURED_TOKEN_USAGE;
 	let streamInvariants = EMPTY_STREAM_INVARIANTS;
-	let chaos = EMPTY_CHAOS_OBSERVATION;
 	let fleetLoops = EMPTY_FLEET_LOOP_OBSERVATION;
 	for (const command of commands) {
 		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
@@ -93,7 +82,6 @@ export async function runExternalCommandRunner(
 		wallTimeMs += result.wallTimeMs;
 		usage = addTokenStreamUsage(usage, result.usage);
 		streamInvariants = addStreamInvariants(streamInvariants, result.streamInvariants);
-		chaos = addChaosObservations(chaos, result.chaos);
 		fleetLoops = addFleetLoopObservations(fleetLoops, result.fleetLoops);
 		if (result.exitCode !== 0) {
 			return {
@@ -107,11 +95,10 @@ export async function runExternalCommandRunner(
 					"latency.wallMs": wallTimeMs,
 					...tokenMetricEntries(usage),
 					...streamInvariantMetrics(streamInvariants),
-					...chaosMetricEntries(chaos),
 					...fleetLoopMetricEntries(fleetLoops),
 					"verifier.exitCode": result.exitCode,
 				},
-				artifacts: chaosArtifacts(chaos),
+				artifacts: {},
 			};
 		}
 	}
@@ -126,11 +113,10 @@ export async function runExternalCommandRunner(
 			"latency.wallMs": wallTimeMs,
 			...tokenMetricEntries(usage),
 			...streamInvariantMetrics(streamInvariants),
-			...chaosMetricEntries(chaos),
 			...fleetLoopMetricEntries(fleetLoops),
 			"verifier.exitCode": 0,
 		},
-		artifacts: chaosArtifacts(chaos),
+		artifacts: {},
 	};
 }
 
@@ -150,7 +136,6 @@ export function runShellCommand(
 		const metricCapture = createJsonlMetricCapture();
 		const usageFold = createTokenUsageFold();
 		const streamFold = createStreamInvariantFold();
-		const chaosFold = createChaosFold();
 		const fleetLoopFold = createFleetLoopFold();
 		let timedOut = false;
 		let settled = false;
@@ -169,7 +154,6 @@ export function runShellCommand(
 			metricCapture.push(chunk);
 			usageFold.push(chunk);
 			streamFold.push(chunk);
-			chaosFold.push(chunk);
 			fleetLoopFold.push(chunk);
 		});
 		child.stderr.on("data", (chunk: string) => {
@@ -191,7 +175,6 @@ export function runShellCommand(
 				metricJsonl: metricCapture.finish(),
 				usage: usageFold.usage(),
 				streamInvariants: streamFold.invariants(),
-				chaos: chaosFold.observation(),
 				fleetLoops: fleetLoopFold.observation(),
 				stderr,
 				wallTimeMs: Math.round(performance.now() - started),
@@ -290,10 +273,6 @@ export function createJsonlMetricCapture(): JsonlMetricCapture {
 
 function compactMetricEvent(event: Record<string, unknown>): Record<string, unknown> | null {
 	const type = event.type;
-	if (type === "clio_soak_chaos") {
-		const marker = parseChaosMarker(event);
-		return marker === null ? null : { type, ...marker };
-	}
 	if (type === "tool_execution_start") {
 		const toolName = stringField(event, "toolName");
 		if (toolName !== "dispatch" && toolName !== "code_nav" && toolName !== "read" && toolName !== "grep") {
@@ -332,12 +311,6 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 			...(stringField(event.payload, "outcome") !== undefined ? { outcome: stringField(event.payload, "outcome") } : {}),
 		},
 	};
-}
-
-function chaosArtifacts(observation: EvalChaosObservation): Record<string, string> {
-	return observation.markerCount === 1 && observation.marker !== null
-		? { chaosSeed: String(observation.marker.seed) }
-		: {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

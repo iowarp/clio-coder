@@ -133,7 +133,6 @@ export const WORKSPACE_EXCLUDED_DIRS: ReadonlySet<string> = new Set([
 	".superpowers",
 	".codex",
 	".claude",
-	".clio-coder-benchmark",
 ]);
 
 function comparePaths(a: string, b: string): number {

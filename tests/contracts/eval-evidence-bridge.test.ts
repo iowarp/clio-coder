@@ -1,13 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
-import {
-	dispatchCountFromJsonl,
-	evidenceMetricsFromReceipt,
-	receiptFromRunJsonStdout,
-	scoutDispatchCountFromJsonl,
-	wikiStaleAcknowledgedFromJsonl,
-} from "../../src/domains/eval/metrics/evidence.js";
+import { evidenceMetricsFromReceipt, receiptFromRunJsonStdout } from "../../src/domains/eval/metrics/evidence.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import { resultCostUsd } from "../../src/domains/eval/suites/run.js";
 
@@ -99,84 +93,6 @@ describe("contracts/eval evidence bridge", () => {
 		);
 		strictEqual(unverified["evidence.verification"], "unverified");
 		ok(!("evidence.firstPassSuccess" in unverified));
-	});
-
-	it("counts terminal dispatch tool calls with the canonical-stream preference", () => {
-		strictEqual(dispatchCountFromJsonl(""), 0);
-		const executionEnds = [
-			JSON.stringify({ type: "tool_execution_end", toolCallId: "d1", toolName: "dispatch", isError: false }),
-			JSON.stringify({ type: "tool_execution_end", toolCallId: "d1", toolName: "dispatch", isError: false }),
-			JSON.stringify({ type: "tool_execution_end", toolCallId: "r1", toolName: "read", isError: false }),
-		].join("\n");
-		strictEqual(dispatchCountFromJsonl(executionEnds), 1, "duplicate ids and non-dispatch tools do not count");
-		// When the canonical clio finish stream exists it is authoritative,
-		// even when it reports zero dispatches.
-		const canonicalZero = [
-			JSON.stringify({ type: "tool_execution_end", toolCallId: "d1", toolName: "dispatch", isError: false }),
-			JSON.stringify({ type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } }),
-		].join("\n");
-		strictEqual(dispatchCountFromJsonl(canonicalZero), 0);
-		const canonicalTwo = [
-			JSON.stringify({ type: "clio_tool_finish", payload: { tool: "dispatch", outcome: "ok", toolCallId: "a" } }),
-			JSON.stringify({ type: "clio_tool_finish", payload: { tool: "dispatch", outcome: "ok", toolCallId: "b" } }),
-		].join("\n");
-		strictEqual(dispatchCountFromJsonl(canonicalTwo), 2);
-	});
-
-	it("counts only model-authored dispatch starts that actually target Scout", () => {
-		const stdout = [
-			JSON.stringify({
-				type: "tool_execution_start",
-				toolCallId: "s1",
-				toolName: "dispatch",
-				args: { tasks: [{ agent: "scout", task: "map the repo" }] },
-			}),
-			JSON.stringify({
-				type: "tool_execution_start",
-				toolCallId: "s1",
-				toolName: "dispatch",
-				args: { tasks: [{ agent: "scout", task: "duplicate" }] },
-			}),
-			JSON.stringify({
-				type: "tool_execution_start",
-				toolCallId: "c1",
-				toolName: "dispatch",
-				args: { agent: "coder", tasks: ["implement"] },
-			}),
-			JSON.stringify({
-				type: "tool_execution_start",
-				toolCallId: "s2",
-				toolName: "dispatch",
-				args: { agent: "scout", tasks: JSON.stringify(["inspect one domain"]) },
-			}),
-		].join("\n");
-		strictEqual(scoutDispatchCountFromJsonl(stdout), 2);
-		strictEqual(scoutDispatchCountFromJsonl(""), 0);
-	});
-
-	it("acknowledges wiki staleness only for a source read after a wiki lookup", () => {
-		const wikiThenRead = [
-			JSON.stringify({ type: "tool_execution_start", toolCallId: "w1", toolName: "code_nav", args: { mode: "wiki" } }),
-			JSON.stringify({ type: "tool_execution_start", toolCallId: "r1", toolName: "read", args: { path: "src/a.ts" } }),
-		].join("\n");
-		strictEqual(wikiStaleAcknowledgedFromJsonl(wikiThenRead), true);
-		const readThenWiki = [
-			JSON.stringify({ type: "tool_execution_start", toolCallId: "r1", toolName: "read", args: { path: "src/a.ts" } }),
-			JSON.stringify({ type: "tool_execution_start", toolCallId: "w1", toolName: "code_nav", args: { mode: "wiki" } }),
-		].join("\n");
-		strictEqual(wikiStaleAcknowledgedFromJsonl(readThenWiki), false, "a pre-wiki read is not acknowledgement");
-		const wikiOnly = JSON.stringify({
-			type: "tool_execution_start",
-			toolCallId: "w1",
-			toolName: "code_nav",
-			args: { mode: "wiki" },
-		});
-		strictEqual(wikiStaleAcknowledgedFromJsonl(wikiOnly), false, "answering from the wiki alone never passes");
-		const symbolThenRead = [
-			JSON.stringify({ type: "tool_execution_start", toolCallId: "s1", toolName: "code_nav", args: { mode: "symbol" } }),
-			JSON.stringify({ type: "tool_execution_start", toolCallId: "r1", toolName: "read", args: { path: "src/a.ts" } }),
-		].join("\n");
-		strictEqual(wikiStaleAcknowledgedFromJsonl(symbolThenRead), false, "only mode=wiki lookups arm the checkpoint");
 	});
 
 	it("accepts the clio-run agent field and the matrix cost ceiling; rejects misuse", () => {

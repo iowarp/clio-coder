@@ -83,8 +83,7 @@ next to the ignore:
 ```
 
 This repository commits none of those, so its `.clio-coder/` stays fully
-ignored except the seeded soak fixtures under `benchmarks/soak/fixtures/`,
-which are test inputs rather than session output.
+ignored. Benchmark workspaces are temporary external repositories.
 
 ## Finding what was hidden
 

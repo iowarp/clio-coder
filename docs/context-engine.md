@@ -192,7 +192,7 @@ In Git workspaces, the indexer uses the same visible file set across full builds
 incremental updates, fingerprints, and project profiles: tracked files plus
 untracked, unignored work in progress. It excludes symlinks, submodule gitlinks,
 generated output, scratch space, and local-state directories such as `.git`,
-`.clio-coder`, `.superpowers`, `.codex`, `.claude`, `.clio-coder-benchmark`, `node_modules`,
+`.clio-coder`, `.superpowers`, `.codex`, `.claude`, `node_modules`,
 `dist`, `build`, `coverage`, virtualenvs, `target`, and `vendor`. Non-Git
 workspaces use a bounded filesystem walk with the same directory exclusions.
 Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, CUDA

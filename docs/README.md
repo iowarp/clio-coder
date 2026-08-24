@@ -54,7 +54,7 @@ current source, tests, and `CHANGELOG.md`.
 | Issue-driven development lifecycle: file-ticket through release, label taxonomy, and dogfooding setup | [development-pipeline.md](development-pipeline.md) |
 | Proactive task memory architecture, session task bank, intervention rules, and handoff carrying | [proactive-memory.md](proactive-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and CLI trace subcommands | [trace-store.md](trace-store.md) ([Interactive Blueprint](html/trace_blueprint.html)) |
-| Private context index determinism, target smoke matrices, and Clio machinery soak benchmark suite | [evals-internal.md](evals-internal.md) ([Blueprints: evals_internal](html/evals_internal_blueprint.html), [soak](html/soak_blueprint.html)) |
+| Private context index determinism and target smoke matrices | [evals-internal.md](evals-internal.md) ([Blueprint](html/evals_internal_blueprint.html)) |
 | Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](config-knobs-audit.md) ([Interactive Blueprint](html/config_knobs_audit_blueprint.html)) |
 | Clock and timestamp conventions: durations, instants, ordering, and formatting | [time-conventions.md](time-conventions.md) ([Interactive Blueprint](html/time_conventions_blueprint.html)) |
 | Correct render, PTY, startup, compile-cache, and import-graph measurement endpoints and the 0.3.3 baseline | [performance-methodology.md](performance-methodology.md) |

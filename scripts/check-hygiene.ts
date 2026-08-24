@@ -350,7 +350,6 @@ function checkCiScripts(): void {
 	);
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
-	expectScript("live:smoke", "node --import tsx benchmarks/internal/live-smoke.ts");
 	expectScript("test:repeat", "node scripts/repeat-tests.mjs");
 	expectScript("prepublishOnly", "npm run ci:release");
 
@@ -388,16 +387,12 @@ function checkCiScripts(): void {
 	if (!gateStep) {
 		fail("ci-scripts", "ci.yml must run the full release gate");
 	}
-	// `npm ci`, uv, and the gate are the whole job. A second suite run, a
+	// `npm ci` and the gate are the whole job. A second suite run, a
 	// coverage pass, a shuffled rerun, or an apt install all belong somewhere
-	// that is not the push path. uv earns its place because the SciCode
-	// adapter contract runs its grader under `uv run` and fails without it;
-	// fd and ripgrep do not, because the tools fall back when they are absent.
-	const allowedCiCommands = new Set([
-		"npm ci --prefer-offline --no-audit --no-fund",
-		"pipx install uv",
-		"npm run ci:release",
-	]);
+	// that is not the push path. Benchmark dependencies belong to the internal
+	// harness; fd and ripgrep are unnecessary because the tools fall back when
+	// they are absent.
+	const allowedCiCommands = new Set(["npm ci --prefer-offline --no-audit --no-fund", "npm run ci:release"]);
 	const strayCommands = ciCommands.filter((command) => !allowedCiCommands.has(command));
 	if (strayCommands.length > 0) {
 		fail("ci-scripts", `ci.yml runs commands outside npm ci and the gate: ${strayCommands.join(", ")}`);

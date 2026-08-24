@@ -467,7 +467,7 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 | --- | --- |
 | `npm run ci` | Local and GitHub PR gate: typecheck, lint, skills pin check, build, the deterministic test suite, and the trace-viewer suite. |
 | `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
-| `npm run live:smoke -- --target <id>` | One real headless turn against a configured target. Add `--delegation` for the `opencode` and `copilot` ACP agents. The other operator-run drivers (`live:recon`, `live:fleet-dispatch`, `live:tui`) are listed in `benchmarks/internal/README.md`. |
+| `npm run live:smoke -- --target <id>` | One real headless turn against a configured target. Add `--delegation` for the `opencode` and `copilot` ACP agents. The other operator-run drivers (`live:fleet-dispatch`, `live:tui`, `live:home`) are listed in `benchmarks/internal/README.md`. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the skills pin check, and the README and docs drift rules. |
 | `npm run test` | Contract and smoke tests through the sharded runner. |

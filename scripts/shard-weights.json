@@ -224,20 +224,6 @@
 		"uniq": 0
 	},
 	{
-		"file": "tests/contracts/benchmark-token-accounting.test.ts",
-		"ms": 1797,
-		"spawns": true,
-		"total": 0,
-		"uniq": 0
-	},
-	{
-		"file": "tests/contracts/scicode-adapter.test.ts",
-		"ms": 1566,
-		"spawns": true,
-		"total": 0,
-		"uniq": 0
-	},
-	{
 		"file": "tests/boundaries/boundaries.test.ts",
 		"ms": 1405,
 		"spawns": false,
@@ -1474,13 +1460,6 @@
 		"ms": 1659,
 		"spawns": false,
 		"total": 340,
-		"uniq": 29
-	},
-	{
-		"file": "tests/contracts/eval-soak-suite.test.ts",
-		"ms": 1581,
-		"spawns": true,
-		"total": 343,
 		"uniq": 29
 	},
 	{

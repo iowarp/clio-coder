@@ -4,8 +4,8 @@
  * The stream is append-oriented: it carries each piece of content exactly
  * once, as an increment while it streams and as one completed message when it
  * lands. It never repeats the growing snapshot of an in-progress message,
- * because that is quadratic in a long turn. One tool-heavy SciCode sub-step
- * wrote 802 MB of stdout, 99.3% of it `message_update` snapshots of a message
+ * because that is quadratic in a long turn. One tool-heavy headless turn wrote
+ * 802 MB of stdout, 99.3% of it `message_update` snapshots of a message
  * whose final form is 44 KB.
  *
  * The rules, in one place:

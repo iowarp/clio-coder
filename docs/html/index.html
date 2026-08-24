@@ -295,7 +295,7 @@
         <button type="button" class="filter-tag" onclick="setCategory('obs')">Observability &amp; Trace</button>
         <button type="button" class="filter-tag" onclick="setCategory('models')">Models &amp; Providers</button>
         <button type="button" class="filter-tag" onclick="setCategory('skills')">Extensions &amp; Skills</button>
-        <button type="button" class="filter-tag" onclick="setCategory('validation')">Validation, Evals &amp; Soak</button>
+        <button type="button" class="filter-tag" onclick="setCategory('validation')">Validation &amp; Evals</button>
         <button type="button" class="filter-tag" onclick="setCategory('reference')">Reference &amp; Arch</button>
         <button type="button" class="filter-tag" onclick="setCategory('internal')">Internal/Historical</button>
       </div>
@@ -361,9 +361,8 @@
           </div>
           <div class="journey-links">
             <a href="trace_blueprint.html">1. WAL SQLite Trace Store</a>
-            <a href="soak_blueprint.html">2. Machinery Soak Benchmark</a>
-            <a href="eval_blueprint.html">3. Evaluation Runner &amp; Dual Tokens</a>
-            <a href="observability_blueprint.html">4. Observability &amp; Receipts</a>
+            <a href="eval_blueprint.html">2. Evaluation Runner &amp; Dual Tokens</a>
+            <a href="observability_blueprint.html">3. Observability &amp; Receipts</a>
           </div>
         </div>
       </div>
@@ -551,19 +550,6 @@
         <div class="card-footer">
           <span class="path">trace-store.md</span>
           <span class="feature">Trace SQL Inspector</span>
-        </div>
-      </a>
-
-      <!-- Card: Soak Machinery Benchmark -->
-      <a href="soak_blueprint.html" class="doc-card flagship" data-categories="validation,obs" data-title="Soak Machinery Benchmark" data-tags="soak benchmark suites machinery reliability boundary chaos loop">
-        <div class="card-top">
-          <h3 class="card-title">Soak Machinery Benchmark</h3>
-          <span class="card-badge badge-flagship">Core</span>
-        </div>
-        <p class="card-desc">Offline benchmark suite measuring Clio machinery reliability (not model quality): core soak, write boundaries, SIGINT chaos, and loop bound exhaustion.</p>
-        <div class="card-footer">
-          <span class="path">evals-internal.md</span>
-          <span class="feature">Soak Suite Simulator</span>
         </div>
       </a>
 
