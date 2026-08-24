@@ -1267,6 +1267,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getAutonomy: resolveEffectiveAutonomy,
 		...(interactive ? { dispatchBackground } : {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
+		...(config ? { getWorkerRosters: () => config.get().workers.rosters } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,

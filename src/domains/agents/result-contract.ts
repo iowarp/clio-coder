@@ -7,6 +7,7 @@ export type ResultContract =
 	| { kind: "architect-plan"; path: string }
 	| { kind: "scout-report" }
 	| { kind: "verifier-report" }
+	| { kind: "council-report" }
 	| { kind: "debugger-report" }
 	| { kind: "research-report" }
 	| { kind: "mutation-report" }
@@ -220,6 +221,98 @@ export interface VerifierResult {
 	checks: ReadonlyArray<VerifierCheck>;
 }
 
+export interface CouncilReportMember {
+	label: string;
+	runId: string;
+	round: number;
+	answer: string;
+	verdict?: string;
+	failed?: { reason: string };
+}
+
+export interface CouncilReport {
+	members: CouncilReportMember[];
+	synthesis: {
+		kind: "none" | "judge" | "vote";
+		text?: string;
+		verdict?: string;
+		tally?: Record<string, number>;
+		judgeRunId?: string;
+	};
+}
+
+export function parseCouncilReport(output: string | null): CouncilReport | null {
+	if (output === null) return null;
+	const parsed = parseJsonObjectPayload(output);
+	if (!parsed.ok) return null;
+	const value = parsed.value;
+	if (!hasOnlyKeys(value, ["members", "synthesis"]) || !Array.isArray(value.members) || value.members.length === 0) {
+		return null;
+	}
+	const members: CouncilReportMember[] = [];
+	for (const raw of value.members) {
+		if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+		const member = raw as Record<string, unknown>;
+		if (
+			!hasOnlyKeys(member, ["label", "runId", "round", "answer", "verdict", "failed"]) ||
+			!string(member.label) ||
+			!string(member.runId) ||
+			!Number.isInteger(member.round) ||
+			Number(member.round) < 1 ||
+			typeof member.answer !== "string" ||
+			(member.verdict !== undefined && !string(member.verdict))
+		)
+			return null;
+		let failed: { reason: string } | undefined;
+		if (member.failed !== undefined) {
+			if (
+				member.failed === null ||
+				typeof member.failed !== "object" ||
+				Array.isArray(member.failed) ||
+				!hasOnlyKeys(member.failed as Record<string, unknown>, ["reason"]) ||
+				!string((member.failed as Record<string, unknown>).reason)
+			)
+				return null;
+			failed = { reason: (member.failed as { reason: string }).reason };
+		}
+		members.push({
+			label: member.label,
+			runId: member.runId,
+			round: Number(member.round),
+			answer: member.answer,
+			...(member.verdict !== undefined ? { verdict: member.verdict as string } : {}),
+			...(failed !== undefined ? { failed } : {}),
+		});
+	}
+	if (value.synthesis === null || typeof value.synthesis !== "object" || Array.isArray(value.synthesis)) return null;
+	const rawSynthesis = value.synthesis as Record<string, unknown>;
+	if (!hasOnlyKeys(rawSynthesis, ["kind", "text", "verdict", "tally", "judgeRunId"])) return null;
+	if (rawSynthesis.kind !== "none" && rawSynthesis.kind !== "judge" && rawSynthesis.kind !== "vote") return null;
+	for (const key of ["text", "verdict", "judgeRunId"] as const) {
+		if (rawSynthesis[key] !== undefined && !string(rawSynthesis[key])) return null;
+	}
+	let tally: Record<string, number> | undefined;
+	if (rawSynthesis.tally !== undefined) {
+		if (rawSynthesis.tally === null || typeof rawSynthesis.tally !== "object" || Array.isArray(rawSynthesis.tally))
+			return null;
+		tally = {};
+		for (const [key, count] of Object.entries(rawSynthesis.tally as Record<string, unknown>)) {
+			if (!key || !Number.isInteger(count) || Number(count) < 0) return null;
+			tally[key] = Number(count);
+		}
+	}
+	return {
+		members,
+		synthesis: {
+			kind: rawSynthesis.kind,
+			...(rawSynthesis.text !== undefined ? { text: rawSynthesis.text as string } : {}),
+			...(rawSynthesis.verdict !== undefined ? { verdict: rawSynthesis.verdict as string } : {}),
+			...(tally !== undefined ? { tally } : {}),
+			...(rawSynthesis.judgeRunId !== undefined ? { judgeRunId: rawSynthesis.judgeRunId as string } : {}),
+		},
+	};
+}
+
 /**
  * Parsed `oracle-report` payload. `/oracle` renders these four fields into the
  * operator note it hands the main agent, so the shape is the answer shape.
@@ -355,6 +448,7 @@ const RESULT_CONTRACT_KINDS: ReadonlyArray<ResultContract["kind"]> = [
 	"architect-plan",
 	"scout-report",
 	"verifier-report",
+	"council-report",
 	"debugger-report",
 	"research-report",
 	"mutation-report",
@@ -1097,6 +1191,12 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 		}
 		case "verifier-report":
 			return validateVerifier(input.contract, input.output);
+		case "council-report": {
+			const report = parseCouncilReport(input.output);
+			return report === null
+				? failure(input.contract, "fail", "council-report is malformed")
+				: success(input.contract, "unmeasured", { council: report });
+		}
 		case "debugger-report":
 			return validateDebugger(input.contract, input.output);
 		case "research-report":
@@ -1183,6 +1283,8 @@ function resultContractShape(contract: ResultContract): string {
 			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]} or, if you cannot produce a citation you are sure of, at least {"findings":[{"claim":"what you observed"}]}, which is accepted as an ungrounded lead rather than losing the run';
 		case "verifier-report":
 			return '{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}';
+		case "council-report":
+			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "debugger-report":
 			return '{"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}';
 		case "research-report":
@@ -1318,6 +1420,7 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
 	const kinds = [
 		"scout-report",
 		"verifier-report",
+		"council-report",
 		"debugger-report",
 		"research-report",
 		"mutation-report",

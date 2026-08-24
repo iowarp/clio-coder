@@ -160,7 +160,7 @@ Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
-Every new receipt uses strict integrity v16; older receipt formats are not
+Every new receipt uses strict integrity v18; older receipt formats are not
 accepted by the current reader.
 
 ## Failure semantics
@@ -202,6 +202,7 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Detached | `detach: true` | Return logical assignment ids and a batch id immediately; collect later. |
 | Review gate | `review: {reviewer?, max_cycles?}` | Builder, read-only reviewer verdict, bounded revise loop. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
+| Council | `mode: "council", roster: "design"` | Two to five read-only members answer the same task, with optional vote or judge synthesis. |
 | Agent automation | `agent: "auto"` | Baselines candidate agent from task shape via shared classifier (`coder`, `tester`, `documenter`, `verifier`, `researcher`, `scout`); advisory unless activated. |
 
 ### Single-writer token
@@ -403,6 +404,32 @@ worktrees and branches. If a judge output is waiting in the decision journal,
 the workers are quiesced but the candidates remain until that output is bound
 to an integrity-verified judge receipt; a recovered winner is preserved for
 operator inspection rather than silently auto-applied after restart.
+
+### Council
+
+Council is the read-only sibling of compete. Two to five members run the same
+singular task concurrently on local HTTP or native targets. A request selects
+exactly one configured `workers.rosters` entry or supplies inline `members`.
+Admission pins every member to `read-only` autonomy and to the `read`, `grep`,
+`find`, `ls`, `code_nav`, and `context` tool surface. A route that resolves to
+an SSH fleet node is refused before approval. Council never creates a worktree
+and never mutates the workspace.
+
+Council supports one to three rounds. The first round gives every member the
+same task and briefing. A later round gives each member the other members'
+prior answers as labelled, untrusted briefing data. The member never receives
+its own prior answer. Each briefing is limited to 8 KiB and carries an explicit
+truncation marker when necessary. A failed peer contributes a labelled failure
+marker and no answer text.
+
+`synthesis: "none"` returns the final member answers directly. `vote` performs
+a deterministic majority tally over structured `verdict` fields without a
+model call. A vote with no majority reports `no_majority`, and a vote with no
+verdict fields reports `no_verdict_field`. `judge` runs one additional read-only judge against all final
+answers. Every member run seals a receipt. A judge receipt points backward to
+every final member receipt through gate provenance. The approval artifact names
+each member's label, target, model, thinking level, node, color, round count,
+and synthesis mode, so the plan hash binds the whole council contract.
 
 ### ExecutionPlan and plan approval
 
@@ -623,7 +650,7 @@ assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
 Assignment status, attempt ids, and terminal run id are stored separately in
-`assignments.json` while each attempt keeps its own strict v17 receipt.
+`assignments.json` while each attempt keeps its own strict v18 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
@@ -637,7 +664,7 @@ closed while a winner remains unapplied.
 
 ## Receipts
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 17`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 18`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
@@ -686,7 +713,7 @@ policy all consume that same final classification.
 Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
 reports whether Clio observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v17/sha256` alongside
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v18/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_requested`.
 A host-executed successful check projects onto canonical validation grounding as

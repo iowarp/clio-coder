@@ -25,6 +25,16 @@ export type { DispatchToolDeps } from "./dispatch-types.js";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+const CouncilMemberSchema = Type.Object(
+	{
+		label: Type.String({ pattern: "^[a-z][a-z0-9_-]{0,31}$" }),
+		target: Type.String(),
+		model: Type.Optional(Type.String()),
+		thinking: Type.Optional(StringEnum(THINKING_LEVELS)),
+	},
+	{ additionalProperties: false },
+);
+
 const DispatchBudgetPhaseSchema = Type.Object(
 	{
 		toolCalls: Type.Integer({ minimum: 1 }),
@@ -175,11 +185,15 @@ export function createDispatchTool(
 				),
 			),
 			mode: Type.Optional(
-				StringEnum(["parallel", "sequential", "pipeline", "compete"], {
+				StringEnum(["parallel", "sequential", "pipeline", "compete", "council"], {
 					description:
 						"Run tasks concurrently (default), one at a time, as a pipeline where each task receives the previous task's output as input data, or as a compete where N candidates build the same single task in scratch worktrees and a judge picks the winner.",
 				}),
 			),
+			roster: Type.Optional(Type.String({ description: "Configured workers.rosters name for council mode." })),
+			members: Type.Optional(Type.Array(CouncilMemberSchema, { minItems: 2, maxItems: 5 })),
+			synthesis: Type.Optional(StringEnum(["none", "judge", "vote"] as const)),
+			rounds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
 			writers: Type.Optional(
 				Type.Literal(1, {
 					description: "Serialize writer admission in declared task order while readers continue concurrently.",

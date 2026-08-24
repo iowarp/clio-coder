@@ -166,6 +166,8 @@ export interface JobSpec {
 	autonomy?: AutonomyLevel;
 	/** Review/compete gate provenance sealed into the run's receipt. */
 	gate?: RunGateProvenance;
+	/** Council grouping projected to receipts and fleet surfaces. */
+	council?: { group: string; label: string; color?: string; round: number };
 	/** Plan-approval provenance sealed into the run's receipt. */
 	plan?: RunPlanProvenance;
 	/**
@@ -217,6 +219,7 @@ const KNOWN_KEYS = new Set([
 	"lineage",
 	"autonomy",
 	"gate",
+	"council",
 	"plan",
 	"competeStance",
 ]);
@@ -409,7 +412,7 @@ export function validateJobSpec(spec: unknown): Validated {
 
 	if ("toolProfile" in spec && spec.toolProfile !== undefined) {
 		if (typeof spec.toolProfile !== "string" || !isToolProfileName(spec.toolProfile)) {
-			errors.push("toolProfile must be one of: minimal-local|science-local|full-agent");
+			errors.push("toolProfile must be one of: minimal-local|science-local|full-agent|council-read-only");
 		}
 	}
 
@@ -605,6 +608,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
 	if (isAutonomyLevel(spec.autonomy)) out.autonomy = spec.autonomy;
 	if (isValidGate(spec.gate)) out.gate = cloneGate(spec.gate);
+	if (isValidCouncil(spec.council)) out.council = { ...spec.council };
 	if (typeof spec.competeStance === "string" && VALID_COMPETE_STANCES.has(spec.competeStance)) {
 		out.competeStance = spec.competeStance as CompeteStance;
 	}
@@ -687,9 +691,18 @@ function isValidProtectedArtifactRemap(value: unknown): value is ProtectedArtifa
 	);
 }
 
-const VALID_GATE_ROLES = new Set(["builder", "reviewer", "candidate", "judge"]);
+const VALID_GATE_ROLES = new Set(["builder", "reviewer", "candidate", "judge", "member", "synthesis"]);
 const VALID_GATE_VERDICTS = new Set(["pass", "fail", "revise"]);
-const VALID_PLAN_TOPOLOGIES = new Set(["parallel", "sequential", "pipeline", "review", "compete", "detached", "fleet"]);
+const VALID_PLAN_TOPOLOGIES = new Set([
+	"parallel",
+	"sequential",
+	"pipeline",
+	"review",
+	"compete",
+	"council",
+	"detached",
+	"fleet",
+]);
 const VALID_PLAN_APPROVALS = new Set(["operator", "full-auto"]);
 
 function isValidGate(value: unknown): value is RunGateProvenance {
@@ -719,6 +732,20 @@ function cloneGate(gate: RunGateProvenance): RunGateProvenance {
 		...(gate.subjects !== undefined ? { subjects: gate.subjects.map((subject) => ({ ...subject })) } : {}),
 		...(gate.verdict !== undefined ? { verdict: gate.verdict } : {}),
 	};
+}
+
+function isValidCouncil(value: unknown): value is NonNullable<JobSpec["council"]> {
+	return (
+		isPlainObject(value) &&
+		typeof value.group === "string" &&
+		value.group.length > 0 &&
+		typeof value.label === "string" &&
+		value.label.length > 0 &&
+		(value.color === undefined || typeof value.color === "string") &&
+		typeof value.round === "number" &&
+		Number.isInteger(value.round) &&
+		value.round >= 1
+	);
 }
 
 function isValidPlan(value: unknown): value is RunPlanProvenance {

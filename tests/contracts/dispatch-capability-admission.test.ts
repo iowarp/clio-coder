@@ -410,7 +410,7 @@ describe("contracts/dispatch summary line admission facts", () => {
 			tokenCount: 10,
 			startedAt: "2026-01-01T00:00:00.000Z",
 			endedAt: "2026-01-01T00:00:01.000Z",
-			integrity: { version: 17, algorithm: "sha256", digest: "0".repeat(64) },
+			integrity: { version: 18, algorithm: "sha256", digest: "0".repeat(64) },
 			verification: unverified,
 			routingIntent: {
 				posture: "balanced",

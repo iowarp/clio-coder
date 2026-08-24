@@ -8,7 +8,23 @@ import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchPlanView, ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 import type { DispatchRunEventRegistry } from "./dispatch-run-events.js";
 
-export type DispatchMode = "parallel" | "sequential" | "pipeline" | "compete";
+export type DispatchMode = "parallel" | "sequential" | "pipeline" | "compete" | "council";
+
+export interface DispatchCouncilMember {
+	label: string;
+	target: string;
+	model?: string;
+	thinking?: string;
+	color?: string;
+}
+
+export interface DispatchCouncilSettings {
+	members: DispatchCouncilMember[];
+	synthesis: "none" | "judge" | "vote";
+	rounds: number;
+	judge?: DispatchCompeteSettings["judge"];
+	resolvedTasks?: ReadonlyArray<ResolvedDispatchPlanArtifact["tasks"][number]>;
+}
 
 export interface DispatchReviewSettings {
 	reviewer?: string;
@@ -36,6 +52,7 @@ export interface DispatchRunExecutionSnapshot {
 	readonly writers: 1 | undefined;
 	readonly review: DispatchReviewSettings | undefined;
 	readonly compete: DispatchCompeteSettings | undefined;
+	readonly council: DispatchCouncilSettings | undefined;
 	readonly detach: boolean;
 	readonly timeoutMs: number | undefined;
 	readonly maxOutputBytes: number;
@@ -75,4 +92,5 @@ export interface DispatchToolDeps {
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	getAutonomy?: () => AutonomyLevel;
 	getCostCeilingUsd?: () => number;
+	getWorkerRosters?: () => Readonly<Record<string, { members: ReadonlyArray<DispatchCouncilMember> }>>;
 }

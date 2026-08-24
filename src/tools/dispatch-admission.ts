@@ -2,7 +2,11 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
-import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
+import {
+	COUNCIL_JUDGE_PROMPT,
+	JUDGE_GATE_PROMPT,
+	REVIEWER_GATE_PROMPT,
+} from "../domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -30,6 +34,7 @@ import {
 } from "./dispatch-scout-admission.js";
 import type {
 	DispatchCompeteSettings,
+	DispatchCouncilSettings,
 	DispatchExecutionSnapshot,
 	DispatchMode,
 	DispatchReviewSettings,
@@ -71,6 +76,64 @@ const COMPETE_SINGLE_TASK_MESSAGE = "dispatch: compete requires exactly one task
 const COMPETE_NO_REVIEW_MESSAGE = "dispatch: compete has its own judge and cannot combine with review";
 const COMPETE_MIN_CANDIDATES = 2;
 const COMPETE_MAX_CANDIDATES = 4;
+const COUNCIL_LABEL = /^[a-z][a-z0-9_-]{0,31}$/u;
+
+function councilSettingsFromArgs(
+	args: Record<string, unknown>,
+	deps: DispatchToolDeps,
+): { ok: true; council: DispatchCouncilSettings } | { ok: false; message: string } {
+	const rosterName = stringArg(args, "roster");
+	const hasMembers = Object.hasOwn(args, "members");
+	if ((rosterName === undefined) === !hasMembers) {
+		return { ok: false, message: "dispatch: council requires exactly one of roster or members" };
+	}
+	let members: DispatchCouncilSettings["members"];
+	if (rosterName !== undefined) {
+		const roster = deps.getWorkerRosters?.()[rosterName];
+		if (roster === undefined) return { ok: false, message: `council_roster_unknown: ${rosterName}` };
+		members = roster.members.map((member) => ({ ...member }));
+	} else {
+		if (!Array.isArray(args.members)) return { ok: false, message: "council_members_out_of_range" };
+		members = [];
+		for (const raw of args.members) {
+			if (!isRecord(raw)) return { ok: false, message: "council_members_out_of_range" };
+			const label = stringArg(raw, "label");
+			const target = stringArg(raw, "target");
+			if (label === undefined || target === undefined || !COUNCIL_LABEL.test(label)) {
+				return { ok: false, message: "council_members_out_of_range" };
+			}
+			const model = stringArg(raw, "model");
+			const thinking = stringArg(raw, "thinking");
+			members.push({ label, target, ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) });
+		}
+	}
+	if (members.length < 2 || members.length > 5) return { ok: false, message: "council_members_out_of_range" };
+	const labels = new Set<string>();
+	for (const member of members) {
+		if (labels.has(member.label)) return { ok: false, message: `council_member_label_duplicate: ${member.label}` };
+		labels.add(member.label);
+	}
+	const synthesis = args.synthesis === undefined ? "none" : args.synthesis;
+	if (synthesis !== "none" && synthesis !== "judge" && synthesis !== "vote") {
+		return { ok: false, message: "dispatch: synthesis must be none, judge, or vote" };
+	}
+	if (args.judge !== undefined && synthesis !== "judge") {
+		return { ok: false, message: "council_synthesis_requires_judge_settings" };
+	}
+	const rounds = args.rounds === undefined ? 1 : args.rounds;
+	if (!Number.isInteger(rounds) || Number(rounds) < 1 || Number(rounds) > 3) {
+		return { ok: false, message: "dispatch: rounds must be an integer 1..3" };
+	}
+	const judge = isRecord(args.judge)
+		? Object.fromEntries(
+				["agent", "model", "target", "node"].flatMap((key) => {
+					const value = stringArg(args.judge as Record<string, unknown>, key);
+					return value === undefined ? [] : [[key, value]];
+				}),
+			)
+		: undefined;
+	return { ok: true, council: { members, synthesis, rounds: Number(rounds), ...(judge ? { judge } : {}) } };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -197,7 +260,10 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 	};
 	const dispatchExecutionSnapshot = (
 		args: Record<string, unknown>,
-		fields: Pick<DispatchExecutionSnapshot & { kind: "dispatch" }, "requests" | "mode" | "review" | "compete">,
+		fields: Pick<
+			DispatchExecutionSnapshot & { kind: "dispatch" },
+			"requests" | "mode" | "review" | "compete" | "council"
+		>,
 	): DispatchExecutionSnapshot => ({
 		kind: "dispatch",
 		planView: describeDispatchPlan(args),
@@ -311,6 +377,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		if (topology === "fleet") return task.wave ?? index;
 		if (topology === "parallel" || topology === "detached") return 0;
 		if (topology === "compete") return task.role === "judge" ? 1 : 0;
+		if (topology === "council")
+			return task.role === "synthesis" ? (task.council?.rounds ?? 1) : (task.council?.round ?? 1) - 1;
 		return index;
 	};
 	const markReservedPlan = (args: Record<string, unknown>, artifact: ResolvedDispatchPlanArtifact) => {
@@ -328,7 +396,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			};
 		});
 		const reservation = deps.dispatch.reservations.prepare({
-			topology: artifact.topology === "fleet" ? "parallel" : artifact.topology,
+			topology: artifact.topology === "fleet" || artifact.topology === "council" ? "parallel" : artifact.topology,
 			tasks,
 		});
 		try {
@@ -375,6 +443,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						mode: "parallel",
 						review: undefined,
 						compete: undefined,
+						council: undefined,
 					}),
 				);
 				state.trustedExecutionPlans.set(marked, deepFreeze(structuredClone(prepared.executionPlan)));
@@ -417,10 +486,13 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 		const parsed = parseRequests(args);
 		if (!parsed.ok) return shapeRejection(args, parsed.message);
-		if (args.mode !== undefined && !["parallel", "sequential", "pipeline", "compete"].includes(String(args.mode))) {
+		if (
+			args.mode !== undefined &&
+			!["parallel", "sequential", "pipeline", "compete", "council"].includes(String(args.mode))
+		) {
 			return shapeRejection(
 				args,
-				`dispatch: mode must be parallel, sequential, pipeline, or compete; got '${String(args.mode)}'`,
+				`dispatch: mode must be parallel, sequential, pipeline, compete, or council; got '${String(args.mode)}'`,
 			);
 		}
 		const mode: DispatchMode =
@@ -430,7 +502,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					? "pipeline"
 					: args.mode === "compete"
 						? "compete"
-						: "parallel";
+						: args.mode === "council"
+							? "council"
+							: "parallel";
 		if (args.writers !== undefined && args.writers !== 1) {
 			return shapeRejection(args, "dispatch: writers must be 1 when present");
 		}
@@ -472,11 +546,23 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 		const competeResult = mode === "compete" ? competeSettingsFromArgs(args) : undefined;
 		if (competeResult !== undefined && !competeResult.ok) return shapeRejection(args, competeResult.message);
+		const councilResult = mode === "council" ? councilSettingsFromArgs(args, deps) : undefined;
+		if (councilResult !== undefined && !councilResult.ok) return shapeRejection(args, councilResult.message);
+		if (mode === "council") {
+			if (parsed.requests.length !== 1 || parsed.requests[0] === undefined) {
+				return shapeRejection(args, "dispatch: council requires exactly one task");
+			}
+			if (reviewResult.review !== undefined) return shapeRejection(args, "dispatch: council cannot combine with review");
+			if ((parsed.requests[0].resolvedVerification?.length ?? 0) > 0) {
+				return shapeRejection(args, "council_verification_unsupported");
+			}
+		}
 		const snapshotFields = {
 			requests: parsed.requests,
 			mode,
 			review: reviewResult.review,
 			compete: competeResult?.ok === true ? competeResult.compete : undefined,
+			council: councilResult?.ok === true ? councilResult.council : undefined,
 		};
 		if (deps.dispatch.preview === undefined) {
 			const marked = markPrepared(args);
@@ -549,6 +635,72 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						1,
 					),
 				);
+			} else if (mode === "council") {
+				const council = councilResult?.ok === true ? councilResult.council : undefined;
+				const base = parsed.requests[0];
+				if (council === undefined || base === undefined)
+					throw new Error("dispatch: council admission settings are unavailable");
+				const subjects: Array<{ runId: string; digest: null }> = [];
+				for (let round = 1; round <= council.rounds; round += 1) {
+					for (const [index, member] of council.members.entries()) {
+						const memberRequest: DispatchRequest = {
+							...base,
+							executionRole: "researcher",
+							autonomy: "read-only",
+							toolProfile: "council-read-only",
+							target: member.target,
+							...(member.model ? { model: member.model } : {}),
+							...(member.thinking ? { thinkingLevel: member.thinking as NonNullable<DispatchRequest["thinkingLevel"]> } : {}),
+							gate: { role: "member", group: "plan-preview", cycle: round },
+						};
+						let task: ResolvedPlanTask;
+						try {
+							task = resolveTask(memberRequest, "member", (round - 1) * council.members.length + index + 1);
+						} catch (error) {
+							return shapeRejection(
+								args,
+								`council_member_target_unknown: ${member.label}: ${error instanceof Error ? error.message : String(error)}`,
+							);
+						}
+						if (task.node !== "local" || task.nodeKind !== "local") {
+							return shapeRejection(args, `council_member_remote_node: ${member.label}`);
+						}
+						task.council = {
+							label: member.label,
+							...(member.color ? { color: member.color } : {}),
+							round,
+							rounds: council.rounds,
+							synthesis: council.synthesis,
+						};
+						if (round === council.rounds) subjects.push({ runId: `plan-member-${member.label}`, digest: null });
+						tasks.push(task);
+					}
+				}
+				if (council.synthesis === "judge") {
+					const judgeRequest: DispatchRequest = {
+						agentId: council.judge?.agent ?? base.agentId,
+						executionRole: "judge",
+						task: "Plan-time capability check for council synthesis.",
+						systemPrompt: COUNCIL_JUDGE_PROMPT,
+						autonomy: "read-only",
+						toolProfile: "council-read-only",
+						gate: { role: "synthesis", group: "plan-preview", cycle: council.rounds, subjects },
+						...(council.judge?.node ? { node: council.judge.node } : {}),
+						...(council.judge?.model ? { model: council.judge.model } : {}),
+						...(council.judge?.target ? { target: council.judge.target } : {}),
+					};
+					const judgeTask = resolveTask(judgeRequest, "synthesis", 1);
+					if (judgeTask.node !== "local" || judgeTask.nodeKind !== "local") {
+						return shapeRejection(args, "council_member_remote_node: judge");
+					}
+					judgeTask.council = {
+						label: "synthesis",
+						round: council.rounds,
+						rounds: council.rounds,
+						synthesis: council.synthesis,
+					};
+					tasks.push(judgeTask);
+				}
 			} else {
 				for (const [index, request] of parsed.requests.entries()) tasks.push(resolveTask(request, "task", index + 1));
 			}

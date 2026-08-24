@@ -28,7 +28,7 @@ This document defines the 45 core architectural concepts and terminology used th
 
 ### 6. Receipt
 - **Definition**: An immutable, cryptographically sealed record of a completed run containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.
-- **Owning Type**: `RunReceipt` in `src/domains/dispatch/types.ts` (`RUN_RECEIPT_INTEGRITY_VERSION = 17`).
+- **Owning Type**: `RunReceipt` in `src/domains/dispatch/types.ts` (`RUN_RECEIPT_INTEGRITY_VERSION = 18`).
 
 ### 7. Envelope
 - **Definition**: A bounded container enforcing byte-length limits and truncation indicators on a dynamic payload. Tool output carries shown and total byte counts plus a continuation fragment; a parent briefing carries byte count and SHA-256 content hash instead.

@@ -3,7 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { clioStateDir } from "../core/xdg.js";
+import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
 import { closeAgentLedger, openAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -32,6 +34,7 @@ import {
 } from "../domains/dispatch/gate-decisions.js";
 import {
 	COMPETE_STANCES,
+	COUNCIL_JUDGE_PROMPT,
 	type CompeteStance,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
@@ -71,7 +74,12 @@ import {
 	type DispatchRunEventRegistry,
 } from "./dispatch-run-events.js";
 import { runScoutContinuationPlan, scoutPlanAuthorityGranted, scoutTransitionDetail } from "./dispatch-scout.js";
-import type { DispatchCompeteSettings, DispatchReviewSettings, DispatchToolDeps } from "./dispatch-types.js";
+import type {
+	DispatchCompeteSettings,
+	DispatchCouncilSettings,
+	DispatchReviewSettings,
+	DispatchToolDeps,
+} from "./dispatch-types.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
@@ -1786,6 +1794,227 @@ function competeResult(
 	};
 }
 
+const COUNCIL_BRIEFING_MAX_BYTES = 8 * 1024;
+const COUNCIL_BRIEFING_TRUNCATION = "\n[council peer briefing truncated]";
+
+function councilVerdict(text: string): string | undefined {
+	const parsed = parseJsonObjectPayload(text);
+	return parsed.ok && typeof parsed.value.verdict === "string" && parsed.value.verdict.trim().length > 0
+		? parsed.value.verdict.trim()
+		: undefined;
+}
+
+function councilJudgeText(text: string): string {
+	const parsed = parseJsonObjectPayload(text);
+	return parsed.ok && typeof parsed.value.text === "string" && parsed.value.text.trim().length > 0
+		? parsed.value.text.trim()
+		: text;
+}
+
+function boundedCouncilBriefing(parts: ReadonlyArray<string>): string {
+	return truncateUtf8(parts.join("\n\n"), COUNCIL_BRIEFING_MAX_BYTES, COUNCIL_BRIEFING_TRUNCATION);
+}
+
+async function runCouncil(
+	deps: RegisteredDispatchToolDeps,
+	base: DispatchRequest,
+	council: DispatchCouncilSettings,
+	timeoutMs: number | undefined,
+	signal: AbortSignal | undefined,
+): Promise<{ report: CouncilReport; runs: CompletedRun[]; group: string }> {
+	const group = newGateGroupId("council");
+	const runs: CompletedRun[] = [];
+	let prior = new Map<string, CompletedRun>();
+	const runMember = async (request: DispatchRequest): Promise<CompletedRun> => {
+		if (signal?.aborted) throw new Error("council dispatch aborted");
+		const handle = await deps.dispatch.dispatch(request);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		if (timeoutMs !== undefined) {
+			timer = setTimeout(
+				() => deps.dispatch.abort(handle.runId, { cause: "timeout", detail: `timed out after ${timeoutMs}ms` }),
+				timeoutMs,
+			);
+		}
+		const abort = (): void => deps.dispatch.abort(handle.runId);
+		signal?.addEventListener("abort", abort, { once: true });
+		try {
+			const [summary, receipt] = await Promise.all([
+				consumeGateSensitiveDispatchEvents(deps, handle.runId, request.agentId, handle.events),
+				handle.finalPromise,
+			]);
+			return completeRun(deps, receipt, summary);
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
+			signal?.removeEventListener("abort", abort);
+		}
+	};
+
+	for (let round = 1; round <= council.rounds; round += 1) {
+		const settled = await Promise.all(
+			council.members.map(async (member, index) => {
+				const peerParts: string[] = base.briefing === undefined ? [] : [`[original briefing] ${base.briefing}`];
+				if (round > 1) {
+					for (const peer of council.members) {
+						if (peer.label === member.label) continue;
+						const previous = prior.get(peer.label);
+						if (previous === undefined || isPipelineStepFailure(previous.receipt)) {
+							peerParts.push(`[${peer.label}] failed in prior round; no answer contributed.`);
+						} else {
+							peerParts.push(`[${peer.label}] ${normalizedAssistantText(previous.summary)}`);
+						}
+					}
+				}
+				const position = (round - 1) * council.members.length + index + 1;
+				const pinned = council.resolvedTasks?.find((task) => task.role === "member" && task.position === position);
+				const request: DispatchRequest = {
+					...base,
+					executionRole: "researcher",
+					autonomy: "read-only",
+					toolProfile: "council-read-only",
+					target: member.target,
+					...(member.model ? { model: member.model } : {}),
+					...(member.thinking ? { thinkingLevel: member.thinking as NonNullable<DispatchRequest["thinkingLevel"]> } : {}),
+					gate: {
+						role: "member",
+						group,
+						cycle: round,
+						...(round > 1
+							? {
+									subjects: [...prior.entries()]
+										.filter(([label]) => label !== member.label)
+										.map(([, run]) => subjectRef(run.receipt)),
+								}
+							: {}),
+					},
+					council: { group, label: member.label, ...(member.color ? { color: member.color } : {}), round },
+					...(round > 1
+						? { briefing: boundedCouncilBriefing(peerParts) }
+						: base.briefing !== undefined
+							? { briefing: base.briefing }
+							: {}),
+				};
+				return [
+					member.label,
+					await runMember(withResolvedPlanTaskPin(request, pinned, { pinTask: false, pinBriefing: false })),
+				] as const;
+			}),
+		);
+		prior = new Map(settled);
+		runs.push(...settled.map(([, run]) => run));
+	}
+
+	const members: CouncilReportMember[] = runs.map((run) => {
+		const text = normalizedAssistantText(run.summary);
+		const failed = isPipelineStepFailure(run.receipt);
+		const verdict = councilVerdict(text);
+		return {
+			label: run.receipt.council?.label ?? "member",
+			runId: run.receipt.runId,
+			round: run.receipt.council?.round ?? 1,
+			answer: text,
+			...(verdict !== undefined ? { verdict } : {}),
+			...(failed ? { failed: { reason: pipelineFailureReason(run.receipt) } } : {}),
+		};
+	});
+	const finalMembers = members.filter((member) => member.round === council.rounds && member.failed === undefined);
+	const finalReports = members.filter((member) => member.round === council.rounds);
+	let synthesis: CouncilReport["synthesis"] = { kind: council.synthesis };
+	if (council.synthesis === "vote") {
+		const tally: Record<string, number> = {};
+		for (const member of finalMembers)
+			if (member.verdict !== undefined) tally[member.verdict] = (tally[member.verdict] ?? 0) + 1;
+		const ranked = Object.entries(tally).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+		const winner = ranked[0];
+		const verdict =
+			winner === undefined ? "no_verdict_field" : winner[1] > finalMembers.length / 2 ? winner[0] : "no_majority";
+		synthesis = { kind: "vote", verdict, tally };
+	} else if (council.synthesis === "judge") {
+		const finalRuns = [...prior.values()];
+		const judgeRequest: DispatchRequest = {
+			agentId: council.judge?.agent ?? base.agentId,
+			executionRole: "judge",
+			task: `Synthesize the council answers for this task:\n\n${base.task}`,
+			briefing: boundedCouncilBriefing(
+				finalReports.map((member) =>
+					member.failed === undefined
+						? `[${member.label}] ${member.answer}`
+						: `[${member.label}] failed; no final answer contributed. Reason: ${member.failed.reason}`,
+				),
+			),
+			systemPrompt: COUNCIL_JUDGE_PROMPT,
+			autonomy: "read-only",
+			toolProfile: "council-read-only",
+			gate: { role: "synthesis", group, cycle: council.rounds, subjects: finalRuns.map((run) => subjectRef(run.receipt)) },
+			council: { group, label: "synthesis", round: council.rounds },
+			...(council.judge?.target ? { target: council.judge.target } : {}),
+			...(council.judge?.model ? { model: council.judge.model } : {}),
+			...(council.judge?.node ? { node: council.judge.node } : {}),
+			...(base.plan ? { plan: base.plan } : {}),
+			...(base.parentToolCallId ? { parentToolCallId: base.parentToolCallId } : {}),
+		};
+		const pinned = council.resolvedTasks?.find((task) => task.role === "synthesis");
+		const judgeRun = await runMember(
+			withResolvedPlanTaskPin(judgeRequest, pinned, { pinTask: false, pinBriefing: false }),
+		);
+		runs.push(judgeRun);
+		const rawText = normalizedAssistantText(judgeRun.summary);
+		const text = councilJudgeText(rawText);
+		const verdict = councilVerdict(rawText);
+		synthesis = {
+			kind: "judge",
+			text,
+			...(verdict !== undefined ? { verdict } : {}),
+			judgeRunId: judgeRun.receipt.runId,
+		};
+	}
+	if (council.synthesis !== "judge" && prior.size > 0 && deps.dispatch.sealCouncilSynthesis !== undefined) {
+		const finalRuns = [...prior.values()];
+		const template = finalRuns[0];
+		if (template === undefined) throw new Error("council synthesis has no final member receipt");
+		const text = JSON.stringify(synthesis);
+		const receipt = await deps.dispatch.sealCouncilSynthesis({
+			group,
+			round: council.rounds,
+			kind: council.synthesis,
+			text,
+			subjects: finalRuns.map((run) => subjectRef(run.receipt)),
+			template: template.receipt,
+		});
+		runs.push(
+			completeRun(deps, receipt, {
+				count: 0,
+				types: [],
+				lastAssistantText: text,
+				terminalAttemptRunId: receipt.runId,
+			}),
+		);
+	}
+	return { report: { members, synthesis }, runs, group };
+}
+
+function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeof runCouncil>>): ToolResult {
+	const sections = outcome.report.members
+		.filter((member) => member.round === Math.max(...outcome.report.members.map((entry) => entry.round)))
+		.map((member) => {
+			const run = outcome.runs.find((entry) => entry.receipt.runId === member.runId);
+			return `[${member.label}] ${run?.receipt.targetId ?? "unknown"}/${run?.receipt.wireModelId ?? "unknown"}\n${member.answer}`;
+		});
+	sections.push(
+		`[synthesis] ${outcome.report.synthesis.kind}\n${outcome.report.synthesis.text ?? outcome.report.synthesis.verdict ?? "none"}`,
+	);
+	const details: ToolResultDetails = {
+		...dispatchDetails(deps, "council", outcome.runs),
+		council: { group: outcome.group, ...outcome.report },
+	};
+	const finalRound = Math.max(...outcome.report.members.map((member) => member.round));
+	const failed =
+		outcome.report.members.some((member) => member.round === finalRound && member.failed !== undefined) ||
+		outcome.runs.some((run) => run.receipt.gate?.role === "synthesis" && isPipelineStepFailure(run.receipt));
+	return failed
+		? { kind: "error", message: sections.join("\n\n"), details }
+		: { kind: "ok", output: sections.join("\n\n"), details };
+}
+
 export async function runDispatchTool(
 	inputDeps: DispatchToolDeps,
 	admissionState: DispatchAdmissionState,
@@ -1860,6 +2089,7 @@ export async function runDispatchTool(
 	const maxOutputBytes = snapshot.maxOutputBytes;
 	const timeoutMs = snapshot.timeoutMs;
 	let review = snapshot.review === undefined ? undefined : structuredClone(snapshot.review);
+	let council = snapshot.council === undefined ? undefined : structuredClone(snapshot.council);
 
 	// Plan-scale calls are either approved at supervised admission or run
 	// unstopped at full-auto; every run seals the same plan hash.
@@ -1892,7 +2122,8 @@ export async function runDispatchTool(
 		};
 	}
 	if (resolvedPlan !== null) {
-		const primaryRole = review !== undefined ? "builder" : mode === "compete" ? "candidate" : "task";
+		const primaryRole =
+			review !== undefined ? "builder" : mode === "compete" ? "candidate" : mode === "council" ? "member" : "task";
 		const primaryTasks = resolvedPlan.tasks.filter((task) => task.role === primaryRole);
 		const executionTasks = primaryRole === "task" ? primaryTasks : primaryTasks.slice(0, 1);
 		if (executionTasks.length !== requests.length) {
@@ -1928,6 +2159,7 @@ export async function runDispatchTool(
 				resolvedTasks: resolvedPlan.tasks,
 			};
 		}
+		if (council !== undefined) council = { ...council, resolvedTasks: resolvedPlan.tasks };
 	}
 	if (planView.planScale) {
 		const plan: RunPlanProvenance = {
@@ -1959,15 +2191,17 @@ export async function runDispatchTool(
 			? "a Scout dependency plan drives its stages from this turn"
 			: mode === "compete"
 				? "compete holds its judge gate in this turn"
-				: review !== undefined
-					? "a review gate holds its cycle state in this turn"
-					: mode === "pipeline" && requests.length > 1
-						? "a pipeline threads each step's output through this turn"
-						: timeoutMs !== undefined
-							? `this call set timeout_ms=${timeoutMs} and nobody would be left to enforce the deadline`
-							: deps.dispatch.detached === undefined
-								? "detached batch records are unavailable in this context"
-								: null;
+				: mode === "council"
+					? "council holds its rounds and synthesis in this turn"
+					: review !== undefined
+						? "a review gate holds its cycle state in this turn"
+						: mode === "pipeline" && requests.length > 1
+							? "a pipeline threads each step's output through this turn"
+							: timeoutMs !== undefined
+								? `this call set timeout_ms=${timeoutMs} and nobody would be left to enforce the deadline`
+								: deps.dispatch.detached === undefined
+									? "detached batch records are unavailable in this context"
+									: null;
 	const background = createBackgroundSwitch();
 	// Review and Scout both execute under mode=parallel, so the operator-facing
 	// label names the topology they actually asked for.
@@ -2085,6 +2319,17 @@ export async function runDispatchTool(
 			try {
 				const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal);
 				return competeResult(deps, outcome, autonomy, maxOutputBytes);
+			} catch (err) {
+				return { kind: "error", message: dispatchErrorMessage(err) };
+			}
+		}
+
+		if (mode === "council") {
+			if (requests.length !== 1 || requests[0] === undefined || council === undefined) {
+				return { kind: "error", message: "dispatch: trusted council settings are unavailable" };
+			}
+			try {
+				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal));
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}

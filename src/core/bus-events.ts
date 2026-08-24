@@ -487,6 +487,8 @@ export interface DispatchRunIdentity {
 	node?: string | undefined;
 	/** Review/compete gate role and cycle, for fleet board badges. */
 	gate?: { role: string; cycle: number } | undefined;
+	/** Council group presentation data for the Fleet Runs board. */
+	council?: { group: string; label: string; color?: string; round: number } | undefined;
 	/** Dead-node failover hops recorded on this run's chain so far. */
 	rerouteCount?: number | undefined;
 	/** Model context window in tokens, for the per-worker context meter. */

@@ -103,6 +103,7 @@ export interface DispatchBoardRow {
 	node?: string;
 	/** Review/compete gate badge (role + cycle). */
 	gate?: { role: string; cycle: number };
+	council?: { group: string; label: string; color?: string; round: number };
 	/** Orchestrator-executed declared verification status. */
 	hostVerification?: "verified" | "rejected" | "skipped";
 	/** Dead-node failover hops recorded on this run's chain. */
@@ -991,6 +992,21 @@ function parseGateBadge(value: unknown): { role: string; cycle: number } | undef
 	return { role: record.role, cycle };
 }
 
+function parseCouncilBadge(value: unknown): DispatchBoardRow["council"] | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as { group?: unknown; label?: unknown; color?: unknown; round?: unknown };
+	const group = parseNonEmptyString(record.group);
+	const label = parseNonEmptyString(record.label);
+	const round = parsePositiveInt(record.round);
+	if (group === undefined || label === undefined || round === undefined) return undefined;
+	return {
+		group,
+		label,
+		...(typeof record.color === "string" && record.color.length > 0 ? { color: record.color } : {}),
+		round,
+	};
+}
+
 function parseFiniteNumberOrZero(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -1158,6 +1174,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 		...(entry.node !== undefined ? { node: entry.node } : {}),
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
+		...(entry.council !== undefined ? { council: { ...entry.council } } : {}),
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
@@ -1252,6 +1269,7 @@ export function createDispatchBoardStore(
 		const requestOrigin = parseRequestOrigin(raw.requestOrigin, previous?.requestOrigin);
 		const node = parseNonEmptyString(raw.node) ?? previous?.node;
 		const gate = parseGateBadge(raw.gate) ?? previous?.gate;
+		const council = parseCouncilBadge(raw.council) ?? previous?.council;
 		const rerouteCount = parsePositiveInt(raw.rerouteCount) ?? previous?.rerouteCount;
 		const contextWindow = parsePositiveInt(raw.contextWindow) ?? previous?.contextWindow;
 		const taskSummary = parseTaskSummary(raw, previous?.taskSummary);
@@ -1284,6 +1302,7 @@ export function createDispatchBoardStore(
 			outcomeDetail: previous?.outcomeDetail ?? null,
 			...(node !== undefined ? { node } : {}),
 			...(gate !== undefined ? { gate } : {}),
+			...(council !== undefined ? { council } : {}),
 			...(previous?.hostVerification !== undefined ? { hostVerification: previous.hostVerification } : {}),
 			...(rerouteCount !== undefined ? { rerouteCount } : {}),
 			...(contextWindow !== undefined ? { contextWindow } : {}),

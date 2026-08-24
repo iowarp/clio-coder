@@ -1,3 +1,4 @@
+import type { WorkerRosters } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -22,6 +23,7 @@ export interface ToolBootstrapDeps extends CoreToolBootstrapDeps {
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	getAutonomy?: () => AutonomyLevel;
 	getCostCeilingUsd?: () => number;
+	getWorkerRosters?: () => WorkerRosters;
 	dispatchBackground?: DispatchBackgroundRegistry;
 }
 
@@ -44,6 +46,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.getAgentRoleFacts ? { getAgentRoleFacts: deps.getAgentRoleFacts } : {}),
 			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
 			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
+			...(deps.getWorkerRosters ? { getWorkerRosters: deps.getWorkerRosters } : {}),
 			...(deps.dispatchBackground ? { background: deps.dispatchBackground } : {}),
 		};
 		registry.register({

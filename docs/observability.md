@@ -156,17 +156,17 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v17 receipt and reconstructible ledger fields. The digest covers every current field, including steering, routing intent and decision, route quality, worker identity, execution role, and result-contract conformance. Every version other than 17 fails verification; there is no historical receipt reader.
+3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v18 receipt and reconstructible ledger fields. The digest covers every current field, including steering, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, and council provenance. Every version other than 18 fails verification; there is no historical receipt reader.
 4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
 ## Receipt Fields for Dispatch Provenance
 
-A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v16 and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable; older receipt versions are invalid.
+A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, council, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v18 and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable; older receipt versions are invalid.
 
 Receipt integrity verification and evidence verification are independent.
-`receipt_integrity=verified/v17/sha256` means Clio called the receipt verifier
+`receipt_integrity=verified/v18/sha256` means Clio called the receipt verifier
 against the ledger envelope; merely finding an embedded digest is not enough.
 `evidence_verification=<verified|unverified|not_applicable|unknown>/<basis>`
 describes validation evidence inside that verified receipt. Likewise,
@@ -177,7 +177,7 @@ separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-The base provenance sets, steering, routing, quality, worker identity, and result-conformance coverage all enter in v0.2.9. These fields are labeled `experimental`: their strict v17 shape is frozen for the release, but the labels stay experimental until the schema is promoted post-1.0. For the complete version registry and migration contract across all artifacts, see [artifact-versions.md](artifact-versions.md).
+The base provenance sets, steering, routing, quality, worker identity, result-conformance, and council coverage use the strict v18 shape frozen for the release. These fields are labeled `experimental` until the schema is promoted post-1.0. For the complete version registry and migration contract across all artifacts, see [artifact-versions.md](artifact-versions.md).
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -196,7 +196,7 @@ The base provenance sets, steering, routing, quality, worker identity, and resul
 | `steering[].sentAt` | `string` | A steer was successfully written | Write timestamp | experimental |
 | `steering[].acknowledged` | `boolean` | A steer was successfully written | Whether a worker acknowledgement was actually observed | experimental |
 | `steering[].acknowledgedAt` | `string` | Acknowledgement was observed | Acknowledgement timestamp | experimental |
-| `outcomeCode` | six-value stable string union or `null` | Every v16 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, or `host_verification_rejected`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
+| `outcomeCode` | six-value stable string union or `null` | Every v18 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, or `host_verification_rejected`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
 | `personaOverride.promptHash` | `string` | Ad-hoc specialist whose persona replaced the recipe body | Hash of the composed static prompt; equals `staticCompositionHash` for the run | experimental |
 | `safety.decisions.escalationRequested` | `number` | Run saw at least one permission escalation | Parked permission asks handed to the operator | experimental |
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |

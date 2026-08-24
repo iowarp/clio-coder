@@ -241,6 +241,13 @@ export interface RunGateProvenance {
 	verdict?: "pass" | "fail" | "revise";
 }
 
+export interface RunCouncilProvenance {
+	group: string;
+	label: string;
+	color?: string;
+	round: number;
+}
+
 /**
  * Plan-approval provenance for multi-task, compete, or remote dispatch.
  * `approval: "operator"` records that a supervised autonomy level parked the
@@ -251,7 +258,7 @@ export interface RunGateProvenance {
  */
 export interface RunPlanProvenance {
 	hash: string;
-	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "detached" | "fleet";
+	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "council" | "detached" | "fleet";
 	taskCount: number;
 	approval: "operator" | "full-auto";
 	source: null | {
@@ -314,7 +321,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 17;
+	version: 18;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -452,6 +459,7 @@ export interface RunEnvelope {
 	pipeline?: RunPipelineProvenance;
 	/** Review/compete gate provenance; present only on runs of a gated dispatch. */
 	gate?: RunGateProvenance;
+	council?: RunCouncilProvenance;
 	/** Plan-approval provenance; present only on runs of an approval-gated plan. */
 	plan?: RunPlanProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
@@ -738,6 +746,7 @@ export interface RunReceipt {
 	pipeline?: RunPipelineProvenance;
 	/** Review/compete gate provenance; present only on runs of a gated dispatch. */
 	gate?: RunGateProvenance;
+	council?: RunCouncilProvenance;
 	/** Plan-approval provenance; present only on runs of an approval-gated plan. */
 	plan?: RunPlanProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */

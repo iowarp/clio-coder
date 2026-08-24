@@ -3,7 +3,7 @@ import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../agents/spec.js";
 import type { ExecutionRole } from "./execution-role.js";
 
-export type ExecutionPlanTopology = "parallel" | "sequential" | "pipeline" | "review" | "compete" | "fleet";
+export type ExecutionPlanTopology = "parallel" | "sequential" | "pipeline" | "review" | "compete" | "council" | "fleet";
 export type ExecutionPlanScope = "readonly" | "workspace";
 export type ExecutionPlanFailurePolicy = "stop" | "continue";
 
@@ -324,7 +324,7 @@ export type ExecutionPlanLinearStepInput =
 export function compileLinearExecutionPlan(
 	input: Omit<ExecutionPlanInput, "steps"> & { steps: ReadonlyArray<ExecutionPlanLinearStepInput> },
 ): ExecutionPlan {
-	const parallel = input.topology === "parallel" || input.topology === "compete";
+	const parallel = input.topology === "parallel" || input.topology === "compete" || input.topology === "council";
 	return compileExecutionPlan({
 		...input,
 		steps: input.steps.map((step, index): ExecutionPlanStepInput => {
