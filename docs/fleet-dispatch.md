@@ -160,7 +160,7 @@ Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
-Every new receipt uses strict integrity v18; older receipt formats are not
+Every new receipt uses strict integrity v19; older receipt formats are not
 accepted by the current reader.
 
 ## Failure semantics
@@ -477,11 +477,22 @@ rejected.
 
 Clio ships three builtin fleet contracts under `src/domains/agents/fleets/`: `build-test`, `build-review`, and `sdlc`. Projects can declare custom fleet contracts or shadow builtin fleets by placing Markdown files under `.clio-coder/fleets/<name>.md`. A file named `.clio-coder/fleets/<name>.md` shadows a builtin fleet of the same name.
 
-Fleet contracts support schema versions 1 through 4:
+Fleet contracts support schema versions 1 through 5:
 - Version 1: Supports agent steps only.
 - Version 2: Introduces deterministic code steps.
 - Version 3: Adds bounded check/repair loops and commit steps with `commitFrom` message sources.
 - Version 4 (`FLEET_WRITE_BOUNDARY_VERSION = 4`): Introduces per-step declared write boundaries (`writes`) and orchestrator post-step enforcement.
+- Version 5 (`FLEET_DYNAMIC_STEP_VERSION = 5`): Adds plan steps, executable gate steps, per-step target or worker-profile defaults, and the optional single-writer declaration.
+
+#### Contract v5: plan, gate, and per-step target
+
+A version 5 agent step, including an agent loop check or repair, may declare either `target: <targetId>` or `profile: <workers.profiles key>`. It may never declare both. Fleet preflight resolves these values through the same worker routing used by `/run --target` and `/run --agent-profile`. An unknown value refuses before approval and names the target or profile. Versions 1 through 4 continue to refuse both fields.
+
+A `kind: gate` step asks its validator agent to write exactly one repository-relative `path`. The contract derives the step's write boundary from that path, so a separate `writes` property is refused. Its `run` property names a command whose argv contains one whole-token `{{path}}` placeholder. After the agent writes the executable acceptance check, the coordinator runs it without a shell against the otherwise untouched tree. A red result admits the gate. A green result refuses the run as `gate_not_discriminating`. The fleet ledger records the gate path hash. A loop may use `check: {kind: gate, gate: <stepId>}`. Only the bounded output lines beginning with `FAIL` cross that failed check edge into the repair agent.
+
+A `kind: plan` step defaults to the builtin `architect`. It declares `roster`, `maxTasks` from 1 through 16, an optional `proposals: true`, its own scope and write boundary, and an optional target or profile default. The architect returns a `delegation-plan` object whose tasks contain `id`, `agent`, `description`, `depends_on`, `writes`, and an optional `mode` of `sequential` or `parallel`. The coordinator admits only roster agents, unique and acyclic task ids, resolvable dependencies, the declared task count, and task writes contained by the plan step boundary. Successful tasks carry lineage to the plan step and inherit its target or profile. A contract with `writers: 1` serializes write tasks through the existing single-writer token.
+
+When `proposals: true`, every roster member first runs with read-only autonomy against the same task. Their answers reach the architect as labelled, bounded briefing data. Proposal agents do not choose targets for generated work. The plan step's contract default remains authoritative for every admitted task.
 
 ### Fleet authoring
 
@@ -556,7 +567,10 @@ commands:
     argv: ["npm", "run", "build"]
     timeoutMs: 600000
   commit:
-    argv: ["git", "commit", "-m"]
+    argv: ["git", "commit", "-m", "{{commitMessage}}"]
+    timeoutMs: 60000
+  acceptance:
+    argv: ["node", "{{path}}"]
     timeoutMs: 60000
 ```
 
@@ -566,6 +580,8 @@ Each command entry supports:
 - `timeoutMs` (optional): Per-step execution timeout in milliseconds (defaults to 600,000 ms; bounds: 1,000 to 3,600,000 ms).
 - `env` (optional): Array of extra environment variable names to pass through on top of `FLEET_COMMAND_BASE_ENV` (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`).
 - `description` (optional): Human-readable description.
+
+The whole-token `{{commitMessage}}` substitution is available to commit steps. The whole-token `{{path}}` substitution is available to version 5 gate commands. Each substitution becomes exactly one argv element and never passes through a shell.
 
 
 ## Measured route selection and agent automation
@@ -650,7 +666,7 @@ assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
 Assignment status, attempt ids, and terminal run id are stored separately in
-`assignments.json` while each attempt keeps its own strict v18 receipt.
+`assignments.json` while each attempt keeps its own strict v19 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
@@ -664,7 +680,7 @@ closed while a winner remains unapplied.
 
 ## Receipts
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 18`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 19`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
@@ -713,7 +729,7 @@ policy all consume that same final classification.
 Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
 reports whether Clio observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v18/sha256` alongside
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v19/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_requested`.
 A host-executed successful check projects onto canonical validation grounding as

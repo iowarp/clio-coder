@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -72,7 +72,11 @@ function spec(capabilityClass: AgentSpec["capabilityClass"]): AgentSpec {
 }
 
 function previewFixture(
-	overrides: { contract?: string; getAgentSpec?: (agentId: string) => AgentSpec | null } = {},
+	overrides: {
+		contract?: string;
+		getAgentSpec?: (agentId: string) => AgentSpec | null;
+		resolveRoute?: Parameters<typeof compileFleetRunPreview>[0]["resolveRoute"];
+	} = {},
 ): ReturnType<typeof compileFleetRunPreview> {
 	const contract = parseFleetContract(overrides.contract ?? CONTRACT, ".clio-coder/fleets/preview-demo.md");
 	const commands = parseFleetCommands(COMMANDS, ".clio-coder/fleets/commands.yaml");
@@ -85,11 +89,13 @@ function previewFixture(
 		getAgentSpec,
 		roleFacts: agentRoleFactsResolver(getAgentSpec),
 		budget: { ceilingUsd: 20, currentUsd: 2.5, verdict: "under" },
-		resolveRoute: (step) => ({
-			targetId: step.scope === "readonly" ? "local-small" : "local-large",
-			wireModelId: "qwen3-coder",
-			nodeId: "local",
-		}),
+		resolveRoute:
+			overrides.resolveRoute ??
+			((step) => ({
+				targetId: step.scope === "readonly" ? "local-small" : "local-large",
+				wireModelId: "qwen3-coder",
+				nodeId: "local",
+			})),
 		load: () => ({ contract, commands }),
 	});
 }
@@ -300,6 +306,38 @@ describe("contracts/fleet-run preview projection", () => {
 		if (result.ok) return;
 		ok(result.diagnostics.length > 0);
 		ok(result.diagnostics.join(" ").includes("unknown agent"), result.diagnostics.join(" "));
+	});
+
+	it("refuses unknown version 5 targets and profiles during route preflight", () => {
+		for (const [field, value] of [
+			["target", "missing-target"],
+			["profile", "missing-profile"],
+		] as const) {
+			const contract = CONTRACT.replace("version: 4", "version: 5").replace(
+				"    scope: readonly\n    dependencies: []",
+				`    scope: readonly\n    ${field}: ${value}\n    dependencies: []`,
+			);
+			const result = previewFixture({
+				contract,
+				resolveRoute: (step) => {
+					throw new Error(`unknown ${field} '${step[field]}'`);
+				},
+			});
+			strictEqual(result.ok, false);
+			if (result.ok) continue;
+			ok(result.diagnostics.join(" ").includes(value), result.diagnostics.join(" "));
+		}
+	});
+
+	it("refuses an unresolved version 4 route with a named preflight diagnostic", () => {
+		const result = previewFixture({
+			resolveRoute: () => {
+				throw new Error("configured route is unavailable");
+			},
+		});
+		strictEqual(result.ok, false);
+		if (result.ok) return;
+		match(result.diagnostics.join(" "), /step 'scout' route preflight failed: configured route is unavailable/);
 	});
 
 	it("offers no accept action when preflight failed", () => {

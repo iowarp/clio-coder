@@ -10,12 +10,12 @@ Clio Coder strictly versions every persistent or network-transported data struct
 
 | Artifact / Subsystem | Current Version | Symbol / Type & Source Location | Persisted Path / Wire Location | Schema Semantics & Version Differences | Mismatch Handling |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Run Receipt** | `18` | `RUN_RECEIPT_INTEGRITY_VERSION = 18`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 18 covers all base provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, and council provenance. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
+| **Run Receipt** | `19` | `RUN_RECEIPT_INTEGRITY_VERSION = 19`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 19 covers all base provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance, and fleet gate provenance. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
 | **Session Ledger** | `3` | `CURRENT_SESSION_FORMAT_VERSION = 3`<br>`src/engine/session.ts:66` | `<stateDir>/sessions/<cwdHash>/<sessionId>/` (`meta.json`, `current.jsonl`, `tree.json`) | Append-only ledger format with UUIDv7 turn IDs, session header line, and tree graph linkage. | Automated migration via `src/domains/session/migrations/` on `/resume`. Earlier unmigratable versions rejected. |
 | **Worker Spec** | `3` | `WORKER_SPEC_VERSION = 3`<br>`src/worker/spec-contract.ts:22` | Subprocess `stdin` control plane JSON payload | Worker invocation parameters, tool surface profile, and execution bounds. | Fail-closed preflight rejection before worker activation. |
 | **Worker Runtime Descriptor** | `2` | `WORKER_RUNTIME_DESCRIPTOR_VERSION = 2`<br>`src/worker/spec-contract.ts:23` | Worker attestation descriptor payload | Attestation descriptor for worker runtime environment and hardware facts. | Attestation mismatch causes immediate process termination. |
 | **Worker Protected Artifact State** | `1` | `WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1`<br>`src/worker/spec-contract.ts:24` | Worker spec initialization snapshot | Snapshot of active protected artifact paths and validation commands passed to worker. | Worker fails closed before executing mutations. |
-| **Fleet Contract** | `1 \| 2 \| 3 \| 4` (Current: `4`) | `FleetContractVersion = 1 \| 2 \| 3 \| 4`<br>`FLEET_WRITE_BOUNDARY_VERSION = 4`<br>`src/domains/agents/fleet-contract.ts:37, 140` | `.clio-coder/fleets/<name>.yaml`, `.clio-coder/fleets/<name>.yml`, or built-in recipes | Multi-agent workflow contract. v1 is agent-only; v2 adds deterministic code steps; v3 adds bounded loops (`FLEET_LOOP_MAX_ATTEMPTS = 5`) and commit steps; v4 adds declared per-step write boundaries (`writes`). | Reader refuses contracts whose version features it does not support. |
+| **Fleet Contract** | `1 \| 2 \| 3 \| 4 \| 5` (Current: `5`) | `FleetContractVersion = 1 \| 2 \| 3 \| 4 \| 5`<br>`FLEET_WRITE_BOUNDARY_VERSION = 4`<br>`FLEET_DYNAMIC_STEP_VERSION = 5`<br>`src/domains/agents/fleet-contract.ts` | `.clio-coder/fleets/<name>.yaml`, `.clio-coder/fleets/<name>.yml`, or built-in recipes | Multi-agent workflow contract. v1 is agent-only; v2 adds deterministic code steps; v3 adds bounded loops and commit steps; v4 adds declared per-step write boundaries; v5 adds plan steps, gate steps, per-step target or profile routing, and the single-writer declaration. | Reader refuses contracts whose version features it does not support. |
 | **Execution Plan** | `4` | `version: 4` in `interface ExecutionPlan`<br>`src/domains/dispatch/execution-plan.ts:98` | Statically compiled DAG representation in dispatch memory and receipts | Statically unrolled, deterministically hashed execution plan. v4 adds bounded loop nodes, verification staleness tracking, and commit nodes. | Preflight validation rejects unsupported plan versions. |
 | **Eval Artifact** | `4` | `version: 4` in `interface EvalArtifactV4`<br>`src/domains/eval/schema/artifact.ts:51-52` | `<stateDir>/evals/<evalId>.json` | Stored eval results with suite provenance, matrix parameters, and itemized metric outcomes. Note: `EVAL_ARTIFACT_VERSION = 1` in `src/domains/eval/types.ts:2` is legacy/dead code. | Incompatible eval artifacts are rejected during `clio-coder eval report` and `compare`. |
 | **Trace Database** | `1` | `TRACE_SCHEMA_VERSION = 1`<br>`src/domains/observability/trace-store.ts:23` | `<stateDir>/trace.sqlite` (`meta` table `schema_version`) | Schema version for the 7 SQLite trace mirror tables (`runs`, `phases`, `events`, `envelopes`, `gate_results`, `agent_sessions`, `processes`). | Log warning (`[clio:trace]`), trace writing degrades without failing the parent run. |
@@ -26,7 +26,7 @@ Clio Coder strictly versions every persistent or network-transported data struct
 
 ## 2. Integrity Verification Contracts
 
-### Receipt Integrity (Version 16)
+### Receipt Integrity (Version 19)
 
 Receipt integrity authenticates that a sealed receipt matches its ledger envelope without modification. Verification reproduces the canonical JSON serialization and computes the SHA-256 digest:
 
@@ -38,9 +38,9 @@ export function computeReceiptDigest(receipt: RunReceiptV15): string {
 ```
 
 Receipt verification checks:
-1. `integrity.version === 18`.
+1. `integrity.version === 19`.
 2. Calculated SHA-256 matches `integrity.digest`.
-3. All optional fields present in the schema (`validationGrounding`, `capabilityMismatch`, `steering`, `gate`, `council`, `plan`, `briefing`) conform to the strict v18 specification.
+3. All optional fields present in the schema (`validationGrounding`, `capabilityMismatch`, `steering`, `gate`, `fleetGate`, `council`, `plan`, `briefing`) conform to the strict v19 specification.
 
 ---
 

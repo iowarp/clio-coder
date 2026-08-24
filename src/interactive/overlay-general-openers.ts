@@ -424,20 +424,16 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
 					task: "",
 					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.target !== undefined ? { target: step.target } : {}),
+					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 				};
-				try {
-					const resolution = deps.dispatch.preview?.(request);
-					if (!resolution) return null;
-					return {
-						targetId: resolution.targetId,
-						wireModelId: resolution.wireModelId,
-						nodeId: resolution.node.id,
-					};
-				} catch {
-					// A route this process cannot resolve is a step rendered without
-					// one, not a preview the operator is denied.
-					return null;
-				}
+				const resolution = deps.dispatch.preview?.(request);
+				if (!resolution) return null;
+				return {
+					targetId: resolution.targetId,
+					wireModelId: resolution.wireModelId,
+					nodeId: resolution.node.id,
+				};
 			},
 		});
 

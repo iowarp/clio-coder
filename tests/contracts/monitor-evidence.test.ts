@@ -244,7 +244,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 		if (result.kind !== "ok") return;
 
 		const verified = runBlock(result.output, "run-verified");
-		match(verified, /receipt_integrity=verified\/v18\/sha256/);
+		match(verified, /receipt_integrity=verified\/v19\/sha256/);
 		match(verified, /trust_status=v1 artifactIntegrity:verified validationGrounding:validated/);
 		match(verified, /evidence_verification=verified\/validation-tool/);
 		match(verified, /budget_recipe_policy="architect default 32\/5, max 150\/16, synthesis=on"/);
@@ -256,7 +256,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(verified, /worker output \(tool-verified\):/);
 
 		const unverified = runBlock(result.output, "run-unverified");
-		match(unverified, /receipt_integrity=verified\/v18\/sha256/);
+		match(unverified, /receipt_integrity=verified\/v19\/sha256/);
 		match(unverified, /trust_status=v1 artifactIntegrity:verified validationGrounding:absent/);
 		match(unverified, /evidence_verification=unverified\/no-validation-tool/);
 		match(unverified, /briefing=none/);
@@ -264,7 +264,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(unverified, /worker claims \(unverified prose\):/);
 
 		const recon = runBlock(result.output, "run-recon");
-		match(recon, /receipt_integrity=verified\/v18\/sha256/);
+		match(recon, /receipt_integrity=verified\/v19\/sha256/);
 		match(recon, /trust_status=v1 artifactIntegrity:verified validationGrounding:not_applicable/);
 		match(recon, /evidence_verification=not_applicable\/read-only-agent/);
 		match(recon, new RegExp(`briefing=bytes:24 sha256:${"c".repeat(64)}`));
@@ -272,7 +272,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(recon, /reconnaissance output \(advisory leads, not validation evidence\):/);
 
 		const unknown = runBlock(result.output, "run-unknown");
-		match(unknown, /receipt_integrity=verified\/v18\/sha256/);
+		match(unknown, /receipt_integrity=verified\/v19\/sha256/);
 		match(unknown, /trust_status=v1 artifactIntegrity:verified validationGrounding:unknown/);
 		match(unknown, /evidence_verification=unknown\/acp-external-unobserved/);
 		match(unknown, /briefing=none/);

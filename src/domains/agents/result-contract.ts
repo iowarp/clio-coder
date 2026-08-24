@@ -12,6 +12,7 @@ export type ResultContract =
 	| { kind: "research-report" }
 	| { kind: "mutation-report" }
 	| { kind: "provenance-report" }
+	| { kind: "delegation-plan" }
 	/**
 	 * The advisory answer `/oracle` asks for. It exists as its own kind because
 	 * the answer shape is the whole point of the command: a verdict, the
@@ -68,6 +69,7 @@ export interface ResultContractValidation {
 	scout?: ScoutResult;
 	/** Parsed Verifier data for the dispatch review-gate projection. */
 	verifier?: VerifierResult;
+	delegationPlan?: DelegationPlanResult;
 	reason?: string;
 }
 
@@ -219,6 +221,56 @@ export interface VerifierCheck {
 export interface VerifierResult {
 	verdict: "pass" | "fail";
 	checks: ReadonlyArray<VerifierCheck>;
+}
+
+export interface DelegationPlanResultTask {
+	id: string;
+	agent: string;
+	description: string;
+	depends_on: ReadonlyArray<string>;
+	writes: ReadonlyArray<string>;
+	mode?: "sequential" | "parallel";
+}
+
+export interface DelegationPlanResult {
+	tasks: ReadonlyArray<DelegationPlanResultTask>;
+}
+
+export function parseDelegationPlanResult(output: string | null): DelegationPlanResult | null {
+	const parsed = parseJson(output);
+	if (
+		!parsed.ok ||
+		!hasOnlyKeys(parsed.value, ["tasks"]) ||
+		!Array.isArray(parsed.value.tasks) ||
+		parsed.value.tasks.length === 0
+	)
+		return null;
+	const tasks: DelegationPlanResultTask[] = [];
+	for (const raw of parsed.value.tasks) {
+		if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+		const task = raw as Record<string, unknown>;
+		if (
+			!hasOnlyKeys(task, ["id", "agent", "description", "depends_on", "writes", "mode"]) ||
+			!string(task.id) ||
+			!string(task.agent) ||
+			!string(task.description) ||
+			!Array.isArray(task.depends_on) ||
+			task.depends_on.some((entry) => !string(entry)) ||
+			!Array.isArray(task.writes) ||
+			task.writes.some((entry) => !string(entry)) ||
+			(task.mode !== undefined && task.mode !== "sequential" && task.mode !== "parallel")
+		)
+			return null;
+		tasks.push({
+			id: task.id,
+			agent: task.agent,
+			description: task.description,
+			depends_on: [...task.depends_on] as string[],
+			writes: [...task.writes] as string[],
+			...(task.mode !== undefined ? { mode: task.mode as "sequential" | "parallel" } : {}),
+		});
+	}
+	return { tasks };
 }
 
 export interface CouncilReportMember {
@@ -382,7 +434,7 @@ function success(
 	contract: ResultContract,
 	quality: ResultContractQuality,
 	value: unknown,
-	extra: Pick<ResultContractValidation, "scout" | "verifier" | "reason"> = {},
+	extra: Pick<ResultContractValidation, "scout" | "verifier" | "delegationPlan" | "reason"> = {},
 ): ResultContractValidation {
 	return {
 		conformance: "pass",
@@ -1205,6 +1257,16 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateMutation(input.contract, input);
 		case "provenance-report":
 			return validateProvenance(input.contract, input.output);
+		case "delegation-plan": {
+			const plan = parseDelegationPlanResult(input.output);
+			return plan === null
+				? failure(
+						input.contract,
+						"fail",
+						"delegation-plan must carry tasks with id, agent, description, depends_on, writes, and optional mode",
+					)
+				: success(input.contract, "unmeasured", plan, { delegationPlan: plan });
+		}
 		case "oracle-report":
 			return validateOracle(input.contract, input.output);
 		case "external-delegation":
@@ -1293,6 +1355,8 @@ function resultContractShape(contract: ResultContract): string {
 			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"optional: one line"}';
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
+		case "delegation-plan":
+			return '{"tasks":[{"id":"build","agent":"coder","description":"Implement the change","depends_on":[],"writes":["src"],"mode":"parallel"}]}';
 		case "oracle-report":
 			return '{"verdict":"one line","challenge":"the strongest objection you can mount","changesMyMind":"the evidence that would reverse the verdict","citedDecisions":["decision key or task id you relied on"]}';
 		case "external-delegation":

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import { parseFleetCommands, parseFleetContract, renderFleetPrompt } from "../../src/domains/agents/index.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
@@ -314,6 +315,9 @@ describe("contracts/cli-fleet-authoring", () => {
 		mkdirSync(join(stateDir, "fleet-runs"), { recursive: true });
 		const previousState = process.env.CLIO_CODER_STATE_DIR;
 		process.env.CLIO_CODER_STATE_DIR = stateDir;
+		// The state dir is cached on first resolution, so an earlier file in the
+		// same lane would otherwise pin this in-process run to its own scratch.
+		resetXdgCache();
 		try {
 			const first = await executeFleetRun({
 				plan,
@@ -330,6 +334,7 @@ describe("contracts/cli-fleet-authoring", () => {
 		} finally {
 			if (previousState === undefined) delete process.env.CLIO_CODER_STATE_DIR;
 			else process.env.CLIO_CODER_STATE_DIR = previousState;
+			resetXdgCache();
 		}
 		const initialRecord = JSON.parse(
 			readFileSync(join(stateDir, "fleet-runs", "fleet-domain-start.json"), "utf8"),

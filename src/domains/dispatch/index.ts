@@ -33,6 +33,17 @@ export {
 export { readCodeStepRecords, writeCodeStepRecord } from "./code-step-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
 export type {
+	DelegationPlan,
+	DelegationPlanReason,
+	DelegationPlanTask,
+	DelegationPlanValidation,
+} from "./delegation-plan.js";
+export {
+	buildDelegationProposalBriefing,
+	DELEGATION_PROPOSAL_BRIEFING_MAX_BYTES,
+	validateDelegationPlan,
+} from "./delegation-plan.js";
+export type {
 	ExecutionPlan,
 	ExecutionPlanAgentStep,
 	ExecutionPlanCodeStep,
@@ -48,6 +59,7 @@ export {
 	executionPlanWaves,
 	isAgentStep,
 	isCodeStep,
+	spliceExecutionPlan,
 } from "./execution-plan.js";
 export {
 	type AgentRoleFacts,
@@ -86,6 +98,7 @@ export {
 	type RetryDecision,
 	type RoutePart,
 } from "./failure-classification.js";
+export { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
 export { type CompileFleetPlanInput, compileFleetExecutionPlan } from "./fleet-plan.js";
 export type {
 	ExecuteFleetRunInput,

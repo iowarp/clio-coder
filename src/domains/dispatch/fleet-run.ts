@@ -12,6 +12,7 @@
  * headless CLI invocation and an interactive approval share it.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
@@ -23,15 +24,18 @@ import type { AgentSpec } from "../agents/spec.js";
 import { runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
+import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
 import {
 	type ExecutionPlan,
 	type ExecutionPlanCodeStep,
 	type ExecutionPlanStep,
 	executionPlanAncestors,
+	spliceExecutionPlan,
 } from "./execution-plan.js";
-import { gateRouteCorrelation } from "./execution-role.js";
+import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
 import { deriveFleetCommitAttribution } from "./fleet-commit-attribution.js";
+import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
 import {
 	decideReviewGate,
 	type GateDecisionCorrelation,
@@ -144,6 +148,7 @@ export function planFleetResume(
 	const priorByStep = new Map(record.steps.map((entry) => [entry.stepId, entry.result]));
 	const replayed = new Map<string, ExecutionStepResult>();
 	for (const step of plan.steps) {
+		if (step.kind === "agent" && step.plan !== undefined) break;
 		const result = priorByStep.get(step.id);
 		if (result === undefined || !result.succeeded || !result.integrityValid) break;
 		replayed.set(step.id, result);
@@ -217,28 +222,29 @@ export function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number 
  * result rather than an exception.
  */
 export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
-	const { plan, dispatch, agents, fleetRootId, workspaceRoot } = input;
+	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
+	let livePlan = input.plan;
 	const replayed = input.resume?.replayed ?? new Map<string, ExecutionStepResult>();
 	const notice = (text: string, kind?: "gate" | "write-boundary"): void => input.onNotice?.(text, kind);
 	const fleetRunRecord: FleetRunRecord = {
 		version: 1,
 		id: fleetRootId,
 		fleet: input.contractName,
-		planHash: plan.hash,
-		stepIds: plan.steps.map((step) => step.id),
-		planSteps: plan.steps.map((step) => structuredClone(step)),
+		planHash: livePlan.hash,
+		stepIds: livePlan.steps.map((step) => step.id),
+		planSteps: livePlan.steps.map((step) => structuredClone(step)),
 		vars: { ...(input.vars ?? {}) },
 		startedAt: new Date().toISOString(),
 		endedAt: null,
 		resumedFrom: input.resume?.record.id ?? null,
 		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
+		dynamicPlans: [],
 	};
 	await writeFleetRun(fleetRunRecord);
-	const boundaryByStep = new Map(plan.steps.map((step) => [step.id, step.writes]));
 	const boundaryEnforcer = createWriteBoundaryEnforcer({
 		root: workspaceRoot,
 		rootId: fleetRootId,
-		boundaryFor: (stepId) => boundaryByStep.get(stepId),
+		boundaryFor: (stepId) => livePlan.steps.find((step) => step.id === stepId)?.writes,
 		onVerdict(verdict, path) {
 			if (verdict.reason === null) return;
 			notice(`write boundary ${verdict.window}: ${verdict.detail ?? verdict.reason} record=${path}`, "write-boundary");
@@ -255,12 +261,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		} catch {
 			// Deterministic results and unavailable historical receipts need no receipt projection.
 		}
-		const step = plan.steps.find((entry) => entry.id === stepId);
+		const step = livePlan.steps.find((entry) => entry.id === stepId);
 		if (step === undefined) continue;
 		const event: FleetRunStepEvent = {
 			stepId,
 			kind: step.kind,
-			waveIndex: fleetPlanWaveIndex(plan, stepId),
+			waveIndex: fleetPlanWaveIndex(livePlan, stepId),
 			assignmentId: replayedResult.assignmentId,
 			...(step.kind === "agent" ? { agentId: step.agentId } : { commandId: step.commandId }),
 			replayed: true,
@@ -274,7 +280,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			result: replayedResult,
 		});
 	}
-	const planStep = (stepId: string) => plan.steps.find((entry) => entry.id === stepId);
+	const planStep = (stepId: string) => livePlan.steps.find((entry) => entry.id === stepId);
 
 	// Freshness is coordinator-owned execution state. Worker prose cannot set
 	// either flag: a successful deterministic verification sets the first, and
@@ -308,12 +314,13 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 
 	let result: ExecutionPlanResult;
 	try {
-		result = await executePlan(plan, {
+		result = await executePlan(livePlan, {
 			preflight(step) {
 				const request: DispatchRequest = {
 					agentId: step.agentId,
 					executionRole: step.executionRole,
 					task: step.task,
+					cwd: workspaceRoot,
 					requestOrigin: "user",
 					lineage: {
 						parentRunId: input.resume?.record.id ?? fleetRootId,
@@ -322,12 +329,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						depth: 1,
 					},
 					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.target !== undefined ? { target: step.target } : {}),
+					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 				};
 				const resolution = dispatch.preview?.(request);
 				if (!resolution) throw new Error(`fleet preflight cannot resolve step '${step.id}'`);
 				return { step, costUpperBoundUsd: resolution.costUpperBoundUsd, nodeId: resolution.node.id };
 			},
-			reserve(_plan, admissions) {
+			reserve(reservedPlan, admissions) {
 				// A fleet of deterministic steps admits no worker and holds no
 				// capacity. The reservation authority refuses an empty reservation,
 				// correctly: there is nothing to reserve, so nothing is asked of it.
@@ -336,11 +345,13 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					topology: "parallel",
 					tasks: admissions.map((admission) => ({
 						memberId: admission.step.id,
-						wave: fleetPlanWaveIndex(plan, admission.step.id),
+						wave: fleetPlanWaveIndex(reservedPlan, admission.step.id),
 						resolution: dispatch.preview?.({
 							agentId: admission.step.agentId,
 							executionRole: admission.step.executionRole,
 							task: admission.step.task,
+							...(admission.step.target !== undefined ? { target: admission.step.target } : {}),
+							...(admission.step.profile !== undefined ? { workerProfile: admission.step.profile } : {}),
 						}) as NonNullable<ReturnType<NonNullable<DispatchContract["preview"]>>>,
 					})),
 				});
@@ -351,13 +362,23 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				// A loop repair is attempt n of the same logical work, so it enters
 				// the run ledger as one: recovery evidence, not a fresh observation.
 				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
+				const parentReceipt = step.planParentId === undefined ? undefined : receiptsByStep.get(step.planParentId);
+				if (step.planParentId !== undefined && parentReceipt === undefined) {
+					throw new Error(`fleet dynamic step '${step.id}' has no terminal plan-step receipt`);
+				}
 				const request: DispatchRequest = {
 					agentId: step.agentId,
 					executionRole: step.executionRole,
 					task: step.task,
+					cwd: workspaceRoot,
 					predecessorHandoffs: handoffs,
 					requestOrigin: "user",
-					lineage: { parentRunId: input.resume?.record.id ?? fleetRootId, rootRunId: fleetRootId, attempt, depth: 1 },
+					lineage: {
+						parentRunId: parentReceipt?.runId ?? input.resume?.record.id ?? fleetRootId,
+						rootRunId: fleetRootId,
+						attempt,
+						depth: parentReceipt === undefined ? 1 : 2,
+					},
 					reservation,
 					...(ledger !== undefined ? { ledger } : {}),
 					...(step.loop?.role === "check"
@@ -374,9 +395,43 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							}
 						: {}),
 					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.target !== undefined ? { target: step.target } : {}),
+					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+					...(step.plan !== undefined
+						? { resultContractOverride: { kind: "delegation-plan" as const } }
+						: step.gate !== undefined
+							? { resultContractOverride: { kind: "artifact-report" as const } }
+							: {}),
+					...(step.gate !== undefined ? { fleetGateReceipt: { path: step.gate.path } } : {}),
 				};
+				if (step.plan?.proposals === true) {
+					const proposals: Array<{ agent: string; output: string }> = [];
+					for (const agentId of step.plan.roster) {
+						const proposal = await dispatch.dispatch({
+							agentId,
+							executionRole: "researcher",
+							task: step.task,
+							cwd: workspaceRoot,
+							requestOrigin: "user",
+							autonomy: "read-only",
+							lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+							resultContractOverride: { kind: "artifact-report" },
+							...(step.target !== undefined ? { target: step.target } : {}),
+							...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+						});
+						void (async () => {
+							for await (const _event of proposal.events) {
+								/* Proposal events are drained while their final answers are collected. */
+							}
+						})().catch(() => {});
+						const receipt = await proposal.finalPromise;
+						const answer = receipt.output?.state === "final" ? receipt.output.text : "[proposal failed]";
+						proposals.push({ agent: agentId, output: answer });
+					}
+					request.briefing = buildDelegationProposalBriefing(proposals);
+				}
 				const handle = await dispatch.dispatch(request);
-				const waveIndex = fleetPlanWaveIndex(plan, step.id);
+				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
 				input.onStepDispatched?.({
 					stepId: step.id,
 					kind: "agent",
@@ -391,7 +446,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				})().catch(() => {});
 				return {
 					assignmentId: handle.runId,
-					result: handle.finalPromise.then((receipt) => {
+					result: handle.finalPromise.then(async (receipt) => {
 						if (step.scope === "workspace") {
 							validationFresh = false;
 							independentReviewFresh = false;
@@ -415,14 +470,73 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						notice(
 							`step ${step.id} ${step.agentId}: ${succeeded ? "succeeded" : "failed"} assignment=${handle.runId} terminal-run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}`,
 						);
+						let stepSucceeded = succeeded;
+						let failureReason: string | undefined;
+						let gatePathHash: string | undefined;
+						let delegationPlanHash: string | undefined;
+						let delegationPlan: ExecutionStepResult["delegationPlan"];
+						if (step.gate !== undefined && succeeded) {
+							let gateBytes = "";
+							try {
+								gateBytes = readFileSync(join(workspaceRoot, step.gate.path), "utf8");
+							} catch {
+								gateBytes = "";
+							}
+							gatePathHash = createHash("sha256").update(gateBytes).digest("hex");
+							const command = input.commands?.commands.get(step.gate.commandId);
+							if (gateBytes.length === 0 || command === undefined) {
+								stepSucceeded = false;
+								failureReason = gateBytes.length === 0 ? "gate_path_missing" : "gate_command_missing";
+							} else {
+								const baseline = await runCodeStep({
+									stepId: `${step.id}.baseline`,
+									command,
+									workspaceRoot,
+									artifactDir: codeStepDir(fleetRootId),
+									substitutions: { path: step.gate.path },
+								});
+								const baselineFailure = gateBaselineFailure(baseline.report.passed);
+								if (baselineFailure !== null) {
+									stepSucceeded = false;
+									failureReason = baselineFailure;
+								}
+							}
+						}
+						if (step.plan !== undefined && succeeded) {
+							let value: unknown = null;
+							try {
+								value = JSON.parse(receipt.output?.state === "final" ? receipt.output.text : "");
+							} catch {
+								value = null;
+							}
+							const validated = validateDelegationPlan({
+								value,
+								roster: step.plan.roster,
+								maxTasks: step.plan.maxTasks,
+								writes: step.writes ?? [],
+							});
+							if (!validated.ok) {
+								stepSucceeded = false;
+								failureReason = validated.reason;
+							} else {
+								delegationPlanHash = validated.hash;
+								delegationPlan = validated.plan;
+								fleetRunRecord.dynamicPlans?.push({ stepId: step.id, hash: validated.hash });
+								await writeFleetRun(fleetRunRecord);
+							}
+						}
 						return {
 							stepId: step.id,
 							assignmentId: handle.runId,
 							terminalRunId: receipt.runId,
 							receiptDigest: receipt.integrity.digest,
 							output: receipt.output?.state === "final" ? receipt.output.text : "",
-							succeeded,
+							succeeded: stepSucceeded,
 							integrityValid,
+							...(failureReason !== undefined ? { failureReason } : {}),
+							...(gatePathHash !== undefined ? { gatePathHash } : {}),
+							...(delegationPlanHash !== undefined ? { delegationPlanHash } : {}),
+							...(delegationPlan !== undefined ? { delegationPlan } : {}),
 						};
 					}),
 				};
@@ -432,7 +546,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				if (command === undefined) throw new Error(`fleet code step '${step.id}' has no registered command`);
 				const isCommit = step.commitFrom !== undefined;
 				const evidence = isCommit
-					? deriveFleetCommitAttribution({ plan, step, priorResults, validationFresh, independentReviewFresh })
+					? deriveFleetCommitAttribution({ plan: livePlan, step, priorResults, validationFresh, independentReviewFresh })
 					: null;
 				if (!isCommit && step.scope === "workspace" && step.verification !== true) {
 					validationFresh = false;
@@ -445,6 +559,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					workspaceRoot,
 					artifactDir: codeStepDir(fleetRootId),
 					signal,
+					...(step.gate !== undefined ? { substitutions: { path: step.gate.path } } : {}),
 					...(isCommit && evidence !== null && originalMessage !== null
 						? {
 								substitutions: {
@@ -457,7 +572,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				});
 				if (step.verification === true) validationFresh = outcome.report.passed;
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
-				const waveIndex = fleetPlanWaveIndex(plan, step.id);
+				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
 				const event = {
 					stepId: step.id,
 					kind: "code" as const,
@@ -482,7 +597,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					assignmentId: outcome.record.runId,
 					terminalRunId: outcome.record.runId,
 					receiptDigest: outcome.record.reportDigest,
-					output: outcome.output,
+					output: step.gate === undefined ? outcome.output : gateFailureLines(outcome.report.outputExcerpt),
 					succeeded: outcome.report.passed,
 					// The runner authored this report itself, so its provenance is
 					// valid by construction; only the command's verdict can be red.
@@ -499,7 +614,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				// upstream of this verification. A direct dependency is not enough,
 				// because a loop's declared dependency is another loop's deterministic
 				// check, which produced no receipt at all.
-				const ancestors = executionPlanAncestors(plan, step.id);
+				const ancestors = executionPlanAncestors(livePlan, step.id);
 				let subject: RunReceipt | undefined;
 				for (const [stepId, receipt] of receiptsByStep) {
 					if (ancestors.has(stepId)) subject = receipt;
@@ -547,6 +662,41 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				fleetRunRecord.steps.push({ stepId: step.id, result: stepResult });
 				await writeFleetRun(fleetRunRecord);
 			},
+			spliceAfter(currentPlan, step, stepResult) {
+				if (stepResult.delegationPlan === undefined) return null;
+				const tasks = stepResult.delegationPlan.tasks.map((task) => {
+					const spec = agents.getSpec(task.agent);
+					if (spec === null || spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
+						throw new Error(`delegation_plan_agent_unavailable:${task.agent}`);
+					}
+					return {
+						id: task.id,
+						agentId: task.agent,
+						task: task.description,
+						dependencies: task.depends_on,
+						writes: task.writes,
+						...(step.target !== undefined ? { target: step.target } : {}),
+						...(step.profile !== undefined ? { profile: step.profile } : {}),
+						requestedAuthority: spec.capabilityClass,
+						approvedAuthority: spec.capabilityClass,
+						expectedResultContract: spec.resultContract.kind,
+						executionRole: requestExecutionRole({
+							agentId: task.agent,
+							resolveFacts: (id) => {
+								const candidate = agents.getSpec(id);
+								return candidate === null
+									? null
+									: {
+											capabilityClass: candidate.capabilityClass,
+											resultContractKind: candidate.resultContract.kind,
+										};
+							},
+						}),
+					};
+				});
+				livePlan = spliceExecutionPlan(currentPlan, step.id, tasks);
+				return livePlan;
+			},
 			replayed,
 		});
 	} catch (error) {
@@ -560,12 +710,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	// A loop is judged by whether it converged, not attempt by attempt: a red
 	// verification that a later attempt fixed is the loop working as declared,
 	// and a node a resolved loop made unnecessary never had to run at all.
-	const required = plan.steps.filter((step) => step.loop === undefined && !result.unneeded.includes(step.id));
+	const required = livePlan.steps.filter((step) => step.loop === undefined && !result.unneeded.includes(step.id));
 	const failedLoops = result.loops.filter((loop) => !loop.resolved);
 	const succeededStepCount = required.filter((step) => result.results.get(step.id)?.succeeded === true).length;
 	return {
 		rootId: fleetRootId,
-		planHash: plan.hash,
+		planHash: input.plan.hash,
 		result,
 		receipts,
 		totalCostUsd: receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0),

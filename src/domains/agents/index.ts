@@ -20,10 +20,12 @@ export type {
 	FleetContract,
 	FleetContractAgentStep,
 	FleetContractCodeStep,
+	FleetContractGateStep,
 	FleetContractListing,
 	FleetContractLoopCheck,
 	FleetContractLoopRepair,
 	FleetContractLoopStep,
+	FleetContractPlanStep,
 	FleetContractSource,
 	FleetContractStep,
 	FleetContractVersion,
@@ -34,6 +36,7 @@ export type {
 export {
 	FLEET_COMMANDS_REMEDY,
 	FLEET_COMMANDS_REPO_PATH,
+	FLEET_DYNAMIC_STEP_VERSION,
 	FLEET_LOOP_MAX_ATTEMPTS,
 	FLEET_WRITE_BOUNDARY_VERSION,
 	FleetCommandRegistryMissingError,
@@ -65,6 +68,8 @@ export type { AgentRecipeDiagnostic } from "./registry.js";
 export type {
 	CouncilReport,
 	CouncilReportMember,
+	DelegationPlanResult,
+	DelegationPlanResultTask,
 	OracleResult,
 	ResultAuthorship,
 	ResultContract,
@@ -76,6 +81,7 @@ export type {
 } from "./result-contract.js";
 export {
 	parseCouncilReport,
+	parseDelegationPlanResult,
 	parseOracleResult,
 	parseResultContract,
 	parseScoutResult,

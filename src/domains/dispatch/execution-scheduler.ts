@@ -1,4 +1,5 @@
 import { closeAgentLedger, openAgentLedger } from "./agent-ledger-store.js";
+import type { DelegationPlan } from "./delegation-plan.js";
 import { type ExecutionHandoff, projectExecutionHandoffs } from "./execution-handoff.js";
 import {
 	type ExecutionPlan,
@@ -18,6 +19,11 @@ export interface ExecutionStepResult extends ExecutionHandoff {
 	 * its own writes is not a witness.
 	 */
 	boundaryViolated?: boolean;
+	failureReason?: string;
+	gatePathHash?: string;
+	delegationPlanHash?: string;
+	/** Coordinator-validated tasks that the scheduler may splice after this step settles. */
+	delegationPlan?: DelegationPlan;
 }
 
 /**
@@ -135,6 +141,12 @@ export interface ExecutionSchedulerAdapter {
 	releaseUnconsumed(ownerId: string): void;
 	/** Persist a settled result after boundary enforcement and before a dependent starts. */
 	onStepSettled?(step: ExecutionPlanStep, result: ExecutionStepResult): void | Promise<void>;
+	/** Recompile the live plan after a successful dynamic plan step settles. */
+	spliceAfter?(
+		plan: ExecutionPlan,
+		step: ExecutionPlanAgentStep,
+		result: ExecutionStepResult,
+	): ExecutionPlan | null | Promise<ExecutionPlan | null>;
 }
 export interface ExecutionPlanResult {
 	planHash: string;
@@ -175,10 +187,11 @@ function isExecutionPlanWriter(step: ExecutionPlanStep): boolean {
 }
 
 export async function executePlan(
-	plan: ExecutionPlan,
+	initialPlan: ExecutionPlan,
 	adapter: ExecutionSchedulerAdapter,
 	signal?: AbortSignal,
 ): Promise<ExecutionPlanResult> {
+	let plan = initialPlan;
 	const replayed = adapter.replayed ?? new Map<string, ExecutionStepResult>();
 	const stepsById = new Map(plan.steps.map((step) => [step.id, step]));
 	const loopsById = new Map(plan.loops.map((loop) => [loop.id, loop]));
@@ -216,6 +229,8 @@ export async function executePlan(
 	if (ledgerId !== null) await openAgentLedger(ledgerId);
 	const admissions = agentSteps.map((step) => adapter.preflight(step));
 	const reservation = adapter.reserve(plan, admissions);
+	const reservationOwners = new Set([reservation.ownerId]);
+	const reservationByStep = new Map(agentSteps.map((step) => [step.id, reservation.ownerId]));
 	const results = new Map<string, ExecutionStepResult>();
 	const skipped = new Set<string>();
 	const unneeded = new Set<string>();
@@ -243,7 +258,7 @@ export async function executePlan(
 		stopped = true;
 		for (const owned of running.values()) if (owned.assignmentId !== null) adapter.cancel(owned.assignmentId);
 		codeAbort.abort();
-		adapter.releaseUnconsumed(reservation.ownerId);
+		for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
 	};
 	signal?.addEventListener("abort", cancelOwned, { once: true });
 
@@ -455,7 +470,7 @@ export async function executePlan(
 				if (plan.onFailure === "stop") {
 					stopped = true;
 					codeAbort.abort();
-					adapter.releaseUnconsumed(reservation.ownerId);
+					for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
 					halt = true;
 				}
 			}
@@ -526,7 +541,10 @@ export async function executePlan(
 		});
 
 	try {
-		for (const [waveIndex, wave] of plan.waves.entries()) {
+		let waveIndex = 0;
+		while (waveIndex < plan.waves.length) {
+			const wave = plan.waves[waveIndex];
+			if (wave === undefined) break;
 			if (stopped || signal?.aborted) break;
 			if (await revalidateFor(wave)) break;
 			const admitted = wave.flatMap((id) => {
@@ -569,7 +587,12 @@ export async function executePlan(
 				const started = await Promise.all(
 					launch.map(async ({ step, handoffs }) => ({
 						step,
-						handle: await adapter.run(step, handoffs, { ownerId: reservation.ownerId, memberId: step.id }, ledger),
+						handle: await adapter.run(
+							step,
+							handoffs,
+							{ ownerId: reservationByStep.get(step.id) ?? reservation.ownerId, memberId: step.id },
+							ledger,
+						),
 					})),
 				);
 				for (const { step, handle } of started) running.set(step.id, { assignmentId: handle.assignmentId });
@@ -580,7 +603,7 @@ export async function executePlan(
 							if (runningStepId !== step.id && owned.assignmentId !== null) adapter.cancel(owned.assignmentId);
 						}
 						codeAbort.abort();
-						adapter.releaseUnconsumed(reservation.ownerId);
+						for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
 					}
 				};
 				const ran = await Promise.all([
@@ -620,9 +643,40 @@ export async function executePlan(
 				});
 				if ((exhausted || settled.some(({ step, result }) => isPlanFailure(step, result))) && plan.onFailure === "stop") {
 					stopped = true;
-					adapter.releaseUnconsumed(reservation.ownerId);
+					for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
 				}
 			}
+			if (!stopped && adapter.spliceAfter !== undefined) {
+				for (const stepId of wave) {
+					const step = stepsById.get(stepId);
+					const settled = results.get(stepId);
+					if (
+						step?.kind !== "agent" ||
+						step.plan === undefined ||
+						settled === undefined ||
+						!settled.succeeded ||
+						!settled.integrityValid
+					) {
+						continue;
+					}
+					const spliced = await adapter.spliceAfter(plan, step, settled);
+					if (spliced === null) continue;
+					const previousIds = new Set(plan.steps.map((entry) => entry.id));
+					const additions = spliced.steps.filter((entry) => !previousIds.has(entry.id));
+					for (const addition of additions) stepsById.set(addition.id, addition);
+					const newAgentSteps = additions.filter(
+						(addition): addition is ExecutionPlanAgentStep => addition.kind === "agent",
+					);
+					if (newAgentSteps.length > 0) {
+						const newAdmissions = newAgentSteps.map((addition) => adapter.preflight(addition));
+						const additionalReservation = adapter.reserve(spliced, newAdmissions);
+						reservationOwners.add(additionalReservation.ownerId);
+						for (const addition of newAgentSteps) reservationByStep.set(addition.id, additionalReservation.ownerId);
+					}
+					plan = spliced;
+				}
+			}
+			waveIndex += 1;
 		}
 		return {
 			planHash: plan.hash,
@@ -639,7 +693,7 @@ export async function executePlan(
 		throw error;
 	} finally {
 		signal?.removeEventListener("abort", cancelOwned);
-		adapter.release(reservation.ownerId);
+		for (const ownerId of reservationOwners) adapter.release(ownerId);
 		if (ledgerId !== null) await closeAgentLedger(ledgerId);
 	}
 }

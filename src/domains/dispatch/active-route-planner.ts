@@ -38,6 +38,8 @@ export function routeValidationProjection(
 		// terms: a model must not be able to author it.
 		parentToolCallId,
 		resolvedVerification,
+		resultContractOverride,
+		fleetGateReceipt,
 		taskWorktree,
 		runIdHint,
 		taskWorktreeDestination,
@@ -61,6 +63,8 @@ export function routeValidationProjection(
 			...(resolvedVerification !== undefined
 				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
 				: {}),
+			...(resultContractOverride !== undefined ? { resultContractOverride } : {}),
+			...(fleetGateReceipt !== undefined ? { fleetGateReceipt: { ...fleetGateReceipt } } : {}),
 			...(taskWorktree !== undefined ? { taskWorktree } : {}),
 			...(runIdHint !== undefined ? { runIdHint } : {}),
 			...(taskWorktreeDestination !== undefined ? { taskWorktreeDestination } : {}),

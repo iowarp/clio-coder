@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -143,7 +144,14 @@ function newFleetRootId(): string {
 function renderStep(step: FleetContractStep): string {
 	if (step.kind === "code") return `code:${step.command}[${step.scope}]`;
 	if (step.kind === "agent") return `${step.agent}[${step.scope}]`;
-	const check = step.check.kind === "code" ? `code:${step.check.command}` : step.check.agent;
+	if (step.kind === "gate") return `gate:${step.path}[${step.run}]`;
+	if (step.kind === "plan") return `plan:${step.agent}[${step.roster.join(",")}; max ${step.maxTasks}]`;
+	const check =
+		step.check.kind === "code"
+			? `code:${step.check.command}`
+			: step.check.kind === "gate"
+				? `gate:${step.check.gate}`
+				: step.check.agent;
 	return `loop:${step.id}(${check} -> ${step.repair.agent} x${step.maxAttempts})`;
 }
 
@@ -195,6 +203,7 @@ interface FleetPreflightDeps {
 	agents: AgentsContract;
 	safety: SafetyContract;
 	scheduling: SchedulingContract | undefined;
+	settings: Readonly<ClioSettings>;
 }
 
 /** Every agent a contract dispatches, including both halves of every loop. */
@@ -204,7 +213,11 @@ function contractAgents(
 	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
 	for (const step of contract.steps) {
 		if (step.kind === "agent") agents.push({ id: step.id, agent: step.agent, scope: step.scope });
-		else if (step.kind === "loop") {
+		else if (step.kind === "gate") agents.push({ id: step.id, agent: step.agent, scope: "workspace" });
+		else if (step.kind === "plan") {
+			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
+			for (const agent of step.roster) agents.push({ id: `${step.id}.roster`, agent, scope: "readonly" });
+		} else if (step.kind === "loop") {
 			if (step.check.kind === "agent") {
 				agents.push({ id: `${step.id}.check`, agent: step.check.agent, scope: step.check.scope });
 			}
@@ -215,6 +228,28 @@ function contractAgents(
 }
 
 function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
+	const targets = new Set(deps.settings.targets.map((target) => target.id));
+	const profiles = new Set(Object.keys(deps.settings.workers?.profiles ?? {}));
+	const checkRoute = (id: string, route: { target?: string; profile?: string }): string | null => {
+		if (route.target !== undefined && !targets.has(route.target))
+			return `unknown target '${route.target}' at step '${id}'`;
+		if (route.profile !== undefined && !profiles.has(route.profile))
+			return `unknown profile '${route.profile}' at step '${id}'`;
+		return null;
+	};
+	for (const step of contract.steps) {
+		if (step.kind === "agent" || step.kind === "gate" || step.kind === "plan") {
+			const error = checkRoute(step.id, step);
+			if (error !== null) return error;
+		}
+		if (step.kind !== "loop") continue;
+		if (step.check.kind === "agent") {
+			const error = checkRoute(`${step.id}.check`, step.check);
+			if (error !== null) return error;
+		}
+		const error = checkRoute(`${step.id}.repair`, step.repair);
+		if (error !== null) return error;
+	}
 	for (const step of contractAgents(contract)) {
 		if (!deps.agents.get(step.agent)) {
 			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio-coder agents')`;
@@ -291,7 +326,12 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		return fail("required domains unavailable (dispatch/agents/safety)");
 	}
 	const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
-	const preflightError = preflightFleet(contract, { agents, safety, scheduling });
+	const preflightError = preflightFleet(contract, {
+		agents,
+		safety,
+		scheduling,
+		settings: config?.get() ?? readSettings(),
+	});
 	if (preflightError !== null) {
 		await loaded.stop();
 		return fail(`preflight failed: ${preflightError}`);
@@ -316,7 +356,14 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				return {
 					requestedAuthority: spec.capabilityClass,
 					approvedAuthority: spec.capabilityClass,
-					expectedResultContract: context.gateRole === "reviewer" ? "verifier-report" : spec.resultContract.kind,
+					expectedResultContract:
+						context.planRole === true
+							? "delegation-plan"
+							: context.gateAuthorRole === true
+								? "artifact-report"
+								: context.gateRole === "reviewer"
+									? "verifier-report"
+									: spec.resultContract.kind,
 					executionRole: withAttemptRole(requestRole, context.attempt),
 				};
 			},

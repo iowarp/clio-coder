@@ -56,6 +56,19 @@ export interface ExecutionPlanAgentStep {
 	 * contract declares no boundary at all and is therefore not enforced.
 	 */
 	writes?: ReadonlyArray<string>;
+	/** Exact per-step route defaults from a version 5 fleet contract. */
+	target?: string;
+	profile?: string;
+	/** Version 5 gate authoring and baseline execution facts. */
+	gate?: { path: string; commandId: string };
+	/** Version 5 dynamic planning facts. */
+	plan?: {
+		roster: ReadonlyArray<string>;
+		maxTasks: number;
+		proposals: boolean;
+	};
+	/** The plan step that admitted this dynamically authored task. */
+	planParentId?: string;
 }
 
 /**
@@ -85,6 +98,8 @@ export interface ExecutionPlanCodeStep {
 	commitFrom?: ReadonlyArray<string>;
 	/** Declared write boundary; see `ExecutionPlanAgentStep.writes`. */
 	writes?: ReadonlyArray<string>;
+	/** A gate check executes a declared gate file through this command. */
+	gate?: { gateId: string; path: string };
 }
 
 export type ExecutionPlanStep = ExecutionPlanAgentStep | ExecutionPlanCodeStep;
@@ -314,6 +329,55 @@ export function executionPlanAncestors(plan: ExecutionPlan, stepId: string): Rea
 		pending.push(...(byId.get(next)?.dependencies ?? []));
 	}
 	return ancestors;
+}
+
+/** Recompile a plan with coordinator-validated dynamic agent tasks. */
+export function spliceExecutionPlan(
+	plan: ExecutionPlan,
+	parentId: string,
+	tasks: ReadonlyArray<{
+		id: string;
+		agentId: string;
+		task: string;
+		dependencies: ReadonlyArray<string>;
+		writes: ReadonlyArray<string>;
+		target?: string;
+		profile?: string;
+		requestedAuthority: AgentAutomationAuthority;
+		approvedAuthority: AgentAutomationAuthority | null;
+		expectedResultContract: ResultContract["kind"];
+		executionRole: ExecutionRole;
+	}>,
+): ExecutionPlan {
+	const parent = plan.steps.find((step) => step.id === parentId);
+	if (parent?.kind !== "agent" || parent.plan === undefined) {
+		throw new Error(`execution plan: '${parentId}' is not a plan step`);
+	}
+	const inserted: ExecutionPlanStepInput[] = tasks.map((task) => ({
+		kind: "agent",
+		id: task.id,
+		agentId: task.agentId,
+		executionRole: task.executionRole,
+		scope: task.writes.length > 0 ? "workspace" : "readonly",
+		expectedResultContract: task.expectedResultContract,
+		requestedAuthority: task.requestedAuthority,
+		approvedAuthority: task.approvedAuthority,
+		dependencies: [parentId, ...task.dependencies],
+		task: task.task,
+		writes: [...task.writes],
+		...(task.target !== undefined ? { target: task.target } : {}),
+		...(task.profile !== undefined ? { profile: task.profile } : {}),
+		planParentId: parentId,
+	}));
+	return compileExecutionPlan({
+		topology: plan.topology,
+		rootTask: plan.rootTask,
+		maxWorkers: plan.maxWorkers,
+		...(plan.writers === 1 ? { writers: 1 as const } : {}),
+		onFailure: plan.onFailure,
+		steps: [...plan.steps, ...inserted],
+		loops: plan.loops,
+	});
 }
 
 /** A linear step declares no dependencies; the compiler chains them by position. */
