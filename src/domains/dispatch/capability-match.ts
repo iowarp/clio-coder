@@ -77,6 +77,7 @@ const REPORTING_CONTRACT_KINDS: ReadonlySet<ResultContract["kind"]> = new Set([
 	"research-report",
 	"provenance-report",
 	"debugger-report",
+	"oracle-report",
 ]);
 
 /** Preferred mutating specialist per task shape, best first. */

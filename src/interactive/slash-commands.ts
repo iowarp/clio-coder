@@ -1,6 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -18,6 +19,13 @@ import type { ShareImportPlan } from "../domains/share/index.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
+import {
+	formatOracleAnswer,
+	ORACLE_AGENT_ID,
+	ORACLE_TASK,
+	type OracleDigestSources,
+	packOracleDigest,
+} from "./oracle.js";
 import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
@@ -59,6 +67,9 @@ type SlashCommandVariant =
 	| { kind: "delegate-usage" }
 	| { kind: "btw"; question: string }
 	| { kind: "btw-usage" }
+	/** `/oracle <question>`: one read-only advisory run briefed on the record, never on the transcript. */
+	| { kind: "oracle"; question: string }
+	| { kind: "oracle-usage" }
 	| { kind: "handoff"; goal: string }
 	| { kind: "handoff-usage" }
 	/** `/fleet run <name>`: compile the plan, show it for approval, dispatch on accept. */
@@ -284,6 +295,76 @@ async function handleDelegate(
 }
 
 /**
+ * `/oracle <question>`: one advisory run, dispatched like any other.
+ *
+ * Nothing here is a side channel. The run goes through the ordinary dispatch
+ * path, so admission, the receipt, and the Fleet Runs island treat it exactly
+ * as they treat a `/run`; `requestOrigin: "internal"` is what lets a shadow
+ * recipe be reached at all, and `autonomy: "read-only"` narrows the worker
+ * below whatever the session holds. The answer reaches the main agent the way
+ * `/share` puts one there: an operator-authored note on the ordinary user-turn
+ * path, never a fabricated tool result.
+ */
+async function handleOracle(question: string, ctx: SlashCommandContext): Promise<void> {
+	if (!ctx.submitOperatorNote) {
+		ctx.notice("error", "/oracle is not wired in this session; there is nowhere to put the answer");
+		return;
+	}
+	// Refused, never queued. The digest describes the record as it stands and a
+	// turn still in flight is about to change it, so an answer written against
+	// the old record would be advice about a session that no longer exists.
+	if (ctx.isTurnInFlight?.() === true) {
+		ctx.notice("warn", "a turn is in flight; /oracle is refused rather than queued");
+		return;
+	}
+	const sources = ctx.oracleBriefing?.();
+	if (!sources) {
+		ctx.notice("error", "/oracle needs the session record, which is not wired in this session");
+		return;
+	}
+	const digest = packOracleDigest({ ...sources, question });
+	const request: DispatchRequest = {
+		agentId: ORACLE_AGENT_ID,
+		task: ORACLE_TASK,
+		briefing: digest.text,
+		executionRole: requestExecutionRole({
+			agentId: ORACLE_AGENT_ID,
+			...(ctx.getAgentRoleFacts ? { resolveFacts: ctx.getAgentRoleFacts } : {}),
+		}),
+		requestOrigin: "internal",
+		autonomy: "read-only",
+	};
+	const progressBus = ctx.dispatch.ownsProgressBus?.(ctx.bus) === true ? undefined : ctx.bus;
+	try {
+		const handle = await ctx.dispatch.dispatch(request);
+		for await (const event of handle.events) {
+			const typed = event as { type?: string };
+			if (!typed.type || typed.type === "heartbeat") continue;
+			progressBus?.emit(BusChannels.DispatchProgress, { runId: handle.runId, agentId: ORACLE_AGENT_ID, event });
+		}
+		const receipt = await handle.finalPromise;
+		const parsed = parseOracleResult(receipt.output?.text ?? null);
+		if (parsed === null) {
+			ctx.notice("error", `/oracle run ${receipt.runId} returned no usable answer (${receipt.outcome})`);
+			return;
+		}
+		const note = formatWorkerShareNote({
+			agentId: ORACLE_AGENT_ID,
+			runId: receipt.runId,
+			outcome: receipt.outcome,
+			text: formatOracleAnswer(parsed),
+		});
+		if (note === null) {
+			ctx.notice("error", `/oracle run ${receipt.runId} produced no text to share`);
+			return;
+		}
+		ctx.submitOperatorNote(note);
+	} catch (err) {
+		ctx.notice("error", `/oracle failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
+/**
  * `/share [runId]`: hand a finished worker run's answer to the main agent.
  *
  * Nothing here is implicit. The operator either typed the command or passed
@@ -394,6 +475,18 @@ export interface SlashCommandContext {
 	 * answer.
 	 */
 	openSideQuestion: (question: string) => void;
+	/**
+	 * The record `/oracle` briefs its advisor on: settled decisions, the task
+	 * board, and the last compaction summary. Absent on a host with no session,
+	 * in which case `/oracle` says so instead of briefing on nothing.
+	 */
+	oracleBriefing?: () => Omit<OracleDigestSources, "question">;
+	/**
+	 * True while a turn is streaming. `/oracle` is refused then, never queued:
+	 * the digest describes the record as it stands and an in-flight turn is
+	 * about to change it.
+	 */
+	isTurnInFlight?: () => boolean;
 	/**
 	 * `/handoff <goal>`: extract this session's working state for a stated goal,
 	 * review the document, and seed a successor session with it. A session
@@ -898,6 +991,32 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind !== "btw") return;
 			ctx.openSideQuestion(command.question);
+		},
+	},
+	{
+		name: "oracle",
+		description: "Ask a read-only advisor to challenge a question against this session's settled decisions",
+		group: "Run",
+		kinds: ["oracle", "oracle-usage"],
+		args: {
+			positionals: [{ name: "question", required: true, rest: true }],
+		},
+		fromArgs(parsed) {
+			const question = parsed.rest?.trim() ?? "";
+			if (parsed.error || question.length === 0) return { kind: "oracle-usage" };
+			return { kind: "oracle", question };
+		},
+		handle(command, ctx) {
+			if (command.kind === "oracle-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "oracle");
+				if (entry) ctx.notice("info", usageNotice(entry));
+				return;
+			}
+			if (command.kind !== "oracle") return;
+			void (async () => {
+				await handleOracle(command.question, ctx);
+				ctx.render();
+			})();
 		},
 	},
 	{

@@ -18,7 +18,10 @@ import {
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
+import { foldDecisionBoard } from "../domains/session/decision-board.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import { foldTaskBoard } from "../domains/session/task-board.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { stripTerminalSequences } from "../engine/tui.js";
@@ -32,6 +35,7 @@ import { appendNotice, appendOperatorCommand } from "./command-output.js";
 import { runOperatorRecall } from "./context-recall-command.js";
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
+import type { OracleDigestSources } from "./oracle.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
 	type ContextClearCommandOptions,
@@ -192,6 +196,29 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	const resources = deps.resources;
 	const userTasks = deps.userTasks;
 
+	/**
+	 * The record `/oracle` briefs its advisor on. Entries are filtered to the
+	 * active branch first, the same way the task board, compaction, and the
+	 * finish contract read them (issue #94): after a `/tree` switch the raw file
+	 * still holds the abandoned turns, and an unscoped fold would brief the
+	 * advisor on decisions the operator walked away from.
+	 */
+	const oracleBriefingSources = (): Omit<OracleDigestSources, "question"> => {
+		const sessionId = deps.chat.getSessionId();
+		if (sessionId === null) return { decisions: [], tasks: [], compactionSummary: null };
+		const leafTurnId = deps.session?.tree(sessionId).leafId ?? undefined;
+		const entries = filterEntriesToActivePath(deps.readStructuredEntries(sessionId), leafTurnId);
+		let compactionSummary: string | null = null;
+		for (const entry of entries) {
+			if (entry.kind === "compactionSummary") compactionSummary = entry.summary;
+		}
+		return {
+			decisions: foldDecisionBoard(entries),
+			tasks: foldTaskBoard(entries)?.tasks ?? [],
+			compactionSummary,
+		};
+	};
+
 	const appendCommandNotice: SlashCommandContext["notice"] = (level, text) => {
 		appendNotice(level, text, {
 			appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
@@ -349,6 +376,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		openCost: deps.openCost,
 		openSideQuestion: deps.openSideQuestion,
+		// `/oracle` is refused, never queued, while a turn streams: the digest it
+		// packs describes the record as it stands.
+		isTurnInFlight: () => deps.chat.isStreaming(),
+		oracleBriefing: oracleBriefingSources,
 		startHandoff: deps.startHandoff,
 		...(deps.startFleetRun ? { startFleetRun: deps.startFleetRun } : {}),
 		openContextView: deps.openContextView,

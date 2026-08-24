@@ -152,3 +152,18 @@ export type {
 	MiddlewareValidationIssue,
 } from "./validate.js";
 export { validateMiddlewareEffect, validateMiddlewareRule } from "./validate.js";
+export {
+	coalesceTurnDiff,
+	createWatchdogRegistration,
+	WATCHDOG_DIFF_MAX_BYTES,
+	WATCHDOG_PATHS_MAX,
+	WATCHDOG_REGISTRATION_ID,
+	WATCHDOG_TASK,
+	WATCHDOG_TRUNCATION_MARKER,
+	type WatchdogDeps,
+	type WatchdogRegistration,
+	type WatchdogSettingsView,
+	type WatchdogTrigger,
+	type WatchdogTriggerReason,
+	watchdogBriefing,
+} from "./watchdog.js";

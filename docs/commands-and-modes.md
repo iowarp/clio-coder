@@ -152,6 +152,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
+| `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/agents` | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |

@@ -209,6 +209,10 @@ terminal:
   fullscreenScrollbar: auto    # hidden, auto, or always in fullscreen mode
   smoothStreaming: off         # off, conservative auto, or explicit on
   notify: false                # content-free desktop notification, interactive TTY only
+watchdog:
+  enabled: false               # opt-in read-only review of every mutating turn
+  # target: local-lmstudio     # route the review at a cheap model
+  # cadenceToolCalls: 20       # also review every N tool calls inside a turn
 skills:
   trustProjectCompatRoots: false
 delegation:
@@ -471,7 +475,7 @@ The Settings Center organizes all configuration under four non-selectable group 
 | **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), and `theme`. |
 | **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
 
-`retry.streamStallMs` and `terminal.notify` have no Settings Center row; edit them in `settings.yaml`.
+`retry.streamStallMs`, `terminal.notify`, and the `watchdog` block have no Settings Center row; edit them in `settings.yaml`.
 
 Label to config path mapping:
 
@@ -623,6 +627,32 @@ Generic provider and transport errors are classified by transient retry rules, i
 | `memory.intervention.windowSteps` | `8` | integer ≥ 1 | next turn |
 | `memory.intervention.maxTokens` | `400` | integer ≥ 1 | next turn |
 | `memory.intervention.timeoutMs` | `180000` | integer ≥ 1 | next turn |
+
+### Turn-end watchdog
+
+| Key | Default | Validation | When it applies |
+| --- | --- | --- | --- |
+| `watchdog.enabled` | `false` | boolean | immediately |
+| `watchdog.target` | unset | non-empty target id | immediately |
+| `watchdog.cadenceToolCalls` | unset | integer ≥ 1 | immediately |
+
+The watchdog is off by default because it spends one worker run per mutating
+turn. With `enabled: true`, a turn that changed the tree is handed to one
+read-only `verifier` run briefed with the turn's coalesced diff and the task
+board's current scope. Its blockers become one transcript notice naming the
+count and the first three failed checks, and nothing else: it never follows up,
+never queues a turn, and never mutates. A passing report emits nothing at all. A
+turn with no file mutations never fires it.
+
+`watchdog.target` routes the run at a named target, which is how a cheap local
+model reviews turns run on a subscription route; unset, the run takes the
+session's active target. `watchdog.cadenceToolCalls: N` additionally fires the
+watchdog after every N tool calls inside a turn, with the same diff-and-scope
+briefing, so mid-turn scope drift is visible before the turn ends. At most one
+watchdog run is in flight at a time; a trigger that arrives while one is running
+is dropped and counted rather than queued. Headless and ACP runs never fire the
+watchdog regardless of the setting, because neither has an operator reading a
+transcript. There is no Settings Center row for the block; edit `settings.yaml`.
 
 ### Delegation
 

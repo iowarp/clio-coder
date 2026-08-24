@@ -915,6 +915,37 @@ function validateMemorySettings(issues: Issues, value: unknown): ClioSettings["m
 	return out;
 }
 
+/**
+ * The watchdog block. `target` and `cadenceToolCalls` stay absent rather than
+ * taking sentinel values: an absent target means the session's active target,
+ * and an absent cadence means the watchdog fires only at turn end. A written
+ * default for either would turn "not configured" into a configuration.
+ */
+function validateWatchdogSettings(issues: Issues, value: unknown): ClioSettings["watchdog"] {
+	const out = cloneValue(DEFAULT_SETTINGS.watchdog);
+	if (!isPlainObject(value)) {
+		issues.add("watchdog", `expected a map, got ${describe(value)}`);
+		return out;
+	}
+	issues.unknownKeys("watchdog", value, ["enabled", "target", "cadenceToolCalls"]);
+	if ("enabled" in value) {
+		const enabled = expectBoolean(issues, "watchdog.enabled", value.enabled);
+		if (enabled !== undefined) out.enabled = enabled;
+	}
+	if ("target" in value && value.target !== null) {
+		const target = expectString(issues, "watchdog.target", value.target);
+		if (target !== undefined) {
+			if (target.trim().length === 0) issues.add("watchdog.target", "expected a non-empty target id");
+			else out.target = target.trim();
+		}
+	}
+	if ("cadenceToolCalls" in value && value.cadenceToolCalls !== null) {
+		const cadence = expectInteger(issues, "watchdog.cadenceToolCalls", value.cadenceToolCalls, { min: 1 });
+		if (cadence !== undefined) out.cadenceToolCalls = cadence;
+	}
+	return out;
+}
+
 function validateKeybindings(issues: Issues, value: unknown): ClioSettings["keybindings"] {
 	if (!isPlainObject(value)) {
 		issues.add("keybindings", `expected a map, got ${describe(value)}`);
@@ -954,6 +985,7 @@ const TOP_LEVEL_KEYS = [
 	"orchestrator",
 	"background",
 	"memory",
+	"watchdog",
 	"workers",
 	"fleet",
 	"routing",
@@ -1050,6 +1082,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		);
 	}
 	if ("memory" in raw) settings.memory = validateMemorySettings(issues, raw.memory);
+	if ("watchdog" in raw) settings.watchdog = validateWatchdogSettings(issues, raw.watchdog);
 
 	// Fleet nodes validate before workers so profile node pins can be checked
 	// against the configured node ids.

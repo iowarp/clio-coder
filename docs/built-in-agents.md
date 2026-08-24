@@ -64,11 +64,33 @@ Internal orchestration helpers and internal process agents. They are hidden from
 | `scout` | read, grep, find, ls, context, code_nav, git | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
 | `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
+| `oracle` | read, grep, find, ls, code_nav, context | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `read-only` | `deep` |
 | `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
 
 `scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose every finding carries the `claim` it observed and the `path:line` that grounds it, a lead it could not confirm live is simply left out, and wiki or index content is orientation only, never citable as evidence. It has an 18-call exploration phase followed by a tool-free synthesis phase; wide parallel batches cannot consume the synthesis backstop as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
 
 Grounding is checked against the run's own reads, not just against the file. The worker records the exact line span every successful read returned, and a cited line must fall inside one. A line that exists in the file but was never read fails, which is what stops an approximated or inferred line number from passing as observation. `grep` and `code_nav` hits are leads: read the file before citing what they point at.
+
+`oracle` is the only shadow agent an operator reaches directly, and only through
+`/oracle <question>`. It never receives a forked transcript. `/oracle` packs a
+bounded digest instead and sends it as dispatch briefing data: the settled
+decisions from the session decision board, the open tasks from the task board,
+the last compaction summary when one exists, and the question. The digest is
+capped at 12 KiB total, with per-section caps of 5120 bytes and 24 rows for
+decisions, 3072 bytes and 24 rows for open tasks, 2048 bytes for the compaction
+summary, and 1536 bytes for the question. Every cap that cuts content appends a
+`[truncated]` marker, so an advisor always knows it is reading a tail-less
+record. Entries are filtered to the active branch before the fold, so a `/tree`
+switch never briefs the advisor on decisions the operator walked away from.
+
+The run is an ordinary singular dispatch with `requestOrigin: "internal"` and
+`autonomy: "read-only"`, so admission, receipts, and the Fleet Runs island apply
+to it exactly as they apply to `/run`. Its `oracle-report` contract carries the
+answer shape: a verdict line, the strongest challenge the advisor can mount, the
+evidence that would change its mind, and the decisions it cited. The rendered
+answer reaches the main agent the way `/share` puts a worker result there, as an
+operator-authored note on the ordinary user-turn path. `/oracle` during an
+in-flight turn is refused rather than queued.
 
 Every contract-bearing agent gets bounded in-worker repair. When the terminal result misses its contract, the worker replays the validator's own reason, the exact accepted shape, and the `path:line` locations this run actually read, then asks for the result again. Two repair rounds is the whole allowance; after that the run fails with `result_contract_exhausted`. This is what keeps a small local model that gathered the right evidence from being failed for a shape mistake nobody told it about.
 

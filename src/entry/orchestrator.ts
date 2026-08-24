@@ -90,6 +90,7 @@ import {
 import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
+import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -177,6 +178,7 @@ import {
 import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
 import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
+import { runWatchdogReview } from "../interactive/watchdog-run.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
@@ -1069,6 +1071,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Bound late: the registration is built here, but the buffer a deferred
 	// reminder lands in belongs to the chat loop that has not been composed yet.
 	let deferredMemoryReminderSink: ((message: string) => void) | null = null;
+	// The watchdog's findings are for the operator, not the model, so they take
+	// the transcript-notice path rather than the reminder buffer. Bound late for
+	// the same reason: the chat loop that owns the transcript is composed below.
+	let deferredWatchdogNoticeSink: ((text: string) => void) | null = null;
 	// Content-bearing, so it exists only when the operator named a file. The
 	// telemetry row says which silence happened; this says what the model wrote.
 	const memoryTracePath = taskMemoryTracePath();
@@ -1521,6 +1527,29 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);
+	// The opt-in turn-end watchdog. Headless and ACP runs pass `false` for the
+	// surface: neither has an operator reading a transcript, so a notice they
+	// cannot see would be a worker run spent on nothing whatever the setting says.
+	middleware.registerHook(
+		createWatchdogRegistration({
+			firesOnThisSurface: interactive,
+			getSettings: () => (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).watchdog,
+			getScope: () => {
+				const board = taskBoard.snapshot();
+				if (board === null) return null;
+				const active = board.tasks.find((task) => task.status === "active");
+				return active ? `${board.title}: ${active.id} ${active.title}` : board.title;
+			},
+			run: (trigger) =>
+				runWatchdogReview(trigger, {
+					dispatch,
+					bus,
+					...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
+					target: (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).watchdog.target,
+					...(deferredWatchdogNoticeSink ? { emitNotice: deferredWatchdogNoticeSink } : {}),
+				}),
+		}),
+	);
 	if (session) {
 		middleware.registerHook(
 			createFinishContractRegistration({
@@ -1583,6 +1612,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;
+		},
+		registerDeferredNoticeSink: (sink) => {
+			deferredWatchdogNoticeSink = sink;
 		},
 		onAskUserFinalized: (policy) => {
 			decisionBoard.recordFinalizedInterview(policy);

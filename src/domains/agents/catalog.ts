@@ -3,6 +3,18 @@ import { type AgentSpec, isUserVisibleAgent, normalizeAgentSpec } from "./spec.j
 
 const DEFAULT_DISPATCH_AGENT_ID = "coder";
 
+/**
+ * Shadow recipes an operator command owns, kept out of the prompt roster.
+ *
+ * `oracle` exists to challenge the operator's question against the decisions
+ * the operator settled, and `/oracle` is the only thing that asks it. Listing
+ * it among the workers the model reaches with `dispatch` would invite the main
+ * agent to dispatch an advisor to argue with itself, which is neither what the
+ * recipe is for nor something its briefing (the record, not the transcript)
+ * would even let it do well.
+ */
+const OPERATOR_ONLY_SHADOW_AGENT_IDS: ReadonlySet<string> = new Set(["oracle"]);
+
 export interface AgentCatalogSections {
 	stable: string;
 	volatile: string;
@@ -92,7 +104,7 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 		return category === 0 ? a.id.localeCompare(b.id) : category;
 	});
 	const publicSpecs = specs.filter(isUserVisibleAgent);
-	const shadowSpecs = specs.filter((spec) => spec.audience === "shadow");
+	const shadowSpecs = specs.filter((spec) => spec.audience === "shadow" && !OPERATOR_ONLY_SHADOW_AGENT_IDS.has(spec.id));
 	if (publicSpecs.length === 0 && shadowSpecs.length === 0) return "";
 
 	const lines: string[] = [

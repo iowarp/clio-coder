@@ -25,7 +25,7 @@ export interface TurnMiddlewareDeps {
 	middleware?: MiddlewareContract | undefined;
 	session?: SessionContract | undefined;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
-	emitNotice: (text: string) => void;
+	emitNotice: (text: string, level?: "info" | "warning" | "error") => void;
 	emitFooterNotice: (level: "info" | "success" | "warning" | "error", text: string, key: string) => void;
 }
 
@@ -55,6 +55,14 @@ export interface TurnMiddleware {
 	 * turn_end reminder takes.
 	 */
 	injectDeferredReminder(message: string, severity?: MiddlewareReminderSeverity): void;
+	/**
+	 * Deliver an operator-facing finding produced after its turn boundary closed.
+	 * The watchdog seam: its run settles well after the turn it reviewed, and
+	 * what it found is for the person, not the model. Unlike a deferred
+	 * reminder, this never joins the pending-reminder buffer and never appends a
+	 * `middlewareReminder` entry, so nothing it says can enter the next request.
+	 */
+	emitDeferredNotice(text: string, level?: "info" | "warning"): void;
 }
 
 export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
@@ -279,6 +287,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			bufferReminder(text, level);
 			appendMiddlewareReminderEntry(text, level);
 			deps.emitNotice(text);
+		},
+
+		emitDeferredNotice(text, level = "warning"): void {
+			const message = text.trim();
+			if (message.length === 0) return;
+			deps.emitNotice(message, level);
 		},
 	};
 }
