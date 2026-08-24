@@ -10,9 +10,9 @@ import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import {
 	createPermissionOverlayBody,
-	PERMISSION_OVERLAY_PLACEMENT,
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
+	permissionOverlayPlacement,
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "./permission-overlay.js";
@@ -84,7 +84,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	/** Rescopes the footer's last-turn line when a session overlay changes the branch. */
 	setLastTurnSummary?: (summary: import("./status/index.js").TurnSummary | null) => void;
 	keybindings: ReturnType<typeof import("./keybinding-manager.js").createKeybindingManager>;
-	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "setText">;
+	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "render" | "setText">;
 	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
 	showOverlayFrame?: typeof showClioOverlayFrame;
 	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
@@ -230,7 +230,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			if (overlayTransitions.state !== "closed") return false;
 			overlayTransitions.state = "permission-confirm";
 			overlayTransitions.handle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
-				...PERMISSION_OVERLAY_PLACEMENT,
+				...permissionOverlayPlacement(tui, editor, footer.view),
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(view),
 				tone: permissionOverlayTone(view),

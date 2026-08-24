@@ -478,16 +478,19 @@ export function showClioOverlayFrame(
 	const { title, footerHint, tone, width, visible, maxHeight, margin, ...overlayOptions } = options;
 	const boxWidth = typeof width === "number" ? width : 0;
 	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor), tone);
-	const marginRows = typeof margin === "number" ? margin * 2 : (margin?.top ?? 0) + (margin?.bottom ?? 0);
 	return tui.showOverlay(frame, {
 		...overlayOptions,
 		...(margin !== undefined ? { margin } : {}),
 		width: "100%",
 		visible: (termWidth, termHeight) => {
+			const shown = visible ? visible(termWidth, termHeight) : true;
+			// A caller may update an object margin in its visibility callback to
+			// follow live content geometry. Read it after that callback, every frame.
+			const marginRows = typeof margin === "number" ? margin * 2 : (margin?.top ?? 0) + (margin?.bottom ?? 0);
 			const available = Math.max(1, termHeight - marginRows);
 			const requested = resolveRowSize(maxHeight, termHeight);
 			frame.setRowBudget(requested === null ? available : Math.min(requested, available));
-			return visible ? visible(termWidth, termHeight) : true;
+			return shown;
 		},
 	});
 }

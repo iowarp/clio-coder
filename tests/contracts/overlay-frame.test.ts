@@ -1,7 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component, OverlayHandle, OverlayOptions, Terminal, TUI } from "../../src/engine/tui.js";
-import { TuiAltScreen, visibleWidth } from "../../src/engine/tui.js";
+import { TuiAltScreen, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
+import { ClioEditor } from "../../src/interactive/clio-editor.js";
+import { buildLayout } from "../../src/interactive/layout.js";
 import {
 	ClioOverlayFrame,
 	diagnosticSeverityToken,
@@ -11,9 +13,9 @@ import {
 } from "../../src/interactive/overlay-frame.js";
 import {
 	createPermissionOverlayBody,
-	PERMISSION_OVERLAY_PLACEMENT,
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
+	permissionOverlayPlacement,
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "../../src/interactive/permission-overlay.js";
@@ -47,12 +49,16 @@ class OverlayLayoutTerminal implements Terminal {
 	setProgress(): void {}
 }
 
-class OverlayLayoutProbe extends TuiAltScreen {
+class OverlayLayoutProbe extends TuiMainScreen {
 	override requestRender(): void {}
 
 	composite(lines: string[], width: number, height: number): string[] {
 		return this.compositeOverlays(lines, width, height);
 	}
+}
+
+class FullscreenOverlayLayoutProbe extends TuiAltScreen {
+	override requestRender(): void {}
 }
 
 describe("contracts/overlay-frame row ownership", () => {
@@ -190,9 +196,27 @@ describe("contracts/overlay-frame row ownership", () => {
 		strictEqual(frameAlignForAnchor(undefined), "center");
 	});
 
-	it("keeps a permission dialog beside the composer at 120 rows and re-anchors it on resize", () => {
+	it("keeps a permission dialog beside a live composer as its height and the viewport change", () => {
 		const terminal = new OverlayLayoutTerminal();
 		const tui = new OverlayLayoutProbe(terminal);
+		const editor = new ClioEditor(tui, {
+			getModelLabel: () => "mini·ornith1.5-35b-moe",
+			getThinkingLabel: () => "off",
+			isStreaming: () => true,
+			isAwaitingApproval: () => true,
+			willEnterSteer: (text) => text.trim().length > 0,
+		});
+		editor.focused = true;
+		const footer = bodyOf(["footer primary", "footer secondary"]);
+		const transcript = bodyOf(Array.from({ length: 110 }, (_, index) => `transcript row ${index}`));
+		tui.addChild(
+			buildLayout({
+				banner: bodyOf([]),
+				chat: transcript,
+				editor,
+				footer,
+			}),
+		);
 		const view = {
 			requestId: "req-layout",
 			tool: "bash",
@@ -203,31 +227,69 @@ describe("contracts/overlay-frame row ownership", () => {
 			target: "npm test",
 		};
 		showClioOverlayFrame(tui, createPermissionOverlayBody(view), {
-			...PERMISSION_OVERLAY_PLACEMENT,
+			...permissionOverlayPlacement(tui, editor, footer),
 			width: PERMISSION_OVERLAY_WIDTH,
 			title: permissionOverlayTitle(view),
 			tone: permissionOverlayTone(view),
 			footerHint: permissionOverlayHint,
 		});
 
-		const placementAt = (rows: number): { first: number; last: number } => {
+		const placementAt = (
+			rows: number,
+			draft: string,
+		): { composerTop: number; editorHeight: number; first: number; firstInViewport: number; last: number } => {
 			terminal.rows = rows;
-			const base = Array.from({ length: rows }, (_, index) => `transcript row ${index}`);
+			editor.setText(draft);
+			const base = tui.render(terminal.columns);
+			const composerTop = base.map(stripAnsi).findIndex((line) => line.startsWith("CONFIRM "));
+			ok(composerTop >= 0, `the live composer is present at ${rows} rows`);
+			const editorHeight = editor.render(terminal.columns).length;
 			const frame = tui.composite(base, terminal.columns, rows).map(stripAnsi);
 			const first = frame.findIndex((line) => line.includes("Safety-net confirmation"));
 			let last = frame.length - 1;
-			while (last >= 0 && !frame[last]?.includes("[Esc] deny")) last -= 1;
+			while (last >= 0 && !(frame[last]?.includes("└") && frame[last]?.includes("[Esc] deny"))) last -= 1;
 			ok(first >= 0 && last >= first, `permission frame is present at ${rows} rows`);
-			return { first, last };
+			const viewportStart = Math.max(0, frame.length - rows);
+			return { composerTop, editorHeight, first, firstInViewport: first - viewportStart, last };
 		};
 
-		const tall = placementAt(120);
-		strictEqual(tall.last, 114, "five rows remain clear for the composer and footer");
-		ok(tall.first >= 100, `the dialog stays in the bottom sixth, beginning at row ${tall.first}`);
+		const empty = placementAt(72, "");
+		strictEqual(empty.editorHeight, 3, "the empty composer owns its two rails and one input row");
+		strictEqual(empty.last, empty.composerTop - 1, "the dialog ends immediately above the empty composer");
 
-		const resized = placementAt(72);
-		strictEqual(resized.last, 66, "the bottom clearance is recomputed at the resized height");
-		strictEqual(tall.first - resized.first, 48, "the dialog follows the 48-row resize instead of keeping its old row");
+		const multiline = placementAt(72, "first line\nsecond line\nthird line\nfourth line");
+		strictEqual(multiline.editorHeight, 6, "four draft rows grow the live composer to six rows");
+		strictEqual(multiline.last, multiline.composerTop - 1, "the taller composer remains unobscured");
+		strictEqual(multiline.last, empty.last, "the dialog follows the stable top edge as the composer grows downward");
+		strictEqual(
+			empty.firstInViewport - multiline.firstInViewport,
+			3,
+			"the three added draft rows increase the live bottom clearance by three",
+		);
+
+		const resized = placementAt(120, "first line\nsecond line\nthird line\nfourth line");
+		strictEqual(resized.last, resized.composerTop - 1, "the dialog remains adjacent after a 48-row resize");
+		strictEqual(resized.first, multiline.first, "resizing preserves the frame's attachment to the flowing composer");
+	});
+
+	it("derives fullscreen permission clearance from the live composer height", () => {
+		const terminal = new OverlayLayoutTerminal();
+		const tui = new FullscreenOverlayLayoutProbe(terminal);
+		const editor = new ClioEditor(tui, {
+			getModelLabel: () => "mini·ornith1.5-35b-moe",
+			getThinkingLabel: () => "off",
+			isAwaitingApproval: () => true,
+		});
+		const footer = bodyOf(["footer primary", "footer secondary"]);
+		const placement = permissionOverlayPlacement(tui, editor, footer);
+		ok(typeof placement.margin === "object" && placement.margin !== null);
+
+		placement.visible?.(terminal.columns, terminal.rows);
+		strictEqual(placement.margin.bottom, 5, "an empty three-row composer and two-row footer reserve five rows");
+
+		editor.setText("first line\nsecond line\nthird line\nfourth line");
+		placement.visible?.(terminal.columns, terminal.rows);
+		strictEqual(placement.margin.bottom, 8, "the four-row draft increases the live dock clearance to eight rows");
 	});
 });
 
