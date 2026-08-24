@@ -116,7 +116,7 @@ export interface UsageBreakdown {
  * the usage surfaces separate these out so an operator can see that money was
  * spent beside the session rather than inside it.
  */
-export type CostEntryLabel = "side-question";
+export type CostEntryLabel = "side-question" | "handoff";
 
 export interface CostEntry {
 	providerId: string;

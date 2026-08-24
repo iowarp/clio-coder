@@ -69,6 +69,7 @@ function createHarness() {
 		openSkillsHub: () => events.push("skills"),
 		openCost: () => events.push("cost"),
 		openSideQuestion: (question) => events.push(`btw:${question}`),
+		startHandoff: () => {},
 		openContextView: () => events.push("context"),
 		openTasks: () => events.push("tasks"),
 		openDecisions: () => events.push("decisions"),

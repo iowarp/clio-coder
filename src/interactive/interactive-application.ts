@@ -642,6 +642,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openSkillsHub: () => openSkillsHubState(),
 		openCost: () => openCostOverlayState(),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
+		startHandoff: (goal) => startHandoffState(goal),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openDecisions: () => openDecisionsOverlayState(),
@@ -728,6 +729,17 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		keybindings,
 		editor,
 		getSlashContext: () => slashRuntime.context,
+		// One terminal owner, so the external editor a handoff review opens gets
+		// the screen the same way the composer's own `$EDITOR` opener does.
+		suspendTerminal: (run) => {
+			try {
+				tui.stop();
+				return run();
+			} finally {
+				tui.start();
+				tui.requestRender(true);
+			}
+		},
 		onOperatorParked: () => desktopNotifications.approvalParked(),
 	});
 	const {
@@ -735,6 +747,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openAskUserOverlayState,
 		openCostOverlayState,
 		openSideQuestionOverlayState,
+		startHandoffState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		openTasksOverlayState,

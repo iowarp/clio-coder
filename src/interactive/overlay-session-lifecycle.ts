@@ -1,14 +1,29 @@
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
+import type { DecisionLedgerEntry } from "../domains/session/entries.js";
+import {
+	buildHandoffReadLedger,
+	HANDOFF_NOTE_CUSTOM_TYPE,
+	HANDOFF_SEED_CUSTOM_TYPE,
+	type HandoffNoteData,
+	type HandoffSeedData,
+	mergeHandoffDecisions,
+	parseHandoffExtraction,
+	renderHandoffDocument,
+	validateHandoffFiles,
+	validateHandoffGoal,
+} from "../domains/session/handoff.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
+import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
+import { openHandoffReviewOverlay } from "./overlays/handoff-review.js";
 import { openMessagePickerOverlay } from "./overlays/message-picker.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
@@ -22,7 +37,7 @@ export interface OverlaySessionLifecycleDeps {
 	tui: TUI;
 	transitions: OverlayTransitions;
 	session?: SessionContract;
-	chat: Pick<ChatLoop, "cancel" | "isStreaming" | "resetForSession" | "whenSettled">;
+	chat: Pick<ChatLoop, "cancel" | "isStreaming" | "resetForSession" | "whenSettled" | "extractHandoff">;
 	chatPanel: ChatPanel;
 	/** The one transcript reset: the panel plus every view folded alongside it. */
 	resetTranscript(): void;
@@ -30,6 +45,18 @@ export interface OverlaySessionLifecycleDeps {
 	getSlashNotice(): SlashCommandContext["notice"];
 	onResumeSession?(sessionId: string): void;
 	onForkSession?(parentTurnId: string): void;
+	/**
+	 * Mint a fresh session, the same hook `/new` uses. `/handoff` needs the one
+	 * session-creation path the orchestrator owns rather than a second one.
+	 */
+	onNewSession?(): void;
+	/** The session's settled decision board, which wins over extracted decisions. */
+	getDecisionBoard?(): ReadonlyArray<DecisionLedgerEntry>;
+	/** Stop and restart the terminal around an external editor child process. */
+	suspendTerminal?<T>(run: () => T): T;
+	resolveEditor?: typeof resolveExternalEditor;
+	editExternally?: typeof editTextExternally;
+	openHandoffReviewOverlay?: typeof openHandoffReviewOverlay;
 	announceTaskMemorySeedOffer(): void;
 	/**
 	 * Running usage totals, reseeded whenever the session under them changes.
@@ -45,6 +72,8 @@ export interface OverlaySessionLifecycleDeps {
 	setLastTurnSummary?(summary: TurnSummary | null): void;
 	refreshFooter(): void;
 	requestRender(): void;
+	/** Live terminal width, so the handoff review box tracks the window. */
+	terminal?: { columns: number };
 	stderr(text: string): void;
 	notify(level: InteractiveNoticeLevel, text: string, key?: string): void;
 	openSessionOverlay?: typeof openSessionOverlay;
@@ -57,6 +86,8 @@ export interface OverlaySessionLifecycle {
 	openResume(): void;
 	openTree(): void;
 	openMessagePicker(): void;
+	/** `/handoff <goal>`: extract, review, and seed a successor session. */
+	startHandoff(goal: string): void;
 }
 
 /**
@@ -327,5 +358,203 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.requestRender();
 	}
 
-	return { openResume, openTree, openMessagePicker: openMessagePickerState };
+	/**
+	 * `/handoff <goal>`: carry this session's working state into a fresh one.
+	 *
+	 * A handoff is a session operation. It writes no memory promotion candidate,
+	 * touches no memory record, and never calls the task-memory bank; the only
+	 * things it writes are one seed entry plus replayed skill activations in the
+	 * new session and one terminal note in the old one, and it writes none of
+	 * them until the operator has accepted the document.
+	 */
+	function startHandoff(goal: string): void {
+		if (deps.transitions.state !== "closed") return;
+		const notice = deps.getSlashNotice();
+		const verdict = validateHandoffGoal(goal);
+		if (!verdict.ok) {
+			emitCommandNotice(notice, "warn", "handoff", verdict.reason);
+			return;
+		}
+		if (!deps.session) {
+			emitCommandNotice(notice, "error", "handoff", "session contract unavailable");
+			return;
+		}
+		if (!deps.onNewSession) {
+			emitCommandNotice(notice, "error", "handoff", "no session-creation path is wired in this session");
+			return;
+		}
+		// Refused, never queued. The document describes a session that has
+		// stopped; a turn still in flight is about to change what it would say.
+		if (deps.chat.isStreaming()) {
+			emitCommandNotice(
+				notice,
+				"warn",
+				"handoff",
+				"a turn is in flight; /handoff cannot summarize a session that is still moving",
+			);
+			return;
+		}
+		const session = deps.session;
+		const fromSessionId = session.current()?.id ?? null;
+		if (fromSessionId === null) {
+			emitCommandNotice(notice, "warn", "handoff", "no current session to hand off; start one with /new or /resume");
+			return;
+		}
+		void runHandoffExtraction(session, fromSessionId, verdict.goal);
+	}
+
+	async function runHandoffExtraction(session: SessionContract, fromSessionId: string, goal: string): Promise<void> {
+		const notice = deps.getSlashNotice();
+		const outcome = await deps.chat.extractHandoff(goal);
+		if (outcome.status !== "answered") {
+			const reason = outcome.status === "aborted" ? "the extraction round was cancelled" : outcome.reason;
+			emitCommandNotice(notice, outcome.status === "failed" ? "error" : "warn", "handoff", reason);
+			return;
+		}
+		const parsed = parseHandoffExtraction(outcome.text);
+		if (!parsed.ok) {
+			emitCommandNotice(notice, "error", "handoff", parsed.reason);
+			return;
+		}
+		const meta = session.current();
+		const cwd = typeof meta?.cwd === "string" && meta.cwd.length > 0 ? meta.cwd : null;
+		const entries = deps.readStructuredEntries(fromSessionId);
+		// The ledger is what this session's own tool calls touched, folded through
+		// the active path so an abandoned `/tree` branch is not evidence.
+		const ledger = buildHandoffReadLedger(entries, { cwd, leafTurnId: meta?.pinnedLeafTurnId ?? null });
+		const files = validateHandoffFiles(parsed.result.extraction.files, ledger, cwd);
+		const decisions = mergeHandoffDecisions(parsed.result.extraction.decisions, deps.getDecisionBoard?.() ?? []);
+		const document = renderHandoffDocument({
+			goal,
+			fromSessionId,
+			decisions,
+			facts: parsed.result.extraction.facts,
+			files: files.kept,
+			droppedFiles: files.dropped,
+			commands: parsed.result.extraction.commands,
+			openQuestions: parsed.result.extraction.openQuestions,
+			truncations: parsed.result.truncations,
+		});
+		openHandoffReview(session, fromSessionId, goal, document);
+	}
+
+	/** Hand the document to `$EDITOR`, or say why it could not go. */
+	function editHandoffDocument(current: string): string | null {
+		const resolve = deps.resolveEditor ?? resolveExternalEditor;
+		const edit = deps.editExternally ?? editTextExternally;
+		const command = resolve();
+		if (!command) {
+			deps.notify("warning", "handoff: no external editor configured; set VISUAL or EDITOR", "handoff:no-editor");
+			return null;
+		}
+		const suspend = deps.suspendTerminal ?? (<T>(run: () => T): T => run());
+		const result = suspend(() => edit(current, command));
+		if (result.ok) return result.text ?? current;
+		if (result.error) deps.notify("warning", `handoff: ${result.error}`, "handoff:editor-failed");
+		return null;
+	}
+
+	function openHandoffReview(session: SessionContract, fromSessionId: string, goal: string, document: string): void {
+		if (deps.transitions.state !== "closed") return;
+		const openReview = deps.openHandoffReviewOverlay ?? openHandoffReviewOverlay;
+		deps.transitions.state = "handoff-review";
+		deps.transitions.handle = openReview(deps.tui, {
+			document,
+			goal,
+			columns: deps.terminal?.columns ?? 80,
+			onEdit: editHandoffDocument,
+			onAccept: (reviewed) => {
+				deps.transitions.close();
+				const text = reviewed.trim();
+				if (text.length === 0) {
+					deps.notify("warning", "handoff: the reviewed document was empty; nothing was written", "handoff:empty");
+					return;
+				}
+				seedHandoffSession(session, fromSessionId, goal, text);
+			},
+			// Esc. Nothing has been written yet, so cancel really is free.
+			onCancel: () => {
+				deps.notify("info", "handoff cancelled; nothing was written", "handoff:cancelled");
+			},
+		});
+		deps.requestRender();
+	}
+
+	/**
+	 * Mint the successor session and open it on the reviewed document.
+	 *
+	 * Order matters. The old session's terminal note is appended while it is
+	 * still current, because an append always lands in the current session. Then
+	 * the new session is minted through the one creation path the orchestrator
+	 * owns, the document goes in as bounded data labelled by its origin, and the
+	 * old session's skill activations are replayed so loaded skills carry
+	 * forward. The old session is otherwise untouched.
+	 */
+	function seedHandoffSession(session: SessionContract, fromSessionId: string, goal: string, document: string): void {
+		const notice = deps.getSlashNotice();
+		const activations = session.current()?.skillActivations ?? [];
+		let toSessionId: string;
+		try {
+			deps.onNewSession?.();
+			const minted = session.current()?.id ?? null;
+			if (minted === null || minted === fromSessionId) throw new Error("the new session was not created");
+			toSessionId = minted;
+			session.appendEntry({
+				kind: "custom",
+				parentTurnId: null,
+				customType: HANDOFF_SEED_CUSTOM_TYPE,
+				display: true,
+				data: { fromSessionId, goal, document } satisfies HandoffSeedData,
+			});
+			for (const activation of activations) session.recordSkillActivation(activation);
+		} catch (error) {
+			emitCommandNotice(
+				notice,
+				"error",
+				"handoff",
+				`could not seed the new session: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return;
+		}
+		// The note names the target, so it can only be written once the target
+		// exists. Appends land in the current session, so the old session is made
+		// current for exactly one append and then handed back. A failure here
+		// costs the note and nothing else: the successor session is already
+		// seeded and is where the operator continues.
+		try {
+			session.switchBranch(fromSessionId);
+			session.appendEntry({
+				kind: "custom",
+				parentTurnId: null,
+				customType: HANDOFF_NOTE_CUSTOM_TYPE,
+				display: true,
+				data: { toSessionId, goal } satisfies HandoffNoteData,
+			});
+		} catch (error) {
+			deps.stderr(`[/handoff] handoff note failed: ${error instanceof Error ? error.message : String(error)}\n`);
+		} finally {
+			try {
+				session.switchBranch(toSessionId);
+			} catch (error) {
+				deps.stderr(
+					`[/handoff] could not return to the new session: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			}
+		}
+		try {
+			const turns = deps.readStructuredEntries(toSessionId);
+			deps.resetTranscript();
+			rehydrateChatPanelFromTurns(deps.chatPanel, turns);
+			deps.chat.resetForSession(null, buildModelReplayAgentMessagesFromTurns(turns));
+			rescopeToBranch(session, turns, null);
+		} catch (error) {
+			deps.stderr(`[/handoff] seeding replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
+			deps.chat.resetForSession(null);
+		}
+		emitCommandNotice(notice, "info", "handoff", `handed off to session ${toSessionId}`);
+		deps.refreshFooter();
+		deps.requestRender();
+	}
+
+	return { openResume, openTree, openMessagePicker: openMessagePickerState, startHandoff };
 }

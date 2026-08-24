@@ -127,6 +127,42 @@ The `/fork` command (`src/domains/session/tree/fork.ts:forkFromParentTurn`) init
 3. Traces ancestry up to `parentTurnId` and copies exactly the active path entries (excluding later unanchored sidecars) into the new session ledger.
 4. Stamps `parentSession` and `parentTurnId` in the new session header.
 
+### Handoff (`/handoff <goal>`)
+
+`/handoff` mints a successor session seeded with a reviewed document describing
+what the current session settled. It is a session operation and only that: it
+writes no memory promotion candidate, touches no memory record, and never calls
+the task-memory bank.
+
+The rule that makes the document trustworthy is read-ledger validation. Clio folds
+this session's persisted `read`, `edit`, `write`, `ls`, `find`, `grep`, and
+`artifact` tool calls (plus its `fileEntry` records) into a set of
+workspace-relative paths, through `filterEntriesToActivePath` so an abandoned
+`/tree` branch contributes nothing, exactly as the task board folds its own inputs.
+Every path the extraction round names is checked against that set and never against
+the filesystem. A file that exists on disk but that this session never opened is
+still an invention, so it is dropped and listed in the review document under
+`dropped (not in this session's read ledger)`.
+
+Extracted decisions merge with the session's settled decision board
+(`src/domains/session/decision-board.ts`); board entries win on conflict and are
+marked as settled. Superseded board decisions are history and do not travel.
+
+On accept, the new session opens with one `custom` entry of type `handoffSeed`
+carrying the reviewed document, the originating session id, and the goal. It
+projects into the model's replay as one user-role context message labelled as a
+handoff from the named session, on the same seam compaction and branch summaries
+use; it is never written as a fabricated user turn. The old session's
+`skillActivation` entries are replayed into the new session so loaded skills carry
+forward. The old session gains exactly one `custom` entry of type `handoffNote`
+recording the target session id, and is otherwise untouched. Esc during review
+cancels the whole handoff with nothing written in either session.
+
+The extraction round itself runs on the out-of-turn seam `/btw` uses: one call
+against the session's live target and model, the compiled message history as
+read-only input, no tools, and no entry in the ledger. Its provider usage is
+reported to `/cost` under a handoffs row and excluded from the turn count.
+
 ### Streaming Turn Settlement During Session Transitions
 
 When an operator issues `/new`, `/resume`, `/tree`, or `/fork` while an assistant turn is actively streaming, `settleChatBeforeSessionSwitch` (`src/interactive/session-switch-settlement.ts`) cancels the in-flight stream and awaits completion. This guarantees that partial assistant records and completed tool executions seal cleanly into the active session ledger before the session writer is replaced, preventing orphaned records in new sessions or unanswered prompts in original sessions (#114). Synchronous session transitions when chat is idle continue to execute immediately.

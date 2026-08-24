@@ -112,6 +112,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openCost: () => void;
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;
+	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
+	startHandoff: (goal: string) => void;
 	openContextView: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
@@ -345,6 +347,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		openCost: deps.openCost,
 		openSideQuestion: deps.openSideQuestion,
+		startHandoff: deps.startHandoff,
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
 		openDecisions: deps.openDecisions,

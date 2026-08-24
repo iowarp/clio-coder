@@ -168,6 +168,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/settings` | `/settings [section]` | Open interactive settings |
 | `/resume` | `/resume` | Resume a past session |
 | `/new` | `/new` | Start a fresh session |
+| `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
@@ -204,6 +205,37 @@ rather than queued, because a side question answered after the run it was asked
 during has already missed its moment. The round's token usage still shows in
 `/cost`, labeled as a side question, because it was a real call and cost real
 money; it is deliberately not counted as a turn.
+
+`/handoff <goal>` carries this session's working state into a fresh session for a
+goal the operator states. The goal is required and gated: a goal shorter than 12
+characters is refused, and so is one of a small stoplist of non-goals such as
+"continue", "next", or "resume". Both refusals name the rule they enforce, because
+"keep going" is exactly the instruction a handoff exists to replace.
+
+One model round then runs on the same out-of-turn seam `/btw` uses. It reads the
+compiled message history the next turn would send, sends no tools, and answers
+with JSON validated against a fixed response schema of decisions, facts, files,
+commands, and open questions. Every list and every string is bounded; output over
+a bound is truncated with a visible marker and the document names each bound that
+fired, so nothing is cut silently and an over-eager answer is never a refusal.
+
+Every file path the model names is checked against this session's read ledger and
+never against the filesystem. Paths the session did not touch are dropped and
+listed in the document under their own heading so the operator can see what the
+model invented. Extracted decisions are merged with the session's settled decision
+board, and the board wins. The result is one Markdown document opened for review:
+Enter accepts it, `e` hands it to `$EDITOR`, and Esc cancels the whole handoff with
+nothing written anywhere.
+
+On accept, Clio mints a new session, writes the reviewed document into it as
+bounded data labelled as a handoff from the old session id, and replays the old
+session's skill activations so loaded skills carry forward. The document is never
+written as a fabricated user turn. The old session is left untouched apart from one
+terminal note recording the target session id. A handoff is a session operation
+throughout: it writes no memory promotion candidate and never calls the task-memory
+bank. `/handoff` during an in-flight turn is refused with a notice rather than
+queued, because a document summarizing a session that is still moving would be
+wrong by the time it was read.
 
 The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list.
 

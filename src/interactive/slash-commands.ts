@@ -59,6 +59,8 @@ type SlashCommandVariant =
 	| { kind: "delegate-usage" }
 	| { kind: "btw"; question: string }
 	| { kind: "btw-usage" }
+	| { kind: "handoff"; goal: string }
+	| { kind: "handoff-usage" }
 	| { kind: "agents" }
 	| { kind: "cost" }
 	| { kind: "context-view" }
@@ -389,6 +391,13 @@ export interface SlashCommandContext {
 	 * answer.
 	 */
 	openSideQuestion: (question: string) => void;
+	/**
+	 * `/handoff <goal>`: extract this session's working state for a stated goal,
+	 * review the document, and seed a successor session with it. A session
+	 * operation only. It writes no memory promotion candidate and never calls
+	 * the task-memory bank.
+	 */
+	startHandoff: (goal: string) => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
@@ -1280,6 +1289,29 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUsage("new", { kind: "new" }),
 		handle(_command, ctx) {
 			ctx.startNewSession();
+		},
+	},
+	{
+		name: "handoff",
+		description: "Hand this session's working state to a fresh session for a stated goal",
+		group: "Sessions",
+		kinds: ["handoff", "handoff-usage"],
+		args: {
+			positionals: [{ name: "goal", required: true, rest: true }],
+		},
+		fromArgs(parsed) {
+			const goal = parsed.rest?.trim() ?? "";
+			if (parsed.error || goal.length === 0) return { kind: "handoff-usage" };
+			return { kind: "handoff", goal };
+		},
+		handle(command, ctx) {
+			if (command.kind === "handoff-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "handoff");
+				if (entry) ctx.notice("info", usageNotice(entry));
+				return;
+			}
+			if (command.kind !== "handoff") return;
+			ctx.startHandoff(command.goal);
 		},
 	},
 	{

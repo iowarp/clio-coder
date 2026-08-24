@@ -42,6 +42,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "observability"
 	| "onContextClear"
 	| "onForkSession"
+	| "onNewSession"
 	| "onResumeSession"
 	| "onSelectModel"
 	| "providers"
@@ -78,6 +79,12 @@ export interface OverlayLifecycleRuntimeDeps {
 	chatPanel: import("./chat-panel.js").ChatPanel;
 	/** Clears the transcript and every view folded alongside it; the session overlays call it before a replay. */
 	resetTranscript: () => void;
+	/**
+	 * Stop and restart the terminal around a child process that owns the screen.
+	 * `/handoff` uses it for the external editor, the same way the composer's
+	 * own `$EDITOR` opener does.
+	 */
+	suspendTerminal: <T>(run: () => T) => T;
 	io: import("./slash-commands.js").RunIo;
 	readStructuredEntries: (sessionId: string) => import("../domains/session/index.js").SessionEntry[];
 	announceTaskMemorySeedOffer: () => void;
@@ -134,6 +141,8 @@ export interface OverlayLifecycleController {
 	openViewOverlayState(initialFilter?: string): void;
 	/** `/btw <question>`: one side-question round rendered in its own overlay. */
 	openSideQuestionOverlayState(question: string): void;
+	/** `/handoff <goal>`: extract, review, and seed a successor session. */
+	startHandoffState(goal: string): void;
 	openModelOverlayState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(): void;
@@ -327,6 +336,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		getSlashNotice: () => deps.getSlashContext().notice,
 		...(deps.app.onResumeSession ? { onResumeSession: deps.app.onResumeSession } : {}),
 		...(deps.app.onForkSession ? { onForkSession: deps.app.onForkSession } : {}),
+		...(deps.app.onNewSession ? { onNewSession: deps.app.onNewSession } : {}),
+		...(deps.app.getDecisionBoard ? { getDecisionBoard: deps.app.getDecisionBoard } : {}),
+		terminal: deps.terminal,
+		suspendTerminal: deps.suspendTerminal,
 		announceTaskMemorySeedOffer,
 		sessionUsage: deps.app.observability,
 		...(setLastTurnSummary ? { setLastTurnSummary } : {}),
@@ -394,6 +407,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const openSideQuestionOverlayState = overlayGeneralOpeners.openSideQuestion;
+	const startHandoffState = overlaySessions.startHandoff;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 
 	return {
@@ -414,6 +428,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openSideQuestionOverlayState,
+		startHandoffState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,

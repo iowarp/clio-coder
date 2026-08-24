@@ -34,6 +34,7 @@ function slashContext(sink: { opened: string[]; notices: string[]; submitted: st
 		listDelegationAgents: () => [],
 		openCost: () => undefined,
 		openSideQuestion: (question) => sink.opened.push(`btw:${question}`),
+		startHandoff: () => {},
 		openContextView: () => undefined,
 		openTasks: () => undefined,
 		openDecisions: () => undefined,

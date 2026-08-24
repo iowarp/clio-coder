@@ -31,6 +31,13 @@ import type {
 	ThinkingLevelChangeEntry,
 	WorkerRunEntry,
 } from "../domains/session/entries.js";
+import {
+	HANDOFF_NOTE_CUSTOM_TYPE,
+	HANDOFF_SEED_CUSTOM_TYPE,
+	handoffSeedContextText,
+	isHandoffNoteData,
+	isHandoffSeedData,
+} from "../domains/session/handoff.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import {
 	type BashExecutionMessage,
@@ -795,11 +802,18 @@ function rendersCustomEntry(entry: CustomEntry): boolean {
 	if (entry.display === false) return false;
 	if (entry.customType === "retryStatus") return true;
 	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") return true;
+	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE || entry.customType === HANDOFF_NOTE_CUSTOM_TYPE) return true;
 	return entry.display === true;
 }
 
 function renderCustomEntry(entry: CustomEntry, width: number): string[] {
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width);
+	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
+		return wrapTextWithAnsi(styleTaggedNotice(`[handoff] carried from session ${entry.data.fromSessionId}`), width);
+	}
+	if (entry.customType === HANDOFF_NOTE_CUSTOM_TYPE && isHandoffNoteData(entry.data)) {
+		return wrapTextWithAnsi(styleTaggedNotice(`[handoff] handed off to session ${entry.data.toSessionId}`), width);
+	}
 	// "finishContractAdvisory" is the pre-middleware name for the same entry
 	// shape; older session ledgers still carry it.
 	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") {
@@ -1039,7 +1053,15 @@ export function buildReplayAgentMessagesFromTurns(
 			case "skillActivation":
 				appendContextMessage(out, "user", skillActivationContextText(entry), entry.timestamp);
 				break;
+			// The one custom entry that becomes a model message. `/handoff` seeds a
+			// new session with a reviewed document, and the seed is the first thing
+			// the model reads there; it is labelled by its origin session and
+			// carried as data, never as a user turn the operator did not write.
 			case "custom":
+				if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
+					appendContextMessage(out, "user", handoffSeedContextText(entry.data), entry.timestamp);
+				}
+				break;
 			case "modelChange":
 			case "thinkingLevelChange":
 			case "fileEntry":

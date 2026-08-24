@@ -34,6 +34,8 @@ export interface CostRow {
 	apiCalls: number;
 	/** Calls in this row that were `/btw` side questions rather than turns. */
 	sideQuestions: number;
+	/** Calls in this row that were `/handoff` extraction rounds rather than turns. */
+	handoffs: number;
 	cost: CostAggregate;
 }
 
@@ -64,6 +66,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			existing.row.reasoningTokens += entry.reasoningTokens;
 			existing.row.apiCalls += entry.apiCalls ?? 1;
 			if (entry.label === "side-question") existing.row.sideQuestions += 1;
+			if (entry.label === "handoff") existing.row.handoffs += 1;
 			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
 			addResponseModelIdObservationCounts(
 				existing.responseModelIdObservationCounts,
@@ -85,6 +88,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				reasoningTokens: entry.reasoningTokens,
 				apiCalls: entry.apiCalls ?? 1,
 				sideQuestions: entry.label === "side-question" ? 1 : 0,
+				handoffs: entry.label === "handoff" ? 1 : 0,
 			},
 			requestedModelIds: new Set(entry.requestedModelIds),
 			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
@@ -122,6 +126,7 @@ function sumRows(
 			reasoningTokens: acc.reasoningTokens + row.reasoningTokens,
 			apiCalls: acc.apiCalls + row.apiCalls,
 			sideQuestions: acc.sideQuestions + row.sideQuestions,
+			handoffs: acc.handoffs + row.handoffs,
 		}),
 		{
 			runs: 0,
@@ -133,6 +138,7 @@ function sumRows(
 			reasoningTokens: 0,
 			apiCalls: 0,
 			sideQuestions: 0,
+			handoffs: 0,
 		},
 	);
 }
@@ -185,9 +191,10 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 	// deliberately not a turn: it never entered the session, so `turns` above
 	// excludes it and this row says how much of the spend sat beside the session.
 	return kvBlock([
-		["turns", formatTokens(totals.runs - totals.sideQuestions)],
+		["turns", formatTokens(totals.runs - totals.sideQuestions - totals.handoffs)],
 		["model calls", formatTokens(totals.apiCalls)],
 		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
+		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
@@ -206,9 +213,10 @@ function modelBlock(row: CostRow): string[] {
 	return kvBlock([
 		["requested model ids", row.requestedModelIds.join(", ")],
 		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
-		["turns", formatTokens(row.runs - row.sideQuestions)],
+		["turns", formatTokens(row.runs - row.sideQuestions - row.handoffs)],
 		["model calls", formatTokens(row.apiCalls)],
 		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
+		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],

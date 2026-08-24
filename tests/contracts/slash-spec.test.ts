@@ -81,6 +81,7 @@ describe("contracts/slash-spec", () => {
 			listDelegationAgents: () => [],
 			openCost: () => opened.push("cost"),
 			openSideQuestion: (question) => opened.push(`btw:${question}`),
+			startHandoff: (goal) => opened.push(`handoff:${goal}`),
 			openContextView: () => opened.push("context"),
 			openTasks: () => opened.push("tasks"),
 			openDecisions: () => opened.push("decisions"),
@@ -464,6 +465,14 @@ describe("contracts/slash-spec", () => {
 			["/delegate", { kind: "delegate-usage" }],
 			["/delegate agent", { kind: "delegate-usage" }],
 
+			// handoff: the rest positional is greedy, so the whole line is one goal.
+			// The goal gate itself lives in the domain, not in the parser: /handoff
+			// parses a short goal and refuses it downstream with the rule named.
+			["/handoff finish the terminal lease work", { kind: "handoff", goal: "finish the terminal lease work" }],
+			["/handoff continue", { kind: "handoff", goal: "continue" }],
+			["/handoff", { kind: "handoff-usage" }],
+			["/handoff    ", { kind: "handoff-usage" }],
+
 			// btw: the rest positional is greedy, so the whole line is one question
 			["/btw which file did the lease land in?", { kind: "btw", question: "which file did the lease land in?" }],
 			["/btw", { kind: "btw-usage" }],
@@ -714,6 +723,7 @@ describe("contracts/slash-spec", () => {
 			"settings",
 			"resume",
 			"new",
+			"handoff",
 			"tree",
 			"fork",
 			"export",

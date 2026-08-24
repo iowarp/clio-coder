@@ -57,6 +57,18 @@ export interface SideQuestionInput {
 	onDelta?: (partialText: string) => void;
 }
 
+/**
+ * One out-of-turn round against the session's live runtime. `/btw` and
+ * `/handoff` are both this: read the compiled history the next turn would see,
+ * append one instruction, send no tools, and never touch the turn state
+ * machine. Only the system prompt and the appended message differ.
+ */
+export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question"> {
+	systemPrompt: string;
+	/** The one message appended to the read-only copy of the history. */
+	userText: string;
+}
+
 export interface SideQuestionResult {
 	text: string;
 	usage: SideQuestionUsage | null;
@@ -112,15 +124,21 @@ function textFromMessage(message: unknown): string {
  * in the overlay.
  */
 export async function runSideQuestion(input: SideQuestionInput): Promise<SideQuestionResult> {
+	const { question, ...rest } = input;
+	return runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText: question });
+}
+
+/** The shared round. See {@link OutOfTurnRoundInput}. */
+export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
 	const options: Record<string, unknown> = { maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS };
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.signal !== undefined) options.signal = input.signal;
 
 	const context = {
-		systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT,
+		systemPrompt: input.systemPrompt,
 		messages: [
 			...input.messages,
-			{ role: "user", content: [{ type: "text", text: input.question }], timestamp: Date.now() },
+			{ role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() },
 		],
 	};
 
