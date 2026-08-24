@@ -3,8 +3,7 @@
 
 This adapter intentionally stays thin: it loads the public HumanEval dataset,
 runs Clio once or more per task in isolated run directories, and grades the
-resulting completions against the HumanEval tests. It can run directly or emit a
-normal `clio-coder eval` task file so the Clio eval harness is exercised too.
+resulting completions against the HumanEval tests.
 
 External data is not vendored. Use `ensure-data`, pass `--data` pointing at a
 HumanEval.jsonl(.gz), or install OpenAI's `human-eval` package from
@@ -21,7 +20,6 @@ import gzip
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -36,21 +34,16 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADAPTER_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get("HUMANEVAL_DATA", ADAPTER_DIR / "data" / "HumanEval.jsonl.gz"))
-DEFAULT_RUN_ROOT = ADAPTER_DIR / "runs" / "eval-tasks"
 DATASET = "openai/human-eval"
 DATASET_SPLIT = "test"
 HUMANEVAL_URL = "https://raw.githubusercontent.com/openai/human-eval/master/data/HumanEval.jsonl.gz"
 CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from clio_usage import (
-    emit_observed_usage,
-    fold_message_end_usage,
-    receipt_total_tokens,
-    run_id_from_events,
-)
+from clio_usage import fold_message_end_usage, receipt_total_tokens, run_id_from_events
+from clio_process import run_json_command
 from result_manifest import target_profile, write_result_manifest
-from uv_command import uv_python_cmd, uv_script_cmd
+from uv_command import uv_python_cmd
 
 PYTHON_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
@@ -240,25 +233,12 @@ def run_clio(
         cmd.extend(["--model", model])
     cmd.append(prompt)
     started = time.monotonic()
-    timed_out = False
-    stderr = ""
-    with events_path.open("w", encoding="utf-8") as stdout:
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=cwd,
-                env={**os.environ},
-                stdout=stdout,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=timeout,
-            )
-            code = proc.returncode
-            stderr = proc.stderr
-        except subprocess.TimeoutExpired as exc:
-            code = 124
-            timed_out = True
-            stderr = str(exc)
+    code, timed_out, stderr = run_json_command(
+        cmd,
+        cwd=cwd,
+        events_path=events_path,
+        timeout=timeout,
+    )
     return {
         "exit": code,
         "timed_out": timed_out,
@@ -408,10 +388,6 @@ def generate_attempt(
     events_path = run_dir / "events" / "clio.jsonl"
     run_id = run_id_from_events(events_path)
     observed_usage = fold_message_end_usage(events_path)
-    # The parent `clio-coder eval` sees only this adapter's stdout, so the usage this
-    # adapter observed is republished there. Nothing is written when nothing was
-    # observed: the eval must report unmeasured rather than a zero.
-    emit_observed_usage(observed_usage)
     stream_tokens = None if observed_usage is None else observed_usage["totalTokens"]
     metric.update(
         {
@@ -895,100 +871,6 @@ def grade_task(args: argparse.Namespace) -> int:
     return 0 if result.get("passed") else 1
 
 
-def quote_command(parts: list[str]) -> str:
-    return " ".join(shlex.quote(str(part)) for part in parts)
-
-
-def maybe_data_args(data: str | None) -> list[str]:
-    if data:
-        return ["--data", data]
-    if DEFAULT_DATA.exists():
-        return ["--data", str(DEFAULT_DATA)]
-    return []
-
-
-def generate_tasks(args: argparse.Namespace) -> int:
-    problems, source, source_type = load_problems(args.data)
-    chosen = selected_problems(problems, args.task_id, args.limit, args.offset)
-    if not chosen:
-        print("no HumanEval tasks matched", file=sys.stderr)
-        return 2
-    script = Path(__file__).resolve()
-    run_root = Path(args.run_root)
-    data_args = maybe_data_args(args.data)
-    uv_packages = (
-        ["human-eval @ git+https://github.com/openai/human-eval.git"]
-        if args.evaluator == "official" or source_type == "human_eval_package"
-        else []
-    )
-    lines = ["version: 1", "tasks:"]
-    for problem in chosen:
-        task_id = problem["task_id"]
-        task_name = f"humaneval-{task_slug(task_id)}"
-        out_dir = run_root / task_name
-        prompt = textwrap.dedent(
-            f"""\
-            Run OpenAI HumanEval task {task_id} through Clio and grade the generated completion.
-
-            Dataset source: {source}
-            Entry point: {problem.get('entry_point')}
-            """
-        )
-        setup = [
-            *uv_script_cmd(script, uv_packages),
-            "run-task",
-            *data_args,
-            "--task-id",
-            task_id,
-            "--out",
-            str(out_dir),
-            "--timeout",
-            str(args.timeout),
-            "--force",
-        ]
-        if args.target:
-            setup.extend(["--target", args.target])
-        if args.model:
-            setup.extend(["--model", args.model])
-        if args.dry_run:
-            setup.append("--dry-run")
-        verifier = [
-            *uv_script_cmd(script, uv_packages),
-            "grade-task",
-            *data_args,
-            "--task-id",
-            task_id,
-            "--run",
-            str(out_dir),
-            "--timeout",
-            str(args.grade_timeout),
-            "--evaluator",
-            args.evaluator,
-        ]
-        lines.extend(
-            [
-                f"  - id: {task_name}",
-                "    prompt: |",
-                *[f"      {line}" for line in prompt.splitlines()],
-                "    cwd: .",
-                "    setup:",
-                f"      - {json.dumps(quote_command(setup))}",
-                "    verifier:",
-                f"      - {json.dumps(quote_command(verifier))}",
-                f"    timeoutMs: {int(args.timeout + args.grade_timeout + 30) * 1000}",
-                "    tags:",
-                "      - humaneval",
-                "      - python",
-                f"      - task-{task_number(task_id)}",
-            ]
-        )
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {len(chosen)} HumanEval eval task(s) to {out}", file=sys.stderr)
-    return 0
-
-
 def add_data_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data", default=None, help=f"HumanEval.jsonl(.gz); default: {DEFAULT_DATA} or human_eval package")
 
@@ -1037,15 +919,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_data_arg(inspect)
     inspect.set_defaults(func=inspect_data)
 
-    tasks = sub.add_parser("generate-tasks", help="write a clio-coder eval YAML task file")
-    add_data_arg(tasks)
-    add_selection_args(tasks)
-    tasks.add_argument("--out", required=True)
-    tasks.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT))
-    add_clio_args(tasks)
-    add_grade_args(tasks)
-    tasks.set_defaults(func=generate_tasks)
-
     run = sub.add_parser("run", help="run and grade selected HumanEval tasks directly")
     add_data_arg(run)
     add_selection_args(run)
@@ -1092,7 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command in {"generate-tasks", "run", "run-task"} and not args.dry_run and not args.target:
+    if args.command in {"run", "run-task"} and not args.dry_run and not args.target:
         parser.error(
             f"{args.command} requires an explicit --target (or use --dry-run to avoid calling Clio)"
         )

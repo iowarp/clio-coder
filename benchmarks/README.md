@@ -1,77 +1,53 @@
 # Clio benchmarks
 
-Three things live here, and nothing else: the public community benchmark
-adapters, the committed results, and the internal drivers that exercise the
-real binary outside CI. Datasets, run output, caches, and virtualenvs are
-ignored by `benchmarks/.gitignore` and never tracked.
+This tree is an external consumer of Clio Coder. It does not add benchmark
+protocols to `src/`, use `clio-coder eval`, or run as part of product CI.
 
 ```text
 benchmarks/
-  community/   Python adapters for SWE-bench Lite, Terminal-Bench, SciCode, HumanEval
-  soak/        clio-coder eval suites that measure Clio's machinery under load
-  internal/    operator-run live drivers, the PTY driver, and SKILL.md for agents
-  results/     sanitized result manifests: results/<suite>/<run-id>/{manifest,summary}.json
+  community/  adapters and upstream scorers for public benchmark datasets
+  internal/   isolated live drivers, harness self-checks, and campaign output
 ```
 
-The eval engine itself ships in `src/domains/eval`; `clio-coder eval run` is
-the runner for every YAML suite in this tree.
+Datasets, virtual environments, caches, model streams, transcripts, container
+output, and result directories are ignored by `benchmarks/.gitignore`. A run
+must never dirty the release worktree. Harness source, suite definitions, and
+small deterministic self-test fixtures are versioned.
 
-## Which one to run
+## Boundary
 
-| Question | Run |
-| --- | --- |
-| Does Clio solve public coding and science tasks? | A community adapter (`community/README.md`). The adapter fetches the dataset, hands each task to `clio-coder run --json`, and scores the output with the upstream grader. |
-| Does Clio's machinery hold up under a real model (receipts seal and authenticate, outcome matches exit, no orphans, usage counted once)? | `clio-coder eval run --suite benchmarks/soak/clio-soak.yaml --target <id> --model <wireId> --clio-coder-entry dist/cli/index.js` |
-| Does a configured target answer through Clio at all? | `npm run live:smoke -- --target <id>` |
-| Does the model route and dispatch the way the docs claim? | `npm run live:recon`, `npm run live:fleet-dispatch` (`internal/README.md`) |
-| What does a person see in the TUI for this prompt? | `npm run live:tui -- --target <id> --workspace <dir> --send "<text>"` |
+Community adapters own only what Clio cannot: loading a public dataset,
+preparing a task workspace, and invoking the upstream scorer. The internal
+harness owns binary identity, isolated state, process cleanup, event and usage
+collection, receipts, provenance, and aggregation. Clio itself exposes its
+normal CLI, JSONL, sessions, and receipts; product source has no benchmark-only
+wire marker or scenario metric.
 
-Every model-running command picks its configured target explicitly with
-`--target <id>` from the operator's `settings.yaml` (`clio-coder targets`). The
-community Terminal-Bench adapter is the documented exception: its container
-has no operator settings, so the harness supplies explicit main and worker
-endpoints and the adapter writes the container-local targets. None of these
-runs under `npm test` or `npm run ci`.
+The two result axes stay separate:
 
-## Running a community adapter
+- `harnessStatus`: whether the run is valid evidence (`valid`, `invalid`, or
+  `blocked`).
+- `taskStatus`: what the upstream grader decided (`pass`, `fail`, `timeout`, or
+  `not_scored`).
 
-Run the Python adapters with `uv run --no-project` so a benchmark command never
-captures a machine-specific interpreter path:
+A valid wrong answer is a model failure, not a harness error.
+
+## Commands
+
+Deterministic harness checks, deliberately outside `npm run ci`:
 
 ```sh
-uv run --no-project --with datasets --with swebench \
-  python benchmarks/community/swe-bench-lite/swebench_clio.py \
-  --target <id> \
-  --instances pytest-dev__pytest-6116 \
-  --out benchmarks/community/swe-bench-lite/runs/smoke
-
-uv run --no-project python benchmarks/community/scicode/scicode_clio.py inspect-data \
-  --data /path/to/scicode/problems_all.jsonl
-
-uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
-  --target <id> \
-  --limit 5 \
-  --out benchmarks/community/human-eval/runs/smoke
+npm run benchmark:check
 ```
 
-SWE-bench, SciCode, and HumanEval require `--target <id>` for commands that
-will start a Clio model run. `--model <id>` remains an optional explicit
-override. Offline inspection, grading, recomputation, and dry-run commands do
-not require a target. `community/README.md` has the per-adapter detail,
-including the endpoint-based Terminal-Bench container setup.
+Real-model drivers use the built candidate and an explicit configured target:
 
-## Result manifests
-
-Tracked result records are small, portable JSON files:
-
-```text
-benchmarks/results/<suite>/<run-id>/manifest.json
-benchmarks/results/<suite>/<run-id>/summary.json
+```sh
+npm run build
+npm run live:smoke -- --target dynamo --model qwen3.8-27b --thinking off
+npm run live:tui -- --target dynamo --model qwen3.8-27b \
+  --workspace /path/to/throwaway-task --send "Solve the task and verify it."
 ```
 
-The manifest describes the suite, dataset, split, Clio version, commit, run
-date, model, target profile, resolved instance count, error count, artifact
-hashes, and notes. The summary contains the compact aggregate result for the
-same run. `results/README.md` has the convention; `results/context-replay/`
-holds the context-engine replay tables, generated by `clio-coder context
-replay`.
+See `community/README.md` for public scorers and `internal/README.md` for live
+isolation, herdr operation, and result artifacts.

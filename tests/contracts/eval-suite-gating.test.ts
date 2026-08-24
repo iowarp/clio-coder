@@ -3,9 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { shellQuote } from "../../src/core/shell-quote.js";
 import { evaluateGate } from "../../src/domains/eval/compare/gates.js";
-import { runExternalCommandRunner } from "../../src/domains/eval/runners/external-command.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteTaskV2, LoadedEvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
 import { runEvalSuiteV2 } from "../../src/domains/eval/suites/run.js";
@@ -36,21 +34,6 @@ function quietTask(id: string, assertions: EvalMetricAssertion[]): EvalSuiteTask
 		metrics: { collect: [] },
 		timeoutMs: 15_000,
 	};
-}
-
-function markerCommand(marker: Record<string, unknown> | null): string {
-	const script =
-		marker === null ? "process.stdout.write('no marker\\n')" : `console.log(${JSON.stringify(JSON.stringify(marker))})`;
-	return `${shellQuote(process.execPath)} -e ${shellQuote(script)}`;
-}
-
-function chaosTask(id: string, marker: Record<string, unknown> | null): EvalSuiteTaskV2 {
-	const task = quietTask(id, [
-		{ metric: "chaos.faultInjected", op: "eq", value: true },
-		{ metric: "chaos.exitCode", op: "eq", value: 130 },
-	]);
-	task.runner = { kind: "external-command", commands: [markerCommand(marker)], args: [] };
-	return task;
 }
 
 function intact(taskId: string, repeatIndex: number): EvalArtifactResultV4 {
@@ -93,53 +76,6 @@ function artifactWith(results: EvalArtifactResultV4[]): EvalArtifactV4 {
 }
 
 describe("contracts/eval suite gating", { concurrency: false }, () => {
-	it("folds one clean SIGINT chaos marker into canonical metrics and seed evidence", async () => {
-		const marker = {
-			type: "clio_soak_chaos",
-			seed: 481516,
-			faultInjected: true,
-			exitCode: 130,
-			orphanedChildren: 0,
-		};
-		const output = await runExternalCommandRunner(
-			{ kind: "external-command", commands: [markerCommand(marker)] } as never,
-			process.cwd(),
-			15_000,
-		);
-		strictEqual(output.metrics["chaos.seed"], 481516);
-		strictEqual(output.metrics["chaos.faultInjected"], true);
-		strictEqual(output.metrics["chaos.exitCode"], 130);
-		strictEqual(output.metrics["process.orphanedChildren"], 0);
-		strictEqual(output.artifacts.chaosSeed, "481516");
-	});
-
-	for (const testCase of [
-		{ name: "missing marker", marker: null, failureClass: "assertion_unresolved" },
-		{
-			name: "false fault injection",
-			marker: { type: "clio_soak_chaos", seed: 7, faultInjected: false, exitCode: 130, orphanedChildren: 0 },
-			failureClass: "assertion_failed",
-		},
-		{
-			name: "wrong nested exit",
-			marker: { type: "clio_soak_chaos", seed: 7, faultInjected: true, exitCode: 0, orphanedChildren: 0 },
-			failureClass: "assertion_failed",
-		},
-	] as const) {
-		it(`fails the SIGINT chaos contract for ${testCase.name}`, async () => {
-			const workspace = mkdtempSync(join(tmpdir(), "clio-eval-chaos-"));
-			try {
-				const artifact = await runEvalSuiteV2(loadedSuite(workspace, [chaosTask(testCase.name, testCase.marker)]), {
-					clioEntry: join(workspace, "unused-entry.js"),
-				});
-				strictEqual(artifact.results[0]?.pass, false);
-				strictEqual(artifact.results[0]?.failureClass, testCase.failureClass);
-			} finally {
-				rmSync(workspace, { recursive: true, force: true });
-			}
-		});
-	}
-
 	it("fails a task assertion whose metric this run never produced", async () => {
 		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-gating-"));
 		try {

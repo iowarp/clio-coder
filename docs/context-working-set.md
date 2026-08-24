@@ -5,7 +5,7 @@ The working set is the part of the session ledger the model actually receives on
 Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in `src/domains/session/entries.ts`, and the compaction stage in `src/interactive/turn-context.ts` (`runAutoCompact`).
 
 > [!WARNING]
-> This is an experimental community alpha surface. The default policy is `structural-v1`, chosen from the replay tables under `benchmarks/results/context-replay/`. `age-horizon` reproduces the selection Clio made before this layer existed and stays available.
+> This is an experimental community alpha surface. The default policy is `structural-v1`; `age-horizon` reproduces the selection Clio made before this layer existed and stays available.
 
 ## Vocabulary
 
@@ -188,7 +188,7 @@ These are tracked follow-ups, not available behavior:
 
 ## See also
 
-- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](commands-and-modes.md#working-set-replay), and the committed tables with the default-policy rule are under `benchmarks/results/context-replay/`.
+- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](commands-and-modes.md#working-set-replay). Generated replay tables are local artifacts rather than versioned benchmark results.
 - [context-engine.md](context-engine.md) for context window resolution, token accounting, and how this stage sits ahead of summary compaction.
 - [session-lifecycle.md](session-lifecycle.md) for the ledger format, active-path lineage, and branching.
 - [glossary.md](glossary.md) for the one-line definitions of these terms.

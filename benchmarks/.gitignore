@@ -1,14 +1,12 @@
 # Everything a benchmark run produces or downloads stays out of the tree.
-# benchmarks/results/<suite>/<run-id>/{manifest,summary}.json is the one
-# tracked result shape (see results/README.md).
+# Harness source, suite definitions, and small deterministic fixtures are the
+# only versioned benchmark material.
 data/
 runs/
+results/
+artifacts/
 .corpus-cache/
-.clio-coder-benchmark/
 .clio-coder-scicode/
-results/**/runs/
-results/**/*.jsonl
-results/**/*.log
 
 # Python bytecode and virtualenvs for the community adapters.
 __pycache__/

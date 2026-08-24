@@ -34,9 +34,6 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      # The SciCode adapter contract grades through `uv run`.
-      - name: Install uv
-        run: pipx install uv
       - run: npm ci --prefer-offline --no-audit --no-fund
       # The full gate on both lanes. On 22 this duplicates what push already
       # proved; on 24 it is the only signal the project gets.

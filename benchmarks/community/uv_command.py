@@ -1,6 +1,6 @@
 """Helpers for running benchmark Python commands through uv.
 
-Generated `clio-coder eval` task files should not bake in a developer's current
+Benchmark grader subprocesses should not bake in a developer's current
 interpreter path. These helpers produce portable `uv run --no-project ...`
 commands and honor UV_BIN for operators that pin a uv executable.
 """

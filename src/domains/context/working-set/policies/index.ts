@@ -3,10 +3,9 @@
  * replay-lite runner resolve the same object from the same settings value and
  * cannot drift into running different selections.
  *
- * `structural-v1` is the default; the replay tables under
- * benchmarks/results/context-replay/ put it ahead of `age-horizon` on
- * retention and ahead of the random control on precision. `age-horizon` stays
- * resolvable as the exact pre-layer selection.
+ * `structural-v1` is the default; internal replay studies put it ahead of
+ * `age-horizon` on retention and ahead of the random control on precision.
+ * `age-horizon` stays resolvable as the exact pre-layer selection.
  */
 
 import type { WorkingSetPolicy, WorkingSetPolicyId } from "../contract.js";

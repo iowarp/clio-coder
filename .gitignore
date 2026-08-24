@@ -7,12 +7,6 @@ dist/
 coverage/
 .claude/
 .clio-coder/
-.clio-coder-benchmark/
-# Soak fixtures are seeded repositories, and a fixture's command registry is
-# fixture source: a repo with no commands.yaml fails a code step by contract,
-# so an ignored registry would make the fixture untestable.
-!benchmarks/soak/fixtures/*/.clio-coder/
-!benchmarks/soak/fixtures/*/.clio-coder/**
 .codex
 .codex/
 .antigravitycli
@@ -29,7 +23,6 @@ scripts/orch/
 
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
 .superpowers/
-benchmarks/battletest
 CLIO-CODER.md
 CLAUDE.md
 AGENTS.md

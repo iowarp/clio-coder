@@ -1,8 +1,10 @@
-# SWE-bench Lite Clio adapter
+# SWE-bench Clio adapter
 
-`swebench_clio.py` generates SWE-bench Lite prediction files by cloning each
-selected instance, running `clio-coder run --json`, and extracting a source-only
-patch from the checkout.
+`swebench_clio.py` generates SWE-bench Lite, Verified, or full prediction files
+by cloning each selected instance, running `clio-coder run --json`, and
+extracting a source-only patch from the checkout. `--dataset` accepts `lite`,
+`verified`, or `full`; omitting it continues to select Lite. `--split` defaults
+to `test`.
 
 ## Generate Predictions
 
@@ -14,6 +16,10 @@ uv run --no-project --with datasets --with swebench \
   --out benchmarks/community/swe-bench-lite/runs/smoke \
   --timeout 1800
 ```
+
+For the 500 human-validated instances commonly used in published reports, add
+`--dataset verified`. `--all` still selects every row in the chosen dataset;
+it has no new environment-variable gate.
 
 `--target` is required and is forwarded to every `clio-coder run`; the adapter
 never inherits the operator's default target. Pass `--model <id>` as an
@@ -45,18 +51,6 @@ uv run --no-project python benchmarks/community/swe-bench-lite/recompute_patches
 ```
 
 This also refreshes `manifest.json` and `summary.json`.
-
-## SWE JSONL From Eval Artifacts
-
-When a task is run through `clio-coder eval`, export SWE-style JSONL with:
-
-```sh
-clio-coder eval report <evalId> --format swe-jsonl > predictions.jsonl
-```
-
-The JSONL records include `instance_id`, `model_name_or_path`, `model_patch`,
-and pass status fields. Use this path when a benchmark suite is represented as
-a Clio eval artifact rather than a direct SWE-bench adapter run.
 
 Official SWE-bench resolution still requires the external SWE-bench harness.
 The adapter manifest records generation counts and artifact hashes only.

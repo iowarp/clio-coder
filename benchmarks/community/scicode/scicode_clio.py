@@ -3,8 +3,7 @@
 
 The adapter has three jobs:
   1. Inspect the local SciCode prompt corpus and report whether scoring data is present.
-  2. Generate a normal `clio-coder eval` task file whose setup command runs Clio on a
-     SciCode problem and whose verifier command grades the generated code.
+  2. Run Clio directly on each sub-step of one SciCode problem.
   3. Grade a generated problem by executing each sub-step against official-style
      target values.
 
@@ -21,7 +20,6 @@ import ast
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -33,13 +31,10 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-# The SciCode corpus and its 1 GB target artifact are external and ignored, but
-# a checkout that already has them under benchmarks/data/science-problems is the
-# common case. Defaulting to the adapter directory made a repo holding the data
-# report faithful_scoring_ready: false, which reads as missing data rather than
-# a path the adapter never looked at.
+# The SciCode corpus and its 1 GB target artifact are external and ignored next
+# to this adapter.
 SCICODE_DATA_DIR = Path(
-    os.environ.get("SCICODE_DATA_DIR", REPO_ROOT / "benchmarks" / "data" / "science-problems")
+    os.environ.get("SCICODE_DATA_DIR", REPO_ROOT / "benchmarks" / "community" / "scicode" / "data")
 )
 ADAPTER_DIR = Path(__file__).resolve().parent
 
@@ -70,19 +65,20 @@ CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 # ModuleNotFoundError before it executes a single line of generated code, which
 # reads as a scientific-code failure when it is an environment failure.
 SCICODE_PACKAGE = os.environ.get(
-    "SCICODE_PIP_SPEC", "scicode @ git+https://github.com/scicode-bench/SciCode.git"
+    "SCICODE_PIP_SPEC",
+    "scicode @ git+https://github.com/scicode-bench/SciCode.git@e3158ea011d4235245a547460d3688d7ccbf9900",
 )
-GRADER_PACKAGES = ("h5py", "numpy", "scipy")
+# SciCode currently leaves its full dependency graph unpinned. Its selected
+# `datasets` release still imports PyExtensionType, which pyarrow 21 removed.
+# Pin the last compatible pyarrow so an upstream environment break is not
+# misreported as a generated-science failure.
+GRADER_PACKAGES = ("h5py", "numpy", "scipy", "pyarrow==20.0.0")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from clio_usage import (
-    add_usage,
-    emit_observed_usage,
-    empty_usage,
-    fold_message_end_usage,
-)
+from clio_usage import add_usage, empty_usage, fold_message_end_usage
+from clio_process import run_json_command
 from result_manifest import target_profile, write_result_manifest
-from uv_command import uv_python_cmd, uv_script_cmd
+from uv_command import uv_python_cmd
 
 SPECIAL_STEP_SNIPPETS = {
     "13.6": DEFAULT_DATA.parent / "13.6.txt",
@@ -172,14 +168,6 @@ def problem_by_id(rows: list[dict[str, Any]], problem_id: str) -> dict[str, Any]
         if str(row.get("problem_id")) == str(problem_id):
             return row
     raise KeyError(f"problem id not found: {problem_id}")
-
-
-def selected_problems(rows: list[dict[str, Any]], ids: list[str], limit: int) -> list[dict[str, Any]]:
-    if ids:
-        selected = [problem_by_id(rows, problem_id) for problem_id in ids]
-    else:
-        selected = rows
-    return selected[:limit] if limit > 0 else selected
 
 
 def step_number(step: dict[str, Any]) -> str:
@@ -314,95 +302,6 @@ def render_prompt(
     )
 
 
-def quote_command(parts: list[str]) -> str:
-    return " ".join(shlex.quote(part) for part in parts)
-
-
-def yaml_block(text: str, indent: int) -> str:
-    prefix = " " * indent
-    if text == "":
-        return f"{prefix}|\n{prefix}\n"
-    return f"{prefix}|\n" + "\n".join(f"{prefix}{line}" for line in text.splitlines()) + "\n"
-
-
-def generate_tasks(args: argparse.Namespace) -> int:
-    data = Path(args.data)
-    rows = read_jsonl(data)
-    problems = selected_problems(rows, args.problem_id, args.limit)
-    script = Path(__file__).resolve()
-    run_root = Path(args.run_root)
-    lines = ["version: 1", "tasks:"]
-    for problem in problems:
-        problem_id = str(problem["problem_id"])
-        task_id = f"scicode-{problem_id}"
-        prompt = textwrap.dedent(
-            f"""\
-            Run SciCode problem {problem_id} through Clio, then grade every sub-step.
-
-            Dataset: {data}
-            Problem: {problem.get('problem_name')}
-            """
-        )
-        out_dir = run_root / task_id
-        setup = [
-            *uv_script_cmd(script),
-            "run-problem",
-            "--data",
-            str(data),
-            "--problem-id",
-            problem_id,
-            "--out",
-            str(out_dir),
-            "--timeout",
-            str(args.timeout),
-        ]
-        setup.extend(["--target", args.target])
-        if args.model:
-            setup.extend(["--model", args.model])
-        if args.with_background:
-            setup.append("--with-background")
-        verifier = [
-            *uv_script_cmd(script),
-            "grade-problem",
-            "--data",
-            str(data),
-            "--problem-id",
-            problem_id,
-            "--run",
-            str(out_dir),
-        ]
-        if args.h5py_file:
-            verifier.extend(["--h5py-file", str(args.h5py_file)])
-        if args.references:
-            verifier.extend(["--references", str(args.references)])
-        lines.extend(
-            [
-                f"  - id: {task_id}",
-                "    prompt: |",
-                *[f"      {line}" for line in prompt.splitlines()],
-                "    cwd: .",
-                "    setup:",
-                f"      - {json.dumps(quote_command(setup))}",
-                "    verifier:",
-                f"      - {json.dumps(quote_command(verifier))}",
-                # `timeoutMs` is applied per command, and the setup command runs
-                # Clio once per sub-step with its own `--timeout`. Budgeting one
-                # step's timeout kills every multi-step problem partway through,
-                # which reads as a model failure rather than a harness cap.
-                f"    timeoutMs: {(int(args.timeout) * max(1, len(problem.get('sub_steps', []))) + 60) * 1000}",
-                "    tags:",
-                "      - scicode",
-                "      - science",
-                f"      - problem-{problem_id}",
-            ]
-        )
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {len(problems)} SciCode eval task(s) to {out}", file=sys.stderr)
-    return 0
-
-
 def inspect_data(args: argparse.Namespace) -> int:
     data = Path(args.data)
     rows = read_jsonl(data)
@@ -436,31 +335,18 @@ def run_clio_step(
     timeout: int,
     target: str,
     model: str | None,
-    agent: str | None = None,
 ) -> dict[str, Any]:
     cmd = [CLIO, "--no-context-files", "run", "--json", "--target", target]
     if model:
         cmd.extend(["--model", model])
-    # Without --agent a sub-step is one main-agent turn: no worker is spawned
-    # and no dispatch is recorded. Naming a recipe dispatches the step to a
-    # worker instead, which is what makes the run comparable to how an
-    # operator would actually delegate the work.
-    if agent:
-        cmd.extend(["--agent", agent])
     cmd.append(prompt)
-    env = {**os.environ}
     started = time.monotonic()
-    timed_out = False
-    stderr = ""
-    with events_path.open("w", encoding="utf-8") as stdout:
-        try:
-            proc = subprocess.run(cmd, cwd=cwd, env=env, stdout=stdout, stderr=subprocess.PIPE, text=True, timeout=timeout)
-            code = proc.returncode
-            stderr = proc.stderr
-        except subprocess.TimeoutExpired as exc:
-            code = 124
-            timed_out = True
-            stderr = str(exc)
+    code, timed_out, stderr = run_json_command(
+        cmd,
+        cwd=cwd,
+        events_path=events_path,
+        timeout=timeout,
+    )
     return {
         "exit": code,
         "timed_out": timed_out,
@@ -587,7 +473,6 @@ def run_problem(args: argparse.Namespace) -> int:
                     timeout=args.timeout,
                     target=args.target,
                     model=args.model,
-                    agent=getattr(args, "agent", None),
                 )
                 # A step's code may arrive two ways: the agent edits
                 # solution.py with a tool, or it answers with a code block and
@@ -617,26 +502,22 @@ def run_problem(args: argparse.Namespace) -> int:
             if failures and not args.continue_on_error:
                 break
     (run_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n", encoding="utf-8")
-    # A parent `clio-coder eval` observes only this adapter's stdout, so the usage
-    # summed across the problem's sub-step runs is republished there. A problem
-    # whose steps reported no usage publishes nothing and stays unmeasured.
-    emit_observed_usage(problem_usage)
     errors = sum(1 for record in records if record.get("timed_out") or record.get("exit") not in (0, None))
-    resolved = sum(1 for record in records if record.get("exit") == 0)
+    generated_steps = sum(1 for record in records if record.get("exit") == 0)
     summary = {
         "suite": "scicode",
         "dataset": scicode_dataset_name(data),
         "datasetSplit": scicode_dataset_split(),
         "problemId": str(problem["problem_id"]),
         "steps": len(records),
-        "resolved": resolved,
+        "generatedSteps": generated_steps,
+        "resolved": 0,
         "errors": errors,
         "dryRun": bool(args.dry_run),
         "wallSeconds": round(sum(float(record.get("wall_s") or 0) for record in records), 3),
         # Absent rather than zero when no sub-step reported usage, and always
         # reported next to how many steps the count covers.
         "tokens": None if problem_usage is None else problem_usage["totalTokens"],
-        "agent": getattr(args, "agent", None),
         "tokensMeasuredSteps": sum(1 for record in records if record.get("tokens_measured")),
         "tokensTotalSteps": len(records),
     }
@@ -648,12 +529,12 @@ def run_problem(args: argparse.Namespace) -> int:
         model=scicode_model(args.model),
         profile=scicode_target_profile(args.target, args.model),
         instances=len(records),
-        resolved=resolved,
+        resolved=0,
         errors=errors,
         artifact_paths=generated_artifacts(run_dir),
         summary=summary,
         notes=[
-            "run-problem records generated step attempts. grade-problem rewrites the manifest with scored results."
+            "Generation-only record: run-problem records attempts; grade-problem is the only scorer."
         ],
         clio_bin=CLIO,
     )
@@ -775,7 +656,11 @@ def grader_packages(h5py_file: Path | None) -> list[str]:
 def scicode_package_available(timeout: int = 300) -> tuple[bool, str]:
     """Resolve the scicode import once, before grading every step with it."""
     proc = subprocess.run(
-        [*uv_python_cmd([SCICODE_PACKAGE]), "-c", "from scicode.parse.parse import process_hdf5_to_tuple"],
+        [
+            *uv_python_cmd([*GRADER_PACKAGES, SCICODE_PACKAGE]),
+            "-c",
+            "from scicode.parse.parse import process_hdf5_to_tuple",
+        ],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -839,11 +724,11 @@ def grade_step_result(
 
 
 def grade_problem(args: argparse.Namespace) -> int:
-    data = Path(args.data)
+    data = Path(args.data).resolve()
     problem = problem_by_id(read_jsonl(data), args.problem_id)
-    refs = load_json_references(Path(args.references) if args.references else None)
-    h5py_file = Path(args.h5py_file) if args.h5py_file else None
-    run_dir = Path(args.run)
+    refs = load_json_references(Path(args.references).resolve() if args.references else None)
+    h5py_file = Path(args.h5py_file).resolve() if args.h5py_file else None
+    run_dir = Path(args.run).resolve()
     # The scicode import is resolved once, before grading. Without this every
     # sub-step reports the same ModuleNotFoundError as a failed step, and an
     # environment gap reads as bad generated science.
@@ -918,11 +803,11 @@ def grade_problem(args: argparse.Namespace) -> int:
 
 
 def grade_step(args: argparse.Namespace) -> int:
-    problem = problem_by_id(read_jsonl(Path(args.data)), args.problem_id)
-    refs = load_json_references(Path(args.references) if args.references else None)
-    h5py_file = Path(args.h5py_file) if args.h5py_file else None
+    problem = problem_by_id(read_jsonl(Path(args.data).resolve()), args.problem_id)
+    refs = load_json_references(Path(args.references).resolve() if args.references else None)
+    h5py_file = Path(args.h5py_file).resolve() if args.h5py_file else None
     step = problem["sub_steps"][step_index(problem, args.step_number)]
-    result = grade_step_result(problem, step, Path(args.run), h5py_file, refs, args.timeout)
+    result = grade_step_result(problem, step, Path(args.run).resolve(), h5py_file, refs, args.timeout)
     print(json.dumps(result, indent=2))
     if result["status"] == "blocked":
         return 2
@@ -952,25 +837,6 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--references", default=None, help="small JSON target manifest")
     inspect.set_defaults(func=inspect_data)
 
-    tasks = sub.add_parser("generate-tasks", help="write a clio-coder eval YAML task file")
-    add_common_data_args(tasks)
-    tasks.add_argument("--out", required=True)
-    tasks.add_argument("--run-root", default=".clio-coder-scicode")
-    tasks.add_argument("--problem-id", action="append", default=[])
-    tasks.add_argument("--limit", type=int, default=0)
-    tasks.add_argument("--timeout", type=int, default=1800)
-    tasks.add_argument(
-        "--target",
-        type=explicit_target,
-        default=None,
-        help="configured clio-coder target id (required for generated model runs)",
-    )
-    tasks.add_argument("--model", default=None)
-    tasks.add_argument("--h5py-file", default=default_h5())
-    tasks.add_argument("--references", default=None)
-    tasks.add_argument("--with-background", action="store_true")
-    tasks.set_defaults(func=generate_tasks)
-
     run = sub.add_parser("run-problem", help="run Clio through every sub-step in one problem")
     add_common_data_args(run)
     run.add_argument("--problem-id", required=True)
@@ -983,7 +849,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="configured clio-coder target id (required unless --dry-run is used)",
     )
     run.add_argument("--model", default=None)
-    run.add_argument("--agent", default=None, help="dispatch each sub-step to this agent recipe instead of the main agent")
     run.add_argument("--template", default=None)
     run.add_argument("--with-background", action="store_true")
     run.add_argument("--continue-on-error", action="store_true")
@@ -1025,8 +890,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "generate-tasks" and not args.target:
-        parser.error("generate-tasks requires an explicit --target")
     if args.command == "run-problem" and not args.dry_run and not args.target:
         parser.error(
             "run-problem requires an explicit --target (or use --dry-run to avoid calling Clio)"

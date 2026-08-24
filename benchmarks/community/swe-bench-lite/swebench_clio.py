@@ -1,5 +1,9 @@
 #!/usr/bin/env -S uv run --no-project --with datasets --with swebench python
-"""SWE-bench Lite adapter for Clio Coder.
+"""SWE-bench adapter for Clio Coder.
+
+Runs SWE-bench Lite (300), Verified (500), or full (2294) through the same
+generation path. `--dataset` selects the corpus; flagless dataset selection
+continues to mean Lite.
 
 Per instance:
   1. Clone {repo}@{base_commit} into an isolated checkout (bare-repo cache + local clone).
@@ -14,7 +18,8 @@ Generation runs on the host against the local fleet. Evaluation is separate
 Usage:
   uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --instances pytest-dev__pytest-6116 --out runs/smoke
   uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --limit 3 --smallest --out runs/smoke
-  uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --all --out runs/full      # gated: 300 instances
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --dataset verified --limit 10 --out runs/verified
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --target <id> --all --out runs/full-lite
 """
 
 import argparse
@@ -26,19 +31,32 @@ import sys
 import time
 from pathlib import Path
 
-DATASET = "princeton-nlp/SWE-bench_Lite"
+DATASETS = {
+    "lite": "princeton-nlp/SWE-bench_Lite",
+    "verified": "princeton-nlp/SWE-bench_Verified",
+    "full": "princeton-nlp/SWE-bench",
+}
+DEFAULT_DATASET = "lite"
 CLIO = os.environ.get("CLIO_CODER_BIN", "clio-coder")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from clio_usage import (
-    emit_observed_usage,
     fold_message_end_usage,
     receipt_total_tokens,
     run_id_from_events,
 )
+from clio_process import run_json_command
 from result_manifest import target_profile, write_result_manifest
 
 DEFAULT_MODEL_NAME = os.environ.get("CLIO_CODER_PRED_MODEL") or os.environ.get("CLIO_CODER_MODEL", "clio-coder")
+
+
+def dataset_id(name: str) -> str:
+    return DATASETS[name]
+
+
+def suite_name(name: str) -> str:
+    return "swe-bench" if name == "full" else f"swe-bench-{name}"
 
 TASK_TEMPLATE = """You are resolving a GitHub issue in the {repo} repository (checked out at commit {base_commit}).
 
@@ -97,18 +115,13 @@ def run_clio(
     if model:
         cmd += ["--model", model]
     cmd += [task]
-    env = {**os.environ}
     t0 = time.monotonic()
-    timed_out = False
-    with open(events_path, "w") as ef:
-        try:
-            proc = subprocess.run(
-                cmd, cwd=str(checkout), env=env, stdout=ef,
-                stderr=subprocess.PIPE, text=True, timeout=timeout_s,
-            )
-            code = proc.returncode
-        except subprocess.TimeoutExpired:
-            code, timed_out = 124, True
+    code, timed_out, _stderr = run_json_command(
+        cmd,
+        cwd=checkout,
+        events_path=events_path,
+        timeout=timeout_s,
+    )
     return time.monotonic() - t0, code, timed_out
 
 
@@ -141,10 +154,6 @@ def generate_one(inst, workdir: Path, cache_dir: Path, model_name, timeout_s, ta
     patch = diff_against_base(checkout)
     run_id = run_id_from_events(events_path)
     observed_usage = fold_message_end_usage(events_path)
-    # The parent `clio-coder eval` sees only this adapter's stdout, so the usage this
-    # adapter observed is republished there. Nothing is written when nothing was
-    # observed: the eval must report unmeasured rather than a zero.
-    emit_observed_usage(observed_usage)
     stream_tokens = None if observed_usage is None else observed_usage["totalTokens"]
     tokens = receipt_total_tokens(run_id) or stream_tokens
     pred = {"instance_id": iid, "model_name_or_path": model_name, "model_patch": patch}
@@ -198,7 +207,14 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--repos", nargs="*", help="restrict to these repos")
     ap.add_argument("--smallest", action="store_true", help="prefer smallest gold patches")
-    ap.add_argument("--all", action="store_true", help="run all 300 (gated)")
+    ap.add_argument(
+        "--dataset",
+        default=DEFAULT_DATASET,
+        choices=sorted(DATASETS),
+        help="lite is 300 instances, verified is the 500 human-validated instances, full is 2294",
+    )
+    ap.add_argument("--split", default="test", help="dataset split; default test")
+    ap.add_argument("--all", action="store_true", help="run every instance in the selected dataset")
     ap.add_argument("--timeout", type=int, default=1800, help="per-instance clio wall cap (s)")
     ap.add_argument(
         "--target",
@@ -227,7 +243,7 @@ def main():
     else:
         from datasets import load_dataset
 
-        ds = load_dataset(DATASET, split="test")
+        ds = load_dataset(dataset_id(args.dataset), split=args.split)
     chosen = select_instances(ds, args)
     if not chosen:
         print("no instances matched", file=sys.stderr)
@@ -265,7 +281,7 @@ def main():
         for metric in metrics_rows
         if metric.get("error") or metric.get("timed_out") or metric.get("exit") not in (0, None)
     )
-    resolved = sum(
+    generated_patches = sum(
         1
         for metric in metrics_rows
         if not metric.get("error") and metric.get("exit") == 0 and not metric.get("empty_patch")
@@ -275,12 +291,13 @@ def main():
     # report absence rather than a zero the reader would sum as real.
     measured_rows = [metric for metric in metrics_rows if metric.get("tokens_measured")]
     summary = {
-        "suite": "swe-bench-lite",
-        "dataset": DATASET,
-        "datasetSplit": "test",
+        "suite": suite_name(args.dataset),
+        "dataset": dataset_id(args.dataset),
+        "datasetSplit": args.split,
         "instances": len(chosen),
         "predictions": len(metrics_rows),
-        "resolved": resolved,
+        "resolved": 0,
+        "generatedPatches": generated_patches,
         "errors": errors,
         "emptyPatches": sum(1 for metric in metrics_rows if metric.get("empty_patch")),
         "timedOut": sum(1 for metric in metrics_rows if metric.get("timed_out")),
@@ -291,9 +308,9 @@ def main():
     }
     manifest_path, summary_path = write_result_manifest(
         workdir,
-        suite="swe-bench-lite",
-        dataset=DATASET,
-        dataset_split="test",
+        suite=suite_name(args.dataset),
+        dataset=dataset_id(args.dataset),
+        dataset_split=args.split,
         model=args.model_name,
         profile=target_profile(
             target=args.target,
@@ -301,12 +318,12 @@ def main():
             thinking=os.environ.get("CLIO_CODER_MAIN_THINKING"),
         ),
         instances=len(chosen),
-        resolved=resolved,
+        resolved=0,
         errors=errors,
         artifact_paths=[preds_path, metrics_path],
         summary=summary,
         notes=[
-            "Resolved counts reflect successful non-empty patch generation. Official SWE-bench resolution requires external harness scoring."
+            "Generation does not establish resolution. Official SWE-bench harness scoring is required."
         ],
         clio_bin=CLIO,
     )

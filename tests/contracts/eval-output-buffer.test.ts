@@ -1,6 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dispatchCountFromJsonl, scoutDispatchCountFromJsonl } from "../../src/domains/eval/metrics/evidence.js";
 import { appendLimited, createJsonlMetricCapture } from "../../src/domains/eval/runners/external-command.js";
 
 describe("contracts/eval output buffer", () => {
@@ -14,7 +13,7 @@ describe("contracts/eval output buffer", () => {
 		strictEqual(output.length, 200_000);
 	});
 
-	it("retains compact dispatch evidence across chunk splits and stdout truncation", () => {
+	it("retains compact tool evidence across chunk splits and stdout truncation", () => {
 		const capture = createJsonlMetricCapture();
 		capture.push(`${"x".repeat(70_000)}\n`);
 		const dispatchStart = JSON.stringify({
@@ -32,23 +31,8 @@ describe("contracts/eval output buffer", () => {
 			})}\n`,
 		);
 		const metricJsonl = capture.finish();
-		strictEqual(scoutDispatchCountFromJsonl(metricJsonl), 1);
-		strictEqual(dispatchCountFromJsonl(metricJsonl), 1);
+		ok(metricJsonl.includes('"toolName":"dispatch"'));
+		ok(metricJsonl.includes('"tool":"dispatch"'));
 		ok(metricJsonl.length < 2_000, "large tool results are not retained in metric evidence");
-	});
-
-	it("preserves the bounded SIGINT chaos marker exactly", () => {
-		const marker = {
-			type: "clio_soak_chaos",
-			seed: 90210,
-			faultInjected: true,
-			exitCode: 130,
-			orphanedChildren: 0,
-		};
-		const encoded = JSON.stringify(marker);
-		const capture = createJsonlMetricCapture();
-		capture.push(encoded.slice(0, 23));
-		capture.push(encoded.slice(23));
-		strictEqual(capture.finish(), encoded);
 	});
 });

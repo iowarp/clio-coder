@@ -31,11 +31,8 @@ jobs:
           cache: npm
       # fd and ripgrep are deliberately not installed. src/tools/executables.ts
       # resolves both at runtime and falls back when they are absent, and the
-      # whole suite passes with both off PATH, so the apt-get step bought
-      # nothing. uv is different: benchmarks/community/scicode/scicode_clio.py
-      # runs under `uv run`, and the SciCode adapter contract fails without it.
-      - name: Install uv
-        run: pipx install uv
+      # whole suite passes with both off PATH. Benchmark dependencies belong
+      # to the opt-in internal harness, not the product release lane.
       - run: npm ci --prefer-offline --no-audit --no-fund
       # The whole gate: typecheck, Biome, hygiene, skill pins, build, the
       # sharded suite, the trace-viewer suite, and the packaging audit.

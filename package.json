@@ -85,9 +85,12 @@
 		"prepublishOnly": "npm run ci:release",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check",
+		"benchmark:typecheck": "tsc -p benchmarks/tsconfig.json",
+		"benchmark:check": "npm run benchmark:typecheck && node --import tsx --test benchmarks/internal/tests/*.test.ts",
+		"benchmark:campaign": "node --import tsx benchmarks/internal/campaign.ts",
+		"benchmark:report": "node --import tsx benchmarks/internal/report.ts",
 		"//": "below here: a real model target, chosen with --target <id>; costs money and/or GPU time, never run in CI",
 		"live:smoke": "node --import tsx benchmarks/internal/live-smoke.ts",
-		"live:recon": "node --import tsx benchmarks/internal/live-recon.ts",
 		"live:fleet-dispatch": "node --import tsx benchmarks/internal/live-fleet-dispatch.ts",
 		"live:tui": "node --import tsx benchmarks/internal/pty-drive.ts",
 		"live:home": "node --import tsx benchmarks/internal/live-home.ts"

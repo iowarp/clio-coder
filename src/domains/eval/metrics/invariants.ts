@@ -2,7 +2,7 @@
  * Invariant metrics: the promises Clio makes about its own machinery, read
  * from the journal one eval item left behind.
  *
- * These invert what a benchmark measures. A weak model that never solved the
+ * These invert what a task outcome measures. A weak model that never solved the
  * task leaves every one of them intact; a strong model that solved it leaves
  * them broken the moment Clio failed to seal, to agree with itself, or to
  * write a receipt its own ledger can authenticate. The task outcome and the

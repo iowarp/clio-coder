@@ -55,28 +55,22 @@ clio_install() {
   fi
   log "node $(node --version)"
 
-  # 2. Clio itself. A tarball URL the container can reach is preferred so a run
-  #    measures the working tree rather than the last published release; the npm
-  #    registry is the fallback.
-  if [ -n "${CLIO_CODER_TARBALL_URL:-}" ]; then
-    log "fetching clio tarball from CLIO_CODER_TARBALL_URL"
-    if ! fetch_to "$CLIO_CODER_TARBALL_URL" /tmp/clio.tgz >"$out" 2>&1; then
-      log "tarball fetch failed: $CLIO_CODER_TARBALL_URL"
-      log_tail "$out"
-      return 1
-    fi
-    if ! npm i -g /tmp/clio.tgz >"$out" 2>&1; then
-      log "npm install of tarball failed"
-      log_tail "$out"
-      return 1
-    fi
-  else
-    log "no CLIO_CODER_TARBALL_URL; trying npm registry"
-    if ! npm i -g @iowarp/clio-coder >"$out" 2>&1; then
-      log "clio install failed: set CLIO_CODER_TARBALL_URL to a reachable npm-pack tarball"
-      log_tail "$out"
-      return 1
-    fi
+  # 2. Clio itself. A benchmark must identify the exact candidate it ran; a
+  #    registry fallback can silently measure an older release.
+  if [ -z "${CLIO_CODER_TARBALL_URL:-}" ]; then
+    log "CLIO_CODER_TARBALL_URL is required; registry fallback is disabled"
+    return 1
+  fi
+  log "fetching clio tarball from CLIO_CODER_TARBALL_URL"
+  if ! fetch_to "$CLIO_CODER_TARBALL_URL" /tmp/clio.tgz >"$out" 2>&1; then
+    log "tarball fetch failed: $CLIO_CODER_TARBALL_URL"
+    log_tail "$out"
+    return 1
+  fi
+  if ! npm i -g /tmp/clio.tgz >"$out" 2>&1; then
+    log "npm install of tarball failed"
+    log_tail "$out"
+    return 1
   fi
   if ! command -v clio-coder >/dev/null 2>&1; then
     log "clio-coder not on PATH after install"
@@ -85,23 +79,19 @@ clio_install() {
   log "clio-coder $(clio-coder --version 2>/dev/null || echo unknown)"
 
   # 3. Fleet config pointing at the operator's nodes.
-  if [ -z "${CLIO_CODER_MAIN_URL:-}" ] || [ -z "${CLIO_CODER_WORKER_URL:-}" ]; then
-    log "CLIO_CODER_MAIN_URL and CLIO_CODER_WORKER_URL must be set for Terminal-Bench runs"
+  if [ -z "${CLIO_CODER_MAIN_URL:-}" ]; then
+    log "CLIO_CODER_MAIN_URL must be set for Terminal-Bench runs"
     return 1
   fi
   CLIO_CODER_MAIN_TARGET=${CLIO_CODER_MAIN_TARGET:-local-main}
-  CLIO_CODER_WORKER_TARGET=${CLIO_CODER_WORKER_TARGET:-local-worker}
-  # Each node's runtime and thinking level travel from the operator's fleet.
-  # Hardcoding them described an LM Studio orchestrator as llama.cpp and raised
+  # The runtime and thinking level travel from the recorded operator target.
+  # Hardcoding them described an LM Studio target as llama.cpp and raised
   # the thinking level the operator had turned off, so the container ran a
-  # different fleet than the one being benchmarked.
+  # different model path than the one being benchmarked.
   CLIO_CODER_MAIN_RUNTIME=${CLIO_CODER_MAIN_RUNTIME:-llamacpp}
-  CLIO_CODER_WORKER_RUNTIME=${CLIO_CODER_WORKER_RUNTIME:-lmstudio-native}
   CLIO_CODER_MAIN_THINKING=${CLIO_CODER_MAIN_THINKING:-off}
-  CLIO_CODER_WORKER_THINKING=${CLIO_CODER_WORKER_THINKING:-off}
-  local main_key_env worker_key_env
+  local main_key_env
   main_key_env=$(key_env_for_runtime "$CLIO_CODER_MAIN_RUNTIME")
-  worker_key_env=$(key_env_for_runtime "$CLIO_CODER_WORKER_RUNTIME")
   mkdir -p "$HOME/.config/clio-coder"
   cat > "$HOME/.config/clio-coder/settings.yaml" <<YAML
 version: 1
@@ -117,24 +107,15 @@ targets:
       - ${CLIO_CODER_MAIN_MODEL}
     defaultModel: ${CLIO_CODER_MAIN_MODEL}
     gateway: true
-  - id: ${CLIO_CODER_WORKER_TARGET}
-    runtime: ${CLIO_CODER_WORKER_RUNTIME}
-    url: ${CLIO_CODER_WORKER_URL}
-    auth:
-      apiKeyEnvVar: ${worker_key_env}
-    wireModels:
-      - ${CLIO_CODER_WORKER_MODEL}
-    defaultModel: ${CLIO_CODER_WORKER_MODEL}
-    gateway: true
 orchestrator:
   target: ${CLIO_CODER_MAIN_TARGET}
   model: ${CLIO_CODER_MAIN_MODEL}
   thinkingLevel: ${CLIO_CODER_MAIN_THINKING}
 workers:
   default:
-    target: ${CLIO_CODER_WORKER_TARGET}
-    model: ${CLIO_CODER_WORKER_MODEL}
-    thinkingLevel: ${CLIO_CODER_WORKER_THINKING}
+    target: ${CLIO_CODER_MAIN_TARGET}
+    model: ${CLIO_CODER_MAIN_MODEL}
+    thinkingLevel: ${CLIO_CODER_MAIN_THINKING}
   onPermission: deny
 YAML
 
@@ -142,14 +123,9 @@ YAML
   # and cache trees so the first turn is not also a first-install.
   clio-coder doctor --fix >/dev/null 2>&1 || true
 
-  # 4. Connectivity preflight so a network-isolated container fails loudly, not
-  #    silently. Both nodes are checked: a reachable orchestrator with an
-  #    unreachable worker fails only once dispatch starts, which reads as a
-  #    mid-episode agent fault.
+  # 4. Connectivity preflight so a network-isolated container fails loudly.
   probe_url "${CLIO_CODER_MAIN_URL}/v1/models" ||
     log "WARNING: cannot reach fleet main at ${CLIO_CODER_MAIN_URL} from container; runs will fail"
-  probe_url "${CLIO_CODER_WORKER_URL}/v1/models" ||
-    log "WARNING: cannot reach fleet workers at ${CLIO_CODER_WORKER_URL} from container; dispatch will fail"
 
   # 5. Deterministic Stage 1 index so code_nav has data immediately.
   clio-coder context index >/dev/null 2>&1 || true

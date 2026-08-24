@@ -1,6 +1,0 @@
-version: 1
-commands:
-  test:
-    argv: ["node", "test/known-answers.test.mjs"]
-    timeoutMs: 30000
-    description: Known-answer rolling-window test. Red before the fix, green after.

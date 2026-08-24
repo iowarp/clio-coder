@@ -1,11 +1,8 @@
-"""Observed token accounting for the Clio benchmark adapters.
+"""Observed token accounting for the Clio community benchmark adapters.
 
-An adapter runs `clio-coder --no-context-files run --json` as its own child and keeps
-the event stream in a file, so a parent `clio-coder eval` sees only the adapter's
-stdout and observes no usage at all. These helpers fold the usage the adapter
-did observe and re-publish it on the adapter's stdout in the one shape the eval
-runner's fold understands, so the eval's accounting is measured rather than
-unmeasured.
+Each adapter keeps its own `clio-coder run --json` stream and folds the usage
+actually observed there. Missing usage remains missing rather than becoming an
+invented zero.
 
 The fold matches `src/domains/eval/metrics/token-stream.ts` exactly: usage is
 counted from `message_end` only, because that is the one event carrying a
@@ -19,9 +16,8 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any
 
 COUNT_FIELDS = ("input", "output", "cacheRead", "cacheWrite")
 
@@ -101,33 +97,6 @@ def run_id_from_events(events_path: Path | str) -> str | None:
             if isinstance(run_id, str) and run_id:
                 return run_id
     return None
-
-
-def emit_observed_usage(usage: dict[str, int] | None, stream: TextIO | None = None) -> None:
-    """Republish observed usage on adapter stdout for a parent eval's fold.
-
-    Nothing is written when nothing was observed, so an absent count stays
-    absent instead of becoming a zero the parent would sum as real.
-    """
-    if usage is None:
-        return
-    out = sys.stdout if stream is None else stream
-    payload = {
-        "type": "message_end",
-        "message": {
-            "role": "assistant",
-            "content": [],
-            "usage": {
-                "input": int(usage.get("input", 0)),
-                "output": int(usage.get("output", 0)),
-                "cacheRead": int(usage.get("cacheRead", 0)),
-                "cacheWrite": int(usage.get("cacheWrite", 0)),
-                "totalTokens": int(usage.get("totalTokens", 0)),
-            },
-        },
-    }
-    out.write(json.dumps(payload) + "\n")
-    out.flush()
 
 
 def clio_state_dir() -> Path:

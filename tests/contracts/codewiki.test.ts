@@ -1337,7 +1337,7 @@ describe("contracts/codewiki", () => {
 	it("excludes gitignored scratch directories from the index", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "real.ts"), "export const real = 1;\n", "utf8");
-		for (const dir of [".superpowers", ".codex", ".claude", ".clio-coder-benchmark"]) {
+		for (const dir of [".superpowers", ".codex", ".claude"]) {
 			mkdirSync(join(scratch, dir), { recursive: true });
 			writeFileSync(join(scratch, dir, "scratch.ts"), "export const scratch = 1;\n", "utf8");
 		}
@@ -1347,7 +1347,7 @@ describe("contracts/codewiki", () => {
 		ok(codewiki.files.some((file) => file.path === "src/real.ts"));
 		strictEqual(
 			codewiki.files.some((file) =>
-				[".superpowers/", ".codex/", ".claude/", ".clio-coder-benchmark/"].some((prefix) => file.path.startsWith(prefix)),
+				[".superpowers/", ".codex/", ".claude/"].some((prefix) => file.path.startsWith(prefix)),
 			),
 			false,
 		);

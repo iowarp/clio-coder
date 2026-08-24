@@ -1,7 +1,7 @@
 # Internal Eval Suites
 
 > [!TIP]
-> **Interactive Spec Available:** Interactive blueprints are available for internal evaluation suites at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) and soak benchmark suites at [docs/html/soak_blueprint.html](html/soak_blueprint.html) (Version: 0.3.6).
+> **Interactive Spec Available:** An interactive blueprint is available at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) (Version: 0.3.6).
 
 Private suites should live outside this repository. Keep datasets, prompts,
 live fleet coordinates, calibration outputs, and raw run artifacts in a private
@@ -15,9 +15,9 @@ clio-coder eval run --suite <external-path> --clio-coder-entry dist/cli/index.js
 ```
 
 Use `--out <dir>` when the artifact should be written outside the default Clio
-data directory. Public summaries can be copied into
-`benchmarks/results/<suite>/<run-id>/` only after they have been sanitized down
-to `manifest.json` and `summary.json`.
+data directory. Product eval artifacts and external benchmark campaigns are
+separate: public benchmark adapters live under `benchmarks/community/` and do
+not use the eval runner.
 
 ## Context Regression Seed
 
@@ -267,45 +267,4 @@ thresholds:
       op: gt
       value: 0
 ```
-
----
-
-## Soak Benchmark Suite
-
-The soak benchmark suite located under [`benchmarks/soak/`](../benchmarks/soak/) measures Clio's own machinery performance, integrity, and structural invariant promises under load. Unlike standard evaluation suites, the soak suite evaluates the reliability of Clio rather than model capability. A weak model that fails to solve the workload still passes the suite if Clio's machinery behaves correctly; a strong model fails the suite if Clio fails to seal a receipt, cannot authenticate a receipt, or violates a system invariant.
-
-Every suite runs through the product's own eval runner against a configured
-target; there is no separate soak runner:
-
-```bash
-npm run build
-clio-coder eval run --suite benchmarks/soak/clio-soak.yaml \
-  --target <id> --model <wireId> --clio-coder-entry dist/cli/index.js
-```
-
-`tests/contracts/eval-soak-suite.test.ts` loads all four files in CI and drives
-`clio-soak.yaml` against a stub that seals receipts on purpose, so the gate is
-known to fail when sealing fails; the model runs themselves are operator-run.
-
-The soak suite comprises four specialized suite files:
-
-### 1. Machinery Under Load (`clio-soak.yaml`)
-Evaluates the same task workload across two execution surfaces: the headless main-agent surface (`clio-run`) and a dispatched worker surface (`agent: coder`). It tests single-file bugs, multi-file bugs, and compaction continuity across restarts.
-- **Surface Differences**: Main-agent tasks verify session ledger continuity (`ledger.formatVersion`, `ledger.toolPairsUnmatched`, `ledger.assistantBetweenCallAndResult`), while dispatch worker tasks verify process group cleanup (`process.orphanedChildren == 0`).
-- **Compaction Continuity**: Verifies that compaction summaries are present (`continuity.compactionSummaryPresent`) and that pre-compaction facts are preserved (`continuity.answeredFromPreCompaction`).
-- **Suite-Wide Gates**: Gates on `receipt.sealed`, `receipt.integrityValid`, `receipt.outcomeMatchesExit`, `tokens.measured`, `stream.cumulativeSnapshots == 0`, `stream.usageDoubleCounted == false`, and `stream.segmentUsageMatchesMessages == true`.
-
-### 2. Per-Step Write Boundaries (`clio-soak-boundary.yaml`)
-Validates write boundary enforcement across steps without model participation. Enforcement is strictly detect-and-rollback and is never sandboxing.
-- `write-boundary.rolled-back`: Verifies clean detection of allowlist violations (`writes_boundary_violation`), git-level file restoration, and sealed verdict generation (`boundary.violationsRolledBack == 1`, `boundary.rollbackIncomplete == 0`).
-- `write-boundary.rollback-incomplete`: Tests honest failure reporting when a path was dirty prior to snapshot taking. prior bytes exist only in the overwritten tree, so rollback leaves the tree unchanged and records incomplete rollback (`boundary.rollbackIncomplete == 1`, `boundary.violationsRolledBack == 0`).
-
-### 3. Fault Injection Chaos (`clio-soak-chaos.yaml`)
-Evaluates system resilience against process signals.
-- `chaos.sigint-mid-tool`: Prompts Clio for a long-running bash tool call and injects `SIGINT` once the subprocess initializes. Asserts exit code `130`, confirms no orphaned children remain (`process.orphanedChildren == 0`), and verifies receipt sealing, receipt integrity, and provider token reporting.
-
-### 4. Bounded Loops (`clio-soak-loop.yaml`)
-Validates iteration bounds and receipt accounting for fleet loops (`bounded-loop.fleet`).
-- **Loop Bounds**: Asserts that verification attempts do not exceed declared limits (`loop.attemptsSpent <= 3`), recovery attempts seal individual receipts (`loop.receiptsMatchRepairs == true`), and unneeded nodes report as `unneeded` rather than skipped or failed (`loop.skippedNodes == 0`).
-- **Two Token Accountings**: Distinguishes `tokens.*` (folded live off wire stdout by `createStreamInvariantFold`) from `receiptUsage.*` (journal receipts sealed and authenticated against ledger envelopes). On fleet runs, wire streaming is absent (`tokens.measured == false`), while journal receipts provide authenticated usage (`receiptUsage.measured == true`).
 
