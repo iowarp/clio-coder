@@ -16,24 +16,24 @@ describe("contracts/worker ndjson stdout drain", { concurrency: false }, () => {
 			queueMicrotask(() => done?.());
 			return true;
 		}) as typeof process.stdout.write;
-		const startedAt = Date.now();
+		const startedAt = performance.now();
 		try {
 			await drainStdout(250);
 		} finally {
 			process.stdout.write = originalWrite;
 		}
 
-		ok(Date.now() - startedAt < 250, "idle stdout drain should not wait for the timeout");
+		ok(performance.now() - startedAt < 250, "idle stdout drain should not wait for the timeout");
 
 		process.stdout.write = (() => true) as typeof process.stdout.write;
-		const timeoutStartedAt = Date.now();
+		const timeoutStartedAt = performance.now();
 		try {
 			await drainStdout(25);
 		} finally {
 			process.stdout.write = originalWrite;
 		}
 
-		ok(Date.now() - timeoutStartedAt >= 20, "swallowed write callback should resolve from the timeout");
+		ok(performance.now() - timeoutStartedAt >= 20, "swallowed write callback should resolve from the timeout");
 
 		process.stdout.write = (() => {
 			throw new Error("stdout closed");
