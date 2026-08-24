@@ -23,6 +23,7 @@ import {
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
+import type { CostEntryLabel } from "../domains/observability/cost.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
@@ -53,6 +54,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
+import { runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
@@ -288,6 +290,17 @@ export interface ChatLoop {
 	 */
 	askSideQuestion(question: string, options?: SideQuestionOptions): Promise<SideQuestionOutcome>;
 	/**
+	 * `/handoff`: run the extraction round for a goal against the same target,
+	 * model, and compiled message history, and return its raw JSON answer.
+	 *
+	 * Like a side question this is out of turn: no tools are sent, the message
+	 * history is read and never mutated, and nothing the round produces reaches
+	 * the ledger. Validating, bounding, and reviewing the answer belong to the
+	 * caller; this method only owns the provider call. Refused outright while a
+	 * turn is in flight rather than queued.
+	 */
+	extractHandoff(goal: string, options?: SideQuestionOptions): Promise<SideQuestionOutcome>;
+	/**
 	 * Drop or replace the chat-loop's in-memory state after a session switch
 	 * (/resume, /fork, /new). `leafTurnId` is the id the next user turn
 	 * should parent under. `replayMessages` is the provider context rebuilt
@@ -335,6 +348,8 @@ export interface CreateChatLoopDeps {
 	 * standing up a provider, exactly as `createAgent` does for a turn.
 	 */
 	runSideQuestion?: typeof runSideQuestion;
+	/** The `/handoff` extraction round. Injectable for the same reason. */
+	runHandoffRound?: typeof runHandoffRound;
 	/**
 	 * Return the current session's entries for token estimation. The chat-loop
 	 * calls this on every submit so the auto-compaction threshold sees the
@@ -443,6 +458,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
+	const handoffRound = deps.runHandoffRound ?? runHandoffRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState(deps.getSettings().orchestrator.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
@@ -634,6 +650,71 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return "a permission ask is parked and already waiting on you; answer it or press Esc";
 		}
 		return null;
+	};
+
+	/**
+	 * Everything an out-of-turn round needs, or the reason it cannot run.
+	 *
+	 * `/btw` and `/handoff` are the two callers. Both read the compiled history
+	 * the next turn would see, both authenticate exactly the way a turn against
+	 * the same target does, and both are refused rather than queued while a turn
+	 * is in flight, so the admission decision is made once here.
+	 */
+	type OutOfTurnPreparation =
+		| { ok: true; runtime: AgentRuntime; apiKey: string | undefined }
+		| { ok: false; reason: string };
+
+	const prepareOutOfTurnRound = async (inFlightRefusal: string, signal?: AbortSignal): Promise<OutOfTurnPreparation> => {
+		if (state.streaming) return { ok: false, reason: inFlightRefusal };
+		let agentRuntime: AgentRuntime | null;
+		try {
+			agentRuntime = turnRuntime.ensureRuntime();
+		} catch (err) {
+			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+		}
+		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice() };
+		const resolution = agentRuntime.runtimeResolution;
+		try {
+			const apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
+				? (
+						await deps.providers.auth.resolveForTarget(resolution.target, resolution.runtime, signal ? { signal } : undefined)
+					).apiKey
+				: LOCAL_SIDE_QUESTION_API_KEY;
+			return { ok: true, runtime: agentRuntime, apiKey };
+		} catch (err) {
+			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+		}
+	};
+
+	/**
+	 * Report an out-of-turn round's provider usage. Money was spent, so `/cost`
+	 * says so under its own label; turn persistence, the working-set ledger,
+	 * compaction inputs, and the footer counters never see it.
+	 */
+	const recordOutOfTurnUsage = (
+		runtime: AgentRuntime,
+		usage: SideQuestionResult["usage"],
+		label: CostEntryLabel,
+	): void => {
+		if (!usage || !deps.observability) return;
+		deps.observability.recordTokens(
+			runtime.targetId,
+			runtime.wireModelId,
+			usage.totalTokens,
+			usage.costUsd,
+			{
+				input: usage.input,
+				output: usage.output,
+				cacheRead: usage.cacheRead,
+				cacheWrite: usage.cacheWrite,
+				reasoningTokens: usage.reasoning,
+				totalTokens: usage.totalTokens,
+				apiCalls: 1,
+			},
+			runtime.runtimeResolution.costProvenance,
+			undefined,
+			label,
+		);
 	};
 
 	const api: ChatLoop = {
@@ -1076,71 +1157,57 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Never queued. A side question exists to be answered now, beside a run
 			// the operator is watching; holding it until the run settles would
 			// deliver it after the moment it was asked in had passed.
-			if (state.streaming) {
-				return { status: "refused", reason: "a turn is in flight; /btw runs beside the session, not in its queue" };
-			}
-			let agentRuntime: AgentRuntime | null;
-			try {
-				agentRuntime = turnRuntime.ensureRuntime();
-			} catch (err) {
-				return { status: "refused", reason: err instanceof Error ? err.message : String(err) };
-			}
-			if (!agentRuntime) {
-				return { status: "refused", reason: notConfiguredNotice() };
-			}
-			const resolution = agentRuntime.runtimeResolution;
-			let apiKey: string | undefined;
-			try {
-				apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
-					? (
-							await deps.providers.auth.resolveForTarget(
-								resolution.target,
-								resolution.runtime,
-								options.signal ? { signal: options.signal } : undefined,
-							)
-						).apiKey
-					: LOCAL_SIDE_QUESTION_API_KEY;
-			} catch (err) {
-				return { status: "refused", reason: err instanceof Error ? err.message : String(err) };
-			}
+			const prepared = await prepareOutOfTurnRound(
+				"a turn is in flight; /btw runs beside the session, not in its queue",
+				options.signal,
+			);
+			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			let result: SideQuestionResult;
 			try {
 				result = await sideQuestionRound({
-					model: agentRuntime.agent.state.model,
+					model: prepared.runtime.agent.state.model,
 					// Read-only: runSideQuestion copies before appending its own
 					// message, so the live agent's history is untouched.
-					messages: agentRuntime.agent.state.messages,
+					messages: prepared.runtime.agent.state.messages,
 					question: text,
-					...(apiKey !== undefined ? { apiKey } : {}),
+					...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 					...(options.signal ? { signal: options.signal } : {}),
 					...(options.onDelta ? { onDelta: options.onDelta } : {}),
 				});
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
-			// Billed like any other call, so it is reported. It is recorded through
-			// the cost surface only: turn persistence, the working-set ledger,
-			// compaction inputs, and the footer counters never see it.
-			if (result.usage && deps.observability) {
-				deps.observability.recordTokens(
-					agentRuntime.targetId,
-					agentRuntime.wireModelId,
-					result.usage.totalTokens,
-					result.usage.costUsd,
-					{
-						input: result.usage.input,
-						output: result.usage.output,
-						cacheRead: result.usage.cacheRead,
-						cacheWrite: result.usage.cacheWrite,
-						reasoningTokens: result.usage.reasoning,
-						totalTokens: result.usage.totalTokens,
-						apiCalls: 1,
-					},
-					resolution.costProvenance,
-					undefined,
-					"side-question",
-				);
+			recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
+			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
+		},
+
+		async extractHandoff(goal: string, options: SideQuestionOptions = {}): Promise<SideQuestionOutcome> {
+			const text = goal.trim();
+			if (text.length === 0) {
+				return { status: "refused", reason: "a handoff needs a goal" };
 			}
+			// Refused, never queued: a handoff describes a session that has stopped
+			// working, and a turn still in flight is about to change what the
+			// document would say.
+			const prepared = await prepareOutOfTurnRound(
+				"a turn is in flight; /handoff cannot summarize a session that is still moving",
+				options.signal,
+			);
+			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			let result: SideQuestionResult;
+			try {
+				result = await handoffRound({
+					model: prepared.runtime.agent.state.model,
+					// Read-only, exactly as the side-question round treats it.
+					messages: prepared.runtime.agent.state.messages,
+					goal: text,
+					...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+					...(options.signal ? { signal: options.signal } : {}),
+				});
+			} catch (err) {
+				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+			}
+			recordOutOfTurnUsage(prepared.runtime, result.usage, "handoff");
 			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
 		},
 

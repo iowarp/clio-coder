@@ -138,6 +138,7 @@ function createHarness(entries: SessionEntry[] = fixture()) {
 		openSkillsHub: () => undefined,
 		openCost: () => undefined,
 		openSideQuestion: () => undefined,
+		startHandoff: () => {},
 		openContextView: () => undefined,
 		openTasks: () => undefined,
 		openDecisions: () => undefined,

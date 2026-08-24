@@ -26,7 +26,8 @@ export type OverlayState =
 	| "extensions"
 	| "interop"
 	| "skills-hub"
-	| "side-question";
+	| "side-question"
+	| "handoff-review";
 
 export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
@@ -228,6 +229,9 @@ export function routeOverlayKey(
 		routeCostOverlayKey(data, deps);
 		return true;
 	}
+	// The handoff review overlay owns Enter, `e`, the arrows, and Esc itself, so
+	// every key goes to its own focus box rather than through the router.
+	if (overlayState === "handoff-review") return false;
 	if (overlayState === "context-reset") return false;
 	if (overlayState === "tasks") return false;
 	if (overlayState === "decisions") return false;
