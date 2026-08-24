@@ -136,7 +136,38 @@ export interface DispatchBoardRow {
 	retry?: DispatchRetryPresentation;
 	/** Most recent worker delivery acknowledgement for an operator steer. */
 	steerAcknowledgement?: DispatchSteerAcknowledgement;
+	/**
+	 * Where this run sits in a fleet plan: the wave the step was scheduled in
+	 * and the step id it executes. Present only for runs a fleet plan
+	 * dispatched, so a `/run`, a delegation, or a dispatch-tool run leaves the
+	 * board's phase column empty rather than claiming a position it has none of.
+	 */
+	phase?: DispatchBoardPhase;
 }
+
+/** One fleet plan position: the wave index and the step the run executes. */
+export interface DispatchBoardPhase {
+	wave: number;
+	stepId: string;
+}
+
+/**
+ * The phase cell, or null for a run that is not a fleet step. Fixed width so
+ * the column lines up across rows; a long step id is clipped with a marker
+ * rather than pushing the row's other facts out of position.
+ */
+export function formatDispatchPhaseCell(
+	phase: DispatchBoardPhase | undefined,
+	width = PHASE_COLUMN_WIDTH,
+): string | null {
+	if (phase === undefined) return null;
+	return truncateToWidth(`w${phase.wave} ${phase.stepId}`, Math.max(1, width), "…", false);
+}
+
+/** Columns the compact island reserves for the phase cell when it can afford them. */
+export const PHASE_COLUMN_WIDTH = 12;
+/** Below this much room for the agent label, the compact row drops the column entirely. */
+const PHASE_COLUMN_MIN_LABEL_WIDTH = 8;
 
 /** Live HTTP/SDK rows are the only rows whose runtime can consume operator guidance. */
 export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
@@ -614,8 +645,18 @@ export function renderDispatchCard(
 	];
 	const hostVerification = theme.fg("info", `host_verification=${row.hostVerification ?? "not_requested"}`);
 	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
+	// The phase column: a fleet step says which wave it belongs to and which
+	// step it is; every other run leaves the cell empty rather than inventing a
+	// position, so the column reads as "not a fleet step" and not as wave zero.
+	const phaseCell = formatDispatchPhaseCell(row.phase, contentWidth);
 	const bodyLines = [
 		cardUnitsLine(theme, "run", [theme.fg("dim", row.runId)], contentWidth),
+		cardUnitsLine(
+			theme,
+			"phase",
+			[phaseCell === null ? theme.fg("dim", "—") : theme.fg("info", phaseCell)],
+			contentWidth,
+		),
 		targetLine,
 		...(row.taskSummary
 			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
@@ -719,11 +760,25 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 		visibleWidth(presentation.label) +
 		3 +
 		visibleWidth(elapsed);
-	const clampedLabel = truncateToWidth(agentLabel, Math.max(1, width - labelChrome), "…", false);
+	// The phase column rides the compact row only when the row can still show a
+	// readable agent label beside it. TASK_ISLAND_WIDTH is fixed, so a row that
+	// cannot afford the cell drops the column here and shows the phase in the
+	// expanded card instead of clipping the label to make room.
+	const phaseCell = formatDispatchPhaseCell(row.phase);
+	const phaseColumn = phaseCell === null ? "" : `${dot}${theme.fg("info", padAnsi(phaseCell, PHASE_COLUMN_WIDTH))}`;
+	const phaseChrome = phaseCell === null ? 0 : PHASE_COLUMN_WIDTH + 3;
+	const labelWidth = width - labelChrome - phaseChrome;
+	const showPhase = phaseCell !== null && labelWidth >= PHASE_COLUMN_MIN_LABEL_WIDTH;
+	const clampedLabel = truncateToWidth(
+		agentLabel,
+		Math.max(1, showPhase ? labelWidth : width - labelChrome),
+		"…",
+		false,
+	);
 
 	// The agent label drops its accent color for plain bold; the status word is
 	// the only status-colored element on the row, with dim middot separators.
-	const line1 = `${glyph} ${rowPrefix.text}${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
+	const line1 = `${glyph} ${rowPrefix.text}${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}${showPhase ? phaseColumn : ""}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
@@ -1109,6 +1164,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
 		lastContextTokens: entry.lastContextTokens,
 		...(entry.receiptId !== undefined ? { receiptId: entry.receiptId } : {}),
+		...(entry.phase !== undefined ? { phase: { ...entry.phase } } : {}),
 		// Both tool fields are views of the one projection, so the compact card and
 		// the expanded detail can never disagree about what is running.
 		currentTool: retry ? null : (progress.currentAction?.tool ?? null),
@@ -1129,7 +1185,7 @@ function sortEntries(a: DispatchBoardEntry, b: DispatchBoardEntry): number {
 	return a.sequence - b.sequence;
 }
 
-function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
+function pruneEntries(entries: Map<string, DispatchBoardEntry>, onEvict?: (runId: string) => void): void {
 	if (entries.size <= MAX_DISPATCH_BOARD_ROWS) return;
 	const terminalEntries = [...entries.values()]
 		.filter((entry) => !entry.retry && isTerminalStatus(entry.status))
@@ -1139,6 +1195,7 @@ function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 	for (const entry of evictionQueue) {
 		if (entries.size <= MAX_DISPATCH_BOARD_ROWS) break;
 		entries.delete(entry.runId);
+		onEvict?.(entry.runId);
 	}
 }
 
@@ -1155,9 +1212,19 @@ export function createDispatchBoardStore(
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
+	/**
+	 * Record the fleet-plan position of a run the caller just dispatched. The
+	 * board never infers a position: a run carries one only because whoever
+	 * dispatched the plan said so, which is why a non-fleet run can never grow
+	 * a phase cell.
+	 */
+	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
 	unsubscribe(): void;
 } {
 	const entries = new Map<string, DispatchBoardEntry>();
+	// Positions arrive from the fleet-run path, which may hand one over before
+	// the run's first lifecycle event creates the entry.
+	const fleetPhases = new Map<string, DispatchBoardPhase>();
 	let nextSequence = 0;
 	let reconciledAtMs = Date.now();
 
@@ -1189,6 +1256,7 @@ export function createDispatchBoardStore(
 		const contextWindow = parsePositiveInt(raw.contextWindow) ?? previous?.contextWindow;
 		const taskSummary = parseTaskSummary(raw, previous?.taskSummary);
 		const budget = cloneRunToolBudgetEnvelope(raw.budget) ?? previous?.budget;
+		const phase = fleetPhases.get(runId) ?? previous?.phase;
 		const entry: DispatchBoardEntry = {
 			runId,
 			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
@@ -1221,12 +1289,13 @@ export function createDispatchBoardStore(
 			...(contextWindow !== undefined ? { contextWindow } : {}),
 			lastContextTokens: previous?.lastContextTokens ?? 0,
 			...(previous?.receiptId !== undefined ? { receiptId: previous.receiptId } : {}),
+			...(phase !== undefined ? { phase } : {}),
 			progress: previous?.progress ?? createWorkerProgressFold(),
 			...(previous?.retry ? { retry: { ...previous.retry } } : {}),
 			...(previous?.steerAcknowledgement ? { steerAcknowledgement: { ...previous.steerAcknowledgement } } : {}),
 		};
 		entries.set(runId, entry);
-		pruneEntries(entries);
+		pruneEntries(entries, (evicted) => fleetPhases.delete(evicted));
 		return entry;
 	};
 
@@ -1495,6 +1564,11 @@ export function createDispatchBoardStore(
 			return projectRows(true);
 		},
 		reconcile,
+		setFleetPhase(runId: string, phase: DispatchBoardPhase): void {
+			fleetPhases.set(runId, phase);
+			const entry = entries.get(runId);
+			if (entry) entry.phase = { ...phase };
+		},
 		unsubscribe() {
 			if (closed) return;
 			closed = true;

@@ -156,7 +156,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
-| `/fleet` | `/fleet` | Open Settings → Fleet: defaults, profiles, agent bindings, nodes |
+| `/fleet` | `/fleet run [--var <key=value>] <name>` | Open Settings → Fleet, or run a fleet contract with an approval preview |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect, promote, or seed task memory |

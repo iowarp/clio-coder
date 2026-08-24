@@ -121,6 +121,7 @@ function harness() {
 		rows: () => [],
 		activeRows: () => [],
 		reconcile: () => {},
+		setFleetPhase: () => {},
 		unsubscribe: () => log.push("dispatch.unsubscribe"),
 	};
 	const contextActivityStore = {

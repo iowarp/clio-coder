@@ -26,6 +26,7 @@ import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings
 // application composition root no longer owns the mutable overlay state.
 export type OverlayLifecycleApplicationDeps = Pick<
 	import("./interactive-application.js").InteractiveDeps,
+	| "agents"
 	| "bus"
 	| "chat"
 	| "commitSetting"
@@ -49,6 +50,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "readSessionEntries"
 	| "registerAskUserHandler"
 	| "resources"
+	| "scheduling"
 	| "session"
 	| "stateDir"
 	| "supersedeDecision"
@@ -76,6 +78,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
+	/** Record a dispatched fleet step's plan position for the board's phase column. */
+	setFleetRunPhase?: (runId: string, phase: { wave: number; stepId: string }) => void;
 	chatPanel: import("./chat-panel.js").ChatPanel;
 	/** Clears the transcript and every view folded alongside it; the session overlays call it before a replay. */
 	resetTranscript: () => void;
@@ -143,6 +147,7 @@ export interface OverlayLifecycleController {
 	openSideQuestionOverlayState(question: string): void;
 	/** `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoffState(goal: string): void;
+	startFleetRunState(name: string, vars: Readonly<Record<string, string>>): void;
 	openModelOverlayState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(): void;
@@ -353,6 +358,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openCwdFallbackOverlayFactory ? { openCwdFallbackOverlay: openCwdFallbackOverlayFactory } : {}),
 	});
 
+	const scheduling = deps.app.scheduling;
 	const overlayGeneralOpeners = createOverlayGeneralOpeners({
 		tui,
 		transitions: overlayTransitions,
@@ -393,6 +399,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openMemoryOverlayFactory ? { openMemoryOverlay: openMemoryOverlayFactory } : {}),
 		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
 		askSideQuestion: (question, options) => deps.app.chat.askSideQuestion(question, options),
+		...(deps.app.agents ? { agents: deps.app.agents } : {}),
+		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
+		isTurnInFlight: () => deps.app.chat.isStreaming(),
+		...(deps.setFleetRunPhase ? { setFleetRunPhase: deps.setFleetRunPhase } : {}),
 	});
 
 	const openResumeOverlayState = overlaySessions.openResume;
@@ -407,6 +417,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const openSideQuestionOverlayState = overlayGeneralOpeners.openSideQuestion;
+	const startFleetRunState = overlayGeneralOpeners.startFleetRun;
 	const startHandoffState = overlaySessions.startHandoff;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 
@@ -428,6 +439,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openSideQuestionOverlayState,
+		startFleetRunState,
 		startHandoffState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
