@@ -1,7 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { parseOracleResult } from "../domains/agents/index.js";
+import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -20,6 +20,16 @@ import type { UserTask } from "../domains/user-tasks/store.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
 import {
+	buildCouncilDispatchArgs,
+	COUNCIL_MAX_ROUNDS,
+	COUNCIL_SYNTHESIS_MODES,
+	type CouncilCommandOptions,
+	type CouncilRosters,
+	isCouncilSynthesisMode,
+	resolveCouncilRoster,
+} from "./council.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "./council-grid.js";
+import {
 	formatOracleAnswer,
 	ORACLE_AGENT_ID,
 	ORACLE_TASK,
@@ -29,7 +39,14 @@ import {
 import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
-import { formatWorkerShareNote, selectWorkerRunToShare, workerShareFactsFromEntry } from "./worker-share.js";
+import {
+	formatCouncilMemberShareNote,
+	formatCouncilShareNote,
+	formatWorkerShareNote,
+	selectWorkerRunToShare,
+	type WorkerShareFacts,
+	workerShareFactsFromEntry,
+} from "./worker-share.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 /**
@@ -70,6 +87,9 @@ type SlashCommandVariant =
 	/** `/oracle <question>`: one read-only advisory run briefed on the record, never on the transcript. */
 	| { kind: "oracle"; question: string }
 	| { kind: "oracle-usage" }
+	/** `/council <task>`: one read-only council of roster members, dispatched through the dispatch tool. */
+	| { kind: "council"; task: string; options: CouncilCommandOptions }
+	| { kind: "council-usage"; reason?: string }
 	| { kind: "handoff"; goal: string }
 	| { kind: "handoff-usage" }
 	/** `/fleet run <name>`: compile the plan, show it for approval, dispatch on accept. */
@@ -126,6 +146,16 @@ export type SetOutputVerbosityResult =
 	| { status: "applied"; verbosity: string }
 	| { status: "unsupported"; verbosity: string; supported: ReadonlyArray<string> }
 	| { status: "unavailable" };
+
+/**
+ * What one admitted dispatch-tool call reports back to `/council`. The council
+ * itself is watched on the board and in the transcript, so success is silent;
+ * only a refusal or a failure is worth a notice.
+ */
+export type CouncilDispatchOutcome =
+	| { status: "ok" }
+	| { status: "blocked"; reason: string }
+	| { status: "error"; message: string };
 
 export type TaskMemorySeedCommandResult =
 	| { status: "seeded"; seeded: number; skipped: number; source: string }
@@ -365,6 +395,66 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 }
 
 /**
+ * `/council <task>`: one council, dispatched exactly as the model dispatches one.
+ *
+ * The command builds dispatch-tool arguments and hands them to the tool
+ * registry. That is the whole of it, and it is deliberate: a council is a
+ * plan-scale dispatch, so supervised autonomy parks the call and the approval
+ * overlay shows the same artifact it shows for a model-asked council, naming
+ * every member's label, target, model, node, round count, and synthesis mode.
+ * A private path would have had to reproduce that, and would eventually have
+ * reproduced it wrongly.
+ */
+async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: SlashCommandContext): Promise<void> {
+	// Refused, never queued, exactly as `/oracle` and `/fleet run` are. An
+	// approved council describes the workspace as it stands, and a turn in
+	// flight is about to change it.
+	if (ctx.isTurnInFlight?.() === true) {
+		ctx.notice("warn", "a turn is in flight; /council is refused rather than queued");
+		return;
+	}
+	if (!ctx.runCouncilDispatch) {
+		ctx.notice("error", "/council is not wired in this session");
+		return;
+	}
+	const rosters = ctx.getWorkerRosters?.();
+	if (rosters === undefined) {
+		ctx.notice("error", "/council needs workers.rosters, which is not wired in this session");
+		return;
+	}
+	const resolved = resolveCouncilRoster(options.roster, rosters);
+	if (!resolved.ok) {
+		ctx.notice("error", resolved.reason);
+		return;
+	}
+	try {
+		const outcome = await ctx.runCouncilDispatch(buildCouncilDispatchArgs(task, resolved.roster, options));
+		if (outcome.status === "blocked") ctx.notice("warn", `/council was not admitted: ${outcome.reason}`);
+		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${outcome.message}`);
+	} catch (err) {
+		ctx.notice("error", `/council failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
+/**
+ * The note a run becomes, with a council run treated as what it is.
+ *
+ * A council synthesis run seals the whole `council-report`, so sharing its id
+ * shares the council: every final member's labelled answer and the synthesis,
+ * as one bounded block. A member run seals one voice, so it travels under the
+ * roster label the operator watched it under. Every other run keeps the note it
+ * has always had. A synthesis whose sealed text does not parse as a report is
+ * shared verbatim rather than dropped: the operator asked for that run.
+ */
+function councilAwareShareNote(facts: WorkerShareFacts, entry: WorkerEntryState): string | null {
+	const council = entry.council;
+	if (council === undefined) return formatWorkerShareNote(facts);
+	if (council.label !== COUNCIL_SYNTHESIS_LABEL) return formatCouncilMemberShareNote(facts, council.label);
+	const report = parseCouncilReport(facts.text);
+	return report === null ? formatWorkerShareNote(facts) : formatCouncilShareNote(facts, report);
+}
+
+/**
  * `/share [runId]`: hand a finished worker run's answer to the main agent.
  *
  * Nothing here is implicit. The operator either typed the command or passed
@@ -387,7 +477,7 @@ function shareWorkerRun(runId: string | undefined, ctx: SlashCommandContext): vo
 		return;
 	}
 	const facts = workerShareFactsFromEntry(entry);
-	const note = facts === null ? null : formatWorkerShareNote(facts);
+	const note = facts === null ? null : councilAwareShareNote(facts, entry);
 	if (note === null) {
 		ctx.notice("error", `run ${entry.runId} produced no text to share`);
 		return;
@@ -481,6 +571,19 @@ export interface SlashCommandContext {
 	 * in which case `/oracle` says so instead of briefing on nothing.
 	 */
 	oracleBriefing?: () => Omit<OracleDigestSources, "question">;
+	/**
+	 * Configured `workers.rosters`, which is what `/council` seats a council
+	 * from. Absent on a host with no settings, in which case the command says so
+	 * rather than dispatching a roster name it could not check.
+	 */
+	getWorkerRosters?: () => CouncilRosters;
+	/**
+	 * Run one dispatch-tool call with prepared council arguments through the
+	 * ordinary tool-admission path. The council command owns no dispatch path of
+	 * its own, so admission, the approval overlay, receipts, and the board treat
+	 * an operator council exactly as they treat a model-asked one.
+	 */
+	runCouncilDispatch?: (args: Readonly<Record<string, unknown>>) => Promise<CouncilDispatchOutcome>;
 	/**
 	 * True while a turn is streaming. `/oracle` is refused then, never queued:
 	 * the digest describes the record as it stands and an in-flight turn is
@@ -1015,6 +1118,59 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "oracle") return;
 			void (async () => {
 				await handleOracle(command.question, ctx);
+				ctx.render();
+			})();
+		},
+	},
+	{
+		name: "council",
+		description: "Ask a roster of read-only members the same task, with an optional vote or judge synthesis",
+		group: "Run",
+		kinds: ["council", "council-usage"],
+		args: {
+			parseFlagsBeforeRest: true,
+			flags: [
+				{ name: "--roster", takesValue: true, valueName: "name" },
+				{ name: "--rounds", takesValue: true, valueName: "n" },
+				{ name: "--synthesis", takesValue: true, values: COUNCIL_SYNTHESIS_MODES },
+			],
+			positionals: [{ name: "task", required: true, rest: true }],
+		},
+		fromArgs(parsed) {
+			const task = parsed.rest?.trim() ?? "";
+			if (parsed.error) return { kind: "council-usage", reason: parsed.error };
+			if (task.length === 0) return { kind: "council-usage" };
+			const options: CouncilCommandOptions = {};
+			const roster = parsed.flags.get("--roster");
+			if (typeof roster === "string") options.roster = roster;
+			const rounds = parsed.flags.get("--rounds");
+			if (typeof rounds === "string") {
+				const parsedRounds = Number(rounds);
+				// The tool bounds rounds at one to three, and a council that is
+				// refused after admission has already shown the operator a plan it
+				// cannot run, so the same bound is enforced where it was typed.
+				if (!Number.isInteger(parsedRounds) || parsedRounds < 1 || parsedRounds > COUNCIL_MAX_ROUNDS) {
+					return { kind: "council-usage", reason: `--rounds must be an integer 1..${COUNCIL_MAX_ROUNDS}` };
+				}
+				options.rounds = parsedRounds;
+			}
+			const synthesis = parsed.flags.get("--synthesis");
+			if (typeof synthesis === "string") {
+				if (!isCouncilSynthesisMode(synthesis)) return { kind: "council-usage" };
+				options.synthesis = synthesis;
+			}
+			return { kind: "council", task, options };
+		},
+		handle(command, ctx) {
+			if (command.kind === "council-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "council");
+				const usage = entry ? usageNotice(entry) : "usage: /council <task>";
+				ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
+				return;
+			}
+			if (command.kind !== "council") return;
+			void (async () => {
+				await handleCouncil(command.task, command.options, ctx);
 				ctx.render();
 			})();
 		},

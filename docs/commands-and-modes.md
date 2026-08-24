@@ -153,6 +153,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
+| `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
 | `/agents` | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |
@@ -206,6 +207,27 @@ rather than queued, because a side question answered after the run it was asked
 during has already missed its moment. The round's token usage still shows in
 `/cost`, labeled as a side question, because it was a real call and cost real
 money; it is deliberately not counted as a turn.
+
+`/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] <task>`
+asks a roster of two to five read-only members the same task and puts the group on
+the Fleet Runs board as one card. It owns no dispatch path of its own: the command
+builds dispatch-tool arguments and admits them through the tool registry, so a
+supervised autonomy level parks the call and the approval overlay names every
+member's label, target, model, node, round count, and synthesis mode before
+anything runs. Members are pinned to read-only autonomy and the council tool
+surface by admission, exactly as they are for a council the model asks for.
+
+`--roster` names a `workers.rosters` entry. Without it the command takes
+`workers.rosters.default` when that roster exists, and with neither it refuses
+and names the setting to declare. A roster that is the only one configured is
+still not the default: seating a council from whichever roster happens to be
+present would run models the operator never chose. `--rounds` accepts one to
+three and `--synthesis` accepts `judge`, `vote`, or `none`, which are the tool's
+own bounds, enforced where the operator typed them so a council is never refused
+after its plan has already been shown. `/council` during an in-flight turn is
+refused with a notice rather than queued, for the same reason `/fleet run` is: an
+approved plan describes the workspace as it stands. Nothing the members produce
+enters the main agent's context until an operator runs `/share`.
 
 `/handoff <goal>` carries this session's working state into a fresh session for a
 goal the operator states. The goal is required and gated: a goal shorter than 12
@@ -304,6 +326,15 @@ operator steering whose run id names a receipt it can read, so a model that
 never dispatched the run does not discard it as unattributed output. A turn
 that only relays a shared note does not trip the unbacked-worker-claim
 advisory.
+A council run shares as a council. `/share <synthesis runId>` brings the whole
+`council-report` in as one bounded block: every final-round member's answer under
+its roster label, each with its verdict when it declared one, then the synthesis
+line naming the mode, the verdict, the tally, and the judge run when there was
+one. `/share <member runId>` brings that one member's answer in under its roster
+label, so a single voice never reaches the main agent as an unattributed one. A
+synthesis run whose sealed text does not parse as a report is shared verbatim
+rather than dropped, because the operator named that run.
+
 `/new` resets the transcript and the pool bare `/share` draws from, so a run
 from the previous session cannot be shared into the new one. Worker tool
 arguments never cross at all: the transcript carries tool names only, the same

@@ -119,3 +119,33 @@ export function createClioTheme(options: { truecolor?: boolean; color?: boolean 
 		fgSequence: (token) => (color ? `\u001b[${fgCode(TOKENS[token], truecolor)}m` : ""),
 	};
 }
+
+/** True when `value` names one of the theme's own tokens, so it can be painted as one. */
+export function isClioToken(value: string): value is ClioToken {
+	return Object.hasOwn(TOKENS, value);
+}
+
+const HEX_COLOR = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/u;
+
+/**
+ * Paint text in a configured `#rrggbb` color.
+ *
+ * A council roster member may carry one. A roster color is the operator's own
+ * choice rather than a token from the palette, which is why a literal color
+ * reaches the screen here and nowhere else. Returns the text unchanged when
+ * color is disabled or the value is not a six-digit hex color, so a caller can
+ * fall back to a token without inspecting the string twice. A terminal without
+ * truecolor gets the nearest color in the 6x6x6 xterm cube.
+ */
+export function paintHex(text: string, hex: string, options: { truecolor?: boolean; color?: boolean } = {}): string {
+	const match = HEX_COLOR.exec(hex);
+	if (match === null) return text;
+	if (!(options.color ?? !colorDisabled())) return text;
+	const truecolor = options.truecolor ?? detectTruecolor();
+	const red = Number.parseInt(match[1] ?? "0", 16);
+	const green = Number.parseInt(match[2] ?? "0", 16);
+	const blue = Number.parseInt(match[3] ?? "0", 16);
+	if (truecolor) return `\u001b[38;2;${red};${green};${blue}m${text}${SGR_RESET}`;
+	const cube = (channel: number): number => Math.round((channel / 255) * 5);
+	return `\u001b[38;5;${16 + 36 * cube(red) + 6 * cube(green) + cube(blue)}m${text}${SGR_RESET}`;
+}

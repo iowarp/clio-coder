@@ -63,6 +63,8 @@ export { parseAgentBudget } from "./recipe.js";
 export { parseAgentRecipeSchema, recipeSchemaFieldNames } from "./recipe-schema.js";
 export type { AgentRecipeDiagnostic } from "./registry.js";
 export type {
+	CouncilReport,
+	CouncilReportMember,
 	OracleResult,
 	ResultAuthorship,
 	ResultContract,
@@ -73,6 +75,7 @@ export type {
 	VerifierResult,
 } from "./result-contract.js";
 export {
+	parseCouncilReport,
 	parseOracleResult,
 	parseResultContract,
 	parseScoutResult,

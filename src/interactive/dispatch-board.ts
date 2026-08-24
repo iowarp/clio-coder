@@ -35,6 +35,13 @@ import type { CostProvenance } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
+import {
+	COUNCIL_SYNTHESIS_LABEL,
+	type CouncilGroupView,
+	type CouncilMemberView,
+	councilGroupBody,
+	councilIslandLines,
+} from "./council-grid.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
 	type ClioTheme,
@@ -800,6 +807,131 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	return [padAnsi(line1, width), ...(task ? [padAnsi(task, width)] : []), padAnsi(telemetry, width)];
 }
 
+/**
+ * One member column's facts, drawn from the row the board already keeps. The
+ * route, status, and answer tail are the same values the run's own card shows,
+ * so a council column and a council card can never disagree.
+ */
+function councilMemberView(
+	row: DispatchBoardRow,
+	council: NonNullable<DispatchBoardRow["council"]>,
+): CouncilMemberView {
+	const presentation = dispatchStatusPresentation(row.status, {
+		compact: true,
+		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+	});
+	return {
+		runId: row.runId,
+		label: council.label,
+		...(council.color !== undefined ? { color: council.color } : {}),
+		round: council.round,
+		route: `${row.targetId}/${row.wireModelId}`,
+		status: { glyph: presentation.glyph, label: presentation.label, token: presentation.token },
+		tailText: sanitizeCallTargetText(row.progress?.tailText ?? ""),
+		droppedLines: row.progress?.droppedLines ?? 0,
+	};
+}
+
+/**
+ * Fold one council group's rows into the view the grid renders.
+ *
+ * A council of N members over R rounds seals N x R member runs, and the
+ * operator is looking at a council, not at its history: each label keeps its
+ * newest round, so the group shows one column per member however many rounds
+ * it ran. Columns are ordered by label so a repaint cannot reshuffle them under
+ * the cursor while runs settle in whatever order they finish.
+ */
+function foldCouncilGroup(
+	group: string,
+	rows: ReadonlyArray<DispatchBoardRow>,
+	selectedRunId?: string | null,
+): CouncilGroupView {
+	const newest = new Map<string, DispatchBoardRow>();
+	let synthesisRow: DispatchBoardRow | null = null;
+	let rank = Number.POSITIVE_INFINITY;
+	let elapsedMs = 0;
+	let round = 1;
+	for (const row of rows) {
+		const council = row.council;
+		if (council === undefined) continue;
+		rank = Math.min(rank, STATUS_ORDER[row.status]);
+		elapsedMs = Math.max(elapsedMs, row.elapsedMs);
+		if (council.label === COUNCIL_SYNTHESIS_LABEL) {
+			synthesisRow = row;
+			continue;
+		}
+		round = Math.max(round, council.round);
+		const previous = newest.get(council.label);
+		if (previous === undefined || (previous.council?.round ?? 0) <= council.round) newest.set(council.label, row);
+	}
+	const aggregate = (Object.entries(STATUS_ORDER) as Array<[DispatchBoardStatus, number]>).find(
+		([, value]) => value === rank,
+	);
+	const presentation = dispatchStatusPresentation(aggregate?.[0] ?? "running", {
+		compact: true,
+		...(aggregate?.[0] === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+	});
+	const members = [...newest.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		// biome-ignore lint/style/noNonNullAssertion: every entry was inserted with its own council badge.
+		.map(([, row]) => councilMemberView(row, row.council!));
+	const selectedInGroup =
+		selectedRunId != null && rows.some((row) => row.runId === selectedRunId) ? selectedRunId : undefined;
+	return {
+		group,
+		members,
+		// biome-ignore lint/style/noNonNullAssertion: the synthesis row was matched on its own council badge.
+		synthesis: synthesisRow === null ? null : councilMemberView(synthesisRow, synthesisRow.council!),
+		status: { glyph: presentation.glyph, label: presentation.label, token: presentation.token },
+		round,
+		elapsed: formatCompactMs(elapsedMs),
+		...(selectedInGroup !== undefined ? { selectedRunId: selectedInGroup } : {}),
+	};
+}
+
+/** A board entry: either one ordinary run, or one whole council in the position of its first row. */
+export type DispatchBoardItem = { kind: "run"; row: DispatchBoardRow } | { kind: "council"; group: CouncilGroupView };
+
+/**
+ * Board order with councils folded in place. A council occupies the position of
+ * its first row and its remaining rows are consumed, so the board never shows a
+ * member both inside its group and beside it.
+ */
+export function dispatchBoardItems(
+	rows: ReadonlyArray<DispatchBoardRow>,
+	selectedRunId?: string | null,
+): DispatchBoardItem[] {
+	const byGroup = new Map<string, DispatchBoardRow[]>();
+	for (const row of rows) {
+		const group = row.council?.group;
+		if (group === undefined) continue;
+		const bucket = byGroup.get(group);
+		if (bucket === undefined) byGroup.set(group, [row]);
+		else bucket.push(row);
+	}
+	const emitted = new Set<string>();
+	const items: DispatchBoardItem[] = [];
+	for (const row of rows) {
+		const group = row.council?.group;
+		if (group === undefined) {
+			items.push({ kind: "run", row });
+			continue;
+		}
+		if (emitted.has(group)) continue;
+		emitted.add(group);
+		items.push({ kind: "council", group: foldCouncilGroup(group, byGroup.get(group) ?? [row], selectedRunId) });
+	}
+	return items;
+}
+
+/** The framed council card: the member grid or stack, with the synthesis run full width under it. */
+export function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
+	const theme = clioTheme();
+	const contentWidth = Math.max(0, width - 4);
+	const title = `${theme.fg("info", "council")} ${theme.paint(group.group, { bold: true })}`;
+	return frame(theme, title, councilGroupBody(theme, group, contentWidth), width, { rightMeta: group.elapsed });
+}
+
 export function formatDispatchBoardLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	width = 76,
@@ -817,11 +949,15 @@ export function formatDispatchBoardLines(
 		});
 	}
 
-	const cards = rows.map((row) =>
-		renderDispatchCard(row, width, deriveRunEvidenceState(observability, row.runId), {
-			selected: row.runId === selectedRunId,
-			expanded: detailExpanded && row.runId === selectedRunId,
-		}),
+	// A council is one question asked of several members, so its rows render as
+	// one card holding the whole group rather than as unrelated neighbours.
+	const cards = dispatchBoardItems(rows, selectedRunId).map((item) =>
+		item.kind === "council"
+			? renderCouncilCard(item.group, width)
+			: renderDispatchCard(item.row, width, deriveRunEvidenceState(observability, item.row.runId), {
+					selected: item.row.runId === selectedRunId,
+					expanded: detailExpanded && item.row.runId === selectedRunId,
+				}),
 	);
 	const body: string[] = [];
 	for (const card of cards) {
@@ -910,23 +1046,30 @@ export function createDispatchBoardView(
 }
 
 export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
-	const visibleRows = rows.slice(0, Math.max(1, maxRows));
+	// Councils are folded before the row cap, so a five-member council costs the
+	// island one card and never crowds out the runs beside it.
+	const items = dispatchBoardItems(rows);
+	const visibleItems = items.slice(0, Math.max(1, maxRows));
 	const body: string[] = [];
 
-	if (visibleRows.length === 0) {
+	if (visibleItems.length === 0) {
 		const theme = clioTheme();
 		body.push(theme.fg("dim", "No active fleet runs."));
 		body.push(theme.fg("dim", "Use /run or /delegate to spawn agents."));
 	} else {
-		for (let i = 0; i < visibleRows.length; i++) {
-			const row = visibleRows[i];
-			if (!row) continue;
+		for (let i = 0; i < visibleItems.length; i++) {
+			const item = visibleItems[i];
+			if (!item) continue;
 			if (i > 0) {
 				body.push(innerDivider(clioTheme(), TASK_ISLAND_WIDTH));
 			}
-			body.push(...renderTaskIslandRow(row, TASK_ISLAND_WIDTH));
+			body.push(
+				...(item.kind === "council"
+					? councilIslandLines(clioTheme(), item.group, TASK_ISLAND_WIDTH)
+					: renderTaskIslandRow(item.row, TASK_ISLAND_WIDTH)),
+			);
 		}
-		const hidden = rows.length - visibleRows.length;
+		const hidden = items.length - visibleItems.length;
 		if (hidden > 0) {
 			body.push(innerDivider(clioTheme(), TASK_ISLAND_WIDTH));
 			body.push(clioTheme().fg("dim", `+ ${hidden} more`));

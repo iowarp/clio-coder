@@ -839,6 +839,22 @@ hard block.
   diagnostics and no accept key. A turn in flight refuses the command with a
   notice rather than queueing it: an approved plan describes the workspace as
   it stands.
+- A council is one question asked of several members, so its rows render as one
+  card rather than as three to five unrelated neighbours. On the `Alt+W` board the
+  members sit side by side, one column each, as long as every column keeps at
+  least 34 cells; below that the whole group stacks one member under another
+  rather than squeezing some columns and not others. Each column carries the
+  member label in its roster color (a member with no color takes the accent), the
+  target and model, the round, the status, and the same bounded answer tail the
+  run's own card would show. The synthesis run takes the full width under the
+  members, because it is the council's answer rather than one voice in it. A
+  council that ran several rounds still shows one column per member: each label
+  keeps its newest round, so the card describes the council rather than its
+  history.
+- The compact Fleet Runs island shows a council as one card naming the group, how
+  many members are seated, and which round they are on. The grid belongs to the
+  board, where there is width to read an answer in. `/share` is what moves a
+  council answer into the main agent's context; the card moves nothing.
 - Board rows a fleet plan dispatched carry a phase column naming the step's
   wave index and step id (`w2 build`). A run that is not a fleet step renders
   the column empty. The compact Fleet Runs island keeps its fixed width, so it
