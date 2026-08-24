@@ -7,6 +7,12 @@
  * trace in the session a fleet run briefs its workers from. The four things it
  * must not touch are asserted directly rather than inferred from the absence of
  * a symptom.
+ *
+ * The spend is still recorded, in two places that are not the session file: the
+ * in-process cost surface, and the durable out-of-turn usage store the archive
+ * readers fold. Both are asserted here, because "nothing was written" and
+ * "nothing was written to the session" are different promises and only the
+ * second one is the contract.
  */
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
@@ -14,6 +20,7 @@ import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
+import type { OutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
@@ -285,6 +292,7 @@ describe("contracts//btw at the chat loop", () => {
 		const session = createSessionSpy();
 		const observability = createObservabilitySpy();
 		const calls: SideQuestionInput[] = [];
+		const outOfTurnRows: OutOfTurnUsageRow[] = [];
 		const captured: { agent: FakeAgentHandle | null } = { agent: null };
 		const loop = createChatLoop({
 			getSettings: settings,
@@ -296,6 +304,7 @@ describe("contracts//btw at the chat loop", () => {
 				throw new Error("no turn may run in a side-question contract");
 			}, captured),
 			runSideQuestion: sideQuestionStub(calls, ANSWERED),
+			recordOutOfTurnUsageRow: (row: OutOfTurnUsageRow) => outOfTurnRows.push(row),
 		} as never);
 		loop.resetForSession(null, SEEDED_HISTORY);
 
@@ -344,6 +353,29 @@ describe("contracts//btw at the chat loop", () => {
 			reasoningTokens: 2,
 			totalTokens: 132,
 			apiCalls: 1,
+		});
+
+		// 5. The same spend reached the durable out-of-turn store, which is where
+		//    an archive reader such as `clio-coder usage report` finds it after
+		//    this process is gone. Exactly one line, labeled and attributed.
+		strictEqual(outOfTurnRows.length, 1, "the out-of-turn usage store received one row");
+		const stored = outOfTurnRows[0];
+		ok(stored);
+		strictEqual(stored.label, "side-question");
+		strictEqual(stored.sessionId, "session-1");
+		strictEqual(stored.target, "test-target");
+		strictEqual(stored.attributedModelId, "model");
+		ok(typeof stored.repoIdentity === "string" && stored.repoIdentity.length > 0, "the row carries a repo identity");
+		ok(Number.isFinite(Date.parse(stored.timestamp)), "the row carries a parseable timestamp");
+		deepStrictEqual(stored.usage, {
+			input: 120,
+			output: 8,
+			cacheRead: 4,
+			cacheWrite: 0,
+			reasoning: 2,
+			totalTokens: 132,
+			costUsd: 0.0004,
+			costProvenance: "unknown",
 		});
 
 		loop.dispose();

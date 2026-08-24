@@ -135,6 +135,7 @@ export const SETTINGS_SECTIONS = [
 	{ id: "compaction", label: "Compaction", group: "RUNTIME" },
 	{ id: "retry", label: "Retry", group: "RUNTIME" },
 	{ id: "terminal", label: "Terminal", group: "EXPERIENCE" },
+	{ id: "watchdog", label: "Watchdog", group: "EXPERIENCE" },
 	{ id: "advanced", label: "Advanced", group: "EXPERIENCE" },
 ] as const;
 
@@ -150,6 +151,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 	compaction: "When and how the context window is summarized under pressure.",
 	retry: "Automatic recovery from transient provider and network errors.",
 	terminal: "Terminal integration and the Clio color palette.",
+	watchdog: "The opt-in turn-end verifier run, where it is routed, and whether it also fires mid-turn.",
 	advanced: "Commit provenance, runtime plugins, delegation timeouts, and links to other surfaces.",
 } as const satisfies Record<SettingsSectionId, string>;
 
@@ -199,6 +201,10 @@ export const SETTINGS_LABELS_BY_ID = {
 	"terminal.tuiMode": "TUI mode",
 	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
 	"terminal.smoothStreaming": "Smooth streaming",
+	"terminal.notify": "Desktop notifications",
+	"watchdog.enabled": "Turn-end watchdog",
+	"watchdog.target": "Watchdog target",
+	"watchdog.cadenceToolCalls": "Watchdog cadence (tools)",
 	theme: "Theme",
 	runtimePlugins: "Runtime plugins",
 	"compaction.model": "Compaction model",
@@ -269,8 +275,10 @@ export const SETTINGS_SECTION_ROWS = {
 		"terminal.tuiMode",
 		"terminal.fullscreenScrollbar",
 		"terminal.smoothStreaming",
+		"terminal.notify",
 		"theme",
 	],
+	watchdog: ["watchdog.enabled", "watchdog.target", "watchdog.cadenceToolCalls"],
 	advanced: [
 		"runtimePlugins",
 		"attribution.gitCommits",
@@ -329,6 +337,11 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"terminal.tuiMode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
 	"terminal.fullscreenScrollbar": "When the draggable transcript scrollbar is visible in fullscreen mode.",
 	"terminal.smoothStreaming": "Presentation-only pacing for streamed assistant text and thinking.",
+	"terminal.notify":
+		"Content-free desktop notification when a turn ends, a detached batch settles, or an approval parks.",
+	"watchdog.enabled": "When enabled, a turn that changed the tree is reviewed by one read-only verifier run.",
+	"watchdog.target": "Set target to route the run at a cheap local model; blank uses the session's active target.",
+	"watchdog.cadenceToolCalls": "Also fire every N tool calls inside a turn; blank fires at turn end only.",
 	theme: "Color palette. Clio ships a single tuned palette.",
 	runtimePlugins: "npm packages exporting clioRuntimes: RuntimeDescriptor[].",
 	"compaction.model": "Dedicated summarization model; blank uses the orchestrator.",
@@ -362,6 +375,14 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
 	scope: "Choose target-level or exact target/model refs. Alt+J / Alt+K step the chat target through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
+	"terminal.notify":
+		"OSC 777, or OSC 9 on iTerm2, Windows Terminal, and ConEmu. Interactive TTY runs only; the body never carries prompt text, file paths, or model output.",
+	"watchdog.enabled":
+		"The verifier run is briefed with the turn's coalesced diff and the task board's current scope; its blockers become one transcript notice and nothing else. Headless and ACP runs never fire it.",
+	"watchdog.target":
+		"A watchdog run costs a worker run per mutating turn, so routing it at a local target keeps the review cheap. Leave blank to reuse whatever the session is already talking to.",
+	"watchdog.cadenceToolCalls":
+		"Mid-turn firing is how scope drift becomes visible before the turn ends. Leave blank and the watchdog fires at turn end only.",
 	keybindings:
 		"Renderer controls: Alt+O newest tool or worker details, Ctrl+Alt+O or Alt+Shift+O all of them, Alt+P live tool output, Alt+R latest reasoning, Ctrl+Alt+R or Alt+Shift+R all reasoning. Override these in settings.yaml or use /help.",
 };
@@ -421,6 +442,14 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		hidden: "never draw the fullscreen transcript scrollbar",
 		auto: "show the scrollbar while scrolling or dragging",
 		always: "reserve the rightmost column for the scrollbar",
+	},
+	"terminal.notify": {
+		true: "post a content-free desktop notification on turn end, batch settlement, and a parked approval",
+		false: "never post a desktop notification",
+	},
+	"watchdog.enabled": {
+		true: "review every mutating turn with one read-only verifier run",
+		false: "no verifier run; a turn ends without a second opinion",
 	},
 	"terminal.smoothStreaming": {
 		off: "preserve the current immediate 16ms-coalesced streaming behavior",
@@ -1211,6 +1240,7 @@ export function buildSettingItems(
 	const compaction = settings.compaction;
 	const retry = settings.retry;
 	const terminal = settings.terminal;
+	const watchdog = settings.watchdog;
 	const orchestratorThinking = thinkingChoices(
 		options?.providers,
 		settings.orchestrator.target,
@@ -1411,10 +1441,31 @@ export function buildSettingItems(
 		settingItem("terminal.smoothStreaming", terminal.smoothStreaming, {
 			values: ["off", "auto", "on"],
 		}),
+		settingItem("terminal.notify", String(terminal.notify), {
+			values: ["false", "true"],
+		}),
 		settingItem("theme", settings.theme, {
 			affordance: "single clio-coder palette",
 			readOnly: true,
 		}),
+		settingItem("watchdog.enabled", String(watchdog.enabled), {
+			values: ["false", "true"],
+		}),
+		// Both optional keys render their absence rather than a fabricated value:
+		// an unset target means the session's own, and an unset cadence means the
+		// watchdog fires at turn end only. Submitting an empty value clears them.
+		settingItem("watchdog.target", watchdog.target ?? "(session target)", {
+			submenu: editTextSubmenu("Edit watchdog target; blank uses the session's active target"),
+			affordance: "free text",
+		}),
+		settingItem(
+			"watchdog.cadenceToolCalls",
+			watchdog.cadenceToolCalls === undefined ? "(turn end only)" : String(watchdog.cadenceToolCalls),
+			{
+				submenu: editNumberSubmenu("Edit watchdog cadence in tool calls; blank fires at turn end only"),
+				affordance: "free text",
+			},
+		),
 		settingItem("runtimePlugins", settings.runtimePlugins.length > 0 ? settings.runtimePlugins.join(", ") : "(none)", {
 			submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart Clio to load changes."),
 			affordance: "free text",
@@ -1898,6 +1949,31 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 				settings.terminal.fullscreenScrollbar = value;
 			}
 			return;
+		case "terminal.notify":
+			if (value === "true" || value === "false") settings.terminal.notify = value === "true";
+			return;
+		case "watchdog.enabled":
+			if (value === "true" || value === "false") settings.watchdog.enabled = value === "true";
+			return;
+		// Both watchdog options are absent-by-default, and an empty submission is
+		// how the operator says "go back to the default" from a text row. Deleting
+		// the key rather than storing a blank keeps settings.yaml matching what the
+		// config validator accepts.
+		case "watchdog.target": {
+			const trimmed = value.trim();
+			if (trimmed) settings.watchdog.target = trimmed;
+			else delete settings.watchdog.target;
+			return;
+		}
+		case "watchdog.cadenceToolCalls": {
+			if (value.trim().length === 0) {
+				delete settings.watchdog.cadenceToolCalls;
+				return;
+			}
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && Math.floor(parsed) >= 1) settings.watchdog.cadenceToolCalls = Math.floor(parsed);
+			return;
+		}
 		case "terminal.smoothStreaming":
 			if (value === "off" || value === "auto" || value === "on") settings.terminal.smoothStreaming = value;
 			return;

@@ -17,6 +17,7 @@ import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { clioStateDir } from "../core/xdg.js";
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
@@ -24,10 +25,11 @@ import {
 } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CostEntryLabel } from "../domains/observability/cost.js";
+import { appendOutOfTurnUsageRow, type OutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { runtimeTargetSnapshot, targetRequiresAuth } from "../domains/providers/index.js";
+import { normalizeCostProvenance, runtimeTargetSnapshot, targetRequiresAuth } from "../domains/providers/index.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/context-accounting.js";
@@ -39,6 +41,7 @@ import { protectedArtifactStateFromSessionEntries } from "../domains/session/pro
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
+import { cwdHash } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
@@ -350,6 +353,12 @@ export interface CreateChatLoopDeps {
 	runSideQuestion?: typeof runSideQuestion;
 	/** The `/handoff` extraction round. Injectable for the same reason. */
 	runHandoffRound?: typeof runHandoffRound;
+	/**
+	 * Append one priced out-of-turn call to the durable out-of-turn usage store.
+	 * Defaults to the real writer under the state dir. Contracts inject a spy so
+	 * they can assert the row was written without touching a real state dir.
+	 */
+	recordOutOfTurnUsageRow?: (row: OutOfTurnUsageRow) => void;
 	/**
 	 * Return the current session's entries for token estimation. The chat-loop
 	 * calls this on every submit so the auto-compaction threshold sees the
@@ -693,18 +702,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	const writeOutOfTurnUsageRow =
+		deps.recordOutOfTurnUsageRow ?? ((row: OutOfTurnUsageRow): void => appendOutOfTurnUsageRow(clioStateDir(), row));
+
 	/**
 	 * Report an out-of-turn round's provider usage. Money was spent, so `/cost`
 	 * says so under its own label; turn persistence, the working-set ledger,
 	 * compaction inputs, and the footer counters never see it.
+	 *
+	 * The same call is also appended to the out-of-turn usage store under the
+	 * state dir. That store exists because `/cost` only knows what this process
+	 * spent: the round appends nothing to the session JSONL by design, so an
+	 * archive reader such as `clio-coder usage report` had no record of the
+	 * spend at all once the process exited. The session ledger stays untouched.
 	 */
 	const recordOutOfTurnUsage = (
 		runtime: AgentRuntime,
 		usage: SideQuestionResult["usage"],
 		label: CostEntryLabel,
 	): void => {
-		if (!usage || !deps.observability) return;
-		deps.observability.recordTokens(
+		if (!usage) return;
+		const costProvenance = runtime.runtimeResolution.costProvenance;
+		deps.observability?.recordTokens(
 			runtime.targetId,
 			runtime.wireModelId,
 			usage.totalTokens,
@@ -718,10 +737,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				totalTokens: usage.totalTokens,
 				apiCalls: 1,
 			},
-			runtime.runtimeResolution.costProvenance,
+			costProvenance,
 			undefined,
 			label,
 		);
+		const meta = deps.session?.current() ?? null;
+		writeOutOfTurnUsageRow({
+			label,
+			sessionId: meta?.id ?? null,
+			// The identity the session ledger is filed under, so `usage report
+			// --repo` selects these rows with the same hash it selects ledgers with.
+			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
+			timestamp: new Date().toISOString(),
+			target: runtime.targetId,
+			attributedModelId: runtime.wireModelId,
+			usage: {
+				input: usage.input,
+				output: usage.output,
+				cacheRead: usage.cacheRead,
+				cacheWrite: usage.cacheWrite,
+				reasoning: usage.reasoning,
+				totalTokens: usage.totalTokens,
+				costUsd: usage.costUsd,
+				costProvenance: normalizeCostProvenance(costProvenance),
+			},
+		});
 	};
 
 	const api: ChatLoop = {

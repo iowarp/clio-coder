@@ -696,3 +696,134 @@ describe("contracts/usage-report bashShape", () => {
 		strictEqual(bashShape("   "), "");
 	});
 });
+
+/**
+ * `/btw` side questions and `/handoff` extraction rounds are real provider
+ * calls that deliberately append nothing to the session ledger, so their spend
+ * lives in `<stateDir>/usage/out-of-turn.jsonl`. The report folds that store
+ * beside the ledgers: the tokens and cost belong in the window totals, but
+ * neither round is a turn, so the turn count excludes them exactly as the
+ * `/cost` overlay does. An archive with no such call renders as it always did.
+ */
+describe("contracts/usage-report out-of-turn calls", () => {
+	function seedLedger(dir: string): void {
+		const line = (turnId: string, total: number, cost: number): string =>
+			JSON.stringify({
+				kind: "message",
+				role: "assistant",
+				turnId,
+				parentTurnId: null,
+				timestamp: RECENT,
+				payload: {
+					text: "done",
+					stopReason: "stop",
+					provider: "dynamo",
+					model: "Nemo-3.5",
+					usage: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: total, cost: { total: cost } },
+				},
+			});
+		writeJsonl(join(dir, "state", "sessions", "repohash", "sess-otr", "current.jsonl"), [
+			line("t1", 100, 0.1),
+			line("t2", 200, 0.2),
+		]);
+	}
+
+	function outOfTurnLine(label: "side-question" | "handoff", totalTokens: number, costUsd: number): string {
+		return JSON.stringify({
+			label,
+			sessionId: "sess-otr",
+			repoIdentity: "repohash",
+			timestamp: RECENT_EARLIER,
+			target: "dynamo",
+			attributedModelId: "Nemo-3.5",
+			usage: {
+				input: totalTokens,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoning: 0,
+				totalTokens,
+				costUsd,
+				costProvenance: "known",
+			},
+		});
+	}
+
+	describe("with two side questions and one handoff", () => {
+		const scratch = makeScratchHome("clio-usage-out-of-turn-");
+		let rows: JsonRow[] = [];
+		let stdout = "";
+
+		before(async () => {
+			seedLedger(scratch.dir);
+			writeJsonl(join(scratch.dir, "state", "usage", "out-of-turn.jsonl"), [
+				outOfTurnLine("side-question", 10, 0.01),
+				outOfTurnLine("side-question", 20, 0.02),
+				outOfTurnLine("handoff", 30, 0.03),
+			]);
+			const result = await runUsage(scratch, ["report", "--json"]);
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			rows = parseJsonl(result.stdout);
+			stdout = (await runUsage(scratch, ["report"])).stdout;
+		});
+		after(() => scratch.cleanup());
+
+		it("counts the labelled calls and excludes them from turns", () => {
+			const tokens = facts(rows, "tokens")[0];
+			ok(tokens, "expected a tokens fact");
+			strictEqual(tokens?.sideQuestions, 2);
+			strictEqual(tokens?.handoffs, 1);
+			// Five folded calls, three of them out of turn.
+			strictEqual(tokens?.apiCalls, 5);
+			strictEqual(tokens?.turns, 2, "a side question and a handoff are spend, never turns");
+		});
+
+		it("folds the out-of-turn tokens and cost into the window totals", () => {
+			const tokens = facts(rows, "tokens")[0];
+			strictEqual(tokens?.totalTokens, 100 + 200 + 10 + 20 + 30);
+			strictEqual((tokens?.costUsd as number).toFixed(4), "0.3600");
+			const model = facts(rows, "model-usage").find((row) => row.attributedModelId === "Nemo-3.5");
+			ok(model, `expected a model-usage fact: ${JSON.stringify(rows)}`);
+			strictEqual(model?.apiCalls, 5);
+		});
+
+		it("prints the counts beside the model-call line in the text report", () => {
+			ok(stdout.includes("tokens in window: 360 over 5 model calls"), stdout);
+			ok(stdout.includes("turns in window: 2"), stdout);
+			ok(stdout.includes("side questions in window: 2"), stdout);
+			ok(stdout.includes("handoffs in window: 1"), stdout);
+		});
+	});
+
+	describe("with no out-of-turn call recorded", () => {
+		const scratch = makeScratchHome("clio-usage-no-out-of-turn-");
+		let rows: JsonRow[] = [];
+		let stdout = "";
+
+		before(async () => {
+			seedLedger(scratch.dir);
+			const result = await runUsage(scratch, ["report", "--json"]);
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			rows = parseJsonl(result.stdout);
+			stdout = (await runUsage(scratch, ["report"])).stdout;
+		});
+		after(() => scratch.cleanup());
+
+		it("emits no origin fields at all, so the older output is unchanged", () => {
+			const tokens = facts(rows, "tokens")[0];
+			ok(tokens);
+			strictEqual("turns" in tokens, false);
+			strictEqual("sideQuestions" in tokens, false);
+			strictEqual("handoffs" in tokens, false);
+			strictEqual(tokens?.apiCalls, 2);
+			strictEqual(tokens?.totalTokens, 300);
+		});
+
+		it("prints neither a turn count nor an out-of-turn count", () => {
+			ok(stdout.includes("tokens in window: 300 over 2 model calls"), stdout);
+			ok(!stdout.includes("turns in window"), stdout);
+			ok(!stdout.includes("side questions in window"), stdout);
+			ok(!stdout.includes("handoffs in window"), stdout);
+		});
+	});
+});

@@ -57,6 +57,53 @@ An `EvidenceIndexRow` has the following schema:
 
 ---
 
+## Cross-Session Usage Facts
+
+`clio-coder usage report` folds the local archive into one window of facts. Its token and cost facts come from two inputs: the per-session ledgers, folded through the session domain's `ledgerUsageCalls`, and the out-of-turn usage store described below. Both the text report and `--json` carry the same fields.
+
+| Field | Where it appears | Meaning |
+| --- | --- | --- |
+| `apiCalls` | `tokens in window: <total> over <n> model calls` and the `tokens` JSON fact | Provider calls folded in the window, out-of-turn rounds included. |
+| `input`, `output`, `cacheRead`, `cacheWrite`, `reasoningTokens`, `totalTokens` | the same line and fact | Provider-reported token breakdown for those calls. |
+| `costUsd` | `provider-reported cost in window` and the `tokens` fact | Provider-reported cost. Never estimated. |
+| `turns` | `turns in window` and the `tokens` fact | Folded calls that were turns, so labelled calls are subtracted exactly as `/cost` subtracts them. |
+| `sideQuestions` | `side questions in window` and the `tokens` fact | `/btw` rounds in the window. |
+| `handoffs` | `handoffs in window` and the `tokens` fact | `/handoff` extraction rounds in the window. |
+
+The last three fields appear only when at least one labelled call falls in the window. An archive with no `/btw` or `/handoff` round in it renders exactly as it did before those fields existed, so their presence is itself the signal that money was spent beside a session.
+
+### The Out-of-Turn Usage Store
+
+A `/btw` side question and a `/handoff` extraction round are real provider calls that append nothing to the session JSONL, by design: a fleet run briefs its workers from the transcript, and a question the operator asked to orient themselves must not become context those workers inherit. The spend still has to be recorded somewhere durable, so it goes to `<stateDir>/usage/out-of-turn.jsonl`, one JSON line per priced call, written by the chat loop at the same moment it reports the call to `/cost`.
+
+The file is append-only NDJSON kept as a bounded ring (capped at 1000 rows, rewritten atomically under the shared state-file lock when it grows past the cap). Reads are tolerant: a malformed line is reported as a diagnostic on stderr and skipped.
+
+A row has the following schema:
+```json
+{
+  "label": "side-question",
+  "sessionId": "01JQ2K7V8W",
+  "repoIdentity": "9f2c1b4ea77d0c31",
+  "timestamp": "2026-06-25T14:30:00.000Z",
+  "target": "dynamo",
+  "attributedModelId": "Nemo-3.5",
+  "usage": {
+    "input": 120,
+    "output": 8,
+    "cacheRead": 4,
+    "cacheWrite": 0,
+    "reasoning": 2,
+    "totalTokens": 132,
+    "costUsd": 0.0004,
+    "costProvenance": "known"
+  }
+}
+```
+
+`repoIdentity` is the same cwd hash the session ledger is filed under, which is what lets `usage report --repo <path>` select these rows with the hash it already computes for the ledgers.
+
+---
+
 ## Artifact Categories and Path Layouts
 
 Clio resolves directories under platform-specific XDG defaults (on Linux, these default to `~/.config/clio-coder/`, `~/.local/share/clio-coder/`, and `~/.local/state/clio-coder/`).
