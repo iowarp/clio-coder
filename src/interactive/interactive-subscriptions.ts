@@ -37,6 +37,12 @@ export interface InteractiveSubscriptionsDeps {
 	recordWorkerRun?: (fields: WorkerRunEntryFields) => void;
 	/** Sealed-receipt reader, injected by tests. Defaults to `<state>/receipts/<runId>.json`. */
 	readWorkerReceipt?: WorkerReceiptReader;
+	/**
+	 * A dispatch run reached a terminal state. The desktop notification uses it
+	 * to look for a detached batch that settled with this run; nothing else
+	 * derives state from it.
+	 */
+	onDispatchSettled?: () => void;
 }
 
 export interface InteractiveSubscriptions {
@@ -89,8 +95,14 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			}),
 		),
 		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted)),
-		deps.bus.on(BusChannels.DispatchCompleted, folded(workers.completed)),
-		deps.bus.on(BusChannels.DispatchFailed, folded(workers.failed)),
+		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
+			folded(workers.completed)(payload);
+			deps.onDispatchSettled?.();
+		}),
+		deps.bus.on(BusChannels.DispatchFailed, (payload) => {
+			folded(workers.failed)(payload);
+			deps.onDispatchSettled?.();
+		}),
 		deps.bus.on(BusChannels.ContextActivity, () => {
 			deps.refreshFooter();
 			deps.renderContextIsland();

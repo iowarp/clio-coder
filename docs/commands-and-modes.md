@@ -151,6 +151,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/share` | `/share [runId] \| /share export <path> \| /share import [--dry-run] [--force] <path>` | Share a worker result with the main agent, or export and import Clio archives |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
+| `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/agents` | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | `/targets` | Open Settings → Targets: health, use, connect, probe, remove |
 | `/cost` | `/cost` | Show session token and cost totals |
@@ -189,6 +190,20 @@ There are no slash-command aliases. `/context compact`, `/quit`, `/model`,
 `/settings`, and `/skill <name>` are their only spellings. Retired or foreign
 spellings stay errors that name `/help` instead of guessing which operation the
 operator intended.
+
+`/btw <question>` runs one model round beside the session and renders the answer
+in an overlay. It sends the same compiled message history the next turn would
+send, as read-only input, under a short system instruction saying this is a side
+question, with no tools. Nothing about the round is appended: not the session
+JSONL, not the transcript panel, not the context ledger, not the task board. That
+is the point of it. A fleet run briefs its workers from the transcript, so a
+question the operator asks to orient themselves mid-run would otherwise become
+context every worker inherits. Esc closes the overlay, and cancels the round if it
+is still streaming. `/btw` during an in-flight turn is refused with a notice
+rather than queued, because a side question answered after the run it was asked
+during has already missed its moment. The round's token usage still shows in
+`/cost`, labeled as a side question, because it was a real call and cost real
+money; it is deliberately not counted as a turn.
 
 The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list.
 

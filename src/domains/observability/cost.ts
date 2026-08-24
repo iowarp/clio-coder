@@ -111,6 +111,13 @@ export interface UsageBreakdown {
 	apiCalls?: number;
 }
 
+/**
+ * What produced a priced call, when it was not an ordinary turn. `/cost` and
+ * the usage surfaces separate these out so an operator can see that money was
+ * spent beside the session rather than inside it.
+ */
+export type CostEntryLabel = "side-question";
+
 export interface CostEntry {
 	providerId: string;
 	attributedModelId: string;
@@ -125,6 +132,8 @@ export interface CostEntry {
 	cacheWrite: number;
 	reasoningTokens: number;
 	apiCalls?: number;
+	/** Absent on an ordinary turn's call. */
+	label?: CostEntryLabel;
 }
 
 export interface CostTracker {
@@ -139,6 +148,7 @@ export interface CostTracker {
 			requestedModelIds: ReadonlyArray<string>;
 			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
 		},
+		label?: CostEntryLabel,
 	): number;
 	sessionTotal(): number;
 	sessionCost(): CostAggregate;
@@ -156,7 +166,7 @@ export function createCostTracker(): CostTracker {
 	let total = 0;
 	const totals = emptyBreakdown();
 	return {
-		accumulate(providerId, attributedModelId, tokens, usd, breakdown, costProvenance, modelIdFacts) {
+		accumulate(providerId, attributedModelId, tokens, usd, breakdown, costProvenance, modelIdFacts, label) {
 			const resolvedUsd = usd ?? 0;
 			const provenance = normalizeCostProvenance(costProvenance);
 			const input = breakdown?.input ?? 0;
@@ -186,6 +196,7 @@ export function createCostTracker(): CostTracker {
 				cacheWrite,
 				reasoningTokens,
 				...(apiCalls !== undefined ? { apiCalls } : {}),
+				...(label !== undefined ? { label } : {}),
 			});
 			total += resolvedUsd;
 			totals.input += input;

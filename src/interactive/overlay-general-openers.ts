@@ -32,6 +32,7 @@ import {
 	openContextResetOverlay,
 } from "./overlays/context-reset.js";
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
+import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import { type ContextClearCommandOptions, formatUserTaskHandoff } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { type ArtifactProviderDeps, createDefaultArtifactProviders } from "./view/artifacts.js";
@@ -77,6 +78,20 @@ export interface OverlayGeneralOpenersDeps {
 	openDecisionsOverlay?: typeof openDecisionsOverlay;
 	openMemoryOverlay?: typeof openMemoryOverlay;
 	openViewOverlay?: typeof openViewOverlay;
+	openSideQuestionOverlay?: typeof openSideQuestionOverlay;
+	/**
+	 * Run one `/btw` round. Absent on a host with no chat loop, in which case
+	 * `/btw` reports that instead of opening an empty overlay.
+	 */
+	askSideQuestion?: (
+		question: string,
+		options: { signal: AbortSignal; onDelta: (partialText: string) => void },
+	) => Promise<
+		| { status: "answered"; text: string }
+		| { status: "aborted"; text: string }
+		| { status: "refused"; reason: string }
+		| { status: "failed"; reason: string }
+	>;
 }
 
 export interface OverlayGeneralOpeners {
@@ -89,6 +104,7 @@ export interface OverlayGeneralOpeners {
 	openMemory(): void;
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
+	openSideQuestion(question: string): void;
 }
 
 export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): OverlayGeneralOpeners {
@@ -100,6 +116,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const openMemoryOverlayFactory = deps.openMemoryOverlay ?? openMemoryOverlay;
 	const openViewOverlayFactory = deps.openViewOverlay ?? openViewOverlay;
 	const showOverlayFrameFactory = deps.showOverlayFrame ?? showClioOverlayFrame;
+	const openSideQuestionOverlayFactory = deps.openSideQuestionOverlay ?? openSideQuestionOverlay;
 
 	const openCost = (): void => {
 		if (deps.transitions.state !== "closed") return;
@@ -305,6 +322,46 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		return buildHint(entries);
 	};
 
+	/**
+	 * `/btw <question>`: one model round beside the session, rendered in an
+	 * overlay and nowhere else. Esc aborts a round that is still streaming and
+	 * closes one that has settled; both paths run through the same abort
+	 * controller, so a cancelled round never keeps a stream alive behind a closed
+	 * overlay.
+	 */
+	const openSideQuestion = (question: string): void => {
+		if (deps.transitions.state !== "closed") return;
+		const ask = deps.askSideQuestion;
+		if (!ask) {
+			deps.notify("error", "/btw is not wired in this session", "btw:unavailable");
+			return;
+		}
+		const controller = new AbortController();
+		deps.transitions.state = "side-question";
+		const session = openSideQuestionOverlayFactory(deps.tui, {
+			question,
+			columns: deps.terminal.columns,
+			onClose: () => controller.abort(),
+		});
+		deps.transitions.handle = session;
+		deps.requestRender();
+		void ask(question, { signal: controller.signal, onDelta: (partialText) => session.setAnswer(partialText) })
+			.then((outcome) => {
+				if (outcome.status === "answered") {
+					session.settle({ kind: "answered", text: outcome.text });
+					return;
+				}
+				if (outcome.status === "aborted") {
+					session.settle({ kind: "aborted", text: outcome.text });
+					return;
+				}
+				session.settle({ kind: "error", reason: outcome.reason });
+			})
+			.catch((error: unknown) => {
+				session.settle({ kind: "error", reason: error instanceof Error ? error.message : String(error) });
+			});
+	};
+
 	return {
 		openCost,
 		openContextView,
@@ -315,5 +372,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openMemory,
 		openView,
 		toggleDispatchBoard,
+		openSideQuestion,
 	};
 }

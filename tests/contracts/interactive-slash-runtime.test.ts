@@ -68,6 +68,7 @@ function createHarness() {
 		openAskUser: async () => ({ answers: [], cancelled: true }),
 		openSkillsHub: () => events.push("skills"),
 		openCost: () => events.push("cost"),
+		openSideQuestion: (question) => events.push(`btw:${question}`),
 		openContextView: () => events.push("context"),
 		openTasks: () => events.push("tasks"),
 		openDecisions: () => events.push("decisions"),

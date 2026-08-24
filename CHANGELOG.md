@@ -2,6 +2,12 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.3.7 - Unreleased
+
+### Added
+- `/btw <question>` asks one side question beside the session (refs #41). The round sends the compiled message history as read-only input under a short fixed instruction with no tools, streams the answer into an overlay, and appends nothing to the session JSONL, the transcript, the context ledger, or the task board, so a fleet run's workers are never briefed from it. Esc cancels a streaming round; a `/btw` during an in-flight turn is refused rather than queued. The round's usage is counted in `/cost` under a `side questions` row and is excluded from the turn count.
+- Opt-in desktop notifications (#204). `terminal.notify: true` emits one content-free terminal notification when a turn ends, when a detached batch settles, and when a worker permission or `ask_user` request parks. The title is fixed, the body comes from a closed vocabulary, control characters are stripped, and the body is bounded to 128 bytes. OSC 777 is the default and OSC 9 is used on iTerm2, Windows Terminal, and ConEmu, never both for one event. Headless, ACP, and non-TTY runs never emit one.
+
 ## 0.3.6 - 2026-08-23
 
 0.3.5 was published by mistake and withdrawn; its content ships here.

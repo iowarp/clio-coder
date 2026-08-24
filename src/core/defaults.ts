@@ -154,6 +154,12 @@ export interface TerminalSettings {
 	fullscreenScrollbar: FullscreenScrollbar;
 	/** Presentation-only pacing for streamed assistant text and thinking. */
 	smoothStreaming: SmoothStreaming;
+	/**
+	 * Content-free desktop notifications on turn end, detached batch settlement,
+	 * and a parked approval. Interactive TTY runs only; headless, ACP, and
+	 * non-TTY runs never emit one.
+	 */
+	notify: boolean;
 }
 
 export interface ModelSelectorSettings {
@@ -358,6 +364,7 @@ export const DEFAULT_SETTINGS = {
 		tuiMode: "regular",
 		fullscreenScrollbar: "auto",
 		smoothStreaming: "off",
+		notify: false,
 	} as TerminalSettings,
 	skills: {
 		trustProjectCompatRoots: false,
@@ -584,6 +591,11 @@ terminal:
   # accessibility-safe local TTY; on requests pacing but still honors stdout
   # backpressure. CLIO_CODER_SMOOTH_STREAM overrides this for one process.
   smoothStreaming: off
+  # Content-free desktop notification (OSC 777, or OSC 9 on iTerm2, Windows
+  # Terminal, and ConEmu) when a turn ends, a detached batch settles, or an
+  # approval parks. Interactive TTY runs only; the body never carries prompt
+  # text, file paths, or model output.
+  notify: false
 
 # Skills are local prompt resources. Project-local compatibility roots such as
 # .agents/skills, .claude/skills, .codex/skills, .github/skills, and

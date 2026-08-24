@@ -208,6 +208,7 @@ terminal:
   tuiMode: regular              # regular terminal scrollback or fullscreen sticky layout
   fullscreenScrollbar: auto    # hidden, auto, or always in fullscreen mode
   smoothStreaming: off         # off, conservative auto, or explicit on
+  notify: false                # content-free desktop notification, interactive TTY only
 skills:
   trustProjectCompatRoots: false
 delegation:
@@ -470,7 +471,7 @@ The Settings Center organizes all configuration under four non-selectable group 
 | **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), and `theme`. |
 | **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
 
-`retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
+`retry.streamStallMs` and `terminal.notify` have no Settings Center row; edit them in `settings.yaml`.
 
 Label to config path mapping:
 
@@ -645,9 +646,20 @@ Generic provider and transport errors are classified by transient retry rules, i
 | `terminal.tuiMode` | `regular` | `regular`, `fullscreen` | restart |
 | `terminal.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
 | `terminal.smoothStreaming` | `off` | `off`, `auto`, `on` | immediately |
+| `terminal.notify` | `false` | boolean | immediately |
 | `modelSelector.favorites` | `[]` | list of strings | immediately |
 | `modelSelector.recentLimit` | `12` | integer ≥ 1 | immediately |
 | `keybindings` | `{}` | map of binding id to a key string or list of them | restart |
+
+`terminal.notify` turns on a content-free desktop notification for the three
+moments an operator is waiting: a turn ends, a detached fleet batch settles, and
+a worker permission or `ask_user` request parks. The payload is fixed. The title
+is always `clio-coder` and the body comes from a closed vocabulary (`turn
+finished`, `batch <shortId> settled`, `approval needed`), so no prompt text, file
+path, or model output ever leaves the process in a notification. Clio emits OSC
+777 by default and OSC 9 on iTerm2, Windows Terminal, and ConEmu, never both for
+one event. Headless, ACP, and non-TTY runs never emit one regardless of the
+setting.
 
 Recently selected models are runtime state and live in `recent-models.json` under the state directory, not here. A `state.recentModels` key in `settings.yaml` is an unknown-key error.
 

@@ -79,6 +79,225 @@ export function classifyNoticeLevel(text: string): NotificationLevel {
 	return "info";
 }
 
+/**
+ * Desktop notification: a content-free nudge to a terminal that is not on
+ * screen right now.
+ *
+ * The payload is deliberately not a message. The title is fixed and the body
+ * comes from a closed vocabulary, so a notification that lands on a shared
+ * screen, a phone mirroring notifications, or a corporate notification log
+ * cannot leak a prompt, a path, a model answer, or a worker's task text. What
+ * it carries is that something needs the operator, and nothing more.
+ */
+export const DESKTOP_NOTIFY_TITLE = "clio-coder";
+
+/** Maximum body length in bytes after sanitization. */
+export const DESKTOP_NOTIFY_BODY_MAX_BYTES = 128;
+
+/**
+ * The three events that earn a notification. `batch` carries the batch's short
+ * id because an operator running several fan-outs needs to know which one came
+ * back; the id is a generated identifier, never operator or model text.
+ */
+export type DesktopNotifyEvent =
+	| { kind: "turn-finished" }
+	| { kind: "batch-settled"; shortId: string }
+	| { kind: "approval-needed" };
+
+/**
+ * Terminals whose OSC 777 support is absent or unreliable and which understand
+ * OSC 9 instead. Matched case-insensitively against TERM_PROGRAM and, for
+ * Windows Terminal, against the presence of WT_SESSION.
+ */
+const OSC9_TERM_PROGRAMS: ReadonlyArray<string> = [
+	"iterm.app",
+	"iterm2",
+	"windowsterminal",
+	"windows terminal",
+	"conemu",
+];
+
+const BEL = "\u0007";
+
+/**
+ * Strip C0/C1 controls and the `;` an OSC payload uses as its own separator.
+ *
+ * The classification is by code point rather than by a character-class regex:
+ * a literal control range inside a pattern is exactly the thing the payload
+ * must not carry, and spelling one out is how it gets copied in by accident.
+ */
+function sanitizeNotifyText(text: string): string {
+	let out = "";
+	for (const char of text) {
+		const code = char.codePointAt(0) ?? 0;
+		const isControl = code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+		out += isControl || char === ";" ? " " : char;
+	}
+	return out.replace(/\s+/gu, " ").trim();
+}
+
+/** Clamp to the byte bound without splitting a multi-byte character. */
+function boundNotifyBytes(text: string, maxBytes: number): string {
+	const encoder = new TextEncoder();
+	if (encoder.encode(text).length <= maxBytes) return text;
+	let out = "";
+	let used = 0;
+	for (const char of text) {
+		const size = encoder.encode(char).length;
+		if (used + size > maxBytes) break;
+		out += char;
+		used += size;
+	}
+	return out;
+}
+
+/** The closed-vocabulary body for one event. */
+export function desktopNotifyBody(event: DesktopNotifyEvent): string {
+	if (event.kind === "turn-finished") return "turn finished";
+	if (event.kind === "approval-needed") return "approval needed";
+	const shortId = boundNotifyBytes(sanitizeNotifyText(event.shortId), 32);
+	return shortId.length > 0 ? `batch ${shortId} settled` : "batch settled";
+}
+
+/** True when the environment names a terminal that answers OSC 9 rather than OSC 777. */
+export function prefersOsc9(env: Readonly<Record<string, string | undefined>>): boolean {
+	if (typeof env.WT_SESSION === "string" && env.WT_SESSION.length > 0) return true;
+	const program = (env.TERM_PROGRAM ?? "").trim().toLowerCase();
+	if (program.length === 0) return false;
+	return OSC9_TERM_PROGRAMS.some((candidate) => program === candidate || program.includes(candidate));
+}
+
+/**
+ * Build the one escape sequence for an event. OSC 777 is the default and
+ * carries both the fixed title and the body; OSC 9 carries only the body and is
+ * chosen for the terminals that implement it instead. Exactly one sequence is
+ * returned, so a single event can never produce two notifications.
+ */
+export function buildDesktopNotifySequence(
+	event: DesktopNotifyEvent,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+	const body = boundNotifyBytes(sanitizeNotifyText(desktopNotifyBody(event)), DESKTOP_NOTIFY_BODY_MAX_BYTES);
+	if (prefersOsc9(env)) return `\u001b]9;${body}${BEL}`;
+	return `\u001b]777;notify;${DESKTOP_NOTIFY_TITLE};${body}${BEL}`;
+}
+
+export interface DesktopNotifierDeps {
+	/**
+	 * Protocol write on the terminal owner. It happens outside a render
+	 * transaction, so the trace records it with `frameId: null` and it never
+	 * lands inside a frame.
+	 */
+	write: (data: string) => void;
+	/** Live `terminal.notify`, re-read per event so a hot config reload takes effect. */
+	enabled: () => boolean;
+	/**
+	 * True only on the interactive TTY path. Headless, ACP, and non-TTY runs
+	 * pass false (or wire no notifier at all) and never emit a sequence.
+	 */
+	interactiveTty: () => boolean;
+	env?: Readonly<Record<string, string | undefined>>;
+}
+
+export interface DesktopNotifier {
+	notify(event: DesktopNotifyEvent): void;
+}
+
+/**
+ * Emit content-free desktop notifications for the three operator-waiting
+ * events. Every call re-checks the setting and the surface, so turning
+ * `terminal.notify` off mid-session silences the next event.
+ */
+export function createDesktopNotifier(deps: DesktopNotifierDeps): DesktopNotifier {
+	const env = deps.env ?? process.env;
+	return {
+		notify(event) {
+			if (!deps.interactiveTty()) return;
+			if (!deps.enabled()) return;
+			try {
+				deps.write(buildDesktopNotifySequence(event, env));
+			} catch {
+				// A terminal that refuses the write is not a reason to interrupt the
+				// turn that produced the event.
+			}
+		},
+	};
+}
+
+/** Minimal projection of a detached batch, matching `DetachedBatchNudgeView`. */
+export interface DesktopNotifyBatchView {
+	id: string;
+	total: number;
+	terminal: number;
+}
+
+export interface InteractiveDesktopNotificationsDeps extends DesktopNotifierDeps {
+	/**
+	 * Live detached-batch progress. Read on every dispatch terminal event so a
+	 * batch whose last run just finished is announced exactly once.
+	 */
+	getOpenBatches?: () => ReadonlyArray<DesktopNotifyBatchView>;
+}
+
+export interface InteractiveDesktopNotifications {
+	/** A model turn reached its end. */
+	turnEnded(): void;
+	/** A dispatch run reached a terminal state; announces any batch that settled with it. */
+	dispatchSettled(): void;
+	/** A worker permission or an ask_user request parked waiting for the operator. */
+	approvalParked(): void;
+}
+
+/** Batch ids stay short in the payload: enough to tell two fan-outs apart. */
+const BATCH_SHORT_ID_CHARS = 8;
+
+/**
+ * The three notification events, wired to the surfaces that produce them.
+ *
+ * Batch settlement has no event of its own on the bus, so it is derived: every
+ * dispatch terminal event recomputes open-batch progress and any batch that
+ * crossed from running to fully terminal since the last look is announced. The
+ * announced set is remembered, so a batch that stays collectible for another
+ * ten minutes does not re-notify on every later run.
+ */
+export function createInteractiveDesktopNotifications(
+	deps: InteractiveDesktopNotificationsDeps,
+): InteractiveDesktopNotifications {
+	const notifier = createDesktopNotifier(deps);
+	const announcedBatches = new Set<string>();
+	return {
+		turnEnded(): void {
+			notifier.notify({ kind: "turn-finished" });
+		},
+		dispatchSettled(): void {
+			const getOpenBatches = deps.getOpenBatches;
+			if (!getOpenBatches) return;
+			let views: ReadonlyArray<DesktopNotifyBatchView>;
+			try {
+				views = getOpenBatches();
+			} catch {
+				return;
+			}
+			const open = new Set<string>();
+			for (const view of views) {
+				open.add(view.id);
+				if (view.total <= 0 || view.terminal < view.total) continue;
+				if (announcedBatches.has(view.id)) continue;
+				announcedBatches.add(view.id);
+				notifier.notify({ kind: "batch-settled", shortId: view.id.slice(0, BATCH_SHORT_ID_CHARS) });
+			}
+			// A collected batch leaves the open list; forget it so its id can be
+			// announced again if the store ever reuses it.
+			for (const id of [...announcedBatches]) {
+				if (!open.has(id)) announcedBatches.delete(id);
+			}
+		},
+		approvalParked(): void {
+			notifier.notify({ kind: "approval-needed" });
+		},
+	};
+}
+
 function resolveExpiry(level: NotificationLevel, addedAt: number, ttlMs: number | undefined): number | null {
 	if (ttlMs !== undefined) return ttlMs <= 0 ? null : addedAt + ttlMs;
 	return level === "info" || level === "success" ? addedAt + DEFAULT_INFO_TTL_MS : null;

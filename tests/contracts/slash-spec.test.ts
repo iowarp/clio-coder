@@ -80,6 +80,7 @@ describe("contracts/slash-spec", () => {
 			listAgents: () => [],
 			listDelegationAgents: () => [],
 			openCost: () => opened.push("cost"),
+			openSideQuestion: (question) => opened.push(`btw:${question}`),
 			openContextView: () => opened.push("context"),
 			openTasks: () => opened.push("tasks"),
 			openDecisions: () => opened.push("decisions"),
@@ -463,6 +464,11 @@ describe("contracts/slash-spec", () => {
 			["/delegate", { kind: "delegate-usage" }],
 			["/delegate agent", { kind: "delegate-usage" }],
 
+			// btw: the rest positional is greedy, so the whole line is one question
+			["/btw which file did the lease land in?", { kind: "btw", question: "which file did the lease land in?" }],
+			["/btw", { kind: "btw-usage" }],
+			["/btw    ", { kind: "btw-usage" }],
+
 			// share
 			// A bare /share is the worker-result sense: the newest finished run the
 			// operator started. The archive senses are the two named subcommands.
@@ -691,6 +697,7 @@ describe("contracts/slash-spec", () => {
 			"share",
 			"run",
 			"delegate",
+			"btw",
 			"agents",
 			"targets",
 			"cost",

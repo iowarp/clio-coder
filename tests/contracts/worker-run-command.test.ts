@@ -94,6 +94,7 @@ function recorder(options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState
 		listAgents: () => [],
 		listDelegationAgents: () => [],
 		openCost: () => undefined,
+		openSideQuestion: () => undefined,
 		openContextView: () => undefined,
 		openTasks: () => undefined,
 		openDecisions: () => undefined,

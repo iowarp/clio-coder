@@ -25,7 +25,8 @@ export type OverlayState =
 	| "prompts"
 	| "extensions"
 	| "interop"
-	| "skills-hub";
+	| "skills-hub"
+	| "side-question";
 
 export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
@@ -217,6 +218,13 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "context-view") {
+		routeCostOverlayKey(data, deps);
+		return true;
+	}
+	// Esc is the only key the side-question overlay answers: it aborts a round
+	// that is still streaming and closes one that has settled. Everything else is
+	// swallowed so a keystroke cannot reach the composer behind it.
+	if (overlayState === "side-question") {
 		routeCostOverlayKey(data, deps);
 		return true;
 	}

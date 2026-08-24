@@ -27,6 +27,7 @@ function row(overrides: Partial<CostRow> = {}): CostRow {
 		cacheWrite: 100,
 		reasoningTokens: 200,
 		apiCalls: 4,
+		sideQuestions: 0,
 		cost: costAggregateForAmount(1.5, "known"),
 		...overrides,
 	};

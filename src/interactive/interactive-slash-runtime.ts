@@ -110,6 +110,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openAskUser: AskUserHandler;
 	openSkillsHub: () => void;
 	openCost: () => void;
+	/** Run one `/btw` side question in its own overlay. */
+	openSideQuestion: (question: string) => void;
 	openContextView: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
@@ -342,6 +344,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				: deps.share.importArchive(resolve(archivePath), importOptions);
 		},
 		openCost: deps.openCost,
+		openSideQuestion: deps.openSideQuestion,
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
 		openDecisions: deps.openDecisions,

@@ -259,9 +259,9 @@ export function createObservabilityBundle(
 			latestThroughput = null;
 			projection.refresh();
 		},
-		recordTokens(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts) {
+		recordTokens(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label) {
 			telemetry.record("counter", "tokens.total", tokens);
-			cost.accumulate(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts);
+			cost.accumulate(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label);
 			projection.refresh();
 		},
 		recordSessionTurn(sessionTurn) {

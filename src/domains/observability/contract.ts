@@ -2,7 +2,7 @@ import type { ResponseModelIdObservationCounts } from "../../core/response-model
 import type { TargetStatus } from "../providers/contract.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { AccountabilitySummary } from "./accountability.js";
-import type { CostAggregate, CostEntry, UsageBreakdown } from "./cost.js";
+import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { SessionTurnTrace } from "./trace-store.js";
@@ -142,6 +142,8 @@ export interface ObservabilityContract {
 			requestedModelIds: ReadonlyArray<string>;
 			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
 		},
+		/** Marks a priced call that was not an ordinary turn, such as a `/btw` side question. */
+		label?: CostEntryLabel,
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;

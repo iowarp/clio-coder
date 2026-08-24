@@ -120,6 +120,7 @@ function overlayBody(cost: Parameters<typeof formatCostOverlayBodyLines>[0], row
 		cacheWrite: 0,
 		reasoningTokens: 0,
 		apiCalls: 2,
+		sideQuestions: 0,
 		cost,
 	}));
 	return strip(formatCostOverlayBodyLines(cost, 24_675, entries, 80).join("\n"));
