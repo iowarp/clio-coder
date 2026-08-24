@@ -1998,6 +1998,7 @@ export async function runDispatchTool(
 				topology: executionPlan.topology,
 				rootTask: executionPlan.rootTask,
 				maxWorkers: executionPlan.maxWorkers,
+				...(executionPlan.writers === 1 ? { writers: 1 as const } : {}),
 				onFailure: executionPlan.onFailure,
 				steps: requireAgentSteps(executionPlan.steps).map((step) => ({
 					...step,
@@ -2115,7 +2116,10 @@ export async function runDispatchTool(
 				// plain sequential and no pipeline-input message is sent.
 				runs = await runSequential(deps, requests, mode, timeoutMs, options?.signal, background);
 			} else {
-				const batch = await runBatch(deps, requests, timeoutMs, options?.signal, background);
+				const batch =
+					snapshot.writers === 1
+						? await runWriterLimitedBatch(deps, requests, timeoutMs, options?.signal)
+						: await runBatch(deps, requests, timeoutMs, options?.signal, background);
 				runs = batch.runs;
 				board = batch.board;
 			}
@@ -2372,5 +2376,55 @@ async function runBatch(
 		if (timer) clearTimeout(timer);
 		signal?.removeEventListener("abort", onSignalAbort);
 		if (!backgrounded) await closeAgentLedger(ledgerId);
+	}
+}
+
+/** Admit one checkout writer at a time while every read-only peer remains concurrent. */
+async function runWriterLimitedBatch(
+	deps: RegisteredDispatchToolDeps,
+	requests: ReadonlyArray<DispatchRequest>,
+	timeoutMs: number | undefined,
+	signal: AbortSignal | undefined,
+): Promise<BatchOutcome> {
+	const specs = new Map(deps.getAgentSpecs().map((spec) => [spec.id, spec]));
+	const readers = requests.filter((request) => specs.get(request.agentId)?.capabilityClass === "read-only");
+	const writers = requests.filter((request) => specs.get(request.agentId)?.capabilityClass !== "read-only");
+	const ledgerId = newGateGroupId("ledger");
+	await openAgentLedger(ledgerId);
+	const activeIds = new Set<string>();
+	const completed = new Map<DispatchRequest, CompletedRun>();
+	const start = async (request: DispatchRequest): Promise<CompletedRun> => {
+		const ledgered = { ...request, ledger: { id: ledgerId, sequence: 0 } };
+		const handle = await deps.dispatch.dispatch(ledgered);
+		activeIds.add(handle.runId);
+		const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
+		const value = await registered.completion;
+		activeIds.delete(handle.runId);
+		const run = completeRun(deps, value.receipt, value.summary);
+		completed.set(request, run);
+		return run;
+	};
+	const abort = (bySignal: boolean): void => {
+		const reason = bySignal ? undefined : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
+		for (const runId of activeIds) deps.dispatch.abort(runId, reason);
+	};
+	const onSignalAbort = (): void => abort(true);
+	const timer = timeoutMs === undefined ? null : setTimeout(() => abort(false), timeoutMs);
+	signal?.addEventListener("abort", onSignalAbort, { once: true });
+	try {
+		const readerPromises = readers.map((request) => start(request));
+		for (const writer of writers) await start(writer);
+		await Promise.all(readerPromises);
+		return {
+			runs: requests.flatMap((request) => {
+				const run = completed.get(request);
+				return run === undefined ? [] : [run];
+			}),
+			board: renderAgentLedgerBoard(ledgerId),
+		};
+	} finally {
+		if (timer !== null) clearTimeout(timer);
+		signal?.removeEventListener("abort", onSignalAbort);
+		await closeAgentLedger(ledgerId);
 	}
 }

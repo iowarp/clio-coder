@@ -157,6 +157,16 @@ function dispatchRequestFromArgs(
 	request.requiredCapabilities = routing.intent.requiredCapabilities;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
+	if (args.worktree !== undefined) {
+		if (args.worktree !== true) return { ok: false, message: "worktree must be true when present" };
+		request.worktree = true;
+	}
+	if (args.apply !== undefined) {
+		if (args.apply !== "merge" && args.apply !== "preserve")
+			return { ok: false, message: "apply must be merge or preserve" };
+		if (request.worktree !== true) return { ok: false, message: "apply requires worktree: true" };
+		request.apply = args.apply;
+	}
 	if (Object.hasOwn(args, "gate") && isRecord(args.intent) && Object.hasOwn(args.intent, "verification")) {
 		return { ok: false, message: "gate_and_intent_verification_conflict: gate cannot combine with intent.verification" };
 	}

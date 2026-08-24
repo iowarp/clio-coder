@@ -173,7 +173,7 @@ describe("contracts/receipt-integrity", () => {
 		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
 		// Every shape before routing intent became required is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -184,7 +184,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 16);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 17);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -356,6 +356,13 @@ describe("contracts/receipt-integrity", () => {
 						artifactPath: "/state/artifacts/run/test.log",
 					},
 				],
+			},
+			worktree: {
+				path: "/workspace/.clio-coder/worktrees/run-all-fields",
+				branch: "clio/task/run-all-fields",
+				diffHash: "f".repeat(64),
+				apply: "merge",
+				applied: true,
 			},
 			skillActivations: [
 				{

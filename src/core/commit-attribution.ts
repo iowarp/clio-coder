@@ -16,7 +16,7 @@ export const CLIO_COMMIT_TRAILERS = {
 } as const;
 
 export interface CommitReceiptEvidence {
-	version: 16;
+	version: 17;
 	algorithm: "sha256";
 	digest: string;
 	/** The receipt was checked against its run-ledger envelope. */
@@ -58,7 +58,7 @@ const KNOWN_CLIO_TRAILERS = new Set(
 );
 
 function isClioTrailer(key: string): boolean {
-	return KNOWN_CLIO_TRAILERS.has(key) || key.startsWith("clio-evidence:receipt-v16/sha256:");
+	return KNOWN_CLIO_TRAILERS.has(key) || key.startsWith("clio-evidence:receipt-v17/sha256:");
 }
 
 /**
@@ -87,7 +87,7 @@ function trailerBlockStart(lines: ReadonlyArray<string>): number | null {
 
 function receiptTrailer(receipt: CommitReceiptEvidence | undefined): string | null {
 	if (
-		receipt?.version !== 16 ||
+		receipt?.version !== 17 ||
 		receipt.algorithm !== "sha256" ||
 		receipt.integrityValid !== true ||
 		receipt.directlyRelevant !== true ||
@@ -95,7 +95,7 @@ function receiptTrailer(receipt: CommitReceiptEvidence | undefined): string | nu
 	) {
 		return null;
 	}
-	return `Clio-Evidence: receipt-v16/sha256:${receipt.digest}`;
+	return `Clio-Evidence: receipt-v17/sha256:${receipt.digest}`;
 }
 
 /**

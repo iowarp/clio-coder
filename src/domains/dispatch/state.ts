@@ -45,7 +45,7 @@ export type CreateRunInput = Omit<
 	| "receiptPath"
 	| "tokenCount"
 	| "costUsd"
->;
+> & { id?: string };
 
 export interface Ledger {
 	create(input: CreateRunInput): RunEnvelope;
@@ -59,7 +59,7 @@ export interface Ledger {
 	reload(): void;
 }
 
-function newRunId(): string {
+export function newRunId(): string {
 	const n = BigInt(`0x${randomBytes(8).toString("hex")}`);
 	const raw = n.toString(36);
 	if (raw.length >= 12) return raw.slice(0, 12);
@@ -169,7 +169,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 	return {
 		create(input: CreateRunInput): RunEnvelope {
 			const envelope: RunEnvelope = {
-				id: newRunId(),
+				id: input.id ?? newRunId(),
 				agentId: input.agentId,
 				executionRole: input.executionRole,
 				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),

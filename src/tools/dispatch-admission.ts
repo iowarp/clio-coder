@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
@@ -36,6 +36,7 @@ import type {
 	DispatchToolDeps,
 } from "./dispatch-types.js";
 import type { ToolSpec } from "./registry.js";
+import { gitCheckoutRoot } from "./task-worktree.js";
 import { discoverDeclaredChecks } from "./verify/scripts.js";
 
 /**
@@ -201,6 +202,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		kind: "dispatch",
 		planView: describeDispatchPlan(args),
 		...fields,
+		writers: args.writers === 1 ? 1 : undefined,
 		detach: args.detach === true,
 		timeoutMs: timeoutMsArg(args),
 		maxOutputBytes: maxOutputBytesArg(args),
@@ -256,6 +258,15 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			agent: resolution.agentId,
 			task: request.task,
 			...(request.briefing !== undefined ? { briefing: request.briefing } : {}),
+			...(request.worktree === true
+				? {
+						worktree: true as const,
+						apply: request.apply ?? "merge",
+						...(gitCheckoutRoot(resolve(request.cwd ?? process.cwd())) === null
+							? {}
+							: { worktreeDestination: gitCheckoutRoot(resolve(request.cwd ?? process.cwd())) as string }),
+					}
+				: {}),
 			target: resolution.targetId,
 			model: resolution.wireModelId,
 			node: resolution.node.id,
@@ -420,6 +431,27 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					: args.mode === "compete"
 						? "compete"
 						: "parallel";
+		if (args.writers !== undefined && args.writers !== 1) {
+			return shapeRejection(args, "dispatch: writers must be 1 when present");
+		}
+		if (args.writers === 1 && mode !== "parallel") {
+			return shapeRejection(args, "dispatch: writers is supported only for parallel dispatch");
+		}
+		const parentCheckout = gitCheckoutRoot(process.cwd());
+		for (const request of parsed.requests) {
+			if (request.worktree !== true) continue;
+			if (mode === "compete") return shapeRejection(args, "worktree_compete_incompatible");
+			if (parentCheckout === null) return shapeRejection(args, "worktree_non_git_checkout");
+			const spec = deps.getAgentSpecs().find((candidate) => candidate.id === request.agentId);
+			if (spec?.capabilityClass === "read-only") return shapeRejection(args, "worktree_read_only_agent");
+			if (request.cwd !== undefined) {
+				const requested = resolve(request.cwd);
+				const rel = relative(parentCheckout, requested);
+				if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
+					return shapeRejection(args, "worktree_cwd_outside_checkout");
+				}
+			}
+		}
 		const reviewResult = reviewSettingsFromArgs(args);
 		if (!reviewResult.ok) return shapeRejection(args, reviewResult.message);
 		if (reviewResult.review !== undefined) {
