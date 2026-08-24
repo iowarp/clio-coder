@@ -5,7 +5,7 @@ import {
 	type DecisionPresentation,
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
-import type { Component } from "../engine/tui.js";
+import type { Component, OverlayOptions, TUI } from "../engine/tui.js";
 import { fitHintEntries } from "./overlay-frame.js";
 import { permissionHintEntries } from "./permission-hint.js";
 import type { ClioToken } from "./theme/index.js";
@@ -42,14 +42,42 @@ const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
 export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
 
 /**
- * Keep the decision next to the composer rail that mirrors its keys. The
- * terminal engine resolves this anchor on every layout pass, so the five-row
- * clearance remains attached to the bottom edge after a resize.
+ * Place a permission frame immediately above the live composer in both TUI
+ * modes. The editor grows with wrapped and multiline drafts, while the footer
+ * can add notice rows, so their rendered heights are the bottom dock rather
+ * than a fixed clearance. Regular mode preserves terminal scrollback and may
+ * leave that dock above the viewport bottom when the transcript is short.
+ * Recompute its viewport row on every frame so draft changes and terminal
+ * resizes move the dialog with the composer.
  */
-export const PERMISSION_OVERLAY_PLACEMENT = {
-	anchor: "bottom-center",
-	margin: { bottom: 5 },
-} as const;
+export function permissionOverlayPlacement(
+	tui: Pick<TUI, "mode" | "render">,
+	editor: Pick<Component, "render">,
+	footer: Pick<Component, "render">,
+): OverlayOptions {
+	const margin = { bottom: 0 };
+	return {
+		anchor: "bottom-center",
+		margin,
+		visible: (termWidth, termHeight) => {
+			const dockHeight = editor.render(termWidth).length + footer.render(termWidth).length;
+			if (tui.mode === "fullscreen") {
+				margin.bottom = dockHeight;
+				return true;
+			}
+
+			const baseHeight = tui.render(termWidth).length;
+			const composerTop = Math.max(0, baseHeight - dockHeight);
+			const viewportStart = Math.max(0, baseHeight - termHeight);
+			const composerViewportRow = composerTop - viewportStart;
+			margin.bottom =
+				composerViewportRow >= 0 && composerViewportRow < termHeight
+					? Math.max(0, termHeight - composerViewportRow)
+					: dockHeight;
+			return true;
+		},
+	};
+}
 
 class PermissionOverlayBody implements Component {
 	constructor(private readonly view: ApprovalRequestView) {}
