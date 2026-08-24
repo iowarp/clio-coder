@@ -120,7 +120,7 @@
         <!-- Architecture Overview Card -->
         <div class="glass-card">
           <h2>Fleet Dispatch v0.3.6 Overview</h2>
-          <p>Clio's Fleet Dispatch orchestrates bounded agents across local processes and remote HPC nodes via SSH transport. In v0.3.6, dispatch includes process-safe capacity leases, WorkerSpec v3 attestation, ExecutionPlan v2 DAGs, Contract v4 per-step write boundaries (detect-and-rollback), bounded check/repair loops, deterministic code steps, strict receipt integrity v15, measured shadow routing, readiness-gated active routing, transactional editing attempts, and bounded agent automation.</p>
+          <p>Clio's Fleet Dispatch orchestrates bounded agents across local processes and remote HPC nodes via SSH transport. In v0.3.6, dispatch includes process-safe capacity leases, WorkerSpec v3 attestation, ExecutionPlan v2 DAGs, Contract v4 per-step write boundaries (detect-and-rollback), bounded check/repair loops, deterministic code steps, strict receipt integrity v16, measured shadow routing, readiness-gated active routing, transactional editing attempts, and bounded agent automation.</p>
         </div>
 
         <!-- Interactive Tabs Navigation -->
@@ -184,8 +184,9 @@
             <div class="terminal-window">
               <div class="term-line"><span class="term-prompt">receipt-verifier$</span> checking worker dispatch receipt #rcpt-89201</div>
               <div class="term-line term-out">Worker claim: "Edited 3 files and ran pytest successfully"</div>
-              <div class="term-line term-success">receipt_integrity=verified/v15/sha256</div>
+              <div class="term-line term-success">receipt_integrity=verified/v16/sha256</div>
               <div class="term-line term-success">evidence_verification=verified/validation-tool</div>
+              <div class="term-line term-success">host_verification=not_requested</div>
               <div class="term-line term-success">Run tokens: 12,410 | Cost: ~$0.04 est</div>
               <div class="term-line term-prompt">worker output (tool-verified):</div>
             </div>

@@ -63,7 +63,7 @@
           </button>
           <button type="button" class="tab-btn" onclick="switchTab('receipt-integrity')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Integrity</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-            Receipt Integrity v15
+            Receipt Integrity v16
           </button>
           <button type="button" class="tab-btn" onclick="switchTab('migration-mechanics')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Migrations</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
@@ -90,8 +90,8 @@
               <tbody>
                 <tr>
                   <td><strong>Run Receipt</strong></td>
-                  <td><span class="version-tag">v15</span></td>
-                  <td><code>RUN_RECEIPT_INTEGRITY_VERSION = 15</code><br><code>src/domains/dispatch/receipt-integrity.ts:13</code></td>
+                  <td><span class="version-tag">v16</span></td>
+                  <td><code>RUN_RECEIPT_INTEGRITY_VERSION = 16</code><br><code>src/domains/dispatch/receipt-integrity.ts:13</code></td>
                   <td><code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code></td>
                   <td>Fail-closed. Incompatible receipts fail validation.</td>
                 </tr>
@@ -178,9 +178,9 @@
             <div class="glass-card">
               <h3>Sealed Integrity Checks</h3>
               <ol style="margin-left:1.25rem; font-size:0.875rem; color:var(--text-muted);">
-                <li><code>integrity.version === 15</code></li>
+                <li><code>integrity.version === 16</code></li>
                 <li>Calculated SHA-256 digest matches <code>integrity.digest</code></li>
-                <li>All optional blocks (<code>validationGrounding</code>, <code>capabilityMismatch</code>, <code>steering</code>, <code>gate</code>, <code>plan</code>, <code>briefing</code>) strictly conform to v15 schema.</li>
+                <li>All optional blocks (<code>validationGrounding</code>, <code>capabilityMismatch</code>, <code>steering</code>, <code>gate</code>, <code>plan</code>, <code>briefing</code>) strictly conform to v16 schema.</li>
               </ol>
             </div>
           </div>

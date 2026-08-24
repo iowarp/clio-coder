@@ -234,7 +234,7 @@ Dispatches one or more tasks to Clio fleet agents and returns per-run receipt su
 Arguments:
 
 - `task` (required for the singular form unless `list:true`). One worker assignment/instruction string. It is distinct from briefing.
-- `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, cwd, briefing}` objects. Per-item fields override the top-level defaults below. Supplying both `task` and `tasks` is an error.
+- `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, cwd, briefing, intent, gate}` objects. Per-item fields override the top-level defaults below. Supplying both `task` and `tasks` is an error.
 - `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. A single task always runs down the sequential path.
 - `detach` (optional boolean). For parallel fan-out, returns the durable batch id and assignment ids after registration while the shared event consumer continues in the background. An assignment id equals its first attempt's run id. This is the parent model's route to mid-run monitor/steer; ordinary synchronous, sequential, and pipeline calls auto-wait for each assignment's terminal attempt.
 - `list` (optional boolean). Returns the agent catalog instead of dispatching.
@@ -248,13 +248,15 @@ Arguments:
 - `cwd` (optional). Default agent working directory.
 - `timeout_ms` (optional). Aborts the whole dispatch; in sequential mode remaining tasks are skipped and the skip is reported.
 - `briefing` (optional string, top-level default or per-task override). Parent-composed context/data, not worker instructions: it cannot replace `task`. It is trimmed and omitted when blank, rejected above 12,000 UTF-8 bytes, sent as its own delimited untrusted dynamic message, and retained only as byte/hash provenance. The shared value applies to string tasks and object tasks without an override; an object-level briefing wins.
+- `intent` (optional object, top-level default or per-task override). Declares `read_roots`, `write_roots`, `relevant_paths`, `expected_outputs`, and `verification`. Path arrays contain normalized repository-relative POSIX paths. Verification entries contain a declared `check` id and optional `timeout_ms`; ids are resolved from package scripts and `.clio-coder/verifiers.yaml` before approval. Checks are ids, not shell commands.
+- `gate` (optional string, top-level default or per-task override). Exact shorthand for `intent.verification=[{check: gate}]`. Supplying it together with `intent.verification` is refused.
 - `max_output_bytes` (optional). Summary byte budget; default 20000, split across runs with at least 1024 bytes each.
 
 Argument tolerance: `tasks` sent as a JSON string is parsed and a single object or bare string is wrapped into an array. The top-level singular `task` is first-class. Briefing-only calls fail with guidance that briefing is context and cannot replace a task.
 
 Output is one batch-shaped summary even for a single task: a header `dispatch (<mode>) total=N failed=M`, the assignment id list, then one terminal-attempt receipt line per assignment (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker's final assistant text. `details = {mode, assignmentIds, receiptCount, failedCount, runs[]}`, and each `runs[]` entry carries distinct `assignmentId` and terminal `runId` fields plus the structured `verification` state and `receiptIntegrity` result. There is no `runIds` compatibility alias. Any terminal attempt with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a `note=` marker; do not treat such a run as validated work.
 
-The summary separates four things that must never be conflated: `receipt_integrity=verified/v15/sha256` comes only from verification against the ledger; `evidence_verification=<state>/<basis>` describes validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
+The summary separates five things that must never be conflated: `receipt_integrity=verified/v16/sha256` comes only from verification against the ledger; `host_verification=<status>` describes orchestrator-executed declared checks; `evidence_verification=<state>/<basis>` describes worker-tool validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
 
 Exit zero is insufficient without a durable deliverable. A successful native or ACP run must seal a nonempty `output.state="final"`. Otherwise it fails with `worker_final_output_missing`; any unfinished text remains partial diagnostics and automatic retry is suppressed. Live tool-use preambles never replace a missing receipt answer.
 
@@ -262,11 +264,11 @@ Sealed receipts are the durable evidence; worker prose remains advisory until ve
 
 ```text
 dispatch(list=true)
-dispatch(agent="debugger", task="Adversarially verify the strict v15 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
+dispatch(agent="debugger", task="Adversarially verify the strict v16 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
 dispatch(tasks=["Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion"])
 dispatch(tasks=[
   {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes"},
-  {agent: "coder", task: "Fix the failing assertion in tests/contracts/safety.test.ts; run verify(check=\"test\") before finishing"}
+  {agent: "coder", task: "Fix the failing assertion in tests/contracts/safety.test.ts", intent: {write_roots: ["tests/contracts"], verification: [{check: "test"}]}}
 ], mode="parallel")
 dispatch(tasks=["Refactor step 1", "Refactor step 2"], mode="sequential", timeout_ms=600000)
 ```

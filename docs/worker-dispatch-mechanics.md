@@ -207,7 +207,7 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 
 ### 5.2 Canonical Receipt Integrity Serialization
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 15`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 16`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
 
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.

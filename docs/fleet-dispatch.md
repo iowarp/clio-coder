@@ -160,7 +160,7 @@ Use `clio-coder fleet resume [--json]` to reopen admission early. Detailed drain
 
 With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
-Every new receipt uses strict integrity v15; older receipt formats are not
+Every new receipt uses strict integrity v16; older receipt formats are not
 accepted by the current reader.
 
 ## Failure semantics
@@ -203,6 +203,53 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Review gate | `review: {reviewer?, max_cycles?}` | Builder, read-only reviewer verdict, bounded revise loop. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
 | Agent automation | `agent: "auto"` | Baselines candidate agent from task shape via shared classifier (`coder`, `tester`, `documenter`, `verifier`, `researcher`, `scout`); advisory unless activated. |
+
+### Typed intent and host-run verification
+
+The singular request and every object in `tasks` accept an optional `intent`:
+
+```json
+{
+  "read_roots": ["src/domains/dispatch"],
+  "write_roots": ["src/tools"],
+  "relevant_paths": ["docs/fleet-dispatch.md"],
+  "expected_outputs": ["dist/cli.js"],
+  "verification": [{ "check": "test", "timeout_ms": 600000 }]
+}
+```
+
+A top-level intent is inherited by batch items unless an item supplies its own
+intent. `gate: "test"` is exact shorthand for
+`intent.verification: [{check: "test"}]`; supplying both spellings is refused.
+Every path is normalized into a sorted, duplicate-free repository-relative
+POSIX path list before approval. Absolute paths, empty paths, root escapes,
+malformed entries, and values beyond the documented caps fail admission.
+Normalized `intent.writeRoots` feeds the existing worker write-boundary
+enforcement when no legacy `JobSpec.writeRoots` exists. Conflicting declarations
+are refused as `intent_write_roots_contradiction`.
+
+Verification values are declared check ids, never shell commands. Admission
+resolves each id from a package script or `.clio-coder/verifiers.yaml`, clamps
+the requested timeout to the declaration, and freezes the exact argv, cwd,
+timeout, and normalized intent into the execution snapshot and plan hash. A
+later catalog edit cannot change the approved command. Undeclared ids fail
+before approval with `verification_check_undeclared` and declaration guidance.
+
+After a successful worker attempt, the orchestrator runs the frozen checks with
+no shell, a fixed cwd, and the code-step environment allowlist. Logs are written
+under the run artifact directory. Successful evidence is memoized by the
+workspace fingerprint, resolved argv, cwd, and allowed environment values. A
+memo hit names the run that produced the original evidence. A changed tree is a
+miss. An unsuccessful worker records `hostVerification.status="skipped"` with
+`reason="worker_not_successful"`; a failed host check records `rejected` with
+its exit code, bounded output tail, and artifact path. Worker-reported command
+success never populates this status.
+
+Host checks are supported for singular, parallel, sequential, pipeline, and
+detached native runs. Review and compete accept intent paths and outputs but
+refuse verification entries with `verification_unsupported_for_mode`.
+Claude Code subprocess routes refuse them with
+`verification_unsupported_runtime`.
 
 ### Agent ledger
 
@@ -526,7 +573,7 @@ assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
 Assignment status, attempt ids, and terminal run id are stored separately in
-`assignments.json` while each attempt keeps its own strict v15 receipt.
+`assignments.json` while each attempt keeps its own strict v16 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
@@ -540,7 +587,7 @@ closed while a winner remains unapplied.
 
 ## Receipts
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 15`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 16`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id). This behavior tracks issue #120.
@@ -551,11 +598,20 @@ include:
   approval kind, and the registry approval identity when supervised).
 - `briefing`: byte count and SHA-256 of the exact canonical parent briefing;
   the prose is not retained and is distinct from bounded project context.
+- `intent`: the normalized typed path, expected-output, and verification
+  declaration that admission sealed for the run.
+- `verification`: the existing evidence state and basis observed from worker
+  tool execution.
+- `hostVerification`: host-run status and the resolved check evidence, including
+  argv, cwd, exit code, duration, memo provenance, bounded output tail, and
+  optional artifact path.
 - `steering`: ordered byte/hash/timestamp and acknowledgement provenance for
   successfully written steers; steering prose is never stored.
 - `outcomeCode`: the stable terminal classifier, including
   `worker_final_output_missing` when an otherwise successful worker exits
-  without a nonempty receipt-sealed final answer.
+  without a nonempty receipt-sealed final answer and
+  `host_verification_rejected` when a declared host check rejects the settled
+  tree. Both suppress automatic retry.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
   readiness evidence, and authenticated quality sources.
@@ -575,11 +631,14 @@ retained only as `state: "partial"` diagnostics and automatic retry is
 suppressed. Dispatch, monitor, ledger, receipt, terminal bus event, and retry
 policy all consume that same final classification.
 
-Receipt integrity and evidence verification are separate axes. Integrity says
+Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
 reports whether Clio observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v15/sha256` alongside
-`evidence_verification=not_applicable/read-only-agent`. Briefing provenance and
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v16/sha256` alongside
+`evidence_verification=not_applicable/read-only-agent`. Host verification is
+rendered independently as `host_verification=verified|rejected|skipped|not_requested`.
+A host-executed successful check projects onto canonical validation grounding as
+authenticated validator evidence. Briefing provenance and
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 

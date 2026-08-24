@@ -14,6 +14,7 @@ import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
+import type { DispatchIntent } from "./intent.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
 
@@ -41,7 +42,8 @@ export type RunOutcomeCode =
 	| "worker_tool_call_cap_exhausted"
 	| "loop_guard_tools_disabled_exhausted"
 	| "result_contract_exhausted"
-	| "worker_final_output_missing";
+	| "worker_final_output_missing"
+	| "host_verification_rejected";
 
 export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 	return (
@@ -49,7 +51,8 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 		value === "worker_tool_call_cap_exhausted" ||
 		value === "loop_guard_tools_disabled_exhausted" ||
 		value === "result_contract_exhausted" ||
-		value === "worker_final_output_missing"
+		value === "worker_final_output_missing" ||
+		value === "host_verification_rejected"
 	);
 }
 
@@ -311,7 +314,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 15;
+	version: 16;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -674,6 +677,25 @@ export interface RunReceiptVerification {
 		| "receipt-unavailable";
 }
 
+export interface RunHostVerificationCheck {
+	check: string;
+	argv: string[];
+	cwd: string;
+	exitCode: number;
+	durationMs: number;
+	memo: boolean;
+	outputTail: string;
+	artifactPath?: string;
+	/** Original evidence owner on a memo hit. */
+	evidenceRunId?: string;
+}
+
+export interface RunHostVerification {
+	status: "verified" | "rejected" | "skipped";
+	reason?: string;
+	checks: RunHostVerificationCheck[];
+}
+
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
@@ -682,6 +704,8 @@ export interface RunReceipt {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
+	/** Normalized dispatch intent admitted before worker execution. */
+	intent?: DispatchIntent;
 	/** Integrity-sealed recipe policy, invocation request, effective phase, and admission reasons. */
 	budget?: RunToolBudgetEnvelope;
 	/** Proof of briefing content without copying its prose into the receipt. */
@@ -764,6 +788,8 @@ export interface RunReceipt {
 	toolActivity?: ToolActivitySummary;
 	/** Integrity-sealed evidence confidence. Sealed on every receipt. */
 	verification: RunReceiptVerification;
+	/** Orchestrator-executed declared checks. Worker self-report never populates this field. */
+	hostVerification?: RunHostVerification;
 	/** Required normalized routing request, sealed without task or prompt data. */
 	routingIntent: RoutingIntent;
 	/** Required routing-quality facts known at receipt finalization. */

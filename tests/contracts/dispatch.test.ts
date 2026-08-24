@@ -2986,6 +2986,53 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("classifies a rejected host check and suppresses retry", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.maxRetries = 1;
+		const failed: Array<{ hostVerification?: unknown }> = [];
+		const unsubscribe = context.bus.on(BusChannels.DispatchFailed, (payload) => {
+			failed.push(payload);
+		});
+		const bundle = makeDispatchBundle(context, {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => ({
+				pid: 1012,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: finalEvents("worker completed"),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "produce a tree rejected by the host gate",
+				resolvedVerification: [
+					{
+						check: "contracts",
+						argv: [process.execPath, "-e", "process.stderr.write('gate failed'); process.exit(7)"],
+						cwd: process.cwd(),
+						timeoutMs: 10_000,
+					},
+				],
+			});
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeCode, "host_verification_rejected");
+			strictEqual(receipt.outcomeDetail, "host verification check 'contracts' rejected with exit code 7");
+			strictEqual(receipt.hostVerification?.status, "rejected");
+			strictEqual(receipt.hostVerification?.checks[0]?.exitCode, 7);
+			strictEqual(failed[0]?.hostVerification, "rejected");
+			strictEqual(bundle.contract.snapshot().retrying.length, 0, "host rejection must suppress retry");
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("does not promote a tool-use preamble into a successful final answer", async () => {
 		const context = stubContext();
 		const bundle = makeDispatchBundle(context, {

@@ -624,7 +624,7 @@ describe("builtin SDLC fleets", () => {
 				validationSucceeded: false,
 				independentReviewPassed: false,
 				receipt: {
-					version: 15,
+					version: 16,
 					algorithm: "sha256",
 					digest: "a".repeat(64),
 					integrityValid: true,

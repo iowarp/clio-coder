@@ -15,6 +15,13 @@ import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunRe
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
+	/** Admission-resolved commands. Model text never enters these argv vectors. */
+	resolvedVerification?: ReadonlyArray<{
+		check: string;
+		argv: ReadonlyArray<string>;
+		cwd: string;
+		timeoutMs: number;
+	}>;
 	/**
 	 * Semantic role this request's first attempt runs under. Derived once by
 	 * `execution-role.ts` at request construction, never authored by a model, and

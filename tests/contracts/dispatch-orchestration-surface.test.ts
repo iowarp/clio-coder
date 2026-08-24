@@ -311,7 +311,7 @@ describe("contracts/orchestration dispatch summary honesty", () => {
 			outputTokenCount: 5,
 			startedAt: "2026-01-01T00:00:00.000Z",
 			endedAt: "2026-01-01T00:00:01.000Z",
-			integrity: { version: 15, algorithm: "sha256", digest: "0".repeat(64) },
+			integrity: { version: 16, algorithm: "sha256", digest: "0".repeat(64) },
 			verification: unverified,
 			routingIntent: {
 				posture: "balanced",

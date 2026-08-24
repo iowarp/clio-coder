@@ -20,6 +20,7 @@ import type { ResultContract } from "../domains/agents/result-contract.js";
 import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "../domains/agents/spec.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type ExecutionRole, isExecutionRole } from "../domains/dispatch/execution-role.js";
+import { type DispatchIntent, isDispatchIntent } from "../domains/dispatch/intent.js";
 import {
 	type ApprovedAssignmentRoute,
 	cloneApprovedAssignmentRoute,
@@ -79,6 +80,8 @@ export interface DispatchPlanTaskView {
 	authorityGrant: DispatchPlanAuthorityGrant;
 	agentDecision: RouteDecisionV1 | null;
 	wave: number | null;
+	intent?: DispatchIntent;
+	resolvedVerification?: NonNullable<DispatchRequest["resolvedVerification"]>;
 }
 
 export interface DispatchPlanView {
@@ -112,7 +115,10 @@ export interface ResolvedDispatchPlanArtifact {
 		Required<Pick<DispatchPlanTaskView, "agent" | "task" | "model" | "node" | "target">> &
 			Required<Pick<DispatchPlanTaskView, "nodeKind" | "failover">> &
 			Required<Pick<DispatchPlanTaskView, "routingIntent">> &
-			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position" | "allowedCandidates"> &
+			Pick<
+				DispatchPlanTaskView,
+				"briefing" | "nodeHost" | "role" | "position" | "allowedCandidates" | "intent" | "resolvedVerification"
+			> &
 			Required<
 				Pick<
 					DispatchPlanTaskView,
@@ -171,6 +177,10 @@ export function withResolvedPlanTaskPin(
 			: { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }),
 		task: options.pinTask === false ? request.task : task.task,
 		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
+		...(task.intent !== undefined ? { intent: structuredClone(task.intent) } : {}),
+		...(task.resolvedVerification !== undefined
+			? { resolvedVerification: task.resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
+			: {}),
 		target: task.target,
 		model: task.model,
 		node: task.node,
@@ -352,6 +362,15 @@ function renderPlanText(
 				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing))}`,
 			);
 		}
+		if (task.intent !== undefined) {
+			const serialized = JSON.stringify(task.intent);
+			lines.push(`    intent_sha256=${createHash("sha256").update(serialized, "utf8").digest("hex")}`);
+		}
+		for (const check of task.resolvedVerification ?? []) {
+			lines.push(
+				`    verification check=${safeField(check.check)} argv=${JSON.stringify(check.argv)} cwd=${JSON.stringify(check.cwd)} timeout_ms=${check.timeoutMs}`,
+			);
+		}
 	}
 	return lines.join("\n");
 }
@@ -381,6 +400,8 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"authorityGrant",
 		"agentDecision",
 		"wave",
+		"intent",
+		"resolvedVerification",
 	]);
 	if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
 	for (const key of [
@@ -441,6 +462,21 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		return false;
 	if (value.authorityGrant !== null && !isAuthorityGrant(value.authorityGrant)) return false;
 	if (value.agentDecision !== null && !isAgentDecision(value.agentDecision)) return false;
+	if (value.intent !== undefined && !isDispatchIntent(value.intent)) return false;
+	if (
+		value.resolvedVerification !== undefined &&
+		(!Array.isArray(value.resolvedVerification) ||
+			!value.resolvedVerification.every(
+				(check) =>
+					isRecord(check) &&
+					typeof check.check === "string" &&
+					Array.isArray(check.argv) &&
+					check.argv.every((arg) => typeof arg === "string") &&
+					typeof check.cwd === "string" &&
+					typeof check.timeoutMs === "number",
+			))
+	)
+		return false;
 	if (value.failover === "approved") {
 		if (canonicalCandidates(value.allowedCandidates) === null) return false;
 	} else if (value.allowedCandidates !== undefined) {
@@ -653,6 +689,10 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			...(task.nodeHost !== undefined ? { nodeHost: task.nodeHost.trim() } : {}),
 			...(task.role !== undefined ? { role: task.role } : {}),
 			...(task.position !== undefined ? { position: task.position } : {}),
+			...(task.intent !== undefined ? { intent: structuredClone(task.intent) } : {}),
+			...(task.resolvedVerification !== undefined
+				? { resolvedVerification: task.resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
+				: {}),
 		})),
 		costCeilingUsd: value.costCeilingUsd,
 		deadlineMs: value.deadlineMs as number | null,

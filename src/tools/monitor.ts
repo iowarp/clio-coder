@@ -378,6 +378,7 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 			...(receipt !== null && receiptIntegrity.ok
 				? {
 						evidenceVerification: receipt.verification,
+						hostVerification: receipt.hostVerification ?? null,
 						briefing: receipt.briefing ?? null,
 						projectContext: receipt.projectContext ?? null,
 					}
@@ -717,6 +718,7 @@ async function runCollect(
 					receiptIntegrity: row.evidence.integrity,
 					trustStatus: row.evidence.trustStatus,
 					evidenceVerification: row.evidence.verification,
+					hostVerification: row.evidence.receipt?.hostVerification ?? null,
 					briefing: row.evidence.receipt?.briefing ?? null,
 					projectContext: row.evidence.receipt?.projectContext ?? null,
 					...(output ? { output: { state: output.state, bytes: output.bytes, truncated: output.truncated } } : {}),

@@ -487,7 +487,10 @@ function formatDispatchOutput(
 			// Evidence confidence comes from the sealed receipt. A receipt that fails
 			// integrity cannot be read as evidence at all.
 			const verification = run.integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION;
-			const trustStatus = adaptRunReceiptTrustStatus({ ...receipt, verification }, { integrity: run.integrity });
+			const trustStatus = adaptRunReceiptTrustStatus(
+				{ ...receipt, verification: verification },
+				{ integrity: run.integrity },
+			);
 			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}`;
 			const routingSuffix =
 				run.integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
@@ -566,6 +569,7 @@ function dispatchDetails(
 				// sealed receipt read-only, plus the integrity check so a tampered
 				// receipt is machine-visible here too.
 				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
+				hostVerification: integrity.ok ? (receipt.hostVerification ?? null) : null,
 				receiptIntegrity: integrity,
 				trustStatus,
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"

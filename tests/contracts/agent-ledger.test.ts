@@ -91,7 +91,7 @@ import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/wor
  * the ledger contribution field existed. A receipt without a contribution must
  * still digest to exactly this.
  */
-const PRE_LEDGER_RECEIPT_DIGEST = "e3c1a7567c5549de6446f5a185c64ca3c23b2cff3d1acc4fffd644ba06fddad6";
+const PRE_LEDGER_RECEIPT_DIGEST = "f89365b07440c782c3fbc2dec793ee7a57e9339add631635f60d6825316a0ff3";
 
 /**
  * Attested tool signature for `allowedTools: ["read", "grep"]`, computed on the
@@ -817,7 +817,7 @@ describe("contracts/agent-ledger receipt", () => {
 		const draft = fixtureReceiptDraft(envelope);
 		const integrity = computeReceiptIntegrity(draft, envelope);
 		strictEqual(integrity.version, RUN_RECEIPT_INTEGRITY_VERSION);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 15, "an optional absent field is not a version bump");
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 16, "the v16 receipt digest is stable without a ledger contribution");
 		strictEqual(integrity.digest, PRE_LEDGER_RECEIPT_DIGEST);
 	});
 

@@ -5,6 +5,7 @@ import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import type { DispatchIntent } from "../domains/dispatch/intent.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
@@ -69,6 +70,12 @@ export interface DispatchArgumentParserOptions {
 		approvedAuthorities: ReadonlyArray<AgentAutomationAuthority>;
 		authorityBasis: "operator-plan-approval" | "full-auto-policy";
 	};
+	resolveIntent?: (
+		rawIntent: unknown,
+		cwd: string | undefined,
+	) =>
+		| { ok: true; intent: DispatchIntent; resolvedVerification: NonNullable<DispatchRequest["resolvedVerification"]> }
+		| { ok: false; message: string };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -150,6 +157,37 @@ function dispatchRequestFromArgs(
 	request.requiredCapabilities = routing.intent.requiredCapabilities;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
+	if (Object.hasOwn(args, "gate") && isRecord(args.intent) && Object.hasOwn(args.intent, "verification")) {
+		return { ok: false, message: "gate_and_intent_verification_conflict: gate cannot combine with intent.verification" };
+	}
+	let rawIntent = args.intent;
+	if (Object.hasOwn(args, "gate")) {
+		if (typeof args.gate !== "string" || args.gate.trim().length === 0) {
+			return { ok: false, message: "gate must be a non-empty declared check id" };
+		}
+		rawIntent = { ...(isRecord(rawIntent) ? rawIntent : {}), verification: [{ check: args.gate.trim() }] };
+	}
+	if (rawIntent !== undefined) {
+		if (options.resolveIntent === undefined) return { ok: false, message: "intent resolver is unavailable" };
+		const resolved = options.resolveIntent(rawIntent, cwd);
+		if (!resolved.ok) return resolved;
+		request.intent = resolved.intent;
+		if (resolved.resolvedVerification.length > 0) request.resolvedVerification = resolved.resolvedVerification;
+		if (resolved.intent.writeRoots.length > 0) {
+			const legacy = Array.isArray(args.writeRoots)
+				? args.writeRoots.filter((entry): entry is string => typeof entry === "string")
+				: undefined;
+			if (legacy !== undefined) {
+				const left = [...new Set(legacy)].sort();
+				if (JSON.stringify(left) !== JSON.stringify(resolved.intent.writeRoots)) {
+					return { ok: false, message: "intent_write_roots_contradiction" };
+				}
+				request.writeRoots = legacy;
+			} else {
+				request.writeRoots = resolved.intent.writeRoots;
+			}
+		}
+	}
 	if ("persona" in args && args.persona !== undefined) {
 		if (typeof args.persona !== "string") return { ok: false, message: "persona must be a string" };
 		const persona = args.persona.trim();

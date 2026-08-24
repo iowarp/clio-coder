@@ -103,6 +103,8 @@ export interface DispatchBoardRow {
 	node?: string;
 	/** Review/compete gate badge (role + cycle). */
 	gate?: { role: string; cycle: number };
+	/** Orchestrator-executed declared verification status. */
+	hostVerification?: "verified" | "rejected" | "skipped";
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
 	/** Assignment retry attempts observed on the assignment event stream. */
@@ -610,6 +612,7 @@ export function renderDispatchCard(
 		`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
 		`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
 	];
+	const hostVerification = theme.fg("info", `host_verification=${row.hostVerification ?? "not_requested"}`);
 	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
 	const bodyLines = [
 		cardUnitsLine(theme, "run", [theme.fg("dim", row.runId)], contentWidth),
@@ -618,6 +621,7 @@ export function renderDispatchCard(
 			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
 			: []),
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
+		cardUnitsLine(theme, "evidence", [hostVerification], contentWidth),
 		...(row.budget !== undefined
 			? [
 					truncateToWidth(
@@ -1099,6 +1103,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 		...(entry.node !== undefined ? { node: entry.node } : {}),
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
+		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
@@ -1211,6 +1216,7 @@ export function createDispatchBoardStore(
 			outcomeDetail: previous?.outcomeDetail ?? null,
 			...(node !== undefined ? { node } : {}),
 			...(gate !== undefined ? { gate } : {}),
+			...(previous?.hostVerification !== undefined ? { hostVerification: previous.hostVerification } : {}),
 			...(rerouteCount !== undefined ? { rerouteCount } : {}),
 			...(contextWindow !== undefined ? { contextWindow } : {}),
 			lastContextTokens: previous?.lastContextTokens ?? 0,
@@ -1251,6 +1257,7 @@ export function createDispatchBoardStore(
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
+			if (payload.hostVerification !== undefined) entry.hostVerification = payload.hostVerification;
 			settleFromReceipt(entry);
 			// A terminal dispatch event is published only after the run's receipt is
 			// sealed at receipts/<runId>.json, so the run id is the receipt id here.
@@ -1279,6 +1286,7 @@ export function createDispatchBoardStore(
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
+			if (payload.hostVerification !== undefined) entry.hostVerification = payload.hostVerification;
 			settleFromReceipt(entry);
 			// A denied retry never reached a run, so no receipt was sealed for it;
 			// every other failure finalized through recordReceipt like a success.

@@ -28,7 +28,7 @@ split would use. They cross them.
 | Write-boundary attribution is per scheduling *window*, so the compiler refuses a wave with two writers | scheduling, write boundaries, plan compilation | `execution-plan.ts`, `write-boundary.ts` |
 | A loop's later nodes are `unneeded`, decided by the scheduler, not the plan | plan compilation, scheduling, receipts | `fleet-plan.ts`, `execution-scheduler.ts` |
 | Staleness revalidation re-runs a verification a later workspace step invalidated | scheduling, plan compilation, code steps | `execution-scheduler.ts` |
-| Receipt integrity v15 seals normalized routing intent | routing, receipts | `receipt-integrity.ts`, `routing-intent.ts` |
+| Receipt integrity v16 seals normalized routing intent | routing, receipts | `receipt-integrity.ts`, `routing-intent.ts` |
 
 The write-boundary and loop rows are the sharpest. Both are properties of a
 *wave*, which is a scheduling concept computed by the plan compiler and enforced

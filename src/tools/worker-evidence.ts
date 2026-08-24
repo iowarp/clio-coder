@@ -127,7 +127,7 @@ export function receiptEvidenceLabels(
 	verification: RunReceiptVerification,
 	integrity: ReceiptIntegrityResult,
 ): string[] {
-	const status = adaptRunReceiptTrustStatus({ ...receipt, verification }, { integrity });
+	const status = adaptRunReceiptTrustStatus({ ...receipt, verification: verification }, { integrity });
 	const canonical = canonicalTrustLabel(status);
 	if (!integrity.ok) {
 		return [canonical, `receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
@@ -157,6 +157,7 @@ export function receiptEvidenceLabels(
 		canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
+		`host_verification=${receipt.hostVerification?.status ?? "not_requested"}`,
 		...(responseModelIdObservation ? [responseModelIdObservation] : []),
 		...budget,
 		...receiptAdmissionLabels(receipt),

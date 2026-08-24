@@ -418,6 +418,7 @@ export type PersistedRunReceiptTrustFacts = Pick<RunReceipt, "runId"> &
 			RunReceipt,
 			| "integrity"
 			| "verification"
+			| "hostVerification"
 			| "quality"
 			| "validationGrounding"
 			| "briefing"
@@ -536,6 +537,12 @@ export function adaptRunReceiptValidationStatus(
 ): ValidationGroundingStatus {
 	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
 	const artifacts = validationArtifacts(receipt);
+	if (receipt.hostVerification?.status === "rejected") {
+		return attributed("failed", receiptSource(receipt), { kind: "validator", id: "host-verification" }, artifacts);
+	}
+	if (receipt.hostVerification?.status === "verified") {
+		return attributed("validated", receiptSource(receipt), { kind: "validator", id: "host-verification" }, artifacts);
+	}
 	if (qualityHasFailure(receipt.quality)) {
 		return attributed("failed", receiptSource(receipt), { kind: "validator", id: "receipt-quality" }, artifacts);
 	}
@@ -549,7 +556,9 @@ export function adaptRunReceiptValidationStatus(
 	if (qualityHasValidation(receipt.quality)) {
 		return attributed("validated", receiptSource(receipt), { kind: "validator", id: "receipt-quality" }, artifacts);
 	}
-	if (receipt.verification !== undefined) return verificationStatus(receipt.verification, receipt, artifacts);
+	if (receipt.verification !== undefined) {
+		return verificationStatus(receipt.verification, receipt, artifacts);
+	}
 	return attributed("unknown", compatibilitySource(receipt, "verification"), COMPATIBILITY_AUTHORITY, artifacts);
 }
 
