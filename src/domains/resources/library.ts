@@ -212,16 +212,33 @@ export interface LibraryRequirementStatus {
 	unsatisfied: LibraryEntry[];
 }
 
+/**
+ * Whether this entry is already on disk for this operator. A kind-qualified pin
+ * and a kind-specific destination are each sufficient, which is the same rule
+ * the requirement classifier applies, so a surface that draws an installed or
+ * available column never disagrees with the gate that refuses an install.
+ */
+export function libraryEntryInstalled(entry: Pick<LibraryEntry, "kind" | "name">): boolean {
+	return readLibraryPins()[libraryEntryRef(entry)] !== undefined || existsSync(libraryInstallPath(entry));
+}
+
+/**
+ * The pin recorded for this entry, or undefined when nothing pinned it. A
+ * destination can exist without a pin, which is why this is a separate question
+ * from `libraryEntryInstalled`.
+ */
+export function libraryEntryPin(
+	entry: Pick<LibraryEntry, "kind" | "name">,
+): { sha256: string; sourceUrl: string } | undefined {
+	return readLibraryPins()[libraryEntryRef(entry)];
+}
+
 export function classifyLibraryRequirements(
 	entry: LibraryEntry,
 	catalog: ReadonlyArray<LibraryEntry>,
 ): LibraryRequirementStatus {
 	const ordered = resolveLibraryRequirements(entry, catalog).slice(0, -1);
-	const pins = readLibraryPins();
-	const satisfied = ordered.filter((requirement) => {
-		const ref = libraryEntryRef(requirement);
-		return pins[ref] !== undefined || existsSync(libraryInstallPath(requirement));
-	});
+	const satisfied = ordered.filter((requirement) => libraryEntryInstalled(requirement));
 	const satisfiedRefs = new Set(satisfied.map(libraryEntryRef));
 	return {
 		ordered,

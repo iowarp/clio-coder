@@ -16,7 +16,7 @@ import {
 	type ThinkingLevel,
 	thinkingLevelChoiceLabel,
 } from "../domains/providers/index.js";
-import type { ResourcesContract } from "../domains/resources/index.js";
+import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { foldDecisionBoard } from "../domains/session/decision-board.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
@@ -113,7 +113,7 @@ export interface InteractiveSlashRuntimeDeps {
 	session?: Pick<SessionContract, "tree" | "current" | "appendEntry">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
-	openSkillsHub: () => void;
+	openSkillsHub: (tab?: LibraryEntryKind) => void;
 	openCost: () => void;
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;

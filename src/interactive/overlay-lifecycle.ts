@@ -1,3 +1,4 @@
+import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { appendNotice } from "./command-output.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
@@ -155,7 +156,7 @@ export interface OverlayLifecycleController {
 	openMessagePickerOverlayState(): void;
 	openHelpOverlayState(query?: string): void;
 	openAgentsOverlayState(): void;
-	openSkillsHubState(): void;
+	openSkillsHubState(tab?: LibraryEntryKind): void;
 	openPromptsOverlayState(): void;
 	openExtensionsOverlayState(): void;
 	openInteropOverlayState(): void;

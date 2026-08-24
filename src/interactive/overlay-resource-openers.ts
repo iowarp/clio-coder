@@ -1,4 +1,4 @@
-import type { ResourcesContract } from "../domains/resources/index.js";
+import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
 import { installSkill as installMarketplaceSkill } from "../domains/resources/skills/marketplace.js";
 import type { TUI } from "../engine/tui.js";
 import type { ClioEditor } from "./clio-editor.js";
@@ -32,7 +32,7 @@ export interface OverlayResourceOpenersDeps {
 export interface OverlayResourceOpeners {
 	openHelpOverlayState(query?: string): void;
 	openAgentsOverlayState(): void;
-	openSkillsHubState(): void;
+	openSkillsHubState(tab?: LibraryEntryKind): void;
 	openPromptsOverlayState(): void;
 	openExtensionsOverlayState(): void;
 	openInteropOverlayState(): void;
@@ -61,10 +61,18 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 		deps.tui.requestRender();
 	};
 
-	const openSkillsHubState = (): void => {
+	const openSkillsHubState = (tab?: LibraryEntryKind): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "skills-hub";
 		deps.transitions.handle = openSkills(deps.tui, {
+			...(tab ? { initialTab: tab } : {}),
+			// A fleet's `use` is its approval preview, which is a surface of its own.
+			// The hub closes first so the preview owns the overlay slot, exactly as
+			// `/fleet run <name>` typed into the composer would.
+			openFleetRun: (name) => {
+				deps.closeOverlay();
+				deps.getSlashContext().startFleetRun?.(name, {});
+			},
 			listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
 			setEditorText: (text) => {
 				deps.editor.setText(text);

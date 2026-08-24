@@ -163,7 +163,7 @@ export async function runLibraryCommand(argv: ReadonlyArray<string>): Promise<nu
 					: kind === "agent"
 						? `/run ${name}`
 						: kind === "skill"
-							? `${libraryInstallPath({ kind, name })}\nload it from /skills in the TUI, or ask the model to call context(scope="skills")`
+							? `${libraryInstallPath({ kind, name })}\nload it from /skill in the TUI, or ask the model to call context(scope="skills")`
 							: name;
 			process.stdout.write(`${output}\n`);
 			return 0;

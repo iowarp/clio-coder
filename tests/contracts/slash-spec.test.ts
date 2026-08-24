@@ -700,6 +700,7 @@ describe("contracts/slash-spec", () => {
 			"quit",
 			"help",
 			"skill",
+			"library",
 			"prompts",
 			"extensions",
 			"interop",
