@@ -15,6 +15,7 @@ import { basename, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { clioConfigDir } from "../../core/xdg.js";
 import { type FleetCommandRegistry, loadFleetCommands } from "./fleet-commands.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { normalizeWriteBoundary, WRITE_BOUNDARY_MAX_ENTRIES } from "./write-boundary.js";
@@ -197,7 +198,7 @@ export interface FleetContract {
 	path: string;
 }
 
-export type FleetContractSource = "builtin" | "project";
+export type FleetContractSource = "builtin" | "user" | "project";
 
 export interface FleetContractListing {
 	name: string;
@@ -960,6 +961,8 @@ function builtinFleetsDir(): string {
 function fleetContractPath(cwd: string, name: string): { path: string; source: FleetContractSource } | null {
 	const projectPath = join(fleetsDir(cwd), `${name}.md`);
 	if (existsSync(projectPath)) return { path: projectPath, source: "project" };
+	const userPath = join(clioConfigDir(), "fleets", `${name}.md`);
+	if (existsSync(userPath)) return { path: userPath, source: "user" };
 	const builtinPath = join(builtinFleetsDir(), `${name}.md`);
 	if (existsSync(builtinPath)) return { path: builtinPath, source: "builtin" };
 	return null;
@@ -1003,6 +1006,7 @@ export function listFleetContracts(cwd: string): FleetContractListing[] {
 	const listings = new Map<string, FleetContractListing>();
 	const sources: ReadonlyArray<{ dir: string; source: FleetContractSource }> = [
 		{ dir: builtinFleetsDir(), source: "builtin" },
+		{ dir: join(clioConfigDir(), "fleets"), source: "user" },
 		{ dir: fleetsDir(cwd), source: "project" },
 	];
 	for (const { dir, source } of sources) {

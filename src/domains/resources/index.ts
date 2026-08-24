@@ -18,6 +18,22 @@ export function createResourcesDomainModule(options: ResourceLoaderOptions = {})
 export type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 export { resolveResourceCollisions } from "./collision.js";
 export type { ResourceList, ResourcesContract } from "./contract.js";
+export {
+	classifyLibraryRequirements,
+	confirmLibraryRemote,
+	discoverLibrary,
+	installLibraryPlan,
+	type LibraryCommandRunner,
+	type LibraryDiscoveryResult,
+	type LibraryEntry,
+	type LibraryInstallPlan,
+	type LibraryRequirementStatus,
+	libraryEntryRef,
+	libraryInstallPath,
+	planLibraryInstall,
+	resolveLibraryRequirements,
+	syncLibrary,
+} from "./library.js";
 export { createResourcesLoader, type ResourceLoaderOptions } from "./loader.js";
 export { ResourcesManifest } from "./manifest.js";
 export {
@@ -61,6 +77,8 @@ export {
 	discoverMarketplaceSkills,
 	getMarketplaceSkills,
 	installSkill,
+	type LibraryEntryKind,
+	type LibraryRequirementRef,
 	MARKETPLACE_UNCONFIGURED,
 	type MarketplaceDiscoveryResult,
 	type MarketplaceSkill,

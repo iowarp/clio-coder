@@ -413,6 +413,12 @@ export const DEFAULT_SETTINGS = {
 	skills: {
 		trustProjectCompatRoots: false,
 	} as SkillsSettings,
+	library: {
+		catalog: null as string | null,
+		remote: null as string | null,
+		confirmedRemote: null as string | null,
+		sync: false,
+	},
 	attribution: {
 		gitCommits: true,
 	} as AttributionSettings,
@@ -659,6 +665,13 @@ terminal:
 # CLIO_CODER_TRUST_PROJECT_SKILLS=1 is set for the process.
 skills:
   trustProjectCompatRoots: false
+
+# The private resource catalog stays local unless sync is explicitly enabled.
+library:
+  catalog: null
+  remote: null
+  confirmedRemote: null
+  sync: false
 
 # Evidence-aware Git commit provenance. The identity and trailer semantics are
 # compiled into Clio; this switch only enables or disables attribution.

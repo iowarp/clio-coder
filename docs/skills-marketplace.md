@@ -28,6 +28,8 @@ skills/ catalog.
 
 The CLI reports the same state as `no local skill marketplace catalog or index configured`. A marketplace source that exists but fails (an unreadable index, a broken catalog package) is a diagnostic row in the hub, not a silent omission.
 
+The same index machinery can also describe agent recipes, prompt templates, and fleet contracts through typed entries and requirements. See [resource-library.md](resource-library.md) for the schema, private catalog, installation roots, and `clio-coder library` commands. The Skills Hub continues to render skills only.
+
 ## Using the hub
 
 | Key | Action |

@@ -11,9 +11,16 @@ import {
 	safeResourceWrite,
 } from "../../core/safe-resource-write.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
+import { parseFrontmatter } from "../agents/frontmatter.js";
+import {
+	assertAgentSpecPolicy,
+	normalizeAgentSpec,
+	parseAgentRecipeSchema,
+	parseFleetContract,
+} from "../agents/index.js";
 
 export type ShareScope = "project" | "user";
-export type ShareEntryType = "project-context" | "prompt" | "skill" | "settings" | "extension";
+export type ShareEntryType = "project-context" | "prompt" | "skill" | "agent" | "fleet" | "settings" | "extension";
 
 export interface ShareArchiveFile {
 	type: ShareEntryType;
@@ -61,6 +68,8 @@ export interface ShareExportOptions {
 	includeContext?: boolean;
 	includePrompts?: boolean;
 	includeSkills?: boolean;
+	includeAgents?: boolean;
+	includeFleets?: boolean;
 	includeSettings?: boolean;
 	includeExtensions?: boolean;
 }
@@ -206,7 +215,13 @@ function defaultedIncludes(
 ): Required<
 	Pick<
 		ShareExportOptions,
-		"includeContext" | "includePrompts" | "includeSkills" | "includeSettings" | "includeExtensions"
+		| "includeContext"
+		| "includePrompts"
+		| "includeSkills"
+		| "includeAgents"
+		| "includeFleets"
+		| "includeSettings"
+		| "includeExtensions"
 	>
 > {
 	// True when the caller named at least one include flag explicitly. In that
@@ -216,12 +231,16 @@ function defaultedIncludes(
 		options.includeContext !== undefined ||
 		options.includePrompts !== undefined ||
 		options.includeSkills !== undefined ||
+		options.includeAgents !== undefined ||
+		options.includeFleets !== undefined ||
 		options.includeSettings !== undefined ||
 		options.includeExtensions !== undefined;
 	return {
 		includeContext: hasExplicitInclude ? options.includeContext === true : true,
 		includePrompts: hasExplicitInclude ? options.includePrompts === true : true,
 		includeSkills: hasExplicitInclude ? options.includeSkills === true : true,
+		includeAgents: hasExplicitInclude ? options.includeAgents === true : true,
+		includeFleets: hasExplicitInclude ? options.includeFleets === true : true,
 		includeSettings: hasExplicitInclude ? options.includeSettings === true : true,
 		includeExtensions: hasExplicitInclude ? options.includeExtensions === true : true,
 	};
@@ -261,6 +280,18 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 		for (const scope of scopes) {
 			const root = scope === "user" ? path.join(clioConfigDir(), "skills") : path.join(cwd, ".clio-coder", "skills");
 			addTree(files, "skill", scope, root, `${scope}/skills`);
+		}
+	}
+	if (includes.includeAgents) {
+		for (const scope of scopes) {
+			const root = scope === "user" ? path.join(clioConfigDir(), "agents") : path.join(cwd, ".clio-coder", "agents");
+			addTree(files, "agent", scope, root, `${scope}/agents`);
+		}
+	}
+	if (includes.includeFleets) {
+		for (const scope of scopes) {
+			const root = scope === "user" ? path.join(clioConfigDir(), "fleets") : path.join(cwd, ".clio-coder", "fleets");
+			addTree(files, "fleet", scope, root, `${scope}/fleets`);
 		}
 	}
 	if (includes.includeExtensions) {
@@ -313,9 +344,19 @@ function parseArchive(raw: unknown): ClioShareArchive {
 		throw new Error("share archive manifest is malformed");
 	}
 	const archive = raw as unknown as ClioShareArchive;
+	const allowedTypes = new Set<ShareEntryType>([
+		"project-context",
+		"prompt",
+		"skill",
+		"agent",
+		"fleet",
+		"settings",
+		"extension",
+	]);
 	for (const file of archive.files) {
 		if (
 			!isRecord(file) ||
+			!allowedTypes.has(file.type as ShareEntryType) ||
 			typeof file.archivePath !== "string" ||
 			typeof file.relativePath !== "string" ||
 			typeof file.sha256 !== "string" ||
@@ -392,6 +433,10 @@ function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions)
 			return scope === "user"
 				? { root: path.join(config, "skills"), containmentRoot: config, scope }
 				: { root: path.join(cwd, ".clio-coder", "skills"), containmentRoot: cwd, scope };
+		case "agent":
+			return { root: path.join(config, "agents"), containmentRoot: config, scope: "user" };
+		case "fleet":
+			return { root: path.join(config, "fleets"), containmentRoot: config, scope: "user" };
 		case "extension":
 			return scope === "user"
 				? { root: path.join(config, "extensions"), containmentRoot: config, scope }
@@ -563,6 +608,26 @@ function prepareShareImport(filePath: string, options: ShareImportOptions = {}):
 	}
 	for (const targetInfo of preflight.targets) {
 		const { entry, target, scope, buffer } = targetInfo;
+		if (entry.type === "fleet") {
+			try {
+				parseFleetContract(buffer.toString("utf8"), target);
+			} catch (error) {
+				diagnostics.push({ type: "error", message: error instanceof Error ? error.message : String(error), path: target });
+				continue;
+			}
+		}
+		if (entry.type === "agent") {
+			try {
+				const parsed = parseFrontmatter(buffer.toString("utf8"), target);
+				const id = path.basename(target, ".md");
+				assertAgentSpecPolicy(
+					normalizeAgentSpec(parseAgentRecipeSchema({ id, source: "user", filepath: target, ...parsed })),
+				);
+			} catch (error) {
+				diagnostics.push({ type: "error", message: error instanceof Error ? error.message : String(error), path: target });
+				continue;
+			}
+		}
 		if (entry.type === "settings") {
 			diagnostics.push(...settingsPlan(buffer, options));
 			actions.push({ action: "settings", type: entry.type, scope, path: target });

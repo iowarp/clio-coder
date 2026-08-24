@@ -34,7 +34,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Rec
 *   **Built-in Protection**: Project agents cannot override any shipped built-ins; they are strictly treated as custom/domain agents.
 *   **Reserved IDs**: The IDs `worker` and `delegate` are strictly reserved for custom/internal contexts and cannot be registered as custom agent IDs.
 *   **Local Ignored Custom Examples**: Local examples (e.g., `benchmark-runner`, `clio-dev`, `implementer`, `scientific-validator`) may exist under `.clio-coder/agents` for documentation or test purposes, but are ignored if they collide with reserved/built-in rules.
-*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Project-level fleet contracts placed at `.clio-coder/fleets/<name>.md` shadow builtin fleets of the same name. Deterministic code steps reference commands declared in `.clio-coder/fleets/commands.yaml`. Contract v4 requires per-step write boundaries (`writes`).
+*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Library-installed contracts live at `<configDir>/fleets/<name>.md`. Project contracts at `.clio-coder/fleets/<name>.md` take highest precedence. Deterministic code steps reference commands declared in `.clio-coder/fleets/commands.yaml`. Contract v4 requires per-step write boundaries (`writes`).
 
 ---
 

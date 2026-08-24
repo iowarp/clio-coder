@@ -998,6 +998,7 @@ const TOP_LEVEL_KEYS = [
 	"theme",
 	"terminal",
 	"skills",
+	"library",
 	"attribution",
 	"delegation",
 	"keybindings",
@@ -1063,6 +1064,25 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	if ("runtimePlugins" in raw) {
 		const v = expectStringArray(issues, "runtimePlugins", raw.runtimePlugins);
 		if (v !== undefined) settings.runtimePlugins = v;
+	}
+	if ("library" in raw) {
+		if (!isPlainObject(raw.library)) {
+			issues.add("library", `expected a map, got ${describe(raw.library)}`);
+		} else {
+			issues.unknownKeys("library", raw.library, ["catalog", "remote", "confirmedRemote", "sync"]);
+			for (const key of ["catalog", "remote", "confirmedRemote"] as const) {
+				const value = raw.library[key];
+				if (value === undefined) continue;
+				if (value !== null && typeof value !== "string")
+					issues.add(`library.${key}`, `expected a string or null, got ${describe(value)}`);
+				else settings.library[key] = value as string | null;
+			}
+			if (raw.library.sync !== undefined) {
+				if (typeof raw.library.sync !== "boolean")
+					issues.add("library.sync", `expected a boolean, got ${describe(raw.library.sync)}`);
+				else settings.library.sync = raw.library.sync;
+			}
+		}
 	}
 
 	if ("orchestrator" in raw) {
