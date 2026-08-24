@@ -61,6 +61,9 @@ type SlashCommandVariant =
 	| { kind: "btw-usage" }
 	| { kind: "handoff"; goal: string }
 	| { kind: "handoff-usage" }
+	/** `/fleet run <name>`: compile the plan, show it for approval, dispatch on accept. */
+	| { kind: "fleet-run"; name: string; vars: Record<string, string> }
+	| { kind: "fleet-run-usage"; reason?: string }
 	| { kind: "agents" }
 	| { kind: "cost" }
 	| { kind: "context-view" }
@@ -398,6 +401,12 @@ export interface SlashCommandContext {
 	 * the task-memory bank.
 	 */
 	startHandoff: (goal: string) => void;
+	/**
+	 * `/fleet run <name>`: compile the contract's plan, show every wave, agent,
+	 * target, boundary, budget, and code-step argv for approval, and dispatch
+	 * only what the operator accepted. Absent on a host with no fleet wiring.
+	 */
+	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
@@ -985,7 +994,59 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 		},
 	},
-	settingsDeepLink("fleet", "fleet", "Open Settings → Fleet: defaults, profiles, agent bindings, nodes"),
+	{
+		name: "fleet",
+		description: "Open Settings → Fleet, or run a fleet contract with an approval preview",
+		group: "Configure",
+		kinds: ["fleet-run", "fleet-run-usage"],
+		subcommandDescriptions: { run: "Preview and run a repo-owned fleet contract" },
+		args: {
+			subcommands: {
+				run: {
+					flags: [{ name: "--var", takesValue: true, repeatable: true, valueName: "key=value" }],
+					positionals: [{ name: "name", required: true }],
+				},
+			},
+		},
+		/**
+		 * `/fleet` alone keeps the settings deep link it has always been, and
+		 * only `run` parses as a command of its own, so an operator who types
+		 * `/fleet` out of habit still lands in Settings → Fleet. Anything else
+		 * on the line stays the usage error every other deep link reports.
+		 */
+		fromArgs(parsed) {
+			if (parsed.subcommand !== "run") {
+				return parsed.error
+					? { kind: "usage-error", command: "fleet", reason: parsed.error }
+					: { kind: "settings", section: "fleet" };
+			}
+			if (parsed.error) return { kind: "fleet-run-usage", reason: parsed.error };
+			const name = parsed.positionals[0] ?? "";
+			if (name.length === 0) return { kind: "fleet-run-usage" };
+			const vars: Record<string, string> = {};
+			for (const pair of parsed.flagValues.get("--var") ?? []) {
+				const eq = pair.indexOf("=");
+				const key = eq < 0 ? "" : pair.slice(0, eq).trim();
+				if (key.length === 0) return { kind: "fleet-run-usage", reason: "--var requires key=value" };
+				vars[key] = pair.slice(eq + 1);
+			}
+			return { kind: "fleet-run", name, vars };
+		},
+		handle(command, ctx) {
+			if (command.kind === "fleet-run-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "fleet");
+				const usage = entry ? usageNotice(entry, "run") : "usage: /fleet run <name> [--var key=value ...]";
+				ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
+				return;
+			}
+			if (command.kind !== "fleet-run") return;
+			if (!ctx.startFleetRun) {
+				ctx.notice("error", "/fleet run is not wired in this session");
+				return;
+			}
+			ctx.startFleetRun(command.name, command.vars);
+		},
+	},
 	{
 		name: "decisions",
 		description: "Show settled interview decisions and operator revisions",

@@ -1822,6 +1822,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		dispatch,
 		...(agents ? { agents } : {}),
+		...(() => {
+			const scheduling = result.getContract<SchedulingContract>("scheduling");
+			return scheduling ? { scheduling } : {};
+		})(),
 		observability,
 		chat,
 		...(options.terminalLease

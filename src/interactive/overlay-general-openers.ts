@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { AgentsContract } from "../domains/agents/contract.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import type { DispatchContract } from "../domains/dispatch/index.js";
+import type { DispatchContract, DispatchRequest } from "../domains/dispatch/index.js";
+import { agentRoleFactsResolver, executeFleetRun, requestExecutionRole } from "../domains/dispatch/index.js";
 import {
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
@@ -23,6 +26,7 @@ import {
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
+import { compileFleetRunPreview, type FleetRunPreview, type FleetRunPreviewInput } from "./fleet-run-preview.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
@@ -32,6 +36,7 @@ import {
 	openContextResetOverlay,
 } from "./overlays/context-reset.js";
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
+import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import { type ContextClearCommandOptions, formatUserTaskHandoff } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
@@ -79,6 +84,23 @@ export interface OverlayGeneralOpenersDeps {
 	openMemoryOverlay?: typeof openMemoryOverlay;
 	openViewOverlay?: typeof openViewOverlay;
 	openSideQuestionOverlay?: typeof openSideQuestionOverlay;
+	openFleetRunApprovalOverlay?: typeof openFleetRunApprovalOverlay;
+	/** Recipe registry `/fleet run` resolves every step's agent against. */
+	agents?: AgentsContract;
+	/** Session budget state the run would be admitted under; absent leaves it unknown. */
+	getBudgetPreflight?: () => { ceilingUsd: number; currentUsd: number; verdict: "under" | "at" | "over" };
+	/**
+	 * True while a turn is streaming. `/fleet run` is refused then, never
+	 * queued: an approved plan describes the workspace as it stands, and a turn
+	 * still in flight is about to change it.
+	 */
+	isTurnInFlight?: () => boolean;
+	/** Record which wave and step a dispatched run belongs to, for the board's phase column. */
+	setFleetRunPhase?: (runId: string, phase: { wave: number; stepId: string }) => void;
+	/** The shared fleet-run path; overridable so a test can observe one call. */
+	runFleet?: typeof executeFleetRun;
+	/** Contract and command-registry loader; overridable so a test projects a fixture. */
+	loadFleetSources?: FleetRunPreviewInput["load"];
 	/**
 	 * Run one `/btw` round. Absent on a host with no chat loop, in which case
 	 * `/btw` reports that instead of opening an empty overlay.
@@ -105,6 +127,8 @@ export interface OverlayGeneralOpeners {
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
 	openSideQuestion(question: string): void;
+	/** `/fleet run <name> [--var k=v ...]`: preview the plan, then dispatch on approval. */
+	startFleetRun(name: string, vars: Readonly<Record<string, string>>): void;
 }
 
 export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): OverlayGeneralOpeners {
@@ -362,6 +386,115 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			});
 	};
 
+	/**
+	 * `/fleet run <name>`: compile the plan, show it, and dispatch only what the
+	 * operator accepted.
+	 *
+	 * Nothing is dispatched and nothing is written before the accept key. A
+	 * contract that fails preflight opens the same overlay with its diagnostics
+	 * and no accept action, so the only exit from a broken plan is to leave it.
+	 */
+	const startFleetRun = (name: string, vars: Readonly<Record<string, string>>): void => {
+		if (deps.transitions.state !== "closed") return;
+		// Refused, never queued: an approved plan describes the workspace as it
+		// stands, and a turn still in flight is about to change it.
+		if (deps.isTurnInFlight?.() === true) {
+			deps.notify("warning", "a turn is in flight; /fleet run is refused rather than queued", "fleet-run:in-flight");
+			return;
+		}
+		const agents = deps.agents;
+		if (!agents) {
+			deps.notify("error", "/fleet run needs the agents domain, which is not wired in this session", "fleet-run:agents");
+			return;
+		}
+		const workspaceRoot = deps.getSessionMeta()?.cwd ?? process.cwd();
+		const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
+		const budget = deps.getBudgetPreflight?.();
+		const result = compileFleetRunPreview({
+			workspaceRoot,
+			name,
+			vars,
+			getAgentSpec: (agentId) => agents.getSpec(agentId),
+			roleFacts,
+			...(budget ? { budget } : {}),
+			...(deps.loadFleetSources ? { load: deps.loadFleetSources } : {}),
+			resolveRoute: (step) => {
+				const request: DispatchRequest = {
+					agentId: step.agentId,
+					executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
+					task: "",
+					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+				};
+				try {
+					const resolution = deps.dispatch.preview?.(request);
+					if (!resolution) return null;
+					return {
+						targetId: resolution.targetId,
+						wireModelId: resolution.wireModelId,
+						nodeId: resolution.node.id,
+					};
+				} catch {
+					// A route this process cannot resolve is a step rendered without
+					// one, not a preview the operator is denied.
+					return null;
+				}
+			},
+		});
+
+		deps.transitions.state = "fleet-run-approval";
+		deps.transitions.handle = (deps.openFleetRunApprovalOverlay ?? openFleetRunApprovalOverlay)(deps.tui, {
+			subject: result.ok ? { ok: true, preview: result.preview } : { ok: false, name, diagnostics: result.diagnostics },
+			columns: deps.terminal.columns,
+			onAccept: () => {
+				deps.closeOverlay();
+				if (result.ok) dispatchFleetRun(result.preview, agents);
+			},
+			onCancel: () => {
+				deps.closeOverlay();
+				deps.notify("info", `fleet ${name}: cancelled; nothing was dispatched`, "fleet-run:cancelled");
+			},
+		});
+		deps.requestRender();
+	};
+
+	const dispatchFleetRun = (preview: FleetRunPreview, agents: AgentsContract): void => {
+		const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
+		const run = deps.runFleet ?? executeFleetRun;
+		deps.notify(
+			"info",
+			`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}`,
+			"fleet-run:started",
+		);
+		void run({
+			plan: preview.plan,
+			contractName: preview.name,
+			commands: preview.commands,
+			workspaceRoot: deps.getSessionMeta()?.cwd ?? process.cwd(),
+			fleetRootId,
+			dispatch: deps.dispatch,
+			agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+			attributionEnabled: deps.getSettings?.().attribution.gitCommits ?? true,
+			onStepDispatched: (event) => {
+				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
+			},
+			onNotice: (text) => deps.stderr(`[fleet ${preview.name}] ${text}\n`),
+		})
+			.then((outcome) => {
+				deps.notify(
+					outcome.cleanRun ? "success" : "warning",
+					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, cost $${outcome.totalCostUsd.toFixed(4)}`,
+					"fleet-run:settled",
+				);
+			})
+			.catch((error: unknown) => {
+				deps.notify(
+					"error",
+					`fleet ${preview.name}: ${error instanceof Error ? error.message : String(error)}`,
+					"fleet-run:failed",
+				);
+			});
+	};
+
 	return {
 		openCost,
 		openContextView,
@@ -373,5 +506,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openView,
 		toggleDispatchBoard,
 		openSideQuestion,
+		startFleetRun,
 	};
 }

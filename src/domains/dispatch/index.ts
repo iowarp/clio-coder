@@ -87,6 +87,14 @@ export {
 	type RoutePart,
 } from "./failure-classification.js";
 export { type CompileFleetPlanInput, compileFleetExecutionPlan } from "./fleet-plan.js";
+export type {
+	ExecuteFleetRunInput,
+	FleetRunAgentAccess,
+	FleetRunOutcome,
+	FleetRunStepEvent,
+	FleetRunStepOutcome,
+} from "./fleet-run.js";
+export { executeFleetRun, fleetPlanWaveIndex } from "./fleet-run.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,

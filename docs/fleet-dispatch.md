@@ -786,6 +786,23 @@ hard block.
 - `/fleet` opens Settings → Fleet: profiles (with the node pin), bindings,
   and read-only node rows (state, capacity, and last-seen). Running and
   retrying runs, with their node, live in the `Alt+W` Fleet Runs board.
+- `/fleet run <name> [--var k=v ...]` compiles the contract's plan and opens
+  the approval overlay before anything dispatches. The overlay lists the steps
+  grouped by wave, and for each step its kind, its agent and resolved target
+  (or its command id and the exact argv from `commands.yaml` for a code step),
+  its scope, and its declared write boundary, followed by the budget ceiling
+  the run would be admitted under. Enter dispatches the plan through the same
+  path `clio-coder fleet run` uses, so admission, autonomy, receipts, and the
+  durable ledger are identical. Esc cancels with nothing dispatched and nothing
+  written. A contract that fails preflight opens the same overlay with its
+  diagnostics and no accept key. A turn in flight refuses the command with a
+  notice rather than queueing it: an approved plan describes the workspace as
+  it stands.
+- Board rows a fleet plan dispatched carry a phase column naming the step's
+  wave index and step id (`w2 build`). A run that is not a fleet step renders
+  the column empty. The compact Fleet Runs island keeps its fixed width, so it
+  shows the column only when the row can still hold a readable agent label;
+  otherwise the phase appears on the expanded card.
 - The monitor tool reports the node and reroute lineage on `status`, `list`,
   and `collect`.
 - `clio-coder fleet status [--json]` shows the durable ledger view cross-process.

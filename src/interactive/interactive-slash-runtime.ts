@@ -114,6 +114,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openSideQuestion: (question: string) => void;
 	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoff: (goal: string) => void;
+	/** Run one `/fleet run <name>`: approval preview first, dispatch only on accept. */
+	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
 	openContextView: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
@@ -348,6 +350,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openCost: deps.openCost,
 		openSideQuestion: deps.openSideQuestion,
 		startHandoff: deps.startHandoff,
+		...(deps.startFleetRun ? { startFleetRun: deps.startFleetRun } : {}),
 		openContextView: deps.openContextView,
 		openTasks: deps.openTasks,
 		openDecisions: deps.openDecisions,

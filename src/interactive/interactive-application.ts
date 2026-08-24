@@ -15,6 +15,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
+import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
@@ -110,6 +111,8 @@ export interface InteractiveDeps {
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
 	agents?: AgentsContract;
+	/** Session budget state `/fleet run` shows as the ceiling a plan is admitted under. */
+	scheduling?: SchedulingContract;
 	observability: ObservabilityContract;
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
@@ -643,6 +646,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openCost: () => openCostOverlayState(),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		startHandoff: (goal) => startHandoffState(goal),
+		startFleetRun: (name, vars) => startFleetRunState(name, vars),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openDecisions: () => openDecisionsOverlayState(),
@@ -720,6 +724,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		notify,
 		terminal,
 		dispatchBoard,
+		setFleetRunPhase: (runId, phase) => dispatchBoardStore.setFleetPhase(runId, phase),
 		chatPanel,
 		resetTranscript,
 		io,
@@ -748,6 +753,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openCostOverlayState,
 		openSideQuestionOverlayState,
 		startHandoffState,
+		startFleetRunState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		openTasksOverlayState,
