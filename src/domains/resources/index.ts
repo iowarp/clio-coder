@@ -28,6 +28,8 @@ export {
 	type LibraryEntry,
 	type LibraryInstallPlan,
 	type LibraryRequirementStatus,
+	libraryEntryInstalled,
+	libraryEntryPin,
 	libraryEntryRef,
 	libraryInstallPath,
 	planLibraryInstall,

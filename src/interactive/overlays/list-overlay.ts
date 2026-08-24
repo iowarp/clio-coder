@@ -32,9 +32,34 @@ export interface ListOverlayItem {
 	detail?: (width: number) => string[];
 }
 
+/**
+ * One tab of a tabbed list overlay.
+ *
+ * A tab owns its own row set and rebuilds it on demand, so switching tabs
+ * re-reads whatever the rows describe rather than serving a snapshot taken when
+ * the overlay opened. The counts drawn in the tab bar come from the same call,
+ * which is why an install that lands on one tab corrects every tab's count.
+ */
+export interface ListOverlayTab {
+	id: string;
+	label: string;
+	items: () => ReadonlyArray<ListOverlayItem>;
+}
+
 export interface ListOverlayOptions {
 	title: string;
 	items: ReadonlyArray<ListOverlayItem>;
+	/**
+	 * Tabs, drawn as a bar above the filter row and switched with ←/→, which is
+	 * the key vocabulary the Settings Center already uses to move between
+	 * sections. Omitted leaves the overlay untabbed and every tab code path
+	 * inert.
+	 */
+	tabs?: ReadonlyArray<ListOverlayTab>;
+	/** Tab the overlay opens on; defaults to the first. */
+	activeTabId?: string;
+	/** Notified after ←/→ changes the active tab. */
+	onTabChange?: (tabId: string) => void;
 	/** Enables the type-to-filter input row. */
 	filterable?: boolean;
 	/** Pre-applied filter text (e.g. /skill <query> in milestone 04). */
@@ -91,6 +116,10 @@ export class ListOverlayView implements Component {
 	private renderMemo: { key: string; lines: string[] } | null = null;
 	/** Bumped on every keystroke routed into the filter input; part of the memo key. */
 	private inputEpoch = 0;
+	/** Active tab id, or the empty string on an untabbed overlay. */
+	private activeTabId = "";
+	/** Row count per tab id, refreshed whenever the tab set is rebuilt. */
+	private tabCounts = new Map<string, number>();
 
 	constructor(
 		private readonly options: ListOverlayOptions,
@@ -104,6 +133,89 @@ export class ListOverlayView implements Component {
 		if (options.initialFilter) {
 			this.input.setValue(options.initialFilter);
 		}
+		const tabs = options.tabs;
+		if (tabs && tabs.length > 0) {
+			const requested = tabs.find((tab) => tab.id === options.activeTabId);
+			this.activeTabId = (requested ?? tabs[0])?.id ?? "";
+			this.refreshTabs();
+		}
+	}
+
+	/** The tab the overlay is on, or undefined when it is untabbed. */
+	activeTab(): ListOverlayTab | undefined {
+		return this.options.tabs?.find((tab) => tab.id === this.activeTabId);
+	}
+
+	/**
+	 * Rebuild every tab's rows, adopt the active tab's, and record each count.
+	 *
+	 * Every tab is rebuilt rather than only the active one because the tab bar
+	 * states each tab's count, and an install performed on one tab can satisfy a
+	 * requirement another tab reports. A stale count there is the same lie a
+	 * stale row is.
+	 */
+	refreshTabs(): void {
+		const tabs = this.options.tabs;
+		if (!tabs || tabs.length === 0) return;
+		const counts = new Map<string, number>();
+		let activeItems: ReadonlyArray<ListOverlayItem> = [];
+		for (const tab of tabs) {
+			const rows = tab.items();
+			counts.set(tab.id, rows.length);
+			if (tab.id === this.activeTabId) activeItems = rows;
+		}
+		this.tabCounts = counts;
+		this.setItems(activeItems);
+	}
+
+	/** Switch tabs and rebuild. A tab id this overlay does not carry is ignored. */
+	setActiveTab(tabId: string): void {
+		const tabs = this.options.tabs;
+		if (!tabs?.some((tab) => tab.id === tabId)) return;
+		this.activeTabId = tabId;
+		this.refreshTabs();
+		// After the rows, not before: setItems re-anchors the cursor on the id it
+		// was on, and on a tab switch that id belongs to a list the operator has
+		// left. A new tab starts at its first row.
+		this.selectedIndex = 0;
+		this.listScrollOffset = 0;
+		this.detailScrollOffset = 0;
+		this.renderMemo = null;
+	}
+
+	/**
+	 * The frame title. A tabbed overlay names the tab it is on, so the border
+	 * and the rows below it describe the same thing.
+	 */
+	title(): string {
+		const tab = this.activeTab();
+		return tab === undefined ? this.options.title : `${this.options.title} · ${tab.label}`;
+	}
+
+	private stepTab(delta: number): boolean {
+		const tabs = this.options.tabs;
+		if (!tabs || tabs.length === 0) return false;
+		const current = tabs.findIndex((tab) => tab.id === this.activeTabId);
+		const next = tabs[((((current === -1 ? 0 : current) + delta) % tabs.length) + tabs.length) % tabs.length];
+		if (!next || next.id === this.activeTabId) return false;
+		this.setActiveTab(next.id);
+		this.options.onTabChange?.(next.id);
+		this.onChange();
+		return true;
+	}
+
+	/** The tab bar: every tab with its count, the active one in the accent token. */
+	private renderTabBar(width: number): string[] {
+		const tabs = this.options.tabs;
+		if (!tabs || tabs.length === 0) return [];
+		const theme = clioTheme();
+		const parts = tabs.map((tab) => {
+			const text = `${tab.label} ${this.tabCounts.get(tab.id) ?? 0}`;
+			return tab.id === this.activeTabId
+				? theme.style("accent", `${GLYPH.cursor} ${text}`, { bold: true })
+				: theme.fg("dim", `  ${text}`);
+		});
+		return [this.padLine(parts.join(theme.fg("frame", " │ ")), width)];
 	}
 
 	/**
@@ -170,12 +282,27 @@ export class ListOverlayView implements Component {
 		this.options.onClose();
 	}
 
+	/**
+	 * The tab entry a tabbed footer carries. The verb names the active tab and
+	 * how many rows it holds, so the count a reader sees is the count of the tab
+	 * they are on rather than of the overlay as a whole.
+	 */
+	private tabHintEntry(): HintEntry | null {
+		const tab = this.activeTab();
+		if (tab === undefined) return null;
+		const count = this.tabCounts.get(tab.id) ?? this.items.length;
+		return { key: "←→", verb: `tab · ${count} ${tab.label.toLowerCase()}`, short: "tab", critical: true };
+	}
+
 	getHint(): string {
+		const tabEntry = this.tabHintEntry();
 		// A list with no rows has no row to select, invoke, or act on. Offering
 		// those keys anyway is the same lie the empty state exists to stop telling.
-		if (this.items.length === 0) return buildHint([], "close");
+		// A tab key is the exception: on an empty tab it is the way to a full one.
+		if (this.items.length === 0) return buildHint(tabEntry ? [tabEntry] : [], "close");
 
 		const hintEntries: HintEntry[] = [];
+		if (tabEntry) hintEntries.push(tabEntry);
 		hintEntries.push({ key: "↑↓", verb: "select" });
 		if (this.options.filterable) {
 			hintEntries.push(FILTER_HINT);
@@ -396,10 +523,13 @@ export class ListOverlayView implements Component {
 			this.detailScrollOffset,
 			this.inputEpoch,
 			this.itemsEpoch,
+			this.activeTabId,
 		].join("|");
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
 
 		const lines: string[] = [];
+
+		lines.push(...this.renderTabBar(width));
 
 		if (this.options.filterable) {
 			this.input.focused = this.isFilterFocused;
@@ -442,6 +572,20 @@ export class ListOverlayView implements Component {
 	}
 
 	handleInput(data: string): void {
+		// ←/→ switch tabs from either pane, ahead of the filter input, which is
+		// the arrangement the Settings Center already uses to move between
+		// sections. On an untabbed overlay both keys fall through untouched.
+		if (this.options.tabs && this.options.tabs.length > 0) {
+			if (matchesKey(data, "left")) {
+				this.stepTab(-1);
+				return;
+			}
+			if (matchesKey(data, "right")) {
+				this.stepTab(1);
+				return;
+			}
+		}
+
 		// PgDn / Ctrl+D and PgUp / Ctrl+U scroll the detail pane, but only
 		// while one is visible; otherwise the keys fall through untouched.
 		if (this.detailPaneVisible()) {
@@ -587,6 +731,15 @@ export interface ListOverlayHandle extends OverlayHandle {
 	 * the frame from before its own change until some other key moves the memo key.
 	 */
 	setItems(items: ReadonlyArray<ListOverlayItem>): void;
+	/**
+	 * Rebuild every tab's rows in place, keeping the active tab and the
+	 * operator's place in it. Inert on an untabbed overlay.
+	 */
+	refreshTabs(): void;
+	/** Switch tabs programmatically. An id this overlay does not carry is ignored. */
+	setActiveTab(tabId: string): void;
+	/** The active tab's id, or the empty string on an untabbed overlay. */
+	activeTabId(): string;
 }
 
 export function openListOverlay(tui: TUI, options: ListOverlayOptions): ListOverlayHandle {
@@ -594,13 +747,26 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions): ListOver
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
 		width: 100,
-		title: options.title,
+		// A function, not the string: on a tabbed overlay the title names the tab
+		// and must be re-read after every switch.
+		title: () => view.title(),
 		footerHint: () => view.getHint(),
 	});
 	return Object.assign(handle, {
 		setItems(items: ReadonlyArray<ListOverlayItem>): void {
 			view.setItems(items);
 			tui.requestRender();
+		},
+		refreshTabs(): void {
+			view.refreshTabs();
+			tui.requestRender();
+		},
+		setActiveTab(tabId: string): void {
+			view.setActiveTab(tabId);
+			tui.requestRender();
+		},
+		activeTabId(): string {
+			return view.activeTab()?.id ?? "";
 		},
 	});
 }

@@ -41,6 +41,10 @@ clio-coder library remote confirm <url>
 
 `library add` prints every destination and SHA-256 hash before it writes. It writes nothing until `--yes` is present. `library use` prints the invocation to paste into the relevant surface.
 
+## In the TUI
+
+The Skills Hub carries one tab per kind. `/library <kind>` opens it on that kind's tab and `/library` alone opens it on Skills, which is also where `/skill` opens. Each tab lists the entries this same discovery finds, with the requirements an entry still needs named in the warning token. Installing from a row runs the same plan-then-write pair `library add` runs, behind a confirmation that states every destination and hash and writes nothing when it is cancelled, and an entry with unresolved requirements is refused by name before an install-with-requirements confirmation offers to write them all. `Enter` on an installed row leads where that kind is invoked from: the composer for an agent, a prompt, or a skill, and the `/fleet run` approval preview for a fleet. See [skills-marketplace.md](skills-marketplace.md) for the key table.
+
 ## Installation roots and validation
 
 | Kind | User installation root | Validation before write |

@@ -145,6 +145,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/quit` | `/quit` | Exit Clio Coder |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
+| `/library` | `/library [kind]` | Open the Skills Hub on a resource library tab |
 | `/prompts` | `/prompts` | List prompt templates |
 | `/extensions` | `/extensions` | List installed extensions |
 | `/interop` | `/interop` | Review other coding agents detected on this machine |

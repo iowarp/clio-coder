@@ -647,7 +647,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		readStructuredEntries,
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
-		openSkillsHub: () => openSkillsHubState(),
+		openSkillsHub: (tab) => openSkillsHubState(tab),
 		openCost: () => openCostOverlayState(),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		startHandoff: (goal) => startHandoffState(goal),

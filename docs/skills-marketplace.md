@@ -28,19 +28,30 @@ skills/ catalog.
 
 The CLI reports the same state as `no local skill marketplace catalog or index configured`. A marketplace source that exists but fails (an unreadable index, a broken catalog package) is a diagnostic row in the hub, not a silent omission.
 
-The same index machinery can also describe agent recipes, prompt templates, and fleet contracts through typed entries and requirements. See [resource-library.md](resource-library.md) for the schema, private catalog, installation roots, and `clio-coder library` commands. The Skills Hub continues to render skills only.
+The same index machinery can also describe agent recipes, prompt templates, and fleet contracts through typed entries and requirements. See [resource-library.md](resource-library.md) for the schema, private catalog, installation roots, and `clio-coder library` commands. Those kinds render on their own tabs in the hub, described below.
 
 ## Using the hub
 
 | Key | Action |
 |---|---|
 | type | Filter all groups |
-| `Enter` | Insert `/skill <name> ` into the editor for the task text |
+| `←`/`→` | Switch tabs |
+| `Enter` | Use the selected row: insert `/skill <name> ` into the editor for the task text, or the invocation the row's kind is called by |
 | `Tab` | Toggle the detail pane (split layout on wide terminals) |
-| `i` | Install the selected marketplace skill into the project scope through the local marketplace resolver |
+| `i` | Install the selected row through the resolver its kind installs by |
 | `PgUp`/`PgDn` | Scroll the detail pane |
 
 Invoking an uninstalled marketplace skill with `/skill <name>` prompts before installing it. `i` runs the same install path eagerly from the hub.
+
+## Tabs
+
+The hub carries one tab per resource library kind: Skills, Agents, Prompts, and Fleets. `←` and `→` move between them, which is the key vocabulary the Settings Center already uses to move between sections. The frame title names the active tab and the footer states its row count, so the numbers on screen always describe the tab being read. `/skill` opens the hub on Skills. `/library <kind>` opens it on that kind's tab, and `/library` alone opens it on Skills.
+
+The Skills tab is unchanged. The other three list the entries of their kind from `discoverLibrary()`, which is the same discovery `clio-coder library list --kind <kind>` reads, so the hub and the CLI never disagree about what exists. Each row carries the entry's origin and version, whether it is installed or available, the short form of its recorded pin hash, and, in the warning token, the names of any requirements it still needs. An entry the catalog refuses outright, because a requirement is missing, malformed, or cyclic, appears as a diagnostic row rather than being omitted.
+
+`Enter` uses the selected row. An agent inserts `/run <agent> ` into the composer, a prompt inserts its `/<id> ` invocation, a skill does what the Skills tab does, and a fleet closes the hub and opens the `/fleet run` approval preview for that contract. A row that is not installed says so instead and points at `i`.
+
+`i` installs, through the same plan-then-write pair `clio-coder library add` runs. A framed confirmation states every destination path and SHA-256 hash before anything is written, which is the TUI spelling of the CLI's `--yes` gate; `Esc` there leaves every destination untouched. An entry whose requirements are not all installed is refused by name on the first `i`, and a second `i` opens the install-with-requirements confirmation, which names every entry it would write in dependency order.
 
 The CLI `clio-coder skills` commands manage local skill discovery, validation, and
 creation. Extension resource roots and share archives are documented in

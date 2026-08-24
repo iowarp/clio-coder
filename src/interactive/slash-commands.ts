@@ -13,7 +13,12 @@ import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
-import type { PromptTemplate, PromptTemplateExpansion, ResourceList } from "../domains/resources/index.js";
+import type {
+	LibraryEntryKind,
+	PromptTemplate,
+	PromptTemplateExpansion,
+	ResourceList,
+} from "../domains/resources/index.js";
 import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
@@ -37,6 +42,7 @@ import {
 	packOracleDigest,
 } from "./oracle.js";
 import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
+import { isLibraryTab, LIBRARY_TABS } from "./overlays/skills-hub.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 import {
@@ -72,6 +78,7 @@ type SlashCommandVariant =
 	/** `ref` is the turnId an `[evicted ...]` marker names. */
 	| { kind: "context-recall"; ref: string }
 	| { kind: "skill-selector" }
+	| { kind: "library"; tab?: LibraryEntryKind }
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
 	| { kind: "extensions" }
@@ -530,7 +537,7 @@ export interface SlashCommandContext {
 	 * until the host wires a session.
 	 */
 	runContextRecall?: (ref: string) => void;
-	openSkillsHub?: () => void;
+	openSkillsHub?: (tab?: LibraryEntryKind) => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	/**
 	 * Resolve a `/name` against the loaded prompt templates. Absent when the host
@@ -812,6 +819,26 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			} else if (command.kind === "skill-invocation") {
 				ctx.submitChat(command.text);
 			}
+		},
+	},
+	{
+		name: "library",
+		description: "Open the Skills Hub on a resource library tab",
+		group: "Run",
+		kinds: ["library"],
+		args: { positionals: [{ name: "kind", required: false }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "library", reason: parsed.error };
+			const tab = parsed.positionals[0];
+			if (tab === undefined) return { kind: "library" };
+			if (!isLibraryTab(tab)) {
+				const known = LIBRARY_TABS.map((entry) => entry.id).join(", ");
+				return { kind: "usage-error", command: "library", reason: `Unknown kind: ${tab} (one of ${known})` };
+			}
+			return { kind: "library", tab };
+		},
+		handle(command, ctx) {
+			if (command.kind === "library") ctx.openSkillsHub?.(command.tab);
 		},
 	},
 	{

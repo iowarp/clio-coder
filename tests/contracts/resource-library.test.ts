@@ -444,7 +444,7 @@ describe("contracts/resource-library CLI", () => {
 			const library = await runCli(["library", "use", "skill", "demo"], { env: home.env });
 			strictEqual(library.code, 0);
 			match(library.stdout, /skills\/demo\/SKILL\.md\n/);
-			match(library.stdout, /load it from \/skills in the TUI/);
+			match(library.stdout, /load it from \/skill in the TUI/);
 		} finally {
 			home.cleanup();
 		}
