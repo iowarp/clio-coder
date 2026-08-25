@@ -1,6 +1,6 @@
 # Session Lifecycle
 
-This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in `v0.3.6`.
+This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in `v0.3.7`.
 
 Source implementations: `src/engine/session.ts` and `src/domains/session/`.
 

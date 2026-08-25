@@ -1,11 +1,11 @@
 # Tool Usage Reference
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive seven-plane tool atlas and observation envelope truncation/offload calculator is located at [docs/html/tool_usage_blueprint.html](html/tool_usage_blueprint.html) (Version: 0.3.6).
+> **Interactive Spec Available:** An interactive seven-plane tool atlas and observation envelope truncation/offload calculator is located at [docs/html/tool_usage_blueprint.html](html/tool_usage_blueprint.html) (Version: 0.3.7).
 
 This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `context(scope="docs", query=...)` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 
-In Clio Coder v0.3.6, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.
+In Clio Coder v0.3.7, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 

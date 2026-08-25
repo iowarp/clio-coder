@@ -1,6 +1,6 @@
 # Artifact Versions & Serialization Contracts
 
-This document is the canonical registry of all versioned file formats, serialized data structures, integrity digests, and migration rules across Clio Coder in `v0.3.6`.
+This document is the canonical registry of all versioned file formats, serialized data structures, integrity digests, and migration rules across Clio Coder in `v0.3.7`.
 
 ---
 
@@ -21,6 +21,10 @@ Clio Coder strictly versions every persistent or network-transported data struct
 | **Trace Database** | `1` | `TRACE_SCHEMA_VERSION = 1`<br>`src/domains/observability/trace-store.ts:23` | `<stateDir>/trace.sqlite` (`meta` table `schema_version`) | Schema version for the 7 SQLite trace mirror tables (`runs`, `phases`, `events`, `envelopes`, `gate_results`, `agent_sessions`, `processes`). | Log warning (`[clio:trace]`), trace writing degrades without failing the parent run. |
 | **Capacity State File** | `2` | `version: 2` in `interface CapacityStateFile`<br>`src/domains/dispatch/capacity-lease.ts:40` | `<stateDir>/dispatch-admission.json` | Active capacity leases, drain status, and cross-process lock state. | Corrupted or unparseable state file causes admission to fail closed. |
 | **Protected Artifact Journal** | `1` | `version: 1` in `interface PendingProtectedArtifactRecord`<br>`src/domains/session/protected-artifact-journal.ts:22` | `<stateDir>/protected-artifact-pending/<key>/<id>.json` | Write-ahead durability records for pending protected artifacts. | Leftover records reconciled during session initialization. |
+| **Fleet Run Record** | `1` | `version: 1` in `interface FleetRunRecord`<br>`src/domains/dispatch/fleet-run.ts` | `<stateDir>/fleet-runs/<runId>.json` | Durable record of one fleet run: contract name, plan hash, static step ids and steps, `--var` values, replayed and settled step results, and the delegation plan hash a `kind: plan` step produced. Read by `fleet run --resume`. | Resume refuses a changed plan hash with a per-step diff and refuses differing `--var` values. |
+| **Checkout Writer Lease** | `1` | `version: 1` in `interface CheckoutWriterLeaseRecord`<br>`src/domains/dispatch/checkout-writer-lease.ts` | `<stateDir>/checkout-writer-leases/<key>.json` (key derived from the canonical checkout path) | Cross-process single-writer lease: checkout path, pid, process birth token, acquisition time. | A live sibling holder is refused with `checkout_writer_lease_held`; a dead owner is reclaimed; a malformed record is treated as absent. |
+| **Out-of-turn Usage Ledger** | unversioned JSONL | `OutOfTurnUsageRow`<br>`src/domains/observability/out-of-turn-usage.ts` | `<stateDir>/usage/out-of-turn.jsonl` | One row per priced `/btw` or `/handoff` call: label, session id, repo identity, timestamp, target, attributed model, provider usage. Bounded ring of `MAX_OUT_OF_TURN_USAGE_ROWS = 1000`, rewritten atomically under the state-file lock. | Unparseable rows are skipped and counted by `usage report`; the session ledger is never affected. |
+| **Library Pins** | unversioned YAML map | `readLibraryPins`<br>`src/domains/resources/library.ts` | `<configDir>/library-pins.yaml` | Typed ref (`skill:x`, `agent:y`, `prompt:p`, `fleet:z`) to `{sha256, sourceUrl}` for every resource `library add` or the Skills Hub installed. | A non-map document reads as empty; an entry whose installed file is missing is reported as available, not installed. |
 
 ---
 

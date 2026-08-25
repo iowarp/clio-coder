@@ -1,7 +1,7 @@
 # Internal Eval Suites
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive blueprint is available at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) (Version: 0.3.6).
+> **Interactive Spec Available:** An interactive blueprint is available at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) (Version: 0.3.7).
 
 Private suites should live outside this repository. Keep datasets, prompts,
 live fleet coordinates, calibration outputs, and raw run artifacts in a private
