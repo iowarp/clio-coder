@@ -228,6 +228,22 @@ describe("contracts/fleet-run command spec", () => {
 		});
 	});
 
+	// A task variable is prose, so its value carries spaces; the tokenizer
+	// used to end every token at whitespace and reported the second word as an
+	// unexpected argument even when the operator quoted it.
+	it("carries quoted --var values with spaces through, quoted either way", () => {
+		deepStrictEqual(parseSlashCommand('/fleet run x --var task="add a pow function" --var mode=fast'), {
+			kind: "fleet-run",
+			name: "x",
+			vars: { task: "add a pow function", mode: "fast" },
+		});
+		deepStrictEqual(parseSlashCommand("/fleet run x --var 'task=add a pow function'"), {
+			kind: "fleet-run",
+			name: "x",
+			vars: { task: "add a pow function" },
+		});
+	});
+
 	it("reports usage for a run form that does not parse", () => {
 		const notices: string[] = [];
 		const ctx = {
