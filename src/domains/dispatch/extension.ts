@@ -12,7 +12,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
-import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
+import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
@@ -5906,6 +5906,45 @@ export function createDispatchBundle(
 			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
 		});
 		await l.persist();
+		// The synthesis never ran as a worker, so nothing else publishes its
+		// lifecycle. The Fleet Runs board and /share are built from these
+		// events, and a council whose synthesis they cannot see is a council
+		// whose verdict the operator cannot read or share.
+		const identity: DispatchRunIdentity = {
+			runId,
+			agentId: "council-synthesis",
+			task,
+			requestOrigin: "internal",
+			targetId: receipt.targetId,
+			wireModelId: receipt.wireModelId,
+			runtimeId: receipt.runtimeId,
+			runtimeKind: receipt.runtimeKind,
+			gate: { role: gate.role, cycle: gate.cycle },
+			council,
+		};
+		context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: "internal" });
+		context.bus.emit(BusChannels.DispatchCompleted, {
+			...identity,
+			requestOrigin: "internal",
+			outcome: "succeeded",
+			outcomeCode: null,
+			outcomeDetail: null,
+			lineage: input.template.lineage ?? { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
+			tokenCount: 0,
+			inputTokenCount: 0,
+			outputTokenCount: 0,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			reasoningTokenCount: 0,
+			staticShellHash: null,
+			sessionShellHash: null,
+			dynamicHash: null,
+			costUsd: 0,
+			costProvenance: "unknown",
+			durationMs: 0,
+			exitCode: 0,
+			toolActivity: null,
+		});
 		return receipt;
 	}
 

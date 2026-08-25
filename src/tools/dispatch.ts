@@ -263,7 +263,8 @@ export function createDispatchTool(
 			),
 			agent: Type.Optional(
 				Type.String({
-					description: "Default agent recipe for string tasks, or auto for bounded agent selection (default coder).",
+					description:
+						"Default agent recipe for string tasks, or auto for bounded agent selection (default coder; researcher for mode council).",
 				}),
 			),
 			briefing: Type.Optional(

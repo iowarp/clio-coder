@@ -122,6 +122,21 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 			body: "# Test Recipe",
 		},
 		{
+			// A council that names no agent seats the builtin researcher, so the
+			// stub fleet must offer a read-only answerer or every council fails
+			// admission before its first member runs.
+			...agentRecipeFixture(),
+			tools: [ToolNames.Read],
+			toolRequirements: { required: [ToolNames.Read], optional: [] },
+			id: "researcher",
+			name: "researcher",
+			description: "test researcher recipe",
+			capabilityClass: "read-only" as const,
+			source: "builtin" as const,
+			filepath: "/test/researcher.md",
+			body: "# Test Researcher Recipe",
+		},
+		{
 			// Review and compete gates default to the builtin Verifier, so the stub
 			// fleet must offer it or every gated dispatch fails admission.
 			...agentRecipeFixture(),
