@@ -5841,13 +5841,17 @@ export function createDispatchBundle(
 		const l = requireLedger();
 		const runId = newRunId();
 		const task = `Council ${input.kind} synthesis`;
+		// The synthesis is the council's own verdict, filed under the origin the
+		// council was asked from: an internal origin would keep it out of the
+		// transcript worker fold, and with it out of /share.
+		const origin = input.template.requestOrigin ?? "agent";
 		const gate = { role: "synthesis" as const, group: input.group, cycle: input.round, subjects: [...input.subjects] };
 		const council = { group: input.group, label: "synthesis", round: input.round };
 		const created = l.create({
 			id: runId,
 			agentId: "council-synthesis",
 			executionRole: "judge",
-			requestOrigin: "internal",
+			requestOrigin: origin,
 			task,
 			targetId: input.template.targetId,
 			wireModelId: input.template.wireModelId,
@@ -5870,7 +5874,7 @@ export function createDispatchBundle(
 			runId,
 			agentId: "council-synthesis",
 			executionRole: "judge",
-			requestOrigin: "internal",
+			requestOrigin: origin,
 			task,
 			targetId: input.template.targetId,
 			wireModelId: input.template.wireModelId,
@@ -5916,7 +5920,7 @@ export function createDispatchBundle(
 			runId,
 			agentId: "council-synthesis",
 			task,
-			requestOrigin: "internal",
+			requestOrigin: origin,
 			targetId: receipt.targetId,
 			wireModelId: receipt.wireModelId,
 			runtimeId: receipt.runtimeId,
@@ -5924,17 +5928,17 @@ export function createDispatchBundle(
 			gate: { role: gate.role, cycle: gate.cycle },
 			council,
 		};
-		context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: "internal" });
+		context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: origin });
 		context.bus.emit(BusChannels.DispatchStarted, {
 			...identity,
-			requestOrigin: "internal",
+			requestOrigin: origin,
 			pid: null,
 			assignmentId: runId,
 			attempt: 0,
 		});
 		context.bus.emit(BusChannels.DispatchCompleted, {
 			...identity,
-			requestOrigin: "internal",
+			requestOrigin: origin,
 			outcome: "succeeded",
 			outcomeCode: null,
 			outcomeDetail: null,

@@ -90,9 +90,23 @@ describe("council dispatch", () => {
 		};
 		const fabric = scriptedGateFabric({ builderText: JSON.stringify({ verdict: "pass", answer: "supported" }) });
 		const context = dispatchStubContext({ settings });
-		const lifecycle: Array<{ channel: string; runId: string; label: string | undefined; outcome?: string }> = [];
+		const lifecycle: Array<{
+			channel: string;
+			runId: string;
+			label: string | undefined;
+			outcome?: string;
+			origin?: string;
+		}> = [];
 		context.bus.on(BusChannels.DispatchEnqueued, (payload) => {
 			lifecycle.push({ channel: "enqueued", runId: payload.runId, label: payload.council?.label });
+		});
+		context.bus.on(BusChannels.DispatchStarted, (payload) => {
+			lifecycle.push({
+				channel: "started",
+				runId: payload.runId,
+				label: payload.council?.label,
+				origin: payload.requestOrigin,
+			});
 		});
 		context.bus.on(BusChannels.DispatchCompleted, (payload) => {
 			lifecycle.push({
@@ -144,13 +158,20 @@ describe("council dispatch", () => {
 			// board and /share are built from, so the verdict is visible in the
 			// session that asked for it.
 			const synthesisRunId = detailRuns[2]?.runId;
+			const memberStart = lifecycle.find((event) => event.channel === "started" && event.label === "alpha");
+			ok(memberStart);
 			deepStrictEqual(
 				lifecycle.filter((event) => event.runId === synthesisRunId),
 				[
 					{ channel: "enqueued", runId: synthesisRunId, label: "synthesis" },
+					// Filed under the council's own origin, never "internal": the
+					// transcript worker fold opens entries for user and agent runs
+					// only, and /share resolves run ids from that fold.
+					{ channel: "started", runId: synthesisRunId, label: "synthesis", origin: memberStart?.origin },
 					{ channel: "completed", runId: synthesisRunId, label: "synthesis", outcome: "succeeded" },
 				],
 			);
+			strictEqual(synthesisReceipt.requestOrigin, memberStart?.origin);
 			strictEqual(fabric.spawns.length, 2);
 			for (const spawn of fabric.spawns) {
 				strictEqual(spawn.spec.autonomy, "read-only");
