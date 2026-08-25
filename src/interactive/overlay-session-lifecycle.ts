@@ -472,8 +472,11 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 				}
 				seedHandoffSession(session, fromSessionId, goal, text);
 			},
-			// Esc. Nothing has been written yet, so cancel really is free.
+			// Esc. Nothing has been written yet, so cancel really is free. The
+			// overlay settles itself on cancel and answers no further key, so the
+			// transition has to close here or the review stays on screen inert.
 			onCancel: () => {
+				deps.transitions.close();
 				deps.notify("info", "handoff cancelled; nothing was written", "handoff:cancelled");
 			},
 		});
