@@ -1,6 +1,7 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { decideRetry } from "../../src/domains/dispatch/failure-classification.js";
+import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunLineage, RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -85,6 +86,38 @@ function retryChain(attempts: number): RunLineage[] {
 }
 
 describe("dispatch attempt numbering", () => {
+	// The native worker path built its ledger row and receipt draft without the
+	// request's typed intent, so a receipt sealed `intent: null` for a run whose
+	// tool call declared read roots, write roots, and expected outputs. Only the
+	// ACP delegation path carried it.
+	it("seals the request's typed intent on a native worker receipt", async () => {
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => worker(0) });
+		await bundle.extension.start();
+		try {
+			const intent = {
+				version: 1 as const,
+				readRoots: ["src/"],
+				writeRoots: [],
+				relevantPaths: ["src/calc.js"],
+				expectedOutputs: ["a summary"],
+				verification: [],
+			};
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "receipt intent shape",
+				intent,
+			});
+			const receipt = await handle.finalPromise;
+			deepStrictEqual(receipt.intent, intent);
+			const envelope = bundle.contract.getRun(receipt.runId);
+			ok(envelope);
+			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("counts attempts from zero on every surface that reads lineage", () => {
 		const chain = retryChain(3);
 		// The ledger row, the receipt, and the attempt_start marker all carry this

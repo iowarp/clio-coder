@@ -507,6 +507,13 @@ export interface SettingsCenterItem extends SettingItem {
 	help?: string;
 	valueHelp?: Record<string, string>;
 	defaultValue?: string;
+	/**
+	 * What a free-text editor opens with when it differs from the rendered
+	 * value. A row that renders its absence as prose such as `(session target)`
+	 * must not hand that prose to the editor, or the operator's typing lands
+	 * behind it and the placeholder is written into settings.yaml.
+	 */
+	editValue?: string;
 }
 
 export interface SettingsCenterSection {
@@ -686,14 +693,19 @@ function editTextSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return textInputSubmenu(title, note);
 }
 
-function editNumberSubmenu(title: string): SettingSubmenuBuilder {
+function editNumberSubmenu(title: string, options: { min?: number; allowBlank?: boolean } = {}): SettingSubmenuBuilder {
+	const min = options.min ?? 0;
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
 		input.setValue(currentValue);
 		input.focused = true;
 		input.onSubmit = (val) => {
+			if (options.allowBlank === true && val.trim().length === 0) {
+				done("");
+				return;
+			}
 			const num = Number(val);
-			if (Number.isFinite(num) && num >= 0) {
+			if (Number.isFinite(num) && num >= min) {
 				done(val);
 			} else {
 				done();
@@ -704,7 +716,9 @@ function editNumberSubmenu(title: string): SettingSubmenuBuilder {
 			title,
 			input,
 			buildHint([{ key: "Enter", verb: "confirm" }], "back"),
-			"Use a non-negative number.",
+			min > 0
+				? `Use a whole number of at least ${min}${options.allowBlank === true ? "; blank clears it" : ""}.`
+				: "Use a non-negative number.",
 		);
 	};
 }
@@ -1151,6 +1165,7 @@ function settingItem(
 		label?: string;
 		description?: string;
 		help?: string;
+		editValue?: string;
 	},
 ): SettingsCenterItem {
 	const item: SettingsCenterItem = {
@@ -1168,6 +1183,7 @@ function settingItem(
 	};
 	const help = options.help ?? SETTINGS_HELP_BY_ID[id];
 	if (help) item.help = help;
+	if (options.editValue !== undefined) item.editValue = options.editValue;
 	const valueHelp = SETTINGS_VALUE_HELP_BY_ID[id];
 	if (valueHelp) item.valueHelp = valueHelp;
 	const def = defaultValueFor(id);
@@ -1457,13 +1473,18 @@ export function buildSettingItems(
 		settingItem("watchdog.target", watchdog.target ?? "(session target)", {
 			submenu: editTextSubmenu("Edit watchdog target; blank uses the session's active target"),
 			affordance: "free text",
+			editValue: watchdog.target ?? "",
 		}),
 		settingItem(
 			"watchdog.cadenceToolCalls",
 			watchdog.cadenceToolCalls === undefined ? "(turn end only)" : String(watchdog.cadenceToolCalls),
 			{
-				submenu: editNumberSubmenu("Edit watchdog cadence in tool calls; blank fires at turn end only"),
+				submenu: editNumberSubmenu("Edit watchdog cadence in tool calls; blank fires at turn end only", {
+					min: 1,
+					allowBlank: true,
+				}),
 				affordance: "free text",
+				editValue: watchdog.cadenceToolCalls === undefined ? "" : String(watchdog.cadenceToolCalls),
 			},
 		),
 		settingItem("runtimePlugins", settings.runtimePlugins.length > 0 ? settings.runtimePlugins.join(", ") : "(none)", {
@@ -2927,7 +2948,7 @@ export class SettingsCenter implements Component {
 		const item = this.selectedItem();
 		if (!item || item.readOnly) return;
 		if (item.submenu) {
-			this.submenuComponent = item.submenu(item.currentValue, (selectedValue) => {
+			this.submenuComponent = item.submenu(item.editValue ?? item.currentValue, (selectedValue) => {
 				this.submenuComponent = null;
 				if (selectedValue !== undefined) this.prepareScopeConfirm(item, selectedValue);
 				this.options.requestRender?.();
