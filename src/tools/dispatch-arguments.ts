@@ -11,6 +11,13 @@ import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/d
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 
 const DEFAULT_AGENT_ID = "coder";
+/**
+ * The agent a council seats when the caller names none. Council admission pins
+ * every member to the `council-read-only` tool profile, and `coder` requires a
+ * write tool, so the ordinary default would fail admission for every member.
+ * `researcher` is the builtin read-only answerer.
+ */
+const COUNCIL_DEFAULT_AGENT_ID = "researcher";
 
 /**
  * Baseline recipe per task shape for `agent:"auto"`.
@@ -107,7 +114,8 @@ function dispatchRequestFromArgs(
 	const task = stringArg(args, "task");
 	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
 	if (Object.hasOwn(args, "agent_id")) return { ok: false, message: "agent_id is unsupported; use agent" };
-	const requestedAgent = stringArg(args, "agent") ?? DEFAULT_AGENT_ID;
+	const requestedAgent =
+		stringArg(args, "agent") ?? (args.mode === "council" ? COUNCIL_DEFAULT_AGENT_ID : DEFAULT_AGENT_ID);
 	const auto = requestedAgent === "auto";
 	const agentId = auto ? autoBaselineAgentId(task, options.hasAgent) : requestedAgent;
 	const request: DispatchRequest = {

@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { parseCouncilReport, validateResultContract } from "../../src/domains/agents/result-contract.js";
@@ -88,7 +89,20 @@ describe("council dispatch", () => {
 			},
 		};
 		const fabric = scriptedGateFabric({ builderText: JSON.stringify({ verdict: "pass", answer: "supported" }) });
-		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker: fabric.spawn });
+		const context = dispatchStubContext({ settings });
+		const lifecycle: Array<{ channel: string; runId: string; label: string | undefined; outcome?: string }> = [];
+		context.bus.on(BusChannels.DispatchEnqueued, (payload) => {
+			lifecycle.push({ channel: "enqueued", runId: payload.runId, label: payload.council?.label });
+		});
+		context.bus.on(BusChannels.DispatchCompleted, (payload) => {
+			lifecycle.push({
+				channel: "completed",
+				runId: payload.runId,
+				label: payload.council?.label,
+				outcome: payload.outcome,
+			});
+		});
+		const bundle = makeDispatchBundle(context, { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({
@@ -105,6 +119,9 @@ describe("council dispatch", () => {
 				{ approval: { requestId: "approval", requestedBy: "tester", actionClass: "dispatch" } },
 			);
 			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			// A council with no agent named seats the read-only researcher, not
+			// coder, whose write requirement the council profile cannot satisfy.
+			for (const spawn of fabric.spawns) strictEqual(spawn.spec.agentId, "researcher");
 			const council = result.details?.council as { synthesis: { verdict: string; tally: Record<string, number> } };
 			strictEqual(council.synthesis.verdict, "pass");
 			deepStrictEqual(council.synthesis.tally, { pass: 2 });
@@ -123,6 +140,17 @@ describe("council dispatch", () => {
 			strictEqual(synthesisReceipt.toolActivity, undefined);
 			strictEqual(synthesisReceipt.routeDecision, undefined);
 			deepStrictEqual(verifyReceiptIntegrity(synthesisReceipt, synthesisEnvelope), { ok: true });
+			// The coordinator-sealed synthesis publishes the same lifecycle the
+			// board and /share are built from, so the verdict is visible in the
+			// session that asked for it.
+			const synthesisRunId = detailRuns[2]?.runId;
+			deepStrictEqual(
+				lifecycle.filter((event) => event.runId === synthesisRunId),
+				[
+					{ channel: "enqueued", runId: synthesisRunId, label: "synthesis" },
+					{ channel: "completed", runId: synthesisRunId, label: "synthesis", outcome: "succeeded" },
+				],
+			);
 			strictEqual(fabric.spawns.length, 2);
 			for (const spawn of fabric.spawns) {
 				strictEqual(spawn.spec.autonomy, "read-only");
