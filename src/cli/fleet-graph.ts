@@ -1,11 +1,32 @@
 import type { ExecutionPlanStep } from "../domains/dispatch/execution-plan.js";
 import { inspectFleet } from "./fleet-preflight.js";
 
+/**
+ * The contract-level kind of a compiled step. The execution plan knows only
+ * `agent` and `code`; a version 5 `gate` or `plan` step compiles to an agent
+ * step carrying `gate` or `plan` facts, and the graph names it as the author
+ * wrote it.
+ */
+function contractKind(step: ExecutionPlanStep): "agent" | "code" | "gate" | "plan" {
+	if (step.kind === "code") return "code";
+	if (step.gate !== undefined) return "gate";
+	if (step.plan !== undefined) return "plan";
+	return "agent";
+}
+
 function projectedStep(step: ExecutionPlanStep): Record<string, unknown> {
 	return {
 		id: step.id,
-		kind: step.kind,
+		kind: contractKind(step),
 		...(step.kind === "agent" ? { agent: step.agentId } : { command: step.commandId }),
+		...(step.kind === "agent" && step.gate !== undefined
+			? { gate: { path: step.gate.path, command: step.gate.commandId } }
+			: {}),
+		...(step.kind === "agent" && step.plan !== undefined
+			? { plan: { roster: [...step.plan.roster], maxTasks: step.plan.maxTasks, proposals: step.plan.proposals } }
+			: {}),
+		...(step.kind === "agent" && step.target !== undefined ? { target: step.target } : {}),
+		...(step.kind === "agent" && step.profile !== undefined ? { profile: step.profile } : {}),
 		scope: step.scope,
 		writes: [...(step.writes ?? [])],
 		dependencies: [...step.dependencies],
@@ -42,9 +63,23 @@ export function runFleetGraph(args: ReadonlyArray<string>): number {
 		for (const wave of waves) {
 			process.stdout.write(`wave ${wave.wave}\n`);
 			for (const step of wave.steps) {
-				const subject = step.kind === "agent" ? `agent=${step.agent}` : `command=${step.command}`;
+				const subject = step.kind === "code" ? `command=${step.command}` : `agent=${step.agent}`;
+				const gate = step.gate as { path: string; command: string } | undefined;
+				const plan = step.plan as { roster: string[]; maxTasks: number; proposals: boolean } | undefined;
+				const detail =
+					gate !== undefined
+						? ` gate=${gate.path} run=${gate.command}`
+						: plan !== undefined
+							? ` roster=${JSON.stringify(plan.roster)} maxTasks=${plan.maxTasks}${plan.proposals ? " proposals" : ""}`
+							: "";
+				const route =
+					step.target !== undefined
+						? ` target=${step.target}`
+						: step.profile !== undefined
+							? ` profile=${step.profile}`
+							: "";
 				process.stdout.write(
-					`  ${step.id} kind=${step.kind} ${subject} scope=${step.scope} writes=${JSON.stringify(step.writes)}\n`,
+					`  ${step.id} kind=${step.kind} ${subject}${route} scope=${step.scope} writes=${JSON.stringify(step.writes)}${detail}\n`,
 				);
 			}
 		}
