@@ -11,7 +11,7 @@ state of every step.
 
 | Item | State |
 | --- | --- |
-| Branch | `v0.3.7`, pushed to `origin` under the explicit refspec `refs/heads/v0.3.7`, sixteen feature and docs commits plus the version-bump commit ahead of `main` |
+| Branch | `v0.3.7`, pushed to `origin` under the explicit refspec `refs/heads/v0.3.7`; sixteen feature and docs commits, the version-bump commit, and the fix commits the interactive release testing produced, ahead of `main` |
 | `package.json` version | `0.3.7`; the top `CHANGELOG.md` heading is `## 0.3.7 - 2026-08-24` |
 | `main` | `9b54219d`, the v0.3.6 release SHA; it is an ancestor of `v0.3.7` and moves only at Part 4 |
 | `origin/main` | `9b54219d`, matching `main` |
