@@ -571,7 +571,11 @@ const RESULT_CONTRACT_KINDS = new Set<ResultContract["kind"]>([
 	"research-report",
 	"mutation-report",
 	"provenance-report",
+	"oracle-report",
 	"external-delegation",
+	"artifact-report",
+	"context-handbook",
+	"delegation-plan",
 ]);
 
 function isAuthorityGrant(value: unknown): value is Exclude<DispatchPlanAuthorityGrant, null> {
