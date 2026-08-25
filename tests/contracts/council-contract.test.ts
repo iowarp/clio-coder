@@ -172,6 +172,17 @@ describe("council dispatch", () => {
 				],
 			);
 			strictEqual(synthesisReceipt.requestOrigin, memberStart?.origin);
+			// The sealed text is the whole council-report, which is what /share
+			// renders as the labelled member answers plus the synthesis line.
+			const sealedReport = parseCouncilReport(
+				synthesisReceipt.output?.state === "final" ? synthesisReceipt.output.text : null,
+			);
+			ok(sealedReport, "the synthesis receipt seals a parseable council-report");
+			deepStrictEqual(
+				sealedReport?.members.map((member) => member.label),
+				["alpha", "beta"],
+			);
+			strictEqual(sealedReport?.synthesis.verdict, "pass");
 			strictEqual(fabric.spawns.length, 2);
 			for (const spawn of fabric.spawns) {
 				strictEqual(spawn.spec.autonomy, "read-only");

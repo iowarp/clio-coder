@@ -1971,7 +1971,10 @@ async function runCouncil(
 		const finalRuns = [...prior.values()];
 		const template = finalRuns[0];
 		if (template === undefined) throw new Error("council synthesis has no final member receipt");
-		const text = JSON.stringify(synthesis);
+		// The sealed text is the whole council-report, not the synthesis alone:
+		// /share <synthesis runId> reads this receipt to bring every final
+		// member's labelled answer and the synthesis line into the main context.
+		const text = JSON.stringify({ members, synthesis } satisfies CouncilReport);
 		const receipt = await deps.dispatch.sealCouncilSynthesis({
 			group,
 			round: council.rounds,
