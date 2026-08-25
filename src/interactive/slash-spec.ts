@@ -154,18 +154,31 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 	const positionalSpecs = currentSpec.positionals ?? [];
 	let positionalIndex = 0;
 
+	// A token ends at whitespace unless a quote is open: `--var task="do it"`
+	// and `--var "task=do it"` both carry the spaces through, and the quotes
+	// themselves are dropped. An unterminated quote runs to the end of the line.
 	const readToken = (): { token: string } | null => {
 		const tokenStart = index;
+		let token = "";
+		let quote: string | null = null;
 		while (index < argsLine.length) {
-			const char = argsLine[index];
-			if (char && !/\s/.test(char)) {
+			const char = argsLine[index] ?? "";
+			if (quote !== null) {
+				if (char === quote) quote = null;
+				else token += char;
 				index++;
-			} else {
-				break;
+				continue;
 			}
+			if (char === '"' || char === "'") {
+				quote = char;
+				index++;
+				continue;
+			}
+			if (/\s/.test(char)) break;
+			token += char;
+			index++;
 		}
-		const token = argsLine.slice(tokenStart, index);
-		if (token.length === 0) return null;
+		if (index === tokenStart) return null;
 		return { token };
 	};
 
