@@ -128,6 +128,54 @@ describe("contracts/cli-fleet-authoring", () => {
 		strictEqual(parsed.loops[0]?.repair[0]?.writes[0], "src/");
 	});
 
+	it("names version 5 gate and plan steps by their contract kind with their facts", async () => {
+		const text = [
+			"---",
+			"version: 5",
+			"name: v5-graph",
+			"steps:",
+			"  - id: acceptance",
+			"    kind: gate",
+			"    agent: tester",
+			"    path: tests/acceptance.test.js",
+			"    run: acceptance",
+			"    dependencies: []",
+			"  - id: sprint",
+			"    kind: plan",
+			"    roster: [coder, tester]",
+			"    maxTasks: 3",
+			"    scope: workspace",
+			"    writes: [src/]",
+			"    dependencies: [acceptance]",
+			"maxWorkers: 1",
+			"onFailure: stop",
+			"---",
+			"Ship the feature.",
+			"",
+		].join("\n");
+		writeFileSync(join(repo, ".clio-coder", "fleets", "v5-graph.md"), text);
+		writeFileSync(
+			join(repo, ".clio-coder", "fleets", "commands.yaml"),
+			'version: 1\ncommands:\n  acceptance:\n    argv: ["node", "--test", "{{path}}"]\n',
+		);
+		const graph = await runCli(["fleet", "graph", "v5-graph", "--json"], { cwd: repo, env: scratch.env });
+		strictEqual(graph.code, 0, graph.stderr);
+		const parsed = JSON.parse(graph.stdout) as {
+			waves: Array<{ steps: Array<Record<string, unknown>> }>;
+		};
+		const steps = parsed.waves.flatMap((wave) => wave.steps);
+		const gate = steps.find((step) => step.id === "acceptance");
+		const plan = steps.find((step) => step.id === "sprint");
+		strictEqual(gate?.kind, "gate");
+		deepStrictEqual(gate?.gate, { path: "tests/acceptance.test.js", command: "acceptance" });
+		strictEqual(plan?.kind, "plan");
+		deepStrictEqual(plan?.plan, { roster: ["coder", "tester"], maxTasks: 3, proposals: false });
+		const rendered = await runCli(["fleet", "graph", "v5-graph"], { cwd: repo, env: scratch.env });
+		strictEqual(rendered.code, 0, rendered.stderr);
+		match(rendered.stdout, /acceptance kind=gate agent=tester .*gate=tests\/acceptance\.test\.js run=acceptance/);
+		match(rendered.stdout, /sprint kind=plan agent=architect .*roster=\["coder","tester"\] maxTasks=3/);
+	});
+
 	it("writes a fully commented command draft from package scripts and Makefile targets and refuses overwrite", async () => {
 		rmSync(join(repo, ".clio-coder", "fleets", "commands.yaml"), { force: true });
 		writeFileSync(

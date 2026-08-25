@@ -72,6 +72,12 @@ export interface FleetRunStepEvent {
 /** One settled step, after its receipt or deterministic report is sealed. */
 export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	succeeded: boolean;
+	/**
+	 * Why a step failed after its own receipt or report succeeded: a gate whose
+	 * baseline was green (`gate_not_discriminating`), a missing gate path or
+	 * command, or a delegation plan the validator refused (`delegation_plan_*`).
+	 */
+	failureReason?: string;
 	/** Terminal run id, which is the receipt id for an agent step. */
 	terminalRunId: string;
 	costUsd: number;
@@ -456,20 +462,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						const envelope = dispatch.getRun(receipt.runId);
 						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;
 						const succeeded = receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded");
-						input.onStepSettled?.({
-							stepId: step.id,
-							kind: "agent",
-							waveIndex,
-							assignmentId: handle.runId,
-							agentId: step.agentId,
-							succeeded,
-							terminalRunId: receipt.runId,
-							costUsd: receipt.costUsd,
-							receipt,
-						});
-						notice(
-							`step ${step.id} ${step.agentId}: ${succeeded ? "succeeded" : "failed"} assignment=${handle.runId} terminal-run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}`,
-						);
 						let stepSucceeded = succeeded;
 						let failureReason: string | undefined;
 						let gatePathHash: string | undefined;
@@ -525,6 +517,24 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 								await writeFleetRun(fleetRunRecord);
 							}
 						}
+						// Settle only after the gate baseline and the delegation-plan
+						// validation have run: a receipt that succeeded on its own can
+						// still fail the step, and the operator must see that reason.
+						input.onStepSettled?.({
+							stepId: step.id,
+							kind: "agent",
+							waveIndex,
+							assignmentId: handle.runId,
+							agentId: step.agentId,
+							succeeded: stepSucceeded,
+							terminalRunId: receipt.runId,
+							costUsd: receipt.costUsd,
+							receipt,
+							...(failureReason !== undefined ? { failureReason } : {}),
+						});
+						notice(
+							`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}`,
+						);
 						return {
 							stepId: step.id,
 							assignmentId: handle.runId,

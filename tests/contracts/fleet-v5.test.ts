@@ -659,6 +659,8 @@ describe("fleet v5 execution", () => {
 				"version: 1\ncommands:\n  acceptance:\n    argv: [node, '{{path}}']\n",
 				"commands.yaml",
 			);
+			const settled: Array<{ stepId: string; succeeded: boolean; failureReason?: string }> = [];
+			const notices: string[] = [];
 			const outcome = await executeFleetRun({
 				plan: compileV5(contract, agents),
 				contractName: contract.name,
@@ -668,9 +670,26 @@ describe("fleet v5 execution", () => {
 				dispatch: bundle.contract,
 				agents,
 				attributionEnabled: false,
+				onStepSettled(step) {
+					settled.push({
+						stepId: step.stepId,
+						succeeded: step.succeeded,
+						...(step.failureReason !== undefined ? { failureReason: step.failureReason } : {}),
+					});
+				},
+				onNotice(text) {
+					notices.push(text);
+				},
 			});
 			strictEqual(outcome.result.results.get("acceptance")?.failureReason, "gate_not_discriminating");
 			strictEqual(outcome.cleanRun, false);
+			// The operator-facing settlement carries the same verdict as the
+			// sealed result: the receipt succeeded, the step did not.
+			deepStrictEqual(settled, [{ stepId: "acceptance", succeeded: false, failureReason: "gate_not_discriminating" }]);
+			ok(
+				notices.some((text) => text.startsWith("step acceptance tester: failed reason=gate_not_discriminating ")),
+				notices.join("\n"),
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}

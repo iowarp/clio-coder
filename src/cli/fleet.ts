@@ -442,7 +442,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
 					else
 						process.stdout.write(
-							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=$${step.costUsd.toFixed(4)}\n`,
+							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=$${step.costUsd.toFixed(4)}\n`,
 						);
 					return;
 				}
