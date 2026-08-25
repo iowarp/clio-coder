@@ -65,6 +65,7 @@ Usage:
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder skills               list, inspect, validate, or install skills
+  clio-coder library              list, search, add, or sync agents, prompts, fleets, and skills from catalogs
   clio-coder verifiers            discover, author, validate, edit, or dry-run project checks
   clio-coder docs [topic]         serve the HTML docs of a source checkout on 127.0.0.1 (--no-open to skip browser)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list

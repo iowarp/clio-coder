@@ -160,6 +160,11 @@ numbered diffs, and `!` runs a shell command in the same transcript.
 | Branch, revisit, or pick up a session | `/tree`, `/fork`, `/resume`, `/new` |
 | Delegate to a fleet agent and watch it work | `/run coder "..."`, `/tasks`, `Alt+W` |
 | Load a skill or bootstrap project context | `/skill <name>`, `/context init` |
+| Ask a side question without touching the session, or get a read-only second opinion | `/btw <question>`, `/oracle <question>` |
+| Put the same question to several models at once and read one synthesis | `/council --synthesis vote "..."` |
+| Preview and run a multi-step fleet contract, resumable from the CLI | `/fleet run <name>` |
+| Install agents, prompts, fleets, and skills from a catalog | `/library`, `/library agents` |
+| Carry the working state into a fresh session | `/handoff <goal>` |
 | Save a self-contained HTML transcript | `/export` (an explicit `.md` path keeps Markdown) |
 | Everything else | `/help` |
 
@@ -215,9 +220,15 @@ fleet:
       maxWorkers: 1
 ```
 
-`clio-coder doctor` preflights every node, `clio-coder fleet list|run|status`
-drives and observes work, and `clio-coder fleet drain|resume` closes or reopens
-admission without interrupting running work. Nodes share the project
+`clio-coder doctor` preflights every node. `clio-coder fleet list` names the
+builtin and discovered contracts, `clio-coder fleet new|validate|graph`
+authors a fleet contract from a builtin and checks it without dispatching
+anything, `clio-coder fleet run|status` drives and observes work (`fleet run
+--resume <runId>` replays a settled prefix), and `clio-coder fleet
+drain|resume` closes or reopens admission without interrupting running work.
+Contracts may declare a single writer, a gate step that must go red before the
+author is trusted, and a plan step whose architect delegates bounded tasks to
+a roster at run time. Nodes share the project
 filesystem at the same absolute path, and a target URL resolves on the node the
 worker runs on, so `localhost` means that node's own inference server. The
 end-to-end walkthrough, including a recorded multi-node demo, is in
@@ -263,7 +274,7 @@ dist-tag instead.
 From source, pinned to this release:
 
 ```bash
-git clone --branch v0.3.6 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.3.7 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
@@ -289,7 +300,7 @@ Full lifecycle details, including `reset` and the upgrade path, are in
 
 ## Status
 
-The current release is **v0.3.6**, installable from npm as
+The current release is **v0.3.7**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Clio Coder is still experimental: we ship quickly, interfaces may
 change between minor versions, and model-specific behavior varies by target, so

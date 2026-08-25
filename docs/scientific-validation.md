@@ -1,11 +1,11 @@
 # Clio Coder Scientific Validation Contracts
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive numerical tolerance calculator and HPC queue execution simulator is located at [docs/html/validation_blueprint.html](html/validation_blueprint.html) (Version: 0.3.6).
+> **Interactive Spec Available:** An interactive numerical tolerance calculator and HPC queue execution simulator is located at [docs/html/validation_blueprint.html](html/validation_blueprint.html) (Version: 0.3.7).
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
-Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.6, the session rigor resolver does not parse or enforce a scientific contract schema. The presence of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
+Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.3.7, the session rigor resolver does not parse or enforce a scientific contract schema. The presence of `.clio-coder/validation.yaml`, `.clio-coder/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
 
 This advisory convention is separate from the executable project verifier catalog at `.clio-coder/verifiers.yaml`. The verifier catalog has a strict version-1 schema and admits exact argv vectors to the `verify` tool. Scientific validation contracts and handbook expectations do not grant command authority: prose such as `validators: ["python tools/check_grid.py"]` remains guidance until the project owner confirms the equivalent argv, cwd, timeout, and tags in `verifiers.yaml`. The executable catalog does not interpret numerical tolerances or artifact expectations; it only runs the explicitly declared process vector through safe-exec.
 
@@ -95,7 +95,7 @@ Comparing floating-point values in scientific computations must accommodate roun
 
 ## Common Scientific Artifact Families
 
-The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in v0.3.6:
+The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in v0.3.7:
 
 - **`HDF5` / `NetCDF` / `Zarr`:** Multi-dimensional scientific array files.
 - **`FITS`:** Flexible Image Transport System (used in astrophysics).
