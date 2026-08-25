@@ -110,6 +110,8 @@ export interface FleetRunPreviewInput {
 	resolveRoute?: (step: {
 		stepId: string;
 		agentId: string;
+		/** The compiled step task; a route preview validates the request it would send, and an empty task is refused. */
+		task: string;
 		scope: "readonly" | "workspace";
 		target?: string;
 		profile?: string;
@@ -265,6 +267,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					input.resolveRoute?.({
 						stepId: step.id,
 						agentId: step.agentId,
+						task: step.task,
 						scope: step.scope,
 						...(step.target !== undefined ? { target: step.target } : {}),
 						...(step.profile !== undefined ? { profile: step.profile } : {}),

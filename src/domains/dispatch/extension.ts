@@ -5925,6 +5925,13 @@ export function createDispatchBundle(
 			council,
 		};
 		context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: "internal" });
+		context.bus.emit(BusChannels.DispatchStarted, {
+			...identity,
+			requestOrigin: "internal",
+			pid: null,
+			assignmentId: runId,
+			attempt: 0,
+		});
 		context.bus.emit(BusChannels.DispatchCompleted, {
 			...identity,
 			requestOrigin: "internal",

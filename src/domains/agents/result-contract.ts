@@ -1493,6 +1493,7 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
 		"external-delegation",
 		"artifact-report",
 		"context-handbook",
+		"delegation-plan",
 	] as const;
 	if (!(kinds as ReadonlyArray<string>).includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);

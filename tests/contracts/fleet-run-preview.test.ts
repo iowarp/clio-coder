@@ -363,6 +363,26 @@ describe("contracts/fleet-run preview projection", () => {
 		body.handleInput?.(ESC);
 		strictEqual(cancelled, 1);
 	});
+	// Under the kitty keyboard protocol Esc arrives as CSI 27 u and a key
+	// release carries the release modifier; a byte comparison against "\x1b"
+	// answered neither, and the overlay could only be left by killing Clio.
+	it("answers kitty-encoded keys and ignores key releases", () => {
+		const mounted = fakeTui();
+		let cancelled = 0;
+		openFleetRunApprovalOverlay(mounted.tui, {
+			subject: { ok: false, name: "broken", diagnostics: ["unknown agent 'ghost'"] },
+			columns: 100,
+			onAccept: () => {},
+			onCancel: () => {
+				cancelled += 1;
+			},
+		});
+		const body = mounted.component();
+		body.handleInput?.("\x1b[27;1:3u");
+		strictEqual(cancelled, 0, "an Esc release is not a press");
+		body.handleInput?.("\x1b[27u");
+		strictEqual(cancelled, 1, "a kitty-encoded Esc cancels");
+	});
 });
 
 describe("contracts/fleet-run approval dispatch", () => {

@@ -11,7 +11,15 @@
  * without a TUI.
  */
 
-import { type Component, type OverlayHandle, type TUI, truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	type Component,
+	isKeyRelease,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../fleet-run-preview.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, rule } from "../theme/index.js";
@@ -140,11 +148,6 @@ class FleetRunApprovalBody implements Component {
 	invalidate(): void {}
 }
 
-/** Raw sequences this overlay answers. Everything else is swallowed. */
-const KEY_UP = "\x1b[A";
-const KEY_DOWN = "\x1b[B";
-const KEY_ESC = "\x1b";
-
 export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunApprovalOverlayOptions): OverlayHandle {
 	const body = new FleetRunApprovalBody(options.subject);
 	const acceptable = options.subject.ok;
@@ -162,23 +165,26 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 	};
 
 	const focus = new FocusBox(body, {
+		// Keys are matched by name, never by raw bytes: under the kitty keyboard
+		// protocol Esc arrives as CSI 27 u, and a byte comparison against "\x1b"
+		// left the overlay unanswerable. Everything unmatched is swallowed.
 		onInput: (data: string): void => {
-			if (settled) return;
-			if (data === KEY_UP) {
+			if (settled || isKeyRelease(data)) return;
+			if (matchesKey(data, "up")) {
 				body.scroll = Math.max(0, body.scroll - 1);
 				tui.requestRender();
 				return;
 			}
-			if (data === KEY_DOWN) {
+			if (matchesKey(data, "down")) {
 				body.scroll += 1;
 				tui.requestRender();
 				return;
 			}
-			if (data === "\r" || data === "\n") {
+			if (matchesKey(data, "enter")) {
 				accept();
 				return;
 			}
-			if (data === KEY_ESC) cancel();
+			if (matchesKey(data, "escape")) cancel();
 		},
 	});
 

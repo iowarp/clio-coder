@@ -9,7 +9,14 @@
  * round and nothing else.
  */
 
-import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	type Component,
+	isKeyRelease,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, rule } from "../theme/index.js";
 
@@ -103,11 +110,6 @@ class HandoffReviewBody implements Component {
 	invalidate(): void {}
 }
 
-/** Raw sequences this overlay answers. Everything else is swallowed. */
-const KEY_UP = "\x1b[A";
-const KEY_DOWN = "\x1b[B";
-const KEY_ESC = "\x1b";
-
 export function openHandoffReviewOverlay(
 	tui: TUI,
 	options: OpenHandoffReviewOverlayOptions,
@@ -127,27 +129,30 @@ export function openHandoffReviewOverlay(
 	};
 
 	const focus = new FocusBox(body, {
+		// Keys are matched by name, never by raw bytes: under the kitty keyboard
+		// protocol Esc arrives as CSI 27 u, and a byte comparison against "\x1b"
+		// left the overlay unanswerable. Everything unmatched is swallowed.
 		onInput: (data: string): void => {
-			if (settled) return;
-			if (data === KEY_UP) {
+			if (settled || isKeyRelease(data)) return;
+			if (matchesKey(data, "up")) {
 				body.scroll = Math.max(0, body.scroll - 1);
 				tui.requestRender();
 				return;
 			}
-			if (data === KEY_DOWN) {
+			if (matchesKey(data, "down")) {
 				body.scroll = Math.min(body.lineCount(), body.scroll + 1);
 				tui.requestRender();
 				return;
 			}
-			if (data === "\r" || data === "\n") {
+			if (matchesKey(data, "enter")) {
 				accept();
 				return;
 			}
-			if (data === KEY_ESC) {
+			if (matchesKey(data, "escape")) {
 				cancel();
 				return;
 			}
-			if (data === "e" || data === "E") {
+			if (matchesKey(data, "e") || matchesKey(data, "shift+e")) {
 				const edited = options.onEdit(body.document());
 				if (edited !== null) body.setDocument(edited);
 				tui.requestRender(true);

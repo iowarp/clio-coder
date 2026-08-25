@@ -12,7 +12,15 @@
  * a TUI.
  */
 
-import { type Component, type OverlayHandle, type TUI, truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	type Component,
+	isKeyRelease,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, rule } from "../theme/index.js";
 
@@ -95,8 +103,6 @@ class LibraryInstallConfirmBody implements Component {
 	invalidate(): void {}
 }
 
-const KEY_ESC = "\x1b";
-
 export function openLibraryInstallConfirmOverlay(
 	tui: TUI,
 	options: OpenLibraryInstallConfirmOverlayOptions,
@@ -115,13 +121,16 @@ export function openLibraryInstallConfirmOverlay(
 	};
 
 	const focus = new FocusBox(new LibraryInstallConfirmBody(options.subject), {
+		// Keys are matched by name, never by raw bytes: under the kitty keyboard
+		// protocol Esc arrives as CSI 27 u, and a byte comparison against "\x1b"
+		// left the overlay unanswerable. Everything unmatched is swallowed.
 		onInput: (data: string): void => {
-			if (settled) return;
-			if (data === "\r" || data === "\n") {
+			if (settled || isKeyRelease(data)) return;
+			if (matchesKey(data, "enter")) {
 				accept();
 				return;
 			}
-			if (data === KEY_ESC) cancel();
+			if (matchesKey(data, "escape")) cancel();
 		},
 	});
 
