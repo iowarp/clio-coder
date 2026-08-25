@@ -92,6 +92,9 @@ describe("contracts/settings-center watchdog and notify rows", () => {
 		// Absent rather than fabricated: an unset target means the session's own.
 		strictEqual(target?.currentValue, "(session target)");
 		strictEqual(target?.defaultValue, undefined, "an absent key has no shipped default to show");
+		// The editor opens empty: the absence prose is for the row, never for
+		// the operator's typing, or it would be written into settings.yaml.
+		strictEqual(target?.editValue, "");
 
 		const cadence = byId.get("watchdog.cadenceToolCalls");
 		ok(cadence);
@@ -99,6 +102,7 @@ describe("contracts/settings-center watchdog and notify rows", () => {
 		strictEqual(cadence?.affordance, "free text");
 		strictEqual(cadence?.currentValue, "(turn end only)");
 		strictEqual(cadence?.defaultValue, undefined);
+		strictEqual(cadence?.editValue, "");
 	});
 
 	it("describes both knobs in the words the settings template already uses", () => {
