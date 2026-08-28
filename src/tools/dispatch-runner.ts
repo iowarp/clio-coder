@@ -38,6 +38,7 @@ import {
 	type CompeteStance,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
+	renderCouncilVoteMemberTask,
 } from "../domains/dispatch/gate-role-prompts.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
@@ -1789,10 +1790,19 @@ function competeResult(
 const COUNCIL_BRIEFING_MAX_BYTES = 8 * 1024;
 const COUNCIL_BRIEFING_TRUNCATION = "\n[council peer briefing truncated]";
 
+/**
+ * The verdict a council answer casts, lower-cased.
+ *
+ * A tally groups by the exact string, so folding case is the difference
+ * between two members who both said yes agreeing and splitting into a
+ * `no_majority` the operator has to read past. Folding happens here, at the one
+ * place a verdict is ever read, so the reported member verdict and the tally
+ * key can never disagree.
+ */
 function councilVerdict(text: string): string | undefined {
 	const parsed = parseJsonObjectPayload(text);
 	return parsed.ok && typeof parsed.value.verdict === "string" && parsed.value.verdict.trim().length > 0
-		? parsed.value.verdict.trim()
+		? parsed.value.verdict.trim().toLowerCase()
 		: undefined;
 }
 
@@ -1863,6 +1873,17 @@ async function runCouncil(
 					executionRole: "researcher",
 					autonomy: "read-only",
 					toolProfile: "council-read-only",
+					// A vote is a majority over the members' verdict fields, so a vote
+					// council asks each member for one and seals the ballot it asked
+					// for. The seated recipe is untouched: the ask is a task suffix and
+					// the postcondition is an override, so the member is still the
+					// agent the operator seated, and any recipe can be voted with.
+					...(council.synthesis === "vote"
+						? {
+								task: renderCouncilVoteMemberTask(base.task),
+								resultContractOverride: { kind: "council-ballot" as const },
+							}
+						: {}),
 					target: member.target,
 					...(member.model ? { model: member.model } : {}),
 					...(member.thinking ? { thinkingLevel: member.thinking as NonNullable<DispatchRequest["thinkingLevel"]> } : {}),
@@ -1903,7 +1924,11 @@ async function runCouncil(
 			label: run.receipt.council?.label ?? "member",
 			runId: run.receipt.runId,
 			round: run.receipt.council?.round ?? 1,
-			answer: text,
+			// A ballot's prose lives in its `text` field, so the report carries the
+			// member's answer rather than its wire envelope, the same way the judge
+			// line already does. A member answering any other shape has no `text`
+			// key and keeps its whole answer.
+			answer: councilJudgeText(text),
 			...(verdict !== undefined ? { verdict } : {}),
 			...(failed ? { failed: { reason: pipelineFailureReason(run.receipt) } } : {}),
 		};

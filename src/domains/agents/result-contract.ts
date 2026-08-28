@@ -8,6 +8,27 @@ export type ResultContract =
 	| { kind: "scout-report" }
 	| { kind: "verifier-report" }
 	| { kind: "council-report" }
+	/**
+	 * One council member's ballot under `synthesis: "vote"`.
+	 *
+	 * The vote is a strict majority over the members' `verdict` fields, computed
+	 * by the coordinator with no model call. Nothing asked a member for that
+	 * field before this kind existed, and nothing could: an unnamed council
+	 * seats the builtin `researcher`, whose `research-report` accepts only
+	 * `source` and `findings`, so a member that emitted a verdict failed its own
+	 * postcondition and a member that obeyed its postcondition emitted no
+	 * verdict. Every vote therefore resolved to `no_verdict_field` with an empty
+	 * tally, on every input (#230).
+	 *
+	 * The ballot is the coordinator's postcondition for that slot, not the
+	 * recipe's, in the same way `reviewer` and the compete `judge` answer the
+	 * gate that dispatched them. It rides in as a `resultContractOverride` on
+	 * the member request, so the seated recipe keeps its persona and any recipe
+	 * can be voted with. No recipe may declare it: `parseResultContract` rejects
+	 * the kind, and a Scout subtask may not request it, because it is a
+	 * topology's ballot rather than an agent's work product.
+	 */
+	| { kind: "council-ballot" }
 	| { kind: "debugger-report" }
 	| { kind: "research-report" }
 	| { kind: "mutation-report" }
@@ -271,6 +292,67 @@ export function parseDelegationPlanResult(output: string | null): DelegationPlan
 		});
 	}
 	return { tasks };
+}
+
+/**
+ * Longest verdict token a ballot may cast, in bytes.
+ *
+ * A tally groups members by their exact verdict string, so a verdict that is a
+ * sentence can only ever tie with itself and a council of any size reports
+ * `no_majority`. The bound is what makes a majority reachable: it forces the
+ * decision into a token members can match (`yes`, `no`, `keep`, an option
+ * name) and pushes the reasoning into `text`, where the report already reads
+ * it. A newline is refused for the same reason.
+ */
+export const COUNCIL_BALLOT_VERDICT_MAX_BYTES = 64;
+
+/**
+ * The ballot's wire shape, quoted verbatim to the member that must cast it and
+ * by the repair round that corrects it. Exported because the council composes
+ * the member's ask from it, which is the rule this module already states: a
+ * contract's example is written once so a prompt cannot drift from its
+ * validator.
+ */
+export const COUNCIL_BALLOT_SHAPE = '{"verdict":"yes","text":"the answer and the evidence behind it"}';
+
+interface CouncilBallot {
+	/** The comparable token the tally counts. */
+	verdict: string;
+	/** The member's answer in prose, which is what the council report shows. */
+	text: string;
+}
+
+/**
+ * Read a council member's ballot. The council reads a verdict out of the
+ * member's terminal text with its own reader, because the judge synthesis
+ * carries the same two fields under no contract at all; this one is what
+ * decides whether the member is allowed to seal that text as its result.
+ */
+function parseCouncilBallot(output: string | null): CouncilBallot | null {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return null;
+	const value = parsed.value;
+	if (!hasOnlyKeys(value, ["verdict", "text"]) || !string(value.verdict) || !string(value.text)) return null;
+	const verdict = value.verdict.trim();
+	if (verdict.includes("\n") || Buffer.byteLength(verdict, "utf8") > COUNCIL_BALLOT_VERDICT_MAX_BYTES) return null;
+	return { verdict, text: value.text.trim() };
+}
+
+function validateCouncilBallot(contract: ResultContract, output: string | null): ResultContractValidation {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	const ballot = parseCouncilBallot(output);
+	if (ballot === null) {
+		return failure(
+			contract,
+			"unmeasured",
+			`A council ballot must carry only verdict and text, both non-empty strings, with verdict a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} bytes so the tally can match it against the other members`,
+		);
+	}
+	// Unmeasured, like every other contract whose shape carries no correctness
+	// claim: casting a well-formed ballot says nothing about whether the member
+	// was right, and the tally is a count of opinions rather than a check.
+	return success(contract, "unmeasured", ballot);
 }
 
 export interface CouncilReportMember {
@@ -1249,6 +1331,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 				? failure(input.contract, "fail", "council-report is malformed")
 				: success(input.contract, "unmeasured", { council: report });
 		}
+		case "council-ballot":
+			return validateCouncilBallot(input.contract, input.output);
 		case "debugger-report":
 			return validateDebugger(input.contract, input.output);
 		case "research-report":
@@ -1347,6 +1431,8 @@ function resultContractShape(contract: ResultContract): string {
 			return '{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}';
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
+		case "council-ballot":
+			return COUNCIL_BALLOT_SHAPE;
 		case "debugger-report":
 			return '{"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}';
 		case "research-report":
@@ -1463,8 +1549,31 @@ export function resultContractRepairMessages(
 	] as const;
 }
 
-/** Strict frontmatter parser for the one recipe result-contract schema. */
-export function parseResultContract(value: unknown, sourcePath: string): ResultContract {
+/** Kinds an agent recipe may declare in its frontmatter. */
+const RECIPE_DECLARABLE_KINDS = [
+	"scout-report",
+	"verifier-report",
+	"council-report",
+	"debugger-report",
+	"research-report",
+	"mutation-report",
+	"provenance-report",
+	"oracle-report",
+	"external-delegation",
+	"artifact-report",
+	"context-handbook",
+	"delegation-plan",
+] as const;
+
+/**
+ * Kinds the coordinator authors and hands to a worker on the wire, which no
+ * recipe may declare. A council ballot is the topology's postcondition for a
+ * vote member's slot, so it arrives as a `resultContractOverride` on the
+ * request and never out of frontmatter.
+ */
+const COORDINATOR_AUTHORED_KINDS = ["council-ballot"] as const;
+
+function parseContract(value: unknown, sourcePath: string, kinds: ReadonlyArray<string>): ResultContract {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract must be an object`);
 	}
@@ -1481,22 +1590,24 @@ export function parseResultContract(value: unknown, sourcePath: string): ResultC
 		}
 		return { kind: "architect-plan", path: record.path };
 	}
-	const kinds = [
-		"scout-report",
-		"verifier-report",
-		"council-report",
-		"debugger-report",
-		"research-report",
-		"mutation-report",
-		"provenance-report",
-		"oracle-report",
-		"external-delegation",
-		"artifact-report",
-		"context-handbook",
-		"delegation-plan",
-	] as const;
-	if (!(kinds as ReadonlyArray<string>).includes(record.kind) || !only("kind")) {
+	if (!kinds.includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);
 	}
 	return { kind: record.kind as Exclude<ResultContract["kind"], "architect-plan"> };
+}
+
+/** Strict frontmatter parser for the one recipe result-contract schema. */
+export function parseResultContract(value: unknown, sourcePath: string): ResultContract {
+	return parseContract(value, sourcePath, RECIPE_DECLARABLE_KINDS);
+}
+
+/**
+ * The same parser for a contract that arrived on a WorkerSpec. It admits what a
+ * recipe may declare plus what the coordinator may author, because a dispatch
+ * request can override the seated recipe's postcondition and the worker has to
+ * be able to read the contract it will be validated against. Keeping the recipe
+ * parser strict is the point: a recipe still cannot claim a coordinator's kind.
+ */
+export function parseWorkerResultContract(value: unknown, sourcePath: string): ResultContract {
+	return parseContract(value, sourcePath, [...RECIPE_DECLARABLE_KINDS, ...COORDINATOR_AUTHORED_KINDS]);
 }

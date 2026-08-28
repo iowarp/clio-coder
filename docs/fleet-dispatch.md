@@ -424,8 +424,18 @@ marker and no answer text.
 
 `synthesis: "none"` returns the final member answers directly. `vote` performs
 a deterministic majority tally over structured `verdict` fields without a
-model call. A vote with no majority reports `no_majority`, and a vote with no
-verdict fields reports `no_verdict_field`. `judge` runs one additional read-only judge against all final
+model call. A vote council asks each member for that verdict: the member's task
+carries the ballot directive and the member's run seals a `council-ballot`
+postcondition, `{"verdict":"...","text":"..."}`, in place of the seated
+recipe's own result contract. The seated agent, its persona, and its read-only
+tool profile are unchanged, so any recipe can be voted with. The verdict is a
+single line of at most 64 bytes and is lower-cased before the tally, so members
+who reach the same conclusion land on the same key; the reasoning belongs in
+`text`, which is what the council report shows as the member's answer. A member
+that seals no conforming ballot fails its own run and is reported as a failed
+member rather than dropping silently out of the count. A vote with no majority
+reports `no_majority`, and a vote whose final members all failed reports
+`no_verdict_field`. `judge` runs one additional read-only judge against all final
 answers. Every member run seals a receipt. A judge receipt points backward to
 every final member receipt through gate provenance. The approval artifact names
 each member's label, target, model, thinking level, node, color, round count,
