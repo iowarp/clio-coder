@@ -758,6 +758,7 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 	}
 	if (version < FLEET_WRITE_BOUNDARY_VERSION) assertNoWritesBefore(frontmatter, sourcePath, version);
 	if (version < FLEET_DYNAMIC_STEP_VERSION) assertNoV5FieldsBefore(frontmatter, sourcePath, version);
+	if (version >= FLEET_DYNAMIC_STEP_VERSION) assertNoGateWrites(frontmatter, sourcePath);
 	const schemaError = firstSchemaError(frontmatter, version);
 	if (schemaError !== null) {
 		throw new Error(`fleet contract ${sourcePath}: ${schemaError}`);
@@ -846,6 +847,17 @@ function assertNoWritesBefore(frontmatter: Record<string, unknown>, sourcePath: 
 				`fleet contract ${sourcePath}: 'writes' requires contract version ${FLEET_WRITE_BOUNDARY_VERSION}; this contract declares version ${version}, where the declaration would not be enforced`,
 			);
 		}
+	}
+}
+
+function assertNoGateWrites(frontmatter: Record<string, unknown>, sourcePath: string): void {
+	for (const value of Array.isArray(frontmatter.steps) ? frontmatter.steps : []) {
+		if (typeof value !== "object" || value === null) continue;
+		const step = value as Record<string, unknown>;
+		if (step.kind !== "gate" || typeof step.id !== "string" || step.id.length === 0 || !("writes" in step)) continue;
+		throw new Error(
+			`fleet contract ${sourcePath}: gate step '${step.id}' must not declare 'writes'; its write boundary is derived from 'path'`,
+		);
 	}
 }
 

@@ -196,6 +196,22 @@ describe("fleet contract version 5", () => {
 		strictEqual(contract.steps[2]?.kind, "plan");
 	});
 
+	it("gate steps refuse writes by step id because path defines the boundary", () => {
+		const gate = [
+			"  - kind: gate",
+			"    id: acceptance",
+			"    agent: tester",
+			"    path: tests/acceptance.mjs",
+			"    run: acceptance",
+			"    writes: [tests/]",
+			"    dependencies: []",
+		].join("\n");
+		throws(() => parseFleetContract(source(5, gate), "fleet.md"), {
+			message:
+				"fleet contract fleet.md: gate step 'acceptance' must not declare 'writes'; its write boundary is derived from 'path'",
+		});
+	});
+
 	it("target and profile are mutually exclusive on every agent position", () => {
 		throws(
 			() => parseFleetContract(source(5, `${AGENT}\n    target: frontier\n    profile: local`), "fleet.md"),
