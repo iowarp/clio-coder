@@ -22,6 +22,7 @@
 import { lstatSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
+import { installTmpGitGuard } from "./tmp-git-guard.js";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 
@@ -144,3 +145,10 @@ if (clioRootEnvKeys.every((key) => !process.env[key]?.trim())) {
 		process.env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
 	}
 }
+
+// Last, because the guard needs the run root this file just settled on. Both
+// the system temp dir and the run root sit on the parent walk that
+// src/tools/ignore-policy.ts does from a mkdtemp scratch, so a `.git` at either
+// level rewrites the answer for every path-walking OBSERVE tool contract. The
+// guard refuses one and names whoever tried. See issue #205.
+installTmpGitGuard({ systemTmp, runRoot: process.env[ROOT_ENV] });
