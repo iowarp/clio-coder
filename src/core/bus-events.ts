@@ -51,6 +51,7 @@ export const BusChannels = {
 	ToolBudgetExceeded: "safety.toolBudgetExceeded",
 	ProviderHealth: "provider.health",
 	RuntimeNotice: "runtime.notice",
+	DispatchScopeNotice: "dispatch.scopeNotice",
 	DispatchEnqueued: "dispatch.enqueued",
 	DispatchStarted: "dispatch.started",
 	DispatchProgress: "dispatch.progress",
@@ -106,6 +107,15 @@ export interface RuntimeNoticePayload {
  */
 export interface ContextWarningPayload {
 	warning: string | null;
+}
+
+/** A declared dispatch scope replaced prose inference and omitted candidate paths. */
+export interface DispatchScopeNoticePayload {
+	code: "typed_scope_replaced_inferred_paths";
+	level: "warning";
+	agentId: string;
+	omittedPaths: ReadonlyArray<string>;
+	message: string;
 }
 
 export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "context-wiki" | "compaction";
@@ -737,6 +747,7 @@ export type BusPayloadMap = {
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
 	[BusChannels.RuntimeNotice]: RuntimeNoticePayload;
+	[BusChannels.DispatchScopeNotice]: DispatchScopeNoticePayload;
 	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;
 	[BusChannels.DispatchStarted]: DispatchStartedPayload;
 	[BusChannels.DispatchProgress]: DispatchProgressPayload;

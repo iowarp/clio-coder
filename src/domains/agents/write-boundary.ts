@@ -1,3 +1,12 @@
+import {
+	normalizePathBoundary,
+	normalizePathBoundaryEntry,
+	PATH_BOUNDARY_MAX_ENTRIES,
+	type PathBoundary,
+	pathBoundariesOverlap,
+	pathBoundaryCovers,
+} from "../../core/path-boundary.js";
+
 /**
  * Declared write boundaries: the repo paths a fleet step is allowed to change.
  *
@@ -30,37 +39,14 @@
  * a step that needs more of the tree than that should say `workspace` and mean
  * it in a contract that does not claim a boundary.
  */
-export const WRITE_BOUNDARY_MAX_ENTRIES = 32;
+export const WRITE_BOUNDARY_MAX_ENTRIES = PATH_BOUNDARY_MAX_ENTRIES;
 
 /** A normalized allowlist. Empty means "changes nothing", which is `readonly`. */
-export type WriteBoundary = ReadonlyArray<string>;
-
-const GLOB_CHARACTERS = /[*?[\]{}]/u;
+export type WriteBoundary = PathBoundary;
 
 /** Normalize one declared entry, or throw explaining exactly what is wrong. */
 export function normalizeWriteBoundaryEntry(entry: string): string {
-	const raw = entry.trim();
-	if (raw.length === 0) throw new Error("write boundary: entry must be a non-empty path");
-	if (raw.includes("\\")) {
-		throw new Error(`write boundary: entry '${entry}' must use '/' separators`);
-	}
-	if (GLOB_CHARACTERS.test(raw)) {
-		throw new Error(`write boundary: entry '${entry}' looks like a glob, which v1 does not support`);
-	}
-	if (raw.startsWith("/") || /^[A-Za-z]:/u.test(raw)) {
-		throw new Error(`write boundary: entry '${entry}' must be repository-relative, not absolute`);
-	}
-	const subtree = raw.endsWith("/");
-	const segments = raw.split("/").filter((segment) => segment.length > 0);
-	if (segments.length === 0) {
-		throw new Error(`write boundary: entry '${entry}' must name a path inside the repository`);
-	}
-	for (const segment of segments) {
-		if (segment === "..") throw new Error(`write boundary: entry '${entry}' must not contain '..'`);
-		if (segment === ".") throw new Error(`write boundary: entry '${entry}' must not contain '.' segments`);
-	}
-	const joined = segments.join("/");
-	return subtree ? `${joined}/` : joined;
+	return normalizePathBoundaryEntry(entry);
 }
 
 /**
@@ -69,38 +55,17 @@ export function normalizeWriteBoundaryEntry(entry: string): string {
  * and a sealed verdict can both carry.
  */
 export function normalizeWriteBoundary(entries: ReadonlyArray<string>): string[] {
-	if (entries.length > WRITE_BOUNDARY_MAX_ENTRIES) {
-		throw new Error(`write boundary: at most ${WRITE_BOUNDARY_MAX_ENTRIES} entries may be declared`);
-	}
-	const normalized = new Set(entries.map(normalizeWriteBoundaryEntry));
-	// A file entry covered by a declared subtree is redundant, not an error: the
-	// operator said the directory, and saying one of its files again changes
-	// nothing about what is allowed.
-	return [...normalized].sort();
-}
-
-/** Repo-relative path with the separators this grammar speaks. */
-function toRepoRelativePosix(path: string): string {
-	return path.split("\\").join("/");
+	return normalizePathBoundary(entries);
 }
 
 /** Whether the boundary permits a change to one repo-relative path. */
 export function writeBoundaryCovers(boundary: WriteBoundary, path: string): boolean {
-	const candidate = toRepoRelativePosix(path);
-	return boundary.some((entry) => (entry.endsWith("/") ? candidate.startsWith(entry) : candidate === entry));
-}
-
-/** Whether two declared entries can describe the same path. */
-function entriesOverlap(left: string, right: string): boolean {
-	if (left === right) return true;
-	if (left.endsWith("/") && right.startsWith(left)) return true;
-	if (right.endsWith("/") && left.startsWith(right)) return true;
-	return false;
+	return pathBoundaryCovers(boundary, path);
 }
 
 /** Whether two boundaries share any path. Empty boundaries never overlap. */
 export function writeBoundariesOverlap(left: WriteBoundary, right: WriteBoundary): boolean {
-	return left.some((entry) => right.some((other) => entriesOverlap(entry, other)));
+	return pathBoundariesOverlap(left, right);
 }
 
 /** Operator-facing rendering, used verbatim in violation messages. */

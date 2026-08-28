@@ -34,6 +34,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { asDirectoryPathBoundary, pathBoundaryEntryCovers } from "../../core/path-boundary.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { isGitRepository } from "../../tools/compete-worktrees.js";
@@ -505,7 +506,13 @@ export function assertWriteBoundaryInsideRoot(root: string, allow: WriteBoundary
 		// path a step is about to create.
 		while (probe !== realRoot && !existsSync(probe)) probe = dirname(probe);
 		const resolved = realpathSync(probe);
-		if (resolved !== realRoot && !resolved.startsWith(realRoot + sep)) {
+		// The root is inside itself. The prefix walk above stops at the root when
+		// a declared directory does not exist yet, and `pathBoundaryEntryCovers`
+		// answers a different question: it asks whether a changed path falls under
+		// a declaration, where the directory entry itself is not a change git ever
+		// reports. Asking it about the root would refuse every boundary naming a
+		// path the step is about to create.
+		if (resolved !== realRoot && !pathBoundaryEntryCovers(asDirectoryPathBoundary(realRoot), resolved)) {
 			throw new Error(`write boundary: entry '${entry}' resolves to ${resolved}, outside the workspace at ${realRoot}`);
 		}
 	}

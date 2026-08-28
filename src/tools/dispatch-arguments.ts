@@ -1,5 +1,6 @@
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
+import { pathBoundaryCovers } from "../core/path-boundary.js";
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
@@ -261,8 +262,34 @@ export function dispatchRequestsFromArgs(
 	for (let index = 0; index < tasks.length; index += 1) {
 		const item = tasks[index];
 		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		const sharedIntent = isRecord(shared.intent) ? shared.intent : null;
+		const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
+		if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
 		const parsed = dispatchRequestFromArgs(itemArgs, options);
 		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
+		if (sharedIntent !== null && itemIntent !== null) {
+			if (options.resolveIntent === undefined) {
+				return { ok: false, message: `dispatch: task ${index + 1}: intent resolver is unavailable` };
+			}
+			const ceiling = options.resolveIntent(sharedIntent, parsed.request.cwd);
+			if (!ceiling.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${ceiling.message}` };
+			const pathCeilings = {
+				readRoots: [...ceiling.intent.readRoots, ...ceiling.intent.writeRoots],
+				writeRoots: ceiling.intent.writeRoots,
+				relevantPaths: [...ceiling.intent.readRoots, ...ceiling.intent.writeRoots, ...ceiling.intent.relevantPaths],
+			};
+			for (const field of ["readRoots", "writeRoots", "relevantPaths"] as const) {
+				const outside = parsed.request.intent?.[field].find(
+					(candidate) => !pathBoundaryCovers(pathCeilings[field], candidate),
+				);
+				if (outside !== undefined) {
+					return {
+						ok: false,
+						message: `dispatch: task ${index + 1}: intent_scope_widening: ${field} entry '${outside}' is outside the top-level intent ceiling`,
+					};
+				}
+			}
+		}
 		requests.push(parsed.request);
 	}
 	return { ok: true, requests };

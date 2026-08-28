@@ -1,6 +1,7 @@
 import path from "node:path";
+import { normalizePathBoundaryEntry, PATH_BOUNDARY_MAX_ENTRIES, PathBoundaryError } from "../../core/path-boundary.js";
 
-export const DISPATCH_INTENT_PATH_LIST_CAP = 32;
+export const DISPATCH_INTENT_PATH_LIST_CAP = PATH_BOUNDARY_MAX_ENTRIES;
 export const DISPATCH_INTENT_PATH_ENTRY_BYTES_CAP = 512;
 export const DISPATCH_INTENT_VERIFICATION_CAP = 8;
 export const DISPATCH_INTENT_TIMEOUT_MIN_MS = 1_000;
@@ -42,7 +43,7 @@ function fail(reason: string, message: string): DispatchIntentNormalizationResul
 	return { ok: false, reason, message };
 }
 
-function normalizePathEntry(value: unknown, field: string, index: number): string | DispatchIntentNormalizationResult {
+function checkedPathText(value: unknown, field: string, index: number): string | DispatchIntentNormalizationResult {
 	if (typeof value !== "string" || value.trim().length === 0) {
 		return fail("intent_path_malformed", `${field}[${index}] must be a non-empty repository-relative POSIX path`);
 	}
@@ -53,6 +54,42 @@ function normalizePathEntry(value: unknown, field: string, index: number): strin
 			`${field}[${index}] exceeds the ${DISPATCH_INTENT_PATH_ENTRY_BYTES_CAP}-byte cap`,
 		);
 	}
+	return trimmed;
+}
+
+function normalizeScopePathEntry(
+	value: unknown,
+	field: string,
+	index: number,
+): string | DispatchIntentNormalizationResult {
+	const checked = checkedPathText(value, field, index);
+	if (typeof checked !== "string") return checked;
+	try {
+		return normalizePathBoundaryEntry(checked);
+	} catch (error) {
+		if (error instanceof PathBoundaryError) {
+			if (error.code === "absolute") {
+				return fail("intent_path_absolute", `${field}[${index}] must be a repository-relative POSIX path`);
+			}
+			if (error.code === "parent") {
+				return fail("intent_path_escapes_root", `${field}[${index}] escapes the repository root`);
+			}
+		}
+		return fail(
+			"intent_path_malformed",
+			`${field}[${index}] does not follow the repository path boundary grammar: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+function normalizeExpectedOutputEntry(
+	value: unknown,
+	field: string,
+	index: number,
+): string | DispatchIntentNormalizationResult {
+	const checked = checkedPathText(value, field, index);
+	if (typeof checked !== "string") return checked;
+	const trimmed = checked;
 	if (trimmed.includes("\\") || path.posix.isAbsolute(trimmed) || path.win32.isAbsolute(trimmed)) {
 		return fail("intent_path_absolute", `${field}[${index}] must be a repository-relative POSIX path`);
 	}
@@ -66,7 +103,15 @@ function normalizePathEntry(value: unknown, field: string, index: number): strin
 	return normalized;
 }
 
-function normalizePathList(value: unknown, field: string): string[] | DispatchIntentNormalizationResult {
+function normalizePathList(
+	value: unknown,
+	field: string,
+	normalizeEntry: (
+		value: unknown,
+		field: string,
+		index: number,
+	) => string | DispatchIntentNormalizationResult = normalizeScopePathEntry,
+): string[] | DispatchIntentNormalizationResult {
 	if (value === undefined) return [];
 	if (!Array.isArray(value)) return fail("intent_path_malformed", `${field} must be an array`);
 	if (value.length > DISPATCH_INTENT_PATH_LIST_CAP) {
@@ -74,7 +119,7 @@ function normalizePathList(value: unknown, field: string): string[] | DispatchIn
 	}
 	const normalized: string[] = [];
 	for (const [index, entry] of value.entries()) {
-		const result = normalizePathEntry(entry, field, index);
+		const result = normalizeEntry(entry, field, index);
 		if (typeof result !== "string") return result;
 		normalized.push(result);
 	}
@@ -115,7 +160,11 @@ export function normalizeDispatchIntent(
 	if (!Array.isArray(writeRoots)) return writeRoots;
 	const relevantPaths = normalizePathList(raw.relevant_paths, "intent.relevant_paths");
 	if (!Array.isArray(relevantPaths)) return relevantPaths;
-	const expectedOutputs = normalizePathList(raw.expected_outputs, "intent.expected_outputs");
+	const expectedOutputs = normalizePathList(
+		raw.expected_outputs,
+		"intent.expected_outputs",
+		normalizeExpectedOutputEntry,
+	);
 	if (!Array.isArray(expectedOutputs)) return expectedOutputs;
 	const rawVerification = raw.verification ?? [];
 	if (!Array.isArray(rawVerification)) {

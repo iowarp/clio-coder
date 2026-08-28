@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
+import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -89,7 +90,8 @@ export interface SafetyPolicyEngineOptions {
 	rulePacks?: RulePacks;
 	projectPolicy?: LoadedProjectSafetyPolicy;
 	/**
-	 * Absolute directories a write-class tool call is confined to for this run.
+	 * Absolute path boundaries a write-class tool call is confined to for this run.
+	 * Exact files omit a trailing slash and subtrees retain one.
 	 * When present and non-empty, a write/edit target outside every root is a
 	 * final BLOCK (reason code "write-root"). Empty or absent disables the check.
 	 * Enforced at the worker safety seam so both the native worker registry and
@@ -182,9 +184,7 @@ function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, 
 	const target = writeRootTargetPath(call);
 	if (target === null) return null;
 	const resolved = path.resolve(writeRootCwd, target);
-	for (const root of roots) {
-		if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) return null;
-	}
+	if (pathBoundaryCovers(roots, resolved)) return null;
 	return `write target '${target}' resolves to '${resolved}', which is outside the permitted write roots for this run: ${roots.join(", ")}`;
 }
 
@@ -193,7 +193,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	// Write-root containment resolves lexically, so it keeps its own un-canonicalized
 	// cwd and roots to compare like against like (the design mandates no symlink chasing).
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
-	const writeRoots = (options.writeRoots ?? []).map((root) => path.resolve(root));
+	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
 	const projectPolicyRoot =

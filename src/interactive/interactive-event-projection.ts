@@ -3,6 +3,7 @@ import {
 	type ConfigReloadFailedPayload,
 	type ContextPrunedPayload,
 	type ContextWarningPayload,
+	type DispatchScopeNoticePayload,
 	type LoopBlockedPayload,
 	type RuntimeNoticePayload,
 	type ToolBudgetExceededPayload,
@@ -271,6 +272,19 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	);
 
 	remainingUnsubscribers.push(
+		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
+			const event = payload as DispatchScopeNoticePayload | null | undefined;
+			if (
+				!event ||
+				typeof event !== "object" ||
+				event.code !== "typed_scope_replaced_inferred_paths" ||
+				typeof event.message !== "string"
+			) {
+				return;
+			}
+			deps.appendTranscriptNotice("warn", event.message);
+			deps.requestRender();
+		}),
 		deps.bus.on(BusChannels.LoopBlocked, (payload) => {
 			const event = payload as LoopBlockedPayload | null | undefined;
 			if (!event || typeof event !== "object" || typeof event.tool !== "string" || typeof event.repeatCount !== "number") {

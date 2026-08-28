@@ -49,7 +49,7 @@ describe("typed dispatch intent", () => {
 	it("normalizes POSIX paths deterministically and rejects malformed boundaries", () => {
 		const normalized = normalizeDispatchIntent(
 			{
-				read_roots: [" ./src//tools ", "src/tools", "src/../src/domains"],
+				read_roots: [" src//tools/ ", "src/tools/", "src/domains/"],
 				write_roots: [],
 				relevant_paths: ["docs/fleet-dispatch.md"],
 				expected_outputs: ["dist//cli.js"],
@@ -60,7 +60,7 @@ describe("typed dispatch intent", () => {
 		ok(normalized.ok);
 		deepStrictEqual(normalized.intent, {
 			version: 1,
-			readRoots: ["src/domains", "src/tools"],
+			readRoots: ["src/domains/", "src/tools/"],
 			writeRoots: [],
 			relevantPaths: ["docs/fleet-dispatch.md"],
 			expectedOutputs: ["dist/cli.js"],
@@ -69,6 +69,8 @@ describe("typed dispatch intent", () => {
 		for (const [value, reason] of [
 			["/tmp/x", "intent_path_absolute"],
 			["../x", "intent_path_escapes_root"],
+			["src/*.ts", "intent_path_malformed"],
+			["./src/tools", "intent_path_malformed"],
 			["", "intent_path_malformed"],
 		] as const) {
 			const result = normalizeDispatchIntent({ read_roots: [value] }, declared);
@@ -83,21 +85,29 @@ describe("typed dispatch intent", () => {
 		strictEqual(overCap.reason, "intent_path_over_cap");
 	});
 
-	it("inherits batch intent, permits an item override, and hashes only the resolved intent change", () => {
+	it("inherits batch intent, permits narrowing, and refuses an item that widens the top-level ceiling", () => {
 		const controller = admission();
 		const base = {
-			tasks: [{ task: "first" }, { task: "second", intent: { read_roots: ["src/domains"] } }],
-			intent: { read_roots: ["src/tools"] },
+			tasks: [{ task: "first" }, { task: "second", intent: { read_roots: ["src/domains/"] } }],
+			intent: { read_roots: ["src/"] },
 		};
 		const first = controller.prepareAdmissionArguments(base);
 		const snapshot = controller.state.trustedExecutionSnapshots.get(first);
 		ok(snapshot?.kind === "dispatch");
-		deepStrictEqual(snapshot.requests[0]?.intent?.readRoots, ["src/tools"]);
-		deepStrictEqual(snapshot.requests[1]?.intent?.readRoots, ["src/domains"]);
+		deepStrictEqual(snapshot.requests[0]?.intent?.readRoots, ["src/"]);
+		deepStrictEqual(snapshot.requests[1]?.intent?.readRoots, ["src/domains/"]);
 		const same = controller.prepareAdmissionArguments(structuredClone(base));
 		strictEqual(controller.describeDispatchPlan(first).hash, controller.describeDispatchPlan(same).hash);
-		const changed = controller.prepareAdmissionArguments({ ...structuredClone(base), intent: { read_roots: ["src"] } });
+		const changed = controller.prepareAdmissionArguments({
+			...structuredClone(base),
+			intent: { read_roots: ["src/", "tests/"] },
+		});
 		notStrictEqual(controller.describeDispatchPlan(first).hash, controller.describeDispatchPlan(changed).hash);
+		const widened = controller.prepareAdmissionArguments({
+			tasks: [{ task: "outside", intent: { read_roots: ["docs/"] } }],
+			intent: { read_roots: ["src/"] },
+		});
+		match(preparationError(widened), /intent_scope_widening.*docs\//u);
 	});
 
 	it("refuses ambiguous, undeclared, unsupported-mode, and unsupported-runtime verification before approval", () => {
@@ -115,10 +125,17 @@ describe("typed dispatch intent", () => {
 			preparationError(admission().prepareAdmissionArguments({ task: "work", gate: "not-declared" })),
 			/verification_check_undeclared.*not-declared/u,
 		);
-		match(
-			preparationError(admission().prepareAdmissionArguments({ task: "work", gate: "test", review: true })),
-			/verification_unsupported_for_mode/u,
-		);
+		const reviewController = admission();
+		const reviewed = reviewController.prepareAdmissionArguments({
+			task: "work",
+			gate: "test",
+			review: true,
+			intent: { expected_outputs: ["scope audit"] },
+		});
+		strictEqual(reviewed[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+		const reviewPlan = reviewController.state.trustedResolvedPlans.get(reviewed);
+		const reviewer = reviewPlan?.tasks.find((task) => task.role === "reviewer");
+		match(reviewer?.task ?? "", /Declared Result Requirements.*scope audit.*test must pass/su);
 		match(
 			preparationError(
 				admission().prepareAdmissionArguments({ task: "work", gate: "test", mode: "compete", candidates: 2 }),
@@ -137,6 +154,11 @@ describe("typed dispatch intent", () => {
 		const inherited = validateJobSpec({ agentId: "coder", task: "work", intent: intent.intent });
 		ok(inherited.ok);
 		deepStrictEqual(inherited.spec.writeRoots, [join(process.cwd(), "src/tools")]);
+		const directoryIntent = normalizeDispatchIntent({ write_roots: ["src/tools/"] }, declared);
+		ok(directoryIntent.ok);
+		const directory = validateJobSpec({ agentId: "coder", task: "work", intent: directoryIntent.intent });
+		ok(directory.ok);
+		deepStrictEqual(directory.spec.writeRoots, [`${join(process.cwd(), "src/tools")}/`]);
 		const contradiction = validateJobSpec({
 			agentId: "coder",
 			task: "work",

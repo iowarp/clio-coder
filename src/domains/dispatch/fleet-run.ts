@@ -335,6 +335,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	try {
 		result = await executePlan(livePlan, {
 			preflight(step) {
+				// The fleet write boundary is deliberately enforced after the step. The enforcer in
+				// write-boundary-enforcer.ts snapshots and verifies the step window. Pre-emptive
+				// confinement for declared commands would require a command sandbox, which does not exist.
 				const request: DispatchRequest = {
 					agentId: step.agentId,
 					executionRole: step.executionRole,
@@ -385,6 +388,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				if (step.planParentId !== undefined && parentReceipt === undefined) {
 					throw new Error(`fleet dynamic step '${step.id}' has no terminal plan-step receipt`);
 				}
+				// The fleet write boundary is deliberately enforced after the step. The enforcer in
+				// write-boundary-enforcer.ts snapshots and verifies the step window. Pre-emptive
+				// confinement for declared commands would require a command sandbox, which does not exist.
 				const request: DispatchRequest = {
 					agentId: step.agentId,
 					executionRole: step.executionRole,

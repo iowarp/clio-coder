@@ -162,7 +162,8 @@ interface WorkerSpecFields {
 	 */
 	autonomy?: AutonomyLevel;
 	/**
-	 * Absolute directories write-class tool calls are confined to for this run.
+	 * Absolute path boundaries write-class tool calls are confined to for this run.
+	 * Exact files omit a trailing slash and subtrees retain one.
 	 * Enforced at the shared worker safety seam so a write/edit target outside
 	 * every root is a final block. Only set on runtimes that mediate per-tool
 	 * calls (native, claude-sdk); dispatch refuses it on subprocess runtimes.
