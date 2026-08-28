@@ -1,7 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -133,7 +133,30 @@ function gitWorkspace(): string {
 	return root;
 }
 
-function spawnedWorker(text: string, onSettle?: () => void): SpawnedWorker {
+interface FixtureToolCall {
+	tool: string;
+	args: Record<string, unknown>;
+}
+
+/** The run wrote this path through the write tool, which names its target. */
+function wrote(path: string): FixtureToolCall {
+	return { tool: ToolNames.Write, args: { path } };
+}
+
+/** The run shelled out, which can write a path no argument names. */
+function ran(command: string): FixtureToolCall {
+	return { tool: ToolNames.Bash, args: { command } };
+}
+
+/**
+ * A finished worker run. `calls` are emitted as the same `tool_execution_*`
+ * pairs a real worker publishes: that stream is the only record of what a run
+ * touched, and the write boundary reads it to tell a step's own change from one
+ * made under it. A fixture that writes a file without emitting the call is a
+ * worker that wrote through a channel nobody can observe, which is a different
+ * case and is spelled here by adding `ran(...)`.
+ */
+function spawnedWorker(text: string, onSettle?: () => void, calls: ReadonlyArray<FixtureToolCall> = []): SpawnedWorker {
 	return {
 		pid: 700,
 		promise: Promise.resolve().then(() => {
@@ -141,6 +164,11 @@ function spawnedWorker(text: string, onSettle?: () => void): SpawnedWorker {
 			return { exitCode: 0, signal: null };
 		}),
 		events: (async function* () {
+			for (const [index, call] of calls.entries()) {
+				const toolCallId = `call-${index}`;
+				yield { type: "tool_execution_start", toolCallId, toolName: call.tool, args: call.args };
+				yield { type: "tool_execution_end", toolCallId, isError: false };
+			}
 			yield { type: "message_end", message: { role: "assistant", content: text, usage: { input: 1, output: 1 } } };
 		})(),
 		abort() {},
@@ -481,8 +509,10 @@ describe("fleet v5 execution", () => {
 		});
 		const violatingBundle = makeDispatchBundle(violatingHarness.context, {
 			spawnWorker(spec, opts) {
-				if (spec.agentId === "coder") writeFileSync(join(opts?.cwd ?? "", "outside.txt"), "outside\n");
-				return spawnedWorker(spec.agentId === "architect" ? violatingAnswer : "escaped");
+				if (spec.agentId !== "coder") return spawnedWorker(violatingAnswer);
+				const escaped = join(opts?.cwd ?? "", "outside.txt");
+				writeFileSync(escaped, "outside\n");
+				return spawnedWorker("escaped", undefined, [wrote(escaped)]);
 			},
 		});
 		await violatingBundle.extension.start();
@@ -519,6 +549,87 @@ describe("fleet v5 execution", () => {
 		} finally {
 			await violatingBundle.extension.stop?.();
 		}
+	});
+
+	/**
+	 * The two halves of the attribution argument, differing by one bash call.
+	 *
+	 * Both runs write their declared path through the write tool, and in both a
+	 * second tracked file changes underneath them. The run that only used tools
+	 * whose arguments name their targets has a closed write record, so the file
+	 * it never wrote survives. The run that also shelled out could have written
+	 * anywhere, so its record clears nothing and the same change is rolled back
+	 * exactly as it was before any of this.
+	 */
+	const concurrentChangeRun = async (
+		fleetRootId: string,
+		extraCalls: ReadonlyArray<FixtureToolCall>,
+	): Promise<{ root: string; outcome: Awaited<ReturnType<typeof executeFleetRun>> }> => {
+		const root = workspace();
+		const { context, agents } = v5AgentHarness();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker(spec, opts) {
+				const cwd = opts?.cwd ?? "";
+				const declared = join(cwd, "src", "built.ts");
+				writeFileSync(declared, "built\n");
+				// An operator editing a tracked file in the same checkout while the
+				// wave runs. No tool call is emitted for it, because the step is not
+				// what changed it.
+				writeFileSync(join(cwd, "tests", ".keep"), "the operator's uncommitted edit\n");
+				return spawnedWorker(`${spec.agentId} complete`, undefined, [wrote(declared), ...extraCalls]);
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const contract = parseFleetContract(
+				source(
+					5,
+					[
+						"  - kind: agent",
+						"    id: build",
+						"    agent: coder",
+						"    scope: workspace",
+						"    writes: [src/]",
+						"    dependencies: []",
+					].join("\n"),
+					"writers: 1",
+				),
+				"fleet.md",
+			);
+			const outcome = await executeFleetRun({
+				plan: compileV5(contract, agents),
+				contractName: contract.name,
+				commands: null,
+				workspaceRoot: root,
+				fleetRootId,
+				dispatch: bundle.contract,
+				agents,
+				attributionEnabled: false,
+			});
+			return { root, outcome };
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	};
+
+	it("leaves a file that changed under a step but that the step never wrote", async () => {
+		const { root, outcome } = await concurrentChangeRun("fleet-v5-concurrent", []);
+
+		strictEqual(outcome.result.results.get("build")?.boundaryViolated, undefined);
+		strictEqual(outcome.result.results.get("build")?.succeeded, true);
+		// The edit survives the run. Before this, it was restored from the
+		// baseline commit and the operator's work was gone.
+		strictEqual(readFileSync(join(root, "tests", ".keep"), "utf8"), "the operator's uncommitted edit\n");
+	});
+
+	it("rolls that same change back when the step also shelled out, because its record is a lower bound", async () => {
+		const { root, outcome } = await concurrentChangeRun("fleet-v5-concurrent-opaque", [ran("npm run build")]);
+
+		// One bash call to a clean exit and the run can no longer clear anything:
+		// enforcement is exactly as strong here as it was before attribution.
+		strictEqual(outcome.result.results.get("build")?.boundaryViolated, true);
+		strictEqual(outcome.result.results.get("build")?.succeeded, false);
+		strictEqual(readFileSync(join(root, "tests", ".keep"), "utf8"), "tests\n");
 	});
 
 	it("refuses an architect task outside the roster without dispatching it", async () => {

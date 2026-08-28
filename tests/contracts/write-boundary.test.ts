@@ -534,6 +534,236 @@ describe("contracts/write-boundary", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// attribution: what the window's own runs recorded writing
+	// ---------------------------------------------------------------------------
+
+	describe("contracts/write-boundary attribution", () => {
+		it("leaves a file the step never wrote exactly as the concurrent editor left it", () => {
+			const root = repo({ "src/a.ts": "a\n", "docs/guide.md": "# guide\n", "README.md": "committed\n" });
+			const snapshot = captureWorkspaceSnapshot(root);
+			write(root, "docs/guide.md", "# the step's own work\n");
+			// Somebody else with the same checkout open, mid-window.
+			write(root, "README.md", "the operator's uncommitted edit\n");
+			const verdict = enforceWriteBoundary({
+				snapshot,
+				window: "wave-0",
+				stepIds: ["docs"],
+				allow: ["docs/"],
+				attribution: { recorded: [join(root, "docs/guide.md")], complete: true },
+			});
+
+			strictEqual(verdict.status, "clean");
+			strictEqual(verdict.reason, null);
+			deepStrictEqual(verdict.violations, []);
+			deepStrictEqual(verdict.unattributed, ["README.md"]);
+			strictEqual(verdict.attributionComplete, true);
+			deepStrictEqual(verdict.rolledBack, []);
+			// The whole point: the operator's bytes are still there.
+			strictEqual(readFileSync(join(root, "README.md"), "utf8"), "the operator's uncommitted edit\n");
+			match(verdict.detail ?? "", /Concurrent changes were seen in this window/);
+			match(verdict.detail ?? "", /README\.md/);
+		});
+
+		it("still rolls back a path the step's own run recorded writing", () => {
+			const root = repo({ "src/a.ts": "committed\n", "docs/guide.md": "# guide\n" });
+			const snapshot = captureWorkspaceSnapshot(root);
+			write(root, "src/a.ts", "the step wrote here\n");
+			write(root, "elsewhere.txt", "and the operator wrote here\n");
+			const verdict = enforceWriteBoundary({
+				snapshot,
+				window: "wave-0",
+				stepIds: ["docs"],
+				allow: ["docs/"],
+				// A workspace-relative target normalizes the same as an absolute one.
+				attribution: { recorded: ["src/a.ts"], complete: true },
+			});
+
+			strictEqual(verdict.status, "rolled-back");
+			strictEqual(verdict.reason, WRITE_BOUNDARY_VIOLATION_REASON);
+			deepStrictEqual(verdict.violations, ["src/a.ts"]);
+			deepStrictEqual(verdict.unattributed, ["elsewhere.txt"]);
+			strictEqual(readFileSync(join(root, "src/a.ts"), "utf8"), "committed\n");
+			strictEqual(readFileSync(join(root, "elsewhere.txt"), "utf8"), "and the operator wrote here\n");
+			match(verdict.detail ?? "", /a run in it recorded writing that path/);
+		});
+
+		it("attributes a change under a recorded directory target and not under a name that merely shares a prefix", () => {
+			const root = repo({ "keep/a.txt": "a\n", "src/a.ts": "a\n" });
+			const snapshot = captureWorkspaceSnapshot(root);
+			write(root, "keep/a.txt", "the step rewrote the tree it deleted\n");
+			write(root, "keepsake.txt", "unrelated\n");
+			const verdict = enforceWriteBoundary({
+				snapshot,
+				window: "wave-0",
+				stepIds: ["build"],
+				allow: ["src/"],
+				attribution: { recorded: [join(root, "keep")], complete: true },
+			});
+
+			deepStrictEqual(verdict.violations, ["keep/a.txt"]);
+			deepStrictEqual(verdict.unattributed, ["keepsake.txt"]);
+			strictEqual(readFileSync(join(root, "keepsake.txt"), "utf8"), "unrelated\n");
+		});
+
+		it("keeps blaming the whole diff when the window has no complete write record", () => {
+			const root = repo({ "src/a.ts": "committed\n" });
+			const snapshot = captureWorkspaceSnapshot(root);
+			write(root, "outside.txt", "x\n");
+			const verdict = enforceWriteBoundary({
+				snapshot,
+				window: "wave-0",
+				stepIds: ["compile"],
+				allow: ["src/"],
+				// A code step in the window: nothing enumerates what its command wrote.
+				attribution: { recorded: [], complete: false },
+			});
+
+			strictEqual(verdict.status, "rolled-back");
+			strictEqual(verdict.attributionComplete, false);
+			deepStrictEqual(verdict.violations, ["outside.txt"]);
+			deepStrictEqual(verdict.unattributed, []);
+			match(verdict.detail ?? "", /no complete write record/);
+		});
+
+		it("still refuses to touch a path that was already dirty at snapshot time, even when the step recorded writing it", () => {
+			const root = repo({ "src/a.ts": "a\n" });
+			write(root, "scratch.txt", "operator notes\n");
+			const snapshot = captureWorkspaceSnapshot(root);
+			write(root, "scratch.txt", "the step overwrote them\n");
+			const verdict = enforceWriteBoundary({
+				snapshot,
+				window: "wave-0",
+				stepIds: ["build"],
+				allow: ["src/"],
+				attribution: { recorded: [join(root, "scratch.txt")], complete: true },
+			});
+
+			strictEqual(verdict.status, "rollback-incomplete");
+			strictEqual(verdict.reason, WRITE_BOUNDARY_VIOLATION_REASON);
+			deepStrictEqual(verdict.violations, ["scratch.txt"]);
+			deepStrictEqual(verdict.rolledBack, []);
+			match(verdict.unrecoverable[0]?.reason ?? "", /already modified or untracked before the step/);
+			// Nothing guessed at: the tree is left exactly as the step made it.
+			strictEqual(readFileSync(join(root, "scratch.txt"), "utf8"), "the step overwrote them\n");
+		});
+
+		it("treats one unrecorded step as an incomplete record for the whole window", async () => {
+			const root = repo({ "src/a.ts": "a\n" });
+			const enforcer = createWriteBoundaryEnforcer({
+				root,
+				rootId: "fleet-partial-record",
+				boundaryFor: () => ["src/"],
+				recordedWritesFor: (stepId) => (stepId === "watched" ? [join(root, "src/a.ts")] : null),
+			});
+			enforcer.begin("wave-0", ["watched", "opaque"]);
+			write(root, "outside.txt", "x\n");
+			const outcome = await enforcer.verify("wave-0", ["watched", "opaque"]);
+
+			// The steps share a checkout, so a change the watched step did not write
+			// could still be the unwatched one's.
+			strictEqual(outcome.violated, true);
+			ok(!existsSync(join(root, "outside.txt")));
+		});
+
+		it("reproduces the portus wave: a step writing one ignored path while tracked files change underneath it", () => {
+			const root = repo({
+				".gitignore": "work/\n",
+				"README.md": "committed readme\n",
+				"MAPPING.md": "committed mapping\n",
+				".clio-coder/fleets/portus.md": "committed fleet\n",
+				"answers/keep.json": "{}\n",
+			});
+			const snapshot = captureWorkspaceSnapshot(root);
+			// The step's only write, exactly as receipt 2ootieiig81n recorded it. git
+			// never reports it, because `.gitignore:1` is `work/`.
+			write(root, "work/answers/schema_mapping_resolution.json", '{"resolved":true}\n');
+			write(root, "answers/keep.json", '{"declared":true}\n');
+			// The operator, editing the same checkout while the wave ran.
+			write(root, "README.md", "uncommitted readme edit\n");
+			write(root, "MAPPING.md", "uncommitted mapping edit\n");
+			write(root, ".clio-coder/fleets/portus.md", "uncommitted fleet edit\n");
+
+			const verdict = enforceWriteBoundary({
+				snapshot,
+				window: "wave-1",
+				stepIds: ["resolve"],
+				allow: ["answers/"],
+				attribution: {
+					recorded: [join(root, "work/answers/schema_mapping_resolution.json"), join(root, "answers/keep.json")],
+					complete: true,
+				},
+			});
+
+			strictEqual(verdict.status, "clean");
+			strictEqual(verdict.reason, null);
+			deepStrictEqual(verdict.violations, []);
+			deepStrictEqual(verdict.rolledBack, []);
+			deepStrictEqual(verdict.unattributed, [".clio-coder/fleets/portus.md", "MAPPING.md", "README.md"]);
+			// All three of the operator's edits are still on disk. Before this, all
+			// three were restored from the baseline commit and the work was lost.
+			strictEqual(readFileSync(join(root, "README.md"), "utf8"), "uncommitted readme edit\n");
+			strictEqual(readFileSync(join(root, "MAPPING.md"), "utf8"), "uncommitted mapping edit\n");
+			strictEqual(readFileSync(join(root, ".clio-coder/fleets/portus.md"), "utf8"), "uncommitted fleet edit\n");
+			// And the ignored write is still invisible to git, which is why the
+			// declaration that named it is refused at preflight instead.
+			ok(!verdict.changedPaths.includes("work/answers/schema_mapping_resolution.json"));
+		});
+
+		it("refuses a declared write path git ignores, naming the path and the ignoring rule", () => {
+			const root = repo({ ".gitignore": "work/\n", "src/a.ts": "a\n" });
+			const plan = compileExecutionPlan({
+				topology: "fleet",
+				rootTask: "t",
+				maxWorkers: 1,
+				onFailure: "stop",
+				steps: [agentStep("resolve", ["work/answers/schema_mapping_resolution.json"])],
+			});
+			throws(
+				() => preflightWriteBoundaries(plan, root),
+				(error: Error) => {
+					match(error.message, /work\/answers\/schema_mapping_resolution\.json/);
+					match(error.message, /\.gitignore:1:work\//);
+					match(error.message, /never reports an ignored path/);
+					return true;
+				},
+			);
+			// A tracked path under the same repository is unaffected.
+			const visible = compileExecutionPlan({
+				topology: "fleet",
+				rootTask: "t",
+				maxWorkers: 1,
+				onFailure: "stop",
+				steps: [agentStep("build", ["src/"])],
+			});
+			preflightWriteBoundaries(visible, root);
+		});
+
+		it("asks the ignore question about a whole plan without hitting the per-step declaration cap", () => {
+			const files = Array.from({ length: 40 }, (_, index) => `f${index}.txt`);
+			const root = repo(Object.fromEntries(files.map((path) => [path, `${path}\n`])));
+			const plan = compileExecutionPlan({
+				topology: "fleet",
+				rootTask: "t",
+				maxWorkers: 1,
+				onFailure: "stop",
+				steps: [agentStep("first", files.slice(0, 20)), agentStep("second", files.slice(20), ["first"])],
+			});
+			// Forty entries across two steps is legal; the cap is per declaration.
+			preflightWriteBoundaries(plan, root);
+		});
+
+		it("refuses an ignored boundary a delegation plan splices in after preflight", () => {
+			const root = repo({ ".gitignore": "work/\n", "src/a.ts": "a\n" });
+			const enforcer = createWriteBoundaryEnforcer({
+				root,
+				rootId: "fleet-dynamic-ignored",
+				boundaryFor: () => ["work/"],
+			});
+			throws(() => enforcer.begin("wave-0", ["spliced"]), /is ignored by \.gitignore:1:work\//);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
 	// scheduler integration
 	// ---------------------------------------------------------------------------
 

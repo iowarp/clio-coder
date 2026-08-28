@@ -251,9 +251,22 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		root: workspaceRoot,
 		rootId: fleetRootId,
 		boundaryFor: (stepId) => livePlan.steps.find((step) => step.id === stepId)?.writes,
+		recordedWritesFor: (stepId) => {
+			const step = livePlan.steps.find((entry) => entry.id === stepId);
+			// A code step runs a registered command in a subprocess. Nothing
+			// enumerates what that command wrote, so the step contributes no record
+			// and its window falls back to blaming the whole diff.
+			if (step === undefined || step.kind !== "agent") return null;
+			const receipt = receiptsByStep.get(stepId);
+			if (receipt === undefined) return null;
+			return dispatch.observedRunWrites?.(receipt.runId) ?? null;
+		},
 		onVerdict(verdict, path) {
-			if (verdict.reason === null) return;
-			notice(`write boundary ${verdict.window}: ${verdict.detail ?? verdict.reason} record=${path}`, "write-boundary");
+			// Concurrent changes are reported too. The window did not fail for them
+			// and nothing was touched, and an operator whose file changed under a
+			// running fleet should hear it from the fleet.
+			if (verdict.detail === null) return;
+			notice(`write boundary ${verdict.window}: ${verdict.detail} record=${path}`, "write-boundary");
 		},
 	});
 	const receipts: RunReceipt[] = [];

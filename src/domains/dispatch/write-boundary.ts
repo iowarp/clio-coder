@@ -21,18 +21,26 @@
  * Everything is pinned to the baseline commit recorded at snapshot time, so a
  * commit step that moves HEAD without touching the working tree reads as "no
  * change" instead of as a wholesale rewrite.
+ *
+ * A window's diff answers "what changed", never "who changed it". An operator
+ * editing the checkout while a fleet runs produces changes inside the window
+ * that no step made, and rolling those back to the baseline destroys work
+ * nobody asked Clio to touch. So a change is blamed on the window only when it
+ * intersects what the window's own runs recorded writing; everything else is
+ * reported as an unattributed concurrent change and left exactly as it is.
  */
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { isGitRepository } from "../../tools/compete-worktrees.js";
 import {
 	describeWriteBoundary,
 	normalizeWriteBoundary,
+	normalizeWriteBoundaryEntry,
 	type WriteBoundary,
 	writeBoundaryCovers,
 } from "../agents/write-boundary.js";
@@ -71,10 +79,15 @@ function gitBytes(root: string, args: ReadonlyArray<string>): Buffer {
  *
  * Enforcement sees exactly what git sees, so an ignored path is outside it: a
  * repository decides what counts as its own content, and this is not the place
- * to overrule that. The one thing subtracted is Clio's own state directory when
- * an operator has placed it inside the workspace. Receipts, code-step logs, and
- * boundary verdicts are the orchestrator writing its journal while the step
- * runs, and blaming the step for them would make every window a violation.
+ * to overrule that. The consequence is that a boundary declared over an ignored
+ * path could never be verified, which is why `assertWriteBoundaryVisibleToGit`
+ * refuses that declaration before anything runs rather than letting this
+ * function certify an unobserved window as clean.
+ *
+ * The one thing subtracted is Clio's own state directory when an operator has
+ * placed it inside the workspace. Receipts, code-step logs, and boundary
+ * verdicts are the orchestrator writing its journal while the step runs, and
+ * blaming the step for them would make every window a violation.
  */
 function dirtyPaths(root: string): string[] {
 	const raw = git(root, ["status", "--porcelain=v1", "-z", "-uall", "--no-renames"]);
@@ -222,13 +235,54 @@ export interface WriteBoundaryUnrecoverable {
 }
 
 /**
- * `clean` means nothing outside the allowlist changed. `rolled-back` means
- * something did and the repository now looks as it did before. Anything else is
- * `rollback-incomplete`: the working tree is left exactly as the step made it
- * and handed to the operator with the list, because a rollback that guesses at
- * content it never recorded destroys work.
+ * `clean` means no change outside the allowlist is attributable to this
+ * window's steps. `rolled-back` means one was and the repository now looks as
+ * it did before. Anything else is `rollback-incomplete`: the working tree is
+ * left exactly as the step made it and handed to the operator with the list,
+ * because a rollback that guesses at content it never recorded destroys work.
+ *
+ * A `clean` verdict can still carry `unattributed` paths. Those changed inside
+ * the window and no run in it recorded writing them, so they are the
+ * operator's, another process's, or a build artifact's, and nothing here may
+ * touch them.
  */
 export type WriteBoundaryStatus = "clean" | "rolled-back" | "rollback-incomplete";
+
+/**
+ * What the window's own runs recorded aiming a successful mutation at.
+ *
+ * This is the write-side witness the diff cannot be: the checkout says a path
+ * changed, and only the run's own tool-call record says whether the run is what
+ * changed it. The record comes from the same fold that grounds a sealed
+ * mutation report, so the boundary and the result contract judge one set of
+ * facts.
+ *
+ * A run can write through a channel no tool event enumerates, and then its path
+ * set is a lower bound rather than the whole list. That is not silently
+ * tolerated: the recorder knows which tools can do it (bash, verify, dispatch,
+ * steer, and any tool this process has no schema for) and reports the record
+ * open, which arrives here as `complete: false`. So the set is only ever read
+ * as a closed list for a run that could not have written outside it, and
+ * enforcement over a run that could stays exactly as strong as it was before
+ * attribution existed.
+ */
+export interface WriteBoundaryAttribution {
+	/**
+	 * Paths the window's runs aimed a successful mutation at. Absolute, or
+	 * relative to the workspace root; anything resolving outside the workspace is
+	 * dropped, because git could not have reported it as a change either.
+	 */
+	recorded: ReadonlyArray<string>;
+	/**
+	 * False when at least one step in the window has no closed write record: a
+	 * code step running a registered command, a runtime that publishes no tool
+	 * telemetry, a run whose telemetry came back with holes, or a run that
+	 * called a tool able to write a path its arguments do not name. An open
+	 * record cannot clear anybody, so the window falls back to blaming every
+	 * change outside the allowlist, and the verdict says it did.
+	 */
+	complete: boolean;
+}
 
 export interface WriteBoundaryVerdict {
 	version: 1;
@@ -243,12 +297,25 @@ export interface WriteBoundaryVerdict {
 	checkedAt: string;
 	changedPaths: ReadonlyArray<string>;
 	violations: ReadonlyArray<string>;
+	/**
+	 * Paths outside the allowlist that changed inside the window and that no run
+	 * in it recorded writing. Recorded so the operator can see them, never rolled
+	 * back: the window did not make them, so the baseline commit is not their
+	 * prior content.
+	 */
+	unattributed: ReadonlyArray<string>;
+	/** Whether every step in the window offered an enumerable write record. */
+	attributionComplete: boolean;
 	rolledBack: ReadonlyArray<WriteBoundaryRollback>;
 	unrecoverable: ReadonlyArray<WriteBoundaryUnrecoverable>;
 	status: WriteBoundaryStatus;
 	/** Typed failure reason, or null when the window stayed inside its boundary. */
 	reason: typeof WRITE_BOUNDARY_VIOLATION_REASON | null;
-	/** Operator-facing message naming the offending paths and the declaration. */
+	/**
+	 * Operator-facing message naming the offending paths and the declaration, or
+	 * naming the concurrent changes the window saw but did not cause. Null only
+	 * when neither happened.
+	 */
 	detail: string | null;
 	digest: string;
 }
@@ -258,6 +325,12 @@ export interface EnforceWriteBoundaryInput {
 	window: string;
 	stepIds: ReadonlyArray<string>;
 	allow: WriteBoundary;
+	/**
+	 * What the window's runs recorded writing. Absent means no caller offered a
+	 * record, which reads the same as an incomplete one: every change outside the
+	 * allowlist is blamed on the window.
+	 */
+	attribution?: WriteBoundaryAttribution;
 }
 
 function canonicalVerdict(verdict: Omit<WriteBoundaryVerdict, "digest">): string {
@@ -318,6 +391,22 @@ function rollbackPath(
 }
 
 /**
+ * Whether one changed path falls inside what a run recorded writing.
+ *
+ * A recorded target is usually the exact file a write or edit named, but a
+ * command's delete target can be a directory, so a change under a recorded
+ * prefix counts as the same write. Matching is on segment boundaries: `work`
+ * does not cover `workspace/a.txt`.
+ */
+function withinRecordedWrite(recorded: ReadonlySet<string>, path: string): boolean {
+	if (recorded.has(path)) return true;
+	for (const target of recorded) {
+		if (path.startsWith(`${target}/`)) return true;
+	}
+	return false;
+}
+
+/**
  * Compare, roll back, and return the verdict. Never throws for a violation: a
  * violation is evidence the caller records and acts on, not an exception that
  * would lose the list of what was restored.
@@ -325,7 +414,21 @@ function rollbackPath(
 export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBoundaryVerdict {
 	const allow = normalizeWriteBoundary(input.allow);
 	const changes = diffWorkspace(input.snapshot);
-	const violations = changes.filter((change) => !writeBoundaryCovers(allow, change.path));
+	const outside = changes.filter((change) => !writeBoundaryCovers(allow, change.path));
+	const attributionComplete = input.attribution?.complete === true;
+	const recorded = new Set<string>();
+	for (const target of input.attribution?.recorded ?? []) {
+		const relativeTarget = repoRelative(input.snapshot.root, target);
+		if (relativeTarget !== null) recorded.add(relativeTarget);
+	}
+	// Without a complete record nothing can be cleared, so the window keeps the
+	// whole diff. With one, only what the runs actually wrote is theirs.
+	const violations = attributionComplete
+		? outside.filter((change) => withinRecordedWrite(recorded, change.path))
+		: outside;
+	const unattributed = attributionComplete
+		? outside.filter((change) => !withinRecordedWrite(recorded, change.path))
+		: [];
 	const rolledBack: WriteBoundaryRollback[] = [];
 	const unrecoverable: WriteBoundaryUnrecoverable[] = [];
 	for (const change of violations) {
@@ -335,15 +438,15 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 	}
 	const status: WriteBoundaryStatus =
 		violations.length === 0 ? "clean" : unrecoverable.length === 0 ? "rolled-back" : "rollback-incomplete";
-	const attribution =
+	const who =
 		input.stepIds.length === 1
 			? `step '${input.stepIds[0]}'`
 			: `steps ${input.stepIds.map((id) => `'${id}'`).join(", ")} ran concurrently in one checkout, so the write cannot be attributed to one of them`;
-	const detail =
+	const violationDetail =
 		violations.length === 0
-			? null
+			? []
 			: [
-					`${attribution} wrote outside its declared boundary.`,
+					`${who} wrote outside its declared boundary.`,
 					`Unauthorized paths: ${violations.map((change) => change.path).join(", ")}.`,
 					`Declared writes: ${describeWriteBoundary(allow)}.`,
 					status === "rolled-back"
@@ -351,8 +454,21 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 						: `Rollback is incomplete; the working tree is left as the step made it. Unrestorable: ${unrecoverable
 								.map((entry) => `${entry.path} (${entry.reason})`)
 								.join("; ")}.`,
+					attributionComplete
+						? "Each was blamed on this window because a run in it recorded writing that path."
+						: "This window had no complete write record, so every change outside the declaration was blamed on it.",
 					"If the change was legitimate, widen the step's `writes:` declaration to cover it.",
-				].join(" ");
+				];
+	const concurrentDetail =
+		unattributed.length === 0
+			? []
+			: [
+					`Concurrent changes were seen in this window that no run in it recorded writing: ${unattributed
+						.map((change) => change.path)
+						.join(", ")}.`,
+					"They were left untouched, because a path this window did not write is not this window's to restore.",
+				];
+	const detail = [...violationDetail, ...concurrentDetail];
 	const body: Omit<WriteBoundaryVerdict, "digest"> = {
 		version: 1,
 		window: input.window,
@@ -363,11 +479,13 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 		checkedAt: new Date().toISOString(),
 		changedPaths: changes.map((change) => change.path),
 		violations: violations.map((change) => change.path),
+		unattributed: unattributed.map((change) => change.path),
+		attributionComplete,
 		rolledBack,
 		unrecoverable,
 		status,
 		reason: violations.length === 0 ? null : WRITE_BOUNDARY_VIOLATION_REASON,
-		detail,
+		detail: detail.length === 0 ? null : detail.join(" "),
 	};
 	return { ...body, digest: createHash("sha256").update(canonicalVerdict(body), "utf8").digest("hex") };
 }
@@ -393,10 +511,64 @@ export function assertWriteBoundaryInsideRoot(root: string, allow: WriteBoundary
 	}
 }
 
-/** Repo-relative form of an absolute path, or null when it is outside. */
+/**
+ * Refuse a declaration git will never report on.
+ *
+ * `git status` does not list an ignored path, so a boundary entry the
+ * repository ignores names a region enforcement is blind to: every window over
+ * it is certified clean without a single observation, which is a stronger claim
+ * than "nothing was checked" and reads as a passing one. That is the same
+ * defect `assertWriteBoundaryInsideRoot` refuses for an entry that leaves the
+ * workspace through a symlink, so it is refused in the same place and at the
+ * same time, before anything runs.
+ *
+ * A tracked path is reportable whatever the ignore rules say, and git's own
+ * index-aware check is what decides that, so this never refuses a path the
+ * repository is actually following.
+ */
+export function assertWriteBoundaryVisibleToGit(root: string, allow: WriteBoundary): void {
+	// Entry by entry rather than through `normalizeWriteBoundary`, whose 32-entry
+	// cap is a per-step declaration limit. A caller may legitimately ask this
+	// question about every entry a whole plan declared.
+	const entries = [...new Set(allow.map(normalizeWriteBoundaryEntry))].sort();
+	if (entries.length === 0) return;
+	const absolute = resolve(root);
+	let raw: string;
+	try {
+		raw = git(absolute, ["check-ignore", "-v", "-z", "--stdin"], `${entries.join("\0")}\0`);
+	} catch (error) {
+		// `check-ignore` exits 1 when nothing matched, which is the common answer
+		// and not a failure. Any other exit is a real inability to decide, and
+		// enforcement fails closed rather than assuming visibility.
+		const status = (error as { status?: number }).status;
+		if (status === 1) return;
+		throw new Error(
+			`write boundary: could not determine whether ${describeWriteBoundary(entries)} is ignored by git in ${absolute}: ${(error as Error).message}`,
+		);
+	}
+	const fields = raw.split("\0");
+	const refusals: string[] = [];
+	// `-v -z` emits source, line number, pattern, and pathname per match.
+	for (let index = 0; index + 3 < fields.length; index += 4) {
+		const [source, line, pattern, path] = fields.slice(index, index + 4);
+		if (path === undefined || path.length === 0) continue;
+		refusals.push(`'${path}' is ignored by ${source}:${line}:${pattern}`);
+	}
+	if (refusals.length === 0) return;
+	throw new Error(
+		`write boundary: ${refusals.join(", ")}. git status never reports an ignored path, so a boundary declared over one is verified against nothing and every window would be certified clean without an observation. Declare a path the repository tracks, or stop ignoring this one.`,
+	);
+}
+
+/**
+ * Workspace-relative form of a path, or null when it resolves outside. A
+ * relative input is taken as already workspace-relative, which is how a
+ * recorded write target and an absolute state directory both normalize here.
+ */
 function repoRelative(root: string, path: string): string | null {
-	const rel = relative(resolve(root), resolve(path));
-	if (rel.length === 0 || rel.startsWith("..") || rel.startsWith(`..${sep}`)) return null;
+	const base = resolve(root);
+	const rel = relative(base, resolve(base, path));
+	if (rel.length === 0 || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
 	return rel.split(sep).join("/");
 }
 

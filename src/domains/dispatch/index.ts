@@ -160,10 +160,12 @@ export {
 } from "./validation.js";
 export type {
 	WorkspaceSnapshot,
+	WriteBoundaryAttribution,
 	WriteBoundaryStatus,
 	WriteBoundaryVerdict,
 } from "./write-boundary.js";
 export {
+	assertWriteBoundaryVisibleToGit,
 	captureWorkspaceSnapshot,
 	diffWorkspace,
 	enforceWriteBoundary,

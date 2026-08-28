@@ -614,6 +614,14 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
  */
 const DISPATCH_DRAIN_GRACE_MS = 2000;
 
+/**
+ * How many finalized runs keep their observed write targets in memory. The
+ * write boundary reads a run's record while closing the window it ran in, which
+ * is the same wave, so a few hundred runs of headroom is far more than the
+ * lookup ever reaches back for.
+ */
+const RUN_WRITE_TARGET_HISTORY = 512;
+
 async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_GRACE_MS): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const grace = new Promise<false>((resolve) => {
@@ -2388,6 +2396,26 @@ export function createDispatchBundle(
 	const active = new Map<string, ActiveRun>();
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 	const ownedReservations = new Set<string>();
+	/**
+	 * Paths each finalized run's own tool calls aimed a successful mutation at,
+	 * newest last. `null` records a run whose write record is unusable, which is
+	 * a different answer from an empty list and has to survive as one.
+	 *
+	 * Held in memory rather than sealed into the receipt: the only reader is the
+	 * write boundary closing a window seconds later in this process, and a
+	 * per-run path list is run-shaped evidence the receipt schema does not carry.
+	 * Bounded because a long session finalizes many runs and none of this is
+	 * needed once its window has closed.
+	 */
+	const runWriteTargets = new Map<string, ReadonlyArray<string> | null>();
+	const recordRunWriteTargets = (runId: string, paths: ReadonlyArray<string> | null): void => {
+		runWriteTargets.set(runId, paths);
+		while (runWriteTargets.size > RUN_WRITE_TARGET_HISTORY) {
+			const oldest = runWriteTargets.keys().next();
+			if (oldest.done === true) break;
+			runWriteTargets.delete(oldest.value);
+		}
+	};
 	const capacityAdmission = createCapacityAdmissionController({
 		limits: () => {
 			const settings = getEffectiveSettings();
@@ -5276,6 +5304,25 @@ export function createDispatchBundle(
 				}
 				ledgerRef.update(envelope.id, ledgerPatch);
 				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation.decision));
+				// Two independent ways a run's write record can fail to be a closed
+				// list, and either one files it as `null` rather than as an empty
+				// one. The difference decides whether the write boundary may clear a
+				// path it did not see this run touch.
+				//
+				// The telemetry axis is whether the events were seen at all: a
+				// subprocess runtime publishes no tool events, and a partial trail
+				// has its holes exactly where an unobserved write would sit.
+				//
+				// The opacity axis is whether the events that were seen say enough.
+				// A run that called bash, verify, dispatch, or steer to a clean exit
+				// could have written through a channel no argument names, so nothing
+				// in the checkout can be cleared on the strength of its absence from
+				// the set. That run's window keeps today's blame-the-whole-diff
+				// behaviour; a run that never touched such a tool keeps the
+				// protection.
+				const writeRecordUsable =
+					receipt.safety?.toolTelemetry?.coverage === "complete" && observedRunEffects.writeRecordComplete;
+				recordRunWriteTargets(envelope.id, writeRecordUsable ? [...observedRunEffects.mutatedPaths] : null);
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
@@ -6203,6 +6250,11 @@ export function createDispatchBundle(
 		getRun(runId) {
 			if (!ledger) return null;
 			return ledger.get(runId);
+		},
+		observedRunWrites(runId) {
+			// A run this process never finalized, or finalized long enough ago to
+			// have been evicted, is unknown rather than silent, so both answer null.
+			return runWriteTargets.get(runId) ?? null;
 		},
 		assignments: {
 			get: (id) => assignments.get(id),
