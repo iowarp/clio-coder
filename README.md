@@ -127,13 +127,18 @@ Scripting the same setup the wizard performs:
 
 ```bash
 clio-coder configure --id local-lmstudio --runtime lmstudio \
-  --url http://localhost:1234 --model your-model-id \
+  --url http://localhost:1234 --model qwen3.8-27b \
   --set-orchestrator --set-fleet-default
 clio-coder targets --probe
 
 clio-coder auth login anthropic-max     # or: openai-codex
 clio-coder configure --id claude-sub --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
 ```
+
+`--model` must name an id the server advertises; `configure` asks the server
+and refuses one it does not list, naming the ids it does. `qwen3.8-27b` is the
+id LM Studio gives the recommended model above; substitute whatever `lms ls`
+shows for yours.
 
 > [!NOTE]
 > Connecting a Claude Pro/Max subscription over OAuth uses the same path as

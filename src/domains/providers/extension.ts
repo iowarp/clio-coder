@@ -16,6 +16,7 @@ import { probeCapabilitiesForModel } from "./model-capabilities.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
+import { listKnownModelsForRuntime } from "./support.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import { EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import {
@@ -204,6 +205,32 @@ export function mergeProbeResult(
 	return merge;
 }
 
+/**
+ * Whether a reachable target can serve the model it is configured to serve by
+ * default. Reachability alone was the whole of `health`, so a target whose
+ * `defaultModel` the server had never heard of printed `healthy` until the
+ * first turn. This is judged only from a live list on a runtime with no static
+ * catalog: the catalog is the authority for cloud runtimes, and a cached or
+ * descriptor-supplied list says nothing about the server in front of us.
+ * Returns the reason when the default is not served, null when it is or when
+ * there is no live evidence either way.
+ */
+export function unservedDefaultModelReason(
+	desc: Pick<RuntimeDescriptor, "id">,
+	target: Pick<TargetDescriptor, "defaultModel">,
+	merge: Pick<ProbeMerge, "discoveredModels" | "discoveredModelsSource" | "discoveredModelStates">,
+): string | null {
+	const model = target.defaultModel;
+	if (!model) return null;
+	if (merge.discoveredModelsSource !== "probe" || merge.discoveredModels.length === 0) return null;
+	if (listKnownModelsForRuntime(desc.id).length > 0) return null;
+	if (merge.discoveredModels.includes(model)) return null;
+	// LM Studio lists a loaded model under its instance id and keeps the model
+	// key in the state map; the request path resolves either.
+	if (merge.discoveredModelStates && model in merge.discoveredModelStates) return null;
+	return `default model '${model}' is not advertised by the target`;
+}
+
 export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
@@ -292,13 +319,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const merge = mergeProbeResult(desc, target, probe, previous);
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthy = probe !== null ? probe.ok : null;
+		const unservedDefault = probe?.ok ? unservedDefaultModelReason(desc, target, merge) : null;
 		const health: TargetHealth =
 			probe === null
 				? (previous?.health ?? emptyHealth())
 				: {
-						status: healthy ? "healthy" : "down",
+						status: healthy ? (unservedDefault === null ? "healthy" : "degraded") : "down",
 						lastCheckAt: new Date().toISOString(),
-						lastError: probe.error ?? null,
+						lastError: probe.error ?? unservedDefault,
 						latencyMs: probe.latencyMs ?? null,
 					};
 		const available = availability.available && (probe === null || probe.ok);

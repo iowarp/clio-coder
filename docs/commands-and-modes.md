@@ -131,7 +131,7 @@ Example:
 clio-coder run \
   "Find the test command and summarize the project structure." \
   --target local-lmstudio \
-  --model your-model-id
+  --model qwen3.8-27b
 ```
 
 ## Interactive Slash Commands

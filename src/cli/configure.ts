@@ -27,7 +27,12 @@ import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
-import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
+import type {
+	ProbeContext,
+	ProbeModelStatus,
+	ProbeResult,
+	RuntimeDescriptor,
+} from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
@@ -44,7 +49,7 @@ import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
-import { validateModelChoice } from "./validate-model.js";
+import { type LiveModelInventory, validateModelChoice } from "./validate-model.js";
 
 const HELP = `clio-coder configure
 
@@ -70,7 +75,8 @@ Non-interactive flags:
   --agent-profile-model <id>       model to use for --agent-profile
   --api-key-env <VAR>              read API key from this env var at call time
   --api-key <literal>              store API key in credentials.yaml
-  --force                          allow a model outside the runtime catalog
+  --force                          save a model outside the runtime catalog, or one the
+                                   target does not advertise, without refusing
   --gateway                        mark the target as a gateway
   --lifecycle <user-managed|clio-managed>
                                   resident model lifecycle policy
@@ -378,19 +384,35 @@ function catalogContextWindowFor(runtime: RuntimeDescriptor, modelId: string): n
 	return null;
 }
 
-function validateResolvedModel(runtimeId: string, modelId: string | undefined, force: boolean): boolean {
+/**
+ * Check the resolved model against the catalog where there is one and against
+ * the target's own list where there is not. A runtime with no catalog used to
+ * pass any string here while the same command wrote the live list that ruled
+ * it out into `wireModels`, so the target saved as `ok` and failed on its first
+ * turn. Without a catalog or a live list there is nothing to check against, and
+ * the note says so rather than implying the id was verified.
+ */
+function validateResolvedModel(
+	runtime: RuntimeDescriptor,
+	target: Pick<TargetDescriptor, "id" | "url">,
+	modelId: string | undefined,
+	force: boolean,
+	inventory: WireModelInventory,
+): boolean {
 	if (!modelId) return true;
-	const validation = validateModelChoice({
-		runtimeId,
-		modelId,
-		knownModels: runtimeKnownModelsFor(runtimeId),
-		force,
-	});
+	const knownModels = runtimeKnownModelsFor(runtime.id);
+	const live = inventory.source === "probe" ? liveInventoryFor(target, inventory) : undefined;
+	const validation = validateModelChoice({ runtimeId: runtime.id, modelId, knownModels, live, force });
 	if (!validation.ok) {
 		process.stderr.write(`error: ${validation.reason}\n`);
 		return false;
 	}
 	if (validation.warning) process.stderr.write(`warning: ${validation.warning}\n`);
+	if (knownModels.length === 0 && live === undefined && runtime.kind === "http") {
+		process.stderr.write(
+			`warning: could not verify model '${modelId}': ${target.url ?? `target '${target.id}'`} returned no model list; it is saved as written\n`,
+		);
+	}
 	return true;
 }
 
@@ -412,10 +434,15 @@ function validateContextWindowOverride(
 	return true;
 }
 
-async function runtimeProbe(runtime: RuntimeDescriptor, target: TargetDescriptor): Promise<ProbeResult | null> {
+async function runtimeProbe(
+	runtime: RuntimeDescriptor,
+	target: TargetDescriptor,
+	authToken?: string,
+): Promise<ProbeResult | null> {
 	if (typeof runtime.probe !== "function") return null;
 	try {
-		return await runtime.probe(target, await buildProbeContext(runtime, target));
+		const context = await buildProbeContext(runtime, target);
+		return await runtime.probe(target, authToken === undefined ? context : { ...context, authToken });
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
@@ -679,17 +706,69 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 	}
 }
 
+/**
+ * The model ids a target can be configured with, and where they came from.
+ * `probe` is the only source that says anything about the server in front of
+ * us right now; `catalog` is static provider knowledge, and `existing` is the
+ * list a previous configure recorded, which the server may no longer match.
+ */
+interface WireModelInventory {
+	models: string[];
+	source: "catalog" | "probe" | "existing" | "none";
+	/** Per-model load state when the probe reported it. */
+	modelStates?: Readonly<Record<string, ProbeModelStatus>> | undefined;
+}
+
+/**
+ * Every id the runtime would resolve. LM Studio lists a loaded model under its
+ * instance id and keeps the model key only in the state map, and the request
+ * path accepts either, so both count as advertised.
+ */
+function advertisedModelIds(inventory: Pick<WireModelInventory, "models" | "modelStates">): string[] {
+	const ids = [...inventory.models];
+	for (const id of Object.keys(inventory.modelStates ?? {})) if (!ids.includes(id)) ids.push(id);
+	return ids;
+}
+
+function residentModelIds(modelStates: WireModelInventory["modelStates"]): string[] {
+	return Object.entries(modelStates ?? {})
+		.filter(([, status]) => status.state === "loaded" || status.state === "loading")
+		.map(([id]) => id);
+}
+
+function liveInventoryFor(
+	target: Pick<TargetDescriptor, "id" | "url">,
+	inventory: WireModelInventory,
+): LiveModelInventory {
+	return {
+		targetId: target.id,
+		url: target.url,
+		models: advertisedModelIds(inventory),
+		resident: residentModelIds(inventory.modelStates),
+	};
+}
+
 async function resolveSupportedWireModels(
 	runtime: RuntimeDescriptor,
 	target: TargetDescriptor,
 	existing?: TargetDescriptor,
 	authToken?: string,
-): Promise<string[]> {
+): Promise<WireModelInventory> {
 	const known = listKnownModelsForRuntime(runtime.id);
-	if (known.length > 0) return known;
-	const discovered = runtime.kind === "http" ? await runtimeProbeModels(runtime, target, authToken) : [];
-	if (discovered.length > 0) return discovered;
-	return existing?.wireModels ? [...existing.wireModels] : [];
+	if (known.length > 0) return { models: known, source: "catalog" };
+	if (runtime.kind === "http") {
+		// The full probe carries load state alongside the ids; a runtime that
+		// lists models only through probeModels still gets its ids checked.
+		const probe = await runtimeProbe(runtime, target, authToken);
+		if (probe?.ok && probe.models && probe.models.length > 0) {
+			return { models: [...probe.models], source: "probe", modelStates: probe.modelStates };
+		}
+		const discovered = await runtimeProbeModels(runtime, target, authToken);
+		if (discovered.length > 0) return { models: discovered, source: "probe" };
+	}
+	if (existing?.wireModels && existing.wireModels.length > 0)
+		return { models: [...existing.wireModels], source: "existing" };
+	return { models: [], source: "none" };
 }
 
 function resolveModelChoice(
@@ -810,7 +889,8 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 	});
-	const wireModels = await resolveSupportedWireModels(runtime, seed, existing, args.apiKey);
+	const inventory = await resolveSupportedWireModels(runtime, seed, existing, args.apiKey);
+	const wireModels = inventory.models;
 	const model =
 		args.model ??
 		existing?.defaultModel ??
@@ -820,7 +900,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		refuseCatalogSeededModel(runtime, support);
 		return 2;
 	}
-	if (!validateResolvedModel(runtime.id, model, args.force)) return 2;
+	if (!validateResolvedModel(runtime, seed, model, args.force, inventory)) return 2;
 	if (!validateContextWindowOverride(runtime, model, args.contextWindow, args.force)) return 2;
 	const descriptor = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
@@ -1192,7 +1272,10 @@ async function runInteractive(
 	}
 
 	let model: string | undefined = defaults.model;
-	let wireModels: string[] = existing?.wireModels ? [...existing.wireModels] : [];
+	let inventory: WireModelInventory =
+		existing?.wireModels && existing.wireModels.length > 0
+			? { models: [...existing.wireModels], source: "existing" }
+			: { models: [], source: "none" };
 	const tentative = buildDescriptor(runtime, targetId, {
 		...(url !== undefined ? { url } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
@@ -1211,8 +1294,9 @@ async function runInteractive(
 	});
 
 	if (runtime.kind === "http") {
-		wireModels = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined);
+		inventory = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined);
 	}
+	const wireModels = inventory.models;
 	// The wizard shows the whole list, so a catalog-ordered runtime does not need
 	// --model here the way the non-interactive path does. It does need to stop
 	// offering the alphabetically first id as though it were the recommended one.
@@ -1234,11 +1318,11 @@ async function runInteractive(
 				process.stdout.write("  a model is required: enter a number from the list or a model id.\n");
 				continue;
 			}
-			if (validateResolvedModel(runtime.id, model, defaults.force)) break;
+			if (validateResolvedModel(runtime, tentative, model, defaults.force, inventory)) break;
 		}
 	} else {
 		for (;;) {
-			if (model && validateResolvedModel(runtime.id, model, defaults.force)) break;
+			if (model && validateResolvedModel(runtime, tentative, model, defaults.force, inventory)) break;
 			const manual = await ask(rl, "Default model id (blank to leave empty)", model ?? "");
 			if (manual === null) return 0;
 			model = manual.length > 0 ? manual : undefined;

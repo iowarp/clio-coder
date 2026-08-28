@@ -4,6 +4,7 @@ import {
 	runDoctor,
 	runDoctorFleetChecks,
 	runDoctorInteropChecks,
+	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
 import { printError } from "./shared.js";
@@ -35,6 +36,9 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	const untouched = !fix && isUninitializedHome();
 	const findings = runDoctor({ fix });
 	const runtimeChecks = await runDoctorRuntimeChecks();
+	// Every model pointer is checked against what its target advertises, so a
+	// placeholder id saved by configure is reported here and not on the first turn.
+	const modelChecks = await runDoctorModelChecks();
 	// The interop and fleet sweeps read the state and config roots through the
 	// ensuring accessors, which create them, and there is no fleet or interop
 	// state to inspect before Clio has ever written anything. On a home Clio has
@@ -43,7 +47,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
 	const fleetChecks = untouched ? [] : await runDoctorFleetChecks();
-	const all = [...findings, ...runtimeChecks, ...interopChecks, ...fleetChecks];
+	const all = [...findings, ...runtimeChecks, ...modelChecks, ...interopChecks, ...fleetChecks];
 	const ok = all.every((f) => f.ok);
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ ok, fix, findings: all }, null, 2)}\n`);

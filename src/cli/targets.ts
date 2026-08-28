@@ -953,7 +953,7 @@ function renderTable(providers: ProvidersContract, entries: ReadonlyArray<Target
 	}
 }
 
-function targetTableRow(providers: ProvidersContract, status: TargetStatus): TargetTableRow {
+export function targetTableRow(providers: ProvidersContract, status: TargetStatus): TargetTableRow {
 	return {
 		id: status.target.id,
 		tier: statusTier(status),
@@ -1051,6 +1051,9 @@ function formatNotes(status: TargetStatus): string {
 	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
 	if (status.capabilities.contextWindow > 0) parts.push(formatContextWindow(status));
 	if (!status.available && status.reason) parts.push(status.reason);
+	// A reachable target that cannot serve its own default is degraded, and the
+	// row has to say why or the model column reads as a model that works.
+	if (status.health.status === "degraded" && status.health.lastError) parts.push(status.health.lastError);
 	const residency = residentModelsSummary(status.discoveredModelStates);
 	if (residency) parts.push(residency);
 	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
