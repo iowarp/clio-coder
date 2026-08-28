@@ -355,6 +355,20 @@ async function main() {
 		throw new Error(`--shard ${args.shard} is out of range: ${lanes.length} lanes (0..${lanes.length - 1})`);
 	}
 
+	// A `.git` at the system temp root makes src/tools/ignore-policy.ts report
+	// every mkdtemp scratch as inside a git repository, which fails the
+	// ignore-policy contracts from whichever lane happens to run them. Lanes
+	// carry tests/harness/tmp-git-guard.ts, which refuses the write and names the
+	// caller; this is the run-level backstop for a creator outside every lane,
+	// including this process. See issue #205.
+	const strayGit = join(tmpdir(), ".git");
+	const strayGitExistedBefore = existsSync(strayGit);
+	if (strayGitExistedBefore) {
+		process.stderr.write(
+			`shard-tests: ${strayGit} already exists before this run. It will fail the ignore-policy contracts in tests/contracts/tool-hardening.test.ts. Remove it.\n`,
+		);
+	}
+
 	const started = Date.now();
 	const results = await Promise.all(
 		[...toRun].map(([index, lane]) => runLane(laneName(index, lanes.length), lane.files, args.forward)),
@@ -378,6 +392,12 @@ async function main() {
 	process.stdout.write(
 		`\n# shards ${results.length}  # tests ${totalTests}  # pass ${totalPass}  # fail ${totalFail}  # wall ${wallSeconds}s\n`,
 	);
+	if (!strayGitExistedBefore && existsSync(strayGit)) {
+		process.stdout.write(
+			`# ${strayGit} was created during this run. Nothing in this repository may write a .git at the system temp root: it makes every mkdtemp scratch look like it sits inside a git repository and breaks the ignore-policy contracts. Remove it, then look for a tmp-git-guard message in the lane output above for the caller. See issue #205.\n`,
+		);
+		return 1;
+	}
 	if (failedLanes.length > 0) {
 		process.stdout.write(`# failed lanes: ${failedLanes.join(", ")}\n`);
 		process.stdout.write(`# reproduce with: node scripts/shard-tests.mjs --shard <n>\n`);
