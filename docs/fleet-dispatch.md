@@ -672,6 +672,19 @@ Assignment status, attempt ids, and terminal run id are stored separately in
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
+A fleet run is the exception to "the attempts settle the record". Every step of
+a fleet dispatches under the fleet root id as its lineage root, so all of them
+share one row, and no single step is the run's verdict. The run claims the row
+by writing `verdictOwner: "fleet"` when it opens, files every settled step's
+terminal run id in `attempts` (an agent step's receipt id, a code step's
+`code-*` run id, whose report sits under `code-steps/<fleetRootId>/`), and
+writes `status` once at the end from the whole-run outcome. Until then the row
+stays `running`, and a step settling under it records its attempt without
+touching the status. A run that stops before its last step, whose final step
+fails, or that throws is `failed`; a run abandoned by a crashed process is
+reconciled to `failed` at the next startup rather than inheriting a green
+step's success.
+
 Editing assignments also own one baseline-pinned workspace transaction. Every
 attempt gets a distinct worktree. Before any winning diff can reach the
 destination checkout, a pure gate checks terminal outcome, receipt integrity,

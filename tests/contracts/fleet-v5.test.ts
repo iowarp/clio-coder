@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -11,7 +11,9 @@ import { parseFleetCommands } from "../../src/domains/agents/fleet-commands.js";
 import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import { getStoredAssignment, settleStoredAssignment } from "../../src/domains/dispatch/assignment-store.js";
 import { resolveCommandArgv } from "../../src/domains/dispatch/code-step.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import {
 	buildDelegationProposalBriefing,
 	DELEGATION_PROPOSAL_BRIEFING_MAX_BYTES,
@@ -881,5 +883,189 @@ describe("fleet v5 execution", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+});
+
+/**
+ * `assignments.json` is the row an operator and any automation reads to ask
+ * whether a run worked. A fleet gathers every step under one lineage root, so
+ * every agent step used to settle that row on its own receipt: the last step to
+ * finish wrote the verdict, and code steps never entered the record at all.
+ * These cover the three shapes that were reported `succeeded` and were not.
+ */
+describe("fleet assignment ledger", () => {
+	const roots: string[] = [];
+	beforeEach(isolateDispatchState);
+	afterEach(() => {
+		restoreDispatchState();
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+	const workspace = (): string => {
+		const root = gitWorkspace();
+		roots.push(root);
+		return root;
+	};
+
+	const codeCommands = (): ReturnType<typeof parseFleetCommands> =>
+		parseFleetCommands(
+			["version: 1", "commands:", "  ok:", '    argv: ["true"]', "  bad:", '    argv: ["false"]', ""].join("\n"),
+			"commands.yaml",
+		);
+
+	const codeStep = (id: string, command: string, dependencies: string): string =>
+		[
+			"  - kind: code",
+			`    id: ${id}`,
+			`    command: ${command}`,
+			"    scope: readonly",
+			`    dependencies: ${dependencies}`,
+		].join("\n");
+
+	const BUILDER = [
+		"  - kind: agent",
+		"    id: build",
+		"    agent: coder",
+		"    scope: workspace",
+		"    writes: [src/]",
+		"    dependencies: []",
+	].join("\n");
+
+	it("records every step of a green fleet and settles the row succeeded", async () => {
+		const root = workspace();
+		const { context, agents } = v5AgentHarness();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker(_spec, opts) {
+				const declared = join(opts?.cwd ?? "", "src", "built.ts");
+				writeFileSync(declared, "built\n");
+				return spawnedWorker("built", undefined, [wrote(declared)]);
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const contract = parseFleetContract(
+				source(5, [BUILDER, codeStep("verify", "ok", "[build]")].join("\n")),
+				"fleet.md",
+			);
+			const outcome = await executeFleetRun({
+				plan: compileV5(contract, agents),
+				contractName: contract.name,
+				commands: codeCommands(),
+				workspaceRoot: root,
+				fleetRootId: "fleet-ledger-green",
+				dispatch: bundle.contract,
+				agents,
+				attributionEnabled: false,
+			});
+			strictEqual(outcome.cleanRun, true, JSON.stringify([...outcome.result.results.entries()]));
+			await bundle.contract.assignments?.flushWrites?.();
+			const stored = getStoredAssignment("fleet-ledger-green");
+			strictEqual(stored?.status, "succeeded");
+			strictEqual(stored?.verdictOwner, "fleet");
+			// Both kinds of step are in the record: the agent's receipt id and the
+			// deterministic step's `code-*` run id, whose report is durable under
+			// code-steps/fleet-ledger-green/.
+			const agentRunId = outcome.receipts[0]?.runId;
+			ok(agentRunId !== undefined && stored.attempts.includes(agentRunId), JSON.stringify(stored.attempts));
+			ok(
+				stored.attempts.some((runId) => runId.startsWith("code-")),
+				JSON.stringify(stored.attempts),
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("fails the row when a code step fails after every agent step went green", async () => {
+		const root = workspace();
+		const { context, agents } = v5AgentHarness();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker(_spec, opts) {
+				const declared = join(opts?.cwd ?? "", "src", "built.ts");
+				writeFileSync(declared, "built\n");
+				return spawnedWorker("built", undefined, [wrote(declared)]);
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const contract = parseFleetContract(
+				source(5, [BUILDER, codeStep("verify", "bad", "[build]")].join("\n")),
+				"fleet.md",
+			);
+			const outcome = await executeFleetRun({
+				plan: compileV5(contract, agents),
+				contractName: contract.name,
+				commands: codeCommands(),
+				workspaceRoot: root,
+				fleetRootId: "fleet-ledger-red-code",
+				dispatch: bundle.contract,
+				agents,
+				attributionEnabled: false,
+			});
+			strictEqual(outcome.result.results.get("build")?.succeeded, true);
+			strictEqual(outcome.result.results.get("verify")?.succeeded, false);
+			strictEqual(outcome.cleanRun, false);
+			await bundle.contract.assignments?.flushWrites?.();
+			const stored = getStoredAssignment("fleet-ledger-red-code");
+			strictEqual(stored?.status, "failed");
+			// The green agent step is filed as an attempt and still does not decide
+			// the row, whichever order the two writes land in.
+			const agentRunId = outcome.receipts[0]?.runId;
+			ok(agentRunId !== undefined && stored.attempts.includes(agentRunId), JSON.stringify(stored.attempts));
+			await settleStoredAssignment("fleet-ledger-red-code", String(agentRunId), "succeeded");
+			strictEqual(getStoredAssignment("fleet-ledger-red-code")?.status, "failed");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("fails the row for a fleet that stopped before its last step and for one that threw", async () => {
+		const stub = { abort() {} } as unknown as DispatchContract;
+		const stoppedContract = parseFleetContract(
+			source(
+				5,
+				[codeStep("first", "ok", "[]"), codeStep("second", "bad", "[first]"), codeStep("third", "ok", "[second]")].join(
+					"\n",
+				),
+			),
+			"fleet.md",
+		);
+		const stoppedPlan = compileV5(stoppedContract, v5AgentHarness().agents);
+		const stopped = await executeFleetRun({
+			plan: stoppedPlan,
+			contractName: stoppedContract.name,
+			commands: codeCommands(),
+			workspaceRoot: workspace(),
+			fleetRootId: "fleet-ledger-stopped",
+			dispatch: stub,
+			agents: { getSpec: () => null },
+			attributionEnabled: false,
+		});
+		strictEqual(stopped.cleanRun, false);
+		strictEqual(stoppedPlan.steps.length, 3);
+		// The run halted under `onFailure: stop`, so its last step has no result at
+		// all. That is the shape that used to be reported succeeded.
+		deepStrictEqual(
+			readFleetRun("fleet-ledger-stopped")?.steps.map((entry) => entry.stepId),
+			["first", "second"],
+		);
+		strictEqual(getStoredAssignment("fleet-ledger-stopped")?.status, "failed");
+
+		const thrownContract = parseFleetContract(source(5, codeStep("only", "ok", "[]")), "fleet.md");
+		await rejects(
+			executeFleetRun({
+				plan: compileV5(thrownContract, v5AgentHarness().agents),
+				contractName: thrownContract.name,
+				// No registry, so the step's command cannot be resolved and the
+				// scheduler throws rather than returning a result.
+				commands: null,
+				workspaceRoot: workspace(),
+				fleetRootId: "fleet-ledger-thrown",
+				dispatch: stub,
+				agents: { getSpec: () => null },
+				attributionEnabled: false,
+			}),
+			/has no registered command/,
+		);
+		strictEqual(getStoredAssignment("fleet-ledger-thrown")?.status, "failed");
 	});
 });
