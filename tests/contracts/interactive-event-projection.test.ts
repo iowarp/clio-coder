@@ -95,6 +95,24 @@ describe("interactive event projection", () => {
 		deepStrictEqual(log, ["hot:on", "settings:refresh"]);
 	});
 
+	it("projects a dispatch scope replacement into the interactive transcript", () => {
+		const log: string[] = [];
+		const harness = createHarness(log);
+		createInteractiveEventProjection(harness.deps);
+		const message =
+			"[dispatch scope] typed intent replaced prose path inference; omitted paths: docs/readme.md. Those paths did not select project rules or expand worker authority.";
+
+		harness.deps.bus.emit(BusChannels.DispatchScopeNotice, {
+			code: "typed_scope_replaced_inferred_paths",
+			level: "warning",
+			agentId: "coder",
+			omittedPaths: ["docs/readme.md"],
+			message,
+		});
+
+		deepStrictEqual(log, [`transcript:warn:${message}`, "render"]);
+	});
+
 	it("preserves startup, queue, tool, and chat-render ordering", () => {
 		const log: string[] = [];
 		const harness = createHarness(log);

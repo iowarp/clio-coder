@@ -1,4 +1,5 @@
 import path from "node:path";
+import { asDirectoryPathBoundary, pathBoundaryEntryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
 import type { ActionClass } from "./action-classifier.js";
 
 /**
@@ -15,15 +16,7 @@ export interface ScopeSpec {
 }
 
 function normalizeRoot(root: string): string {
-	return path.resolve(root);
-}
-
-function isUnder(child: string, parent: string): boolean {
-	const c = normalizeRoot(child);
-	const p = normalizeRoot(parent);
-	if (c === p) return true;
-	const rel = path.relative(p, c);
-	return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+	return resolvePathBoundary(process.cwd(), root);
 }
 
 export function isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean {
@@ -31,7 +24,9 @@ export function isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean {
 		if (!orchestrator.allowedActions.has(action)) return false;
 	}
 	for (const root of worker.allowedWriteRoots) {
-		const covered = orchestrator.allowedWriteRoots.some((outer) => isUnder(root, outer));
+		const covered = orchestrator.allowedWriteRoots.some((outer) =>
+			pathBoundaryEntryCovers(normalizeRoot(outer), normalizeRoot(root)),
+		);
 		if (!covered) return false;
 	}
 	if (worker.allowNetwork && !orchestrator.allowNetwork) return false;
@@ -48,14 +43,14 @@ export const READONLY_SCOPE: ScopeSpec = {
 
 export const WORKSPACE_SCOPE: ScopeSpec = {
 	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch"]),
-	allowedWriteRoots: [process.cwd()],
+	allowedWriteRoots: [asDirectoryPathBoundary(path.resolve(process.cwd()))],
 	allowNetwork: true,
 	allowDispatch: true,
 };
 
 export const CONFIRMED_SCOPE: ScopeSpec = {
 	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify"]),
-	allowedWriteRoots: [process.cwd()],
+	allowedWriteRoots: [asDirectoryPathBoundary(path.resolve(process.cwd()))],
 	allowNetwork: true,
 	allowDispatch: true,
 };

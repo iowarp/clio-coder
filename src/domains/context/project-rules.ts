@@ -203,10 +203,60 @@ function ruleMatchesAnyPath(rule: ProjectRule, workingPaths: ReadonlyArray<strin
 			continue;
 		}
 		for (const path of workingPaths) {
-			if (regex.test(normalizeGlobInput(path))) return true;
+			const normalized = normalizeGlobInput(path);
+			if (regex.test(normalized)) return true;
+			if (normalized.endsWith("/") && globMatchesInsideDirectory(regex, pattern, normalized)) return true;
 		}
 	}
 	return false;
+}
+
+function materializedGlobVariants(pattern: string): string[] {
+	let variants = [""];
+	const normalized = normalizeGlobInput(pattern);
+	for (let index = 0; index < normalized.length; index += 1) {
+		const character = normalized[index];
+		if (character === undefined) break;
+		if (character === "*" && normalized[index + 1] === "*" && normalized[index + 2] === "/") {
+			variants = variants.flatMap((prefix) => [prefix, `${prefix}x/`]).slice(0, 64);
+			index += 2;
+			continue;
+		}
+		if (character === "*" && normalized[index + 1] === "*") {
+			variants = variants.map((prefix) => `${prefix}x`);
+			index += 1;
+			continue;
+		}
+		if (character === "*" || character === "?") {
+			variants = variants.map((prefix) => `${prefix}x`);
+			continue;
+		}
+		if (character === "[") {
+			const end = normalized.indexOf("]", index + 1);
+			const selected = end === -1 ? "x" : (normalized[index + 1] ?? "x");
+			variants = variants.map((prefix) => `${prefix}${selected}`);
+			index = end === -1 ? index : end;
+			continue;
+		}
+		variants = variants.map((prefix) => `${prefix}${character}`);
+	}
+	return variants;
+}
+
+function globMatchesInsideDirectory(regex: RegExp, pattern: string, directory: string): boolean {
+	const candidates = new Set<string>([`${directory}x`, `${directory}x/x`]);
+	for (const materialized of materializedGlobVariants(pattern)) {
+		if (materialized.startsWith(directory)) candidates.add(materialized);
+		const segments = materialized.split("/");
+		for (let index = 0; index < segments.length; index += 1) {
+			const suffix = segments.slice(index).join("/");
+			if (suffix.length > 0) candidates.add(`${directory}${suffix}`);
+		}
+		for (let index = 0; index < materialized.length; index += 1) {
+			candidates.add(`${directory}${materialized.slice(index)}`);
+		}
+	}
+	return [...candidates].some((candidate) => regex.test(candidate));
 }
 
 /**

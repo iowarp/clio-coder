@@ -39,6 +39,7 @@ import {
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 } from "../domains/dispatch/gate-role-prompts.js";
+import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
@@ -632,15 +633,6 @@ function competeCorrelation(
 	return gateCorrelationOf(subject, decider);
 }
 
-function reviewerTask(originalTask: string, builderRunId: string, cycle: number): string {
-	return [
-		`Review the work of builder run ${builderRunId} (review cycle ${cycle}).`,
-		"The builder's final answer is provided as input data; verify it against the workspace, do not trust it blindly.",
-		"Original task the builder was given:",
-		originalTask,
-	].join("\n\n");
-}
-
 type ReviewGateSettings = DispatchReviewSettings;
 
 const REVIEW_SINGLE_TASK_MESSAGE =
@@ -787,7 +779,7 @@ async function runReviewGated(
 			const reviewerRequest: DispatchRequest = {
 				agentId: gateDeciderAgentId(review.reviewer),
 				executionRole: "reviewer",
-				task: reviewerTask(base.task, builder.receipt.runId, cycle),
+				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent),
 				systemPrompt: REVIEWER_GATE_PROMPT,
 				autonomy: "read-only",
 				gate: { role: "reviewer", group, cycle, subjects: [subjectRef(builder.receipt)] },

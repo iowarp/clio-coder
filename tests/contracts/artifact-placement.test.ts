@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { artifactDefaultPath, CLIO_ARTIFACT_DIR } from "../../src/core/artifact-paths.js";
+import { asDirectoryPathBoundary } from "../../src/core/path-boundary.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -106,7 +107,7 @@ describe("contracts/artifact placement under write-root confinement", () => {
 	});
 
 	function safetyWithRoot(root: string): SafetyContract {
-		return createWorkerSafety({ cwd: scratch, writeRoots: [join(scratch, root)] });
+		return createWorkerSafety({ cwd: scratch, writeRoots: [asDirectoryPathBoundary(join(scratch, root))] });
 	}
 
 	it("admits a pathless artifact call when the artifact directory is a write root", () => {

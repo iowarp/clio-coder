@@ -167,6 +167,7 @@ import { routeFactVerdict } from "./fleet-preflight.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { hostVerificationRejection, runHostVerification } from "./host-verification.js";
+import { renderDispatchIntentRequirements } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
 	configuredJointNodes,
@@ -181,6 +182,12 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
+import {
+	type DispatchPathScope,
+	declaredScopeReplacementDiagnostic,
+	declaredScopeReplacementNotice,
+	resolveDispatchPathScope,
+} from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import {
@@ -759,9 +766,14 @@ function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
 	return safety.scopes.workspace;
 }
 
-function pickWorkerScope(safety: SafetyContract, requestedActions: ReadonlyArray<ActionClass>): ScopeSpec {
+function pickWorkerScope(
+	safety: SafetyContract,
+	requestedActions: ReadonlyArray<ActionClass>,
+	pathScope: DispatchPathScope,
+): ScopeSpec {
 	if (requestedActions.every((action) => action === "read")) return safety.scopes.readonly;
-	return safety.scopes.workspace;
+	if (pathScope.writeBoundaries.length === 0) return safety.scopes.workspace;
+	return { ...safety.scopes.workspace, allowedWriteRoots: pathScope.writeBoundaries };
 }
 
 function deriveRequestedActions(tools: ReadonlyArray<ToolName>, safety: SafetyContract): ReadonlyArray<ActionClass> {
@@ -1030,9 +1042,8 @@ function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string 
  * flows through dynamic messages, never through the system prompt. The system
  * prompt itself is stable per recipe and tool surface with one exception: the
  * operator-editable layer (`additionalFragments`) folds in path-scoped project
- * rules selected by `workerWorkingContextPaths`, which are recalled from the
- * task and briefing text, so `staticCompositionHash` can differ between two
- * runs of one recipe when a rule's glob matches one task and not the other.
+ * rules selected from the canonical request scope, so `staticCompositionHash`
+ * can differ between two runs of one recipe when their scoped rules differ.
  * A local model's worker prefix cache misses on that flip; the trade was made
  * deliberately in #96 to keep rules scoped rather than shipped wholesale.
  */
@@ -1101,35 +1112,6 @@ function workerProjectContextIncludesVerification(body: string): boolean {
 	return body.includes("\nVerification expectations:\n");
 }
 
-/**
- * Path-like tokens in free text: a slash-separated segment, or a bare
- * `name.ext` token. The model-facing dispatch tool has no structured
- * path/file field, so a worker's task text is the only working-context
- * signal available at compile time; this is best-effort recall, not a
- * parser. A false-positive token is harmless because `selectActiveRules`
- * only activates a rule when the token matches that rule's own glob.
- */
-const PATH_TOKEN_RE = /(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1,8}\b/g;
-
-/**
- * Best-effort working-context paths for a dispatched worker: `writeRoots`
- * when the caller set them (the precise signal, for internal/programmatic
- * callers), plus path-like tokens recalled from the task and briefing text.
- * Feeds the same `selectActiveRules` a session uses, so a worker whose task
- * touches a ruled path reads that rule instead of never hearing about it.
- */
-function workerWorkingContextPaths(req: DispatchRequest): string[] {
-	const out = new Set<string>();
-	for (const root of req.writeRoots ?? []) out.add(root);
-	const text = `${req.task}\n${req.briefing ?? ""}`;
-	for (const match of text.matchAll(PATH_TOKEN_RE)) {
-		const token = match[0];
-		if (token.startsWith("http://") || token.startsWith("https://")) continue;
-		out.add(token);
-	}
-	return [...out];
-}
-
 export function buildDynamicPromptMessages(
 	req: DispatchRequest,
 	dynamicContext: WorkerDynamicContext = {},
@@ -1152,6 +1134,10 @@ export function buildDynamicPromptMessages(
 		const permission = dynamicContext.onPermission ?? "deny";
 		const body = `Safety posture: autonomy ${autonomy}. ${workerSafetyOneLiner(autonomy, permission)} Worker permission routing: ${permission}.`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
+	}
+	const requirements = renderDispatchIntentRequirements(req.intent);
+	if (requirements !== null) {
+		messages.push({ id: "dispatch-intent-requirements", body: requirements, contentHash: sha256(requirements) });
 	}
 	if (req.competeStance !== undefined) {
 		const body = competeStanceLiner(req.competeStance);
@@ -1277,6 +1263,7 @@ interface DispatchAdmissionStage {
 
 interface DispatchWorkerSpecInput {
 	req: DispatchRequest;
+	pathScope: DispatchPathScope;
 	target: ResolvedTarget;
 	admission: DispatchAdmissionStage;
 	recipe?: AgentRecipe | null;
@@ -1296,6 +1283,7 @@ interface DispatchWorkerSpecInput {
 
 interface DispatchLifecycleStage {
 	recipe: AgentRecipe | null;
+	pathScope: DispatchPathScope;
 	admission: DispatchAdmissionStage;
 	target: ResolvedTarget;
 	cwd: string;
@@ -1513,10 +1501,6 @@ function explicitToolCapability(
 	const hit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
 	const fromKnowledgeBase = hit?.entry.capabilities?.tools;
 	return typeof fromKnowledgeBase === "boolean" ? fromKnowledgeBase : null;
-}
-
-function writeConfinedRequest(req: DispatchRequest): boolean {
-	return req.writeRoots !== undefined && req.writeRoots.length > 0;
 }
 
 function effectiveToolNames(
@@ -1744,6 +1728,7 @@ function resolveDispatchAdmissionStage(
 	req: DispatchRequest,
 	recipe: AgentRecipe,
 	safety: SafetyContract,
+	pathScope: DispatchPathScope,
 ): DispatchAdmissionStage {
 	const recipeTools = recipe.tools;
 	const candidateTools = recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : [];
@@ -1757,7 +1742,7 @@ function resolveDispatchAdmissionStage(
 	}
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
 	const orchScope = pickOrchestratorScope(safety);
-	const workerScope = pickWorkerScope(safety, requestedActions);
+	const workerScope = pickWorkerScope(safety, requestedActions, pathScope);
 	const verdict = admit(
 		{
 			requestedScope: workerScope,
@@ -1782,7 +1767,7 @@ function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyCon
 	const allowedTools = applyToolProfile([], req.toolProfile);
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
 	const orchScope = pickOrchestratorScope(safety);
-	const workerScope = pickWorkerScope(safety, requestedActions);
+	const workerScope = pickWorkerScope(safety, requestedActions, resolveDispatchPathScope(req));
 	const verdict = admit(
 		{
 			requestedScope: workerScope,
@@ -1913,14 +1898,9 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
-	// Carry write-root confinement to the worker safety seam. Refuse it up front
-	// on runtimes that cannot mediate per-tool calls (subprocess) so it is never
-	// silently ignored. Roots are resolved against the job cwd so a relative root
-	// reaches the worker absolute, matching the validation contract.
-	if (input.req.writeRoots !== undefined && input.req.writeRoots.length > 0) {
-		const jobCwd = input.req.cwd !== undefined && input.req.cwd.length > 0 ? input.req.cwd : process.cwd();
-		spec.writeRoots = input.req.writeRoots.map((root) => resolvePath(jobCwd, root));
-	}
+	// Carry canonical write boundaries to the worker safety seam. Exact files
+	// remain exact and trailing-slash entries remain subtrees after resolution.
+	if (input.pathScope.writeBoundaries.length > 0) spec.writeRoots = [...input.pathScope.writeBoundaries];
 	assertWriteRootsEnforceable(input.target.runtime, spec.writeRoots);
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
@@ -3249,7 +3229,19 @@ export function createDispatchBundle(
 						specs: agents.listSpecs(),
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
-		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
+		const pathScope = resolveDispatchPathScope(req);
+		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
+		if (replacementDiagnostic !== null) {
+			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
+		}
+		const replacementNotice = declaredScopeReplacementNotice(pathScope);
+		if (replacementNotice !== null) {
+			context.bus.emit(BusChannels.DispatchScopeNotice, {
+				...replacementNotice,
+				agentId: req.agentId,
+			});
+		}
+		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(
 			req,
@@ -3268,7 +3260,7 @@ export function createDispatchBundle(
 		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
 		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(admission.allowedTools, target, writeConfinedRequest(req), deniedToolNames(req)),
+			effectiveToolNames(admission.allowedTools, target, pathScope.writeBoundaries.length > 0, deniedToolNames(req)),
 			req,
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
@@ -3297,7 +3289,7 @@ export function createDispatchBundle(
 				dynamic: false,
 			},
 			cwd,
-			workingContextPaths: workerWorkingContextPaths(req),
+			workingContextPaths: pathScope.workingContextPaths,
 		});
 		const systemPrompt = compiledWorkerPrompt.systemPrompt;
 		const budgetEnvelope = resolveEffectiveWorkerBudget({
@@ -3341,6 +3333,7 @@ export function createDispatchBundle(
 		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {
 			recipe,
+			pathScope,
 			admission: effectiveAdmission,
 			target,
 			cwd,
@@ -4318,6 +4311,7 @@ export function createDispatchBundle(
 		const spec = buildDispatchWorkerSpec(
 			{
 				req,
+				pathScope: lifecycle.pathScope,
 				target: lifecycle.target,
 				admission: lifecycle.admission,
 				recipe: lifecycle.recipe,
@@ -5574,7 +5568,8 @@ export function createDispatchBundle(
 		if (hasCallerPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);
 		}
-		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
+		const pathScope = resolveDispatchPathScope(req);
+		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(
 			req,
@@ -5587,14 +5582,14 @@ export function createDispatchBundle(
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(admission.allowedTools, target, writeConfinedRequest(req), deniedToolNames(req)),
+			effectiveToolNames(admission.allowedTools, target, pathScope.writeBoundaries.length > 0, deniedToolNames(req)),
 			req,
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
 		assertWorkerBudgetEnforceable(target.runtime, agentSpec.budget !== null || req.budget !== undefined);
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
-		assertWriteRootsEnforceable(target.runtime, req.writeRoots);
+		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
 		assertProtectedArtifactsEnforceable(
 			target.runtime.id,
 			target.runtime.kind !== "subprocess",

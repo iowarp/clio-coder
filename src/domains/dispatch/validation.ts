@@ -7,6 +7,7 @@
 
 import path from "node:path";
 import { THINKING_LEVELS, type ThinkingLevel } from "../../core/defaults.js";
+import { asDirectoryPathBoundary, resolvePathBoundary } from "../../core/path-boundary.js";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { AgentProduct } from "../agents/spec.js";
@@ -482,8 +483,8 @@ export function validateJobSpec(spec: unknown): Validated {
 	}
 	if (isDispatchIntent(spec.intent) && spec.intent.writeRoots.length > 0 && Array.isArray(spec.writeRoots)) {
 		const jobCwd = typeof spec.cwd === "string" && spec.cwd.length > 0 ? spec.cwd : process.cwd();
-		const legacy = [...new Set(spec.writeRoots.map((root) => path.resolve(jobCwd, String(root))))].sort();
-		const declared = [...new Set(spec.intent.writeRoots.map((root) => path.resolve(jobCwd, root)))].sort();
+		const legacy = [...new Set(spec.writeRoots.map((root) => resolvePathBoundary(jobCwd, String(root))))].sort();
+		const declared = [...new Set(spec.intent.writeRoots.map((root) => resolvePathBoundary(jobCwd, root)))].sort();
 		if (JSON.stringify(legacy) !== JSON.stringify(declared)) errors.push("intent_write_roots_contradiction");
 	}
 
@@ -597,7 +598,9 @@ export function validateJobSpec(spec: unknown): Validated {
 				: undefined;
 	if (effectiveWriteRoots !== undefined) {
 		const jobCwd = typeof spec.cwd === "string" && spec.cwd.length > 0 ? spec.cwd : process.cwd();
-		out.writeRoots = effectiveWriteRoots.map((root) => path.resolve(jobCwd, String(root)));
+		out.writeRoots = isDispatchIntent(spec.intent)
+			? effectiveWriteRoots.map((root) => resolvePathBoundary(jobCwd, String(root)))
+			: effectiveWriteRoots.map((root) => asDirectoryPathBoundary(path.resolve(jobCwd, String(root))));
 	}
 	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { asDirectoryPathBoundary } from "../../src/core/path-boundary.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -27,7 +28,7 @@ describe("contracts/write-roots", () => {
 		// escalate scratch paths to system_modify for being outside the repo root.
 		process.chdir(scratch);
 		root = join(scratch, ".clio-coder", "wiki-staging-abc");
-		safety = createWorkerSafety({ cwd: scratch, writeRoots: [root] });
+		safety = createWorkerSafety({ cwd: scratch, writeRoots: [asDirectoryPathBoundary(root)] });
 	});
 
 	afterEach(() => {
@@ -62,6 +63,16 @@ describe("contracts/write-roots", () => {
 	it("allows a write to a page directly under the root", () => {
 		const decision = safety.evaluate({ tool: ToolNames.Edit, args: { file_path: join(root, "quickstart.md") } });
 		strictEqual(decision.kind, "allow");
+	});
+
+	it("treats a boundary without a trailing slash as one exact file", () => {
+		const exact = join(root, "quickstart.md");
+		const exactSafety = createWorkerSafety({ cwd: scratch, writeRoots: [exact] });
+		strictEqual(exactSafety.evaluate({ tool: ToolNames.Write, args: { file_path: exact } }).kind, "allow");
+		strictEqual(
+			exactSafety.evaluate({ tool: ToolNames.Write, args: { file_path: join(exact, "nested.md") } }).kind,
+			"block",
+		);
 	});
 
 	it("does not gate read-class tools", () => {

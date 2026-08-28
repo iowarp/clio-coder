@@ -8,6 +8,7 @@ import {
 	REVIEWER_GATE_PROMPT,
 } from "../domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
+import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
@@ -137,15 +138,6 @@ function councilSettingsFromArgs(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function reviewerTask(originalTask: string, builderRunId: string, cycle: number): string {
-	return [
-		`Review the work of builder run ${builderRunId} (review cycle ${cycle}).`,
-		"The builder's final answer is provided as input data; verify it against the workspace, do not trust it blindly.",
-		"Original task the builder was given:",
-		originalTask,
-	].join("\n\n");
 }
 
 function reviewSettingsFromArgs(
@@ -534,9 +526,6 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			if (parsed.requests.length !== 1 || parsed.requests[0] === undefined) {
 				return shapeRejection(args, REVIEW_SINGLE_TASK_MESSAGE);
 			}
-			if (parsed.requests.some((request) => (request.resolvedVerification?.length ?? 0) > 0)) {
-				return shapeRejection(args, "verification_unsupported_for_mode: review requests cannot run host verification");
-			}
 		}
 		if (mode === "compete" && (parsed.requests.length !== 1 || parsed.requests[0] === undefined)) {
 			return shapeRejection(args, COMPETE_SINGLE_TASK_MESSAGE);
@@ -587,7 +576,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							{
 								agentId: gateDeciderAgentId(reviewResult.review.reviewer),
 								executionRole: "reviewer",
-								task: reviewerTask(base.task, subject.runId, cycle),
+								task: renderDispatchReviewerTask(base.task, subject.runId, cycle, base.intent),
 								systemPrompt: REVIEWER_GATE_PROMPT,
 								autonomy: "read-only",
 								gate: { role: "reviewer", group: "plan-preview", cycle, subjects: [subject] },

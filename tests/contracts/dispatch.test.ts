@@ -2264,6 +2264,71 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("selects worker rules from typed directory scope and publishes omitted prose paths (#158)", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-dispatch-typed-rules-"));
+		try {
+			mkdirSync(join(scratch, ".clio-coder", "rules"), { recursive: true });
+			writeFileSync(
+				join(scratch, ".clio-coder", "rules", "typescript.md"),
+				"---\npaths:\n  - 'src/**/*.ts'\n---\n# TypeScript\nUse explicit exports.\n",
+				"utf8",
+			);
+			writeFileSync(
+				join(scratch, ".clio-coder", "rules", "docs.md"),
+				"---\npaths:\n  - 'docs/**'\n---\n# Docs\nThis rule is unrelated to declared scope.\n",
+				"utf8",
+			);
+			let capturedSpec: WorkerSpec | null = null;
+			const context = stubContext();
+			const scopeNotices: string[] = [];
+			context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+				scopeNotices.push(notice.message);
+			});
+			const bundle = makeDispatchBundle(context, {
+				spawnWorker: (spec) => {
+					capturedSpec = spec;
+					return {
+						pid: 8002,
+						promise: Promise.resolve({ exitCode: 0, signal: null }),
+						events: emptyEvents(),
+						abort: () => {},
+						heartbeatAt: { current: Date.now() },
+					};
+				},
+			});
+			await bundle.extension.start();
+			try {
+				const handle = await bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "Update docs/readme.md while implementing the declared source work.",
+					cwd: scratch,
+					intent: {
+						version: 1,
+						readRoots: ["src/nested/"],
+						writeRoots: [],
+						relevantPaths: [],
+						expectedOutputs: ["typed scope result"],
+						verification: [],
+					},
+				});
+				const receipt = await handle.finalPromise;
+				deepStrictEqual(receipt.rulesApplied, ["typescript.md"]);
+				deepStrictEqual(scopeNotices, [
+					"[dispatch scope] typed intent replaced prose path inference; omitted paths: docs/readme.md. Those paths did not select project rules or expand worker authority.",
+				]);
+				const requirementMessage = (capturedSpec as WorkerSpec | null)?.dynamicPromptMessages?.find(
+					(message) => message.id === "dispatch-intent-requirements",
+				);
+				match(requirementMessage?.body ?? "", /typed scope result.*not evidence|not evidence.*typed scope result/su);
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	it("writes an empty rulesApplied array, never a missing field, when a run has no project rules (#104)", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-dispatch-no-rules-"));
 		try {
@@ -2528,8 +2593,8 @@ describe("contracts/dispatch", () => {
 		strictEqual(good.ok, true);
 		if (good.ok) {
 			deepStrictEqual((good.spec as { writeRoots?: readonly string[] }).writeRoots, [
-				"/work/repo/staging/wiki",
-				"/abs/root",
+				"/work/repo/staging/wiki/",
+				"/abs/root/",
 			]);
 		}
 
@@ -5543,7 +5608,10 @@ rl.once("line", (line) => {
 				writeRoots: roots,
 			});
 			await handle.finalPromise;
-			deepStrictEqual((capturedSpec as WorkerSpec | null)?.writeRoots, roots);
+			deepStrictEqual(
+				(capturedSpec as WorkerSpec | null)?.writeRoots,
+				roots.map((root) => `${root}/`),
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -5599,6 +5667,49 @@ rl.once("line", (line) => {
 			strictEqual(confinedTools.includes("verify"), false, "verify is never offered under confinement");
 			strictEqual(confinedTools.includes("bash"), false);
 			ok(confinedTools.includes("read") && confinedTools.includes("edit"), "the writer keeps its own tools");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("lets a read-only tool profile narrow typed write intent without widening authority", async () => {
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(stubContext(), {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 4244,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "inspect the intended source output",
+				toolProfile: "council-read-only",
+				intent: {
+					version: 1,
+					readRoots: ["src/"],
+					writeRoots: ["src/output.ts"],
+					relevantPaths: [],
+					expectedOutputs: [],
+					verification: [],
+				},
+			});
+			await handle.finalPromise;
+			const spec = capturedSpec as WorkerSpec | null;
+			ok(spec);
+			strictEqual(
+				spec.allowedTools.some((tool) => tool === "write" || tool === "edit" || tool === "artifact"),
+				false,
+			);
+			deepStrictEqual(spec.writeRoots, [join(process.cwd(), "src/output.ts")]);
 		} finally {
 			await bundle.extension.stop?.();
 		}

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { pathBoundaryCovers } from "../../core/path-boundary.js";
 import { normalizeWriteBoundary } from "../agents/write-boundary.js";
 
 export type DelegationTaskMode = "sequential" | "parallel";
@@ -53,10 +54,6 @@ export function buildDelegationProposalBriefing(proposals: ReadonlyArray<{ agent
 }
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-
-function insideBoundary(path: string, boundary: ReadonlyArray<string>): boolean {
-	return boundary.some((root) => (root.endsWith("/") ? path.startsWith(root) : path === root));
-}
 
 function malformed(detail: string): DelegationPlanValidation {
 	return { ok: false, reason: "delegation_plan_malformed", detail };
@@ -116,7 +113,7 @@ export function validateDelegationPlan(input: ValidateDelegationPlanInput): Dele
 		} catch (error) {
 			return malformed(`task '${task.id}' has invalid writes: ${error instanceof Error ? error.message : String(error)}`);
 		}
-		const outside = writes.find((path) => !insideBoundary(path, input.writes));
+		const outside = writes.find((path) => !pathBoundaryCovers(input.writes, path));
 		if (outside !== undefined) {
 			return {
 				ok: false,
