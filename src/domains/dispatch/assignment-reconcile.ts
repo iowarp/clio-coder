@@ -11,7 +11,7 @@
  */
 
 import type { AssignmentStatus } from "./assignment.js";
-import type { DurableAssignmentRecord } from "./assignment-store.js";
+import type { AssignmentVerdictOwner, DurableAssignmentRecord } from "./assignment-store.js";
 
 /** Minimal terminal view of one attempt's durable ledger row. */
 export interface ReconcileAttemptView {
@@ -27,11 +27,12 @@ export interface AssignmentReconcileDeps {
 	listRunning: () => ReadonlyArray<DurableAssignmentRecord>;
 	/** Resolve one attempt's terminal view from the ledger, or null if pruned. */
 	lookupAttempt: (runId: string) => ReconcileAttemptView | null;
-	/** Persist the reconciled terminal status. */
+	/** Persist the reconciled terminal status, as the record's verdict owner when it has one. */
 	settle: (
 		assignmentId: string,
 		terminalRunId: string,
 		status: Exclude<AssignmentStatus, "running">,
+		owner?: AssignmentVerdictOwner,
 	) => Promise<unknown>;
 }
 
@@ -44,6 +45,9 @@ export interface AssignmentReconcileSummary {
 
 /**
  * Deterministic rule, in priority order:
+ *   0. a record whose verdict belongs to its opener is failed (abandoned): the
+ *      opener died before reaching a verdict, and a green attempt under it is
+ *      one step of a run, never the run's answer;
  *   1. a recovered succeeded terminal attempt wins (`succeeded`);
  *   2. otherwise the last terminal attempt marks the assignment `failed`;
  *   3. otherwise no attempt is recoverable and the assignment is failed
@@ -53,6 +57,11 @@ export async function reconcileOrphanAssignments(deps: AssignmentReconcileDeps):
 	const summary: AssignmentReconcileSummary = { recovered: 0, abandoned: 0 };
 	for (const record of deps.listRunning()) {
 		if (record.status !== "running") continue;
+		if (record.verdictOwner !== undefined) {
+			await deps.settle(record.assignmentId, record.attempts.at(-1) ?? record.assignmentId, "failed", record.verdictOwner);
+			summary.abandoned += 1;
+			continue;
+		}
 		const views = record.attempts
 			.map((runId) => deps.lookupAttempt(runId))
 			.filter((view): view is ReconcileAttemptView => view !== null);

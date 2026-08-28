@@ -6056,7 +6056,8 @@ export function createDispatchBundle(
 							succeeded: envelope.outcome === "succeeded",
 						};
 					},
-					settle: (assignmentId, terminalRunId, status) => settleStoredAssignment(assignmentId, terminalRunId, status),
+					settle: (assignmentId, terminalRunId, status, owner) =>
+						settleStoredAssignment(assignmentId, terminalRunId, status, owner),
 				});
 				if ((reconciled.recovered > 0 || reconciled.abandoned > 0) && process.env.CLIO_CODER_INTERACTIVE !== "1") {
 					process.stderr.write(

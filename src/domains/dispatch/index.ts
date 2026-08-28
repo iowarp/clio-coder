@@ -21,7 +21,7 @@ export type {
 	AttemptRef,
 	DispatchAssignment,
 } from "./assignment.js";
-export type { DurableAssignmentRecord } from "./assignment-store.js";
+export type { AssignmentVerdictOwner, DurableAssignmentRecord } from "./assignment-store.js";
 export type { CodeStepOutcome, CodeStepRecord, CodeStepRunInput } from "./code-step.js";
 export {
 	canonicalCodeReport,

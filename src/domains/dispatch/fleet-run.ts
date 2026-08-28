@@ -21,6 +21,7 @@ import type { FleetCommandRegistry } from "../agents/fleet-commands.js";
 import type { FleetContract } from "../agents/fleet-contract.js";
 import { resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
+import { claimAssignmentVerdict, recordAssignmentAttempt, settleStoredAssignment } from "./assignment-store.js";
 import { runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
@@ -247,6 +248,27 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		dynamicPlans: [],
 	};
 	await writeFleetRun(fleetRunRecord);
+	// Every step of this run dispatches under `fleetRootId` as its lineage root,
+	// so every agent step also settles the assignment row of that id. One step is
+	// not the run, and letting the last one to finish write the row reported a
+	// green step of a run that aborted at step 2 of 7 as `succeeded`. The run
+	// claims the verdict here and answers for itself at the end.
+	await claimAssignmentVerdict(fleetRootId, "fleet");
+	/** File one step's terminal run id, whichever kind produced it. */
+	const fileStepAttempt = (terminalRunId: string): Promise<unknown> =>
+		recordAssignmentAttempt(fleetRootId, terminalRunId);
+	/**
+	 * The run's own word on its ledger row. A settle that cannot be written
+	 * leaves the row `running`, which startup reconciliation resolves to failed,
+	 * so a lost write never becomes a false success.
+	 */
+	const settleFleetAssignment = (cleanRun: boolean): Promise<unknown> =>
+		settleStoredAssignment(
+			fleetRootId,
+			fleetRunRecord.steps.at(-1)?.result.terminalRunId ?? fleetRootId,
+			cleanRun ? "succeeded" : "failed",
+			"fleet",
+		).catch(() => undefined);
 	const boundaryEnforcer = createWriteBoundaryEnforcer({
 		root: workspaceRoot,
 		rootId: fleetRootId,
@@ -298,6 +320,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			costUsd: receiptsByStep.get(stepId)?.costUsd ?? 0,
 			result: replayedResult,
 		});
+		await fileStepAttempt(replayedResult.terminalRunId);
 	}
 	const planStep = (stepId: string) => livePlan.steps.find((entry) => entry.id === stepId);
 
@@ -690,6 +713,11 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			onStepSettled: async (step, stepResult) => {
 				fleetRunRecord.steps.push({ stepId: step.id, result: stepResult });
 				await writeFleetRun(fleetRunRecord);
+				// The scheduler settles both kinds of step here, so this is where a
+				// deterministic step enters the assignment: a code step's `code-*` run
+				// id reads exactly like an agent receipt id, and its evidence sits under
+				// `code-steps/<fleetRootId>/`.
+				await fileStepAttempt(stepResult.terminalRunId);
 			},
 			spliceAfter(currentPlan, step, stepResult) {
 				if (stepResult.delegationPlan === undefined) return null;
@@ -731,6 +759,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	} catch (error) {
 		fleetRunRecord.endedAt = new Date().toISOString();
 		await writeFleetRun(fleetRunRecord);
+		// A run the scheduler could not carry to the end never reached a verdict,
+		// and a fleet that threw is not a fleet that worked.
+		await settleFleetAssignment(false);
 		throw error;
 	}
 	fleetRunRecord.endedAt = new Date().toISOString();
@@ -742,6 +773,10 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	const required = livePlan.steps.filter((step) => step.loop === undefined && !result.unneeded.includes(step.id));
 	const failedLoops = result.loops.filter((loop) => !loop.resolved);
 	const succeededStepCount = required.filter((step) => result.results.get(step.id)?.succeeded === true).length;
+	// A step a stop policy left unrun is counted but never succeeded, so a run
+	// that halted early can never reach the required count.
+	const cleanRun = failedLoops.length === 0 && result.skipped.length === 0 && succeededStepCount === required.length;
+	await settleFleetAssignment(cleanRun);
 	return {
 		rootId: fleetRootId,
 		planHash: input.plan.hash,
@@ -751,6 +786,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		requiredStepCount: required.length,
 		succeededStepCount,
 		resolvedLoopCount: result.loops.length - failedLoops.length,
-		cleanRun: failedLoops.length === 0 && result.skipped.length === 0 && succeededStepCount === required.length,
+		cleanRun,
 	};
 }

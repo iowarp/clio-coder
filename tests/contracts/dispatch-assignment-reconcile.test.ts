@@ -58,6 +58,22 @@ describe("assignment reconciliation", () => {
 		deepStrictEqual(summary, { recovered: 0, abandoned: 1 });
 	});
 
+	it("abandons a claimed record rather than inheriting a green attempt's success", async () => {
+		const settled: Array<[string, string, string, string | undefined]> = [];
+		const summary = await reconcileOrphanAssignments({
+			listRunning: () => [{ ...record("fleet-e1", ["e1", "e2"]), verdictOwner: "fleet" }],
+			// Both attempts succeeded on their own. The fleet that owned the verdict
+			// died before reaching one, and two green steps of a seven-step run are
+			// not the run's answer.
+			lookupAttempt: (runId) => ({ runId, terminal: true, succeeded: true }),
+			settle: async (assignmentId, terminalRunId, status, owner) => {
+				settled.push([assignmentId, terminalRunId, status, owner]);
+			},
+		});
+		deepStrictEqual(settled, [["fleet-e1", "e2", "failed", "fleet"]]);
+		deepStrictEqual(summary, { recovered: 0, abandoned: 1 });
+	});
+
 	it("leaves already-terminal durable records untouched", async () => {
 		let settles = 0;
 		const summary = await reconcileOrphanAssignments({
