@@ -593,12 +593,23 @@ function delegationAgentsAffordance(
 type SubmenuTitle = string | ((width: number) => string);
 
 export class SubmenuWrapper implements Component {
+	/**
+	 * Why the last submission was refused, or null while nothing is wrong. The
+	 * editor sets it instead of closing, so the operator corrects the value with
+	 * the reason on screen rather than back at the row list with no reason.
+	 */
+	private problem: string | null = null;
+
 	constructor(
 		private readonly title: SubmenuTitle,
 		private readonly child: Component,
 		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back"),
 		private readonly note?: string,
 	) {}
+
+	setProblem(problem: string | null): void {
+		this.problem = problem;
+	}
 
 	render(width: number): string[] {
 		const theme = clioTheme();
@@ -619,6 +630,11 @@ export class SubmenuWrapper implements Component {
 		// two columns off each one and marked the cut, so every entry wore a
 		// trailing … it had not earned.
 		lines.push(...this.child.render(Math.max(1, width - 2)).map((line) => `  ${line}`));
+		if (this.problem !== null) {
+			for (const line of wrapTextWithAnsi(this.problem, Math.max(1, width - 2))) {
+				lines.push(theme.fg("error", `  ${line}`));
+			}
+		}
 		lines.push("");
 		lines.push(theme.fg("dim", `  ${this.hint}`));
 		return lines;
@@ -693,33 +709,108 @@ function editTextSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return textInputSubmenu(title, note);
 }
 
-function editNumberSubmenu(title: string, options: { min?: number; allowBlank?: boolean } = {}): SettingSubmenuBuilder {
-	const min = options.min ?? 0;
+/**
+ * The bound a number row enforces, shared by the editor and the apply path so
+ * the two cannot drift: whatever the editor forwards, the apply path stores.
+ * The bounds mirror the config validator's, so a value the Settings Center
+ * refuses is one settings.yaml would have refused too, in the same words.
+ */
+interface NumberSettingRule {
+	readonly min: number;
+	readonly max?: number;
+	readonly integer: boolean;
+	/** A blank submission clears the key instead of being a parse failure. */
+	readonly allowBlank?: boolean;
+}
+
+const NUMBER_SETTING_RULES = {
+	"budget.sessionCeilingUsd": { min: 0, integer: false },
+	"watchdog.cadenceToolCalls": { min: 1, integer: true, allowBlank: true },
+	"delegation.defaults.connectTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
+	"delegation.defaults.turnTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
+	"delegation.defaults.permissionTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
+} as const satisfies Partial<Record<EditableSettingId, NumberSettingRule>>;
+
+export type NumberSettingId = keyof typeof NUMBER_SETTING_RULES;
+
+export const NUMBER_SETTING_IDS = Object.keys(NUMBER_SETTING_RULES) as readonly NumberSettingId[];
+
+type NumberSettingOutcome = { readonly value: number | null } | { readonly refusal: string };
+
+function describeSubmittedText(value: string): string {
+	const trimmed = value.trim();
+	return trimmed.length === 0 ? "an empty string" : JSON.stringify(trimmed);
+}
+
+/**
+ * Parse one submitted number-row value under its rule. A null value means the
+ * operator cleared an optional key. The refusal is worded like the config
+ * validator's issue for the same key ("expected an integer >= 1, got 0"), with
+ * a "Not applied:" prefix so it reads as the outcome of this submission.
+ */
+function parseNumberSetting(value: string, rule: NumberSettingRule): NumberSettingOutcome {
+	const trimmed = value.trim();
+	const noun = rule.integer ? "an integer" : "a number";
+	if (trimmed.length === 0 && rule.allowBlank === true) return { value: null };
+	const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
+	if (!Number.isFinite(parsed) || (rule.integer && !Number.isInteger(parsed))) {
+		const shown = Number.isFinite(parsed) ? String(parsed) : describeSubmittedText(value);
+		return { refusal: `Not applied: expected ${noun}, got ${shown}.` };
+	}
+	if (parsed < rule.min) return { refusal: `Not applied: expected ${noun} >= ${rule.min}, got ${parsed}.` };
+	if (rule.max !== undefined && parsed > rule.max) {
+		return { refusal: `Not applied: expected ${noun} <= ${rule.max}, got ${parsed}.` };
+	}
+	return { value: parsed };
+}
+
+/**
+ * The reason a number row would refuse `value`, or null when it would apply.
+ * This is the same check the editor and `applySettingChange` run, exposed so a
+ * caller that bypasses the editor can still name the bound it hit.
+ */
+export function describeNumberSettingRefusal(id: NumberSettingId, value: string): string | null {
+	const outcome = parseNumberSetting(value, NUMBER_SETTING_RULES[id]);
+	return "refusal" in outcome ? outcome.refusal : null;
+}
+
+function numberSettingNote(rule: NumberSettingRule): string {
+	const noun = rule.integer ? "a whole number" : "a number";
+	const clears = rule.allowBlank === true ? "; blank clears it" : "";
+	if (rule.min > 0 && rule.max !== undefined) return `Use ${noun} from ${rule.min} to ${rule.max}${clears}.`;
+	if (rule.min > 0) return `Use ${noun} of at least ${rule.min}${clears}.`;
+	return `Use a non-negative ${rule.integer ? "whole number" : "number"}${clears}.`;
+}
+
+/**
+ * A number editor that stays open on a refused submission. Closing with no
+ * value looked like a successful edit that changed nothing, so the reason is
+ * rendered under the input and the operator corrects the text in place; Esc
+ * still leaves without applying.
+ */
+function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBuilder {
+	const rule = NUMBER_SETTING_RULES[id];
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
 		input.setValue(currentValue);
 		input.focused = true;
-		input.onSubmit = (val) => {
-			if (options.allowBlank === true && val.trim().length === 0) {
-				done("");
-				return;
-			}
-			const num = Number(val);
-			if (Number.isFinite(num) && num >= min) {
-				done(val);
-			} else {
-				done();
-			}
-		};
-		input.onEscape = () => done();
-		return new SubmenuWrapper(
+		const wrapper = new SubmenuWrapper(
 			title,
 			input,
 			buildHint([{ key: "Enter", verb: "confirm" }], "back"),
-			min > 0
-				? `Use a whole number of at least ${min}${options.allowBlank === true ? "; blank clears it" : ""}.`
-				: "Use a non-negative number.",
+			numberSettingNote(rule),
 		);
+		input.onSubmit = (val) => {
+			const outcome = parseNumberSetting(val, rule);
+			if ("refusal" in outcome) {
+				wrapper.setProblem(outcome.refusal);
+				return;
+			}
+			wrapper.setProblem(null);
+			done(outcome.value === null ? "" : val.trim());
+		};
+		input.onEscape = () => done();
+		return wrapper;
 	};
 }
 
@@ -1412,7 +1503,7 @@ export function buildSettingItems(
 			readOnly: true,
 		}),
 		settingItem("budget.sessionCeilingUsd", String(settings.budget.sessionCeilingUsd), {
-			submenu: editNumberSubmenu("Edit session cost ceiling USD"),
+			submenu: editNumberSubmenu("Edit session cost ceiling USD", "budget.sessionCeilingUsd"),
 			affordance: "free text",
 		}),
 		settingItem("defaults.maxTokens", String(settings.defaults.maxTokens), {
@@ -1479,10 +1570,10 @@ export function buildSettingItems(
 			"watchdog.cadenceToolCalls",
 			watchdog.cadenceToolCalls === undefined ? "(turn end only)" : String(watchdog.cadenceToolCalls),
 			{
-				submenu: editNumberSubmenu("Edit watchdog cadence in tool calls; blank fires at turn end only", {
-					min: 1,
-					allowBlank: true,
-				}),
+				submenu: editNumberSubmenu(
+					"Edit watchdog cadence in tool calls; blank fires at turn end only",
+					"watchdog.cadenceToolCalls",
+				),
 				affordance: "free text",
 				editValue: watchdog.cadenceToolCalls === undefined ? "" : String(watchdog.cadenceToolCalls),
 			},
@@ -1503,15 +1594,15 @@ export function buildSettingItems(
 			affordance: "free text",
 		}),
 		settingItem("delegation.defaults.connectTimeoutMs", String(settings.delegation.defaults.connectTimeoutMs), {
-			submenu: editNumberSubmenu("Edit delegate connect timeout (ms)"),
+			submenu: editNumberSubmenu("Edit delegate connect timeout (ms)", "delegation.defaults.connectTimeoutMs"),
 			affordance: "free text",
 		}),
 		settingItem("delegation.defaults.turnTimeoutMs", String(settings.delegation.defaults.turnTimeoutMs), {
-			submenu: editNumberSubmenu("Edit delegate turn timeout (ms)"),
+			submenu: editNumberSubmenu("Edit delegate turn timeout (ms)", "delegation.defaults.turnTimeoutMs"),
 			affordance: "free text",
 		}),
 		settingItem("delegation.defaults.permissionTimeoutMs", String(settings.delegation.defaults.permissionTimeoutMs), {
-			submenu: editNumberSubmenu("Edit delegate permission timeout (ms)"),
+			submenu: editNumberSubmenu("Edit delegate permission timeout (ms)", "delegation.defaults.permissionTimeoutMs"),
 			affordance: "free text",
 		}),
 		settingItem("keybindings", keybindingCount > 0 ? `${keybindingCount} override(s)` : "(defaults)", {
@@ -1819,9 +1910,15 @@ function applyNonNegativeInteger(value: string, set: (next: number) => void): vo
 	if (Number.isFinite(parsed) && parsed >= 0) set(Math.floor(parsed));
 }
 
-function applyPositiveInteger(value: string, set: (next: number) => void): void {
-	const parsed = Number(value);
-	if (Number.isInteger(parsed) && parsed >= 1 && parsed <= MAX_TIMER_DELAY_MS) set(parsed);
+/**
+ * Store a number-row submission under the row's shared rule. A refused value
+ * leaves the setting alone; the editor has already shown the operator why, and
+ * `describeNumberSettingRefusal` names the reason for any other caller.
+ */
+function applyNumberSetting(id: NumberSettingId, value: string, set: (next: number | null) => void): void {
+	const outcome = parseNumberSetting(value, NUMBER_SETTING_RULES[id]);
+	if ("refusal" in outcome) return;
+	set(outcome.value);
 }
 
 /**
@@ -1986,15 +2083,12 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			else delete settings.watchdog.target;
 			return;
 		}
-		case "watchdog.cadenceToolCalls": {
-			if (value.trim().length === 0) {
-				delete settings.watchdog.cadenceToolCalls;
-				return;
-			}
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && Math.floor(parsed) >= 1) settings.watchdog.cadenceToolCalls = Math.floor(parsed);
+		case "watchdog.cadenceToolCalls":
+			applyNumberSetting("watchdog.cadenceToolCalls", value, (next) => {
+				if (next === null) delete settings.watchdog.cadenceToolCalls;
+				else settings.watchdog.cadenceToolCalls = next;
+			});
 			return;
-		}
 		case "terminal.smoothStreaming":
 			if (value === "off" || value === "auto" || value === "on") settings.terminal.smoothStreaming = value;
 			return;
@@ -2005,18 +2099,18 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 				.filter(Boolean);
 			return;
 		case "delegation.defaults.connectTimeoutMs":
-			applyPositiveInteger(value, (next) => {
-				settings.delegation.defaults.connectTimeoutMs = next;
+			applyNumberSetting("delegation.defaults.connectTimeoutMs", value, (next) => {
+				if (next !== null) settings.delegation.defaults.connectTimeoutMs = next;
 			});
 			return;
 		case "delegation.defaults.turnTimeoutMs":
-			applyPositiveInteger(value, (next) => {
-				settings.delegation.defaults.turnTimeoutMs = next;
+			applyNumberSetting("delegation.defaults.turnTimeoutMs", value, (next) => {
+				if (next !== null) settings.delegation.defaults.turnTimeoutMs = next;
 			});
 			return;
 		case "delegation.defaults.permissionTimeoutMs":
-			applyPositiveInteger(value, (next) => {
-				settings.delegation.defaults.permissionTimeoutMs = next;
+			applyNumberSetting("delegation.defaults.permissionTimeoutMs", value, (next) => {
+				if (next !== null) settings.delegation.defaults.permissionTimeoutMs = next;
 			});
 			return;
 		case "orchestrator.target": {
@@ -2067,11 +2161,11 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 					.map((v) => v.trim())
 					.filter(Boolean);
 			return;
-		case "budget.sessionCeilingUsd": {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0) settings.budget.sessionCeilingUsd = parsed;
+		case "budget.sessionCeilingUsd":
+			applyNumberSetting("budget.sessionCeilingUsd", value, (next) => {
+				if (next !== null) settings.budget.sessionCeilingUsd = next;
+			});
 			return;
-		}
 	}
 }
 
