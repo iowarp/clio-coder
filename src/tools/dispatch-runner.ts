@@ -1967,13 +1967,16 @@ async function runCouncil(
 			judgeRunId: judgeRun.receipt.runId,
 		};
 	}
-	if (council.synthesis !== "judge" && prior.size > 0 && deps.dispatch.sealCouncilSynthesis !== undefined) {
+	if (prior.size > 0 && deps.dispatch.sealCouncilSynthesis !== undefined) {
 		const finalRuns = [...prior.values()];
 		const template = finalRuns[0];
 		if (template === undefined) throw new Error("council synthesis has no final member receipt");
 		// The sealed text is the whole council-report, not the synthesis alone:
 		// /share <synthesis runId> reads this receipt to bring every final
 		// member's labelled answer and the synthesis line into the main context.
+		// A judge council seals it on the same terms: the judge run's own
+		// receipt holds only its {"verdict","text"} payload, which carries no
+		// member answers and no roster labels for the main agent to act on.
 		const text = JSON.stringify({ members, synthesis } satisfies CouncilReport);
 		const receipt = await deps.dispatch.sealCouncilSynthesis({
 			group,

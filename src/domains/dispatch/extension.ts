@@ -1001,6 +1001,25 @@ function hasPersonaOverride(req: DispatchRequest): boolean {
 	return typeof req.systemPrompt === "string" && req.systemPrompt.trim().length > 0;
 }
 
+/**
+ * Whether this request's system prompt is a caller-authored persona rather
+ * than one of the coordinator's own bounded gate-role prompts.
+ *
+ * A reviewer, a compete judge, and a council synthesis all carry a system
+ * prompt the coordinator wrote, pinned by {@link isBoundedGateRolePrompt} to
+ * one exact text under one gate role and read-only autonomy. That is the
+ * topology speaking, not an operator reshaping a recipe, so it is not the
+ * thing the shadow and internal audiences are protected from. The ACP
+ * delegation path already draws the line here; without the same line, a
+ * council that seats the builtin read-only `researcher` (a shadow recipe, and
+ * the agent every unnamed council seats) refused `--synthesis judge` outright,
+ * before a single member ran.
+ */
+function hasCallerPersonaOverride(req: DispatchRequest): boolean {
+	if (!hasPersonaOverride(req)) return false;
+	return !isBoundedGateRolePrompt({ role: req.gate?.role, autonomy: req.autonomy, systemPrompt: req.systemPrompt });
+}
+
 function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string | null): RunPersonaOverride | null {
 	if (!hasPersonaOverride(req) || staticCompositionHash === null) return null;
 	return { promptHash: staticCompositionHash };
@@ -3208,7 +3227,7 @@ export function createDispatchBundle(
 				`dispatch: agent '${req.agentId}' is a ${spec.audience} agent reserved for Clio internal orchestration`,
 			);
 		}
-		if (hasPersonaOverride(req) && (spec.audience === "shadow" || spec.audience === "internal")) {
+		if (hasCallerPersonaOverride(req) && (spec.audience === "shadow" || spec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${spec.audience} agent '${req.agentId}'`);
 		}
 		// A read-only recipe pointed at a mutating task is knowable here and costs
@@ -3359,12 +3378,7 @@ export function createDispatchBundle(
 	): AcpDelegationLifecycleStage {
 		const agentId = req.delegationAgentId;
 		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
-		const boundedGateRolePrompt = isBoundedGateRolePrompt({
-			role: req.gate?.role,
-			autonomy: req.autonomy,
-			systemPrompt: req.systemPrompt,
-		});
-		if (hasPersonaOverride(req) && !boundedGateRolePrompt) {
+		if (hasCallerPersonaOverride(req)) {
 			throw new Error(`dispatch: persona overrides are not allowed for ACP delegation agent '${agentId}'`);
 		}
 		if (req.agentId && maybeAgents) {
@@ -5557,7 +5571,7 @@ export function createDispatchBundle(
 				`dispatch: agent '${req.agentId}' is a ${agentSpec.audience} agent reserved for Clio internal orchestration`,
 			);
 		}
-		if (hasPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
+		if (hasCallerPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);
 		}
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
@@ -5880,7 +5894,7 @@ export function createDispatchBundle(
 	async function sealCouncilSynthesis(input: {
 		group: string;
 		round: number;
-		kind: "none" | "vote";
+		kind: "none" | "vote" | "judge";
 		text: string;
 		subjects: ReadonlyArray<{ runId: string; digest: string | null }>;
 		template: RunReceipt;
