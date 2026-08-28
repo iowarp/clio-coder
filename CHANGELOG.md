@@ -2,6 +2,11 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.3.8 - unreleased
+
+### Fixed
+- Settings Center number editors report a refused value instead of dropping it (#218). Every number row now resolves its bound from one shared rule table (`budget.sessionCeilingUsd`, `watchdog.cadenceToolCalls`, and the three `delegation.defaults.*Ms` rows), and the editor and the apply path read the same rule, so a value the editor forwards is never dropped later. A refused submission keeps the editor open and prints the reason under the input in the words the config validator would use for the same key (`Not applied: expected an integer >= 1, got 0.`); Esc still leaves without applying, and a corrected value clears the reason and continues to the scope prompt. Three previously silent drops on that path become named refusals: a blank on the three timeout rows used to parse as zero and be discarded, a blank on `budget.sessionCeilingUsd` used to set the ceiling to zero, and a fractional `watchdog.cadenceToolCalls` used to be floored. A contract test pins the row set, so a sixth number row added without a rule fails it.
+
 ## 0.3.7 - 2026-08-24
 
 ### Added
