@@ -1845,9 +1845,17 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// The worker repairs against exactly the contract the orchestrator will seal.
 	// A gate role that overrides the recipe contract gets no worker-side repair,
 	// for the same reason it gets no recipe validation.
-	if (appliesRecipeResultContract(input.req.gate?.role) && input.recipe?.resultContract) {
-		spec.resultContract = input.req.resultContractOverride ?? input.recipe.resultContract;
-	}
+	//
+	// The request's own override is the contract whether or not the seated
+	// recipe declares one, because that is the resolution the seal already uses.
+	// Requiring a recipe contract here meant a caller-supplied override against a
+	// recipe with none was sealed but never sent, so the worker spent no repair
+	// round on a contract it was never told about and the run failed on a shape
+	// nothing had asked it for.
+	const workerResultContract = appliesRecipeResultContract(input.req.gate?.role)
+		? (input.req.resultContractOverride ?? input.recipe?.resultContract)
+		: undefined;
+	if (workerResultContract) spec.resultContract = workerResultContract;
 	const product = input.req.product ?? input.recipe?.product;
 	if (product) spec.product = product;
 	// The orchestrator's tool decision is the one the run was admitted under and

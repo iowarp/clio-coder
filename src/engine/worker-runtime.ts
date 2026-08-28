@@ -23,7 +23,7 @@ import { type ToolName, ToolNames } from "../core/tool-names.js";
 import {
 	type ObservedReadRanges,
 	type ObservedRunEffects,
-	parseResultContract,
+	parseWorkerResultContract,
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	type ResultContract,
 	resultContractRepairMessages,
@@ -362,8 +362,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	assertResponseSchemaRuntime(input);
 	// The wire carries the contract as data; the one strict parser owns its
 	// shape. The worker subprocess may not import it (it stays slim), so the
-	// check lands here, before any model call.
-	if (input.resultContract !== undefined) parseResultContract(input.resultContract, "WorkerSpec.resultContract");
+	// check lands here, before any model call. The wire parser, not the recipe
+	// one: a dispatch request may override the seated recipe's postcondition
+	// with a kind the coordinator authors, and the recipe parser refusing those
+	// killed every council vote member with a fatal spec error.
+	if (input.resultContract !== undefined) parseWorkerResultContract(input.resultContract, "WorkerSpec.resultContract");
 	if (input.runtime.id === "claude-sdk") {
 		return startClaudeSdkWorkerRun(input, emit);
 	}

@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
@@ -6,7 +6,13 @@ import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
-import { parseCouncilReport, validateResultContract } from "../../src/domains/agents/result-contract.js";
+import {
+	COUNCIL_BALLOT_VERDICT_MAX_BYTES,
+	parseCouncilReport,
+	parseResultContract,
+	parseWorkerResultContract,
+	validateResultContract,
+} from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
@@ -15,7 +21,7 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
-import { councilSynthesisReport, researchReport, scriptedGateFabric } from "../harness/gate-fabric.js";
+import { councilBallot, councilSynthesisReport, researchReport, scriptedGateFabric } from "../harness/gate-fabric.js";
 
 const TARGET = { id: "local", runtime: "openai", defaultModel: "model" };
 
@@ -118,6 +124,42 @@ describe("council-report result contract", () => {
 	});
 });
 
+describe("council-ballot result contract", () => {
+	const validate = (output: string) =>
+		validateResultContract({
+			contract: { kind: "council-ballot" },
+			output,
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => null },
+		});
+
+	it("admits a verdict the tally can match and refuses one it cannot", () => {
+		strictEqual(validate(councilBallot("keep", "the tuple key survives a node rename")).conformance, "pass");
+		// The researcher's own contract shape, which is what a council member
+		// emitted before the ballot existed. It is not a ballot, and saying so is
+		// the whole point: the vote no longer reads a field nobody asked for.
+		strictEqual(validate(researchReport("the tuple key survives")).conformance, "fail");
+		strictEqual(validate(JSON.stringify({ verdict: "keep", text: "why", source: "local" })).conformance, "fail");
+		strictEqual(validate(JSON.stringify({ verdict: "keep" })).conformance, "fail");
+		// A tally groups by the exact verdict string, so a verdict that is prose
+		// can only ever tie with itself.
+		strictEqual(validate(councilBallot("keep\nbecause", "why")).conformance, "fail");
+		strictEqual(validate(councilBallot("k".repeat(COUNCIL_BALLOT_VERDICT_MAX_BYTES + 1), "why")).conformance, "fail");
+		match(validate(researchReport("x")).reason ?? "", /verdict a single line of at most 64 bytes/);
+	});
+
+	it("cannot be declared by an agent recipe, but is readable where the worker validates its spec", () => {
+		throws(() => parseResultContract({ kind: "council-ballot" }, "/test/agent.md"), /resultContract.kind is unsupported/);
+		// The worker re-parses its own WorkerSpec.resultContract before any model
+		// call. Sending it a kind only the recipe parser knows kills the run with
+		// a fatal spec error, which is exactly what a live vote council did.
+		deepStrictEqual(parseWorkerResultContract({ kind: "council-ballot" }, "WorkerSpec.resultContract"), {
+			kind: "council-ballot",
+		});
+	});
+});
+
 describe("council dispatch", () => {
 	beforeEach(async () => isolateDispatchState());
 	after(() => restoreDispatchState());
@@ -135,7 +177,7 @@ describe("council dispatch", () => {
 				],
 			},
 		};
-		const fabric = scriptedGateFabric({ builderText: JSON.stringify({ verdict: "pass", answer: "supported" }) });
+		const fabric = scriptedGateFabric({ builderText: councilBallot("pass", "supported") });
 		const context = dispatchStubContext({ settings });
 		const lifecycle: Array<{
 			channel: string;
@@ -407,6 +449,141 @@ describe("council dispatch", () => {
 			ok(Buffer.byteLength(alphaBriefing, "utf8") < 9 * 1024);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+
+	/**
+	 * One default council through `--synthesis vote` against the builtin
+	 * researcher's real recipe facts, which is the shape #230 says can never
+	 * tally. `withBuiltinResearcherFacts` restores the `research-report`
+	 * contract and the `shadow` audience the harness stub drops; without it a
+	 * council runs against a permissive `external-delegation` fixture and any
+	 * answer at all passes, which is what hid the defect.
+	 */
+	const runVoteCouncil = async (
+		ballots: string[],
+		members: Array<{ label: string; target: string }>,
+	): Promise<{
+		result: Awaited<ReturnType<NonNullable<ReturnType<typeof createDispatchTool>["run"]>>>;
+		council: { members: Array<{ label: string; runId: string; answer: string; verdict?: string; failed?: unknown }> } & {
+			synthesis: { kind: string; verdict?: string; tally?: Record<string, number> };
+		};
+		spawns: ReadonlyArray<{ spec: WorkerSpec }>;
+		getRun: (runId: string) => { receiptPath?: string | null } | null;
+		stop: () => Promise<void>;
+	}> => {
+		const fabric = scriptedGateFabric({ memberAnswers: ballots });
+		const bundle = makeDispatchBundle(withBuiltinResearcherFacts(dispatchStubContext()), {
+			spawnWorker: fabric.spawn,
+		});
+		await bundle.extension.start();
+		const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
+		const result = await tool.run(
+			{ mode: "council", task: "Should the cache key stay a tuple?", members, synthesis: "vote" },
+			{ approval: { requestId: "vote", requestedBy: "tester", actionClass: "dispatch" } },
+		);
+		return {
+			result,
+			council: result.details?.council as never,
+			spawns: fabric.spawns,
+			getRun: (runId) => bundle.contract.getRun(runId) ?? null,
+			stop: async () => {
+				await bundle.extension.stop?.();
+			},
+		};
+	};
+
+	const TWO_MEMBERS = [
+		{ label: "alpha", target: "default" },
+		{ label: "beta", target: "default" },
+	];
+
+	it("asks a default vote council's members for a ballot and tallies the verdicts they cast", async () => {
+		const run = await runVoteCouncil(
+			[
+				councilBallot("keep", "the tuple key survives a node rename"),
+				councilBallot("keep", "keying by node loses the failover case"),
+			],
+			TWO_MEMBERS,
+		);
+		try {
+			strictEqual(run.result.kind, "ok", run.result.kind === "error" ? run.result.message : "");
+			// The seated agent is unchanged: a council that names none still seats
+			// the read-only builtin researcher, persona and all.
+			for (const spawn of run.spawns) strictEqual(spawn.spec.agentId, "researcher");
+			// What changed is the postcondition for this slot. The member is asked
+			// for the ballot and seals the ballot, so the field the tally reads is
+			// one the run was actually required to produce.
+			for (const spawn of run.spawns) {
+				deepStrictEqual(spawn.spec.resultContract, { kind: "council-ballot" });
+				// The worker re-parses this field before its first model call, so a
+				// spec the coordinator can send but the worker cannot read is a
+				// fatal run rather than a vote.
+				deepStrictEqual(parseWorkerResultContract(spawn.spec.resultContract, "WorkerSpec.resultContract"), {
+					kind: "council-ballot",
+				});
+				match(spawn.spec.task, /^Should the cache key stay a tuple\?/);
+				match(spawn.spec.task, /This council round is a vote/);
+				match(spawn.spec.task, /End with a JSON object only: \{"verdict":"yes","text":/);
+			}
+			// The tally the ticket says no input could produce.
+			strictEqual(run.council.synthesis.verdict, "keep");
+			deepStrictEqual(run.council.synthesis.tally, { keep: 2 });
+			// And it is validated rather than merely parsed: a member that sealed
+			// no conforming ballot could not have contributed to it.
+			for (const member of run.council.members) {
+				const receipt = sealedReceipt(run.getRun(member.runId));
+				strictEqual(receipt.quality?.resultContract?.conformance, "pass", member.label);
+				strictEqual(receipt.quality?.resultContract?.sourceId?.includes("council-ballot"), true, member.label);
+			}
+			// The report carries the ballot's prose, not its wire envelope, so
+			// /share and the council card read as answers rather than as JSON.
+			deepStrictEqual(run.council.members.map((member) => member.answer).sort(), [
+				"keying by node loses the failover case",
+				"the tuple key survives a node rename",
+			]);
+		} finally {
+			await run.stop();
+		}
+	});
+
+	it("reports no_majority on a split vote and folds verdict case into one tally key", async () => {
+		// "Keep" and "keep" are one verdict. Counting them apart would report a
+		// split the council did not have.
+		const run = await runVoteCouncil(
+			[councilBallot("Keep", "the tuple key holds"), councilBallot("drop", "key by node")],
+			TWO_MEMBERS,
+		);
+		try {
+			strictEqual(run.result.kind, "ok", run.result.kind === "error" ? run.result.message : "");
+			deepStrictEqual(run.council.synthesis.tally, { drop: 1, keep: 1 });
+			strictEqual(run.council.synthesis.verdict, "no_majority");
+			deepStrictEqual(run.council.members.map((member) => member.verdict).sort(), ["drop", "keep"]);
+		} finally {
+			await run.stop();
+		}
+	});
+
+	it("fails a member that answers in its recipe's shape instead of dropping it from the tally", async () => {
+		// The pre-#230 behaviour: the researcher emits the only thing its own
+		// contract allowed, and the vote silently resolved to no_verdict_field
+		// with an empty tally on every run. The member now fails its ballot and
+		// the council says so.
+		const run = await runVoteCouncil(
+			[councilBallot("keep", "the tuple key holds"), researchReport("the tuple key survives a node rename")],
+			TWO_MEMBERS,
+		);
+		try {
+			strictEqual(run.result.kind, "error");
+			const failed = run.council.members.filter((member) => member.failed !== undefined);
+			strictEqual(failed.length, 1);
+			const receipt = sealedReceipt(run.getRun(failed[0]?.runId ?? ""));
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeCode, "result_contract_exhausted");
+			strictEqual(receipt.quality?.resultContract?.conformance, "fail");
+			match(receipt.outcomeDetail ?? "", /A council ballot must carry only verdict and text/);
+		} finally {
+			await run.stop();
 		}
 	});
 

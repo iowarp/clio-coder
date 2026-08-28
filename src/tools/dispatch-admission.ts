@@ -6,6 +6,7 @@ import {
 	COUNCIL_JUDGE_PROMPT,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
+	renderCouncilVoteMemberTask,
 } from "../domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
@@ -637,6 +638,15 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							executionRole: "researcher",
 							autonomy: "read-only",
 							toolProfile: "council-read-only",
+							// The runner composes the same suffix for a vote member, so the
+							// approval artifact the plan hash binds shows the operator the
+							// ballot the member is actually asked to cast.
+							...(council.synthesis === "vote"
+								? {
+										task: renderCouncilVoteMemberTask(base.task),
+										resultContractOverride: { kind: "council-ballot" as const },
+									}
+								: {}),
 							target: member.target,
 							...(member.model ? { model: member.model } : {}),
 							...(member.thinking ? { thinkingLevel: member.thinking as NonNullable<DispatchRequest["thinkingLevel"]> } : {}),
