@@ -252,6 +252,20 @@ export interface DispatchContract {
 	/** Get a specific immutable attempt envelope. */
 	getRun(runId: string): RunEnvelope | null;
 
+	/**
+	 * Absolute paths this run's own successful tool calls aimed a mutation at,
+	 * or null when the run kept no usable record: an unknown or evicted run, a
+	 * runtime that publishes no tool telemetry, telemetry that came back
+	 * incomplete, or a run that called a tool able to write a path its arguments
+	 * do not name. Null is not an empty list, and a caller that cannot tell them
+	 * apart will read "wrote nothing" off a run nobody watched.
+	 *
+	 * The write boundary reads this to separate what a step changed from what
+	 * changed under it, so the answer must stay a record of observation rather
+	 * than an inference from the checkout.
+	 */
+	observedRunWrites?(runId: string): ReadonlyArray<string> | null;
+
 	/** In-memory logical assignment state and complete finalized-attempt history. */
 	readonly assignments?: {
 		/** Live assignment, including its terminal promise and detailed attempt refs. */

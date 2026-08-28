@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
 import {
 	detectValidationCommand,
@@ -25,6 +26,13 @@ import {
  * bash command that writes through a script) leaves the path absent from the
  * set and the validator falls back to the filesystem rather than to a failed
  * conformance.
+ *
+ * `writeRecordComplete` is the other half of that sentence, and it exists for
+ * the reader that cannot fall back to the filesystem. The write boundary uses
+ * this record the other way round, to decide that a path the run did *not*
+ * write is somebody else's and must survive. Reading an under-reporting set as
+ * a closed list would clear a step of a write it really made, so the recorder
+ * says outright whether the set is closed.
  */
 export interface RunEffects {
 	/** Absolute paths the run's successful tool calls aimed a mutation at. */
@@ -56,6 +64,18 @@ export interface RunEffects {
 	 * wider set.
 	 */
 	verificationCommands: ReadonlySet<string>;
+	/**
+	 * False once the run made a successful call to a tool that can mutate a path
+	 * its own arguments do not name. After such a call `mutatedPaths` is a lower
+	 * bound rather than the whole list, so a reader that would treat an absent
+	 * path as proof the run did not write it has to stop treating it that way.
+	 *
+	 * The downgrade covers the whole run rather than the one call, because an
+	 * opaque call's effect is unbounded. A shell command, a project script, or a
+	 * spawned worker can write anywhere the process can reach, so once one has
+	 * run there is no path left in the checkout that the record can clear.
+	 */
+	writeRecordComplete: boolean;
 }
 
 export interface RunEffectsRecorder {
@@ -70,6 +90,39 @@ interface PendingEffects {
 	paths: ReadonlyArray<string>;
 	validationCommand: string | null;
 	verificationCommand: string | null;
+	opaque: boolean;
+}
+
+/**
+ * Action classes whose successful calls write only paths their own arguments
+ * name. `read` covers the observe, retrieve, interact, and orchestrate-bookkeeping
+ * tools, none of which touch a source-workspace file: `git` is a closed
+ * status/diff/log surface, and `tasks`, `ledger`, and `context` write Clio's own
+ * state. `write` covers `write`, `edit`, and `artifact`, whose target
+ * `toolMutationPaths` resolves from the call itself, including the artifact
+ * tool's default path.
+ */
+const ENUMERABLE_ACTION_CLASSES: ReadonlySet<string> = new Set(["read", "write"]);
+
+/**
+ * Whether a successful call to this tool can mutate a path its own recorded
+ * arguments do not name.
+ *
+ * Asked of the classifier rather than of a hand-written list, because
+ * `src/tools/policy.ts` asserts at bootstrap that every registered tool's
+ * `baseActionClass` equals what this classifier returns and what the plane
+ * table declares. A tool added to the execute or orchestrate-dispatch plane is
+ * therefore opaque the day it is registered, with no list to remember to update.
+ *
+ * The classifier is asked about the tool name alone. Bash's argument scan can
+ * escalate a single call to `system_modify` or `git_destructive`, and those are
+ * still bash; the question here is what the tool can do, not what one call was
+ * caught doing. An unregistered name (a dynamic or MCP tool) classifies as
+ * `unknown` and is opaque, which is the fail-closed answer for a tool whose
+ * arguments this process has no schema for.
+ */
+export function toolWritesOpaquely(toolName: string): boolean {
+	return !ENUMERABLE_ACTION_CLASSES.has(classify({ tool: toolName }).actionClass);
 }
 
 /**
@@ -157,18 +210,23 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
 	const verificationCommands = new Set<string>();
+	let opaqueWriteObserved = false;
 	return {
 		start(toolCallId, toolName, args) {
 			const paths = mutationTargets(toolName, args);
 			const validationCommand = validationCommandOf(toolName, args, "finish-contract");
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
-			if (paths.length === 0 && validationCommand === null && verificationCommand === null) return;
+			const opaque = toolWritesOpaquely(toolName);
+			// An opaque call is tracked even when it exposed no path and no
+			// command, because the fact that it ran at all is the finding.
+			if (!opaque && paths.length === 0 && validationCommand === null && verificationCommand === null) return;
 			// A bash call may re-base its relative paths with its own cwd argument.
 			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 			pending.set(toolCallId, {
 				paths: paths.map((target) => path.resolve(base, target)),
 				validationCommand,
 				verificationCommand,
+				opaque,
 			});
 		},
 		finish(toolCallId, failed) {
@@ -179,6 +237,10 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 				for (const target of effects.paths) failedMutationPaths.add(target);
 				return;
 			}
+			// Success-gated on purpose. A shell command the safety policy blocked,
+			// or one that came back an error, never reached the filesystem, so it
+			// leaves the record closed.
+			if (effects.opaque) opaqueWriteObserved = true;
 			for (const target of effects.paths) mutatedPaths.add(target);
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
@@ -191,6 +253,7 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
 				verificationCommands: new Set(verificationCommands),
+				writeRecordComplete: !opaqueWriteObserved,
 			};
 		},
 	};

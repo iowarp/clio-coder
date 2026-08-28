@@ -10,7 +10,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { ALL_TOOL_NAMES } from "../../src/core/tool-names.js";
+import { createRunEffectsRecorder, toolWritesOpaquely } from "../../src/domains/safety/run-effects.js";
 
 const CWD = "/repo";
 
@@ -114,5 +115,64 @@ describe("contracts/run-effects", () => {
 		const effects = recorder.snapshot();
 		strictEqual(effects.validationCommands.size, 0);
 		strictEqual(effects.verificationCommands.size, 0);
+	});
+
+	// -------------------------------------------------------------------------
+	// Whether the path set is a closed list or a lower bound
+	// -------------------------------------------------------------------------
+
+	it("names exactly the tools whose successful call can write a path their arguments do not", () => {
+		// The list a reader has to trust, derived rather than authored: every
+		// registered tool outside the read and write action classes. `git` is on
+		// the EXECUTE plane but is a closed status/diff/log surface, so the
+		// classifier calls it read class and it stays enumerable.
+		deepStrictEqual(ALL_TOOL_NAMES.filter(toolWritesOpaquely), ["bash", "verify", "dispatch", "steer"]);
+		// A dynamic or MCP tool has no schema this process can read, so it is
+		// opaque by default rather than by omission.
+		strictEqual(toolWritesOpaquely("mcp__server__do_something"), true);
+	});
+
+	it("reports a closed write record for a run that only used enumerable tools", () => {
+		const recorder = createRunEffectsRecorder(CWD);
+		recorder.start("call-1", "write", { path: "src/a.ts", content: "x" });
+		recorder.finish("call-1", false);
+		recorder.start("call-2", "read", { path: "src/b.ts" });
+		recorder.finish("call-2", false);
+		recorder.start("call-3", "git", { op: "diff" });
+		recorder.finish("call-3", false);
+		strictEqual(recorder.snapshot().writeRecordComplete, true);
+	});
+
+	it("downgrades the whole run's record once one opaque call succeeds", () => {
+		for (const tool of ["bash", "verify", "dispatch", "steer"]) {
+			const recorder = createRunEffectsRecorder(CWD);
+			recorder.start("call-1", "write", { path: "src/a.ts", content: "x" });
+			recorder.finish("call-1", false);
+			recorder.start("call-2", tool, { command: "npm run build" });
+			recorder.finish("call-2", false);
+			const effects = recorder.snapshot();
+			strictEqual(effects.writeRecordComplete, false, `${tool} leaves the record open`);
+			// The path set itself is unchanged: it is still every path the run was
+			// seen aiming a mutation at, now read as a lower bound.
+			deepStrictEqual([...effects.mutatedPaths], abs("src/a.ts"));
+		}
+	});
+
+	it("leaves the record closed when the opaque call never landed", () => {
+		// A shell command the safety policy blocked, or one that came back an
+		// error, reached no filesystem, so it cannot have hidden a write.
+		const recorder = createRunEffectsRecorder(CWD);
+		recorder.start("call-1", "bash", { command: "rm -rf /" });
+		recorder.finish("call-1", true);
+		strictEqual(recorder.snapshot().writeRecordComplete, true);
+	});
+
+	it("tracks an opaque call that exposed no path and no command at all", () => {
+		const recorder = createRunEffectsRecorder(CWD);
+		recorder.start("call-1", "dispatch", { agent: "coder", task: "do the thing" });
+		recorder.finish("call-1", false);
+		const effects = recorder.snapshot();
+		strictEqual(effects.writeRecordComplete, false);
+		strictEqual(effects.mutatedPaths.size, 0);
 	});
 });
