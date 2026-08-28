@@ -2,9 +2,10 @@
  * Scripted worker fabric for review and compete gate contract tests.
  *
  * Roles are recognized from the task text the dispatch tool composes: reviewer
- * tasks start with "Review the work of builder run", judge tasks with "Rank".
- * Reviewer and judge answers pop from queues; builders answer with a fixed text
- * and optionally write a file into their cwd (the candidate worktree under
+ * tasks start with "Review the work of builder run", judge tasks with "Rank",
+ * and the council synthesis with "Synthesize the council answers". Reviewer,
+ * judge, and synthesis answers pop from queues; builders answer with a fixed
+ * text and optionally write a file into their cwd (the candidate worktree under
  * compete). Gate deciders answer their typed contract, never a prose sentinel.
  */
 
@@ -28,11 +29,23 @@ export function judgeReport(winner: number, evidence = "compared the candidate b
 	return JSON.stringify({ winner, checks: [{ name: "ranking", passed: true, evidence }] });
 }
 
+/** The council judge's answer shape, which COUNCIL_JUDGE_PROMPT asks for. */
+export function councilSynthesisReport(verdict: string, text: string): string {
+	return JSON.stringify({ verdict, text });
+}
+
+/** The researcher recipe's `research-report` contract, which every council member seals against. */
+export function researchReport(claim: string, evidence = "read the file"): string {
+	return JSON.stringify({ source: "local", findings: [{ claim, evidence }] });
+}
+
 export interface GateFabricScript {
 	builderText?: string;
 	builderWritesFile?: string;
 	reviewerAnswers?: string[];
 	judgeAnswers?: string[];
+	/** Answers for the council synthesis run, which is neither a builder nor a compete judge. */
+	synthesisAnswers?: string[];
 	/** Number of retryable reviewer attempts to fail before scripted answers succeed. */
 	reviewerFailures?: number;
 	/** Number of retryable judge attempts to fail before scripted answers succeed. */
@@ -46,6 +59,7 @@ export function scriptedGateFabric(script: GateFabricScript): {
 	const spawns: GateSpawnRecord[] = [];
 	const reviewerAnswers = [...(script.reviewerAnswers ?? [])];
 	const judgeAnswers = [...(script.judgeAnswers ?? [])];
+	const synthesisAnswers = [...(script.synthesisAnswers ?? [])];
 	let reviewerFailures = script.reviewerFailures ?? 0;
 	let judgeFailures = script.judgeFailures ?? 0;
 	const spawn = (spec: WorkerSpec, opts?: { cwd?: string }): SpawnedWorker => {
@@ -68,6 +82,8 @@ export function scriptedGateFabric(script: GateFabricScript): {
 			} else {
 				text = judgeAnswers.shift() ?? judgeReport(1);
 			}
+		} else if (spec.task.startsWith("Synthesize the council answers")) {
+			text = synthesisAnswers.shift() ?? councilSynthesisReport("supported", "the council agrees");
 		} else {
 			text = script.builderText ?? "built it";
 			if (script.builderWritesFile !== undefined && opts?.cwd !== undefined) {

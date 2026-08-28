@@ -240,7 +240,7 @@ export interface DispatchContract {
 	sealCouncilSynthesis?(input: {
 		group: string;
 		round: number;
-		kind: "none" | "vote";
+		kind: "none" | "vote" | "judge";
 		text: string;
 		subjects: ReadonlyArray<{ runId: string; digest: string | null }>;
 		template: RunReceipt;

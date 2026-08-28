@@ -172,9 +172,17 @@ export function gateDeciderAgentId(requested: string | undefined): string {
  * the slot. The gate validates that answer and fails closed on a malformed one,
  * so also enforcing an inapplicable recipe postcondition would fail the run
  * before its verdict could be read.
+ *
+ * `synthesis` is the third decider and belongs here for the same reason.
+ * {@link deriveExecutionRole} already resolves it to the `judge` role, and
+ * `isBoundedGateRolePrompt` admits it only under the council judge prompt,
+ * which asks for `{"verdict","text"}`. A council seats the read-only
+ * `researcher` by default, whose recipe declares `research-report`, so leaving
+ * the recipe postcondition on the slot sealed a contract failure on every
+ * correct synthesis and burned the configured retries reproducing it.
  */
 export function appliesRecipeResultContract(gateRole: GateTopologyRole | undefined): boolean {
-	return gateRole !== "reviewer" && gateRole !== "judge";
+	return gateRole !== "reviewer" && gateRole !== "judge" && gateRole !== "synthesis";
 }
 
 /** The route dimensions a gate correlation is measured across. */

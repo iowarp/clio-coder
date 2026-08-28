@@ -4,7 +4,10 @@ import { after, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { parseCouncilReport, validateResultContract } from "../../src/domains/agents/result-contract.js";
+import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -12,12 +15,56 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
-import { scriptedGateFabric } from "../harness/gate-fabric.js";
+import { councilSynthesisReport, researchReport, scriptedGateFabric } from "../harness/gate-fabric.js";
 
 const TARGET = { id: "local", runtime: "openai", defaultModel: "model" };
 
 function roster(members: unknown[]): unknown {
 	return { targets: [TARGET], workers: { rosters: { design: { members } } } };
+}
+
+/**
+ * The stub fleet's `researcher` recipe is a permissive harness fixture: an
+ * `external-delegation` contract and the `base` audience. Neither is what a
+ * real council seats. `src/domains/agents/builtins/researcher.md` declares
+ * `resultContract: {kind: research-report}` and `audience: shadow`, and both
+ * facts are what the judge synthesis broke on: the contract it could never
+ * satisfy, and the audience that refused its bounded gate-role prompt as a
+ * persona override. A council test that means to exercise either has to run
+ * the production recipe facts.
+ */
+function withBuiltinResearcherFacts(context: DomainContext): DomainContext {
+	const agents = context.getContract<AgentsContract>("agents");
+	if (agents === undefined) throw new Error("the dispatch stub context has no agents contract");
+	const recipes = agents
+		.list()
+		.map((recipe) =>
+			recipe.id === "researcher"
+				? { ...recipe, audience: "shadow" as const, resultContract: { kind: "research-report" as const } }
+				: recipe,
+		);
+	const faithful: AgentsContract = {
+		...agents,
+		list: () => recipes,
+		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
+		listSpecs: () => recipes.map(normalizeAgentSpec),
+		getSpec: (id) => {
+			const recipe = recipes.find((entry) => entry.id === id);
+			return recipe ? normalizeAgentSpec(recipe) : null;
+		},
+	};
+	return {
+		bus: context.bus,
+		getContract: ((name: string) =>
+			name === "agents" ? faithful : context.getContract(name)) as DomainContext["getContract"],
+	};
+}
+
+/** The sealed receipt on disk, which is where the applied result contract is recorded. */
+function sealedReceipt(envelope: { receiptPath?: string | null } | null): RunReceipt {
+	const receiptPath = envelope?.receiptPath;
+	if (receiptPath === null || receiptPath === undefined) throw new Error("run has no sealed receipt path");
+	return JSON.parse(readFileSync(receiptPath, "utf8")) as RunReceipt;
 }
 
 describe("council roster configuration", () => {
@@ -363,9 +410,14 @@ describe("council dispatch", () => {
 		}
 	});
 
-	it("seals a judge receipt that references every final member", async () => {
-		const fabric = scriptedGateFabric({ builderText: JSON.stringify({ verdict: "pass", text: "synthesized" }) });
-		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+	it("seals a judge receipt that references every final member and passes the applied contract", async () => {
+		const fabric = scriptedGateFabric({
+			builderText: researchReport("the tuple key survives a node rename"),
+			synthesisAnswers: [councilSynthesisReport("pass", "synthesized")],
+		});
+		const bundle = makeDispatchBundle(withBuiltinResearcherFacts(dispatchStubContext()), {
+			spawnWorker: fabric.spawn,
+		});
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
@@ -382,11 +434,80 @@ describe("council dispatch", () => {
 				{ approval: { requestId: "judge", requestedBy: "tester", actionClass: "dispatch" } },
 			);
 			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
-			const council = result.details?.council as { synthesis: { text: string; judgeRunId: string } };
+			const council = result.details?.council as {
+				members: Array<{ label: string; runId: string }>;
+				synthesis: { kind: string; text: string; verdict?: string; judgeRunId: string };
+			};
 			strictEqual(council.synthesis.text, "synthesized");
-			const judge = bundle.contract.getRun(council.synthesis.judgeRunId);
-			strictEqual(judge?.gate?.role, "synthesis");
-			strictEqual(judge?.gate?.subjects?.length, 2);
+			const judgeEnvelope = bundle.contract.getRun(council.synthesis.judgeRunId);
+			strictEqual(judgeEnvelope?.gate?.role, "synthesis");
+			strictEqual(judgeEnvelope?.gate?.subjects?.length, 2);
+			// The members prove the sealed validation is live on this fleet: their
+			// recipe contract was applied and passed. The judge answered the same
+			// council with {"verdict","text"}, which is not a research-report, so
+			// a run that seals green here is one the contract was not applied to.
+			for (const member of council.members) {
+				const memberReceipt = sealedReceipt(bundle.contract.getRun(member.runId));
+				strictEqual(memberReceipt.quality?.resultContract?.conformance, "pass", member.label);
+			}
+			const judgeReceipt = sealedReceipt(judgeEnvelope);
+			strictEqual(judgeReceipt.outcome, "succeeded", judgeReceipt.outcomeDetail ?? "");
+			strictEqual(judgeReceipt.quality?.resultContract, null);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("seals the whole council report for a judge synthesis, as vote and none already do", async () => {
+		const fabric = scriptedGateFabric({
+			builderText: researchReport("keep the tuple key"),
+			synthesisAnswers: [councilSynthesisReport("keep", "the members agree on the tuple key")],
+		});
+		const bundle = makeDispatchBundle(withBuiltinResearcherFacts(dispatchStubContext()), {
+			spawnWorker: fabric.spawn,
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
+			const result = await tool.run(
+				{
+					mode: "council",
+					task: "judge",
+					members: [
+						{ label: "alpha", target: "default" },
+						{ label: "beta", target: "default" },
+					],
+					synthesis: "judge",
+				},
+				{ approval: { requestId: "judge-seal", requestedBy: "tester", actionClass: "dispatch" } },
+			);
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			const council = result.details?.council as { synthesis: { judgeRunId: string } };
+			const detailRuns = result.details?.runs as Array<{ runId: string }>;
+			// Two members, the judge run, then the coordinator-sealed synthesis.
+			strictEqual(detailRuns.length, 4);
+			const sealedRunId = detailRuns[3]?.runId ?? "";
+			notStrictEqual(sealedRunId, council.synthesis.judgeRunId);
+			const sealedEnvelope = bundle.contract.getRun(sealedRunId);
+			strictEqual(sealedEnvelope?.agentId, "council-synthesis");
+			strictEqual(sealedEnvelope?.council?.label, "synthesis");
+			strictEqual(sealedEnvelope?.gate?.subjects?.length, 2);
+			const receipt = sealedReceipt(sealedEnvelope);
+			strictEqual(receipt.outcome, "succeeded");
+			deepStrictEqual(verifyReceiptIntegrity(receipt, sealedEnvelope), { ok: true });
+			// This is what /share <synthesis runId> reads: the whole council-report,
+			// so the main agent gets every final member's labelled answer and the
+			// judge line rather than the judge's bare {"verdict","text"} payload.
+			const report = parseCouncilReport(receipt.output?.state === "final" ? receipt.output.text : null);
+			ok(report, "the judge synthesis receipt seals a parseable council-report");
+			deepStrictEqual(
+				report?.members.map((member) => member.label),
+				["alpha", "beta"],
+			);
+			strictEqual(report?.synthesis.kind, "judge");
+			strictEqual(report?.synthesis.text, "the members agree on the tuple key");
+			strictEqual(report?.synthesis.verdict, "keep");
+			strictEqual(report?.synthesis.judgeRunId, council.synthesis.judgeRunId);
 		} finally {
 			await bundle.extension.stop?.();
 		}

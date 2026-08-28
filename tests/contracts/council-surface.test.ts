@@ -427,6 +427,32 @@ describe("/share of a council run", () => {
 		ok(!(note ?? "").includes('"members"'), "the report reaches the model as prose, never as its raw payload");
 	});
 
+	it("renders the judge line and every final member for a judge synthesis run id", () => {
+		const entry = makeEntry({
+			assignmentId: "synth",
+			runId: "synth",
+			agentId: "council-synthesis",
+			attempts: [{ runId: "synth", targetLabel: "local/example-model" }],
+			council: { group: "g1", label: "synthesis", round: 1 },
+			text: JSON.stringify({
+				members: report.members,
+				synthesis: {
+					kind: "judge",
+					verdict: "keep",
+					text: "the tuple key survives a node rename; keying by node loses the failover case",
+					judgeRunId: "j-1",
+				},
+			}),
+		});
+		const [note] = shared(entry, "synth");
+		ok(note !== undefined);
+		match(note ?? "", /^\[worker result] council-synthesis · run synth · ok · shared by the operator/);
+		match(note ?? "", /\[alpha] \(verdict pass\) keep the tuple key/);
+		match(note ?? "", /\[beta] \(verdict fail\) key by node instead/);
+		match(note ?? "", /\[synthesis judge] verdict keep · judge run j-1\n\nthe tuple key survives a node rename/);
+		ok(!(note ?? "").includes('"members"'), "the judge report reaches the model as prose, never as its raw payload");
+	});
+
 	it("labels a member run with its roster label", () => {
 		const entry = makeEntry({
 			assignmentId: "m-1",
