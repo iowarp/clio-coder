@@ -5,8 +5,11 @@ import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
-import { openAuthStorage } from "../providers/auth/index.js";
+import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
+import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
+import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
@@ -529,6 +532,142 @@ export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 				level: "warn",
 				name: `target ${target.id}`,
 				detail: `${fingerprint.displayName} detected at ${url}; run \`clio-coder targets convert ${target.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle`,
+			};
+		}),
+	);
+	return results.filter((finding): finding is DoctorFinding => finding !== null);
+}
+
+/** One configured model pointer at a target, named the way settings.yaml spells it. */
+interface ConfiguredModelRole {
+	role: string;
+	model: string;
+}
+
+function configuredModelRoles(
+	settings: ReturnType<typeof readSettings>,
+	target: TargetDescriptor,
+): ConfiguredModelRole[] {
+	const roles: ConfiguredModelRole[] = [];
+	if (target.defaultModel) roles.push({ role: "defaultModel", model: target.defaultModel });
+	if (settings.orchestrator.target === target.id && settings.orchestrator.model) {
+		roles.push({ role: "orchestrator.model", model: settings.orchestrator.model });
+	}
+	if (settings.background.target === target.id && settings.background.model) {
+		roles.push({ role: "background.model", model: settings.background.model });
+	}
+	if (settings.workers.default.target === target.id && settings.workers.default.model) {
+		roles.push({ role: "workers.default.model", model: settings.workers.default.model });
+	}
+	return roles;
+}
+
+/**
+ * Per-request budget for the model sweep. A target that does not answer in
+ * this time falls back to the list configure recorded, so a black-holed
+ * remote costs doctor a bounded wait rather than the probe's full timeout.
+ */
+const DOCTOR_MODEL_PROBE_TIMEOUT_MS = 2_500;
+
+async function doctorProbeContext(target: TargetDescriptor, runtime: RuntimeDescriptor): Promise<ProbeContext> {
+	const ctx: ProbeContext = { credentialsPresent: credentialsPresent(), httpTimeoutMs: DOCTOR_MODEL_PROBE_TIMEOUT_MS };
+	if (!targetRequiresAuth(target, runtime)) return ctx;
+	try {
+		const resolution = await openAuthStorage().resolveForTarget(resolveAuthTarget(target, runtime), {
+			includeFallback: false,
+		});
+		if (resolution.apiKey) ctx.authToken = resolution.apiKey;
+	} catch {
+		// The probe reports its own missing-auth failure; the wireModels fallback covers the check.
+	}
+	return ctx;
+}
+
+/** What the target advertises now, or null when it could not be asked. */
+async function probeAdvertisedModels(
+	target: TargetDescriptor,
+	runtime: RuntimeDescriptor,
+): Promise<{ advertised: string[]; resident: string[] } | null> {
+	if (runtime.kind !== "http" || typeof runtime.probe !== "function" || !target.url) return null;
+	let probe: ProbeResult;
+	try {
+		probe = await runtime.probe(target, await doctorProbeContext(target, runtime));
+	} catch {
+		return null;
+	}
+	if (!probe.ok || !probe.models || probe.models.length === 0) return null;
+	const advertised = [...probe.models];
+	const resident: string[] = [];
+	for (const [id, status] of Object.entries(probe.modelStates ?? {})) {
+		if (!advertised.includes(id)) advertised.push(id);
+		if (status.state === "loaded" || status.state === "loading") resident.push(id);
+	}
+	return { advertised, resident };
+}
+
+/**
+ * Model sweep: every model pointer settings.yaml aims at a target with no
+ * static catalog is checked against what that target advertises. The live
+ * list wins when the target answers; the `wireModels` list configure recorded
+ * stands in when it does not, so an unreachable server still gets the
+ * placeholder id it was saved with called out. A target with neither list is
+ * a WARN, not a pass, because nothing was verified. Network-bound like the
+ * runtime sweep, so it is not part of the synchronous `runDoctor()` core.
+ */
+export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
+	let settings: ReturnType<typeof readSettings>;
+	try {
+		settings = readSettings();
+	} catch {
+		return [];
+	}
+	if (settings.targets.length === 0) return [];
+	// Every runtime descriptor and the model catalog sit behind these two
+	// imports. They are loaded here, not at module load, so a doctor run on a
+	// home with no targets (the `--fix` seed every CLI test starts from) pays
+	// nothing for a sweep it has nothing to do.
+	const [{ getRuntimeRegistry }, { registerBuiltinRuntimes }, { listKnownModelsForRuntime }] = await Promise.all([
+		import("../providers/registry.js"),
+		import("../providers/runtimes/builtins.js"),
+		import("../providers/support.js"),
+	]);
+	const registry = getRuntimeRegistry();
+	// doctor never loads the providers domain, so the registry is empty here
+	// unless another command in this process filled it.
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
+	const results = await Promise.all(
+		settings.targets.map(async (target): Promise<DoctorFinding | null> => {
+			const runtime = registry.get(target.runtime);
+			if (!runtime) return null;
+			// Cloud runtimes are validated against their catalog at configure time.
+			if (listKnownModelsForRuntime(runtime.id).length > 0) return null;
+			const roles = configuredModelRoles(settings, target);
+			if (roles.length === 0) return null;
+			const live = await probeAdvertisedModels(target, runtime);
+			const recorded = target.wireModels ?? [];
+			if (live === null && recorded.length === 0) {
+				return {
+					ok: true,
+					level: "warn",
+					name: `model ${target.id}`,
+					detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} could not be verified: the target did not answer and configure recorded no model list; run \`clio-coder targets --probe\` once it is up`,
+				};
+			}
+			const advertised = live ? live.advertised : recorded;
+			const source = live ? `advertised by ${target.url ?? target.id} now` : "recorded by configure at last save";
+			const missing = roles.filter((entry) => !advertised.includes(entry.model));
+			if (missing.length === 0) {
+				return {
+					ok: true,
+					name: `model ${target.id}`,
+					detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} ${source}`,
+				};
+			}
+			const resident = live && live.resident.length > 0 ? live.resident.join(", ") : live ? "none" : "unknown";
+			return {
+				ok: false,
+				name: `model ${target.id}`,
+				detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not ${source} (${advertised.length} ids). Resident instances: ${resident}. Re-run \`clio-coder configure --id ${target.id} --model <advertised id>\`; \`clio-coder targets --probe\` lists them`,
 			};
 		}),
 	);

@@ -82,10 +82,15 @@ clio-coder configure \
   --id local-lmstudio \
   --runtime lmstudio \
   --url http://127.0.0.1:1234 \
-  --model your-model-id \
+  --model qwen3.8-27b \
   --set-orchestrator \
   --set-fleet-default
 ```
+
+`--model` must be an id the server advertises. `configure` fetches the
+server's model list and refuses an id that is not on it, printing the ids it
+found and which of them are loaded; `--force` saves the target anyway. Replace
+`qwen3.8-27b` with an id from `lms ls` (LM Studio) or your server's model list.
 
 Use the id you chose, probe it, then launch the TUI:
 
@@ -768,7 +773,7 @@ clio-coder configure \
   --id local-llamacpp \
   --runtime llamacpp \
   --url http://127.0.0.1:8080 \
-  --model your-model-id \
+  --model qwen3.8-27b \
   --set-orchestrator \
   --set-fleet-default
 ```

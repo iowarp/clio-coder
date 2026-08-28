@@ -1233,7 +1233,10 @@ function safeProbeReason(
 	} catch {
 		return "not-configured";
 	}
-	return status.available && status.health.status === "healthy" ? null : "unreachable";
+	// Degraded is reachable with a default the server does not serve; a client
+	// that names its own model can still use the target.
+	const reachable = status.health.status === "healthy" || status.health.status === "degraded";
+	return status.available && reachable ? null : "unreachable";
 }
 
 interface AcpPermissionBridge {
