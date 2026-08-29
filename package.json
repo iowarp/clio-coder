@@ -107,7 +107,6 @@
 	},
 	"overrides": {
 		"@anthropic-ai/sdk": "0.105.0",
-		"ip-address": "10.2.0",
 		"esbuild": "0.28.1"
 	},
 	"devDependencies": {
