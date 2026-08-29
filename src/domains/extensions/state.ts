@@ -129,7 +129,7 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	const cwd = options.cwd ?? process.cwd();
 	const source = path.resolve(sourcePath);
 	const candidate = loadManifestFromRoot(source);
-	if (!candidate.manifest) return { diagnostics: candidate.diagnostics };
+	if (!candidate.manifest || !candidate.valid) return { diagnostics: candidate.diagnostics };
 	const targetRoot = path.join(extensionBaseDir(scope, cwd), candidate.manifest.id);
 	if (existsSync(targetRoot)) {
 		if (!options.force) {

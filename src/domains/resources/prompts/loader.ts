@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseCommandArgs, substituteArgs } from "../../../engine/prompt-templates.js";
@@ -13,7 +13,6 @@ import {
 import {
 	COMPAT_RESOURCE_PRECEDENCE,
 	defaultScopedResourceRoots,
-	readRootEntries,
 	sourceInfoForRoot,
 	splitYamlFrontmatter,
 	stringField,
@@ -33,6 +32,8 @@ export interface PromptTemplate {
 
 export interface PromptTemplateRoot {
 	path: string;
+	/** Present only for an installed extension resource root. */
+	rootPath?: string;
 	scope: ResourceScope;
 	source?: string;
 	precedence?: number;
@@ -139,6 +140,61 @@ function fallbackDescription(body: string): string {
 	return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized;
 }
 
+// Keep the suffix deliberately conservative. Prompt prose commonly places a
+// comma, parenthesis, or full stop immediately after an @path; treating that
+// punctuation as part of the filesystem reference makes a valid template look
+// unresolved. Extension bundles use portable path components, so these are the
+// only characters needed in a reference while still allowing `..` to be
+// detected and rejected by the containment check below.
+const EXTENSION_ROOT_REFERENCE = /\$\{extensionRoot\}(\/[A-Za-z0-9._~%+@/-]*)?/g;
+const EXTENSION_ROOT_TOKEN = "$" + "{extensionRoot}";
+
+function contained(root: string, candidate: string): boolean {
+	const relative = path.relative(root, candidate);
+	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+/** Resolve only existing paths contained by the declaring extension package. */
+function resolveExtensionReferences(
+	body: string,
+	root: PromptTemplateRoot,
+	filePath: string,
+	diagnostics: ResourceDiagnostic[],
+): string | null {
+	if (root.rootPath === undefined || !body.includes(EXTENSION_ROOT_TOKEN)) return body;
+	let canonicalRoot: string;
+	try {
+		canonicalRoot = realpathSync(root.rootPath);
+	} catch (error) {
+		diagnostics.push({
+			type: "warning",
+			message: `extension root could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+			path: filePath,
+		});
+		return null;
+	}
+	let invalid: string | null = null;
+	const resolved = body.replace(EXTENSION_ROOT_REFERENCE, (reference, suffix: string | undefined) => {
+		const candidate = path.resolve(canonicalRoot, `.${suffix ?? ""}`);
+		try {
+			const canonicalCandidate = realpathSync(candidate);
+			if (!contained(canonicalRoot, canonicalCandidate)) invalid = reference;
+		} catch {
+			invalid = reference;
+		}
+		return candidate;
+	});
+	if (invalid !== null) {
+		diagnostics.push({
+			type: "warning",
+			message: `prompt template has an unresolved or escaping extension reference: ${invalid}`,
+			path: filePath,
+		});
+		return null;
+	}
+	return resolved;
+}
+
 function loadPromptFile(
 	filePath: string,
 	root: PromptTemplateRoot,
@@ -155,16 +211,28 @@ function loadPromptFile(
 		return null;
 	}
 
-	const name = path.basename(filePath, ext);
+	const relativePath = path.relative(root.path, filePath);
+	if (
+		relativePath === "" ||
+		relativePath === ".." ||
+		relativePath.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(relativePath)
+	) {
+		diagnostics.push({ type: "warning", message: "prompt template escaped its discovery root", path: filePath });
+		return null;
+	}
+	const name = relativePath.slice(0, -ext.length).split(path.sep).join(":");
 	if (name.trim().length === 0) return null;
 	const { frontmatter, body } = splitOptionalFrontmatter(raw, filePath, diagnostics);
-	const description = stringField(frontmatter, "description") ?? fallbackDescription(body);
+	const resolvedBody = resolveExtensionReferences(body, root, filePath, diagnostics);
+	if (resolvedBody === null) return null;
+	const description = stringField(frontmatter, "description") ?? fallbackDescription(resolvedBody);
 	const argumentHint = stringField(frontmatter, "argument-hint") ?? stringField(frontmatter, "argumentHint");
 	const sourceInfo: ResourceSourceInfo = sourceInfoForRoot(root, filePath);
 	const template: PromptTemplate = {
 		name,
 		description,
-		content: body.trim(),
+		content: resolvedBody.trim(),
 		filePath,
 		sourceInfo,
 		trusted: root.trusted !== false,
@@ -178,10 +246,42 @@ function loadPromptRoot(
 	diagnostics: ResourceDiagnostic[],
 ): ResourceCandidate<PromptTemplate>[] {
 	const candidates: ResourceCandidate<PromptTemplate>[] = [];
-	for (const entry of readRootEntries(root, "prompt template", diagnostics)) {
-		if (!entry.isFile()) continue;
-		const candidate = loadPromptFile(path.join(root.path, entry.name), root, diagnostics);
-		if (candidate) candidates.push(candidate);
+	const pending = [root.path];
+	while (pending.length > 0) {
+		const directory = pending.pop();
+		if (!directory) continue;
+		let entries: import("node:fs").Dirent[];
+		try {
+			const stat = lstatSync(directory);
+			if (stat.isSymbolicLink() || !stat.isDirectory()) {
+				diagnostics.push({
+					type: "warning",
+					message: "prompt template root contains a non-directory or symbolic link",
+					path: directory,
+				});
+				continue;
+			}
+			entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			diagnostics.push({
+				type: "warning",
+				message: `prompt template directory could not be read: ${error instanceof Error ? error.message : String(error)}`,
+				path: directory,
+			});
+			continue;
+		}
+		for (const entry of [...entries].reverse()) {
+			const filePath = path.join(directory, entry.name);
+			if (entry.isSymbolicLink()) {
+				diagnostics.push({ type: "warning", message: "prompt template symbolic link was ignored", path: filePath });
+			} else if (entry.isDirectory()) {
+				pending.push(filePath);
+			} else if (entry.isFile()) {
+				const candidate = loadPromptFile(filePath, root, diagnostics);
+				if (candidate) candidates.push(candidate);
+			}
+		}
 	}
 	return candidates;
 }

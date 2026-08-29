@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
@@ -39,11 +39,97 @@ function normalizeResources(value: unknown): ExtensionManifestResources {
 	const out: ExtensionManifestResources = {};
 	const skills = trimString(value.skills);
 	const prompts = trimString(value.prompts);
+	const agents = trimString(value.agents);
+	const fleets = trimString(value.fleets);
 	const themes = trimString(value.themes);
 	if (skills) out.skills = skills;
 	if (prompts) out.prompts = prompts;
+	if (agents) out.agents = agents;
+	if (fleets) out.fleets = fleets;
 	if (themes) out.themes = themes;
 	return out;
+}
+
+function contained(root: string, candidate: string): boolean {
+	const relative = path.relative(root, candidate);
+	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function validateResourceTree(
+	root: string,
+	resourcePath: string,
+	kind: string,
+	diagnostics: ExtensionDiagnostic[],
+): void {
+	if (path.isAbsolute(resourcePath)) {
+		diagnostics.push({ type: "error", message: `resources.${kind} must be relative`, path: resourcePath });
+		return;
+	}
+	const resolvedRoot = path.resolve(root);
+	const resolved = path.resolve(resolvedRoot, resourcePath);
+	if (!contained(resolvedRoot, resolved) || resolved === resolvedRoot) {
+		diagnostics.push({ type: "error", message: `resources.${kind} escapes the extension root`, path: resourcePath });
+		return;
+	}
+	let canonicalRoot: string;
+	let canonicalResource: string;
+	try {
+		canonicalRoot = realpathSync(resolvedRoot);
+		canonicalResource = realpathSync(resolved);
+		if (!lstatSync(resolved).isDirectory()) {
+			diagnostics.push({ type: "error", message: `resources.${kind} is not a directory`, path: resolved });
+			return;
+		}
+	} catch (error) {
+		diagnostics.push({
+			type: "error",
+			message: `resources.${kind} cannot be resolved: ${error instanceof Error ? error.message : String(error)}`,
+			path: resolved,
+		});
+		return;
+	}
+	if (!contained(canonicalRoot, canonicalResource)) {
+		diagnostics.push({ type: "error", message: `resources.${kind} escapes through a symbolic link`, path: resolved });
+		return;
+	}
+
+	const pending = [resolved];
+	while (pending.length > 0) {
+		const directory = pending.pop();
+		if (!directory) continue;
+		for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+			const candidate = path.join(directory, entry.name);
+			if (entry.isSymbolicLink()) {
+				try {
+					if (!contained(canonicalRoot, realpathSync(candidate))) {
+						diagnostics.push({
+							type: "error",
+							message: `resources.${kind} contains an escaping symbolic link`,
+							path: candidate,
+						});
+					}
+				} catch (error) {
+					diagnostics.push({
+						type: "error",
+						message: `resources.${kind} contains an unresolved symbolic link: ${error instanceof Error ? error.message : String(error)}`,
+						path: candidate,
+					});
+				}
+			} else if (entry.isDirectory()) {
+				pending.push(candidate);
+			}
+		}
+	}
+}
+
+function validateResourceRoots(
+	root: string,
+	resources: ExtensionManifestResources,
+	diagnostics: ExtensionDiagnostic[],
+): void {
+	for (const [kind, resourcePath] of Object.entries(resources)) {
+		if (resourcePath) validateResourceTree(root, resourcePath, kind, diagnostics);
+	}
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -123,6 +209,7 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 	}
 	try {
 		const parsed = parseExtensionManifest(readJsonOrYaml(manifestPath), manifestPath);
+		if (parsed.manifest) validateResourceRoots(root, parsed.manifest.resources, parsed.diagnostics);
 		return {
 			path: root,
 			manifestPath,

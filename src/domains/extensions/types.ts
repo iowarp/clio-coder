@@ -1,9 +1,11 @@
 export type ExtensionScope = "user" | "project";
-export type ExtensionResourceKind = "skills" | "prompts" | "themes";
+export type ExtensionResourceKind = "skills" | "prompts" | "agents" | "fleets" | "themes";
 
 export interface ExtensionManifestResources {
 	skills?: string;
 	prompts?: string;
+	agents?: string;
+	fleets?: string;
 	themes?: string;
 }
 
@@ -52,6 +54,7 @@ export interface ExtensionResourceRoot {
 	id: string;
 	scope: ExtensionScope;
 	path: string;
+	rootPath: string;
 	source: string;
 }
 

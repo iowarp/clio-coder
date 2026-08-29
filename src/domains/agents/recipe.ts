@@ -131,7 +131,7 @@ export interface AgentRecipe {
 	resultContract: ResultContract;
 	product?: AgentProduct;
 	tags: ReadonlyArray<string>;
-	source: "builtin" | "user" | "project";
+	source: "builtin" | "extension" | "user" | "project";
 	filepath: string;
 	/** Persona prompt body. */
 	body: string;
@@ -140,6 +140,10 @@ export interface AgentRecipe {
 export interface RecipeSource {
 	dir: string;
 	source: AgentRecipe["source"];
+	/** Stable provenance used to correlate resources from one extension. */
+	origin?: string;
+	/** The declaring extension's skill root; extension agents may bind only here. */
+	skillRoot?: string;
 }
 
 export function recipeIdFromPath(absPath: string, rootDir: string): string {

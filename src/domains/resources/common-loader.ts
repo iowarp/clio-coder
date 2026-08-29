@@ -7,6 +7,8 @@ import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./co
 
 export interface ResourceRoot {
 	path: string;
+	/** Package root for safely resolving extension-relative prompt references. */
+	rootPath?: string;
 	scope: ResourceScope;
 	source?: string;
 	/** Collision rank, higher wins. See {@link ResourceSourceInfo.precedence}. */
@@ -44,6 +46,7 @@ export function defaultScopedResourceRoots(kind: ExtensionResourceKind, cwd: str
 	return [
 		...enabledExtensionResourceRoots(kind, cwd).map((root) => ({
 			path: root.path,
+			rootPath: root.rootPath,
 			scope: "package" as const,
 			source: root.source,
 			precedence: COMPAT_RESOURCE_PRECEDENCE.extension,

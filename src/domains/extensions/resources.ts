@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { listInstalledExtensions } from "./state.js";
 import type { ExtensionResourceKind, ExtensionResourceRoot } from "./types.js";
@@ -7,8 +7,24 @@ export function extensionResourcePath(rootPath: string, resourcePath: string): s
 	const root = path.resolve(rootPath);
 	const full = path.resolve(root, resourcePath);
 	const relative = path.relative(root, full);
-	if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) return full;
-	return null;
+	if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+		return null;
+	try {
+		const rootReal = realpathSync(root);
+		const fullReal = realpathSync(full);
+		const canonicalRelative = path.relative(rootReal, fullReal);
+		if (
+			canonicalRelative === ".." ||
+			canonicalRelative.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(canonicalRelative)
+		) {
+			return null;
+		}
+		if (!lstatSync(full).isDirectory()) return null;
+		return full;
+	} catch {
+		return null;
+	}
 }
 
 export function enabledExtensionResourceRoots(
@@ -22,15 +38,11 @@ export function enabledExtensionResourceRoots(
 		if (!rel) continue;
 		const full = extensionResourcePath(entry.rootPath, rel);
 		if (!full) continue;
-		try {
-			if (!statSync(full).isDirectory()) continue;
-		} catch {
-			continue;
-		}
 		roots.push({
 			id: entry.id,
 			scope: entry.scope,
 			path: full,
+			rootPath: entry.rootPath,
 			source: `extension:${entry.scope}:${entry.id}`,
 		});
 	}
