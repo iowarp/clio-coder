@@ -4,6 +4,7 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
 import type { ConfigContract } from "../config/contract.js";
+import { enabledExtensionResourceRoots } from "../extensions/index.js";
 import type { AgentsContract } from "./contract.js";
 import type { AgentRecipe } from "./recipe.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir, mergeRecipes } from "./registry.js";
@@ -20,9 +21,26 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		const projectDir = path.join(process.cwd(), ".clio-coder", "agents");
 		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
 		const builtin = loadRecipesFromDir({ dir: builtinDir, source: "builtin" }, nextDiagnostics);
+		const skillRoots = new Map(
+			enabledExtensionResourceRoots("skills", process.cwd()).map((root) => [root.source, root.path]),
+		);
+		const extensionRecipes = enabledExtensionResourceRoots("agents", process.cwd())
+			.sort((left, right) => left.source.localeCompare(right.source))
+			.map((root) => {
+				const skillRoot = skillRoots.get(root.source);
+				return loadRecipesFromDir(
+					{
+						dir: root.path,
+						source: "extension",
+						origin: root.source,
+						...(skillRoot === undefined ? {} : { skillRoot }),
+					},
+					nextDiagnostics,
+				);
+			});
 		const user = loadRecipesFromDir({ dir: userDir, source: "user" }, nextDiagnostics);
 		const project = loadRecipesFromDir({ dir: projectDir, source: "project" }, nextDiagnostics);
-		const merged = mergeRecipes(builtin, user, project);
+		const merged = mergeRecipes(builtin, ...extensionRecipes, user, project);
 		const config = _context.getContract<ConfigContract>("config");
 		assertAgentIdNamespace(merged, config?.get()?.delegation?.agents ?? []);
 		recipes = merged;
