@@ -279,7 +279,7 @@ dist-tag instead.
 From source, pinned to this release:
 
 ```bash
-git clone --branch v0.3.7 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.3.8 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"

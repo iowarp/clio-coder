@@ -10,7 +10,7 @@ Clio Coder strictly versions every persistent or network-transported data struct
 
 | Artifact / Subsystem | Current Version | Symbol / Type & Source Location | Persisted Path / Wire Location | Schema Semantics & Version Differences | Mismatch Handling |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Run Receipt** | `19` | `RUN_RECEIPT_INTEGRITY_VERSION = 19`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 19 covers all base provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance, and fleet gate provenance. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
+| **Run Receipt** | `20` | `RUN_RECEIPT_INTEGRITY_VERSION = 20`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 20 adds `pathProvenance` on dispatch intent and the resolved `pathScope`, over the v19 base of provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance, and fleet gate provenance. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
 | **Session Ledger** | `3` | `CURRENT_SESSION_FORMAT_VERSION = 3`<br>`src/engine/session.ts:66` | `<stateDir>/sessions/<cwdHash>/<sessionId>/` (`meta.json`, `current.jsonl`, `tree.json`) | Append-only ledger format with UUIDv7 turn IDs, session header line, and tree graph linkage. | Automated migration via `src/domains/session/migrations/` on `/resume`. Earlier unmigratable versions rejected. |
 | **Worker Spec** | `3` | `WORKER_SPEC_VERSION = 3`<br>`src/worker/spec-contract.ts:22` | Subprocess `stdin` control plane JSON payload | Worker invocation parameters, tool surface profile, and execution bounds. | Fail-closed preflight rejection before worker activation. |
 | **Worker Runtime Descriptor** | `2` | `WORKER_RUNTIME_DESCRIPTOR_VERSION = 2`<br>`src/worker/spec-contract.ts:23` | Worker attestation descriptor payload | Attestation descriptor for worker runtime environment and hardware facts. | Attestation mismatch causes immediate process termination. |
@@ -42,9 +42,9 @@ export function computeReceiptDigest(receipt: RunReceiptV15): string {
 ```
 
 Receipt verification checks:
-1. `integrity.version === 19`.
+1. `integrity.version === 20`. A receipt sealed at a lower version is reported as retired rather than invalid: it is intact, but is not read as evidence and is never migrated.
 2. Calculated SHA-256 matches `integrity.digest`.
-3. All optional fields present in the schema (`validationGrounding`, `capabilityMismatch`, `steering`, `gate`, `fleetGate`, `council`, `plan`, `briefing`) conform to the strict v19 specification.
+3. All optional fields present in the schema (`validationGrounding`, `capabilityMismatch`, `steering`, `gate`, `fleetGate`, `council`, `plan`, `briefing`) conform to the strict v20 specification.
 
 ---
 

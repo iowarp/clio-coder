@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Lifecycle Operations Blueprint (v0.3.7)</title>
+  <title>Clio Coder Lifecycle Operations Blueprint (v0.3.8)</title>
   
   <style>
     :root {
@@ -414,7 +414,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.7</span>
+        <span class="version-badge">Clio Coder v0.3.8</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -604,7 +604,7 @@
         <p><code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Upgrading to Version 0.3.3</h3>
-        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.3.7:</p>
+        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.3.8:</p>
         <ul>
           <li><strong>Engine SDK 0.84.0:</strong> Upgrades provider integrations and adds signal-aware OAuth token cancellation.</li>
           <li><strong>Migration Resilience (#121):</strong> Damaged <code>credentials.yaml</code> files do not fail upgrade when no provider renames are needed; <code>--skip-migrations</code> is supported.</li>
