@@ -46,6 +46,7 @@ import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
+import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import {
@@ -582,6 +583,10 @@ function dispatchDetails(
 				hostVerification: integrity.ok ? (receipt.hostVerification ?? null) : null,
 				receiptIntegrity: integrity,
 				trustStatus,
+				// The bounded projection sits shallow and flat on purpose: a
+				// depth-capped wire (ACP rawOutput) keeps it whole while the
+				// canonical status's nested references fall off the end.
+				trust: summarizeTrustStatus(trustStatus),
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
 					: {}),

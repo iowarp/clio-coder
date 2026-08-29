@@ -22,6 +22,20 @@ export {
 	loadEvidenceRunProvenance,
 	loadEvidenceTrustStatus,
 } from "./store.js";
+export type { TrustSummaryProjection, TrustVerdict } from "./trust-projection.js";
+export {
+	formatTrustAxes,
+	formatTrustSummary,
+	formatTrustSummaryLine,
+	summarizeTrustStatus,
+	TRUST_STATE_WORDS,
+	TRUST_SUMMARY_MAX_REFS,
+	TRUST_SUMMARY_VERSION,
+	TRUST_VERDICTS,
+	trustStateWord,
+	trustSummaryReferences,
+	trustVerdict,
+} from "./trust-projection.js";
 export type {
 	AbsentTrustStatus,
 	AdaptFinishContractTrustOptions,

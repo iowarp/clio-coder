@@ -4,6 +4,24 @@ import type {
 	RunReceipt,
 	RunReceiptAutonomyEnforcement,
 } from "../dispatch/types.js";
+import { trustStateWord } from "./trust-projection.js";
+
+/**
+ * The receipt grade in the shared trust vocabulary: `mediated` stays
+ * `mediated`, and a dangerous-bypass flag reads as bypassed whatever grade
+ * was recorded beside it, exactly as the canonical adapter normalizes it.
+ * One table serves the transcript line, the compact suffix, and every other
+ * surface, so the operator never maps `mediated` to `enforced` by hand.
+ */
+function autonomyEnforcementWord(enforcement: RunReceiptAutonomyEnforcement): string {
+	const state =
+		enforcement.dangerousBypass === true || enforcement.grade === "bypassed"
+			? "bypassed"
+			: enforcement.grade === "approximated"
+				? "approximated"
+				: "enforced";
+	return trustStateWord("autonomyEnforcement", state);
+}
 
 /**
  * Worker permission-escalation counters projected from sealed receipt
@@ -163,10 +181,11 @@ export function provenanceTranscriptLines(view: RunProvenanceView): string[] {
 		lines.push(`escalations: ${requested} requested, ${approved} approved, ${denied} denied, ${timedOut} timed out`);
 	}
 	if (view.autonomyEnforcement !== undefined) {
-		const { grade, autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
+		const { autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
 		const mode = externalMode !== undefined ? ` mode=${externalMode}` : "";
 		const bypass = dangerousBypass === true ? " dangerousBypass=true" : "";
-		lines.push(`autonomy enforcement: ${grade} autonomy=${autonomy}${mode}${bypass}`);
+		const word = autonomyEnforcementWord(view.autonomyEnforcement);
+		lines.push(`autonomy enforcement: ${word} autonomy=${autonomy}${mode}${bypass}`);
 	}
 	return lines;
 }
@@ -191,10 +210,10 @@ export function provenanceCompactSuffix(view: RunProvenanceView): string {
 		parts.push(`escalations=${requested}req/${approved}appr/${denied}deny/${timedOut}timeout`);
 	}
 	if (view.autonomyEnforcement !== undefined) {
-		const { grade, autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
+		const { autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
 		const mode = externalMode !== undefined ? `/${externalMode}` : "";
 		const bypass = dangerousBypass === true ? "/bypass" : "";
-		parts.push(`enforcement=${grade}:${autonomy}${mode}${bypass}`);
+		parts.push(`enforcement=${autonomyEnforcementWord(view.autonomyEnforcement)}:${autonomy}${mode}${bypass}`);
 	}
 	return parts.length === 0 ? "" : ` ${parts.join(" ")}`;
 }

@@ -576,15 +576,46 @@ function validBoundedProjectContext(context: RunProjectContextProvenance): boole
 	);
 }
 
+/**
+ * The one structured message a `none`-tier run can still receive. The tier is
+ * the CLIO-CODER.md handbook policy; the workspace-root message is sent
+ * regardless of it, and the producer records the characters and hash of
+ * every structured message it sent (`projectContextProvenanceFor` in the
+ * dispatch extension). A none-tier block naming exactly this section, with
+ * a well-formed count and hash, is therefore a consistent record of a real
+ * message, not a contradiction. Anything else under a none tier cannot be
+ * explained by the policy: a handbook section the policy forbids, a hash
+ * with no section to hash, or a malformed count.
+ */
+const NONE_TIER_SECTIONS: ReadonlyArray<string> = ["workspace-root"];
+
+function validNoneTierProjectContext(context: RunProjectContextProvenance): boolean {
+	return (
+		context.tier === "none" &&
+		context.sections !== undefined &&
+		context.sections.length === NONE_TIER_SECTIONS.length &&
+		context.sections.every((section) => NONE_TIER_SECTIONS.includes(section)) &&
+		Number.isSafeInteger(context.chars) &&
+		(context.chars ?? -1) >= 0 &&
+		typeof context.contentHash === "string" &&
+		/^[a-f0-9]{64}$/u.test(context.contentHash)
+	);
+}
+
+function recordedProjectContextHash(context: RunProjectContextProvenance | undefined): string | undefined {
+	if (context === undefined) return undefined;
+	if (context.tier === "bounded") return validBoundedProjectContext(context) ? context.contentHash : undefined;
+	return validNoneTierProjectContext(context) ? context.contentHash : undefined;
+}
+
 function contextArtifacts(receipt: PersistedRunReceiptTrustFacts): TrustArtifactReference[] {
 	const artifacts = [receiptReference(receipt)];
 	if (receipt.briefing !== undefined && validBriefing(receipt.briefing)) {
 		artifacts.push(sha256Reference("briefing", `${receipt.runId}:briefing`, receipt.briefing.contentHash));
 	}
-	if (receipt.projectContext?.tier === "bounded" && validBoundedProjectContext(receipt.projectContext)) {
-		artifacts.push(
-			sha256Reference("project_context", `${receipt.runId}:project-context`, receipt.projectContext.contentHash),
-		);
+	const recordedHash = recordedProjectContextHash(receipt.projectContext);
+	if (recordedHash !== undefined) {
+		artifacts.push(sha256Reference("project_context", `${receipt.runId}:project-context`, recordedHash));
 	}
 	return uniqueBoundedReferences(artifacts);
 }
@@ -604,12 +635,23 @@ export function adaptRunReceiptContextStatus(
 		return attributed("unknown", compatibilitySource(receipt, "projectContext"), COMPATIBILITY_AUTHORITY, artifacts);
 	}
 	if (context.tier === "none") {
-		if (context.chars !== undefined || context.contentHash !== undefined || context.sections !== undefined) {
-			return attributed("invalid", source, DISPATCH_AUTHORITY, artifacts);
+		const bare = context.chars === undefined && context.contentHash === undefined && context.sections === undefined;
+		if (bare) {
+			// Nothing structured was sent: the axis does not apply unless a
+			// briefing was recorded, which is context of its own.
+			return receipt.briefing === undefined
+				? attributed("not_applicable", source, DISPATCH_AUTHORITY, artifacts)
+				: attributed("recorded", source, DISPATCH_AUTHORITY, artifacts);
 		}
-		return receipt.briefing === undefined
-			? attributed("not_applicable", source, DISPATCH_AUTHORITY, artifacts)
-			: attributed("recorded", source, DISPATCH_AUTHORITY, artifacts);
+		// The workspace-root message is the one thing a none-tier run receives,
+		// and its record is valid; every other none-tier content shape is a
+		// record the policy cannot account for.
+		return attributed(
+			validNoneTierProjectContext(context) ? "recorded" : "invalid",
+			source,
+			DISPATCH_AUTHORITY,
+			artifacts,
+		);
 	}
 	return attributed(validBoundedProjectContext(context) ? "recorded" : "invalid", source, DISPATCH_AUTHORITY, artifacts);
 }

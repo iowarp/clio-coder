@@ -17,6 +17,7 @@ import {
 	type RunReceipt,
 	type RunReceiptVerification,
 } from "../domains/dispatch/types.js";
+import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import {
 	adaptRunReceiptTrustStatus,
 	type CanonicalTrustStatus,
@@ -389,6 +390,7 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 			receiptPath: run.receiptPath,
 			receiptIntegrity,
 			trustStatus,
+			trust: summarizeTrustStatus(trustStatus),
 			...(receipt !== null && receiptIntegrity.ok
 				? {
 						evidenceVerification: receipt.verification,

@@ -16,6 +16,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
+import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { receiptFilePath } from "./view/artifacts.js";
 import type { WorkerReceiptFacts, WorkerResultContract } from "./worker-stream.js";
 
@@ -86,12 +88,22 @@ export function workerReceiptFacts(receipt: Record<string, unknown>): WorkerRece
 
 /** Read and project `<state>/receipts/<runId>.json` alone; null when it is absent or unreadable. */
 function readReceiptFileFacts(runId: string, stateDir: string): WorkerReceiptFacts | null {
+	let parsed: unknown;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
-		return isRecord(parsed) ? workerReceiptFacts(parsed) : null;
+		parsed = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
 	} catch {
 		return null;
 	}
+	if (!isRecord(parsed)) return null;
+	const facts = workerReceiptFacts(parsed);
+	if (facts === null) return null;
+	// The trust verdict is an authenticated read-back: the receipt file
+	// against the ledger row it was sealed from. Without the row there is no
+	// authentication, and no verdict is better than a guessed one.
+	const row = findRunRow(runId, stateDir);
+	if (row === null) return facts;
+	const trust = inspectRunReceiptTrustStatus(parsed as unknown as RunReceipt, row as unknown as RunEnvelope).status;
+	return { ...facts, trust };
 }
 
 /** Read and project `<state>/receipts/<runId>.json`; null when it is absent or unreadable. */

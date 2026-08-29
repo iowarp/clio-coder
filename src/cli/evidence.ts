@@ -1,10 +1,12 @@
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { CanonicalTrustStatus, EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
+import type { EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
 import {
 	buildEvalEvidence,
 	buildEvidence,
 	EvidenceNotFoundError,
+	formatTrustAxes,
+	formatTrustSummary,
 	inspectEvidence,
 	listEvidenceOverviews,
 	loadEvidenceRunProvenance,
@@ -191,8 +193,12 @@ function renderEvidence(
 	if (trustStatus.projection === "historical_format") {
 		process.stdout.write("trust status: unavailable (historical bundle without canonical projection)\n");
 	} else {
+		// The compact projection answers the trust questions; the canonical axis
+		// line beneath it is the drill-down, in the same form the dispatch tool
+		// and monitor print.
 		for (const run of trustStatus.runs) {
-			process.stdout.write(`trust ${run.runId}: ${formatTrustStatus(run.status)}\n`);
+			process.stdout.write(`trust ${run.runId}: ${formatTrustSummary(run.status)}\n`);
+			process.stdout.write(`  ${formatTrustAxes(run.status)}\n`);
 		}
 	}
 	// Provenance is printed only for runs whose receipts carry it, so a legacy
@@ -202,17 +208,6 @@ function renderEvidence(
 		for (const line of provenanceTranscriptLines(view)) process.stdout.write(`  ${line}\n`);
 	}
 	process.stdout.write(`files: ${formatList(overview.files)}\n`);
-}
-
-function formatTrustStatus(status: CanonicalTrustStatus): string {
-	return [
-		`artifactIntegrity=${status.artifactIntegrity.state}`,
-		`validationGrounding=${status.validationGrounding.state}`,
-		`independentReview=${status.independentReview.state}`,
-		`contextProvenance=${status.contextProvenance.state}`,
-		`autonomyEnforcement=${status.autonomyEnforcement.state}`,
-		`completionEvidence=${status.completionEvidence.state}`,
-	].join(" ");
 }
 
 function renderEvidenceList(overviews: ReadonlyArray<EvidenceOverview>): void {

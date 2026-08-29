@@ -116,6 +116,9 @@ Clio Coder classifies every run, session, and eval record using a closed set of 
 | `auth-failure` | Failure | Missing or invalid credentials/API keys. |
 | `external-bypass` | Security | An external runner bypassed standard safety gates. |
 | `external-approximation`| Validation | An external runner approximated results rather than fully executing. |
+| `independent-review` | Validation | The canonical independent-review axis: a failed, correlated, or inconclusive review is a warning; a successful run with no review at all is an info row saying its result rests on its own receipt. |
+| `context-provenance` | Provenance | The canonical context-provenance axis read `invalid`: the receipt's briefing or project-context record contradicts itself. |
+| `completion-evidence` | Validation | The canonical completion-evidence axis: a mutation that finished without validation evidence at the completion boundary is a warning; an explicit limitation is an info row. |
 | `unknown` | Undefined | Unclassified execution failure. |
 
 ---
@@ -211,7 +214,7 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Receipt `verification.state: unverified` | Validation grounding is `absent` with `not_observed`; lack of a validation tool is not a failed validation. |
 | Receipt verification `unknown` or `not_applicable` | Validation grounding preserves `unknown` or `not_applicable`. A missing historical verification field maps to `unknown`. |
 | Typed receipt validation or result-contract quality | A passing correctness-bearing fact maps to `validated`; a failing fact maps to `failed`; an ungrounded passing claim maps to `ungrounded`. |
-| Valid bounded project context or valid briefing hash | Context provenance is `recorded`. Explicit project-context tier `none` with no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block is `invalid`. |
+| Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash | Context provenance is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with no content and no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is `invalid`. |
 | Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`. Correlated review maps to `not_independent`. Unauthenticated artifacts map to `unknown`; operator or full-auto confirmation alone is `not_applicable` to independent review. |
 | Receipt autonomy grade | `mediated`, `approximated`, and `bypassed` map to `enforced`, `approximated`, and `bypassed`. A dangerous-bypass flag always normalizes to `bypassed`; a missing historical block is `unknown`. |
 | Finish-contract assessment | `validation_evidence`, `unvalidated_mutation`, `explicit_limitation`, and `no_mutation` map to `evidenced`, `incomplete`, `limited`, and `not_applicable`. A run whose receipt was presented and rejected downgrades `evidenced` to `unknown`: the row still points at its own record, but a rejected receipt authenticates nothing about the run it names. |
@@ -222,14 +225,73 @@ Receipt inspection, worker output, monitor details, and evidence rebuilding all
 use the same authenticated receipt projection boundary. Evidence rebuilding
 then composes independently authenticated gate decisions and exact
 finish-contract records without changing receipt-owned axes. Findings such as
-`no-validation`, `proxy-validation`, `external-approximation`, and
-`external-bypass` are selected from the canonical states, while their detailed
-domain artifacts remain in the receipt, gate, audit, and trace files.
+`no-validation`, `proxy-validation`, `external-approximation`,
+`external-bypass`, `independent-review`, `context-provenance`, and
+`completion-evidence` are selected from the canonical states, so every axis
+reaches `findings.md`, while their detailed domain artifacts remain in the
+receipt, gate, audit, and trace files.
 
 The canonical aggregate is an additive projection for downstream work. Receipt
 integrity remains version 18, evidence bundles remain version 1, gate decisions
 remain version 2, and no persisted receipt field or cryptographic algorithm
 changes.
+
+### Trust projection
+
+`src/domains/evidence/trust-projection.ts` is the one place the canonical
+status is turned into words. Every operator surface prints from it, so the
+same canonical input renders the same verdict on the dispatch run line, in a
+monitor block, under `clio-coder evidence inspect`, in `findings.md`, on the
+Alt+W board, in the `/view` receipt header, in eval metrics, and on the ACP
+wire.
+
+The compact human line has six fixed clauses in a fixed order and answers the
+four operator questions without receipt internals:
+
+```text
+trust v1: sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced
+```
+
+| Clause | Axis | Question it answers |
+|---|---|---|
+| `sealed` / `seal broken` / `seal unchecked` / `no receipt` | Artifact integrity | Can the record be trusted to be what was written? |
+| `grounded by <claimant>` / `validation failed by <claimant>` / `inferred: validation claimed, none observed` / `no validation observed` / `validation unknown (<system>)` / `validation not applicable` | Validation grounding | Who claims the result, and what was observed? |
+| `independently reviewed: pass` / `independently reviewed: fail` / `independent review inconclusive` / `review not independent` / `not independently reviewed` | Independent review | What did a second, uncorrelated authority check? |
+| `mediated` / `approximated (<runtime>)` / `bypassed (<runtime>)` / `autonomy not recorded` | Autonomy enforcement | Did Clio's own gate mediate the run? |
+| `context recorded` / `context record invalid` / `context not recorded` | Context provenance | Is what the worker was given recorded consistently? |
+| `completion evidenced` / `completion unevidenced` / `completion limited` / `completion not applicable` | Completion evidence | What did the finish contract observe? |
+
+`mediated` is the word for the `enforced` state because it is what the
+receipt grade already says; `inferred` is the word for an `ungrounded` claim.
+Every `unknown` and `absent` state prints as such, so what remains unknown is
+part of the line, never an omission.
+
+The drill-down line prints every axis by its canonical state id and is the
+same on every text surface:
+
+```text
+trust_status=v1 artifactIntegrity:verified validationGrounding:validated independentReview:absent contextProvenance:recorded autonomyEnforcement:enforced completionEvidence:evidenced
+```
+
+The machine projection (`TrustSummaryProjection`, `trust` on the `dispatch`
+tool's `details.runs[]` entries and on the `monitor` receipt details) is
+bounded and versioned: the verdict tier, the six axis states, the claimant,
+the axes still unknown, the compact text, and up to 8 `<kind>:<id>`
+references into the detailed artifacts. It is flat by design so a depth-capped
+wire such as ACP `rawOutput` carries it whole where the nested canonical
+status's artifact references fall off the depth cap.
+
+The verdict tier styles a surface and never scores a run. `reviewed` is the
+only tier styled as independently verified; a sealed receipt with observed
+validation is `grounded`, a sealed receipt with nothing observed is
+`unverified`, a broken seal, bypassed gate, failed or inferred validation,
+failed or correlated review, or contradictory context record is
+`compromised`, and an unchecked or missing seal is `unknown`. The Alt+W board
+never carries a verdict on the terminal bus event: the event is published the
+moment the receipt is sealed, before anything has read it back and
+authenticated it against the ledger row, so the board reads the receipt file
+back and projects that authenticated status, and shows `trust: receipt not
+read back` until it can.
 
 ### Mutation-Report Grounding
 

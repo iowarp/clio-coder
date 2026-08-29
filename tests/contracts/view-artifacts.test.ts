@@ -624,7 +624,11 @@ describe("contracts/view-artifacts", () => {
 		ok(artifacts[0]?.path?.endsWith(`${envelope.id}.json`));
 
 		const verify = await artifacts[0]?.verify?.();
-		deepStrictEqual(verify, { ok: true, detail: "integrity verified" });
+		// The verify detail is the canonical trust line, not "integrity
+		// verified" on its own: a sealed receipt says nothing about what was
+		// validated, and the line spells that out.
+		strictEqual(verify?.ok, true);
+		ok(verify?.detail.startsWith("trust v1: sealed; "), verify?.detail);
 		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: true });
 
 		const loaded = await artifacts[0]?.load();
@@ -660,7 +664,11 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(artifacts.length, 1);
 		strictEqual(artifacts[0]?.id, envelope.id);
 		const verify = await artifacts[0]?.verify?.();
-		deepStrictEqual(verify, { ok: true, detail: "integrity verified" });
+		// The verify detail is the canonical trust line, not "integrity
+		// verified" on its own: a sealed receipt says nothing about what was
+		// validated, and the line spells that out.
+		strictEqual(verify?.ok, true);
+		ok(verify?.detail.startsWith("trust v1: sealed; "), verify?.detail);
 	});
 
 	it("reloads disk-written ledger receipts and keeps corrupted artifacts from poisoning /view listings", async () => {

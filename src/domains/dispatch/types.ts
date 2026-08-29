@@ -126,12 +126,16 @@ export interface RunPersonaOverride {
 
 /**
  * Effective project-context decision for a run, recorded on every receipt so
- * evidence can prove what a worker saw without rehashing. `tier: "none"` is
- * written explicitly: it distinguishes "policy said none" from a
- * pre-provenance receipt where the whole block is absent. `chars` and
- * `contentHash` describe the rendered dynamic message body when bounded;
- * `sections` lists extra projected sections that actually rendered
- * (currently only "verification-expectations", never for ACP delegation).
+ * evidence can prove what a worker saw without rehashing. `tier` is the
+ * recipe's CLIO-CODER.md handbook policy and is written explicitly: `none`
+ * distinguishes "policy said none" from a pre-provenance receipt where the
+ * whole block is absent. `chars` and `contentHash` describe every structured
+ * message that was actually sent, whatever the tier, and `sections` names
+ * them: `workspace-root` (sent under both tiers, so a none-tier run still
+ * records characters), `clio-md` (bounded only), and
+ * `verification-expectations` (bounded only, never for ACP delegation). A
+ * none-tier block naming only `workspace-root` is a consistent record; the
+ * trust adapter treats any other none-tier content as contradictory.
  */
 export interface RunProjectContextProvenance {
 	tier: "none" | "bounded";

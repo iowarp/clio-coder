@@ -25,6 +25,11 @@ import {
 	runKindSupportsLiveSteering,
 } from "../domains/dispatch/types.js";
 import {
+	summarizeTrustStatus,
+	type TrustSummaryProjection,
+	type TrustVerdict,
+} from "../domains/evidence/trust-projection.js";
+import {
 	COST_NOT_MEASURED,
 	costAggregateForAmount,
 	formatCostAggregate,
@@ -113,6 +118,13 @@ export interface DispatchBoardRow {
 	council?: { group: string; label: string; color?: string; round: number };
 	/** Orchestrator-executed declared verification status. */
 	hostVerification?: "verified" | "rejected" | "skipped";
+	/**
+	 * The canonical trust projection of the sealed receipt, read back from
+	 * disk and authenticated against the ledger row. Absent while the run is
+	 * live or when the receipt could not be read back, so the card never
+	 * implies a verdict the terminal bus event cannot carry.
+	 */
+	trust?: TrustSummaryProjection;
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
 	/** Assignment retry attempts observed on the assignment event stream. */
@@ -651,7 +663,15 @@ export function renderDispatchCard(
 		`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
 		`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
 	];
-	const hostVerification = theme.fg("info", `host_verification=${row.hostVerification ?? "not_requested"}`);
+	// The trust line is the canonical projection, styled by its verdict tier;
+	// a host check is folded into that projection as validation grounding, so
+	// it is named as a secondary fact and never as independent verification.
+	const trustUnits = [
+		row.trust === undefined
+			? theme.fg("dim", isTerminalStatus(row.status) ? "trust: receipt not read back" : "trust: not sealed yet")
+			: theme.fg(trustVerdictToken(row.trust.verdict), `${trustVerdictGlyph(row.trust.verdict)} ${row.trust.text}`),
+		...(row.hostVerification !== undefined ? [theme.fg("muted", `host checks ${row.hostVerification}`)] : []),
+	];
 	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
@@ -670,7 +690,7 @@ export function renderDispatchCard(
 			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
 			: []),
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
-		cardUnitsLine(theme, "evidence", [hostVerification], contentWidth),
+		cardUnitsLine(theme, "trust", trustUnits, contentWidth),
 		...(row.budget !== undefined
 			? [
 					truncateToWidth(
@@ -1160,6 +1180,33 @@ function parseOptionalDetail(value: unknown): string | null {
 	return detail.length > 0 ? detail : null;
 }
 
+/** Only an authenticated independent pass earns the success token; sealed alone is never green. */
+function trustVerdictToken(verdict: TrustVerdict): ClioToken {
+	switch (verdict) {
+		case "reviewed":
+			return "success";
+		case "grounded":
+			return "info";
+		case "unverified":
+			return "muted";
+		case "compromised":
+			return "error";
+		default:
+			return "dim";
+	}
+}
+
+function trustVerdictGlyph(verdict: TrustVerdict): string {
+	switch (verdict) {
+		case "reviewed":
+			return GLYPH.ok;
+		case "compromised":
+			return GLYPH.error;
+		default:
+			return "◇";
+	}
+}
+
 function terminalDetail(row: DispatchBoardRow): string | null {
 	if (row.status !== "failed" && row.status !== "dead" && row.status !== "aborted") return null;
 	return parseOptionalDetail(row.outcomeDetail);
@@ -1319,6 +1366,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
 		...(entry.council !== undefined ? { council: { ...entry.council } } : {}),
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
+		...(entry.trust !== undefined ? { trust: entry.trust } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
@@ -1394,8 +1442,10 @@ export function createDispatchBoardStore(
 	 * before it publishes one, so this is the first moment the file exists.
 	 */
 	const settleFromReceipt = (entry: DispatchBoardEntry): void => {
-		const text = readReceipt?.(entry.runId)?.text;
+		const facts = readReceipt?.(entry.runId);
+		const text = facts?.text;
 		entry.progress.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
+		if (facts?.trust !== undefined) entry.trust = summarizeTrustStatus(facts.trust);
 	};
 
 	// Payloads arrive typed off the bus, but the board keeps its runtime
