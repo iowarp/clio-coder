@@ -1,5 +1,8 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { resolvePackageRoot } from "../../core/package-root.js";
+import { clioConfigDir } from "../../core/xdg.js";
+import { enabledExtensionResourceRoots } from "../extensions/index.js";
 import { loadSkills } from "../resources/skills/loader.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.js";
@@ -26,12 +29,12 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	const skills =
 		source.source === "extension"
 			? loadSkills({
-					cwd: process.cwd(),
+					cwd: source.cwd ?? process.cwd(),
 					disableDiscovery: true,
 					explicitSkillPaths: source.skillRoot === undefined ? [] : [source.skillRoot],
 				})
 			: loadSkills({
-					cwd: process.cwd(),
+					cwd: source.cwd ?? process.cwd(),
 					...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
 				});
 	if (source.source === "extension" && source.skillRoot !== undefined) {
@@ -131,4 +134,46 @@ export function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe
 		}
 	}
 	return Array.from(byId.values()).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+/**
+ * Discover the one native-agent catalog used by listing, fleet admission, and
+ * dispatch. Extension recipes occupy the same precedence slot as extension
+ * fleets: after builtins and before operator/user and project recipes. Their
+ * skill bindings remain constrained to the declaring extension's skill root.
+ */
+export function discoverAgentRecipes(
+	cwd = process.cwd(),
+	diagnostics: AgentRecipeDiagnostic[] = [],
+): ReadonlyArray<AgentRecipe> {
+	const builtin = loadRecipesFromDir(
+		{
+			dir: path.join(resolvePackageRoot(), "src", "domains", "agents", "builtins"),
+			source: "builtin",
+			cwd,
+		},
+		diagnostics,
+	);
+	const skillRoots = new Map(enabledExtensionResourceRoots("skills", cwd).map((root) => [root.source, root.path]));
+	const extensionRecipes = enabledExtensionResourceRoots("agents", cwd)
+		.sort((left, right) => left.source.localeCompare(right.source))
+		.map((root) => {
+			const skillRoot = skillRoots.get(root.source);
+			return loadRecipesFromDir(
+				{
+					dir: root.path,
+					source: "extension",
+					cwd,
+					origin: root.source,
+					...(skillRoot === undefined ? {} : { skillRoot }),
+				},
+				diagnostics,
+			);
+		});
+	const user = loadRecipesFromDir({ dir: path.join(clioConfigDir(), "agents"), source: "user", cwd }, diagnostics);
+	const project = loadRecipesFromDir(
+		{ dir: path.join(cwd, ".clio-coder", "agents"), source: "project", cwd },
+		diagnostics,
+	);
+	return mergeRecipes(builtin, ...extensionRecipes, user, project);
 }
