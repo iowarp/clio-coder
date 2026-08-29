@@ -310,13 +310,18 @@ export function loadPromptTemplates(input: LoadPromptTemplatesInput = {}): Promp
 }
 
 function parsePromptCommand(input: string): { name: string; rest: string } | null {
-	const trimmed = input.trim();
-	if (!trimmed.startsWith("/")) return null;
-	const withoutSlash = trimmed.slice(1);
+	const framed = input.trimStart();
+	if (!framed.startsWith("/")) return null;
+	const withoutSlash = framed.slice(1);
 	const separator = withoutSlash.search(/\s/);
 	const name = separator === -1 ? withoutSlash : withoutSlash.slice(0, separator);
 	if (name.length === 0 || name.includes("/")) return null;
-	const rest = separator === -1 ? "" : withoutSlash.slice(separator).trim();
+	// Leading whitespace before `/` and the first whitespace after the command
+	// are framing. A CRLF pair is one delimiter. Every subsequent byte belongs
+	// to the argument payload, including indentation, blank lines, and trailing
+	// whitespace, so raw `$ARGUMENTS` substitution can be exact at its boundary.
+	const delimiterWidth = separator !== -1 && withoutSlash.slice(separator, separator + 2) === "\r\n" ? 2 : 1;
+	const rest = separator === -1 ? "" : withoutSlash.slice(separator + delimiterWidth);
 	return { name, rest };
 }
 
@@ -338,7 +343,7 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 	const args = parseCommandArgs(command.rest);
 	return {
 		expanded: true,
-		text: substituteArgs(template.content, args),
+		text: substituteArgs(template.content, args, command.rest),
 		args,
 		template,
 		diagnostics: templates.diagnostics,

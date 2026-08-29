@@ -99,12 +99,12 @@ describe("contracts/slash prompt templates", () => {
 		strictEqual(expanded.text, "Run the demo for alpha.");
 	});
 
-	it("substitutes Pi positional and aggregate arguments through the prompt loader", () => {
+	it("preserves raw $ARGUMENTS while retaining Pi positional and $@ semantics", () => {
 		const root = scratchDir();
 		writePrompt(
 			root,
 			"arguments.md",
-			["$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "all=$ARGUMENTS"].join("\n"),
+			["$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "raw=$ARGUMENTS", "parsed=$@"].join("\n"),
 		);
 		const list = loadPromptTemplates({ roots: [{ path: root, scope: "project", trusted: true }] });
 
@@ -138,9 +138,50 @@ describe("contracts/slash prompt templates", () => {
 				"golf",
 				"hotel",
 				"india",
-				"all=alpha bravo two charlie delta echo foxtrot golf hotel india",
+				'raw=alpha "bravo two" charlie delta echo foxtrot golf hotel india',
+				"parsed=alpha bravo two charlie delta echo foxtrot golf hotel india",
 			].join("\n"),
 		);
+	});
+
+	it("keeps Pi slice semantics for templates without $ARGUMENTS", () => {
+		const root = scratchDir();
+		const tailPlaceholder = "$" + "{@:2}";
+		const windowPlaceholder = "$" + "{@:2:2}";
+		writePrompt(
+			root,
+			"slices.md",
+			["first=$1", `tail=${tailPlaceholder}`, `window=${windowPlaceholder}`, "parsed=$@"].join("\n"),
+		);
+		const list = loadPromptTemplates({ roots: [{ path: root, scope: "project", trusted: true }] });
+
+		const expansion = expandPromptTemplateInput(`/slices alpha "bravo two" charlie delta`, list);
+
+		strictEqual(expansion.expanded, true);
+		if (!expansion.expanded) throw new Error("expected the prompt template to expand");
+		deepStrictEqual(expansion.args, ["alpha", "bravo two", "charlie", "delta"]);
+		strictEqual(
+			expansion.text,
+			[
+				"first=alpha",
+				"tail=bravo two charlie delta",
+				"window=bravo two charlie",
+				"parsed=alpha bravo two charlie delta",
+			].join("\n"),
+		);
+	});
+
+	it("does not recursively substitute placeholder syntax inside raw $ARGUMENTS", () => {
+		const root = scratchDir();
+		writePrompt(root, "literal.md", ["raw=$ARGUMENTS", "first=$1"].join("\n"));
+		const list = loadPromptTemplates({ roots: [{ path: root, scope: "project", trusted: true }] });
+
+		const expansion = expandPromptTemplateInput(`/literal alpha "keep $1 exactly"`, list);
+
+		strictEqual(expansion.expanded, true);
+		if (!expansion.expanded) throw new Error("expected the prompt template to expand");
+		deepStrictEqual(expansion.args, ["alpha", "keep $1 exactly"]);
+		strictEqual(expansion.text, ['raw=alpha "keep $1 exactly"', "first=alpha"].join("\n"));
 	});
 
 	it("refuses an untrusted template with the loader's reason and sends nothing to the model", () => {
