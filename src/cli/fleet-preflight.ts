@@ -1,7 +1,4 @@
-import { join } from "node:path";
 import { readSettings } from "../core/config.js";
-import { resolvePackageRoot } from "../core/package-root.js";
-import { clioConfigDir } from "../core/xdg.js";
 import {
 	type FleetCommandRegistry,
 	type FleetContract,
@@ -9,7 +6,7 @@ import {
 	loadFleetContract,
 	renderFleetPrompt,
 } from "../domains/agents/index.js";
-import { type AgentRecipeDiagnostic, loadRecipesFromDir, mergeRecipes } from "../domains/agents/registry.js";
+import { discoverAgentRecipes } from "../domains/agents/registry.js";
 import { type AgentSpec, normalizeAgentSpec } from "../domains/agents/spec.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
@@ -23,14 +20,7 @@ export interface FleetPreflightResult {
 }
 
 function discoverSpecs(cwd: string): AgentSpec[] {
-	const diagnostics: AgentRecipeDiagnostic[] = [];
-	const builtin = loadRecipesFromDir(
-		{ dir: join(resolvePackageRoot(), "src", "domains", "agents", "builtins"), source: "builtin" },
-		diagnostics,
-	);
-	const user = loadRecipesFromDir({ dir: join(clioConfigDir(), "agents"), source: "user" }, diagnostics);
-	const project = loadRecipesFromDir({ dir: join(cwd, ".clio-coder", "agents"), source: "project" }, diagnostics);
-	return mergeRecipes(builtin, user, project).map(normalizeAgentSpec);
+	return discoverAgentRecipes(cwd).map(normalizeAgentSpec);
 }
 
 export function inspectFleet(name: string, vars?: Readonly<Record<string, string>>): FleetPreflightResult {
