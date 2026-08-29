@@ -4,24 +4,7 @@ import type {
 	RunReceipt,
 	RunReceiptAutonomyEnforcement,
 } from "../dispatch/types.js";
-import { trustStateWord } from "./trust-projection.js";
-
-/**
- * The receipt grade in the shared trust vocabulary: `mediated` stays
- * `mediated`, and a dangerous-bypass flag reads as bypassed whatever grade
- * was recorded beside it, exactly as the canonical adapter normalizes it.
- * One table serves the transcript line, the compact suffix, and every other
- * surface, so the operator never maps `mediated` to `enforced` by hand.
- */
-function autonomyEnforcementWord(enforcement: RunReceiptAutonomyEnforcement): string {
-	const state =
-		enforcement.dangerousBypass === true || enforcement.grade === "bypassed"
-			? "bypassed"
-			: enforcement.grade === "approximated"
-				? "approximated"
-				: "enforced";
-	return trustStateWord("autonomyEnforcement", state);
-}
+import type { CanonicalTrustStatus } from "./trust-status.js";
 
 /**
  * Worker permission-escalation counters projected from sealed receipt
@@ -66,6 +49,33 @@ export function extractRunProvenance(receipt: ProvenanceReceipt): RunProvenanceV
 	if (escalation !== null) view.escalation = escalation;
 	if (receipt.autonomyEnforcement !== undefined) view.autonomyEnforcement = receipt.autonomyEnforcement;
 	return view;
+}
+
+/**
+ * The slice of a provenance view the canonical projection admits. The
+ * projection is the only thing that decides whether an axis is reported, so
+ * the autonomy detail (`autonomy=`, `mode=`, `dangerousBypass=`) is kept only
+ * when the projection reports the autonomy axis in a recorded state, and the
+ * non-axis provenance (pipeline, persona override, escalations) only when the
+ * seal that carries it verified. With no projection at hand no axis detail is
+ * admitted at all, whatever the receipt says; the non-axis provenance passes
+ * through for a caller that prints it beside its own integrity banner.
+ */
+export function admitRunProvenance(view: RunProvenanceView, status?: CanonicalTrustStatus): RunProvenanceView {
+	const admitted: RunProvenanceView = {};
+	if (status === undefined || status.artifactIntegrity.state === "verified") {
+		if (view.pipeline !== undefined) admitted.pipeline = view.pipeline;
+		if (view.personaOverride !== undefined) admitted.personaOverride = view.personaOverride;
+		if (view.escalation !== undefined) admitted.escalation = view.escalation;
+	}
+	const autonomy = status?.autonomyEnforcement.state;
+	if (
+		view.autonomyEnforcement !== undefined &&
+		(autonomy === "enforced" || autonomy === "approximated" || autonomy === "bypassed")
+	) {
+		admitted.autonomyEnforcement = view.autonomyEnforcement;
+	}
+	return admitted;
 }
 
 /** True when at least one provenance field set is present. */
@@ -162,10 +172,15 @@ function formatPersonaHashPrefix(promptHash: string): string {
 }
 
 /**
- * Human transcript sentences for each present provenance field set.
- * An empty view adds no lines to the transcript run section.
+ * Human transcript sentences for each admitted provenance field set, gated
+ * through {@link admitRunProvenance}. The autonomy line carries only the
+ * detail the canonical projection does not: the policy name, the external
+ * mode, and the bypass flag. The axis itself (mediated, approximated,
+ * bypassed) is printed by the trust summary and nowhere else, so one
+ * autonomy fact never appears in two vocabularies on one screen.
  */
-export function provenanceTranscriptLines(view: RunProvenanceView): string[] {
+export function provenanceTranscriptLines(source: RunProvenanceView, status?: CanonicalTrustStatus): string[] {
+	const view = admitRunProvenance(source, status);
 	const lines: string[] = [];
 	if (view.pipeline !== undefined) {
 		const { fromRunId, position, inputBytes, inputTruncated } = view.pipeline;
@@ -184,18 +199,19 @@ export function provenanceTranscriptLines(view: RunProvenanceView): string[] {
 		const { autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
 		const mode = externalMode !== undefined ? ` mode=${externalMode}` : "";
 		const bypass = dangerousBypass === true ? " dangerousBypass=true" : "";
-		const word = autonomyEnforcementWord(view.autonomyEnforcement);
-		lines.push(`autonomy enforcement: ${word} autonomy=${autonomy}${mode}${bypass}`);
+		lines.push(`autonomy: ${autonomy}${mode}${bypass}`);
 	}
 	return lines;
 }
 
 /**
- * Compact ` key=value` suffix for the dispatch tool's per-run and CLI lines.
- * The leading space lets callers append it directly. An empty provenance view
- * returns an empty string.
+ * Compact ` key=value` suffix for the dispatch tool's per-run and CLI lines,
+ * gated through {@link admitRunProvenance} on the same terms as the
+ * transcript lines. The leading space lets callers append it directly. An
+ * empty admitted view returns an empty string.
  */
-export function provenanceCompactSuffix(view: RunProvenanceView): string {
+export function provenanceCompactSuffix(source: RunProvenanceView, status?: CanonicalTrustStatus): string {
+	const view = admitRunProvenance(source, status);
 	const parts: string[] = [];
 	if (view.pipeline !== undefined) {
 		const { fromRunId, position, inputBytes, inputTruncated } = view.pipeline;
@@ -213,7 +229,7 @@ export function provenanceCompactSuffix(view: RunProvenanceView): string {
 		const { autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
 		const mode = externalMode !== undefined ? `/${externalMode}` : "";
 		const bypass = dangerousBypass === true ? "/bypass" : "";
-		parts.push(`enforcement=${autonomyEnforcementWord(view.autonomyEnforcement)}:${autonomy}${mode}${bypass}`);
+		parts.push(`autonomy=${autonomy}${mode}${bypass}`);
 	}
 	return parts.length === 0 ? "" : ` ${parts.join(" ")}`;
 }

@@ -6,7 +6,7 @@
  * outcome, lineage, and token splits) must keep verifying.
  */
 
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -411,6 +411,36 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
+	it("withholds every autonomy value from a receipt whose seal was checked and rejected", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const { runId, receiptPath } = await sealRun(undefined, {
+				autonomyEnforcement: { grade: "mediated", autonomy: "read-only" },
+			});
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { inputTokenCount: number };
+			receipt.inputTokenCount += 1;
+			writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+			strictEqual(result.trustStatus.runs[0]?.status.artifactIntegrity.state, "failed");
+			deepStrictEqual(result.trustStatus.runs[0]?.status.autonomyEnforcement, {
+				state: "absent",
+				reason: "not_observed",
+			});
+			ok(result.findings.some((finding) => finding.tag === "receipt-integrity"));
+
+			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
+			strictEqual(inspected.result, 0, inspected.stdout);
+			ok(inspected.stdout.includes(`trust ${runId}: seal broken; `), inspected.stdout);
+			ok(inspected.stdout.includes("artifactIntegrity:failed"), inspected.stdout);
+			ok(inspected.stdout.includes("autonomyEnforcement:absent"), inspected.stdout);
+			doesNotMatch(inspected.stdout, /retired|read-only|autonomy=|autonomy:|provenance /u);
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			doesNotMatch(transcript, /read-only|autonomy/u);
+		});
+	});
+
 	it("discovers integrity-valid gate decisions from receipt ids and omits tampered coordinator evidence", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const builder = await sealRun();
@@ -622,13 +652,11 @@ describe("contracts/evidence-build", () => {
 
 			const result = await buildEvidence({ dataDir, stateDir, runId });
 
+			// The transcript carries the detail behind the axis and never the axis
+			// word: `bypassed` is the trust summary's to print.
 			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
-			ok(
-				transcript.includes(
-					"autonomy enforcement: bypassed autonomy=full-auto mode=bypassPermissions dangerousBypass=true",
-				),
-				transcript,
-			);
+			ok(transcript.includes("autonomy: full-auto mode=bypassPermissions dangerousBypass=true"), transcript);
+			ok(!transcript.includes("autonomy enforcement:"), transcript);
 
 			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
 			const runRow = cleaned.find((row) => row.kind === "run");
@@ -646,12 +674,12 @@ describe("contracts/evidence-build", () => {
 
 			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
 			strictEqual(inspected.result, 0, inspected.stdout);
-			ok(
-				inspected.stdout.includes(
-					"autonomy enforcement: bypassed autonomy=full-auto mode=bypassPermissions dangerousBypass=true",
-				),
-				inspected.stdout,
-			);
+			ok(inspected.stdout.includes("autonomy: full-auto mode=bypassPermissions dangerousBypass=true"), inspected.stdout);
+			// One axis, printed once as prose and once as the machine state, and
+			// nowhere else on the screen.
+			strictEqual(inspected.stdout.match(/\bbypassed\b/gu)?.length, 2, inspected.stdout);
+			ok(inspected.stdout.includes("; bypassed (bypassPermissions); "), inspected.stdout);
+			ok(inspected.stdout.includes("autonomyEnforcement:bypassed"), inspected.stdout);
 		});
 	});
 
@@ -726,7 +754,7 @@ describe("contracts/evidence-build", () => {
 			ok(!transcript.includes("pipeline: step"), transcript);
 			ok(!transcript.includes("persona override:"), transcript);
 			ok(!transcript.includes("escalations:"), transcript);
-			ok(!transcript.includes("autonomy enforcement:"), transcript);
+			ok(!transcript.includes("autonomy:"), transcript);
 
 			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
 			const runRow = cleaned.find((row) => row.kind === "run");

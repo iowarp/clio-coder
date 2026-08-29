@@ -201,11 +201,17 @@ function renderEvidence(
 			process.stdout.write(`  ${formatTrustAxes(run.status)}\n`);
 		}
 	}
-	// Provenance is printed only for runs whose receipts carry it, so a legacy
-	// bundle prints nothing new here.
+	// Provenance is the detail behind the projection, never a second reading
+	// of it: each run's block is gated on that run's canonical status, so a
+	// receipt the projection withheld (a broken or retired seal) prints no
+	// autonomy value here, and a run whose block would be empty prints no
+	// header. A historical bundle has no projection and admits no axis detail.
+	const statusByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
 	for (const { runId, view } of provenance) {
+		const lines = provenanceTranscriptLines(view, statusByRun.get(runId));
+		if (lines.length === 0) continue;
 		process.stdout.write(`provenance ${runId}:\n`);
-		for (const line of provenanceTranscriptLines(view)) process.stdout.write(`  ${line}\n`);
+		for (const line of lines) process.stdout.write(`  ${line}\n`);
 	}
 	process.stdout.write(`files: ${formatList(overview.files)}\n`);
 }

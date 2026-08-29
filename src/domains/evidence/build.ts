@@ -196,7 +196,10 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		redactedToolEvents,
 		protectedArtifacts,
 	);
-	const transcript = redactSecretsText(renderTranscript(overview, redactedRunSources, sessionLinks), tally);
+	const transcript = redactSecretsText(
+		renderTranscript(overview, redactedRunSources, sessionLinks, trustStatusRaw),
+		tally,
+	);
 	const finalOverview: EvidenceOverview = { ...overview, redactionCount: tally.count };
 	await writeEvidenceFiles(
 		directory,
@@ -609,7 +612,7 @@ async function writeEvidenceFiles(
 	await writeJson(join(directory, "overview.json"), overview);
 	await writeFile(
 		join(directory, "transcript.md"),
-		transcript ?? renderTranscript(overview, runSources, sessionLinks),
+		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus),
 		"utf8",
 	);
 	await writeJsonl(join(directory, "trace.raw.jsonl"), rawTraceRows(runSources));
@@ -644,9 +647,11 @@ function cleanedTraceRows(
 	const rows: EvidenceCleanTraceRow[] = [];
 	for (const source of runSources) {
 		const envelope = source.envelope;
-		// Clean trace rows project only provenance carried by the sealed receipt.
+		// Clean trace rows project only provenance carried by an authenticated
+		// receipt: a rejected or retired seal contributes none of its fields.
 		// Runs without receipt provenance keep the standard row shape.
-		const provenance = source.receipt === null ? {} : extractRunProvenance(source.receipt);
+		const receipt = authenticatedReceipt(source);
+		const provenance = receipt === null ? {} : extractRunProvenance(receipt);
 		rows.push({
 			kind: "run",
 			runId: envelope.id,
@@ -1266,7 +1271,9 @@ function renderTranscript(
 	overview: EvidenceOverview,
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	sessionLinks: SessionLinkResult,
+	trustStatus: EvidenceTrustStatusFile,
 ): string {
+	const trustByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
 	const lines = [
 		`# Evidence ${overview.evidenceId}`,
 		"",
@@ -1282,10 +1289,11 @@ function renderTranscript(
 			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.targetId}`,
 		);
 		lines.push(`  task: ${truncateText(envelope.task, MAX_TASK_CHARS)}`);
-		// Run section rendering reads provenance from the sealed receipt and adds
-		// sentences only for fields that are present.
+		// Run section rendering adds a sentence per provenance field the
+		// canonical projection admits; a rejected or retired seal adds none.
 		if (source.receipt !== null) {
-			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt))) {
+			const status = trustByRun.get(envelope.id);
+			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt), status)) {
 				lines.push(`  ${line}`);
 			}
 		}
