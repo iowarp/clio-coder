@@ -247,6 +247,71 @@ for (const name of readdirSync(recipeDir)
 	}
 }
 
+/**
+ * Advisories against packages that reach the published tarball.
+ *
+ * `npm audit` is not run by any other gate: `.github/workflows/ci.yml` installs
+ * with `--no-audit`, and this script previously audited package *contents*
+ * without ever asking whether those contents were vulnerable. Five advisories
+ * shipped to users for months that way, all of them production dependencies
+ * arriving through the agent SDK's MCP chain, and all five were assumed to be
+ * development-surface until someone checked (#199).
+ *
+ * `--omit=dev` is the whole point: a development dependency's advisory is a
+ * maintenance question, and one in a shipped dependency is something users
+ * installed. High and critical fail the release; moderate and low are printed
+ * so a maintainer sees them without a release being blocked by, say, a JSX
+ * advisory in an HTTP framework this runtime never renders with.
+ *
+ * There is no environment-variable escape. Shipping a known high in the
+ * published tarball should take an explicit, reviewable edit: bump it, override
+ * it, or add it here with the reason.
+ */
+function checkShippedAdvisories() {
+	let raw;
+	try {
+		raw = execFileSync("npm", ["audit", "--omit=dev", "--json"], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	} catch (error) {
+		// npm audit exits non-zero when it finds anything, and still prints the
+		// report on stdout. A genuinely failed run leaves stdout empty.
+		raw = typeof error?.stdout === "string" ? error.stdout : "";
+		if (raw.trim().length === 0) {
+			errors.push(
+				`unable to run npm audit: ${error instanceof Error ? error.message : String(error)}. The release gate does not pass on an unknown advisory state.`,
+			);
+			return;
+		}
+	}
+	let report;
+	try {
+		report = JSON.parse(raw);
+	} catch {
+		errors.push("npm audit did not return JSON; the release gate does not pass on an unknown advisory state");
+		return;
+	}
+	const found = Object.entries(report.vulnerabilities ?? {});
+	const blocking = found.filter(([, v]) => v.severity === "high" || v.severity === "critical");
+	const noted = found.filter(([, v]) => v.severity === "moderate" || v.severity === "low");
+	for (const [name, v] of noted) {
+		process.stdout.write(`check-release: note: ${v.severity} advisory in shipped dependency ${name} (${v.range})\n`);
+	}
+	for (const [name, v] of blocking) {
+		const fix =
+			v.fixAvailable === true
+				? "npm audit fix"
+				: v.fixAvailable
+					? `upgrade to ${v.fixAvailable.name}@${v.fixAvailable.version}`
+					: "no fix available";
+		errors.push(`${v.severity} advisory in shipped dependency ${name} (${v.range}); ${fix}`);
+	}
+}
+
+checkShippedAdvisories();
+
 if (report.size > MAX_TARBALL_BYTES) {
 	errors.push(`tarball ${report.size} bytes exceeds budget ${MAX_TARBALL_BYTES}`);
 }
