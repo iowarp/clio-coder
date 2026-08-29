@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { loadSkills } from "../resources/skills/loader.js";
 import { parseFrontmatter } from "./frontmatter.js";
@@ -20,10 +20,29 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	// only the operator's discovered skill roots; a recipe cannot smuggle an
 	// arbitrary filesystem path into worker context through a skill name.
 	const packageSkills = path.resolve(source.dir, "..", "..", "..", "..", "skills");
-	const skills = loadSkills({
-		cwd: process.cwd(),
-		...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
-	});
+	if (source.source === "extension" && source.skillRoot === undefined) {
+		throw new Error(`agent recipe: ${recipe.filepath}: extension declares bound skills but no skills resource root`);
+	}
+	const skills =
+		source.source === "extension"
+			? loadSkills({
+					cwd: process.cwd(),
+					disableDiscovery: true,
+					explicitSkillPaths: source.skillRoot === undefined ? [] : [source.skillRoot],
+				})
+			: loadSkills({
+					cwd: process.cwd(),
+					...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
+				});
+	if (source.source === "extension" && source.skillRoot !== undefined) {
+		const canonicalRoot = realpathSync(source.skillRoot);
+		for (const skill of skills.items) {
+			const relative = path.relative(canonicalRoot, realpathSync(skill.filePath));
+			if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+				throw new Error(`agent recipe: ${recipe.filepath}: bound skill escapes its extension: ${skill.filePath}`);
+			}
+		}
+	}
 	const byName = new Map(skills.items.map((skill) => [skill.name, skill.filePath]));
 	const missing = recipe.skills.filter((skill) => !byName.has(skill));
 	if (missing.length > 0) {
@@ -95,6 +114,10 @@ export function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe
 				continue;
 			}
 			const builtin = builtinById.get(recipe.id);
+			if (recipe.source === "extension" && builtin) {
+				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=extension reason=reserved-builtin\n`);
+				continue;
+			}
 			if (recipe.source === "user" && builtin && isShadowAgent(normalizeAgentSpec(builtin))) {
 				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=user reason=reserved-shadow\n`);
 				continue;
