@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -79,6 +79,7 @@ Plan and inspect {{topic}}.
 `;
 
 function writeExtension(root: string): void {
+	write(root, "state.json", '{"version":1,"private":"extension-manager-bookkeeping"}\n');
 	write(
 		root,
 		"clio-coder-extension.yaml",
@@ -97,10 +98,11 @@ function writeExtension(root: string): void {
 		].join("\n"),
 	);
 	write(root, "core/templates/project.md", "# Project template\n");
+	write(root, "core/templates/state.json", '{"schema":"wtfp.project.state/v1"}\n');
 	write(
 		root,
 		"prompts/wtfp/new-paper.md",
-		`Read @\${extensionRoot}/core/templates/project.md, then start a paper about $ARGUMENTS.\n`,
+		`Read @\${extensionRoot}/core/templates/project.md and @\${extensionRoot}/core/templates/state.json, then start a paper about $ARGUMENTS.\n`,
 	);
 	write(root, "skills/wtfp-plan-section/SKILL.md", SKILL);
 	write(root, "agents/wtfp-planner.md", agent("WTF-P Planner", ["wtfp-plan-section"]));
@@ -124,6 +126,14 @@ describe("contracts/WTF-P extension resources", () => {
 			installed.diagnostics.filter((diagnostic) => diagnostic.type === "error"),
 			[],
 		);
+		const installedRoot = installed.extension?.rootPath;
+		ok(installedRoot, "the extension has an installed root");
+		strictEqual(existsSync(path.join(installedRoot, "state.json")), false, "root bookkeeping state is excluded");
+		strictEqual(
+			readFileSync(path.join(installedRoot, "core", "templates", "state.json"), "utf8"),
+			'{"schema":"wtfp.project.state/v1"}\n',
+			"nested state resources are installed",
+		);
 		strictEqual(enabledExtensionResourceRoots("agents", project).length, 1);
 		strictEqual(enabledExtensionResourceRoots("fleets", project).length, 1);
 
@@ -132,6 +142,7 @@ describe("contracts/WTF-P extension resources", () => {
 		strictEqual(expanded.expanded, true);
 		if (!expanded.expanded) throw new Error("expected namespaced extension prompt to expand");
 		ok(expanded.text.includes(path.join("extensions", "wtfp", "core", "templates", "project.md")));
+		ok(expanded.text.includes(path.join("extensions", "wtfp", "core", "templates", "state.json")));
 		ok(expanded.text.endsWith("then start a paper about durable workflows."));
 
 		const previousCwd = process.cwd();
