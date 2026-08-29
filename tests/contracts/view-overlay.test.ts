@@ -418,6 +418,18 @@ describe("contracts/view-overlay", () => {
 		ok(stripAnsi(failHeader).includes(GLYPH.error), "failed verification uses the shared glyph");
 		ok(failHeader.includes(clioTheme().fgSequence("error")), "failed verification uses the error token");
 
+		// A retired seal is neither a pass nor a failure: it carries the warn
+		// glyph and token so it never reads as a tampered receipt.
+		const retiredHeader = buildArtifactHeader(
+			item,
+			{ status: "retired", detail: "receipt integrity v19 is retired; this build verifies v20" },
+			160,
+		);
+		ok(stripAnsi(retiredHeader).includes("verify retired receipt integrity v19 is retired"), stripAnsi(retiredHeader));
+		ok(stripAnsi(retiredHeader).includes(GLYPH.warn), "retired verification uses the warn glyph");
+		ok(!stripAnsi(retiredHeader).includes("verify fail"), stripAnsi(retiredHeader));
+		ok(retiredHeader.includes(clioTheme().fgSequence("warning")), "retired verification uses the warning token");
+
 		const narrow = stripAnsi(buildArtifactHeader(item, { status: "ok", detail: "integrity verified" }, 32));
 		ok(narrow.includes("…"), `narrow headers should truncate with an ellipsis: ${narrow}`);
 		ok(!narrow.includes("..."), "narrow headers should not use three-dot truncation");

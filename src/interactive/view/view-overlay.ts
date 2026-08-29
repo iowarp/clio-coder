@@ -51,7 +51,9 @@ export type ViewVerificationState =
 	| { status: "idle" }
 	| { status: "running" }
 	| { status: "ok"; detail: string }
-	| { status: "fail"; detail: string };
+	| { status: "fail"; detail: string }
+	/** A seal this build does not verify because its version was retired: neither a pass nor a tampered-receipt failure. */
+	| { status: "retired"; detail: string };
 
 export type ViewScrollAction =
 	| "line-up"
@@ -327,6 +329,7 @@ function verificationText(state: ViewVerificationState | undefined): string {
 	if (!state || state.status === "idle") return "";
 	if (state.status === "running") return `${GLYPH.running} verify running`;
 	if (state.status === "ok") return `${GLYPH.ok} verify ok ${state.detail}`;
+	if (state.status === "retired") return `${GLYPH.warn} verify retired ${state.detail}`;
 	return `${GLYPH.error} verify fail ${state.detail}`;
 }
 
@@ -343,7 +346,14 @@ export function buildArtifactHeader(
 	if (size.length > 0) parts.push(theme.fg("dim", size));
 	const verify = verificationText(verification);
 	if (verify.length > 0) {
-		const token = verification?.status === "ok" ? "success" : verification?.status === "fail" ? "error" : "info";
+		const token =
+			verification?.status === "ok"
+				? "success"
+				: verification?.status === "fail"
+					? "error"
+					: verification?.status === "retired"
+						? "warning"
+						: "info";
 		parts.push(theme.fg(token, verify));
 	}
 	return padAnsi(parts.join("  "), width, ELLIPSIS);
@@ -689,7 +699,9 @@ export class ViewOverlayView implements Component {
 			.then((result) => {
 				this.verifications.set(
 					key,
-					result.ok ? { status: "ok", detail: result.detail } : { status: "fail", detail: result.detail },
+					result.ok
+						? { status: "ok", detail: result.detail }
+						: { status: result.retired === true ? "retired" : "fail", detail: result.detail },
 				);
 			})
 			.catch((err) => {

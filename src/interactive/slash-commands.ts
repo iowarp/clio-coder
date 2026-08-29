@@ -6,9 +6,9 @@ import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
@@ -665,7 +665,7 @@ export interface SlashCommandContext {
 	 * and emit a single status line. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
-	verifyReceipt: (runId: string) => ReceiptIntegrityResult;
+	verifyReceipt: (runId: string) => ReceiptIntegrityOutcome;
 	/**
 	 * Handles the "unknown" case: append the text to the chat panel as a user
 	 * turn, submit to the chat loop, and schedule a re-render. Handlers for
@@ -1507,6 +1507,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const result = ctx.verifyReceipt(command.runId);
 			if (result.ok) {
 				ctx.notice("success", `verify ok ${command.runId}`);
+			} else if (result.retired !== undefined) {
+				// A retired seal is the expected state of a run from the previous
+				// release, so it is a warning that names the versions, never the
+				// failure a tampered receipt gets.
+				ctx.notice("warn", `verify retired ${command.runId} ${result.reason}`);
 			} else {
 				ctx.notice("error", `verify fail ${command.runId} ${result.reason}`);
 			}
