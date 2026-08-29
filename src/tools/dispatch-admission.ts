@@ -638,9 +638,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							executionRole: "researcher",
 							autonomy: "read-only",
 							toolProfile: "council-read-only",
-							// The runner composes the same suffix for a vote member, so the
-							// approval artifact the plan hash binds shows the operator the
-							// ballot the member is actually asked to cast.
+							// The runner reuses this composed task from the resolved plan, so
+							// the approval artifact the plan hash binds shows the operator the
+							// exact ballot the member is asked to cast.
 							...(council.synthesis === "vote"
 								? {
 										task: renderCouncilVoteMemberTask(base.task),

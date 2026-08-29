@@ -14,6 +14,7 @@ import {
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import { COUNCIL_VOTE_MEMBER_DIRECTIVE } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -469,6 +470,7 @@ describe("council dispatch", () => {
 			synthesis: { kind: string; verdict?: string; tally?: Record<string, number> };
 		};
 		spawns: ReadonlyArray<{ spec: WorkerSpec }>;
+		approvedMemberTasks: string[];
 		getRun: (runId: string) => { receiptPath?: string | null } | null;
 		stop: () => Promise<void>;
 	}> => {
@@ -478,14 +480,21 @@ describe("council dispatch", () => {
 		});
 		await bundle.extension.start();
 		const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
-		const result = await tool.run(
-			{ mode: "council", task: "Should the cache key stay a tuple?", members, synthesis: "vote" },
-			{ approval: { requestId: "vote", requestedBy: "tester", actionClass: "dispatch" } },
-		);
+		const rawArgs = { mode: "council", task: "Should the cache key stay a tuple?", members, synthesis: "vote" };
+		const prepared = tool.prepareAdmissionArguments?.(rawArgs) ?? rawArgs;
+		const approvedMemberTasks =
+			tool
+				.describeDispatchPlan?.(prepared)
+				.tasks.filter((task) => task.role === "member")
+				.map((task) => task.task) ?? [];
+		const result = await tool.run(prepared, {
+			approval: { requestId: "vote", requestedBy: "tester", actionClass: "dispatch" },
+		});
 		return {
 			result,
 			council: result.details?.council as never,
 			spawns: fabric.spawns,
+			approvedMemberTasks,
 			getRun: (runId) => bundle.contract.getRun(runId) ?? null,
 			stop: async () => {
 				await bundle.extension.stop?.();
@@ -508,14 +517,21 @@ describe("council dispatch", () => {
 		);
 		try {
 			strictEqual(run.result.kind, "ok", run.result.kind === "error" ? run.result.message : "");
+			strictEqual(run.approvedMemberTasks.length, run.spawns.length);
 			// The seated agent is unchanged: a council that names none still seats
 			// the read-only builtin researcher, persona and all.
 			for (const spawn of run.spawns) strictEqual(spawn.spec.agentId, "researcher");
 			// What changed is the postcondition for this slot. The member is asked
 			// for the ballot and seals the ballot, so the field the tally reads is
 			// one the run was actually required to produce.
-			for (const spawn of run.spawns) {
+			for (const [index, spawn] of run.spawns.entries()) {
+				const approvedTask = run.approvedMemberTasks[index];
+				if (approvedTask === undefined) throw new Error(`approved member task ${index + 1} is missing`);
 				deepStrictEqual(spawn.spec.resultContract, { kind: "council-ballot" });
+				strictEqual(spawn.spec.autonomy, "read-only");
+				strictEqual(spawn.spec.toolProfile, "council-read-only");
+				match(spawn.spec.systemPrompt, /# Test Researcher Recipe/);
+				ok(!spawn.spec.systemPrompt.includes(COUNCIL_VOTE_MEMBER_DIRECTIVE));
 				// The worker re-parses this field before its first model call, so a
 				// spec the coordinator can send but the worker cannot read is a
 				// fatal run rather than a vote.
@@ -525,14 +541,23 @@ describe("council dispatch", () => {
 				match(spawn.spec.task, /^Should the cache key stay a tuple\?/);
 				match(spawn.spec.task, /This council round is a vote/);
 				match(spawn.spec.task, /End with a JSON object only: \{"verdict":"yes","text":/);
+				deepStrictEqual(Buffer.from(spawn.spec.task, "utf8"), Buffer.from(approvedTask, "utf8"));
+				strictEqual(spawn.spec.task.split(COUNCIL_VOTE_MEMBER_DIRECTIVE).length - 1, 1);
 			}
 			// The tally the ticket says no input could produce.
 			strictEqual(run.council.synthesis.verdict, "keep");
 			deepStrictEqual(run.council.synthesis.tally, { keep: 2 });
 			// And it is validated rather than merely parsed: a member that sealed
 			// no conforming ballot could not have contributed to it.
-			for (const member of run.council.members) {
+			for (const [index, member] of run.council.members.entries()) {
+				const approvedTask = run.approvedMemberTasks[index];
+				if (approvedTask === undefined) throw new Error(`approved member task ${index + 1} is missing`);
 				const receipt = sealedReceipt(run.getRun(member.runId));
+				deepStrictEqual(Buffer.from(receipt.task, "utf8"), Buffer.from(approvedTask, "utf8"));
+				strictEqual(receipt.task.split(COUNCIL_VOTE_MEMBER_DIRECTIVE).length - 1, 1);
+				strictEqual(receipt.agentId, "researcher");
+				strictEqual(receipt.agentAudience, "shadow");
+				strictEqual(receipt.personaOverride, undefined);
 				strictEqual(receipt.quality?.resultContract?.conformance, "pass", member.label);
 				strictEqual(receipt.quality?.resultContract?.sourceId?.includes("council-ballot"), true, member.label);
 			}
