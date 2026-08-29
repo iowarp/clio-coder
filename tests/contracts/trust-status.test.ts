@@ -19,8 +19,12 @@ import {
 	adaptRunReceiptTrustStatus,
 	adaptRunReceiptValidationStatus,
 	composeTrustStatus,
+	formatTrustAxes,
+	formatTrustSummary,
 	normalizeTrustStatus,
 	projectTrustStatus,
+	retiredIntegrityVersionOf,
+	retiredReceiptIntegrity,
 	TRUST_STATUS_AXES,
 	TRUST_STATUS_MAX_ARTIFACT_REFERENCES,
 	TRUST_STATUS_STATES,
@@ -395,6 +399,55 @@ describe("contracts/trust-status", () => {
 		);
 		strictEqual(failedIntegrity.artifactIntegrity.state, "failed");
 		strictEqual(failedIntegrity.validationGrounding.state, "absent");
+	});
+
+	it("distinguishes a retired seal from a rejected one on every projected surface", () => {
+		const retired = adaptRunReceiptTrustStatus(currentReceipt(), {
+			integrity: {
+				ok: false,
+				reason: "receipt integrity v19 is retired; this build verifies v20; the receipt is not read as evidence",
+				retired: { receiptVersion: 19, supportedVersion: 20 },
+			},
+		});
+		// Nothing was checked, so the seal is unknown through the compatibility
+		// source that names its version, and the receipt-owned axes are absent
+		// because the format is historical. No receipt claim is read.
+		deepStrictEqual(retired.artifactIntegrity, {
+			state: "unknown",
+			source: { kind: "compatibility", id: "run_receipt:run-154:integrity-v19-retired" },
+			authority: { kind: "unknown", id: "historical-persisted-format" },
+			artifacts: [{ kind: "run_receipt", id: "run-154", digest: { algorithm: "sha256", value: DIGEST_A } }],
+		});
+		deepStrictEqual(retired.validationGrounding, absentTrustStatus("historical_format"));
+		deepStrictEqual(retired.contextProvenance, absentTrustStatus("historical_format"));
+		deepStrictEqual(retired.autonomyEnforcement, absentTrustStatus("historical_format"));
+		strictEqual(retiredIntegrityVersionOf(retired.artifactIntegrity), 19);
+		ok(
+			formatTrustSummary(retired).startsWith("seal v19 retired (this build verifies v20); "),
+			formatTrustSummary(retired),
+		);
+		ok(formatTrustAxes(retired).includes("artifactIntegrity:unknown"), formatTrustAxes(retired));
+		// The persisted projection round-trips the version through its source id.
+		strictEqual(retiredIntegrityVersionOf(normalizeTrustStatus(retired).artifactIntegrity), 19);
+
+		const rejected = adaptRunReceiptTrustStatus(currentReceipt(), {
+			integrity: { ok: false, reason: "integrity mismatch" },
+		});
+		strictEqual(rejected.artifactIntegrity.state, "failed");
+		deepStrictEqual(rejected.autonomyEnforcement, absentTrustStatus("not_observed"));
+		strictEqual(retiredIntegrityVersionOf(rejected.artifactIntegrity), null);
+		ok(formatTrustSummary(rejected).startsWith("seal broken; "), formatTrustSummary(rejected));
+
+		// Only a lower integer version is retired; the current one, a newer
+		// one, and a malformed block all fall through to the verifier.
+		deepStrictEqual(retiredReceiptIntegrity({ version: 19, algorithm: "sha256", digest: DIGEST_A }), {
+			receiptVersion: 19,
+			supportedVersion: 20,
+		});
+		strictEqual(retiredReceiptIntegrity({ version: 20, algorithm: "sha256", digest: DIGEST_A }), null);
+		strictEqual(retiredReceiptIntegrity({ version: 21, algorithm: "sha256", digest: DIGEST_A }), null);
+		strictEqual(retiredReceiptIntegrity({ version: "19" }), null);
+		strictEqual(retiredReceiptIntegrity(null), null);
 	});
 
 	it("adapts positive, negative, ungrounded, absent, unknown, and not applicable validation", () => {

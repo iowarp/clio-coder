@@ -30,7 +30,7 @@ import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./re
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
 import type { CanonicalTrustStatus, TrustArtifactReference } from "./trust-status.js";
-import { inspectRunReceiptTrustStatus } from "./trust-status.js";
+import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
@@ -196,7 +196,10 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		redactedToolEvents,
 		protectedArtifacts,
 	);
-	const transcript = redactSecretsText(renderTranscript(overview, redactedRunSources, sessionLinks), tally);
+	const transcript = redactSecretsText(
+		renderTranscript(overview, redactedRunSources, sessionLinks, trustStatusRaw),
+		tally,
+	);
 	const finalOverview: EvidenceOverview = { ...overview, redactionCount: tally.count };
 	await writeEvidenceFiles(
 		directory,
@@ -286,8 +289,14 @@ function buildFindings(
 		const status = trustByRun.get(source.envelope.id);
 		if (status === undefined) throw new Error(`canonical trust status missing for run ${source.envelope.id}`);
 		if (source.receiptError !== null) {
-			const tag = source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
-			findings.push(finding(findings.length, "warn", tag, source.envelope.id, source.receiptError));
+			// The canonical axis, not the raw reason string, says whether the seal
+			// was retired: `receipt-retired` is the expected state of every run
+			// that predates an integrity bump and is an info row, while
+			// `receipt-integrity` stays the warning for a seal that was checked
+			// and rejected.
+			const retired = retiredIntegrityVersionOf(status.artifactIntegrity) !== null;
+			const tag = retired ? "receipt-retired" : source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
+			findings.push(finding(findings.length, retired ? "info" : "warn", tag, source.envelope.id, source.receiptError));
 		}
 		if (
 			isSuccessfulRun(source) &&
@@ -609,7 +618,7 @@ async function writeEvidenceFiles(
 	await writeJson(join(directory, "overview.json"), overview);
 	await writeFile(
 		join(directory, "transcript.md"),
-		transcript ?? renderTranscript(overview, runSources, sessionLinks),
+		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus),
 		"utf8",
 	);
 	await writeJsonl(join(directory, "trace.raw.jsonl"), rawTraceRows(runSources));
@@ -644,9 +653,11 @@ function cleanedTraceRows(
 	const rows: EvidenceCleanTraceRow[] = [];
 	for (const source of runSources) {
 		const envelope = source.envelope;
-		// Clean trace rows project only provenance carried by the sealed receipt.
+		// Clean trace rows project only provenance carried by an authenticated
+		// receipt: a rejected or retired seal contributes none of its fields.
 		// Runs without receipt provenance keep the standard row shape.
-		const provenance = source.receipt === null ? {} : extractRunProvenance(source.receipt);
+		const receipt = authenticatedReceipt(source);
+		const provenance = receipt === null ? {} : extractRunProvenance(receipt);
 		rows.push({
 			kind: "run",
 			runId: envelope.id,
@@ -1266,7 +1277,9 @@ function renderTranscript(
 	overview: EvidenceOverview,
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	sessionLinks: SessionLinkResult,
+	trustStatus: EvidenceTrustStatusFile,
 ): string {
+	const trustByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
 	const lines = [
 		`# Evidence ${overview.evidenceId}`,
 		"",
@@ -1282,10 +1295,11 @@ function renderTranscript(
 			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.targetId}`,
 		);
 		lines.push(`  task: ${truncateText(envelope.task, MAX_TASK_CHARS)}`);
-		// Run section rendering reads provenance from the sealed receipt and adds
-		// sentences only for fields that are present.
+		// Run section rendering adds a sentence per provenance field the
+		// canonical projection admits; a rejected or retired seal adds none.
 		if (source.receipt !== null) {
-			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt))) {
+			const status = trustByRun.get(envelope.id);
+			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt), status)) {
 				lines.push(`  ${line}`);
 			}
 		}
@@ -1548,6 +1562,9 @@ async function readReceipt(
 	}
 	const integrity = inspectRunReceiptTrustStatus(receipt, envelope).integrity;
 	if (!integrity.ok) {
+		// A retired seal is set aside unread, the way a missing receipt is; it
+		// is not a failed one, and its reason already names both versions.
+		if (integrity.retired !== undefined) return { receipt, error: integrity.reason, integrityFailed: false };
 		return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
 	}
 	return { receipt, error: null, integrityFailed: false };

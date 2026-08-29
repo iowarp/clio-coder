@@ -5,6 +5,7 @@ export { buildEvalEvidence, evalEvidenceId } from "./eval.js";
 export { FINISH_CONTRACT_EVIDENCE_TAGS, finishContractEvidenceTags } from "./finish-contract-map.js";
 export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
+	admitRunProvenance,
 	extractRunProvenance,
 	hasRunProvenance,
 	PERSONA_HASH_PREFIX_CHARS,
@@ -49,6 +50,8 @@ export type {
 	GroundedEvidenceValidationInput,
 	IndependentReviewStatus,
 	PersistedRunReceiptTrustFacts,
+	ReceiptIntegrityOutcome,
+	RetiredReceiptIntegrity,
 	RunReceiptTrustInspection,
 	TrustAbsenceReason,
 	TrustArtifactKind,
@@ -77,12 +80,16 @@ export {
 	inspectRunReceiptTrustStatus,
 	normalizeTrustStatus,
 	projectTrustStatus,
+	retiredIntegrityVersionOf,
+	retiredReceiptIntegrity,
+	retiredReceiptIntegrityReason,
 	TRUST_STATUS_AXES,
 	TRUST_STATUS_MAX_ARTIFACT_REFERENCES,
 	TRUST_STATUS_MAX_IDENTIFIER_LENGTH,
 	TRUST_STATUS_STATES,
 	TRUST_STATUS_VERSION,
 	validateTrustStatus,
+	verifyReceiptIntegrityOutcome,
 } from "./trust-status.js";
 export type {
 	EvidenceAuditLinkedRow,
