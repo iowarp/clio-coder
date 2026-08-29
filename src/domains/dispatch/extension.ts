@@ -186,7 +186,6 @@ import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
 	declaredScopeReplacementNotice,
-	legacyScopeInferenceNotice,
 	resolveDispatchPathScope,
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
@@ -3211,7 +3210,14 @@ export function createDispatchBundle(
 		if (replacementDiagnostic !== null) {
 			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
 		}
-		const notice = declaredScopeReplacementNotice(pathScope) ?? legacyScopeInferenceNotice(pathScope);
+		// Only the replacement case reaches the transcript. A dispatch that
+		// declared no intent is the ordinary case rather than an anomaly, and one
+		// receipt in ninety-nine carries an intent key today, so noticing it would
+		// warn on almost every dispatch and teach the operator to skip the channel.
+		// Its provenance is not lost: the receipt seals `pathProvenance`, and the
+		// approval artifact renders every inferred entry in full before a
+		// supervised dispatch runs, which is where an operator can still act on it.
+		const notice = declaredScopeReplacementNotice(pathScope);
 		if (notice !== null) {
 			context.bus.emit(BusChannels.DispatchScopeNotice, {
 				...notice,
