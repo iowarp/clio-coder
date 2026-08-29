@@ -147,6 +147,13 @@ export interface ResolveRuntimeTargetInput {
 	requireTools?: boolean;
 	requireStreaming?: boolean;
 	requireOutputBudget?: boolean;
+	/**
+	 * A loaded window this target and model were already observed serving, from
+	 * a caller that remembers across processes. Used only when live discovery
+	 * reports no loaded window, so a resumed session stops budgeting against a
+	 * probed server-wide figure for its first turn (issue #227).
+	 */
+	knownLoadedContextWindow?: number | null;
 }
 
 function diagnostic(severity: RuntimeResolutionSeverity, code: string, message: string): RuntimeResolutionDiagnostic {
@@ -405,7 +412,7 @@ export function resolveRuntimeTarget(
 	// Discovery's per-model loaded window, which the probe capabilities cannot
 	// carry: `probeCapabilitiesForModel` answers for the target's default model
 	// and reports a window without saying whether it is the one being served.
-	const loadedContextWindow = loadedContextWindowForModel(status, wireModelId);
+	const loadedContextWindow = loadedContextWindowForModel(status, wireModelId) ?? input.knownLoadedContextWindow ?? null;
 	const contextWindowDetails = resolveContextWindowDetails(
 		target,
 		runtime,

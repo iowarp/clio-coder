@@ -50,7 +50,9 @@ import {
 	contextUsageSnapshot,
 	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
+	estimateAgentMessageTokens,
 	getLatestContextSnapshot,
+	lastLoadedContextWindow,
 	reconcileSnapshot,
 	snapshotInputTokens,
 } from "../domains/session/context-accounting.js";
@@ -92,7 +94,22 @@ export interface TurnContextDeps {
 }
 
 export interface LiveContextEstimate {
+	/**
+	 * The figure to budget against: the reconciled total when the provider has
+	 * attested one for this conversation, otherwise the estimate. Never below
+	 * the estimate, because the estimate covers material the last provider call
+	 * did not see.
+	 */
 	tokens: number;
+	/** Pure chars/4 projection, with the pre-existing provider-usage anchor. */
+	estimatedTokens: number;
+	/**
+	 * Provider-attested prompt tokens for the messages up to the last reconciled
+	 * call, plus a chars/4 estimate of everything appended since. Null before the
+	 * first reconcile of a session and after a summary compaction rewrites the
+	 * history the attestation described.
+	 */
+	reconciledTokens: number | null;
 	contextWindow: number;
 	breakdown: ReturnType<typeof estimateAgentContextBreakdown>;
 }
@@ -120,6 +137,12 @@ export interface TurnContext {
 	 */
 	promptSideTokens(): number;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
+	/**
+	 * The loaded context window this session already recorded for a target and
+	 * model, so a resume budgets against it instead of re-probing. Null when the
+	 * ledger has no such measurement.
+	 */
+	rememberedLoadedContextWindow(targetId: string, modelId: string): number | null;
 	refreshAgentMessagesFromSession(agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry>;
 	runAutoCompact(
 		agentRuntime: AgentRuntime,
@@ -157,6 +180,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
 
 	let currentContextSnapshot: ContextSnapshot | null = null;
+	/**
+	 * The last provider-attested prompt size, and how many agent messages it
+	 * covered (issue #227).
+	 *
+	 * `tokens` is the provider's own prompt count for that call plus the output
+	 * it produced, which together are what the next call's prompt carries for
+	 * the same messages. `anchoredMessageCount` is the length of the live
+	 * message list at that moment, so anything appended since is priced by
+	 * estimate and added on top. Unlike the per-message usage anchor inside
+	 * `estimateAgentContextTokens`, this survives `contextUsageInvalidated`:
+	 * a working-set projection subtracts the tokens it removed rather than
+	 * throwing the attestation away.
+	 */
+	let reconciledAnchor: { tokens: number; anchoredMessageCount: number } | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
 	// prompt was reused. Shown together in /context so "prompt reused" can
@@ -322,6 +359,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * (issue #189). Null when no target is configured or it does not resolve,
 	 * and the overlay's "unknown" is then true.
 	 */
+	const rememberedLoadedContextWindow = (targetId: string, modelId: string): number | null => {
+		const session = deps.session?.current();
+		if (!session) return null;
+		return lastLoadedContextWindow(session, targetId, modelId);
+	};
+
 	const resolveWindowWithoutRuntime = (): ContextWindowDetails | null => {
 		const settings = deps.getSettings();
 		const targetId = settings.orchestrator?.target?.trim();
@@ -334,6 +377,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
+			knownLoadedContextWindow: rememberedLoadedContextWindow(targetId, wireModelId),
 		});
 		return resolved.ok ? resolved.target.contextWindowDetails : null;
 	};
@@ -383,6 +427,29 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return { contextWindow: 0, contextWindowSource: null, contextWindowSlots: null };
 	};
 
+	/**
+	 * Carry the reconciled anchor onto the current message list: the attested
+	 * prompt for the messages it covered, plus a chars/4 estimate of everything
+	 * appended since, plus text that has not been submitted yet. The tool
+	 * schemas and the system prompt are inside the attested figure already, so
+	 * they are not added again. Null when there is no attestation, or when the
+	 * list is shorter than the anchor covered, which means the history it
+	 * described was rewritten beneath it.
+	 */
+	const reconciledAnchoredTokens = (agentRuntime: AgentRuntime, pendingUserTokens: number): number | null => {
+		const anchor = reconciledAnchor;
+		if (!anchor) return null;
+		const messages = agentRuntime.agent.state.messages;
+		if (anchor.anchoredMessageCount > messages.length) return null;
+		let tail = 0;
+		for (let i = anchor.anchoredMessageCount; i < messages.length; i += 1) {
+			const message = messages[i];
+			if (message === undefined) continue;
+			tail += estimateAgentMessageTokens(message);
+		}
+		return anchor.tokens + tail + pendingUserTokens;
+	};
+
 	const liveContextEstimate = (agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
@@ -391,10 +458,34 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText } : {}),
 		};
+		const breakdown = estimateAgentContextBreakdown(estimateInput);
+		const estimatedTokens = estimateAgentContextTokens(estimateInput);
+		const reconciledTokens = reconciledAnchoredTokens(agentRuntime, breakdown.pendingUserTokens);
 		return {
-			tokens: estimateAgentContextTokens(estimateInput),
+			// The estimate is a floor, not a competing verdict: it prices material
+			// the attested call never saw, so a provider count below it would be
+			// answering about a smaller conversation.
+			tokens: Math.max(estimatedTokens, reconciledTokens ?? 0),
+			estimatedTokens,
+			reconciledTokens,
 			contextWindow,
-			breakdown: estimateAgentContextBreakdown(estimateInput),
+			breakdown,
+		};
+	};
+
+	/**
+	 * A working-set projection removes tokens from messages the attestation
+	 * covered; it does not make the attestation wrong about the rest. Subtract
+	 * what the planner priced out against the same projection and re-anchor on
+	 * the refreshed list, instead of discarding the figure and falling back to
+	 * pure chars/4 exactly when the accounting matters most (issue #227).
+	 * Call after the message list has been rebuilt.
+	 */
+	const carryReconciledAnchorThroughProjection = (agentRuntime: AgentRuntime, tokensRemoved: number): void => {
+		if (!reconciledAnchor) return;
+		reconciledAnchor = {
+			tokens: Math.max(0, reconciledAnchor.tokens - Math.max(0, tokensRemoved)),
+			anchoredMessageCount: agentRuntime.agent.state.messages.length,
 		};
 	};
 
@@ -507,6 +598,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						emitCompactionActivity("started", "compacting context (mask stage)");
 						deps.session.replaceEntries(masked.entries);
 						refreshAgentMessagesFromSession(agentRuntime);
+						// The masked history is not the one the provider counted.
+						reconciledAnchor = null;
 						deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
 						const postMaskSnapshot = captureRuntimeContextSnapshot(
@@ -591,6 +684,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							});
 							noteColdReason("working_set_evict");
 							refreshAgentMessagesFromSession(agentRuntime);
+							carryReconciledAnchorThroughProjection(agentRuntime, planned.tokensBefore - planned.tokensAfter);
 
 							const postEvictionSnapshot = captureRuntimeContextSnapshot(
 								agentRuntime,
@@ -683,6 +777,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		recordCompactionUsage(agentRuntime, result);
 
 		refreshAgentMessagesFromSession(agentRuntime);
+		// A summary replaces the conversation the attestation described, so no
+		// arithmetic carries it forward; the next call re-anchors it.
+		reconciledAnchor = null;
 
 		const postCompactSnapshot = captureRuntimeContextSnapshot(
 			agentRuntime,
@@ -741,6 +838,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		captureRuntimeContextSnapshot,
 		persistContextSnapshot,
 		liveContextEstimate,
+		rememberedLoadedContextWindow,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
 
@@ -754,6 +852,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		reconcileUsage(usage: Usage): void {
+			// Cached prompt tokens still occupy the window; providers report them
+			// outside `input`, so the attested prompt is the three summed.
+			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+			const messages = state.runtime?.agent.state.messages;
+			if (promptTokens > 0 && messages) {
+				// The output of this call is part of the next call's prompt for the
+				// same messages, which is why it is folded in here.
+				reconciledAnchor = {
+					tokens: promptTokens + (usage.output || 0),
+					anchoredMessageCount: messages.length,
+				};
+			}
 			if (!currentContextSnapshot) return;
 			// Reconcile in memory on every API call so the live meters
 			// track usage; persistence waits for the run to settle.
@@ -1067,6 +1177,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
 			emptyAutoCompactTurnId = null;
+			reconciledAnchor = null;
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
 		},
