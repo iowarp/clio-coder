@@ -516,23 +516,57 @@ describe("contracts/usage-report token and cost facts", () => {
 	before(async () => {
 		const sessions = join(scratch.dir, "state", "sessions", "repohash");
 		writeJsonl(join(sessions, "sess-tokens", "current.jsonl"), [
-			assistantUsageLine("t1", RECENT, {
-				input: 138,
-				output: 3,
-				cacheRead: 10274,
-				cacheWrite: 0,
-				totalTokens: 10415,
-				cost: { total: 0.25 },
-			}),
-			assistantUsageLine("t2", RECENT, {
-				input: 10,
-				output: 5,
-				cacheRead: 0,
-				cacheWrite: 7,
-				reasoningTokens: 40,
-				totalTokens: 22,
-				cost: { total: 0.05 },
-			}),
+			assistantUsageLine(
+				"t1",
+				RECENT,
+				{
+					input: 138,
+					output: 3,
+					cacheRead: 10274,
+					cacheWrite: 0,
+					totalTokens: 10415,
+					cost: { total: 0.25 },
+				},
+				{
+					promptCache: {
+						backendVerdict: "hot",
+						backend: {
+							promptTokens: 10_000,
+							cachedTokens: 10_000,
+							predictedTokens: 3,
+							promptMs: 50,
+							predictedMs: 10,
+							source: "lmstudio-timings",
+						},
+					},
+				},
+			),
+			assistantUsageLine(
+				"t2",
+				RECENT,
+				{
+					input: 10,
+					output: 5,
+					cacheRead: 0,
+					cacheWrite: 7,
+					reasoningTokens: 40,
+					totalTokens: 22,
+					cost: { total: 0.05 },
+				},
+				{
+					promptCache: {
+						backendVerdict: "partial",
+						backend: {
+							promptTokens: 5_000,
+							cachedTokens: 2_500,
+							predictedTokens: 5,
+							promptMs: 75,
+							predictedMs: 20,
+							source: "llamacpp-timings",
+						},
+					},
+				},
+			),
 			// Aborted: its usage is not a completed call, exactly as the reseed
 			// treats it, so the report must not count it either.
 			assistantUsageLine(
@@ -584,6 +618,18 @@ describe("contracts/usage-report token and cost facts", () => {
 		});
 		strictEqual(model?.apiCalls, 2);
 		strictEqual(model?.totalTokens, 10437);
+	});
+
+	it("reports uncached prefill and verdict counts per session", () => {
+		const cache = facts(rows, "session-cache")[0];
+		ok(cache, `expected a session-cache fact: ${JSON.stringify(rows)}`);
+		strictEqual(cache?.sessionId, "sess-tokens");
+		strictEqual(cache?.uncachedPrefillTokens, 2_500);
+		deepStrictEqual(cache?.verdictCounts, { hot: 1, partial: 1, cold: 0, small: 0 });
+		ok(stdout.includes("prompt cache by session (from backend timings and persisted verdicts)"), stdout);
+		ok(stdout.includes("hot/partial/cold/small"), stdout);
+		ok(stdout.includes("1/1/0/0"), stdout);
+		ok(stdout.includes("2,500") || stdout.includes("2500"), stdout);
 	});
 
 	it("prints the totals and the per-model table in the text report", () => {

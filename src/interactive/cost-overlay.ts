@@ -11,6 +11,12 @@ import {
 	type ObservabilityContract,
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
+import {
+	foldPromptCacheTelemetry,
+	hasPromptCacheTelemetry,
+	type PromptCacheTelemetry,
+	type SessionEntry,
+} from "../domains/session/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { clioTheme, rule } from "./theme/index.js";
@@ -179,7 +185,12 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): st
 	});
 }
 
-function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
+function summaryBlock(
+	totalCost: CostAggregate,
+	totalTokens: number,
+	rows: ReadonlyArray<CostRow>,
+	promptCache: PromptCacheTelemetry | null,
+): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
 	// No priced call, no cost row: neither the `cost $0.00` the overlay used to
@@ -190,6 +201,19 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 	// A side question is billed like anything else and is counted here, but it is
 	// deliberately not a turn: it never entered the session, so `turns` above
 	// excludes it and this row says how much of the spend sat beside the session.
+	const cacheRows =
+		promptCache !== null && hasPromptCacheTelemetry(promptCache)
+			? [
+					[
+						"uncached prefill",
+						promptCache.uncachedPrefillTokens === null ? "not reported" : formatTokens(promptCache.uncachedPrefillTokens),
+					] as const,
+					[
+						"cache verdicts",
+						`hot ${promptCache.verdictCounts.hot} · partial ${promptCache.verdictCounts.partial} · cold ${promptCache.verdictCounts.cold} · small ${promptCache.verdictCounts.small}`,
+					] as const,
+				]
+			: [];
 	return kvBlock([
 		["turns", formatTokens(totals.runs - totals.sideQuestions - totals.handoffs)],
 		["model calls", formatTokens(totals.apiCalls)],
@@ -201,6 +225,7 @@ function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: Reado
 		["reasoning", ...reasoningValue(totals.reasoningTokens)],
 		["cache read", ...cacheReadValue(totals.cacheRead, totals.apiCalls)],
 		["cache write", formatTokens(totals.cacheWrite)],
+		...cacheRows,
 		["processed", `${formatTokens(resolvedTotal)} tokens`],
 	]);
 }
@@ -232,10 +257,11 @@ export function formatCostOverlayBodyLines(
 	totalTokens: number,
 	rows: ReadonlyArray<CostRow>,
 	contentWidth: number,
+	promptCache: PromptCacheTelemetry | null = null,
 ): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
-	for (const line of summaryBlock(totalCost, totalTokens, rows)) {
+	for (const line of summaryBlock(totalCost, totalTokens, rows, promptCache)) {
 		lines.push(line);
 	}
 	lines.push(rule(theme, contentWidth));
@@ -258,6 +284,7 @@ export interface CostSnapshot {
 	totalCost: CostAggregate;
 	totalTokens: number;
 	rows: CostRow[];
+	promptCache: PromptCacheTelemetry | null;
 }
 
 // Session totals come from the observability projection: when a snapshot is
@@ -268,6 +295,7 @@ function buildCostSnapshot(
 	observability: ObservabilityContract,
 	sessionId: string | null,
 	snapshot?: ObservabilitySnapshot,
+	getSessionEntries?: () => ReadonlyArray<SessionEntry>,
 ): CostSnapshot {
 	const entries = observability.costEntries();
 	const rows = aggregateCostEntries(entries);
@@ -277,11 +305,14 @@ function buildCostSnapshot(
 		totalCost: snapshot?.session.cost ?? observability.sessionCostSummary(),
 		totalTokens,
 		rows,
+		promptCache: getSessionEntries ? foldPromptCacheTelemetry(getSessionEntries()) : null,
 	};
 }
 
 export interface OpenCostOverlayOptions {
 	sessionId?: string | null;
+	/** Session ledger, read on every render so newly settled and branched calls appear. */
+	getSessionEntries?: () => ReadonlyArray<SessionEntry>;
 }
 
 class CostOverlayBody implements Component {
@@ -290,7 +321,13 @@ class CostOverlayBody implements Component {
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
 		const snapshot = this.getSnapshot();
-		return formatCostOverlayBodyLines(snapshot.totalCost, snapshot.totalTokens, snapshot.rows, contentWidth);
+		return formatCostOverlayBodyLines(
+			snapshot.totalCost,
+			snapshot.totalTokens,
+			snapshot.rows,
+			contentWidth,
+			snapshot.promptCache,
+		);
 	}
 
 	invalidate(): void {}
@@ -312,7 +349,9 @@ export function openCostOverlay(
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
 	let latest: ObservabilitySnapshot = observability.snapshot();
-	const body = new CostOverlayBody(() => buildCostSnapshot(observability, sessionId, latest));
+	const body = new CostOverlayBody(() =>
+		buildCostSnapshot(observability, sessionId, latest, options?.getSessionEntries),
+	);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: COST_OVERLAY_WIDTH,

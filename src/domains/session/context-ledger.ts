@@ -16,6 +16,7 @@
  * proportional reconciliation the footer bar already performs.
  */
 
+import type { BackendCacheVerdict, BackendCompletionTimings } from "../../core/cache-telemetry.js";
 import type { ContextWindowSlots, ContextWindowSource } from "../providers/index.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 
@@ -117,13 +118,17 @@ export interface PromptCacheStats {
 	cacheWriteTokens: number | null;
 	/** Provider-reported uncached input tokens for the last run. */
 	uncachedInputTokens: number | null;
+	/** Serving-backend timings for the run's last API call; null when none were captured. */
+	backend: BackendCompletionTimings | null;
+	/** Backend prompt tokens not served from cache, derived only when cache reads were reported. */
+	uncachedPrefillTokens: number | null;
 	/**
-	 * Cache verdict of the run's first API call, classified from the
-	 * provider-reported usage by `backendCacheVerdict`. Null before any
-	 * settled run. "Shell reused but backend cold" is the dishonest
-	 * combination the overlay renders as a warning.
+	 * Cache verdict of the run's first API call, classified by
+	 * `backendCacheVerdict` from normalized provider usage and captured serving
+	 * backend timings when available. Null before any settled run. "Shell reused
+	 * but backend cold" is the dishonest combination the overlay warns about.
 	 */
-	backendVerdict: "hot" | "partial" | "cold" | "small" | null;
+	backendVerdict: BackendCacheVerdict | null;
 	/** Cache disturbances Clio expected before the last settled run. */
 	expectedColdReasons?: ReadonlyArray<string>;
 }

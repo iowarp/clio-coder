@@ -4,12 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { AssistantMessage, AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
+import { uncachedPrefillTokens } from "../../src/core/cache-telemetry.js";
+import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ThinkingLevel } from "../../src/domains/providers/types/capability-flags.js";
+import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import { resetLlamaCppResidencyState } from "../../src/engine/apis/llamacpp-residency.js";
 import {
 	applyOpenAICompatReasoningEstimate,
 	openAICompletionsApiProvider,
 } from "../../src/engine/apis/openai-completions.js";
+import type { AgentMessage } from "../../src/engine/types.js";
+import { createTurnContext } from "../../src/interactive/turn-context.js";
+import { createTurnPersistence } from "../../src/interactive/turn-persistence.js";
+import { createTurnState } from "../../src/interactive/turn-state.js";
 
 function usage(overrides: Record<string, unknown> = {}): AssistantMessage["usage"] {
 	return {
@@ -53,6 +61,284 @@ function jsonResponse(payload: unknown): Response {
 		headers: { "content-type": "application/json" },
 	});
 }
+
+function llamaCppCaptureModel(): Model<"openai-completions"> {
+	return {
+		id: "qwen3.8-27b-dense",
+		name: "qwen3.8-27b-dense",
+		api: "openai-completions",
+		provider: "llamacpp",
+		baseUrl: "http://mini.invalid/v1",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 131072,
+		maxTokens: 4096,
+		compat: {
+			supportsStore: false,
+			supportsDeveloperRole: false,
+			supportsReasoningEffort: false,
+			supportsUsageInStreaming: true,
+			supportsFinishReason: true,
+			maxTokensField: "max_tokens",
+			supportsStrictMode: false,
+		},
+		clio: { targetId: "mini", runtimeId: "llamacpp", lifecycle: "user-managed" },
+	} as unknown as Model<"openai-completions">;
+}
+
+function completionSseResponse(events: ReadonlyArray<Record<string, unknown>>): Response {
+	const body = [...events.map((event) => `data: ${JSON.stringify(event)}`), "data: [DONE]", ""].join("\n\n");
+	return new Response(body, {
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+	});
+}
+
+function finalCompletionEvent(timings?: Record<string, unknown>): Record<string, unknown> {
+	return {
+		choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+		usage: { prompt_tokens: 59, completion_tokens: 2, total_tokens: 61 },
+		...(timings === undefined ? {} : { timings }),
+	};
+}
+
+async function capturedLlamaCppCompletion(events: ReadonlyArray<Record<string, unknown>>): Promise<{
+	message: AssistantMessage;
+	requestPayload: Record<string, unknown>;
+}> {
+	const streamed: AssistantMessageEvent[] = [];
+	let requestPayload: Record<string, unknown> | undefined;
+	const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+	for await (const event of openAICompletionsApiProvider.streamSimple(llamaCppCaptureModel(), context, {
+		apiKey: "fake-key",
+		onPayload: (payload) => {
+			if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+				requestPayload = payload as Record<string, unknown>;
+			}
+			return undefined;
+		},
+		fetch: async () => completionSseResponse(events),
+	})) {
+		streamed.push(event);
+	}
+	const done = streamed.find((event) => event.type === "done");
+	ok(done && done.type === "done", "expected a completed fake llama.cpp stream");
+	ok(requestPayload, "expected pi-ai to expose the request payload");
+	return { message: done.message, requestPayload };
+}
+
+async function persistedLlamaCppPromptCache(timings?: Record<string, unknown>): Promise<Record<string, unknown>> {
+	const { message } = await capturedLlamaCppCompletion([
+		{ model: "qwen3.8-27b-dense", choices: [{ index: 0, delta: { content: "hello" } }] },
+		finalCompletionEvent(timings),
+	]);
+	const appended: TurnInput[] = [];
+	const session = {
+		current: () => ({ id: "cache-contract-session" }),
+		append: (turn: TurnInput) => {
+			appended.push(turn);
+			return { ...turn, id: `turn-${appended.length}`, at: "2026-08-29T00:00:00.000Z" };
+		},
+	} as unknown as SessionContract;
+	const state = createTurnState("off");
+	const context = createTurnContext({
+		state,
+		getSettings: () => DEFAULT_SETTINGS as ClioSettings,
+		providers: { getRuntime: () => ({ tier: "local-native" }) } as never,
+		middleware: {} as never,
+		emitNotice: () => {},
+	});
+	const persistence = createTurnPersistence({
+		state,
+		session,
+		getSettings: () => DEFAULT_SETTINGS as ClioSettings,
+		middlewareToolChoice: { reset: () => {} } as never,
+		consumePersistedEcho: () => false,
+		removeQueuedMirrorEntry: () => {},
+		promptCachePayloadForAssistant: (messageUsage, backend) =>
+			context.promptCachePayloadForAssistant(messageUsage, backend),
+		promptSideTokens: () => 0,
+	});
+	try {
+		persistence.appendAssistantTurn(message as unknown as AgentMessage);
+		strictEqual(appended.length, 1, "the captured completion should persist one assistant turn");
+		const payload = appended[0]?.payload as { promptCache?: unknown };
+		ok(
+			payload.promptCache !== null && typeof payload.promptCache === "object" && !Array.isArray(payload.promptCache),
+			"the persisted assistant should carry prompt-cache telemetry",
+		);
+		return payload.promptCache as Record<string, unknown>;
+	} finally {
+		context.dispose();
+	}
+}
+
+describe("openai-completions backend timing capture", () => {
+	it("captures final llama.cpp timings after an earlier response model id", async () => {
+		const { message, requestPayload } = await capturedLlamaCppCompletion([
+			{
+				model: "qwen3.8-27b-dense:served",
+				choices: [{ index: 0, delta: { role: "assistant", content: "hello" } }],
+			},
+			finalCompletionEvent({
+				prompt_n: 4,
+				cache_n: 55,
+				predicted_n: 2,
+				prompt_ms: 12.5,
+				predicted_ms: 21.25,
+			}),
+		]);
+
+		deepStrictEqual(message.responseModelIdObservation, {
+			state: "reported",
+			reportedModelId: "qwen3.8-27b-dense:served",
+		});
+		deepStrictEqual(message.backendTimings, {
+			promptTokens: 59,
+			cachedTokens: 55,
+			predictedTokens: 2,
+			promptMs: 12.5,
+			predictedMs: 21.25,
+			source: "llamacpp-timings",
+		});
+		strictEqual(uncachedPrefillTokens(message.backendTimings), 4);
+		strictEqual(Object.hasOwn(requestPayload, "timings_per_token"), false);
+	});
+
+	it("marks cache reads unknown when llama.cpp timings omit cache_n", async () => {
+		const { message } = await capturedLlamaCppCompletion([
+			{ model: "qwen3.8-27b-dense", choices: [{ index: 0, delta: { content: "hello" } }] },
+			finalCompletionEvent({
+				prompt_n: 59,
+				predicted_n: 2,
+				prompt_ms: 50,
+				predicted_ms: 20,
+			}),
+		]);
+
+		deepStrictEqual(message.backendTimings, {
+			promptTokens: 59,
+			cachedTokens: null,
+			predictedTokens: 2,
+			promptMs: 50,
+			predictedMs: 20,
+			source: "llamacpp-timings",
+		});
+		strictEqual(uncachedPrefillTokens(message.backendTimings), null);
+	});
+
+	it("leaves the assistant message shape unchanged when timings are absent", async () => {
+		const { message } = await capturedLlamaCppCompletion([
+			{ model: "qwen3.8-27b-dense", choices: [{ index: 0, delta: { content: "hello" } }] },
+			finalCompletionEvent(),
+		]);
+
+		strictEqual(Object.hasOwn(message, "backendTimings"), false);
+	});
+
+	it("keeps the last cumulative timing object from the stream", async () => {
+		const { message } = await capturedLlamaCppCompletion([
+			{
+				model: "qwen3.8-27b-dense",
+				choices: [{ index: 0, delta: { content: "hello" } }],
+				timings: { prompt_n: 1, cache_n: 2, predicted_n: 1, prompt_ms: 3, predicted_ms: 4 },
+			},
+			finalCompletionEvent({
+				prompt_n: 4,
+				cache_n: 55,
+				predicted_n: 2,
+				prompt_ms: 12.5,
+				predicted_ms: 21.25,
+			}),
+		]);
+
+		strictEqual(message.backendTimings?.promptTokens, 59);
+		strictEqual(message.backendTimings?.cachedTokens, 55);
+	});
+
+	it("rejects impossible uncached-prefill operands", () => {
+		strictEqual(
+			uncachedPrefillTokens({
+				promptTokens: 4,
+				cachedTokens: 5,
+				predictedTokens: 1,
+				promptMs: 1,
+				predictedMs: 1,
+				source: "llamacpp-timings",
+			}),
+			null,
+		);
+	});
+
+	it("persists backend timings and backend-derived cold, hot, and partial verdicts", async () => {
+		const cases = [
+			{
+				label: "cold",
+				timings: { prompt_n: 5_000, cache_n: 0, predicted_n: 2, prompt_ms: 50, predicted_ms: 20 },
+				backend: {
+					promptTokens: 5_000,
+					cachedTokens: 0,
+					predictedTokens: 2,
+					promptMs: 50,
+					predictedMs: 20,
+					source: "llamacpp-timings",
+				},
+			},
+			{
+				label: "hot",
+				timings: { prompt_n: 1_000, cache_n: 1_000, predicted_n: 2, prompt_ms: 10, predicted_ms: 20 },
+				backend: {
+					promptTokens: 2_000,
+					cachedTokens: 1_000,
+					predictedTokens: 2,
+					promptMs: 10,
+					predictedMs: 20,
+					source: "llamacpp-timings",
+				},
+			},
+			{
+				label: "partial",
+				timings: { prompt_n: 2_500, cache_n: 7_500, predicted_n: 2, prompt_ms: 30, predicted_ms: 20 },
+				backend: {
+					promptTokens: 10_000,
+					cachedTokens: 7_500,
+					predictedTokens: 2,
+					promptMs: 30,
+					predictedMs: 20,
+					source: "llamacpp-timings",
+				},
+			},
+		] as const;
+
+		for (const expected of cases) {
+			const promptCache = await persistedLlamaCppPromptCache(expected.timings);
+			deepStrictEqual(
+				promptCache,
+				{
+					input: 59,
+					cacheRead: 0,
+					cacheWrite: 0,
+					backendVerdict: expected.label,
+					backend: expected.backend,
+				},
+				`${expected.label} should use the serving backend's cache observation`,
+			);
+		}
+	});
+
+	it("persists the exact legacy prompt-cache shape when SSE timings are absent", async () => {
+		const promptCache = await persistedLlamaCppPromptCache();
+
+		deepStrictEqual(promptCache, {
+			input: 59,
+			cacheRead: 0,
+			cacheWrite: 0,
+			backendVerdict: "small",
+		});
+		strictEqual(Object.hasOwn(promptCache, "backend"), false);
+	});
+});
 
 describe("openai-completions thinking preservation", () => {
 	it("accepts local streams that omit finish_reason through pi's compatibility flag", async () => {

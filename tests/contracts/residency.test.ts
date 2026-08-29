@@ -1,7 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { BusChannels, type ResidencyMutationPayload } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { protectedResidencyModelIds, protectedResidencyModels } from "../../src/core/residency-protection.js";
+import { residencyTargetKey } from "../../src/core/residency-target-key.js";
+import { getSharedBus } from "../../src/core/shared-bus.js";
 import {
 	decideResidency,
 	markClioLoaded,
@@ -347,6 +350,85 @@ describe("contracts/model residency reconciler", () => {
 		strictEqual(second.decision, "reconcile");
 		strictEqual(second.keepResident, true);
 		strictEqual(listCalls, 1, "TTL hit must avoid another resident-list probe");
+	});
+
+	it("publishes successful loads and evictions with the normalized endpoint key", async () => {
+		const mutations: ResidencyMutationPayload[] = [];
+		const unsubscribe = getSharedBus().on(BusChannels.ResidencyMutation, (payload) => {
+			mutations.push(payload);
+		});
+		const targetKey = residencyTargetKey("llamacpp", "http://mini:8080/v1/");
+		try {
+			await reconcileResidency(
+				baseAdapter({
+					targetKey,
+					targetId: "mini",
+					runtimeId: "llamacpp",
+					strategy: "router",
+					capacity: async () => 1,
+					listResident: async () => [{ modelId: "old-model" }],
+					unload: async () => {},
+					load: async () => {},
+				}),
+			);
+		} finally {
+			unsubscribe();
+		}
+
+		deepStrictEqual(
+			mutations.map(({ at: _at, ...mutation }) => mutation),
+			[
+				{
+					targetKey: "llamacpp|http://mini:8080",
+					targetId: "mini",
+					runtimeId: "llamacpp",
+					model: "old-model",
+					operation: "evict",
+				},
+				{
+					targetKey: "llamacpp|http://mini:8080",
+					targetId: "mini",
+					runtimeId: "llamacpp",
+					model: "new-model",
+					operation: "load",
+				},
+			],
+		);
+		strictEqual(
+			mutations.every((mutation) => Number.isFinite(mutation.at)),
+			true,
+		);
+	});
+
+	it("does not publish failed or no-op residency mutations", async () => {
+		const mutations: ResidencyMutationPayload[] = [];
+		const unsubscribe = getSharedBus().on(BusChannels.ResidencyMutation, (payload) => {
+			mutations.push(payload);
+		});
+		try {
+			await reconcileResidency(
+				baseAdapter({
+					targetKey: "failed-mutation",
+					strategy: "router",
+					capacity: async () => 1,
+					listResident: async () => [{ modelId: "old-model" }],
+					unload: async () => {
+						throw new Error("busy");
+					},
+				}),
+			);
+			await reconcileResidency(
+				baseAdapter({
+					targetKey: "already-resident",
+					listResident: async () => [{ modelId: "new-model" }],
+					load: async () => {},
+				}),
+			);
+		} finally {
+			unsubscribe();
+		}
+
+		deepStrictEqual(mutations, []);
 	});
 
 	it("classifies configured models as protected via the provider, including worker processes' view", async () => {

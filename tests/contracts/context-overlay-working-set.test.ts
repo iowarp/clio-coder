@@ -6,6 +6,7 @@ import { buildContextLedger } from "../../src/domains/session/context-ledger.js"
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { renderEvictedTokensLine } from "../../src/interactive/context-meter.js";
 import { renderContextLedgerLines } from "../../src/interactive/context-overlay.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -115,6 +116,8 @@ describe("context overlay working-set section", () => {
 					cacheReadTokens: 0,
 					cacheWriteTokens: 0,
 					uncachedInputTokens: 12_000,
+					backend: null,
+					uncachedPrefillTokens: null,
 					backendVerdict: "cold",
 					...(expectedColdReasons ? { expectedColdReasons } : {}),
 				},
@@ -134,7 +137,95 @@ describe("context overlay working-set section", () => {
 		// Same words, different token: a cold turn Clio caused is explained, and a
 		// cold turn it cannot explain stays the warning it always was.
 		strictEqual(strip(cacheLineOf(explained)), strip(cacheLineOf(unexplained)));
-		ok(cacheLineOf(explained) !== cacheLineOf(unexplained), "an explained cold turn must drop the warning token");
+		const warning = clioTheme().fgSequence("warning");
+		if (warning.length > 0) {
+			ok(!cacheLineOf(explained).includes(warning), "an explained cold turn must drop the warning token");
+			ok(cacheLineOf(unexplained).includes(warning), "an unexplained cold turn must retain the warning token");
+		}
+	});
+
+	it("renders backend prefill work and cache reads for the last call", () => {
+		const measured = buildContextLedger({
+			provider: "mock",
+			model: "model-a",
+			contextWindow: 4000,
+			promptCache: {
+				shellReused: true,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				uncachedInputTokens: 500,
+				backend: {
+					promptTokens: 12_000,
+					cachedTokens: 11_500,
+					predictedTokens: 40,
+					promptMs: 125,
+					predictedMs: 80,
+					source: "llamacpp-timings",
+				},
+				uncachedPrefillTokens: 500,
+				backendVerdict: "hot",
+			},
+		});
+		const text = strip(renderContextLedgerLines(measured, 68).join("\n"));
+		ok(text.includes("prefill: 500 uncached · 11,500 cached · 125 ms"), text);
+	});
+
+	it("reports missing cache reads without calling the backend cold", () => {
+		const unknown = buildContextLedger({
+			provider: "mock",
+			model: "model-a",
+			contextWindow: 4000,
+			promptCache: {
+				shellReused: true,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				uncachedInputTokens: 12_000,
+				backend: {
+					promptTokens: 12_000,
+					cachedTokens: null,
+					predictedTokens: 40,
+					promptMs: 125,
+					predictedMs: 80,
+					source: "lmstudio-timings",
+				},
+				uncachedPrefillTokens: null,
+				backendVerdict: "cold",
+				expectedColdReasons: ["residency"],
+			},
+		});
+		const text = strip(renderContextLedgerLines(unknown, 68).join("\n"));
+		ok(text.includes("server does not report cache reads"), text);
+		ok(text.includes("prefill: 12,000 prompt · 125 ms"), text);
+		ok(!text.includes("backend cold"), text);
+		ok(!text.includes("last cold turn:"), text);
+	});
+
+	it("names every expected cache disturbance in the last-cold-turn line", () => {
+		const cases = [
+			["residency", "residency change"],
+			["thinking_change", "thinking-level change"],
+			["tool_surface_change", "tool-surface change"],
+			["prompt_recompiled", "prompt recompile"],
+		] as const;
+		for (const [reason, label] of cases) {
+			const withReason = buildContextLedger({
+				provider: "mock",
+				model: "model-a",
+				contextWindow: 4000,
+				promptCache: {
+					shellReused: true,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					uncachedInputTokens: 12_000,
+					backend: null,
+					uncachedPrefillTokens: null,
+					backendVerdict: "cold",
+					expectedColdReasons: [reason],
+				},
+			});
+			const text = strip(renderContextLedgerLines(withReason, 68).join("\n"));
+			ok(text.includes(`last cold turn: ${label} (expected)`), text);
+		}
 	});
 
 	/**

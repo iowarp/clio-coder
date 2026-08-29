@@ -108,6 +108,14 @@ function coldReasonLabel(reason: string): string {
 			return "compaction";
 		case "dispatch":
 			return "dispatch traffic";
+		case "residency":
+			return "residency change";
+		case "thinking_change":
+			return "thinking-level change";
+		case "tool_surface_change":
+			return "tool-surface change";
+		case "prompt_recompiled":
+			return "prompt recompile";
 		default:
 			return reason;
 	}
@@ -221,8 +229,10 @@ export function renderContextLedgerLines(
 	if (ledger.promptCache) {
 		const cache = ledger.promptCache;
 		const shell = cache.shellReused ? "shell reused" : "shell recompiled";
-		const backend =
-			cache.backendVerdict === "hot" || cache.backendVerdict === "partial"
+		const backendCacheReadsUnknown = cache.backend?.cachedTokens === null;
+		const backend = backendCacheReadsUnknown
+			? "server does not report cache reads"
+			: cache.backendVerdict === "hot" || cache.backendVerdict === "partial"
 				? "backend reused"
 				: cache.backendVerdict === "cold"
 					? "backend cold"
@@ -232,18 +242,28 @@ export function renderContextLedgerLines(
 		const read = cache.cacheReadTokens !== null ? `cache read ${formatTokens(cache.cacheReadTokens)}` : "cache read n/a";
 		const uncached =
 			cache.uncachedInputTokens !== null ? `uncached input ${formatTokens(cache.uncachedInputTokens)}` : null;
-		const line = ["prompt cache:", shell, "·", backend, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
-		// Reasons Clio recorded before the run: working-set eviction, summary
-		// compaction, and dispatch traffic all move the byte prefix a local
-		// single-slot backend caches, so a cold turn after one of them is the
-		// expected outcome rather than a provider surprise.
-		const coldReasons = cache.backendVerdict === "cold" ? (cache.expectedColdReasons ?? []) : [];
+		const line = backendCacheReadsUnknown
+			? ["prompt cache:", shell, "·", backend].join(" ")
+			: ["prompt cache:", shell, "·", backend, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
+		// Reasons Clio recorded before the run describe either prefix-byte changes
+		// or local-server activity that displaced the cached prefix. A cold turn
+		// after one of them is expected rather than a provider surprise.
+		const coldReasons =
+			cache.backendVerdict === "cold" && !backendCacheReadsUnknown ? (cache.expectedColdReasons ?? []) : [];
 		// A reused shell with a cold backend means Clio kept the bytes stable
 		// but the provider re-prefilled anyway; surface that disagreement
 		// instead of hiding it. An expected reason explains the same numbers, so
 		// it is reported on its own line and not as a warning.
-		const misleading = cache.shellReused && cache.backendVerdict === "cold" && coldReasons.length === 0;
+		const misleading =
+			cache.shellReused && cache.backendVerdict === "cold" && !backendCacheReadsUnknown && coldReasons.length === 0;
 		lines.push(theme.fg(misleading ? "warning" : "dim", line));
+		if (cache.backend) {
+			const prefill =
+				cache.backend.cachedTokens !== null && cache.uncachedPrefillTokens !== null
+					? `prefill: ${formatTokens(cache.uncachedPrefillTokens)} uncached · ${formatTokens(cache.backend.cachedTokens)} cached · ${formatTokens(cache.backend.promptMs)} ms`
+					: `prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
+			lines.push(theme.fg("dim", prefill));
+		}
 		if (coldReasons.length > 0) {
 			const reasons = coldReasons.map(coldReasonLabel).join(", ");
 			lines.push(theme.fg("dim", `last cold turn: ${reasons} (expected)`));

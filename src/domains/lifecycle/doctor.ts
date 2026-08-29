@@ -1,5 +1,5 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
@@ -11,6 +11,8 @@ import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
+import { isSessionEntry, type SessionEntry } from "../session/entries.js";
+import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
@@ -208,6 +210,68 @@ function sessionStoreFinding(stateDir: string, stateMetadataPresent: boolean): D
 	return { ok: false, name: "session store", detail: parts.join("; ") };
 }
 
+interface SessionCacheCandidate {
+	entries: SessionEntry[];
+	ledger: string;
+	sessionId: string;
+	updatedAt: number;
+}
+
+/**
+ * Report the latest transcript's durable cache evidence. Current ledgers are
+ * selected explicitly because the session directory also holds diagnostic
+ * JSONL files whose timestamps do not identify the latest conversation.
+ */
+function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
+	const store = join(stateDir, "sessions");
+	const ledgers: string[] = [];
+	const unlistable: string[] = [];
+	collectSessionLedgers(store, ledgers, unlistable);
+	const candidates: SessionCacheCandidate[] = [];
+	for (const ledger of ledgers) {
+		if (basename(ledger) !== "current.jsonl") continue;
+		let parsed: unknown[];
+		let modifiedAt: number;
+		try {
+			parsed = readSessionFileEntries(ledger, { onWarning: () => {} });
+			modifiedAt = statSync(ledger).mtimeMs;
+		} catch {
+			continue;
+		}
+		const entries = parsed.filter(isSessionEntry);
+		const entryTimes = entries
+			.map((entry) => Date.parse(entry.timestamp))
+			.filter((timestamp) => Number.isFinite(timestamp));
+		candidates.push({
+			entries,
+			ledger,
+			sessionId: basename(dirname(ledger)),
+			updatedAt: entryTimes.length > 0 ? Math.max(...entryTimes) : modifiedAt,
+		});
+	}
+	const latest = candidates.sort(
+		(left, right) => right.updatedAt - left.updatedAt || left.ledger.localeCompare(right.ledger),
+	)[0];
+	if (latest === undefined) return null;
+
+	const telemetry = foldPromptCacheTelemetry(latest.entries);
+	if (!hasPromptCacheTelemetry(telemetry)) {
+		return {
+			ok: true,
+			level: "warn",
+			name: "cache telemetry",
+			detail: `last session ${latest.sessionId}: no prompt-cache telemetry recorded`,
+		};
+	}
+	const counts = telemetry.verdictCounts;
+	const topReason = topExpectedColdReason(telemetry);
+	return {
+		ok: true,
+		name: "cache telemetry",
+		detail: `last session ${latest.sessionId}: hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small}; top expected reason ${topReason === null ? "none" : `${topReason.reason} (${topReason.count})`}`,
+	};
+}
+
 /**
  * Why the credentials store did not fully parse, read through the same
  * `openAuthStorage` the auth commands use, or null when it is clean. The row
@@ -375,6 +439,10 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 	const sessionStore = sessionStoreFinding(dirs.state, state !== null);
 	if (sessionStore !== null) findings.push(sessionStore);
+	if (sessionStore?.ok) {
+		const cacheTelemetry = latestSessionCacheFinding(dirs.state);
+		if (cacheTelemetry !== null) findings.push(cacheTelemetry);
+	}
 
 	return findings;
 }

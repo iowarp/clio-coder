@@ -147,6 +147,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "cost";
 		deps.transitions.handle = openCostOverlayFactory(deps.tui, deps.observability, {
 			sessionId: deps.getSessionId?.() ?? null,
+			...(deps.readSessionEntries
+				? {
+						getSessionEntries: () => deps.readSessionEntries?.() ?? [],
+					}
+				: {}),
 		});
 		deps.requestRender();
 	};

@@ -183,7 +183,23 @@ describe("cost overlay", () => {
 	it("styles the empty state instead of leaving it bare", () => {
 		const lines = formatCostOverlayBodyLines(costAggregateForAmount(0, "unknown"), 0, [], 80);
 		const emptyLine = lines.find((line) => strip(line).includes("no token usage recorded"));
-		ok(emptyLine?.includes(ESC), "the empty-state line carries a token");
+		ok(emptyLine, "the empty-state line is present");
+		if (theme.fgSequence("muted").length > 0) {
+			ok(emptyLine.includes(ESC), "the empty-state line carries a token when color is enabled");
+		}
+	});
+
+	it("summarizes uncached prefill and cache verdicts from the session ledger", () => {
+		const lines = formatCostOverlayBodyLines(costAggregateForAmount(0, "known_free"), 5_000, [row()], 80, {
+			uncachedPrefillTokens: 2_500,
+			uncachedPrefillCalls: 3,
+			verdictCounts: { hot: 4, partial: 3, cold: 2, small: 1 },
+			verdictCalls: 10,
+			expectedColdReasonCounts: {},
+		});
+		const body = strip(lines.join("\n"));
+		ok(/uncached prefill\s+2,500/u.test(body), body);
+		ok(/cache verdicts\s+hot 4 · partial 3 · cold 2 · small 1/u.test(body), body);
 	});
 
 	it("leaves no completely unstyled line in the overlay body", () => {
@@ -200,9 +216,11 @@ describe("cost overlay", () => {
 			],
 			80,
 		);
-		for (const line of lines) {
-			if (strip(line).trim().length === 0) continue;
-			ok(line.includes(ESC), `every content line carries at least one token, bare line: ${JSON.stringify(line)}`);
+		if (theme.fgSequence("muted").length > 0) {
+			for (const line of lines) {
+				if (strip(line).trim().length === 0) continue;
+				ok(line.includes(ESC), `every content line carries at least one token, bare line: ${JSON.stringify(line)}`);
+			}
 		}
 	});
 });
