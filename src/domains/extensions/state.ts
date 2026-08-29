@@ -129,7 +129,7 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	const cwd = options.cwd ?? process.cwd();
 	const source = path.resolve(sourcePath);
 	const candidate = loadManifestFromRoot(source);
-	if (!candidate.manifest) return { diagnostics: candidate.diagnostics };
+	if (!candidate.manifest || !candidate.valid) return { diagnostics: candidate.diagnostics };
 	const targetRoot = path.join(extensionBaseDir(scope, cwd), candidate.manifest.id);
 	if (existsSync(targetRoot)) {
 		if (!options.force) {
@@ -152,7 +152,11 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		rmSync(backupRoot, { recursive: true, force: true });
 		cpSync(source, stagingRoot, {
 			recursive: true,
-			filter: (src) => path.basename(src) !== "state.json",
+			// `state.json` beside the installed extension directories belongs to
+			// Clio's extension manager. An extension may legitimately ship nested
+			// resources with the same basename (for example a project-state JSON
+			// template), so exclude only a bookkeeping file at the package root.
+			filter: (src) => path.relative(source, src) !== "state.json",
 		});
 		if (existsSync(targetRoot)) {
 			renameSync(targetRoot, backupRoot);
