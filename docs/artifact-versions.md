@@ -1,6 +1,6 @@
 # Artifact Versions & Serialization Contracts
 
-This document is the canonical registry of all versioned file formats, serialized data structures, integrity digests, and migration rules across Clio Coder in `v0.3.7`.
+This document is the canonical registry of all versioned file formats, serialized data structures, integrity digests, and migration rules across Clio Coder in `v0.3.8`.
 
 ---
 
@@ -10,7 +10,7 @@ Clio Coder strictly versions every persistent or network-transported data struct
 
 | Artifact / Subsystem | Current Version | Symbol / Type & Source Location | Persisted Path / Wire Location | Schema Semantics & Version Differences | Mismatch Handling |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Run Receipt** | `20` | `RUN_RECEIPT_INTEGRITY_VERSION = 20`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 20 adds `pathProvenance` on dispatch intent and the resolved `pathScope`, over the v19 base of provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance, and fleet gate provenance. | Fail-closed. Incompatible receipts fail verification and are never read as evidence. |
+| **Run Receipt** | `20` | `RUN_RECEIPT_INTEGRITY_VERSION = 20`<br>`src/domains/dispatch/receipt-integrity.ts:13` | `<stateDir>/receipts/<runId>.json` | Cryptographically sealed run record. Version 20 adds `pathProvenance` on dispatch intent and the resolved `pathScope`, over the v19 base of provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance, and fleet gate provenance. | Fail-closed. A receipt below v20 is reported as retired rather than invalid, is never read as evidence, and is never migrated; a malformed or tampered v20 receipt fails verification. |
 | **Session Ledger** | `3` | `CURRENT_SESSION_FORMAT_VERSION = 3`<br>`src/engine/session.ts:66` | `<stateDir>/sessions/<cwdHash>/<sessionId>/` (`meta.json`, `current.jsonl`, `tree.json`) | Append-only ledger format with UUIDv7 turn IDs, session header line, and tree graph linkage. | Automated migration via `src/domains/session/migrations/` on `/resume`. Earlier unmigratable versions rejected. |
 | **Worker Spec** | `3` | `WORKER_SPEC_VERSION = 3`<br>`src/worker/spec-contract.ts:22` | Subprocess `stdin` control plane JSON payload | Worker invocation parameters, tool surface profile, and execution bounds. | Fail-closed preflight rejection before worker activation. |
 | **Worker Runtime Descriptor** | `2` | `WORKER_RUNTIME_DESCRIPTOR_VERSION = 2`<br>`src/worker/spec-contract.ts:23` | Worker attestation descriptor payload | Attestation descriptor for worker runtime environment and hardware facts. | Attestation mismatch causes immediate process termination. |
@@ -22,6 +22,7 @@ Clio Coder strictly versions every persistent or network-transported data struct
 | **Capacity State File** | `2` | `version: 2` in `interface CapacityStateFile`<br>`src/domains/dispatch/capacity-lease.ts:40` | `<stateDir>/dispatch-admission.json` | Active capacity leases, drain status, and cross-process lock state. | Corrupted or unparseable state file causes admission to fail closed. |
 | **Protected Artifact Journal** | `1` | `version: 1` in `interface PendingProtectedArtifactRecord`<br>`src/domains/session/protected-artifact-journal.ts:22` | `<stateDir>/protected-artifact-pending/<key>/<id>.json` | Write-ahead durability records for pending protected artifacts. | Leftover records reconciled during session initialization. |
 | **Fleet Run Record** | `1` | `version: 1` in `interface FleetRunRecord`<br>`src/domains/dispatch/fleet-run.ts` | `<stateDir>/fleet-runs/<runId>.json` | Durable record of one fleet run: contract name, plan hash, static step ids and steps, `--var` values, replayed and settled step results, and the delegation plan hash a `kind: plan` step produced. Read by `fleet run --resume`. | Resume refuses a changed plan hash with a per-step diff and refuses differing `--var` values. |
+| **Durable Assignment Store** | `1` | `version: 1` in `interface AssignmentStoreFile`<br>`DurableAssignmentRecord`<br>`src/domains/dispatch/assignment-store.ts` | `<stateDir>/assignments.json` | Machine-wide logical-dispatch records: assignment id, attempt ids, terminal run id, status, optional fleet verdict owner, and—while running—`processOwner {pid, processBirthToken, acquiredAt}`. The owner is cleared on a true terminal transition. | A live sibling owner keeps the row running; a genuinely dead or legacy ownerless row is reconciled. An unsupported or unreadable store is treated as empty, and malformed records are ignored. |
 | **Checkout Writer Lease** | `1` | `version: 1` in `interface CheckoutWriterLeaseRecord`<br>`src/domains/dispatch/checkout-writer-lease.ts` | `<stateDir>/checkout-writer-leases/<key>.json` (key derived from the canonical checkout path) | Cross-process single-writer lease: checkout path, pid, process birth token, acquisition time. | A live sibling holder is refused with `checkout_writer_lease_held`; a dead owner is reclaimed; a malformed record is treated as absent. |
 | **Out-of-turn Usage Ledger** | unversioned JSONL | `OutOfTurnUsageRow`<br>`src/domains/observability/out-of-turn-usage.ts` | `<stateDir>/usage/out-of-turn.jsonl` | One row per priced `/btw` or `/handoff` call: label, session id, repo identity, timestamp, target, attributed model, provider usage. Bounded ring of `MAX_OUT_OF_TURN_USAGE_ROWS = 1000`, rewritten atomically under the state-file lock. | Unparseable rows are skipped and counted by `usage report`; the session ledger is never affected. |
 | **Library Pins** | unversioned YAML map | `readLibraryPins`<br>`src/domains/resources/library.ts` | `<configDir>/library-pins.yaml` | Typed ref (`skill:x`, `agent:y`, `prompt:p`, `fleet:z`) to `{sha256, sourceUrl}` for every resource `library add` or the Skills Hub installed. | A non-map document reads as empty; an entry whose installed file is missing is reported as available, not installed. |
@@ -30,7 +31,7 @@ Clio Coder strictly versions every persistent or network-transported data struct
 
 ## 2. Integrity Verification Contracts
 
-### Receipt Integrity (Version 19)
+### Receipt Integrity (Version 20)
 
 Receipt integrity authenticates that a sealed receipt matches its ledger envelope without modification. Verification reproduces the canonical JSON serialization and computes the SHA-256 digest:
 

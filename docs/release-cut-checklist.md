@@ -11,17 +11,17 @@ state of every step.
 
 | Item | State |
 | --- | --- |
-| Branch | `v0.3.8`, nineteen commits ahead of `main`: the thirteen feature and fix commits of the implementation session, the four release-test fix commits and their two merges (#233, #235, #238, #239), and this version-bump commit. `origin/v0.3.8` sits at `af6546b2`, the pre-release-test tip; the release-test fixes are local only |
-| `package.json` version | `0.3.8`; the top `CHANGELOG.md` heading is `## 0.3.8 - 2026-08-28` |
-| `main` | `598be99c`, the v0.3.7 release SHA; it is an ancestor of `v0.3.8` and moves only at Part 4 |
-| `origin/main` | `598be99c`, matching `main` |
-| Tags | `v0.3.7` exists on `598be99c`; none for 0.3.8, local or remote. The `wtfp-safety` tag is an unrelated local safety snapshot of in-flight work on `feat/wtfp-extension-resources` and must never be pushed |
-| GitHub Release | `v0.3.7` published; none for 0.3.8 |
-| npm registry | `@iowarp/clio-coder@0.3.8` absent; `latest` is `0.3.7` |
-| npm history | Published versions 0.3.0 through 0.3.4, 0.3.6, and 0.3.7. Version 0.3.5 was published and withdrawn and can never be reused. |
-| Milestone | `v0.3.8` holds the four issues this release closes (#233, #235, #238, #239). The interactive release test moved #163 and #222 to `v0.3.9` on 2026-08-28, because #163 is a feature and #222 is untouched live-assertion work |
-| Interactive release test | `docs/release-notes/v0.3.8-release-test.md`. Three rounds, 57 PASS / 8 FAIL / 3 PARTIAL / 6 OBSERVATION / 2 NOT RUN. Seven issues filed; four are in this release and three (#234, #236, #237) are on `v0.3.9` |
-| Commit provenance identity | Post-release maintainer follow-up, not a gate; unchanged from 0.3.7. |
+| Branch | After the release-cut evidence commit, `v0.3.8` is 30 commits ahead of `main`: the 29-commit candidate through `9b7b80cc` plus the final documentation and verification-evidence commit. The candidate includes the original implementation, the four release-test fixes (#233, #235, #238, #239), the WTF-P extension-resource merge, the `$ARGUMENTS` fidelity fix (#240), and the extension-agent resolution fix (#241). `origin/v0.3.8` remains at `af6546b2`, 17 commits behind the final local tip. |
+| `package.json` version | `0.3.8`; `package-lock.json` agrees at both version fields; the top changelog heading is `## 0.3.8 - 2026-08-29`. |
+| `main` | `598be99c`, the v0.3.7 release SHA; it is an ancestor of the final `v0.3.8` candidate and moves only at Part 4. |
+| `origin/main` | `598be99c`, matching local `main` and still an ancestor of the final candidate. |
+| Tags | `v0.3.7` exists on `598be99c`; no `v0.3.8` tag exists locally or remotely. The redundant `wtfp-safety` tag was deleted. The eight local `tmp-032-*` recovery tags remain and must never be pushed. |
+| GitHub Release | `v0.3.7` is published; no GitHub Release exists for `v0.3.8`. |
+| npm registry | `@iowarp/clio-coder@0.3.8` is absent; `latest` is `0.3.7`; the 0.3.8 dist-tag is undecided. |
+| npm history | Published versions are 0.3.0 through 0.3.4, 0.3.6, and 0.3.7. Version 0.3.5 was published and withdrawn and can never be reused. |
+| Milestone | `v0.3.8` has six open issues, all fixed on the branch: #233, #235, #238, #239, #240, and #241. They close from their `Fixes` trailers when the final candidate reaches `main`. |
+| Interactive release test | The original three-round report is `docs/release-notes/v0.3.8-release-test.md` (57 PASS / 8 FAIL / 3 PARTIAL / 6 OBSERVATION / 2 NOT RUN). The continuation is `docs/release-notes/v0.3.8-verification.md` (44 PASS / 6 non-blocking FAIL / 7 OBSERVATION / 1 NOT RUN), which closes the blocker, verifies the three later merges, and carries the final `CUT` verdict. |
+| Commit provenance identity | Still a post-release maintainer follow-up rather than a release gate; unchanged from 0.3.7. |
 
 ---
 
@@ -119,13 +119,13 @@ confirming the exact SHA and the commands.
     rebase, no reset. Verify `main` equals the reviewed SHA and is clean.
 21. `git fetch origin` once more; stop on any unexpected remote movement. Then
     `git push origin main`. Never `--force` or `--force-with-lease`. The push
-    closes the thirteen milestone issues through their `Fixes` trailers.
+    closes the six milestone issues through their `Fixes` trailers.
 
 ## Part 5: exact-SHA CI, tag, GitHub Release
 
-22. The `main` push triggers the `ci` workflow. It is a useful signal but not
-    a gate on tagging, because `release.yml` runs the same gate on the tagged
-    tree itself. A red run still blocks the cut; investigate it rather than
+22. The `main` push triggers the `ci` workflow. Require that exact-SHA run to
+    finish green before tagging; `release.yml` then runs the same gate again on
+    the tagged tree itself. A red run blocks the cut: investigate it rather than
     tagging around it, and never silence a flake with an unrelated change.
 23. Reconfirm that tag `v0.3.8` and the GitHub Release do not exist, then
     `git tag -a v0.3.8 -m "Clio Coder 0.3.8"` on the green SHA and
@@ -141,7 +141,7 @@ confirming the exact SHA and the commands.
 25. `npm whoami` and confirm the registry and account; reconfirm
     `@iowarp/clio-coder@0.3.8` is still absent.
 26. Obtain the operator's explicit dist-tag decision. `latest` makes this the
-    default install for every user; `--tag next` keeps `0.3.6` as the default.
+    default install for every user; `--tag next` keeps `0.3.7` as the default.
 27. Run `npm publish` once. `prepublishOnly` re-runs `ci:release` as a safety
     net; it is not a substitute for Part 1.
 28. A published version cannot be replaced. `npm unpublish` is restricted and
