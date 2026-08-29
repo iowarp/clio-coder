@@ -33,6 +33,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, type WorkingSetPolicyId } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
+import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -183,6 +184,12 @@ export interface ScenarioHarnessOptions {
 	target?: number;
 	/** Present means the summary stage has somewhere to go; absent means it is a no-op. */
 	autoCompact?: () => Promise<null>;
+	/**
+	 * A prompts contract for scenarios that drive `ensureSessionPrompt`. Absent
+	 * means the turn context has no prompts domain and compiles nothing, which
+	 * is what the compaction scenarios want.
+	 */
+	prompts?: PromptsContract;
 }
 
 export interface ScenarioHarness {
@@ -244,10 +251,21 @@ function scenarioRuntime(contextWindow: number): AgentRuntime {
 			},
 		} as never,
 		runtimeResolution: {
+			capabilityDecisions: {
+				chat: true,
+				tools: true,
+				reasoning: false,
+				vision: false,
+				streaming: true,
+				contextWindow,
+				maxTokens: 4096,
+			},
 			contextWindowDetails: {
 				desiredContextWindow: contextWindow,
 				effectiveContextWindow: contextWindow,
 				contextWindowSource: "descriptor-default",
+				probedContextWindow: null,
+				loadedContextWindow: null,
 			},
 		} as never,
 	};
@@ -286,6 +304,7 @@ export async function createScenarioHarness(options: ScenarioHarnessOptions): Pr
 		providers: { getRuntime: () => null } as never,
 		session,
 		readSessionEntries: entries,
+		...(options.prompts ? { prompts: options.prompts } : {}),
 		...(options.autoCompact
 			? {
 					autoCompact: async () => {

@@ -66,7 +66,12 @@ import {
 import { buildContextLedger, type ContextLedger, type PromptCacheStats } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
-import { appendPromptCompileRecord, type SessionPromptCompileRecord } from "../domains/session/prompt-manifest.js";
+import {
+	appendPromptCompileRecord,
+	PROMPT_MANIFEST_VERSION,
+	readPromptCompileRecords,
+	type SessionPromptCompileRecord,
+} from "../domains/session/prompt-manifest.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
@@ -225,6 +230,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
+	// Whether this process has already looked up the resumed session's last
+	// recorded prompt hash. The lookup reads the manifest file, so it happens
+	// once, on the first compile, and never on the reuse path.
+	let resumedPromptHashRead = false;
+	let resumedPromptHash: string | null = null;
 	const sessionWorkingContextPaths = new Set<string>();
 	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
 	// A post-tool guard can run after every tool result in one model turn. Once
@@ -391,6 +401,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const session = deps.session?.current();
 		if (!session) return null;
 		return lastLoadedContextWindow(session, targetId, modelId);
+	};
+
+	/**
+	 * The prompt hash this session last recorded, for the first compile of a
+	 * resumed process. Without it a resume reports `previousHash: null`, which
+	 * reads as "there was no prompt before" when in fact there was one and it
+	 * is exactly what a reader needs to attribute the cold cache to: a layout
+	 * bump, a fragment edit, or a moved context window (issue #249).
+	 */
+	const lastRecordedPromptHash = (): string | null => {
+		if (resumedPromptHashRead) return resumedPromptHash;
+		resumedPromptHashRead = true;
+		const currentSession = deps.session?.current();
+		if (!currentSession) {
+			// No session to read; leave the lookup open for the next compile.
+			resumedPromptHashRead = false;
+			return null;
+		}
+		const records = readPromptCompileRecords(currentSession);
+		resumedPromptHash = records[records.length - 1]?.systemPromptHash ?? null;
+		return resumedPromptHash;
 	};
 
 	const resolveWindowWithoutRuntime = (): ContextWindowDetails | null => {
@@ -925,7 +956,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const modelState = agentRuntime.agent.state.model as
 				| (typeof agentRuntime.agent.state.model & { clio?: { quirks?: LocalModelQuirks } })
 				| undefined;
-			const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
+			// `Context window: N` is the window the backend will actually serve
+			// this session, taken from the resolution the turn already ran rather
+			// than from the model descriptor's copy of it (issue #249). A probed
+			// window is a number the target advertises without saying it is what
+			// is loaded, so a loaded figure outranks it; brief #227's
+			// carry-forward is what puts that figure in reach on a resume. The
+			// source rides into the prompt manifest, so a recompile after the
+			// loaded window is first observed is explained by the record.
+			const windowDetails = agentRuntime.runtimeResolution.contextWindowDetails;
+			const loadedWindow =
+				typeof windowDetails.loadedContextWindow === "number" && windowDetails.loadedContextWindow > 0
+					? windowDetails.loadedContextWindow
+					: null;
+			const preferLoaded = loadedWindow !== null && windowDetails.contextWindowSource === "probe";
+			const resolvedWindow = preferLoaded ? loadedWindow : windowDetails.effectiveContextWindow;
+			const contextWindow = typeof resolvedWindow === "number" && resolvedWindow > 0 ? resolvedWindow : null;
+			const contextWindowSource: ContextWindowSource | null =
+				contextWindow === null ? null : preferLoaded ? "loaded" : windowDetails.contextWindowSource;
 			const guidance = modelState?.clio?.quirks?.thinking?.guidance;
 			// Per-tool prompt hints come from registry metadata, derived once from
 			// the frozen surface per compile. The compiler renders them sorted by
@@ -961,16 +1009,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					cwd: process.cwd(),
 					workingContextPaths: [...sessionWorkingContextPaths],
 				});
-				const previousHash = sessionPrompt?.systemPromptHash ?? null;
+				const previousHash = sessionPrompt?.systemPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
 				if (changed) {
 					agentRuntime.agent.state.systemPrompt = result.systemPrompt;
 					pendingPromptLogEntry = {
+						version: PROMPT_MANIFEST_VERSION,
 						at: new Date().toISOString(),
 						previousHash,
 						systemPromptHash: result.systemPromptHash,
 						tokenEstimate: result.tokenEstimate,
 						thinkingLevel: agentRuntime.agent.state.thinkingLevel ?? null,
+						contextWindow,
+						contextWindowSource,
 						projectPreload: result.projectPreload ?? null,
 						sections: result.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate })),
 						fragments: result.fragmentManifest.map((f) => ({
@@ -1015,7 +1066,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						tokenEstimate: entry.tokenEstimate,
 					},
 				});
-				if (entry.previousHash !== null) noteColdReason("prompt_recompiled");
+				// A resumed process names the session's last recorded hash as previousHash (#249), so
+				// the stamp requires the hash to have moved, not merely to have a predecessor.
+				if (entry.previousHash !== null && entry.previousHash !== entry.systemPromptHash) {
+					noteColdReason("prompt_recompiled");
+				}
 			} catch {
 				// Ledger logging is diagnostics, not control flow; never abort a turn.
 			}
@@ -1215,6 +1270,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			lastPromptCache = null;
 			lastSystemPromptReused = false;
 			sessionPromptKey = null;
+			resumedPromptHashRead = false;
+			resumedPromptHash = null;
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
 			emptyAutoCompactTurnId = null;

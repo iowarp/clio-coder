@@ -48,12 +48,22 @@ export interface SessionPromptInputs {
 	memorySection?: string;
 }
 
+/**
+ * Which section order `compile()` lays down. `volatility` is the product
+ * order; `legacy-0.3.8` reproduces the order shipped before issue #249 and
+ * exists so a test can prove the change is a pure permutation. Nothing in
+ * `src/` may pass `legacy-0.3.8`; the boundary is the test suite.
+ */
+export type SessionPromptSectionOrder = "volatility" | "legacy-0.3.8";
+
 export interface CompileInputs {
 	identity: string;
 	operatingContract: string;
 	safety: string;
 	sessionInputs: SessionPromptInputs;
 	additionalFragments?: ReadonlyArray<RenderedPromptFragment>;
+	/** Test-only escape hatch; see `SessionPromptSectionOrder`. Defaults to `volatility`. */
+	sectionOrder?: SessionPromptSectionOrder;
 }
 
 /** Stable inputs for one mediated fleet worker's canonical system prompt. */
@@ -439,9 +449,21 @@ function renderProjectBlock(contextFiles: string | undefined): string {
 	return trimmedFiles.length === 0 ? "" : `# Project\n\n${trimmedFiles}`;
 }
 
-function renderMemoryBlock(memorySection: string | undefined): string {
+/**
+ * The rendered memory section already opens with its own `# Memory` heading
+ * (`domains/memory/prompt-section.ts`), so prepending one unconditionally put
+ * the header in the prompt twice. Callers that pass a bare body still get a
+ * header; callers that pass a rendered section keep the one they wrote.
+ *
+ * `legacyDuplicateHeader` reproduces the 0.3.8 behavior and is reachable only
+ * through `sectionOrder: "legacy-0.3.8"`, so the permutation test compares
+ * against the whole prompt 0.3.8 emitted rather than a half-corrected one.
+ */
+function renderMemoryBlock(memorySection: string | undefined, legacyDuplicateHeader = false): string {
 	const trimmed = memorySection?.trim() ?? "";
-	return trimmed.length === 0 ? "" : `# Memory\n\n${trimmed}`;
+	if (trimmed.length === 0) return "";
+	if (legacyDuplicateHeader) return `# Memory\n\n${trimmed}`;
+	return /^#\s+Memory\s*$/.test(trimmed.split("\n", 1)[0] ?? "") ? trimmed : `# Memory\n\n${trimmed}`;
 }
 
 function estimatePromptTokens(text: string): number {
@@ -449,11 +471,71 @@ function estimatePromptTokens(text: string): number {
 }
 
 /**
+ * The session prompt's section order, stable prefix first (issue #249).
+ *
+ * The rule, and it is the only rule: a section goes as late as its
+ * volatility, and anything that reads a clock, a probe, or a mutable store
+ * goes after everything that does not. Every backend Clio targets caches by
+ * exact prefix and re-prefills from the earliest changed byte, so a section
+ * that can change between two turns must not sit ahead of sections that
+ * cannot. That is why `runtime` is last of the compiled sections: its
+ * `Context window: N` moves when the backend reloads a model or a
+ * co-residency clamp lands, and before this order a single changed digit
+ * re-prefilled the tool contract, the roster, the hints, memory, and the
+ * project context behind it. `memory` sits just ahead of it because an
+ * approved memory record rewrites that section mid-session, and
+ * `project-context` is stable for the session's lifetime.
+ *
+ * The tail fragments (`workspace-root`, `clio-repo-awareness`,
+ * `project-rules`, `operator-profile`) are appended after this list in their
+ * own order: path-scoped project rules grow mid-session by design, which is
+ * exactly why they belong at the very end.
+ *
+ * Moving an entry here is a deliberate cache decision. `tests/contracts/
+ * prompt-prefix-layout.test.ts` pins this list so the move has to be made on
+ * purpose.
+ */
+export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
+	"identity",
+	"operating-contract",
+	"delegation",
+	"skills",
+	"safety",
+	"tool-contract",
+	"fleet",
+	"retrieval-hints",
+	"project-context",
+	"memory",
+	"runtime",
+];
+
+/**
+ * The order shipped through 0.3.8, kept only so a test can prove the new order
+ * is a permutation of it rather than a rewrite. Never reachable from `src/`.
+ */
+export const LEGACY_SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
+	"identity",
+	"operating-contract",
+	"delegation",
+	"skills",
+	"safety",
+	"runtime",
+	"tool-contract",
+	"fleet",
+	"retrieval-hints",
+	"memory",
+	"project-context",
+];
+
+/**
  * Compile the session system prompt. Identity and the operating contract
  * render verbatim from disk fragments; safety renders a one-line directive
  * plus the safety fragment body; everything else renders inline from typed
  * SessionPromptInputs. Output is one string, one sha256, one token estimate,
  * and a flat section breakdown for the /context overlay.
+ *
+ * Sections are laid down in `SESSION_PROMPT_SECTION_ORDER`, whose doc comment
+ * states the volatility rule that fixes it.
  */
 export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSessionPrompt {
 	const identity = lookupFragment(table, inputs.identity, "identity");
@@ -493,17 +575,22 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
 	const skills = sessionHasContext(session) ? table.byId.get("operating.skills") : undefined;
 
-	push("identity", identityBody);
-	push("operating-contract", operatingContract.body);
-	if (delegation) push("delegation", delegation.body);
-	if (skills) push("skills", skills.body);
-	push("safety", renderSafetySection(safety, autonomyLevel));
-	push("runtime", renderRuntimeBlock(session));
-	push("tool-contract", renderToolContractBlock(session));
-	push("fleet", renderFleetBlock(session));
-	push("retrieval-hints", renderRetrievalHintsBlock(session));
-	push("memory", renderMemoryBlock(session.memorySection));
-	push("project-context", renderProjectBlock(session.contextFiles));
+	const legacy = inputs.sectionOrder === "legacy-0.3.8";
+	const rendered = new Map<string, string>([
+		["identity", identityBody],
+		["operating-contract", operatingContract.body],
+		["delegation", delegation?.body ?? ""],
+		["skills", skills?.body ?? ""],
+		["safety", renderSafetySection(safety, autonomyLevel)],
+		["runtime", renderRuntimeBlock(session)],
+		["tool-contract", renderToolContractBlock(session)],
+		["fleet", renderFleetBlock(session)],
+		["retrieval-hints", renderRetrievalHintsBlock(session)],
+		["memory", renderMemoryBlock(session.memorySection, legacy)],
+		["project-context", renderProjectBlock(session.contextFiles)],
+	]);
+	const order = legacy ? LEGACY_SESSION_PROMPT_SECTION_ORDER : SESSION_PROMPT_SECTION_ORDER;
+	for (const id of order) push(id, rendered.get(id) ?? "");
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}

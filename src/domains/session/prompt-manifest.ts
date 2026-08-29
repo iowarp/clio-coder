@@ -14,6 +14,21 @@ import type { SessionMeta } from "./contract.js";
  * stay diffable without recompiling anything.
  */
 
+/**
+ * Layout version of the compiled prompt these records describe.
+ *
+ * 1: the order shipped through 0.3.8.
+ * 2: stable-prefix-first ordering with one `# Memory` header, and
+ *    `contextWindowSource` recorded alongside the window the prompt states
+ *    (issue #249).
+ *
+ * A record without a `version` field predates the field and is read as 1, so a
+ * 0.3.8 manifest still parses. Bump this whenever the compiled text moves for a
+ * reason other than its inputs: a resumed session then has the version in hand
+ * to explain the one `promptRecompiled` entry its first compile writes.
+ */
+export const PROMPT_MANIFEST_VERSION = 2;
+
 export interface PromptManifestSection {
 	id: string;
 	tokenEstimate: number;
@@ -27,6 +42,8 @@ export interface PromptManifestFragment {
 }
 
 export interface SessionPromptCompileRecord {
+	/** Prompt layout version; see `PROMPT_MANIFEST_VERSION`. Absent on pre-0.3.9 records. */
+	version?: number;
 	/** ISO timestamp of the compile. */
 	at: string;
 	/** Hash of the previously served prompt, null on the first compile. */
@@ -35,6 +52,14 @@ export interface SessionPromptCompileRecord {
 	tokenEstimate: number;
 	/** Thinking dial applied to the live agent when this prompt was compiled. */
 	thinkingLevel: string | null;
+	/**
+	 * The window the prompt's `Context window: N` states, and the layer that
+	 * answered it. `loaded` is what the backend has this model open at; anything
+	 * else means the figure can still move once a loaded window is observed, and
+	 * a later recompile is then explained rather than mysterious.
+	 */
+	contextWindow?: number | null;
+	contextWindowSource?: string | null;
 	projectPreload: ProjectPreloadClass | null;
 	sections: PromptManifestSection[];
 	fragments: PromptManifestFragment[];
@@ -102,9 +127,21 @@ function isProjectPreloadClass(value: unknown): value is ProjectPreloadClass {
 	);
 }
 
+/** Optional fields added after 0.3.8: absent is valid, present must be well-typed. */
+function isOptional<T>(value: unknown, guard: (candidate: unknown) => candidate is T): boolean {
+	return value === undefined || guard(value);
+}
+
 function isSessionPromptCompileRecord(value: unknown): value is SessionPromptCompileRecord {
 	if (!isRecord(value)) return false;
 	return (
+		isOptional(value.version, isNonNegativeInteger) &&
+		isOptional(value.contextWindow, (candidate): candidate is number | null =>
+			candidate === null ? true : isNonNegativeInteger(candidate),
+		) &&
+		isOptional(value.contextWindowSource, (candidate): candidate is string | null =>
+			candidate === null ? true : typeof candidate === "string",
+		) &&
 		isCanonicalUtcTimestamp(value.at) &&
 		(value.previousHash === null || isSha256(value.previousHash)) &&
 		isSha256(value.systemPromptHash) &&
@@ -116,6 +153,11 @@ function isSessionPromptCompileRecord(value: unknown): value is SessionPromptCom
 		Array.isArray(value.fragments) &&
 		value.fragments.every(isPromptManifestFragment)
 	);
+}
+
+/** A record written before the field existed describes the 0.3.8 layout. */
+export function promptManifestVersion(record: SessionPromptCompileRecord): number {
+	return record.version ?? 1;
 }
 
 export function getPromptManifestFilePath(meta: SessionMeta, stateDir?: string): string {
