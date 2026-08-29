@@ -175,7 +175,7 @@ describes validation evidence inside that verified receipt. Likewise,
 message. Model-facing dispatch and collect output name all four concepts
 separately and never substitute one hash for another.
 
-The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
+The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`, including `trust`, the bounded canonical trust projection described in [evidence-and-memory.md](evidence-and-memory.md#trust-projection). A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
 The base provenance sets, steering, routing, quality, worker identity, result-conformance, council provenance, and fleet gate provenance use the strict v19 shape frozen for the release. These fields are labeled `experimental` until the schema is promoted post-1.0. For the complete version registry and migration contract across all artifacts, see [artifact-versions.md](artifact-versions.md).
 

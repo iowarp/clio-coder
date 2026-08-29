@@ -1,6 +1,6 @@
 # Clio Coder Glossary
 
-This document defines the 45 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
+This document defines the 50 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
 
 ---
 
@@ -185,3 +185,23 @@ This document defines the 45 core architectural concepts and terminology used th
 ### 45. Marker
 - **Definition**: The byte-stable one-line stub the projection renders in place of an evicted body, naming the ref, the reason, the tool, the size, and the exact recall call. It carries no timestamp and no counter, because a marker whose bytes drifted between renders would cold-start the prefix cache on a turn that evicted nothing new.
 - **Owning Type**: `renderMarker` in `src/domains/context/working-set/marker.ts`.
+
+### 46. Canonical Trust Status
+- **Definition**: The six-axis record of what is known about one run: artifact integrity, validation grounding, independent review, context provenance, autonomy enforcement, and completion evidence. It is an algebra, not a score: no axis promotes another, every non-absent state names its source and authority, and `absent`, `unknown`, and `not_applicable` are states in their own right. See [docs/evidence-and-memory.md](evidence-and-memory.md#canonical-trust-status) for the full state table.
+- **Owning Type**: `CanonicalTrustStatus` in `src/domains/evidence/trust-status.ts`.
+
+### 47. Trust Projection
+- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in six fixed clauses (`sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `evidence inspect`, `findings.md`, the Alt+W board, the receipt view, the eval bridge, and the ACP wire all print from it.
+- **Owning Type**: `formatTrustSummary` and `TrustSummaryProjection` in `src/domains/evidence/trust-projection.ts`.
+
+### 48. Trust Verdict
+- **Definition**: The presentation tier read off the axes in a fixed order, used for styling and sorting and never as a score. `reviewed` requires an authenticated independent pass and is the only tier styled as independently verified. `grounded` is observed validation without independent review. `unverified` is a sealed receipt with nothing observed. `compromised` is a broken seal, a bypassed gate, a failed or inferred validation, a failed or correlated review, or a contradictory context record. `unknown` is an unchecked or missing seal.
+- **Owning Type**: `TrustVerdict` and `trustVerdict` in `src/domains/evidence/trust-projection.ts`.
+
+### 49. Trust Vocabulary
+- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the receipt authenticated against the ledger row; it says nothing about correctness. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means an authenticated reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `mediated` is the word for the `enforced` autonomy state: Clio's own safety gate mediated the run. `approximated` and `bypassed` name an external runtime's enforcement, always with the runtime's id. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
+- **Owning Type**: `TRUST_STATE_WORDS` in `src/domains/evidence/trust-projection.ts`.
+
+### 50. Commonly Confused Trust States
+- **Definition**: `sealed` is not `grounded`: a receipt can authenticate perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
+- **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in `src/domains/evidence/trust-projection.ts`; the axis states in `TRUST_STATUS_STATES` in `src/domains/evidence/trust-status.ts`.

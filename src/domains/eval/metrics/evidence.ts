@@ -6,7 +6,15 @@
  * than silently pass.
  */
 
-import type { RunReceipt } from "../../dispatch/types.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { RunEnvelope, RunReceipt } from "../../dispatch/types.js";
+import { formatTrustSummary, summarizeTrustStatus } from "../../evidence/trust-projection.js";
+import {
+	adaptRunReceiptTrustStatus,
+	inspectRunReceiptTrustStatus,
+	TRUST_STATUS_AXES,
+} from "../../evidence/trust-status.js";
 
 function dispatchScopeMetrics(receipt: RunReceipt): Record<string, string | boolean | number> {
 	const scope = receipt.pathScope;
@@ -73,10 +81,14 @@ function isReceiptShaped(value: unknown): value is RunReceipt {
  * mirrors the durable findings summary and is omitted when that summary is
  * absent, so a gate on the metric fails closed instead of inventing a value.
  */
-export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, string | boolean | number> {
+export function evidenceMetricsFromReceipt(
+	receipt: RunReceipt,
+	options: { envelope?: RunEnvelope | null } = {},
+): Record<string, string | boolean | number> {
 	return {
 		"evidence.verification": receipt.verification.state,
 		...dispatchScopeMetrics(receipt),
+		...evidenceTrustMetrics(receipt, options.envelope ?? null),
 		...(receipt.findingsSummary === undefined
 			? {}
 			: { "evidence.firstPassSuccess": receipt.findingsSummary.firstPassSuccess === true }),
@@ -84,4 +96,48 @@ export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, 
 		"evidence.responseSchema.digest": receipt.quality.responseSchema.schemaDigest ?? "none",
 		...(typeof receipt.costUsd === "number" && Number.isFinite(receipt.costUsd) ? { "cost.usd": receipt.costUsd } : {}),
 	};
+}
+
+/**
+ * The canonical trust status as metrics, so a benchmark table reads the same
+ * verdict as every operator surface instead of the raw receipt marker. The
+ * receipt is authenticated against its ledger row when the caller can supply
+ * one; without a row the canonical model reports the seal unchecked and the
+ * receipt-owned axes unobserved, which is the honest answer for a receipt
+ * that only ever arrived through stdout.
+ */
+function evidenceTrustMetrics(
+	receipt: RunReceipt,
+	envelope: RunEnvelope | null,
+): Record<string, string | boolean | number> {
+	// A missing row means the seal was never checked, not that it failed:
+	// only a row that exists and disagrees can break a seal.
+	const status =
+		envelope === null ? adaptRunReceiptTrustStatus(receipt) : inspectRunReceiptTrustStatus(receipt, envelope).status;
+	const summary = summarizeTrustStatus(status);
+	return {
+		"evidence.trust.version": summary.version,
+		"evidence.trust.verdict": summary.verdict,
+		"evidence.trust.summary": formatTrustSummary(status),
+		...Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [`evidence.trust.${axis}`, status[axis].state])),
+	};
+}
+
+/**
+ * The ledger row a stdout receipt was sealed from, read from the state dir
+ * the run wrote to. Null when the ledger or the row cannot be read; the
+ * caller then reports the seal unchecked rather than guessing.
+ */
+export function readRunEnvelopeForReceipt(receipt: RunReceipt, stateDir: string): RunEnvelope | null {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8"));
+		if (!Array.isArray(parsed)) return null;
+		const row = parsed.find(
+			(entry): entry is RunEnvelope =>
+				typeof entry === "object" && entry !== null && (entry as { id?: unknown }).id === receipt.runId,
+		);
+		return row ?? null;
+	} catch {
+		return null;
+	}
 }

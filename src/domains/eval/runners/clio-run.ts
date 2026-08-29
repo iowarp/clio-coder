@@ -1,5 +1,10 @@
 import { shellQuote } from "../../../core/shell-quote.js";
-import { evidenceMetricsFromReceipt, receiptFromRunJsonStdout } from "../metrics/evidence.js";
+import { clioStateDir } from "../../../core/xdg.js";
+import {
+	evidenceMetricsFromReceipt,
+	readRunEnvelopeForReceipt,
+	receiptFromRunJsonStdout,
+} from "../metrics/evidence.js";
 import { streamInvariantMetrics } from "../metrics/invariants.js";
 import { tokenMetricEntries } from "../metrics/token-stream.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
@@ -35,6 +40,11 @@ export async function runClioRunRunner(
 	// prints; a runner without a receipt leaves them absent so any gate on
 	// them fails closed instead of reading prose labels.
 	const receipt = receiptFromRunJsonStdout(result.stdout);
+	// The canonical trust metrics authenticate the receipt against the ledger
+	// row the child wrote; a stdout receipt on its own only ever reads as an
+	// unchecked seal.
+	const envelope =
+		receipt === null ? null : readRunEnvelopeForReceipt(receipt, env?.CLIO_CODER_STATE_DIR ?? clioStateDir());
 	return {
 		assignmentId: receipt === null ? null : (receipt.lineage?.rootRunId ?? receipt.runId),
 		terminalReceiptDigest: receipt?.integrity.digest ?? null,
@@ -52,7 +62,7 @@ export async function runClioRunRunner(
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,
 			"verifier.exitCode": result.exitCode,
-			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt)),
+			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt, { envelope })),
 			...(receipt === null
 				? {}
 				: { "evidence.qualityLabel": receipt.quality.typedValidations.length > 0 ? "measured" : "unmeasured" }),

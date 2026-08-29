@@ -7,6 +7,7 @@ import {
 } from "../domains/dispatch/budget-envelope.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
+import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
 
@@ -128,9 +129,9 @@ export function receiptEvidenceLabels(
 	integrity: ReceiptIntegrityResult,
 ): string[] {
 	const status = adaptRunReceiptTrustStatus({ ...receipt, verification: verification }, { integrity });
-	const canonical = canonicalTrustLabel(status);
+	const canonical = canonicalTrustLabels(status);
 	if (!integrity.ok) {
-		return [canonical, `receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
+		return [...canonical, `receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
 	}
 	const briefing =
 		receipt.briefing === undefined
@@ -154,7 +155,7 @@ export function receiptEvidenceLabels(
 					`budget_reason=${JSON.stringify(formatBudgetReasons(receipt.budget))}`,
 				];
 	return [
-		canonical,
+		...canonical,
 		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
 		`evidence_verification=${verification.state}/${verification.basis}`,
 		`host_verification=${receipt.hostVerification?.status ?? "not_requested"}`,
@@ -167,16 +168,13 @@ export function receiptEvidenceLabels(
 	];
 }
 
-function canonicalTrustLabel(status: CanonicalTrustStatus): string {
-	return [
-		`trust_status=v${status.version}`,
-		`artifactIntegrity:${status.artifactIntegrity.state}`,
-		`validationGrounding:${status.validationGrounding.state}`,
-		`independentReview:${status.independentReview.state}`,
-		`contextProvenance:${status.contextProvenance.state}`,
-		`autonomyEnforcement:${status.autonomyEnforcement.state}`,
-		`completionEvidence:${status.completionEvidence.state}`,
-	].join(" ");
+/**
+ * The compact projection first, then the canonical axis line, both from the
+ * shared projection so the dispatch and monitor text can never spell a state
+ * differently from `evidence inspect` or the board.
+ */
+function canonicalTrustLabels(status: CanonicalTrustStatus): string[] {
+	return [`trust=${JSON.stringify(formatTrustSummary(status))}`, formatTrustAxes(status)];
 }
 
 /**
@@ -192,6 +190,14 @@ export function workerTextLabel(status: CanonicalTrustStatus): string {
 			return "reconnaissance output (advisory leads, not validation evidence):";
 		case "unknown":
 			return "worker claims (validation not observable at this layer):";
+		// The three remaining states were one label. The evidence bundle tells
+		// a failed check, an inferred claim, and no validation at all apart, so
+		// the terminal must too or it hands the operator a coarser verdict than
+		// the report for the same run.
+		case "failed":
+			return "worker claims (validation failed; a check ran and did not pass):";
+		case "ungrounded":
+			return "worker claims (inferred; validation claimed, none observed):";
 		default:
 			return "worker claims (unverified prose):";
 	}

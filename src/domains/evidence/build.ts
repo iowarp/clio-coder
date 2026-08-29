@@ -29,7 +29,7 @@ import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
-import type { TrustArtifactReference } from "./trust-status.js";
+import type { CanonicalTrustStatus, TrustArtifactReference } from "./trust-status.js";
 import { inspectRunReceiptTrustStatus } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
@@ -45,6 +45,7 @@ import {
 	type EvidenceReceiptFile,
 	type EvidenceRunLink,
 	type EvidenceRunSource,
+	type EvidenceSeverity,
 	type EvidenceTag,
 	type EvidenceToolEvent,
 	type EvidenceTrustStatusFile,
@@ -359,6 +360,13 @@ function buildFindings(
 				),
 			);
 		}
+		// The remaining axes were never read here, so a run could finish with
+		// no independent review, a contradictory context record, or a mutation
+		// nobody validated, and findings.md said nothing. Each finding is
+		// selected from the canonical state the way the validation and
+		// autonomy findings above are, with the detailed record left in
+		// trust-status.json.
+		findings.push(...axisFindings(findings.length, source, status));
 		if (source.envelope.status === "stale" || source.envelope.status === "dead") {
 			findings.push(
 				finding(findings.length, "warn", "timeout", source.envelope.id, `run status ${source.envelope.status}`),
@@ -1436,6 +1444,39 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 	}
 	const _exhaustive: never = entry;
 	return [`${prefix} ${String(_exhaustive)}`];
+}
+
+/** Independent review, context provenance, and completion evidence, read off the canonical axes. */
+function axisFindings(offset: number, source: EvidenceRunSource, status: CanonicalTrustStatus): EvidenceFinding[] {
+	const out: EvidenceFinding[] = [];
+	const runId = source.envelope.id;
+	const next = (severity: EvidenceSeverity, tag: EvidenceTag, message: string): void => {
+		out.push(finding(offset + out.length, severity, tag, runId, message));
+	};
+	const review = status.independentReview.state;
+	if (review === "failed") {
+		next("warn", "independent-review", "independent review failed for this run");
+	} else if (review === "not_independent") {
+		next("warn", "independent-review", "review was not independent of the run it judged");
+	} else if (review === "inconclusive") {
+		next("info", "independent-review", "independent review was inconclusive");
+	} else if (isSuccessfulRun(source) && (review === "absent" || review === "unknown")) {
+		next("info", "independent-review", "run was not independently reviewed; its result rests on its own receipt");
+	}
+	if (status.contextProvenance.state === "invalid") {
+		next("warn", "context-provenance", "context provenance record is contradictory; see trust-status.json");
+	}
+	const completion = status.completionEvidence.state;
+	if (completion === "incomplete") {
+		next(
+			"warn",
+			"completion-evidence",
+			"run mutated the workspace and finished without validation evidence at the completion boundary",
+		);
+	} else if (completion === "limited") {
+		next("info", "completion-evidence", "run finished with an explicit limitation instead of validation evidence");
+	}
+	return out;
 }
 
 function renderFindings(findings: ReadonlyArray<EvidenceFinding>): string {

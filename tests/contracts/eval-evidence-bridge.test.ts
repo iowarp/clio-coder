@@ -80,6 +80,20 @@ describe("contracts/eval evidence bridge", () => {
 			),
 			{
 				"evidence.verification": "verified",
+				// Canonical projection of the same receipt. No ledger row was
+				// supplied, so the seal is unchecked and every receipt-owned axis
+				// is unobserved: the bridge never promotes a stdout receipt's own
+				// verification marker into a trust verdict.
+				"evidence.trust.version": 1,
+				"evidence.trust.verdict": "unknown",
+				"evidence.trust.summary":
+					"seal unchecked; no validation observed; not independently reviewed; autonomy not recorded; context not recorded; completion not recorded",
+				"evidence.trust.artifactIntegrity": "unknown",
+				"evidence.trust.validationGrounding": "absent",
+				"evidence.trust.independentReview": "absent",
+				"evidence.trust.contextProvenance": "absent",
+				"evidence.trust.autonomyEnforcement": "absent",
+				"evidence.trust.completionEvidence": "absent",
 				"evidence.firstPassSuccess": true,
 				"evidence.quality.typedValidationCount": 0,
 				"evidence.responseSchema.digest": "none",

@@ -9,6 +9,8 @@ import {
 } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
+import { formatTrustSummaryLine } from "../../domains/evidence/trust-projection.js";
+import { inspectRunReceiptTrustStatus } from "../../domains/evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
 import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
 import type {
@@ -285,6 +287,21 @@ function validateToolStats(value: unknown): ReceiptVerifyResult {
 }
 
 type ReadLedgerResult = { ok: true; envelope: RunEnvelope } | { ok: false; reason: string };
+
+/**
+ * The canonical trust line for a receipt the integrity verifier just accepted:
+ * the same file and ledger row, projected through the shared boundary so the
+ * receipt view spells its verdict exactly as the board and the CLI do.
+ */
+export function receiptTrustDetail(stateDir: string, runId: string): string {
+	try {
+		const receipt = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8")) as RunReceipt;
+		const ledger = readRunEnvelope(stateDir, runId);
+		return formatTrustSummaryLine(inspectRunReceiptTrustStatus(receipt, ledger.ok ? ledger.envelope : null).status);
+	} catch {
+		return "integrity verified; trust status unreadable";
+	}
+}
 
 function readRunEnvelope(stateDir: string, runId: string): ReadLedgerResult {
 	const runs = readRunLedger(stateDir);
@@ -674,7 +691,9 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					verify: async () => {
 						const result = verifyReceiptFile(this.deps.stateDir, env.id);
 						if (!result.ok) return { ok: false, detail: result.reason };
-						return { ok: true, detail: "integrity verified" };
+						// "integrity verified" alone read as a verified result. The
+						// canonical line says what the seal proves and what it does not.
+						return { ok: true, detail: receiptTrustDetail(this.deps.stateDir, env.id) };
 					},
 				};
 			});

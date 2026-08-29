@@ -459,6 +459,36 @@ describe("contracts/trust-status", () => {
 			projectContext: { tier: "none", contentHash: DIGEST_B } as { tier: "none" },
 		});
 		strictEqual(adaptRunReceiptContextStatus(invalidContext).state, "invalid");
+		// The shape every none-tier receipt on a real install carries (receipt
+		// run-l5mithv0l8s8, 2026-08-27): the policy sent no handbook, but the
+		// workspace-root message was sent and recorded. That is a consistent
+		// record, so it reads recorded and cites the message it hashed.
+		const workspaceRootOnly = adaptRunReceiptContextStatus(
+			currentReceipt({
+				projectContext: {
+					tier: "none",
+					chars: 187,
+					contentHash: "c2d8193b43376f88e0383e94e3c57d232fe768a61d5a88be8d67ccb0e40ffacd",
+					sections: ["workspace-root"],
+				},
+			}),
+		);
+		strictEqual(workspaceRootOnly.state, "recorded");
+		ok(
+			workspaceRootOnly.state === "recorded" &&
+				workspaceRootOnly.artifacts.some((artifact) => artifact.kind === "project_context"),
+			"the workspace-root record is cited as a project_context artifact",
+		);
+		// A handbook section under a none policy is the contradiction the
+		// invalid state exists for.
+		strictEqual(
+			adaptRunReceiptContextStatus(
+				currentReceipt({
+					projectContext: { tier: "none", chars: 187, contentHash: DIGEST_B, sections: ["workspace-root", "clio-md"] },
+				}),
+			).state,
+			"invalid",
+		);
 
 		strictEqual(adaptRunReceiptAutonomyStatus(currentReceipt()).state, "enforced");
 		strictEqual(
