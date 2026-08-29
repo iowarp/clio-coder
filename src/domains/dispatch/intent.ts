@@ -1,5 +1,6 @@
 import path from "node:path";
 import { normalizePathBoundaryEntry, PATH_BOUNDARY_MAX_ENTRIES, PathBoundaryError } from "../../core/path-boundary.js";
+import { type DispatchPathProvenanceEntry, declaredIntentPathProvenance } from "./path-scope.js";
 
 export const DISPATCH_INTENT_PATH_LIST_CAP = PATH_BOUNDARY_MAX_ENTRIES;
 export const DISPATCH_INTENT_PATH_ENTRY_BYTES_CAP = 512;
@@ -12,10 +13,12 @@ export interface DispatchIntentVerification {
 }
 
 export interface DispatchIntent {
-	version: 1;
+	version: 2;
 	readRoots: string[];
 	writeRoots: string[];
 	relevantPaths: string[];
+	/** Integrity-sealed source and confidence for every policy-bearing path. */
+	pathProvenance: DispatchPathProvenanceEntry[];
 	expectedOutputs: string[];
 	verification: DispatchIntentVerification[];
 }
@@ -127,9 +130,25 @@ function normalizePathList(
 }
 
 export function isDispatchIntent(value: unknown): value is DispatchIntent {
-	if (!isRecord(value) || value.version !== 1) return false;
+	if (!isRecord(value) || value.version !== 2) return false;
 	for (const field of ["readRoots", "writeRoots", "relevantPaths", "expectedOutputs"] as const) {
 		if (!Array.isArray(value[field]) || !value[field].every((entry) => typeof entry === "string")) return false;
+	}
+	const readRoots = value.readRoots as string[];
+	const writeRoots = value.writeRoots as string[];
+	const relevantPaths = value.relevantPaths as string[];
+	if (
+		!Array.isArray(value.pathProvenance) ||
+		JSON.stringify(value.pathProvenance) !==
+			JSON.stringify(
+				declaredIntentPathProvenance({
+					readRoots,
+					writeRoots,
+					relevantPaths,
+				}),
+			)
+	) {
+		return false;
 	}
 	return (
 		Array.isArray(value.verification) &&
@@ -203,6 +222,14 @@ export function normalizeDispatchIntent(
 	}
 	return {
 		ok: true,
-		intent: { version: 1, readRoots, writeRoots, relevantPaths, expectedOutputs, verification },
+		intent: {
+			version: 2,
+			readRoots,
+			writeRoots,
+			relevantPaths,
+			pathProvenance: declaredIntentPathProvenance({ readRoots, writeRoots, relevantPaths }),
+			expectedOutputs,
+			verification,
+		},
 	};
 }

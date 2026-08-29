@@ -35,6 +35,7 @@ import {
 import { DispatchManifest } from "../../src/domains/dispatch/manifest.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
+import { declaredIntentPathProvenance } from "../../src/domains/dispatch/path-scope.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "../../src/domains/dispatch/phase-timing.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
@@ -2304,10 +2305,15 @@ describe("contracts/dispatch", () => {
 					task: "Update docs/readme.md while implementing the declared source work.",
 					cwd: scratch,
 					intent: {
-						version: 1,
+						version: 2,
 						readRoots: ["src/nested/"],
 						writeRoots: [],
 						relevantPaths: [],
+						pathProvenance: declaredIntentPathProvenance({
+							readRoots: ["src/nested/"],
+							writeRoots: [],
+							relevantPaths: [],
+						}),
 						expectedOutputs: ["typed scope result"],
 						verification: [],
 					},
@@ -2326,6 +2332,55 @@ describe("contracts/dispatch", () => {
 			}
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("seals legacy path provenance and publishes its operator warning (#159)", async () => {
+		const context = stubContext();
+		const scopeNotices: string[] = [];
+		context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+			scopeNotices.push(notice.message);
+		});
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8003,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: emptyEvents(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "Inspect src/legacy.ts and summarize it.",
+			});
+			const receipt = await handle.finalPromise;
+			deepStrictEqual(receipt.pathScope, {
+				version: 1,
+				mode: "legacy-inferred",
+				workingContextPaths: [
+					{
+						path: "src/legacy.ts",
+						evidence: [
+							{
+								provenance: "inferred",
+								source: "task",
+								confidence: "medium",
+								reason: "task_path_token",
+							},
+						],
+					},
+				],
+				writeBoundaries: [],
+			});
+			deepStrictEqual(scopeNotices, [
+				"[dispatch scope] legacy dispatch resolved policy-bearing scope without declared intent: working-context src/legacy.ts (provenance=inferred source=task confidence=medium). Review this scope before execution.",
+			]);
+		} finally {
+			await bundle.extension.stop?.();
 		}
 	});
 
@@ -5694,10 +5749,15 @@ rl.once("line", (line) => {
 				task: "inspect the intended source output",
 				toolProfile: "council-read-only",
 				intent: {
-					version: 1,
+					version: 2,
 					readRoots: ["src/"],
 					writeRoots: ["src/output.ts"],
 					relevantPaths: [],
+					pathProvenance: declaredIntentPathProvenance({
+						readRoots: ["src/"],
+						writeRoots: ["src/output.ts"],
+						relevantPaths: [],
+					}),
 					expectedOutputs: [],
 					verification: [],
 				},

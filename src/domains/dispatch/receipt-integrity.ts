@@ -10,7 +10,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 19;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 20;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -77,6 +77,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	requestOrigin: true,
 	task: true,
 	intent: true,
+	pathScope: true,
 	// Historical receipts omit this field, so their receipt and ledger payloads remain unchanged.
 	budget: true,
 	targetId: true,

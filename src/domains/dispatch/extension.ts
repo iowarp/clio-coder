@@ -186,6 +186,7 @@ import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
 	declaredScopeReplacementNotice,
+	legacyScopeInferenceNotice,
 	resolveDispatchPathScope,
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
@@ -1319,6 +1320,7 @@ interface DispatchLifecycleStage {
 
 interface AcpDelegationLifecycleStage {
 	admission: DispatchAdmissionStage;
+	pathScope: DispatchPathScope;
 	agentConfig: ReturnType<ConfigContract["get"]>["delegation"]["agents"][number];
 	cwd: string;
 	systemPrompt: string;
@@ -3204,6 +3206,20 @@ export function createDispatchBundle(
 		targetCooldowns.set(key, { until: now() + cooldownMs, reason: failureClass });
 	}
 
+	function publishDispatchPathScope(req: DispatchRequest, pathScope: DispatchPathScope): void {
+		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
+		if (replacementDiagnostic !== null) {
+			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
+		}
+		const notice = declaredScopeReplacementNotice(pathScope) ?? legacyScopeInferenceNotice(pathScope);
+		if (notice !== null) {
+			context.bus.emit(BusChannels.DispatchScopeNotice, {
+				...notice,
+				agentId: req.agentId,
+			});
+		}
+	}
+
 	async function resolveLifecycle(req: DispatchRequest, settings: EffectiveSettings): Promise<DispatchLifecycleStage> {
 		const recipe = agents.get(req.agentId);
 		if (!recipe) {
@@ -3238,17 +3254,7 @@ export function createDispatchBundle(
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
 		const pathScope = resolveDispatchPathScope(req);
-		const replacementDiagnostic = declaredScopeReplacementDiagnostic(pathScope);
-		if (replacementDiagnostic !== null) {
-			reportDispatchDiagnostic("typed scope replacement", new Error(replacementDiagnostic));
-		}
-		const replacementNotice = declaredScopeReplacementNotice(pathScope);
-		if (replacementNotice !== null) {
-			context.bus.emit(BusChannels.DispatchScopeNotice, {
-				...replacementNotice,
-				agentId: req.agentId,
-			});
-		}
+		publishDispatchPathScope(req, pathScope);
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(
@@ -3408,6 +3414,7 @@ export function createDispatchBundle(
 			);
 		}
 		const cwd = req.cwd ?? process.cwd();
+		const pathScope = resolveDispatchPathScope(req);
 		const personaBody = workerPersonaBody(req, null, []);
 		// ACP owns an unknown external tool inventory, so it receives the raw
 		// bounded persona rather than a native Clio schema-harness claim.
@@ -3434,6 +3441,7 @@ export function createDispatchBundle(
 		const personaOverride = personaOverrideFor(req, staticCompositionHash);
 		return {
 			admission,
+			pathScope,
 			agentConfig: configured,
 			cwd,
 			systemPrompt,
@@ -3469,6 +3477,7 @@ export function createDispatchBundle(
 		finalPromise: Promise<RunReceipt>;
 	}> {
 		const lifecycle = resolveAcpDelegationLifecycle(req, settings);
+		publishDispatchPathScope(req, lifecycle.pathScope);
 		timing.decisionCompletedAt = new Date(now()).toISOString();
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
@@ -3842,6 +3851,7 @@ export function createDispatchBundle(
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
+				pathScope: structuredClone(lifecycle.pathScope.provenance),
 				targetId,
 				wireModelId,
 				runtimeId,
@@ -4937,6 +4947,7 @@ export function createDispatchBundle(
 				outcomeCode,
 				lineage,
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
+				pathScope: structuredClone(lifecycle.pathScope.provenance),
 				identity,
 				node: placement?.node ?? LOCAL_RUN_NODE,
 				...receiptAttestationFields(worker.attestation?.() ?? null),

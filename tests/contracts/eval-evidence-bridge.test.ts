@@ -37,7 +37,7 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 			resultContract: null,
 		},
 		sessionId: null,
-		integrity: { version: 19, algorithm: "sha256", digest: "d".repeat(64) },
+		integrity: { version: 20, algorithm: "sha256", digest: "d".repeat(64) },
 		...partial,
 	} as RunReceipt;
 }
@@ -93,6 +93,41 @@ describe("contracts/eval evidence bridge", () => {
 		);
 		strictEqual(unverified["evidence.verification"], "unverified");
 		ok(!("evidence.firstPassSuccess" in unverified));
+	});
+
+	it("counts legacy scope adoption from provenance without exporting paths or prose", () => {
+		const metrics = evidenceMetricsFromReceipt(
+			receipt({
+				verification: { state: "unverified", basis: "no-validation-tool" },
+				pathScope: {
+					version: 1,
+					mode: "legacy-inferred",
+					workingContextPaths: [
+						{
+							path: "private/customer-name.ts",
+							evidence: [
+								{
+									provenance: "inferred",
+									source: "task",
+									confidence: "medium",
+									reason: "task_path_token",
+								},
+							],
+						},
+					],
+					writeBoundaries: [],
+				},
+			}),
+		);
+		deepStrictEqual(Object.fromEntries(Object.entries(metrics).filter(([key]) => key.startsWith("dispatch.scope."))), {
+			"dispatch.scope.mode": "legacy-inferred",
+			"dispatch.scope.inferredPathCount": 1,
+			"dispatch.scope.derivedPathCount": 0,
+			"dispatch.scope.source.task": 1,
+			"dispatch.scope.source.briefing": 0,
+			"dispatch.scope.source.writeRoots": 0,
+		});
+		strictEqual(JSON.stringify(metrics).includes("private/customer-name.ts"), false);
 	});
 
 	it("accepts the clio-run agent field and the matrix cost ceiling; rejects misuse", () => {

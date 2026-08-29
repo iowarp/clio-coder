@@ -59,10 +59,34 @@ describe("typed dispatch intent", () => {
 		);
 		ok(normalized.ok);
 		deepStrictEqual(normalized.intent, {
-			version: 1,
+			version: 2,
 			readRoots: ["src/domains/", "src/tools/"],
 			writeRoots: [],
 			relevantPaths: ["docs/fleet-dispatch.md"],
+			pathProvenance: [
+				{
+					path: "docs/fleet-dispatch.md",
+					evidence: [
+						{
+							provenance: "declared",
+							source: "intent.relevant_paths",
+							confidence: "certain",
+							reason: "explicit_intent",
+						},
+					],
+				},
+				...(["src/domains/", "src/tools/"] as const).map((path) => ({
+					path,
+					evidence: [
+						{
+							provenance: "declared" as const,
+							source: "intent.read_roots" as const,
+							confidence: "certain" as const,
+							reason: "explicit_intent" as const,
+						},
+					],
+				})),
+			],
 			expectedOutputs: ["dist/cli.js"],
 			verification: [{ check: "test", timeoutMs: 30_000 }],
 		});

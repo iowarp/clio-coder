@@ -11,6 +11,7 @@ import {
 	renderDispatchReviewerTask,
 } from "../../src/domains/dispatch/intent-requirements.js";
 import {
+	declaredIntentPathProvenance,
 	declaredScopeReplacementDiagnostic,
 	declaredScopeReplacementNotice,
 	resolveDispatchPathScope,
@@ -24,10 +25,15 @@ function request(cwd: string): DispatchRequest {
 		task: "Update docs/legacy.md while working on the declared source scope.",
 		cwd,
 		intent: {
-			version: 1,
+			version: 2,
 			readRoots: ["src/config.ts"],
 			writeRoots: ["src/generated/"],
 			relevantPaths: ["tests/unit/"],
+			pathProvenance: declaredIntentPathProvenance({
+				readRoots: ["src/config.ts"],
+				writeRoots: ["src/generated/"],
+				relevantPaths: ["tests/unit/"],
+			}),
 			expectedOutputs: [],
 			verification: [],
 		},
@@ -93,10 +99,11 @@ describe("typed dispatch scope", () => {
 
 	it("carries expected outputs and verification into result and reviewer context as requirements", () => {
 		const intent = {
-			version: 1 as const,
+			version: 2 as const,
 			readRoots: [],
 			writeRoots: [],
 			relevantPaths: [],
+			pathProvenance: [],
 			expectedOutputs: ["file provenance verdicts"],
 			verification: [{ check: "typecheck", timeoutMs: 30_000 }],
 		};

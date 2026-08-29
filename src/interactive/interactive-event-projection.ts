@@ -277,7 +277,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			if (
 				!event ||
 				typeof event !== "object" ||
-				event.code !== "typed_scope_replaced_inferred_paths" ||
+				!["typed_scope_replaced_inferred_paths", "legacy_scope_inferred", "legacy_scope_empty"].includes(event.code) ||
 				typeof event.message !== "string"
 			) {
 				return;

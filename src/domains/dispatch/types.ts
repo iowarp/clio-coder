@@ -15,6 +15,7 @@ import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.j
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { DispatchIntent } from "./intent.js";
+import type { DispatchPathScopeProvenance } from "./path-scope.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
 
@@ -321,7 +322,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 19;
+	version: 20;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -714,6 +715,8 @@ export interface RunReceipt {
 	task: string;
 	/** Normalized dispatch intent admitted before worker execution. */
 	intent?: DispatchIntent;
+	/** Resolved policy-bearing paths with field source and confidence, without source prose. */
+	pathScope?: DispatchPathScopeProvenance;
 	/** Integrity-sealed recipe policy, invocation request, effective phase, and admission reasons. */
 	budget?: RunToolBudgetEnvelope;
 	/** Proof of briefing content without copying its prose into the receipt. */
