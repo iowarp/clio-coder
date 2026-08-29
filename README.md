@@ -305,7 +305,7 @@ Full lifecycle details, including `reset` and the upgrade path, are in
 
 ## Status
 
-The current release is **v0.3.7**, installable from npm as
+The current release is **v0.3.8**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Clio Coder is still experimental: we ship quickly, interfaces may
 change between minor versions, and model-specific behavior varies by target, so
