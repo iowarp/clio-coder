@@ -1,13 +1,15 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { inspectFleet } from "../../src/cli/fleet-preflight.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { listFleetContracts, loadFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { enabledExtensionResourceRoots, installExtension } from "../../src/domains/extensions/index.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
+import { runCli } from "../harness/spawn.js";
 
 const scratchRoots: string[] = [];
 
@@ -111,6 +113,47 @@ function writeExtension(root: string): void {
 	write(root, "fleets/wtfp-plan-section.md", FLEET);
 }
 
+function writeMinimalExtension(root: string, fleetAgent = "extension-reader"): void {
+	write(
+		root,
+		"clio-coder-extension.yaml",
+		[
+			"manifestVersion: 1",
+			"id: minimal",
+			"name: Minimal Fleet Extension",
+			"version: 1.0.0",
+			"description: Minimal agent and fleet integration fixture.",
+			"resources:",
+			"  agents: agents",
+			"  fleets: fleets",
+			"",
+		].join("\n"),
+	);
+	write(root, "agents/extension-reader.md", agent("Extension Reader", []));
+	write(
+		root,
+		"fleets/minimal.md",
+		[
+			"---",
+			"version: 3",
+			"name: minimal",
+			"description: Resolve one extension-owned agent.",
+			"steps:",
+			"  - kind: agent",
+			"    id: inspect",
+			`    agent: ${fleetAgent}`,
+			"    scope: readonly",
+			"    dependencies: []",
+			"maxWorkers: 1",
+			"onFailure: stop",
+			"---",
+			"",
+			"Inspect the supplied fixture without mutation.",
+			"",
+		].join("\n"),
+	);
+}
+
 describe("contracts/WTF-P extension resources", () => {
 	afterEach(() => {
 		for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -163,6 +206,78 @@ describe("contracts/WTF-P extension resources", () => {
 		strictEqual(listing?.source, "extension");
 		strictEqual(listing?.error, null);
 		strictEqual(loadFleetContract(project, "wtfp-plan-section").steps.length, 2);
+
+		const preflightCwd = process.cwd();
+		try {
+			process.chdir(project);
+			const preflight = inspectFleet("wtfp-plan-section", { topic: "durable workflows" });
+			strictEqual(preflight.checks.find((check) => check.check === "agents")?.summary, "resolved 2 agents");
+		} finally {
+			process.chdir(preflightCwd);
+		}
+
+		const validate = await runCli(["fleet", "validate", "wtfp-plan-section", "--json"], { cwd: project });
+		strictEqual(validate.code, 0, validate.stderr || validate.stdout);
+		const validation = JSON.parse(validate.stdout) as {
+			valid: boolean;
+			checks: Array<{ check: string; summary: string }>;
+		};
+		strictEqual(validation.valid, true);
+		strictEqual(validation.checks.find((check) => check.check === "agents")?.summary, "resolved 2 agents");
+
+		const graph = await runCli(["fleet", "graph", "wtfp-plan-section", "--json"], { cwd: project });
+		strictEqual(graph.code, 0, graph.stderr || graph.stdout);
+		const graphResult = JSON.parse(graph.stdout) as {
+			waves: Array<{ steps: Array<{ id: string; agent: string }> }>;
+		};
+		deepStrictEqual(
+			graphResult.waves.flatMap((wave) => wave.steps.map((step) => [step.id, step.agent])),
+			[
+				["plan", "wtfp-planner"],
+				["inspect", "wtfp-checker"],
+			],
+		);
+	});
+
+	it("preflights a minimal extension fleet and refuses an unknown agent", () => {
+		const project = scratchDir();
+		const source = scratchDir();
+		writeMinimalExtension(source);
+		strictEqual(
+			installExtension(source, { cwd: project, scope: "project" }).diagnostics.some(
+				(diagnostic) => diagnostic.type === "error",
+			),
+			false,
+		);
+
+		const originalCwd = process.cwd();
+		try {
+			process.chdir(project);
+			const inspected = inspectFleet("minimal");
+			strictEqual(inspected.plan.steps[0]?.kind, "agent");
+			strictEqual(inspected.plan.steps[0]?.kind === "agent" ? inspected.plan.steps[0].agentId : null, "extension-reader");
+		} finally {
+			process.chdir(originalCwd);
+		}
+
+		const brokenProject = scratchDir();
+		const brokenSource = scratchDir();
+		writeMinimalExtension(brokenSource, "missing-extension-agent");
+		strictEqual(
+			installExtension(brokenSource, { cwd: brokenProject, scope: "project" }).diagnostics.some(
+				(diagnostic) => diagnostic.type === "error",
+			),
+			false,
+		);
+		try {
+			process.chdir(brokenProject);
+			throws(
+				() => inspectFleet("minimal"),
+				/unknown agent 'missing-extension-agent'.*must name a recipe from 'clio-coder agents'/,
+			);
+		} finally {
+			process.chdir(originalCwd);
+		}
 	});
 
 	it("refuses a declared resource root outside the extension package", () => {

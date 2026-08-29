@@ -140,6 +140,8 @@ export interface AgentRecipe {
 export interface RecipeSource {
 	dir: string;
 	source: AgentRecipe["source"];
+	/** Project root whose extension and skill resources are being discovered. */
+	cwd?: string;
 	/** Stable provenance used to correlate resources from one extension. */
 	origin?: string;
 	/** The declaring extension's skill root; extension agents may bind only here. */
