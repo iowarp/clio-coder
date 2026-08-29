@@ -5,6 +5,7 @@
  * append advances `state.lastTurnId`.
  */
 
+import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
@@ -39,7 +40,7 @@ export interface TurnPersistenceDeps {
 	/** Remove a queued-mirror entry once the engine injects it. */
 	removeQueuedMirrorEntry: (text: string) => void;
 	/** Prompt-cache record for a persisted assistant call (T3.2 + cold stamp). */
-	promptCachePayloadForAssistant: (usage: Usage) => Record<string, unknown>;
+	promptCachePayloadForAssistant: (usage: Usage, backend?: BackendCompletionTimings) => Record<string, unknown>;
 	/**
 	 * Prompt-side tokens the live context accounting holds for the turn in
 	 * flight. Used only to record what an interrupted call is known to have
@@ -228,7 +229,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (timing) payload.timing = timing;
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
-			payload.promptCache = deps.promptCachePayloadForAssistant(usage);
+			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
+			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings);
 		}
 		// A cancelled turn's provider usage is the object the stream started with
 		// and never updated. Record what the call is known to have spent instead of

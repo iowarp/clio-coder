@@ -35,7 +35,12 @@
  * unload/load against the same server.
  */
 
-import { BusChannels, type RuntimeNoticeKind, type RuntimeNoticePayload } from "../../core/bus-events.js";
+import {
+	BusChannels,
+	type ResidencyMutationPayload,
+	type RuntimeNoticeKind,
+	type RuntimeNoticePayload,
+} from "../../core/bus-events.js";
 import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
 import { getSharedBus } from "../../core/shared-bus.js";
 import { withResidencyLock } from "./residency-lock.js";
@@ -71,6 +76,11 @@ export function emitResidencyNotice(notice: ResidencyNotice): void {
 	} catch {
 		// A notice is informational; a sink failure must never escape into a turn.
 	}
+}
+
+/** Publish one successful residency mutation to in-process cache telemetry. */
+export function emitResidencyMutation(mutation: Omit<ResidencyMutationPayload, "at">): void {
+	getSharedBus().emit(BusChannels.ResidencyMutation, { ...mutation, at: Date.now() });
 }
 
 // --- configured-model protection ---------------------------------------------
@@ -543,6 +553,13 @@ async function restoreEvictedModels(
 		try {
 			await adapter.reloadEvicted(entry.modelId);
 			restored.push(entry.modelId);
+			emitResidencyMutation({
+				targetKey: adapter.targetKey,
+				targetId: adapter.targetId,
+				runtimeId: adapter.runtimeId,
+				model: entry.modelId,
+				operation: "load",
+			});
 		} catch {
 			failed.push(entry.modelId);
 		}
@@ -705,6 +722,13 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 					await adapter.unload(entry.modelId);
 					forgetClioLoaded(adapter.targetKey, entry.modelId);
 					evicted.push(entry);
+					emitResidencyMutation({
+						targetKey: adapter.targetKey,
+						targetId: adapter.targetId,
+						runtimeId: adapter.runtimeId,
+						model: entry.modelId,
+						operation: "evict",
+					});
 				} catch {
 					// Best-effort: a failed unload self-heals on the next reconcile.
 				}
@@ -712,6 +736,15 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 			if (!adapter.load) return;
 			try {
 				await adapter.load(adapter.keepModelId);
+				if (!plan.keepResident) {
+					emitResidencyMutation({
+						targetKey: adapter.targetKey,
+						targetId: adapter.targetId,
+						runtimeId: adapter.runtimeId,
+						model: adapter.keepModelId,
+						operation: "load",
+					});
+				}
 			} catch (error) {
 				// The eviction bought nothing: the slot it freed is still empty and
 				// the target is now serving less than before the reconcile. Put back

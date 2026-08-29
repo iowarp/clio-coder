@@ -16,6 +16,7 @@ import {
 	type Usage,
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import type { BackendCompletionTimings, BackendTimingsSource } from "../../core/cache-telemetry.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import {
 	type AppliedThinking,
@@ -41,6 +42,8 @@ declare module "@earendil-works/pi-ai" {
 	interface AssistantMessage {
 		/** Direct observation of model-id presence in an OpenAI-compatible response. */
 		responseModelIdObservation?: ResponseModelIdObservation;
+		/** Backend-reported prefill and prediction timings when available. */
+		backendTimings?: BackendCompletionTimings;
 	}
 }
 
@@ -95,13 +98,57 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 interface ResponseModelIdCapture {
 	reportedModelId: string | null;
 	observed: boolean;
-	done: boolean;
+	modelIdDone: boolean;
+	backendTimings: BackendCompletionTimings | null;
+	backendTimingsSource: BackendTimingsSource | null;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
 
-function observeResponseModelIdLine(line: string, capture: ResponseModelIdCapture): void {
-	if (capture.done) return;
+function nonnegativeFiniteNumber(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * The operator's llama.cpp router reported build b226-2115b73d8. Its nonstream
+ * response placed a `{ prompt_n, prompt_ms, predicted_n, predicted_ms, cache_n }`
+ * timing object at the top level. Its stream placed the timing object on the
+ * final SSE JSON event without `timings_per_token`. Setting
+ * `timings_per_token: true` repeated cumulative timing objects for individual
+ * tokens. LM Studio's OpenAI-compatible stream and nonstream responses omitted
+ * timings both with and without that flag. Its native runtime reported
+ * llama.cpp-win-x86_64-nvidia-cuda12-avx2 2.29.0.
+ */
+function backendCompletionTimings(value: unknown, source: BackendTimingsSource): BackendCompletionTimings | null {
+	if (!isPlainRecord(value)) return null;
+	const promptN = nonnegativeFiniteNumber(value.prompt_n);
+	const predictedN = nonnegativeFiniteNumber(value.predicted_n);
+	const promptMs = nonnegativeFiniteNumber(value.prompt_ms);
+	const predictedMs = nonnegativeFiniteNumber(value.predicted_ms);
+	if (promptN === null || predictedN === null || promptMs === null || predictedMs === null) return null;
+	const cacheN = nonnegativeFiniteNumber(value.cache_n);
+	return {
+		promptTokens: promptN + (cacheN ?? 0),
+		cachedTokens: cacheN,
+		predictedTokens: predictedN,
+		promptMs,
+		predictedMs,
+		source,
+	};
+}
+
+function backendTimingsSourceForModel(model: Model<Api>): BackendTimingsSource | null {
+	const metadata = (model as Model<Api> & ClioRuntimeMetadata).clio;
+	if (model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp") return "llamacpp-timings";
+	if (model.provider === "lmstudio" && metadata?.runtimeId === "lmstudio") return "lmstudio-timings";
+	return null;
+}
+
+function captureCanStopEarly(capture: ResponseModelIdCapture): boolean {
+	return capture.modelIdDone && capture.backendTimingsSource === null;
+}
+
+function observeResponseMetadataLine(line: string, capture: ResponseModelIdCapture): void {
 	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
 	if (!normalized.startsWith("data:")) return;
 	const data = normalized.slice("data:".length).trimStart();
@@ -109,10 +156,16 @@ function observeResponseModelIdLine(line: string, capture: ResponseModelIdCaptur
 	try {
 		const payload = JSON.parse(data) as unknown;
 		if (!isPlainRecord(payload)) return;
-		const model = payload.model;
-		if (typeof model === "string" && model.trim().length > 0) {
-			capture.reportedModelId = model.trim();
-			capture.done = true;
+		if (!capture.modelIdDone) {
+			const model = payload.model;
+			if (typeof model === "string" && model.trim().length > 0) {
+				capture.reportedModelId = model.trim();
+				capture.modelIdDone = true;
+			}
+		}
+		if (capture.backendTimingsSource !== null) {
+			const timings = backendCompletionTimings(payload.timings, capture.backendTimingsSource);
+			if (timings !== null) capture.backendTimings = timings;
 		}
 	} catch {
 		// A partial or vendor-specific event is pi-ai's parsing concern. This
@@ -125,14 +178,14 @@ function observeResponseModelIdBytes(
 	capture: ResponseModelIdCapture,
 	flush = false,
 ): void {
-	if (capture.done || !capture.decoder) return;
+	if (!capture.decoder) return;
 	capture.buffer += chunk ? capture.decoder.decode(chunk, { stream: !flush }) : capture.decoder.decode();
 	let newline = capture.buffer.indexOf("\n");
 	while (newline >= 0) {
 		const line = capture.buffer.slice(0, newline);
 		capture.buffer = capture.buffer.slice(newline + 1);
-		observeResponseModelIdLine(line, capture);
-		if (capture.done) {
+		observeResponseMetadataLine(line, capture);
+		if (captureCanStopEarly(capture)) {
 			capture.buffer = "";
 			capture.decoder = null;
 			return;
@@ -140,10 +193,10 @@ function observeResponseModelIdBytes(
 		newline = capture.buffer.indexOf("\n");
 	}
 	if (flush && capture.buffer.length > 0) {
-		observeResponseModelIdLine(capture.buffer, capture);
+		observeResponseMetadataLine(capture.buffer, capture);
 		capture.buffer = "";
 	}
-	if (capture.done || flush) capture.decoder = null;
+	if (captureCanStopEarly(capture) || flush) capture.decoder = null;
 }
 
 function captureResponseModelId(response: Response, capture: ResponseModelIdCapture): Response {
@@ -154,12 +207,12 @@ function captureResponseModelId(response: Response, capture: ResponseModelIdCapt
 		new TransformStream<Uint8Array, Uint8Array>({
 			transform(chunk, controller) {
 				capture.observed = true;
-				if (!capture.done) observeResponseModelIdBytes(chunk, capture);
+				observeResponseModelIdBytes(chunk, capture);
 				controller.enqueue(chunk);
 			},
 			flush() {
 				capture.observed = true;
-				if (!capture.done) observeResponseModelIdBytes(undefined, capture, true);
+				observeResponseModelIdBytes(undefined, capture, true);
 			},
 		}),
 	);
@@ -171,13 +224,16 @@ function captureResponseModelId(response: Response, capture: ResponseModelIdCapt
 }
 
 function withResponseModelIdCapture<TOptions extends StreamOptions>(
+	model: Model<Api>,
 	options: TOptions,
 	sourceFactory: (capturedOptions: TOptions) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	const capture: ResponseModelIdCapture = {
 		reportedModelId: null,
 		observed: false,
-		done: false,
+		modelIdDone: false,
+		backendTimings: null,
+		backendTimingsSource: backendTimingsSourceForModel(model),
 		buffer: "",
 		decoder: new TextDecoder(),
 	};
@@ -197,8 +253,13 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 						? { state: "not-reported" }
 						: { state: "reported", reportedModelId: capture.reportedModelId }
 					: { state: "not-observed" };
-				if (event.type === "done") event.message.responseModelIdObservation = observation;
-				else if (event.type === "error") event.error.responseModelIdObservation = observation;
+				if (event.type === "done") {
+					event.message.responseModelIdObservation = observation;
+					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
+				} else if (event.type === "error") {
+					event.error.responseModelIdObservation = observation;
+					if (capture.backendTimings !== null) event.error.backendTimings = capture.backendTimings;
+				}
 				annotated.push(event as AssistantMessageEvent);
 			}
 			annotated.end();
@@ -863,6 +924,7 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
 							withResponseModelIdCapture(
+								model,
 								withRemainingContextBudget(model, effectiveContext, withSamplers),
 								(capturedOptions) =>
 									withLocalResidency(
@@ -895,6 +957,7 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 					stripNeverReasoningFromStream(
 						filterGemmaChannelStream(
 							withResponseModelIdCapture(
+								model,
 								withRemainingContextBudget(model, effectiveContext, withSamplers),
 								(capturedOptions) =>
 									withLocalResidency(

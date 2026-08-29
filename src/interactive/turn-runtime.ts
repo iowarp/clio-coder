@@ -6,6 +6,7 @@
  */
 
 import { performance } from "node:perf_hooks";
+import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import { attributedModelId } from "../core/response-model-id.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
@@ -855,7 +856,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {
 					const input = typeof usage.input === "number" ? usage.input : 0;
 					const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
-					runFirstCallVerdict = backendCacheVerdict(input, cacheRead);
+					const backendTimings = (enrichedEvent.message as { backendTimings?: BackendCompletionTimings }).backendTimings;
+					runFirstCallVerdict = backendCacheVerdict(input, cacheRead, backendTimings);
 				}
 				if (usage) {
 					context.reconcileUsage(usage);

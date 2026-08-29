@@ -12,9 +12,16 @@ import {
 	type ContextPrunedPayload,
 	type ContextRecalledPayload,
 	type ContextWarningPayload,
+	type ResidencyMutationPayload,
 } from "../core/bus-events.js";
+import {
+	type BackendCacheVerdict,
+	type BackendCompletionTimings,
+	uncachedPrefillTokens,
+} from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { ToolName } from "../core/tool-names.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -63,7 +70,6 @@ import { appendPromptCompileRecord, type SessionPromptCompileRecord } from "../d
 import type { AgentMessage, Usage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
-	type BackendCacheVerdict,
 	backendCacheVerdict,
 	extractUserText,
 	runtimeSupportsTools,
@@ -113,6 +119,16 @@ export interface LiveContextEstimate {
 	contextWindow: number;
 	breakdown: ReturnType<typeof estimateAgentContextBreakdown>;
 }
+
+/** Known causes that make the next provider prefix cache miss expected. */
+export type ExpectedColdReason =
+	| "dispatch"
+	| "compaction"
+	| "working_set_evict"
+	| "residency"
+	| "thinking_change"
+	| "tool_surface_change"
+	| "prompt_recompiled";
 
 export interface TurnContext {
 	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
@@ -165,10 +181,12 @@ export interface TurnContext {
 	contextUsage(): ContextUsageSnapshot;
 	contextLedger(): ContextLedger;
 	emitContextWindowWarningTransition(warning: string | null): void;
+	/** Record one known cache disturbance for the current or next call. */
+	noteColdReason(reason: ExpectedColdReason): void;
 	/** Consume disturbances since the last settled run (T3.3 honesty). */
 	consumeExpectedColdReasons(runtimeId: string): void;
 	/** Prompt-cache record for one persisted assistant call, with cold-reason stamp. */
-	promptCachePayloadForAssistant(usage: Usage): Record<string, unknown>;
+	promptCachePayloadForAssistant(usage: Usage, backend?: BackendCompletionTimings): Record<string, unknown>;
 	/** Record the settled run's cache summary for /context. */
 	noteRunCacheSummary(messages: ReadonlyArray<AgentMessage>, runFirstCallVerdict: BackendCacheVerdict | null): void;
 	resetForSession(): void;
@@ -215,22 +233,25 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// and summary probes. A new submitted user turn gets a new id naturally.
 	let emptyAutoCompactTurnId: string | null = null;
 
-	// Cache-disturbance honesty (T3.3). Dispatch traffic and history
-	// compaction invalidate a single-slot local backend's prefix cache.
-	// Accumulate every disturbance since the last settled run; the next
-	// submit consumes the set, stamps `promptCache.expectedColdReasons` on
-	// its first assistant entry, and shows one dim notice.
-	const pendingColdReasons = new Set<string>();
-	let runExpectedColdReasons: string[] = [];
-	let nextAssistantColdReasons: string[] = [];
-	// A working-set eviction changes the prefix itself, so it cools every
-	// tier's cache, not only a single-slot local one. Dispatch and compaction
-	// disturbances keep the local-native gate below.
-	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<string> = new Set(["working_set_evict"]);
-	const stampsOnTier = (reason: string, runtimeId: string | undefined): boolean =>
+	// Cache-disturbance honesty (T3.3). Accumulate every known local-runtime
+	// disturbance and prefix-byte change since the last settled run. The next
+	// submit consumes the set, stamps `promptCache.expectedColdReasons` on its
+	// first assistant entry, and shows one dim notice.
+	const pendingColdReasons = new Set<ExpectedColdReason>();
+	let runExpectedColdReasons: ExpectedColdReason[] = [];
+	let nextAssistantColdReasons: ExpectedColdReason[] = [];
+	// Prefix-byte changes cool every tier. Residency, thinking changes, dispatch
+	// traffic, and compaction keep the local-native gate because they disturb a
+	// local server or its rendered template.
+	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<ExpectedColdReason> = new Set([
+		"working_set_evict",
+		"tool_surface_change",
+		"prompt_recompiled",
+	]);
+	const stampsOnTier = (reason: ExpectedColdReason, runtimeId: string | undefined): boolean =>
 		TIER_INDEPENDENT_COLD_REASONS.has(reason) ||
 		(runtimeId !== undefined && deps.providers.getRuntime(runtimeId)?.tier === "local-native");
-	const noteColdReason = (reason: string): void => {
+	const noteColdReason = (reason: ExpectedColdReason): void => {
 		if (!state.streaming) {
 			pendingColdReasons.add(reason);
 			return;
@@ -254,6 +275,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					noteColdReason("compaction");
 				}) ?? null,
 		),
+		deps.bus?.on(BusChannels.ResidencyMutation, (payload: ResidencyMutationPayload) => {
+			const runtime = state.runtime;
+			const model = runtime?.agent.state.model as { baseUrl?: unknown } | undefined;
+			const baseUrl = typeof model?.baseUrl === "string" ? model.baseUrl : null;
+			if (payload.targetKey !== residencyTargetKey(runtime?.runtimeId ?? "", baseUrl)) return;
+			noteColdReason("residency");
+		}) ?? null,
 		deps.bus?.on(BusChannels.ContextRecalled, (payload: ContextRecalledPayload) => {
 			middleware.fireCompactionHook("working_set_recall", payload.trigger);
 		}) ?? null,
@@ -987,6 +1015,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						tokenEstimate: entry.tokenEstimate,
 					},
 				});
+				if (entry.previousHash !== null) noteColdReason("prompt_recompiled");
 			} catch {
 				// Ledger logging is diagnostics, not control flow; never abort a turn.
 			}
@@ -1117,12 +1146,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			deps.bus?.emit(BusChannels.ContextWarning, { warning } satisfies ContextWarningPayload);
 		},
 
+		noteColdReason,
+
 		consumeExpectedColdReasons(runtimeId: string): void {
 			// Cache-disturbance honesty (T3.3): consume disturbances since
 			// the last settled run. Only single-slot local backends lose their
-			// prefix cache to interleaved work, so dispatch and compaction
-			// stamp only on local-native targets; a working-set eviction moved
-			// the prefix itself and stamps on every tier (see stampsOnTier).
+			// prefix cache to interleaved work, so residency, thinking changes,
+			// dispatch, and compaction stamp only on local-native targets. Reasons
+			// that change the prefix bytes stamp every tier (see stampsOnTier).
 			runExpectedColdReasons = [];
 			nextAssistantColdReasons = [];
 			if (pendingColdReasons.size > 0) {
@@ -1136,10 +1167,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		},
 
-		promptCachePayloadForAssistant(usage: Usage): Record<string, unknown> {
-			// Per-call prompt-cache record (T3.2): provider-reported numbers only,
-			// classified by backendCacheVerdict in chat-loop-messages.ts. The
-			// run's first persisted call also carries any expected-cold reasons.
+		promptCachePayloadForAssistant(usage: Usage, backend?: BackendCompletionTimings): Record<string, unknown> {
+			// Per-call prompt-cache record (T3.2) keeps normalized provider usage
+			// beside any timings captured from the server response. The run's first
+			// persisted call also carries any expected-cold reasons.
 			const input = typeof usage.input === "number" ? usage.input : 0;
 			const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 			const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
@@ -1147,8 +1178,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				input,
 				cacheRead,
 				cacheWrite,
-				backendVerdict: backendCacheVerdict(input, cacheRead),
+				backendVerdict: backendCacheVerdict(input, cacheRead, backend),
 			};
+			if (backend !== undefined) promptCache.backend = { ...backend };
 			if (nextAssistantColdReasons.length > 0) {
 				promptCache.expectedColdReasons = [...nextAssistantColdReasons];
 				nextAssistantColdReasons = [];
@@ -1159,11 +1191,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		noteRunCacheSummary(messages, runFirstCallVerdict): void {
 			const cacheSummary = sumRunUsage(messages);
 			if (cacheSummary.hadUsage) {
+				let lastBackend: BackendCompletionTimings | null = null;
+				for (let index = messages.length - 1; index >= 0; index -= 1) {
+					const message = messages[index];
+					if (message?.role !== "assistant") continue;
+					lastBackend = (message as { backendTimings?: BackendCompletionTimings }).backendTimings ?? null;
+					break;
+				}
 				lastPromptCache = {
 					shellReused: lastSystemPromptReused,
 					cacheReadTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheRead : null,
 					cacheWriteTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheWrite : null,
 					uncachedInputTokens: cacheSummary.input,
+					backend: lastBackend,
+					uncachedPrefillTokens: uncachedPrefillTokens(lastBackend),
 					backendVerdict: runFirstCallVerdict,
 					...(runExpectedColdReasons.length > 0 ? { expectedColdReasons: [...runExpectedColdReasons] } : {}),
 				};

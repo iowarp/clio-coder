@@ -45,6 +45,8 @@ describe("contracts/context-accounting", () => {
 				cacheReadTokens: 0,
 				cacheWriteTokens: 120,
 				uncachedInputTokens: 4000,
+				backend: null,
+				uncachedPrefillTokens: null,
 				backendVerdict: "cold",
 			},
 		});

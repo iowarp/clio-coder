@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
+import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
 	type LmStudioCatalog,
 	type LmStudioLoadedInstance,
@@ -11,7 +12,7 @@ import {
 } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { TargetDescriptor } from "../../domains/providers/types/target-descriptor.js";
 import { coResidentContextCeiling, fitLoadContextLength } from "./lmstudio-residency.js";
-import { emitResidencyNotice, reconcileResidency, residencyManagedFor } from "./residency.js";
+import { emitResidencyMutation, emitResidencyNotice, reconcileResidency, residencyManagedFor } from "./residency.js";
 import { withResidencyLock } from "./residency-lock.js";
 
 interface LmStudioModelMetadata {
@@ -205,7 +206,7 @@ export async function ensureLmStudioResidency(
 		entry.loadedInstances.map((instance) => ({ modelKey: entry.key, identifier: instance.id, instance })),
 	);
 	const managed = residencyManagedFor(info.lifecycle);
-	const targetKey = `lmstudio|${lmStudioRootUrl(target.url ?? model.baseUrl)}`;
+	const targetKey = residencyTargetKey("lmstudio", target.url ?? model.baseUrl);
 	const contextLength = target.lmstudio?.load?.contextLength;
 	const plan = await reconcileResidency({
 		targetKey,
@@ -248,17 +249,36 @@ export async function ensureLmStudioResidency(
 			});
 		}
 	}
+	const loadAndReport = async (): Promise<string> => {
+		const instanceId = await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal);
+		emitResidencyMutation({
+			targetKey,
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: modelKey,
+			operation: "load",
+		});
+		return instanceId ?? model.id;
+	};
 	try {
-		return (await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal)) ?? model.id;
+		return await loadAndReport();
 	} catch (error) {
 		if (plan.decision === "observe" || plan.fallbackEvict.length === 0) throw error;
 		return withResidencyLock(targetKey, async () => {
 			for (const candidate of plan.fallbackEvict) {
 				for (const entry of instances.filter((resident) => resident.modelKey === candidate.modelId)) {
-					await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal);
+					if (await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal)) {
+						emitResidencyMutation({
+							targetKey,
+							targetId: info.targetId,
+							runtimeId: "lmstudio",
+							model: candidate.modelId,
+							operation: "evict",
+						});
+					}
 				}
 			}
-			return (await loadOwnedInstance(target, targetKey, body, options.apiKey, options.signal)) ?? model.id;
+			return loadAndReport();
 		});
 	}
 }

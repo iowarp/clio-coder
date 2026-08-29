@@ -589,7 +589,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
 		removeQueuedMirrorEntry: (text) => queues.removeQueuedMirrorEntry(text),
-		promptCachePayloadForAssistant: (usage) => context.promptCachePayloadForAssistant(usage),
+		promptCachePayloadForAssistant: (usage, backend) => context.promptCachePayloadForAssistant(usage, backend),
 		promptSideTokens: () => context.promptSideTokens(),
 		observability: deps.observability,
 	});
@@ -822,7 +822,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			}
 
-			state.lastRunSnapshot = null;
+			const previousRunSnapshot = state.lastRunSnapshot;
 			let agentRuntime: AgentRuntime | null;
 			try {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
@@ -858,6 +858,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				currentToolInvokeOptions,
 				turnRuntime.toolTelemetry,
 			);
+			const toolSignature = toolSignatureFromState(agentRuntime.agent.state.tools);
 			const askUserPolicy = createAskUserToolPolicy(agentRuntime.agent.state.tools);
 			// turn_start: the prompt is accepted; registrations may inject
 			// context for this request. Accumulated reminders (turn_end
@@ -907,7 +908,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					pendingUserInput: submittedText,
 					images,
 					promptHash: compiledPrompt?.systemPromptHash,
-					toolSignature: toolSignatureFromState(agentRuntime.agent.state.tools),
+					toolSignature,
 				});
 
 			const reservedOutput = resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens);
@@ -966,6 +967,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// cancelled run's leftovers, which is the order the ledger has.
 			if (interrupted) emit({ type: "queued_user_turn", text, kind: "interrupt" });
 			context.logPromptCompileIfPending();
+			const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
+			if (
+				previousThinkingLevel !== undefined &&
+				previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel
+			) {
+				context.noteColdReason("thinking_change");
+			}
+			if (typeof previousRunSnapshot?.toolSignature === "string" && previousRunSnapshot.toolSignature !== toolSignature) {
+				context.noteColdReason("tool_surface_change");
+			}
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 			context.setCurrentSnapshot(turnSnapshot);
 			context.persistContextSnapshot(turnSnapshot);
@@ -980,7 +991,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				compiledPromptHash: promptHash,
 				staticCompositionHash: promptHash,
 				promptSignature: promptHash,
-				toolSignature: toolSignatureFromState(agentRuntime.agent.state.tools),
+				toolSignature,
 				runtimeResolution: runtimeTargetSnapshot(agentRuntime.runtimeResolution),
 				sessionId: deps.session?.current()?.id ?? null,
 				cwd: process.cwd(),
@@ -1176,6 +1187,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			middleware.clearPendingReminders();
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
+			state.lastRunSnapshot = null;
 			context.resetForSession();
 			// The resumed ledger renders before the first new turn (issue #189),
 			// and the window it renders against should be the probed one rather

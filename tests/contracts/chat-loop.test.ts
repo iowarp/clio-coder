@@ -8,6 +8,8 @@ import { BusChannels, type LoopBlockedPayload } from "../../src/core/bus-events.
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { residencyTargetKey } from "../../src/core/residency-target-key.js";
+import { getSharedBus } from "../../src/core/shared-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -18,12 +20,15 @@ import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../.
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { reconcileResidency } from "../../src/engine/apis/residency.js";
 import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { backendCacheVerdict } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { renderContextLedgerLines } from "../../src/interactive/context-overlay.js";
 import { createStatusController } from "../../src/interactive/status/controller.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -492,6 +497,334 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		strictEqual(payload.promptCache?.input, 1100);
 		strictEqual(payload.promptCache?.backendVerdict, "small");
 		ok(panel.render(120).join("\n").includes("generation/output limit"));
+	});
+});
+
+type ColdReasonTier = "local-native" | "cloud";
+
+function coldReasonProviders(options: {
+	tier: ColdReasonTier;
+	reasoning?: boolean;
+	residency?: boolean;
+}): ProvidersContract {
+	const contract = providers(options.tier === "local-native" ? "local-native" : undefined);
+	const status = contract.list()[0];
+	ok(status);
+	const runtime = status.runtime;
+	ok(runtime);
+	runtime.tier = options.tier;
+	// The cold assistant below attests a 5,000-token prompt. Since #227 the
+	// preflight budgets against that attested figure, so the window has to hold
+	// it or the second submit is blocked as an overflow before it can stamp.
+	const contextWindow = 100_000;
+	runtime.defaultCapabilities = { ...runtime.defaultCapabilities, contextWindow };
+	status.target.capabilities = { ...status.target.capabilities, contextWindow };
+	status.capabilities = { ...status.capabilities, contextWindow };
+	status.probeCapabilities = { ...(status.probeCapabilities ?? {}), contextWindow };
+	if (options.residency) {
+		runtime.id = "llamacpp";
+		status.target.runtime = "llamacpp";
+		status.target.url = "http://mini:8080";
+	}
+	if (options.reasoning) {
+		runtime.defaultCapabilities = { ...runtime.defaultCapabilities, reasoning: true };
+		status.target.capabilities = { ...status.target.capabilities, reasoning: true };
+		status.capabilities = { ...status.capabilities, reasoning: true };
+	}
+	const synthesize = runtime.synthesizeModel;
+	ok(synthesize);
+	runtime.synthesizeModel = (target, wireModelId, kb) => {
+		const model = synthesize(target, wireModelId, kb);
+		return {
+			...model,
+			contextWindow,
+			...(options.reasoning ? { reasoning: true } : {}),
+			...(options.residency ? { provider: "llamacpp", baseUrl: "http://mini:8080/v1" } : {}),
+		};
+	};
+	return contract;
+}
+
+function coldPromptContract(readText: () => string) {
+	const compile = async () => {
+		const systemPrompt = readText();
+		return {
+			systemPrompt,
+			systemPromptHash: systemPrompt === "stable prompt" ? "a".repeat(64) : "b".repeat(64),
+			tokenEstimate: 3,
+			sections: [{ id: "identity", tokenEstimate: 3 }],
+			fragmentManifest: [],
+		};
+	};
+	return {
+		compileSessionPrompt: compile,
+		compileWorkerPrompt: compile,
+		reload() {},
+	};
+}
+
+async function emitColdAssistant(agent: FakeAgent, text: string): Promise<void> {
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		stopReason: "stop",
+		usage: { input: 5_000, output: 8, cacheRead: 0, cacheWrite: 0, totalTokens: 5_008 },
+		timestamp: Date.now(),
+	} as unknown as AgentMessage;
+	await agent.emit({ type: "agent_start" });
+	await agent.emit({ type: "message_start", message });
+	await agent.emit({
+		type: "message_update",
+		message,
+		assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text, partial: message },
+	} as never);
+	agent.state.messages.push(message);
+	await agent.emit({ type: "message_end", message });
+	await agent.emit({ type: "agent_end", messages: [message] });
+}
+
+function persistedColdReasons(entries: ReadonlyArray<SessionEntry>): string[] | undefined {
+	const assistant = entries.filter(isAssistantMessageEntry).at(-1);
+	return (assistant?.payload as { promptCache?: { expectedColdReasons?: string[] } } | undefined)?.promptCache
+		?.expectedColdReasons;
+}
+
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+
+function assertExpectedColdOverlay(loop: ReturnType<typeof createChatLoop>, label: string): void {
+	const lines = renderContextLedgerLines(loop.contextLedger(), 88);
+	const text = lines.join("\n").replace(ANSI_PATTERN, "");
+	ok(text.includes(`last cold turn: ${label} (expected)`), text);
+	const cacheLine = lines.find((line) => line.replace(ANSI_PATTERN, "").includes("prompt cache:"));
+	ok(cacheLine, text);
+	const warning = clioTheme().fgSequence("warning");
+	if (warning.length > 0) ok(!cacheLine.includes(warning), "an explained cold turn must not use warning styling");
+}
+
+describe("contracts/chat-loop expected cold reasons", () => {
+	it("stamps a successful mutation on the active residency endpoint", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = getSharedBus();
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: coldReasonProviders({ tier: "local-native", residency: true }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				if (calls === 2) {
+					await reconcileResidency({
+						targetKey: residencyTargetKey("llamacpp", "http://mini:8080/v1"),
+						targetId: "test-target",
+						runtimeId: "llamacpp",
+						keepModelId: "model",
+						managed: true,
+						strategy: "router",
+						listResident: async () => [{ modelId: "displaced-model" }],
+						capacity: async () => 1,
+						unload: async () => {},
+						load: async () => {},
+						ttlMs: 0,
+					});
+				}
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		await loop.submit("after residency changed");
+
+		deepStrictEqual(persistedColdReasons(entries), ["residency"]);
+		assertExpectedColdOverlay(loop, "residency change");
+		loop.dispose();
+	});
+
+	it("ignores a residency mutation on a different local endpoint", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = getSharedBus();
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: coldReasonProviders({ tier: "local-native", residency: true }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				if (calls === 2) {
+					bus.emit(BusChannels.ResidencyMutation, {
+						targetKey: residencyTargetKey("llamacpp", "http://another-host:8080/v1"),
+						targetId: "another-target",
+						runtimeId: "llamacpp",
+						model: "model",
+						operation: "evict",
+						at: Date.now(),
+					});
+				}
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		await loop.submit("different endpoint changed");
+
+		strictEqual(persistedColdReasons(entries), undefined);
+		loop.dispose();
+	});
+
+	it("retains the last served snapshot across a rejected submit before a thinking-level change", async () => {
+		const configured = settings();
+		configured.orchestrator.thinkingLevel = "off";
+		const entries: SessionEntry[] = [];
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => configured,
+			providers: coldReasonProviders({ tier: "local-native", reasoning: true }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		configured.orchestrator.thinkingLevel = "high";
+		await loop.submit("x".repeat(500_000));
+		strictEqual(calls, 1, "the oversized request should be rejected before it reaches the backend");
+		await loop.submit("think now");
+
+		deepStrictEqual(persistedColdReasons(entries), ["thinking_change"]);
+		assertExpectedColdOverlay(loop, "thinking-level change");
+		loop.dispose();
+	});
+
+	it("stamps a changed tool surface on a cloud target", async () => {
+		const entries: SessionEntry[] = [];
+		const registry = createRegistry({ safety: allowAllSafety() });
+		registry.register(dummyTool(ToolNames.Read));
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: coldReasonProviders({ tier: "cloud" }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			toolRegistry: registry,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		registry.register(dummyTool(ToolNames.Grep));
+		await loop.submit("use the expanded tools");
+
+		deepStrictEqual(persistedColdReasons(entries), ["tool_surface_change"]);
+		assertExpectedColdOverlay(loop, "tool-surface change");
+		loop.dispose();
+	});
+
+	it("does not stamp the first compile and stamps a genuine prompt recompile", async () => {
+		const configured = settings();
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		let promptText = "stable prompt";
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => configured,
+			providers: coldReasonProviders({ tier: "cloud" }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => promptText),
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		strictEqual(persistedColdReasons(entries), undefined);
+		promptText = "changed prompt";
+		bus.emit(BusChannels.ConfigHotReload, { diff: { hotReload: ["prompt.fragment"] } } as never);
+		await loop.submit("after prompt reload");
+
+		deepStrictEqual(persistedColdReasons(entries), ["prompt_recompiled"]);
+		assertExpectedColdOverlay(loop, "prompt recompile");
+		loop.dispose();
+	});
+
+	it("does not stamp residency on a cloud target", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: coldReasonProviders({ tier: "cloud", residency: true }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				if (calls === 2) {
+					bus.emit(BusChannels.ResidencyMutation, {
+						targetKey: residencyTargetKey("llamacpp", "http://mini:8080"),
+						targetId: "test-target",
+						runtimeId: "llamacpp",
+						model: "model",
+						operation: "evict",
+						at: Date.now(),
+					});
+				}
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		await loop.submit("cloud call");
+
+		strictEqual(persistedColdReasons(entries), undefined);
+		loop.dispose();
+	});
+
+	it("does not stamp a thinking change on a cloud target", async () => {
+		const configured = settings();
+		configured.orchestrator.thinkingLevel = "off";
+		const entries: SessionEntry[] = [];
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => configured,
+			providers: coldReasonProviders({ tier: "cloud", reasoning: true }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		configured.orchestrator.thinkingLevel = "high";
+		await loop.submit("cloud thinking call");
+
+		strictEqual(persistedColdReasons(entries), undefined);
+		loop.dispose();
 	});
 });
 

@@ -51,6 +51,7 @@ export const BusChannels = {
 	ToolBudgetExceeded: "safety.toolBudgetExceeded",
 	ProviderHealth: "provider.health",
 	RuntimeNotice: "runtime.notice",
+	ResidencyMutation: "residency.mutation",
 	DispatchScopeNotice: "dispatch.scopeNotice",
 	DispatchEnqueued: "dispatch.enqueued",
 	DispatchStarted: "dispatch.started",
@@ -98,6 +99,16 @@ export interface RuntimeNoticePayload {
 	model: string;
 	message: string;
 	detail?: Record<string, number | string | boolean>;
+}
+
+/** A successful model load or eviction on one residency-managed endpoint. */
+export interface ResidencyMutationPayload {
+	targetKey: string;
+	targetId: string;
+	runtimeId: string;
+	model: string;
+	operation: "load" | "evict";
+	at: number;
 }
 
 /**
@@ -761,6 +772,7 @@ export type BusPayloadMap = {
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
 	[BusChannels.RuntimeNotice]: RuntimeNoticePayload;
+	[BusChannels.ResidencyMutation]: ResidencyMutationPayload;
 	[BusChannels.DispatchScopeNotice]: DispatchScopeNoticePayload;
 	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;
 	[BusChannels.DispatchStarted]: DispatchStartedPayload;

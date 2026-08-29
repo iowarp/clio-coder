@@ -124,6 +124,35 @@ describe("contracts/interactive general overlay openers", () => {
 		lifecycle.dispose();
 	});
 
+	it("passes every incurred branch call to the session-wide cost telemetry fold", () => {
+		const events: string[] = [];
+		const handle = { hide: () => events.push("hide") } as unknown as OverlayHandle;
+		const entries = [
+			{ kind: "message", turnId: "kept", parentTurnId: null, role: "assistant", payload: {} },
+			{ kind: "message", turnId: "sibling", parentTurnId: null, role: "assistant", payload: {} },
+		] as never[];
+		let observedEntries: ReadonlyArray<unknown> = [];
+		const runtime = makeRuntime({
+			events,
+			app: {
+				session: { current: () => ({ id: "session-1", pinnedLeafTurnId: "kept" }) } as never,
+				readSessionEntries: () => entries,
+			},
+			runtime: {
+				openCostOverlay: (_tui, _observability, options) => {
+					observedEntries = options?.getSessionEntries?.() ?? [];
+					return handle;
+				},
+			},
+		});
+		const lifecycle = createOverlayLifecycle(runtime);
+
+		lifecycle.openCostOverlayState();
+
+		deepStrictEqual(observedEntries, entries);
+		lifecycle.dispose();
+	});
+
 	it("persists a correction, closes the board, and submits exactly one ordinary operator turn", () => {
 		const events: string[] = [];
 		let options: OpenDecisionsOverlayOptions | undefined;

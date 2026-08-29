@@ -6,6 +6,11 @@
  */
 
 import { randomUUID } from "node:crypto";
+import {
+	type BackendCacheVerdict,
+	type BackendCompletionTimings,
+	uncachedPrefillTokens,
+} from "../core/cache-telemetry.js";
 import { settingsPath } from "../core/config.js";
 import {
 	addResponseModelIdObservationCount,
@@ -446,20 +451,34 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 	return summary;
 }
 
-export type BackendCacheVerdict = "hot" | "partial" | "cold" | "small";
+export type { BackendCacheVerdict } from "../core/cache-telemetry.js";
+
+function classifyCacheUsage(input: number, cacheRead: number): BackendCacheVerdict {
+	if (cacheRead > 0) return input >= 2000 ? "partial" : "hot";
+	return input >= 2000 ? "cold" : "small";
+}
 
 /**
- * Classify one API call's provider-reported usage. This is the single
- * definition of a cache verdict; the ledger, the overlay, and any forensics
- * reader all consume the persisted value rather than reclassifying:
+ * Classify one API call's provider-reported usage. When normalized provider
+ * usage reports no cache read but the serving backend supplies cache_n, use
+ * that direct observation instead. This is the single definition of a cache
+ * verdict; the ledger, the overlay, and any forensics reader all consume the
+ * persisted value rather than reclassifying:
  *   hot      cacheRead > 0  and input < 2000   (prefix reused, prefill ≈ user text)
  *   partial  cacheRead > 0  and input >= 2000  (prefix reused up to a divergence point)
  *   cold     cacheRead == 0 and input >= 2000  (full re-prefill)
  *   small    cacheRead == 0 and input < 2000   (too small to judge)
  */
-export function backendCacheVerdict(input: number, cacheRead: number): BackendCacheVerdict {
-	if (cacheRead > 0) return input >= 2000 ? "partial" : "hot";
-	return input >= 2000 ? "cold" : "small";
+export function backendCacheVerdict(
+	input: number,
+	cacheRead: number,
+	backend?: BackendCompletionTimings | null,
+): BackendCacheVerdict {
+	if (cacheRead === 0 && backend?.cachedTokens !== null && backend?.cachedTokens !== undefined) {
+		const backendInput = uncachedPrefillTokens(backend);
+		if (backendInput !== null) return classifyCacheUsage(backendInput, backend.cachedTokens);
+	}
+	return classifyCacheUsage(input, cacheRead);
 }
 
 /** Per-API-call latency captured from the agent event stream (T3.2). */

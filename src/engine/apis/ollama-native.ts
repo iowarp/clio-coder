@@ -24,6 +24,7 @@ import {
 	type Tool as OllamaTool,
 	type ToolCall as OllamaToolCall,
 } from "ollama";
+import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
 	type AppliedThinking,
 	resolveModelRuntimeCapabilitiesForModel,
@@ -75,7 +76,7 @@ async function reconcileOllamaResidency(model: Model<"ollama-native">, headers: 
 	if (!baseUrl) return;
 	const metadata = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio;
 	const adapter: ResidencyAdapter = {
-		targetKey: `ollama-native|${baseUrl}`,
+		targetKey: residencyTargetKey("ollama-native", baseUrl),
 		targetId: ollamaTargetId(model),
 		runtimeId: "ollama-native",
 		keepModelId: model.id,

@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { residencyTargetKey } from "../../core/residency-target-key.js";
 import { sleep } from "../../core/timers.js";
 import {
 	type ResidencyAdapter,
@@ -246,7 +247,7 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 	const fetchImpl = input.fetchImpl ?? fetch;
 	let snapshot: LlamaCppRouterModel[] = [];
 	const adapter: ResidencyAdapter = {
-		targetKey: `llamacpp|${input.baseUrl}`,
+		targetKey: residencyTargetKey("llamacpp", input.baseUrl),
 		targetId: input.targetId,
 		runtimeId: input.runtimeId,
 		keepModelId: input.keepModelId,

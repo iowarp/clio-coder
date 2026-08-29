@@ -48,6 +48,26 @@ describe("contracts/doctor store honesty", { concurrency: false }, () => {
 
 	const HEADER = '{"type":"session","version":3}';
 
+	function assistantCacheLine(
+		turnId: string,
+		timestamp: string,
+		backendVerdict: "hot" | "partial" | "cold" | "small",
+		expectedColdReasons: string[] = [],
+		parentTurnId: string | null = null,
+	): string {
+		return JSON.stringify({
+			kind: "message",
+			role: "assistant",
+			turnId,
+			parentTurnId,
+			timestamp,
+			payload: {
+				text: "done",
+				promptCache: { backendVerdict, expectedColdReasons },
+			},
+		});
+	}
+
 	it("calls a session store that was deleted under a recorded install a failure", () => {
 		strictEqual(rowFor("session store").ok, true, "the store initializeClioHome created is healthy");
 
@@ -67,6 +87,53 @@ describe("contracts/doctor store honesty", { concurrency: false }, () => {
 		match(row.detail, /1 of 2 ledgers/u);
 		ok(row.detail.includes(`${damaged}:2: invalid JSON skipped`), `expected path:line detail, got: ${row.detail}`);
 		ok(!row.detail.includes("s-clean"), "the intact ledger is not named");
+	});
+
+	it("summarizes the latest session's verdicts and top expected reason", () => {
+		writeLedger("older", [HEADER, assistantCacheLine("old", "2026-08-20T00:00:00.000Z", "small", ["dispatch"])]);
+		writeLedger("latest", [
+			HEADER,
+			assistantCacheLine("hot", "2026-08-29T00:00:01.000Z", "hot"),
+			assistantCacheLine("cold-one", "2026-08-29T00:00:02.000Z", "cold", ["residency"]),
+			assistantCacheLine("cold-two", "2026-08-29T00:00:03.000Z", "cold", ["residency", "dispatch"]),
+		]);
+
+		const row = rowFor("cache telemetry");
+		strictEqual(row.ok, true);
+		strictEqual(row.level, undefined);
+		match(row.detail, /^last session latest: hot 1 · partial 0 · cold 2 · small 0;/u);
+		match(row.detail, /top expected reason residency \(2\)$/u);
+	});
+
+	it("counts incurred calls on sibling branches in the session summary", () => {
+		writeLedger("branched", [
+			HEADER,
+			assistantCacheLine("root", "2026-08-29T00:00:01.000Z", "hot"),
+			assistantCacheLine("kept", "2026-08-29T00:00:02.000Z", "cold", [], "root"),
+			assistantCacheLine("sibling", "2026-08-29T00:00:03.000Z", "partial", [], "root"),
+		]);
+
+		const row = rowFor("cache telemetry");
+		match(row.detail, /^last session branched: hot 1 · partial 1 · cold 1 · small 0;/u);
+	});
+
+	it("keeps missing cache telemetry informational instead of measuring zero calls", () => {
+		writeLedger("without-cache", [
+			HEADER,
+			JSON.stringify({
+				kind: "message",
+				role: "assistant",
+				turnId: "a1",
+				parentTurnId: null,
+				timestamp: "2026-08-29T00:00:00.000Z",
+				payload: { text: "done" },
+			}),
+		]);
+
+		const row = rowFor("cache telemetry");
+		strictEqual(row.ok, true);
+		strictEqual(row.level, "warn");
+		strictEqual(row.detail, "last session without-cache: no prompt-cache telemetry recorded");
 	});
 
 	/**

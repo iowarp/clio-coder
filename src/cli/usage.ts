@@ -12,9 +12,12 @@ import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
 import { loadSkills } from "../domains/resources/index.js";
 import {
+	foldPromptCacheTelemetry,
+	hasPromptCacheTelemetry,
 	type LedgerUsageCall,
 	ledgerUsageCalls,
 	listSessionLedgerRefs,
+	type PromptCacheTelemetry,
 	parseSessionEntries,
 	readAuditRows,
 } from "../domains/session/index.js";
@@ -69,6 +72,8 @@ interface SessionUsage {
 	entriesInWindow: number;
 	/** Completed API calls this session recorded in the window, one per call. */
 	usageCalls: LedgerUsageCall[];
+	/** Backend prompt-cache facts persisted on assistant calls in the window. */
+	promptCache: PromptCacheTelemetry;
 }
 
 /** Per-call usage folded over one grouping (a model, or the whole window). */
@@ -435,6 +440,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const usageRows = [...usageByModel.values()].sort(
 		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
 	);
+	const cacheSessions = sessions
+		.filter((session) => hasPromptCacheTelemetry(session.promptCache))
+		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
 
 	const approvedMemory = memoryRecords.filter((record) => record.approved && record.rejectedAt === undefined);
 	const pendingMemory = memoryRecords.filter((record) => !record.approved && record.rejectedAt === undefined);
@@ -540,6 +548,15 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					...row.totals,
 				});
 			}
+			for (const session of cacheSessions) {
+				emit({
+					kind: "fact",
+					fact: "session-cache",
+					sessionId: session.sessionId,
+					uncachedPrefillTokens: session.promptCache.uncachedPrefillTokens,
+					verdictCounts: session.promptCache.verdictCounts,
+				});
+			}
 		}
 		for (const [tool, totals] of topTools) emit({ kind: "fact", fact: "top-tool", tool, ...totals });
 		for (const [shape, count] of topShapes) {
@@ -634,6 +651,27 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 						String(row.totals.reasoningTokens),
 						String(row.totals.totalTokens),
 						`$${row.totals.costUsd.toFixed(4)}`,
+					]),
+				]),
+			),
+		);
+	}
+	if (cacheSessions.length > 0) {
+		out("");
+		out("  prompt cache by session (from backend timings and persisted verdicts)");
+		process.stdout.write(
+			indent(
+				formatColumns([
+					["session", "uncached prefill", "hot/partial/cold/small"],
+					...cacheSessions.map((session) => [
+						session.sessionId,
+						session.promptCache.uncachedPrefillTokens === null ? "n/a" : String(session.promptCache.uncachedPrefillTokens),
+						[
+							session.promptCache.verdictCounts.hot,
+							session.promptCache.verdictCounts.partial,
+							session.promptCache.verdictCounts.cold,
+							session.promptCache.verdictCounts.small,
+						].join("/"),
 					]),
 				]),
 			),
@@ -865,6 +903,9 @@ async function readSessions(
 		}
 		const parsedEntries = parseSessionEntries(raw, ref.path);
 		diagnostics.malformedSessionLines += parsedEntries.errors.length;
+		const accountingEntries = parsedEntries.entries.filter(
+			(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
+		);
 		const usage: SessionUsage = {
 			sessionId: ref.sessionId,
 			cwdHash: ref.cwdHash,
@@ -874,11 +915,8 @@ async function readSessions(
 			// modelChange rows are kept regardless of the window: they carry no
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
-			usageCalls: ledgerUsageCalls(
-				parsedEntries.entries.filter(
-					(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
-				),
-			),
+			usageCalls: ledgerUsageCalls(accountingEntries),
+			promptCache: foldPromptCacheTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {
 			if (!inWindow(entry.timestamp, windowStart, windowEnd)) continue;
