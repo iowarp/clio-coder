@@ -21,7 +21,9 @@ Prompt extensions can add dynamic fragments for project rules, the operator prof
 
 Prompt templates expand into the operator's user message before submission. They do not alter the compiled system prompt or bypass the trust check on project-scope compatibility roots. The prompt-root locations, frontmatter fields, and trust rules are documented in [extensions-and-sharing.md](extensions-and-sharing.md#prompt-templates).
 
-Arguments after `/template-name` use shell-style command argument parsing. Single or double quotes keep spaces inside one argument. The template body may use `$1` through `$9` for positional arguments, `$@`, and `$ARGUMENTS` for every parsed argument joined with spaces, as well as argument slices. A positional placeholder with no matching argument expands to an empty string. Template names that collide with built-in slash commands fail closed with a diagnostic and are excluded from `/prompts`.
+The first whitespace character after `/template-name` is the command delimiter; CRLF counts as one delimiter. Leading whitespace before the slash is also command framing. Every byte after that delimiter is the argument payload, including leading or trailing whitespace, repeated spaces, tabs, quotes, and line breaks.
+
+The template body may use `$ARGUMENTS` to insert that raw payload byte-for-byte. Raw insertion is not recursively substituted, so placeholder-like text such as `$1` remains data. `$1` through `$9`, `$@`, `${@:N}`, and `${@:N:L}` retain shell-style parsing: single or double quotes group spaces within one argument, `$@` joins all parsed arguments with single spaces, `${@:N}` selects parsed arguments from one-based position `N`, and `${@:N:L}` selects `L` arguments beginning there. A positional placeholder with no matching argument expands to an empty string. Template names that collide with built-in slash commands fail closed with a diagnostic and are excluded from `/prompts`.
 
 ## Directory-scoped handbook overrides
 
