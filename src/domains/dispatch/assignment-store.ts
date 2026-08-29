@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -25,6 +26,25 @@ const MAX_ASSIGNMENT_RECORDS = 1_000;
 export type AssignmentVerdictOwner = "fleet";
 
 /**
+ * Durable identity of the process executing a running assignment. A pid alone
+ * is not enough: the OS may recycle it after a crash, so the process birth
+ * token must still match before another extension treats the owner as live.
+ */
+export interface AssignmentProcessOwner {
+	pid: number;
+	processBirthToken: string;
+	acquiredAt: string;
+}
+
+export interface AssignmentProcessOwnerProbe {
+	birthToken(pid: number): string | null;
+	/** True when a missing birth token proves that the process is gone. */
+	tokenProvesDeath?: boolean;
+	/** Liveness fallback for platforms whose birth token is synthetic. */
+	alive?(pid: number): boolean;
+}
+
+/**
  * One durable logical-dispatch row.
  *
  * `attempts` holds terminal run ids: an agent attempt's receipt id, and for a
@@ -39,6 +59,8 @@ export interface DurableAssignmentRecord {
 	status: AssignmentStatus;
 	/** Set when something other than the attempts decides `status`. */
 	verdictOwner?: AssignmentVerdictOwner;
+	/** Process lease held only while this record is running. */
+	processOwner?: AssignmentProcessOwner;
 }
 
 interface AssignmentStoreFile {
@@ -50,6 +72,18 @@ function storePath(): string {
 	return join(clioStateDir(), "assignments.json");
 }
 
+function validProcessOwner(value: unknown): value is AssignmentProcessOwner {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const owner = value as Partial<AssignmentProcessOwner>;
+	return (
+		Number.isSafeInteger(owner.pid) &&
+		(owner.pid ?? 0) > 0 &&
+		typeof owner.processBirthToken === "string" &&
+		typeof owner.acquiredAt === "string" &&
+		Number.isFinite(Date.parse(owner.acquiredAt))
+	);
+}
+
 function validRecord(value: unknown): value is DurableAssignmentRecord {
 	if (typeof value !== "object" || value === null) return false;
 	const record = value as Partial<DurableAssignmentRecord>;
@@ -59,6 +93,7 @@ function validRecord(value: unknown): value is DurableAssignmentRecord {
 		record.attempts.every((runId) => typeof runId === "string") &&
 		(record.terminalRunId === null || typeof record.terminalRunId === "string") &&
 		(record.verdictOwner === undefined || record.verdictOwner === "fleet") &&
+		(record.processOwner === undefined || validProcessOwner(record.processOwner)) &&
 		(record.status === "running" ||
 			record.status === "succeeded" ||
 			record.status === "failed" ||
@@ -80,7 +115,32 @@ function readStore(): DurableAssignmentRecord[] {
 }
 
 function copyRecord(record: DurableAssignmentRecord): DurableAssignmentRecord {
-	return { ...record, attempts: [...record.attempts] };
+	return {
+		...record,
+		attempts: [...record.attempts],
+		...(record.processOwner === undefined ? {} : { processOwner: { ...record.processOwner } }),
+	};
+}
+
+const defaultProcessOwnerProbe: AssignmentProcessOwnerProbe = {
+	birthToken: processBirthToken,
+	tokenProvesDeath: BIRTH_TOKEN_SOURCE_AVAILABLE,
+	alive: processAlive,
+};
+
+/** True only when the durable identity still names the same live process. */
+export function assignmentProcessOwnerAlive(
+	record: Pick<DurableAssignmentRecord, "processOwner">,
+	probe: AssignmentProcessOwnerProbe = defaultProcessOwnerProbe,
+): boolean {
+	const owner = record.processOwner;
+	if (owner === undefined) return false;
+	const current = probe.birthToken(owner.pid);
+	if (current === null || current !== owner.processBirthToken) return false;
+	// A synthetic `pid-N` token cannot distinguish pid reuse, so require an
+	// independent liveness signal on platforms without a real birth-token source.
+	if (probe.tokenProvesDeath === false) return probe.alive?.(owner.pid) ?? false;
+	return true;
 }
 
 function writeStore(assignments: ReadonlyArray<DurableAssignmentRecord>): void {
@@ -137,12 +197,39 @@ export async function renameStoredAssignment(
 	return copyRecord(result);
 }
 
+function currentProcessOwner(): AssignmentProcessOwner {
+	const token = processBirthToken();
+	if (token === null) throw new Error("dispatch: cannot establish assignment owner process birth token");
+	return {
+		pid: process.pid,
+		processBirthToken: token,
+		acquiredAt: new Date().toISOString(),
+	};
+}
+
 function openRecord(assignmentId: string): DurableAssignmentRecord {
-	return { assignmentId, attempts: [], terminalRunId: null, status: "running" };
+	return {
+		assignmentId,
+		attempts: [],
+		terminalRunId: null,
+		status: "running",
+		processOwner: currentProcessOwner(),
+	};
+}
+
+function ensureRunningProcessOwner(record: DurableAssignmentRecord): DurableAssignmentRecord {
+	if (record.status !== "running" || record.processOwner !== undefined) return record;
+	return { ...record, processOwner: currentProcessOwner() };
+}
+
+function clearProcessOwner(record: DurableAssignmentRecord): DurableAssignmentRecord {
+	const result = { ...record };
+	delete result.processOwner;
+	return result;
 }
 
 export function registerAssignment(assignmentId: string): Promise<DurableAssignmentRecord> {
-	return updateRecord(assignmentId, (current) => current ?? openRecord(assignmentId));
+	return updateRecord(assignmentId, (current) => ensureRunningProcessOwner(current ?? openRecord(assignmentId)));
 }
 
 /**
@@ -154,12 +241,15 @@ export function claimAssignmentVerdict(
 	assignmentId: string,
 	owner: AssignmentVerdictOwner,
 ): Promise<DurableAssignmentRecord> {
-	return updateRecord(assignmentId, (current) => ({ ...(current ?? openRecord(assignmentId)), verdictOwner: owner }));
+	return updateRecord(assignmentId, (current) => ({
+		...ensureRunningProcessOwner(current ?? openRecord(assignmentId)),
+		verdictOwner: owner,
+	}));
 }
 
 export function recordAssignmentAttempt(assignmentId: string, runId: string): Promise<DurableAssignmentRecord> {
 	return updateRecord(assignmentId, (current) => {
-		const base = current ?? openRecord(assignmentId);
+		const base = ensureRunningProcessOwner(current ?? openRecord(assignmentId));
 		return base.attempts.includes(runId) ? base : { ...base, attempts: [...base.attempts, runId] };
 	});
 }
@@ -168,7 +258,7 @@ export function failQueuedAssignment(assignmentId: string): Promise<DurableAssig
 	return updateRecord(assignmentId, (current) => {
 		const base = current ?? openRecord(assignmentId);
 		if (base.verdictOwner !== undefined) return base;
-		return base.status === "running" ? { ...base, status: "failed" } : base;
+		return base.status === "running" ? clearProcessOwner({ ...base, status: "failed" }) : base;
 	});
 }
 
@@ -176,7 +266,7 @@ export function timeoutStoredAssignment(assignmentId: string): Promise<DurableAs
 	return updateRecord(assignmentId, (current) => {
 		const base = current ?? openRecord(assignmentId);
 		if (base.verdictOwner !== undefined) return base;
-		return base.status === "running" ? { ...base, status: "timed_out" } : base;
+		return base.status === "running" ? clearProcessOwner({ ...base, status: "timed_out" }) : base;
 	});
 }
 
@@ -184,7 +274,7 @@ export function cancelStoredAssignment(assignmentId: string): Promise<DurableAss
 	return updateRecord(assignmentId, (current) => {
 		const base = current ?? openRecord(assignmentId);
 		if (base.verdictOwner !== undefined) return base;
-		return base.status === "running" ? { ...base, status: "canceled" } : base;
+		return base.status === "running" ? clearProcessOwner({ ...base, status: "canceled" }) : base;
 	});
 }
 
@@ -204,6 +294,6 @@ export function settleStoredAssignment(
 		const base = current ?? openRecord(assignmentId);
 		const attempts = base.attempts.includes(terminalRunId) ? base.attempts : [...base.attempts, terminalRunId];
 		if (base.verdictOwner !== owner) return { ...base, attempts };
-		return { ...base, attempts, terminalRunId, status };
+		return clearProcessOwner({ ...base, attempts, terminalRunId, status });
 	});
 }

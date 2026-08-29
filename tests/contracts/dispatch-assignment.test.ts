@@ -6,6 +6,7 @@ import { after, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { claimAssignmentVerdict, getStoredAssignment } from "../../src/domains/dispatch/assignment-store.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -375,6 +376,31 @@ describe("dispatch assignments", () => {
 		strictEqual(terminal.outcome, "failed");
 		strictEqual(bundle.contract.assignments?.getStored(handle.runId)?.status, "canceled");
 		strictEqual(spawns, 1, "the queued retry never spawned after shutdown");
+	});
+
+	it("starting a sibling extension leaves a live claimed assignment untouched", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 0;
+		const first = makeDispatchBundle(dispatchStubContext({ settings }));
+		const second = makeDispatchBundle(dispatchStubContext({ settings }));
+
+		await first.extension.start();
+		try {
+			const before = await claimAssignmentVerdict("fleet-live", "fleet");
+			ok(before.processOwner, "the fleet claim persists its process owner");
+
+			await second.extension.start();
+			try {
+				const after = getStoredAssignment("fleet-live");
+				deepStrictEqual(after, before);
+				strictEqual(after?.status, "running");
+				strictEqual(after?.terminalRunId, null);
+			} finally {
+				await second.extension.stop?.();
+			}
+		} finally {
+			await first.extension.stop?.();
+		}
 	});
 
 	it("reconciles an orphaned running assignment against ledger state on restart", async () => {
