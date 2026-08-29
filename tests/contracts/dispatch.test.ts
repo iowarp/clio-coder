@@ -2376,9 +2376,13 @@ describe("contracts/dispatch", () => {
 				],
 				writeBoundaries: [],
 			});
-			deepStrictEqual(scopeNotices, [
-				"[dispatch scope] legacy dispatch resolved policy-bearing scope without declared intent: working-context src/legacy.ts (provenance=inferred source=task confidence=medium). Review this scope before execution.",
-			]);
+			// A dispatch that declared no intent is the ordinary case, not an
+			// anomaly, so it earns no transcript notice. The provenance above is
+			// sealed on the receipt and the approval artifact renders it in full
+			// before a supervised run, which is where an operator can act on it.
+			// Warning here fired on nearly every dispatch and buried the one notice
+			// that does mean something, the declared-replaces-inferred divergence.
+			deepStrictEqual(scopeNotices, []);
 		} finally {
 			await bundle.extension.stop?.();
 		}
