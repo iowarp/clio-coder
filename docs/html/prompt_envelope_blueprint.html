@@ -120,12 +120,19 @@
           <h2>Prompt Template Expansion ($1..$9, $@, $ARGUMENTS)</h2>
           <div class="grid grid-2">
             <div class="glass-card">
-              <h3>Shell-Style Parameter Parsing</h3>
+              <h3>Raw and Shell-Style Parameters</h3>
               <p>Templates expand into the operator's message prior to submission:</p>
               <ul>
-                <li>Single and double quotes preserve whitespace within arguments.</li>
-                <li><code>$1</code> through <code>$9</code> bind to positional arguments.</li>
-                <li><code>$@</code> and <code>$ARGUMENTS</code> join all arguments with single spaces.</li>
+                <li>
+                  The first whitespace after the command name is its delimiter (CRLF counts as one); every subsequent
+                  byte belongs to the argument payload.
+                </li>
+                <li><code>$ARGUMENTS</code> inserts that payload byte-for-byte and does not recursively substitute it.</li>
+                <li>Single and double quotes group whitespace for parsed placeholders.</li>
+                <li>
+                  <code>$1</code> through <code>$9</code>, <code>$@</code>, <code>${@:N}</code>, and
+                  <code>${@:N:L}</code> use parsed arguments; <code>$@</code> joins them with single spaces.
+                </li>
                 <li>Unsupplied positional parameters expand to empty strings.</li>
                 <li>Collisions with built-in slash commands fail closed and are excluded from <code>/prompts</code>.</li>
               </ul>

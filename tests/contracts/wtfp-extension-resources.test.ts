@@ -187,4 +187,33 @@ describe("contracts/WTF-P extension resources", () => {
 		ok(result.diagnostics.some((diagnostic) => diagnostic.type === "error" && diagnostic.message.includes("escapes")));
 		strictEqual(result.extension, undefined);
 	});
+
+	it("preserves every payload byte after one command delimiter in aggregate prompt arguments", () => {
+		const promptsRoot = scratchDir();
+		write(
+			promptsRoot,
+			"wtfp/new-paper.md",
+			["<invocation_arguments>", "$ARGUMENTS", "</invocation_arguments>", ""].join("\n"),
+		);
+		const prompts = loadPromptTemplates({
+			roots: [{ path: promptsRoot, scope: "project", source: "wtfp", trusted: true }],
+		});
+		const invocationArguments = [
+			"",
+			"  Inspect  this disposable fixture.",
+			"",
+			'  - Working title: "Adaptive Checkpoint Scheduling".',
+			"\t- Keep synthetic labels and exact  spacing.",
+			"Trailing spaces remain data.  ",
+			"",
+		].join("\n");
+
+		// The first newline delimits the command. The second newline and every
+		// byte after it, including the final newline, are invocation data.
+		const expanded = expandPromptTemplateInput(`/wtfp:new-paper\n${invocationArguments}`, prompts);
+
+		strictEqual(expanded.expanded, true);
+		if (!expanded.expanded) throw new Error("expected namespaced extension prompt to expand");
+		strictEqual(expanded.text, ["<invocation_arguments>", invocationArguments, "</invocation_arguments>"].join("\n"));
+	});
 });
