@@ -914,11 +914,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const effectiveWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 			const pendingInputTokens = ceilChars(submittedText.length);
 			let turnSnapshot = captureTurnSnapshot("pending");
-			const totalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
+			// The snapshot prices the prompt at chars/4. When the provider has
+			// already attested a larger prompt for this conversation, that figure
+			// is what the request will actually cost, so the overflow guard reads
+			// the higher of the two (issue #227). Both already carry the pending
+			// user text and the tool schema estimate.
+			const budgetedPromptTokens = (snapshot: ContextSnapshot): number =>
+				Math.max(
+					snapshotInputTokens(snapshot) + pendingInputTokens,
+					context.liveContextEstimate(agentRuntime, submittedText).tokens,
+				);
+			const totalEstimate = budgetedPromptTokens(turnSnapshot) + reservedOutput;
 
 			if (effectiveWindow > 0 && totalEstimate > effectiveWindow) {
 				emitNotice(
-					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${snapshotInputTokens(turnSnapshot) + pendingInputTokens} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
+					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${totalEstimate - reservedOutput} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
 				);
 				const compacted = await context.runAutoCompact(agentRuntime, true, undefined, undefined, submittedText);
 				if (!compacted) {
@@ -929,7 +939,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				context.refreshAgentMessagesFromSession(agentRuntime);
 				turnSnapshot = captureTurnSnapshot("pending");
-				const postTotalEstimate = snapshotInputTokens(turnSnapshot) + pendingInputTokens + reservedOutput;
+				const postTotalEstimate = budgetedPromptTokens(turnSnapshot) + reservedOutput;
 				if (postTotalEstimate > effectiveWindow) {
 					emitNotice(
 						`[Clio Coder] Request still exceeds the effective window after compaction (${postTotalEstimate} > ${effectiveWindow}). Request blocked.`,

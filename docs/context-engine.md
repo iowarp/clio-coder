@@ -15,6 +15,8 @@ Each target has a declared, desired, and effective context window. The effective
 
 The loaded window outranks the declared one because it is the only figure describing what the backend will serve. LM Studio routinely opens a model well below its `max_context_length`, and a run planned against the larger number overruns the server before compaction ever fires. Discovery carries that number per model in `discoveredModelStates[<model>].contextLength`, and the residency notice reads the same entry, so a model Clio is budgeting a loaded window for is never announced as absent.
 
+A resumed session carries the loaded window it already recorded. A resume re-resolves its target before discovery has reported what the backend has open, so the first turn used to budget against the probed figure, which on a multi-slot or multi-copy backend can be several times the real headroom, and corrected a turn later. `lastLoadedContextWindow` reads the last `loaded` window the session's own `context-snapshots.jsonl` recorded for the same target and model and hands it to resolution as `knownLoadedContextWindow`. It is used only when live discovery reports nothing, and it is scoped to that target and model, so a different selection re-probes and a model reloaded at a new size corrects as soon as discovery names the live window.
+
 Local-native runtimes use a recommended minimum desired window of 128,000 tokens. If the live model reports a smaller loaded context window, Clio re-resolves the target so accounting uses the actual ceiling.
 
 The `/context` overlay states which layer answered, next to the token total: `loaded`, `probed`, `configured`, `declared`, or `assumed`.
@@ -27,13 +29,17 @@ The estimator in `context-accounting.ts` uses a four-characters-per-token family
 
 At submit time, Clio captures a context snapshot and persists a slim JSONL record under the session directory as `context-snapshots.jsonl`. The slim record keeps token counts, segment metadata, signatures, and hashes, not the heavy prompt or transcript text. When provider usage arrives, `reconcileSnapshot` folds actual input and output counts back into the ledger.
 
+Every snapshot records the divergence between the two accountings. `estimatedTokens` is the chars/4 prompt-side total the snapshot was captured with and is never rewritten by a reconcile; `reconciledTokens` is the provider's own prompt count for the call, with cached prompt tokens folded back in; `divergenceRatio` is the second over the first. A ratio above 1 means the estimator is under-counting what the backend charges for the same messages.
+
+The reconciled figure is not only a display value. Once a provider has answered, the compaction verdict budgets against `max(estimate, reconciled + estimate of everything appended since)`, at all three evaluation points: the pre-submit trigger, the post-tool continuation guard, and the preflight overflow check. The estimate stays a floor because it prices material the attested call never saw; the provider count can only raise the figure, never lower it. A working-set projection subtracts the tokens the eviction planner priced out and re-anchors on the projected message list rather than discarding the attestation, so post-eviction accounting is still provider-anchored. A summary compaction rewrites the conversation the attestation described, so it drops the anchor and the next call re-establishes it.
+
 Session metadata enforces session format version 4 (`CURRENT_SESSION_FORMAT_VERSION = 4`). Version 4 is additive: it adds the `contextEviction` and `contextRecall` records and changes no existing entry. A version 3 session therefore migrates to 4 in place when Clio opens it, and no entry is rewritten. Only a session written by a newer build is refused, with an error naming the version it read and pointing at upgrading. The bump is one-way for the operator: a 0.3.3 binary cannot open a session this release wrote.
 
 The `/context` overlay and footer meter read the same ledger categories: `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
 
 ## Single-threshold compaction
 
-Auto-compaction is controlled by one pressure threshold. Pressure is `estimated_tokens / context_window`. The default threshold is `0.8`.
+Auto-compaction is controlled by one pressure threshold. Pressure is `budgeted_tokens / context_window`, where the budgeted figure is the reconciled total when the provider has attested one and the chars/4 estimate otherwise. The default threshold is `0.8`.
 
 Crossing that threshold engages three mechanisms in a fixed order. The first two are cheap, reversible, and call no model. Only the third rewrites what the session says about itself.
 

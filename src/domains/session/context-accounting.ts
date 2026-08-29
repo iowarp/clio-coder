@@ -72,6 +72,19 @@ export interface ContextSnapshot {
 		splits: Record<string, "estimated" | "exact" | "reconciled">;
 	};
 
+	/**
+	 * Divergence record. `estimatedTokens` is the chars/4 prompt-side total this
+	 * snapshot was captured with and is never rewritten by a reconcile, so the
+	 * two figures stay comparable. `reconciledTokens` is the provider's own
+	 * prompt token count for the call this snapshot was reconciled against
+	 * (cached prompt tokens folded back in), and `divergenceRatio` is
+	 * `reconciledTokens / estimatedTokens`. A ratio above 1 is the estimator
+	 * under-counting, which is what issue #227 recorded as a provider overflow.
+	 */
+	estimatedTokens?: number | undefined;
+	reconciledTokens?: number | undefined;
+	divergenceRatio?: number | undefined;
+
 	promptHash?: string | undefined;
 	toolSignature?: string | undefined;
 	messageRange?: { start: number; end: number } | undefined;
@@ -332,6 +345,31 @@ export function getLatestContextSnapshot(meta: SessionMeta): ContextSnapshot | n
 	return list.at(-1) ?? null;
 }
 
+/**
+ * The window a previous process measured this session's prompts against, when
+ * the backend itself reported it as the one it had open (issue #227).
+ *
+ * A resumed session re-resolves its target before discovery has reported a
+ * loaded window, so the first turn budgets against the probed server-wide
+ * figure, which on a multi-slot backend is a multiple of what the model is
+ * actually serving. The snapshot ledger already recorded the number the
+ * backend named, so the resume carries it forward instead of re-probing.
+ * Scoped to the same target and model: a different selection has no claim on
+ * that measurement, and a live loaded window always outranks this one, so a
+ * model reloaded at a new size corrects on the next resolution.
+ */
+export function lastLoadedContextWindow(meta: SessionMeta, providerId: string, modelId: string): number | null {
+	const snapshots = getContextSnapshots(meta);
+	for (let i = snapshots.length - 1; i >= 0; i -= 1) {
+		const snapshot = snapshots[i];
+		if (snapshot?.contextWindowSource !== "loaded") continue;
+		if (snapshot.providerId !== providerId || snapshot.modelId !== modelId) continue;
+		const window = snapshot.effectiveContextWindow;
+		if (typeof window === "number" && Number.isFinite(window) && window > 0) return window;
+	}
+	return null;
+}
+
 export function buildSnapshotCategories(inputs: {
 	systemPrompt?: string | undefined;
 	promptSegments?: ReadonlyArray<{ id: string; tokenEstimate: number }> | undefined;
@@ -456,6 +494,7 @@ export function captureContextSnapshot(input: CaptureContextSnapshotInput): Cont
 		compactionThreshold: input.compactionThreshold,
 	});
 	return {
+		estimatedTokens: sumSplitTokens(categories),
 		snapshotId: nextSnapshotId(),
 		sessionId: input.sessionId,
 		turnId: input.turnId,
@@ -480,9 +519,13 @@ export function captureContextSnapshot(input: CaptureContextSnapshotInput): Cont
 	};
 }
 
+function sumSplitTokens(categories: ContextSnapshot["categories"]): number {
+	return SNAPSHOT_SPLIT_KEYS.reduce((sum, key) => sum + (categories[key] ?? 0), 0);
+}
+
 /** Sum of the prompt-side categories (everything except reserve/free/streaming). */
 export function snapshotInputTokens(snapshot: ContextSnapshot): number {
-	return SNAPSHOT_SPLIT_KEYS.reduce((sum, key) => sum + (snapshot.categories[key] ?? 0), 0);
+	return sumSplitTokens(snapshot.categories);
 }
 
 export function reconcileSnapshot(snapshot: ContextSnapshot, usage: Usage): ContextSnapshot {
@@ -572,9 +615,17 @@ export function reconcileSnapshot(snapshot: ContextSnapshot, usage: Usage): Cont
 		{} as Record<string, "estimated" | "exact" | "reconciled">,
 	);
 
+	// The estimate this snapshot was captured with, kept whole across repeated
+	// reconciles so the recorded divergence always compares the provider count
+	// against chars/4 rather than against a previously normalized total.
+	const estimatedTokens = snapshot.estimatedTokens ?? sumSplitTokens(snapshot.categories);
+
 	return {
 		...snapshot,
 		categories: updatedCategories,
+		estimatedTokens,
+		reconciledTokens: exactInput,
+		divergenceRatio: estimatedTokens > 0 ? Math.round((exactInput / estimatedTokens) * 1000) / 1000 : undefined,
 		sources: {
 			total: "reconciled",
 			splits: splitsSources,

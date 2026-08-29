@@ -192,6 +192,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
+			// A resumed session already knows what this backend had open; without
+			// it the first turn budgets against the probed server-wide figure and
+			// corrects only once discovery reports a loaded window (issue #227).
+			knownLoadedContextWindow: context.rememberedLoadedContextWindow(targetId, wireModelId),
 		});
 		if (!resolved.ok) {
 			const failure = resolved.diagnostics.find((entry) => entry.severity === "error") ?? resolved.diagnostics[0];
@@ -315,6 +319,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						use: "orchestrator",
 						requireTools: false,
 						requireOutputBudget: true,
+						knownLoadedContextWindow: context.rememberedLoadedContextWindow(target.target.id, target.wireModelId),
 					});
 					if (!refreshed.ok) return;
 					const liveModel = state.runtime.agent.state.model;
