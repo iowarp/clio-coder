@@ -3,7 +3,7 @@
 Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.3.7). You can open it directly in any web browser to view details dynamically.
+> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.3.8). You can open it directly in any web browser to view details dynamically.
 
 ---
 

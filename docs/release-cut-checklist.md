@@ -1,6 +1,6 @@
-# v0.3.7 Release-Cut Checklist
+# v0.3.8 Release-Cut Checklist
 
-The ordered steps that turn the prepared `v0.3.7` branch into a published
+The ordered steps that turn the prepared `v0.3.8` branch into a published
 release. Everything above the line marked **AUTHORIZATION BOUNDARY** is
 repeatable and reversible and is run locally before the cut. Everything below
 it is external or irreversible and needs an explicit decision from the
@@ -11,16 +11,17 @@ state of every step.
 
 | Item | State |
 | --- | --- |
-| Branch | `v0.3.7`, pushed to `origin` under the explicit refspec `refs/heads/v0.3.7`; sixteen feature and docs commits, the version-bump commit, and the fix commits the interactive release testing produced, ahead of `main` |
-| `package.json` version | `0.3.7`; the top `CHANGELOG.md` heading is `## 0.3.7 - 2026-08-24` |
-| `main` | `9b54219d`, the v0.3.6 release SHA; it is an ancestor of `v0.3.7` and moves only at Part 4 |
-| `origin/main` | `9b54219d`, matching `main` |
-| Tags | `v0.3.6` exists on `9b54219d`; none for 0.3.7, local or remote |
-| GitHub Release | `v0.3.6` published 2026-08-24; none for 0.3.7 |
-| npm registry | `@iowarp/clio-coder@0.3.7` absent; `latest` is `0.3.6` |
-| npm history | Published versions 0.3.0 through 0.3.4 and 0.3.6. Version 0.3.5 was published and withdrawn and can never be reused. |
-| Milestone | `v0.3.7` holds the thirteen issues this branch closes (#155, #204, #206 through #216); the ten off-map items (#156, #158 through #164, #198, #199) moved to `v0.3.8` on 2026-08-24 |
-| Commit provenance identity | Post-release maintainer follow-up, not a gate: verifying `clio-coder@iowarp.ai` on IOWarp-controlled GitHub and GitLab identities (such as `clio-coder-bot` or `iowarp-clio`, with `assets/clio-coder-avatar-512.png` as the avatar) only changes how those platforms render the trailers. |
+| Branch | `v0.3.8`, nineteen commits ahead of `main`: the thirteen feature and fix commits of the implementation session, the four release-test fix commits and their two merges (#233, #235, #238, #239), and this version-bump commit. `origin/v0.3.8` sits at `af6546b2`, the pre-release-test tip; the release-test fixes are local only |
+| `package.json` version | `0.3.8`; the top `CHANGELOG.md` heading is `## 0.3.8 - 2026-08-28` |
+| `main` | `598be99c`, the v0.3.7 release SHA; it is an ancestor of `v0.3.8` and moves only at Part 4 |
+| `origin/main` | `598be99c`, matching `main` |
+| Tags | `v0.3.7` exists on `598be99c`; none for 0.3.8, local or remote. The `wtfp-safety` tag is an unrelated local safety snapshot of in-flight work on `feat/wtfp-extension-resources` and must never be pushed |
+| GitHub Release | `v0.3.7` published; none for 0.3.8 |
+| npm registry | `@iowarp/clio-coder@0.3.8` absent; `latest` is `0.3.7` |
+| npm history | Published versions 0.3.0 through 0.3.4, 0.3.6, and 0.3.7. Version 0.3.5 was published and withdrawn and can never be reused. |
+| Milestone | `v0.3.8` holds the four issues this release closes (#233, #235, #238, #239). The interactive release test moved #163 and #222 to `v0.3.9` on 2026-08-28, because #163 is a feature and #222 is untouched live-assertion work |
+| Interactive release test | `docs/release-notes/v0.3.8-release-test.md`. Three rounds, 57 PASS / 8 FAIL / 3 PARTIAL / 6 OBSERVATION / 2 NOT RUN. Seven issues filed; four are in this release and three (#234, #236, #237) are on `v0.3.9` |
+| Commit provenance identity | Post-release maintainer follow-up, not a gate; unchanged from 0.3.7. |
 
 ---
 
@@ -69,35 +70,37 @@ Run against the exact final candidate with `NO_COLOR` unset and
 ## Part 2: version and notes (repeatable)
 
 14. Files carrying a version reference, to update together if the number
-    changes: `package.json` and `package-lock.json`, the `## 0.3.7 - <date>`
-    heading in `CHANGELOG.md`, the `(Version: 0.3.7)` markers in `docs/*.md`,
-    the `Blueprint (v0.3.7)` titles in `docs/html/*.html`, the `--branch`
+    changes: `package.json` and `package-lock.json`, the `## 0.3.8 - <date>`
+    heading in `CHANGELOG.md`, the `(Version: 0.3.8)` markers in `docs/*.md`,
+    the `Blueprint (v0.3.8)` titles in `docs/html/*.html`, the `--branch`
     pin in the README install block (the hygiene lint checks it), and the
     measured-at figures in `scripts/check-release.mjs` if the package size
     moved materially. For 0.3.7 the tarball measured 6.5 MB packed and
-    37.9 MB unpacked, inside the 10 MB and 50 MB ceilings set for 0.3.6.
-15. Confirm the `## 0.3.7` section of `CHANGELOG.md` describes every
+    37.9 MB unpacked; re-measure for 0.3.8, inside the 10 MB and 50 MB ceilings set for 0.3.6.
+15. Confirm the `## 0.3.8` section of `CHANGELOG.md` describes every
     user-visible behavior change under `### Added`, and every change to an
     existing behavior under `### Changed`, and carries no Workbench release
     narrative. The release workflow uses this section verbatim as the GitHub
     Release body.
 16. `docs/artifact-versions.md` lists every persisted artifact this release
-    added or re-versioned: run receipt integrity v19, fleet contract v5, the
-    fleet run record, the checkout writer lease, the out-of-turn usage ledger,
-    and the library pin file.
+    added or re-versioned. For 0.3.8 that is run receipt integrity v20, which
+    adds `pathProvenance` on dispatch intent and the resolved `pathScope`, and
+    whose entry must also record that a receipt below v20 is reported as
+    retired rather than invalid, and the durable assignment record, which now
+    carries its owner pid, process birth token, and acquisition time.
 17. Re-run `npm run ci:release` after any version edit and commit as one
-    commit on `v0.3.7`.
+    commit on `v0.3.8`.
 
 ## Part 3: present the gate
 
-18. Report to the operator before touching `main`: the exact final `v0.3.7`
+18. Report to the operator before touching `main`: the exact final `v0.3.8`
     SHA and clean status, the commits added since the handoff SHA, the gate
     commands with pass/fail totals, the package version and changelog heading,
     the tarball audit, the clean-install results, the interactive test table,
     and any deferred live check, confirmation that no tag, GitHub Release, or
     npm version exists yet, the proposed commands for Parts 4 through 6, and
     the npm dist-tag. The dist-tag is the operator's call; for 0.3.7 the
-    operator chose `latest` on 2026-08-24.
+    operator chose `latest` on 2026-08-24; 0.3.8's dist-tag is undecided.
 
 ---
 
@@ -110,9 +113,9 @@ confirming the exact SHA and the commands.
 ## Part 4: fast-forward `main`
 
 19. `git fetch origin` immediately before integrating; require `origin/main`
-    to be an ancestor of the reviewed `v0.3.7` tip and confirm no other
+    to be an ancestor of the reviewed `v0.3.8` tip and confirm no other
     worktree has `main` checked out.
-20. `git checkout main && git merge --ff-only v0.3.7`. No merge commit, no
+20. `git checkout main && git merge --ff-only v0.3.8`. No merge commit, no
     rebase, no reset. Verify `main` equals the reviewed SHA and is clean.
 21. `git fetch origin` once more; stop on any unexpected remote movement. Then
     `git push origin main`. Never `--force` or `--force-with-lease`. The push
@@ -124,19 +127,19 @@ confirming the exact SHA and the commands.
     a gate on tagging, because `release.yml` runs the same gate on the tagged
     tree itself. A red run still blocks the cut; investigate it rather than
     tagging around it, and never silence a flake with an unrelated change.
-23. Reconfirm that tag `v0.3.7` and the GitHub Release do not exist, then
-    `git tag -a v0.3.7 -m "Clio Coder 0.3.7"` on the green SHA and
-    `git push origin refs/tags/v0.3.7`.
+23. Reconfirm that tag `v0.3.8` and the GitHub Release do not exist, then
+    `git tag -a v0.3.8 -m "Clio Coder 0.3.8"` on the green SHA and
+    `git push origin refs/tags/v0.3.8`.
 24. The tag push triggers `.github/workflows/release.yml`, which verifies the
     tag matches `package.json`, runs `npm run ci:release` on the tagged tree,
-    extracts the `## 0.3.7` section of `CHANGELOG.md` as the release body, and
+    extracts the `## 0.3.8` section of `CHANGELOG.md` as the release body, and
     attaches the tarball. Do not create a release by hand. Verify the run's
     SHA, the notes, the attached tarball, and the URL.
 
 ## Part 6: npm publication (irreversible)
 
 25. `npm whoami` and confirm the registry and account; reconfirm
-    `@iowarp/clio-coder@0.3.7` is still absent.
+    `@iowarp/clio-coder@0.3.8` is still absent.
 26. Obtain the operator's explicit dist-tag decision. `latest` makes this the
     default install for every user; `--tag next` keeps `0.3.6` as the default.
 27. Run `npm publish` once. `prepublishOnly` re-runs `ci:release` as a safety
@@ -146,13 +149,13 @@ confirming the exact SHA and the commands.
 
 ## Part 7: post-publish verification and follow-ups
 
-29. `npm view @iowarp/clio-coder@0.3.7` and the selected dist-tag.
+29. `npm view @iowarp/clio-coder@0.3.8` and the selected dist-tag.
 30. On a clean machine, `npm install -g @iowarp/clio-coder` from the registry
     rather than from a local tarball, then repeat step 12 against it, plus
     `configure` to a real target and one real turn when one is authorized.
     This is the only step that tests what users actually receive.
-31. From an installation of 0.3.6, verify `clio-coder upgrade` finds and
-    applies 0.3.7.
+31. From an installation of 0.3.7, verify `clio-coder upgrade` finds and
+    applies 0.3.8.
 32. Record the SHA, CI URL, tag, GitHub Release URL, npm version and dist-tag,
     tarball evidence, and the post-publish verification in the release report.
 33. Maintainer follow-up, independent of the release: verify the commit
