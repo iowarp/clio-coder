@@ -173,7 +173,7 @@ describe("resolved dispatch plan admission", () => {
 		});
 		strictEqual(plan.text.includes("\u001b"), false);
 		strictEqual(plan.text.includes("\u0000"), false);
-		strictEqual(plan.text.split("\n").length, 4, "embedded line breaks cannot forge plan rows");
+		strictEqual(plan.text.split("\n").length, 6, "embedded line breaks cannot forge plan rows");
 		match(
 			plan.text,
 			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged failover=none .* task="inspect\?the repo\?\[31m"/,
@@ -385,6 +385,24 @@ describe("resolved dispatch plan admission", () => {
 		match(first.text, /briefing_bytes=26 briefing_sha256=[0-9a-f]{64} briefing_preview=/);
 		strictEqual(first.tasks[0]?.briefing, "Prior finding: src/a.ts:12");
 		strictEqual(first.hash === second.hash, false, "changing only briefing must change the approval hash");
+	});
+
+	it("renders inferred policy-bearing scope in the supervised approval artifact", () => {
+		const plan = describeDispatchPlan({
+			tasks: [
+				{ task: "Inspect src/legacy.ts before answering." },
+				{ task: "Summarize the parent finding.", briefing: "The parent identified docs/context.md." },
+			],
+		});
+		strictEqual(plan.planScale, true);
+		match(
+			plan.text,
+			/scope working_context path="src\/legacy\.ts" provenance=inferred source=task confidence=medium reason=task_path_token/u,
+		);
+		match(
+			plan.text,
+			/scope working_context path="docs\/context\.md" provenance=inferred source=briefing confidence=low reason=briefing_path_token/u,
+		);
 	});
 
 	it("shows, approves once, pins, executes, and receipts explicit/profile/automatic placements", async () => {

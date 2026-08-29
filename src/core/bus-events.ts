@@ -109,14 +109,28 @@ export interface ContextWarningPayload {
 	warning: string | null;
 }
 
-/** A declared dispatch scope replaced prose inference and omitted candidate paths. */
-export interface DispatchScopeNoticePayload {
-	code: "typed_scope_replaced_inferred_paths";
-	level: "warning";
-	agentId: string;
-	omittedPaths: ReadonlyArray<string>;
-	message: string;
-}
+/** A dispatch path-scope decision that must remain visible in the operator transcript. */
+export type DispatchScopeNoticePayload =
+	| {
+			code: "typed_scope_replaced_inferred_paths";
+			level: "warning";
+			agentId: string;
+			omittedPaths: ReadonlyArray<string>;
+			message: string;
+	  }
+	| {
+			code: "legacy_scope_inferred" | "legacy_scope_empty";
+			level: "warning";
+			agentId: string;
+			paths: ReadonlyArray<{
+				path: string;
+				policy: "working-context" | "write-boundary";
+				provenance: "declared" | "derived" | "inferred";
+				source: "intent.read_roots" | "intent.write_roots" | "intent.relevant_paths" | "writeRoots" | "task" | "briefing";
+				confidence: "certain" | "high" | "medium" | "low";
+			}>;
+			message: string;
+	  };
 
 export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "context-wiki" | "compaction";
 export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "done";

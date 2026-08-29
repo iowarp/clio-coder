@@ -113,6 +113,32 @@ describe("interactive event projection", () => {
 		deepStrictEqual(log, [`transcript:warn:${message}`, "render"]);
 	});
 
+	it("projects legacy inference provenance into the interactive transcript", () => {
+		const log: string[] = [];
+		const harness = createHarness(log);
+		createInteractiveEventProjection(harness.deps);
+		const message =
+			"[dispatch scope] legacy dispatch resolved policy-bearing scope without declared intent: working-context src/legacy.ts (provenance=inferred source=task confidence=medium). Review this scope before execution.";
+
+		harness.deps.bus.emit(BusChannels.DispatchScopeNotice, {
+			code: "legacy_scope_inferred",
+			level: "warning",
+			agentId: "coder",
+			paths: [
+				{
+					path: "src/legacy.ts",
+					policy: "working-context",
+					provenance: "inferred",
+					source: "task",
+					confidence: "medium",
+				},
+			],
+			message,
+		});
+
+		deepStrictEqual(log, [`transcript:warn:${message}`, "render"]);
+	});
+
 	it("preserves startup, queue, tool, and chat-render ordering", () => {
 		const log: string[] = [];
 		const harness = createHarness(log);

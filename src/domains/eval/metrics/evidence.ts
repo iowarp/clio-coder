@@ -8,6 +8,26 @@
 
 import type { RunReceipt } from "../../dispatch/types.js";
 
+function dispatchScopeMetrics(receipt: RunReceipt): Record<string, string | boolean | number> {
+	const scope = receipt.pathScope;
+	if (scope === undefined) return {};
+	const entries = [...scope.workingContextPaths, ...scope.writeBoundaries];
+	const evidence = entries.flatMap((entry) => entry.evidence);
+	const count = (source: string): number => evidence.filter((entry) => entry.source === source).length;
+	return {
+		"dispatch.scope.mode": scope.mode,
+		"dispatch.scope.inferredPathCount": entries.filter((entry) =>
+			entry.evidence.some((item) => item.provenance === "inferred"),
+		).length,
+		"dispatch.scope.derivedPathCount": entries.filter((entry) =>
+			entry.evidence.some((item) => item.provenance === "derived"),
+		).length,
+		"dispatch.scope.source.task": count("task"),
+		"dispatch.scope.source.briefing": count("briefing"),
+		"dispatch.scope.source.writeRoots": count("writeRoots"),
+	};
+}
+
 /**
  * Extract the sealed RunReceipt that `clio-coder run --agent … --json` prints after
  * its single-line JSONL event stream. The receipt is the only multi-line,
@@ -56,6 +76,7 @@ function isReceiptShaped(value: unknown): value is RunReceipt {
 export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, string | boolean | number> {
 	return {
 		"evidence.verification": receipt.verification.state,
+		...dispatchScopeMetrics(receipt),
 		...(receipt.findingsSummary === undefined
 			? {}
 			: { "evidence.firstPassSuccess": receipt.findingsSummary.firstPassSuccess === true }),

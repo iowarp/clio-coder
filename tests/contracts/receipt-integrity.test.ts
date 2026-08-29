@@ -1,5 +1,6 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { declaredIntentPathProvenance } from "../../src/domains/dispatch/path-scope.js";
 import {
 	computeReceiptIntegrity,
 	RECEIPT_INTEGRITY_FIELD_COVERAGE,
@@ -173,7 +174,7 @@ describe("contracts/receipt-integrity", () => {
 		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
 		// Every shape before routing intent became required is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -184,7 +185,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 19);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 20);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -312,12 +313,27 @@ describe("contracts/receipt-integrity", () => {
 			personaOverride: required(envelope.personaOverride, "personaOverride"),
 			briefing: required(envelope.briefing, "briefing"),
 			intent: {
-				version: 1,
+				version: 2,
 				readRoots: ["src"],
 				writeRoots: ["tests"],
 				relevantPaths: ["src/domains/dispatch/types.ts"],
+				pathProvenance: declaredIntentPathProvenance({
+					readRoots: ["src"],
+					writeRoots: ["tests"],
+					relevantPaths: ["src/domains/dispatch/types.ts"],
+				}),
 				expectedOutputs: ["dist/cli.js"],
 				verification: [{ check: "test", timeoutMs: 30_000 }],
+			},
+			pathScope: {
+				version: 1,
+				mode: "declared",
+				workingContextPaths: declaredIntentPathProvenance({
+					readRoots: ["src"],
+					writeRoots: ["tests"],
+					relevantPaths: ["src/domains/dispatch/types.ts"],
+				}),
+				writeBoundaries: [],
 			},
 			steering: required(envelope.steering, "steering"),
 			outcomeCode: required(envelope.outcomeCode, "outcomeCode"),
@@ -644,6 +660,42 @@ describe("contracts/receipt-integrity", () => {
 			ok: false,
 			reason: "integrity mismatch",
 		});
+	});
+
+	it("integrity-covers resolved path provenance without source prose", () => {
+		const envelope = fixtureEnvelope("run-path-scope-tamper");
+		const pathScope = {
+			version: 1 as const,
+			mode: "legacy-inferred" as const,
+			workingContextPaths: [
+				{
+					path: "src/legacy.ts",
+					evidence: [
+						{
+							provenance: "inferred" as const,
+							source: "task" as const,
+							confidence: "medium" as const,
+							reason: "task_path_token" as const,
+						},
+					],
+				},
+			],
+			writeBoundaries: [],
+		};
+		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), pathScope }, envelope);
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.pathScope, true);
+		const workingContext = pathScope.workingContextPaths[0];
+		if (workingContext === undefined) throw new Error("path scope fixture must carry working context");
+
+		const tampered: RunReceipt = {
+			...receipt,
+			pathScope: {
+				...pathScope,
+				workingContextPaths: [{ ...workingContext, path: "src/forged.ts" }],
+			},
+		};
+		deepStrictEqual(verifyReceiptIntegrity(tampered, envelope), { ok: false, reason: "integrity mismatch" });
 	});
 
 	it("detects tampering with the findings summary on a sealed receipt", () => {

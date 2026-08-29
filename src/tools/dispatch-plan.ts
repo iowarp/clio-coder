@@ -21,6 +21,7 @@ import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "../
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type ExecutionRole, isExecutionRole } from "../domains/dispatch/execution-role.js";
 import { type DispatchIntent, isDispatchIntent } from "../domains/dispatch/intent.js";
+import { resolveDispatchPathScope } from "../domains/dispatch/path-scope.js";
 import {
 	type ApprovedAssignmentRoute,
 	cloneApprovedAssignmentRoute,
@@ -246,6 +247,33 @@ function safeField(value: string): string {
 	return result;
 }
 
+function renderLegacyPathScope(task: DispatchPlanTaskView): string[] {
+	if (task.intent !== undefined) return [];
+	const scope = resolveDispatchPathScope({
+		agentId: task.agent,
+		executionRole: task.executionRole,
+		task: task.task,
+		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
+	});
+	const lines = ["    scope mode=legacy-inferred"];
+	for (const [policy, entries] of [
+		["working_context", scope.provenance.workingContextPaths],
+		["write_boundary", scope.provenance.writeBoundaries],
+	] as const) {
+		for (const entry of entries) {
+			for (const evidence of entry.evidence) {
+				lines.push(
+					`    scope ${policy} path=${JSON.stringify(safeField(entry.path))} provenance=${evidence.provenance} source=${evidence.source} confidence=${evidence.confidence} reason=${evidence.reason}`,
+				);
+			}
+		}
+	}
+	if (scope.provenance.workingContextPaths.length === 0 && scope.provenance.writeBoundaries.length === 0) {
+		lines.push("    scope policy_paths=none");
+	}
+	return lines;
+}
+
 function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 	const tasks = Array.isArray(args.tasks) ? args.tasks : [];
 	const sharedAgent = str(args.agent) ?? "coder";
@@ -417,6 +445,7 @@ function renderPlanText(
 			const serialized = JSON.stringify(task.intent);
 			lines.push(`    intent_sha256=${createHash("sha256").update(serialized, "utf8").digest("hex")}`);
 		}
+		lines.push(...renderLegacyPathScope(task));
 		for (const check of task.resolvedVerification ?? []) {
 			lines.push(
 				`    verification check=${safeField(check.check)} argv=${JSON.stringify(check.argv)} cwd=${JSON.stringify(check.cwd)} timeout_ms=${check.timeoutMs}`,

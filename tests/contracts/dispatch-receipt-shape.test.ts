@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { decideRetry } from "../../src/domains/dispatch/failure-classification.js";
+import { declaredIntentPathProvenance } from "../../src/domains/dispatch/path-scope.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunLineage, RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -95,10 +96,15 @@ describe("dispatch attempt numbering", () => {
 		await bundle.extension.start();
 		try {
 			const intent = {
-				version: 1 as const,
+				version: 2 as const,
 				readRoots: ["src/"],
 				writeRoots: [],
 				relevantPaths: ["src/calc.js"],
+				pathProvenance: declaredIntentPathProvenance({
+					readRoots: ["src/"],
+					writeRoots: [],
+					relevantPaths: ["src/calc.js"],
+				}),
 				expectedOutputs: ["a summary"],
 				verification: [],
 			};

@@ -91,7 +91,7 @@ import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/wor
  * the ledger contribution field existed. A receipt without a contribution must
  * still digest to exactly this.
  */
-const V19_BASE_RECEIPT_DIGEST = "352c59cf267f926d54f46179e8c6fe511d2bee39386c7b049eb2dbe3efa7174e";
+const V20_BASE_RECEIPT_DIGEST = "0807be5c70cb13cd8a62532bc269c5fe9f8e613add4147024305b10211d82740";
 
 /**
  * Attested tool signature for `allowedTools: ["read", "grep"]`, computed on the
@@ -812,13 +812,13 @@ describe("contracts/agent-ledger hub", () => {
 // ---------------------------------------------------------------------------
 
 describe("contracts/agent-ledger receipt", () => {
-	it("keeps the v19 base receipt digest stable without a ledger contribution", () => {
+	it("keeps the v20 base receipt digest stable without a ledger contribution", () => {
 		const envelope = fixtureEnvelope();
 		const draft = fixtureReceiptDraft(envelope);
 		const integrity = computeReceiptIntegrity(draft, envelope);
 		strictEqual(integrity.version, RUN_RECEIPT_INTEGRITY_VERSION);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 19, "the v19 receipt digest covers fleet gate provenance");
-		strictEqual(integrity.digest, V19_BASE_RECEIPT_DIGEST);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 20, "the v20 receipt digest covers path-scope provenance");
+		strictEqual(integrity.digest, V20_BASE_RECEIPT_DIGEST);
 	});
 
 	it("covers the contribution in integrity and digests it distinctly when present", () => {
@@ -834,7 +834,7 @@ describe("contracts/agent-ledger receipt", () => {
 		const draft: RunReceiptDraft = { ...fixtureReceiptDraft(envelope), ledgerContribution: contribution };
 		const sealed = computeReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.version, RUN_RECEIPT_INTEGRITY_VERSION);
-		ok(sealed.digest !== V19_BASE_RECEIPT_DIGEST, "a sealed contribution is inside the digest");
+		ok(sealed.digest !== V20_BASE_RECEIPT_DIGEST, "a sealed contribution is inside the digest");
 
 		const tampered: RunReceiptDraft = {
 			...draft,
