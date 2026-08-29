@@ -1941,7 +1941,12 @@ describe("contracts/tools", () => {
 				ok(result.output.includes("pipeline=step2 from=run-1 in=32b truncated"), result.output);
 				ok(result.output.includes("persona=1b3fc16b2c4d..."), result.output);
 				ok(result.output.includes("escalations=2req/0appr/1deny/1timeout"), result.output);
-				ok(result.output.includes("enforcement=approximated:auto-edit/acceptEdits"), result.output);
+				// The autonomy axis is rendered by the canonical pair alone; the
+				// compact suffix prints no reading of it without the projection.
+				ok(result.output.includes("approximated (acceptEdits)"), result.output);
+				ok(result.output.includes("autonomyEnforcement:approximated"), result.output);
+				ok(!result.output.includes("enforcement="), result.output);
+				ok(!result.output.includes("autonomy=auto-edit"), result.output);
 				const details = result.details as {
 					runs?: Array<{
 						runId?: unknown;

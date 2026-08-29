@@ -12,7 +12,7 @@ import {
 	loadEvidenceRunProvenance,
 	provenanceTranscriptLines,
 } from "../domains/evidence/index.js";
-import { printError, printOk } from "./shared.js";
+import { printError, printNote, printOk } from "./shared.js";
 
 const HELP = `clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
@@ -139,15 +139,19 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 			// but the verdict line and exit code must not say ok over a receipt
 			// that failed integrity verification.
 			const integrityFailures = result.findings.filter((entry) => entry.tag === "receipt-integrity");
-			if (integrityFailures.length > 0) {
-				process.stdout.write(`wrote ${result.evidenceId} ${result.directory}\n`);
-				for (const failure of integrityFailures) {
-					printError(`${failure.runId !== null ? `run ${failure.runId}: ` : ""}${failure.message}`);
-				}
-				return 1;
+			// A retired seal is the expected state of every run that predates an
+			// integrity bump: the receipt is set aside unread, as a missing one
+			// is, so it is a note beside the verdict and leaves the exit code alone.
+			const retiredSeals = result.findings.filter((entry) => entry.tag === "receipt-retired");
+			if (integrityFailures.length > 0) process.stdout.write(`wrote ${result.evidenceId} ${result.directory}\n`);
+			else printOk(`wrote ${result.evidenceId} ${result.directory}`);
+			for (const entry of retiredSeals) {
+				printNote(`${entry.runId !== null ? `run ${entry.runId}: ` : ""}${entry.message}`);
 			}
-			printOk(`wrote ${result.evidenceId} ${result.directory}`);
-			return 0;
+			for (const failure of integrityFailures) {
+				printError(`${failure.runId !== null ? `run ${failure.runId}: ` : ""}${failure.message}`);
+			}
+			return integrityFailures.length > 0 ? 1 : 0;
 		}
 		if (parsed.command === "inspect") {
 			const evidenceId = parsed.evidenceId;
@@ -201,11 +205,17 @@ function renderEvidence(
 			process.stdout.write(`  ${formatTrustAxes(run.status)}\n`);
 		}
 	}
-	// Provenance is printed only for runs whose receipts carry it, so a legacy
-	// bundle prints nothing new here.
+	// Provenance is the detail behind the projection, never a second reading
+	// of it: each run's block is gated on that run's canonical status, so a
+	// receipt the projection withheld (a broken or retired seal) prints no
+	// autonomy value here, and a run whose block would be empty prints no
+	// header. A historical bundle has no projection and admits no axis detail.
+	const statusByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
 	for (const { runId, view } of provenance) {
+		const lines = provenanceTranscriptLines(view, statusByRun.get(runId));
+		if (lines.length === 0) continue;
 		process.stdout.write(`provenance ${runId}:\n`);
-		for (const line of provenanceTranscriptLines(view)) process.stdout.write(`  ${line}\n`);
+		for (const line of lines) process.stdout.write(`  ${line}\n`);
 	}
 	process.stdout.write(`files: ${formatList(overview.files)}\n`);
 }

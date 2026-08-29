@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { resetXdgCache } from "../../src/core/xdg.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { RUN_RECEIPT_INTEGRITY_VERSION, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -636,19 +636,41 @@ describe("contracts/view-artifacts", () => {
 		ok(loaded?.lines.includes(`  "runId": "${envelope.id}",`));
 	});
 
-	it("fails verification for a receipt sealed under a retired integrity version", async () => {
+	it("reports a receipt sealed under a retired integrity version as retired, naming both versions", async () => {
 		const stateDir = await scratchDir();
 		const envelope = await writeReceiptFixture(stateDir);
 		const receiptPath = receiptFilePath(stateDir, envelope.id);
 		const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
 			integrity: { version: number };
 		};
-		receipt.integrity.version = 3;
+		const previous = RUN_RECEIPT_INTEGRITY_VERSION - 1;
+		receipt.integrity.version = previous;
 		await writeFile(receiptPath, JSON.stringify(receipt, null, 2));
 
-		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: false, reason: "integrity invalid" });
+		// Neither a pass nor the "integrity invalid" a malformed seal reports:
+		// the outcome carries both versions and its wording never calls an
+		// intact receipt of a retired format invalid, broken, or corrupt.
+		const reason = `receipt integrity v${previous} is retired; this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION}; the receipt is not read as evidence`;
+		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), {
+			ok: false,
+			reason,
+			retired: { receiptVersion: previous, supportedVersion: RUN_RECEIPT_INTEGRITY_VERSION },
+		});
 		const artifact = (await new ReceiptArtifactProvider({ stateDir }).list())[0];
-		deepStrictEqual(await artifact?.verify?.(), { ok: false, detail: "integrity invalid" });
+		deepStrictEqual(await artifact?.verify?.(), { ok: false, detail: reason, retired: true });
+	});
+
+	it("still reports a tampered current-version receipt as an integrity mismatch", async () => {
+		const stateDir = await scratchDir();
+		const envelope = await writeReceiptFixture(stateDir);
+		const receiptPath = receiptFilePath(stateDir, envelope.id);
+		const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as { inputTokenCount: number };
+		receipt.inputTokenCount += 1;
+		await writeFile(receiptPath, JSON.stringify(receipt, null, 2));
+
+		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: false, reason: "integrity mismatch" });
+		const artifact = (await new ReceiptArtifactProvider({ stateDir }).list())[0];
+		deepStrictEqual(await artifact?.verify?.(), { ok: false, detail: "integrity mismatch" });
 	});
 
 	it("lists receipts written to disk by another process after provider construction", async () => {

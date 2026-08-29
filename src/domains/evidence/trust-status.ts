@@ -1,5 +1,5 @@
 import type { GateDecisionArtifact, GateDecisionVerification } from "../dispatch/gate-decisions.js";
-import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
+import { RUN_RECEIPT_INTEGRITY_VERSION, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
 import type {
 	RunBriefingProvenance,
 	RunEnvelope,
@@ -459,13 +459,89 @@ function compatibilitySource(receipt: PersistedRunReceiptTrustFacts, field: stri
 const DISPATCH_AUTHORITY: TrustStatusAuthority = { kind: "clio", id: "dispatch" };
 const COMPATIBILITY_AUTHORITY: TrustStatusAuthority = { kind: "unknown", id: "historical-persisted-format" };
 
+/**
+ * A receipt sealed under an integrity version this build no longer verifies.
+ * It is not migrated and not read as evidence, on the same terms as every
+ * prior integrity bump, but it is not a tampered receipt either: nothing was
+ * checked, so nothing failed. The outcome names both versions so an operator
+ * with a store full of last release's runs can tell a retired seal from a
+ * broken one.
+ */
+export interface RetiredReceiptIntegrity {
+	receiptVersion: number;
+	supportedVersion: number;
+}
+
+/**
+ * The dispatch verifier's result, widened with the retired-format diagnosis
+ * this module puts in front of it. A failure without `retired` is the
+ * verifier's own verdict: a malformed seal, a ledger mismatch, or a digest
+ * that does not match the receipt's contents.
+ */
+export type ReceiptIntegrityOutcome = { ok: true } | { ok: false; reason: string; retired?: RetiredReceiptIntegrity };
+
+/** The retired-version diagnosis for a receipt's integrity block, or null when the block is current or unreadable. */
+export function retiredReceiptIntegrity(integrity: unknown): RetiredReceiptIntegrity | null {
+	if (!isRecord(integrity)) return null;
+	const version = integrity.version;
+	if (typeof version !== "number" || !Number.isInteger(version) || version < 1) return null;
+	if (version >= RUN_RECEIPT_INTEGRITY_VERSION) return null;
+	return { receiptVersion: version, supportedVersion: RUN_RECEIPT_INTEGRITY_VERSION };
+}
+
+/** The one sentence every surface prints for a retired seal. It never calls the receipt invalid, broken, or corrupt. */
+export function retiredReceiptIntegrityReason(retired: RetiredReceiptIntegrity): string {
+	return `receipt integrity v${retired.receiptVersion} is retired; this build verifies v${retired.supportedVersion}; the receipt is not read as evidence`;
+}
+
+/**
+ * Verify a receipt against its ledger row, diagnosing a retired seal before
+ * the verifier can report it as a malformed one. Every trust-bearing
+ * verification goes through here so the CLI, the bundle, and the TUI receipt
+ * view agree on what a retired receipt is.
+ */
+export function verifyReceiptIntegrityOutcome(receipt: RunReceipt, envelope: RunEnvelope): ReceiptIntegrityOutcome {
+	const retired = retiredReceiptIntegrity(receipt.integrity);
+	if (retired !== null) return { ok: false, reason: retiredReceiptIntegrityReason(retired), retired };
+	return verifyReceiptIntegrity(receipt, envelope);
+}
+
+const RETIRED_INTEGRITY_SOURCE = /:integrity-v(\d+)-retired$/u;
+
+function retiredIntegritySourceId(runId: string, receiptVersion: number): string {
+	return `run_receipt:${runId}:integrity-v${receiptVersion}-retired`;
+}
+
+/**
+ * The retired integrity version a projected artifact-integrity axis names, or
+ * null when the axis says something else. The compatibility source id is the
+ * only place the persisted projection carries the version, so the human clause
+ * reads it back from there rather than from the receipt.
+ */
+export function retiredIntegrityVersionOf(status: ArtifactIntegrityStatus): number | null {
+	if (status.state !== "unknown" || status.source.kind !== "compatibility") return null;
+	const match = RETIRED_INTEGRITY_SOURCE.exec(status.source.id);
+	return match === null ? null : Number(match[1]);
+}
+
 /** Adapt receipt integrity verification without reading any receipt claim as self-authenticating. */
 export function adaptReceiptIntegrityStatus(
 	receipt: PersistedRunReceiptTrustFacts | null | undefined,
-	verification?: ReceiptIntegrityResult,
+	verification?: ReceiptIntegrityOutcome,
 ): ArtifactIntegrityStatus {
 	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
 	const artifacts = [receiptReference(receipt)];
+	// A retired seal was never checked, so the axis is unknown rather than
+	// failed, and the compatibility source names the version it was sealed
+	// under. `failed` stays reserved for a seal this build verified and rejected.
+	if (verification !== undefined && !verification.ok && verification.retired !== undefined) {
+		return attributed(
+			"unknown",
+			{ kind: "compatibility", id: retiredIntegritySourceId(receipt.runId, verification.retired.receiptVersion) },
+			COMPATIBILITY_AUTHORITY,
+			artifacts,
+		);
+	}
 	if (verification === undefined || (verification.ok && receipt.integrity === undefined)) {
 		return attributed(
 			"unknown",
@@ -681,18 +757,19 @@ export function adaptRunReceiptAutonomyStatus(
 }
 
 export interface AdaptRunReceiptTrustOptions {
-	integrity?: ReceiptIntegrityResult;
+	integrity?: ReceiptIntegrityOutcome;
 }
 
 function receiptClaimsAreAuthenticated(
 	receipt: PersistedRunReceiptTrustFacts | null | undefined,
-	integrity: ReceiptIntegrityResult | undefined,
+	integrity: ReceiptIntegrityOutcome | undefined,
 ): boolean {
 	return receipt?.integrity !== undefined && integrity?.ok === true;
 }
 
 function unauthenticatedReceiptProjection(
 	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+	integrity: ReceiptIntegrityOutcome | undefined,
 ): TrustStatusProjection {
 	if (receipt === null || receipt === undefined) {
 		return {
@@ -724,6 +801,15 @@ function unauthenticatedReceiptProjection(
 			),
 		};
 	}
+	// A retired seal leaves the receipt unread rather than rejected: its axes
+	// are absent because the format is historical, not because a check failed.
+	if (integrity !== undefined && !integrity.ok && integrity.retired !== undefined) {
+		return {
+			validationGrounding: absentTrustStatus("historical_format"),
+			contextProvenance: absentTrustStatus("historical_format"),
+			autonomyEnforcement: absentTrustStatus("historical_format"),
+		};
+	}
 	// The artifact-integrity axis retains the failure diagnostic. No other
 	// axis reads a field from a receipt that failed authentication.
 	return {
@@ -745,7 +831,7 @@ export function adaptRunReceiptTrustStatus(
 				contextProvenance: adaptRunReceiptContextStatus(receipt),
 				autonomyEnforcement: adaptRunReceiptAutonomyStatus(receipt),
 			}
-		: unauthenticatedReceiptProjection(receipt);
+		: unauthenticatedReceiptProjection(receipt, options.integrity);
 	return composeTrustStatus({
 		artifactIntegrity: adaptReceiptIntegrityStatus(receipt, options.integrity),
 		...receiptProjection,
@@ -757,7 +843,7 @@ export function adaptRunReceiptTrustStatus(
 }
 
 export interface RunReceiptTrustInspection {
-	integrity: ReceiptIntegrityResult;
+	integrity: ReceiptIntegrityOutcome;
 	status: CanonicalTrustStatus;
 }
 
@@ -770,14 +856,14 @@ export function inspectRunReceiptTrustStatus(
 	receipt: RunReceipt | null | undefined,
 	envelope: RunEnvelope | null | undefined,
 ): RunReceiptTrustInspection {
-	let integrity: ReceiptIntegrityResult;
+	let integrity: ReceiptIntegrityOutcome;
 	if (receipt === null || receipt === undefined) {
 		integrity = { ok: false, reason: "receipt unavailable" };
 	} else if (envelope === null || envelope === undefined) {
 		integrity = { ok: false, reason: "run ledger envelope unavailable" };
 	} else {
 		try {
-			integrity = verifyReceiptIntegrity(receipt, envelope);
+			integrity = verifyReceiptIntegrityOutcome(receipt, envelope);
 		} catch (error) {
 			integrity = {
 				ok: false,
