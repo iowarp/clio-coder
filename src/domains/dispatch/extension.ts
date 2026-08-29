@@ -123,6 +123,7 @@ import { AssignmentRegistry, applyActiveRouteSelection, asAssignmentId } from ".
 import type { AssignmentAttemptStartEvent } from "./assignment-events.js";
 import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
 import {
+	assignmentProcessOwnerAlive,
 	cancelStoredAssignment,
 	failQueuedAssignment,
 	getStoredAssignment,
@@ -6072,6 +6073,7 @@ export function createDispatchBundle(
 				const reconciledLedger = ledger;
 				const reconciled = await reconcileOrphanAssignments({
 					listRunning: () => listStoredAssignments().filter((record) => record.status === "running"),
+					ownerAlive: assignmentProcessOwnerAlive,
 					lookupAttempt: (runId) => {
 						const envelope = reconciledLedger?.get(runId) ?? null;
 						if (!envelope) return null;

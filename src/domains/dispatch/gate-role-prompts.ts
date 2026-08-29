@@ -57,8 +57,8 @@ export const COUNCIL_VOTE_MEMBER_DIRECTIVE = [
 
 /**
  * The task a council member is given under `synthesis: "vote"`. Plan admission
- * and the runner both compose it here, so the approval artifact the plan hash
- * binds shows the operator the ask the member actually receives.
+ * composes it here once, then the runner reuses the task pinned by that plan so
+ * the approval artifact shows the exact ask the member receives.
  */
 export function renderCouncilVoteMemberTask(originalTask: string): string {
 	return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE].join("\n\n");
