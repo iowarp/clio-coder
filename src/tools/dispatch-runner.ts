@@ -1873,6 +1873,13 @@ async function runCouncil(
 				}
 				const position = (round - 1) * council.members.length + index + 1;
 				const pinned = council.resolvedTasks?.find((task) => task.role === "member" && task.position === position);
+				let voteTask = base.task;
+				if (council.synthesis === "vote") {
+					if (pinned !== undefined) voteTask = pinned.task;
+					else if (council.resolvedTasks !== undefined)
+						throw new Error(`dispatch: resolved council plan has no member task at position ${position}`);
+					else voteTask = renderCouncilVoteMemberTask(base.task);
+				}
 				const request: DispatchRequest = {
 					...base,
 					executionRole: "researcher",
@@ -1883,9 +1890,12 @@ async function runCouncil(
 					// for. The seated recipe is untouched: the ask is a task suffix and
 					// the postcondition is an override, so the member is still the
 					// agent the operator seated, and any recipe can be voted with.
+					// Admission already composed the suffix into each resolved member
+					// task, so reuse its exact bytes. The fallback supports dispatch
+					// contracts that have no resolved admission artifact.
 					...(council.synthesis === "vote"
 						? {
-								task: renderCouncilVoteMemberTask(base.task),
+								task: voteTask,
 								resultContractOverride: { kind: "council-ballot" as const },
 							}
 						: {}),
