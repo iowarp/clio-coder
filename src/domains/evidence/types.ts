@@ -27,6 +27,7 @@ export const EVIDENCE_TAGS = [
 	"context-provenance",
 	"completion-evidence",
 	"receipt-integrity",
+	"receipt-retired",
 	"protected-artifact",
 	"tool-loop",
 	"test-failure",

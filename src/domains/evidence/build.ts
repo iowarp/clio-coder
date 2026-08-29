@@ -30,7 +30,7 @@ import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./re
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
 import type { CanonicalTrustStatus, TrustArtifactReference } from "./trust-status.js";
-import { inspectRunReceiptTrustStatus } from "./trust-status.js";
+import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
@@ -289,8 +289,14 @@ function buildFindings(
 		const status = trustByRun.get(source.envelope.id);
 		if (status === undefined) throw new Error(`canonical trust status missing for run ${source.envelope.id}`);
 		if (source.receiptError !== null) {
-			const tag = source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
-			findings.push(finding(findings.length, "warn", tag, source.envelope.id, source.receiptError));
+			// The canonical axis, not the raw reason string, says whether the seal
+			// was retired: `receipt-retired` is the expected state of every run
+			// that predates an integrity bump and is an info row, while
+			// `receipt-integrity` stays the warning for a seal that was checked
+			// and rejected.
+			const retired = retiredIntegrityVersionOf(status.artifactIntegrity) !== null;
+			const tag = retired ? "receipt-retired" : source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
+			findings.push(finding(findings.length, retired ? "info" : "warn", tag, source.envelope.id, source.receiptError));
 		}
 		if (
 			isSuccessfulRun(source) &&
@@ -1556,6 +1562,9 @@ async function readReceipt(
 	}
 	const integrity = inspectRunReceiptTrustStatus(receipt, envelope).integrity;
 	if (!integrity.ok) {
+		// A retired seal is set aside unread, the way a missing receipt is; it
+		// is not a failed one, and its reason already names both versions.
+		if (integrity.retired !== undefined) return { receipt, error: integrity.reason, integrityFailed: false };
 		return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
 	}
 	return { receipt, error: null, integrityFailed: false };

@@ -7,6 +7,7 @@
  */
 
 import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -18,6 +19,7 @@ import {
 	materializePendingGateDecision,
 	stagePendingGateDecision,
 } from "../../src/domains/dispatch/gate-decisions.js";
+import { RUN_RECEIPT_INTEGRITY_VERSION } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type {
 	RunKind,
@@ -394,20 +396,81 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
-	it("reports a receipt sealed under a retired integrity version as an integrity failure", async () => {
-		await withIsolatedClioHome(async () => {
-			const { runId, receiptPath } = await sealRun();
-
-			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
-				integrity: { version: number };
-			};
-			receipt.integrity.version = 3;
+	it("sets aside a receipt sealed under the retired integrity version without calling it corrupt", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const previous = RUN_RECEIPT_INTEGRITY_VERSION - 1;
+			const { runId, receiptPath } = await sealRun(undefined, {
+				autonomyEnforcement: { grade: "mediated", autonomy: "read-only" },
+			});
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { integrity: { version: number } };
+			receipt.integrity.version = previous;
 			writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
+			const sha256 = (): string => createHash("sha256").update(readFileSync(receiptPath)).digest("hex");
+			const before = sha256();
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
 
-			const corrupted = await captureStderr(() => runEvidenceCommand(["build", "--run", runId]));
-			strictEqual(corrupted.result, 1);
-			ok(corrupted.stderr.includes("receipt integrity"), corrupted.stderr);
-			ok(corrupted.stderr.includes(runId), corrupted.stderr);
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+
+			// The finding names the version, is an info row, and is not the
+			// warning a checked-and-rejected seal raises.
+			const retired = result.findings.find((finding) => finding.tag === "receipt-retired");
+			ok(retired, "expected a receipt-retired finding");
+			strictEqual(retired?.severity, "info");
+			strictEqual(
+				retired?.message,
+				`receipt integrity v${previous} is retired; this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION}; the receipt is not read as evidence`,
+			);
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "receipt-integrity"),
+				false,
+			);
+			// The projection says what it knows: nothing was checked, so the seal
+			// is unknown and names its version; the receipt-owned axes are absent
+			// because the format is historical, not because a check failed.
+			const status = result.trustStatus.runs[0]?.status;
+			ok(status, "expected a canonical status for the run");
+			strictEqual(status?.artifactIntegrity.state, "unknown");
+			ok(
+				status?.artifactIntegrity.state === "unknown" &&
+					status.artifactIntegrity.source.id === `run_receipt:${runId}:integrity-v${previous}-retired`,
+				JSON.stringify(status?.artifactIntegrity),
+			);
+			deepStrictEqual(status?.autonomyEnforcement, { state: "absent", reason: "historical_format" });
+			deepStrictEqual(status?.validationGrounding, { state: "absent", reason: "historical_format" });
+			// Not migrated: the file on disk is byte-identical after the build.
+			strictEqual(sha256(), before);
+
+			const built = await captureStderr(() => runEvidenceCommand(["build", "--run", runId]));
+			strictEqual(built.result, 0, built.stderr);
+			ok(
+				built.stderr.includes(
+					`run ${runId}: receipt integrity v${previous} is retired; this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION}`,
+				),
+				built.stderr,
+			);
+			doesNotMatch(built.stderr, /invalid|broken|corrupt|error:/u);
+
+			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
+			strictEqual(inspected.result, 0, inspected.stdout);
+			ok(
+				inspected.stdout.includes(
+					`trust ${runId}: seal v${previous} retired (this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION}); `,
+				),
+				inspected.stdout,
+			);
+			ok(inspected.stdout.includes("artifactIntegrity:unknown"), inspected.stdout);
+			ok(inspected.stdout.includes("autonomy not recorded"), inspected.stdout);
+			ok(inspected.stdout.includes("autonomyEnforcement:absent"), inspected.stdout);
+			doesNotMatch(inspected.stdout, /seal broken|integrity invalid/u);
+			// The seal-set-aside verdict is the only statement made about the
+			// autonomy axis: no renderer publishes the value the projection withheld.
+			doesNotMatch(inspected.stdout, /read-only|autonomy=|autonomy:|provenance /u);
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			doesNotMatch(transcript, /read-only|autonomy/u);
+			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
+			const runRow = cleaned.find((row) => row.kind === "run");
+			ok(runRow && !("autonomyEnforcement" in runRow), "a retired receipt contributes no provenance to the trace");
 		});
 	});
 

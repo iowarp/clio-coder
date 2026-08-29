@@ -12,7 +12,7 @@ import {
 	loadEvidenceRunProvenance,
 	provenanceTranscriptLines,
 } from "../domains/evidence/index.js";
-import { printError, printOk } from "./shared.js";
+import { printError, printNote, printOk } from "./shared.js";
 
 const HELP = `clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
@@ -139,15 +139,19 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 			// but the verdict line and exit code must not say ok over a receipt
 			// that failed integrity verification.
 			const integrityFailures = result.findings.filter((entry) => entry.tag === "receipt-integrity");
-			if (integrityFailures.length > 0) {
-				process.stdout.write(`wrote ${result.evidenceId} ${result.directory}\n`);
-				for (const failure of integrityFailures) {
-					printError(`${failure.runId !== null ? `run ${failure.runId}: ` : ""}${failure.message}`);
-				}
-				return 1;
+			// A retired seal is the expected state of every run that predates an
+			// integrity bump: the receipt is set aside unread, as a missing one
+			// is, so it is a note beside the verdict and leaves the exit code alone.
+			const retiredSeals = result.findings.filter((entry) => entry.tag === "receipt-retired");
+			if (integrityFailures.length > 0) process.stdout.write(`wrote ${result.evidenceId} ${result.directory}\n`);
+			else printOk(`wrote ${result.evidenceId} ${result.directory}`);
+			for (const entry of retiredSeals) {
+				printNote(`${entry.runId !== null ? `run ${entry.runId}: ` : ""}${entry.message}`);
 			}
-			printOk(`wrote ${result.evidenceId} ${result.directory}`);
-			return 0;
+			for (const failure of integrityFailures) {
+				printError(`${failure.runId !== null ? `run ${failure.runId}: ` : ""}${failure.message}`);
+			}
+			return integrityFailures.length > 0 ? 1 : 0;
 		}
 		if (parsed.command === "inspect") {
 			const evidenceId = parsed.evidenceId;

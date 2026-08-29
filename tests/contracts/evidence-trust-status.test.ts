@@ -24,6 +24,7 @@ import {
 	composeTrustStatus,
 	inspectEvidence,
 	inspectRunReceiptTrustStatus,
+	TRUST_STATUS_AXES,
 } from "../../src/domains/evidence/index.js";
 
 const scratchRoots: string[] = [];
@@ -451,14 +452,23 @@ describe("contracts/evidence canonical trust projection", () => {
 		}
 		ok(result.findings.some((finding) => finding.tag === "receipt-integrity"));
 
-		const unsupported = {
+		// A retired integrity version is not a tampered receipt: nothing was
+		// checked, so the seal is unknown (never failed) and names its version,
+		// and no receipt-owned axis reaches a positive state.
+		const retired = {
 			...receipt,
 			integrity: { ...receipt.integrity, version: 14 },
 		} as unknown as RunReceipt;
-		const unsupportedInspection = inspectRunReceiptTrustStatus(unsupported, envelope);
-		strictEqual(unsupportedInspection.integrity.ok, false);
-		strictEqual(unsupportedInspection.status.artifactIntegrity.state, "failed");
-		strictEqual(unsupportedInspection.status.validationGrounding.state, "absent");
+		const retiredInspection = inspectRunReceiptTrustStatus(retired, envelope);
+		strictEqual(retiredInspection.integrity.ok, false);
+		deepStrictEqual(retiredInspection.integrity.ok ? undefined : retiredInspection.integrity.retired, {
+			receiptVersion: 14,
+			supportedVersion: 20,
+		});
+		strictEqual(retiredInspection.status.artifactIntegrity.state, "unknown");
+		deepStrictEqual(retiredInspection.status.validationGrounding, { state: "absent", reason: "historical_format" });
+		deepStrictEqual(retiredInspection.status.autonomyEnforcement, { state: "absent", reason: "historical_format" });
+		for (const axis of TRUST_STATUS_AXES) strictEqual(forbidden.has(retiredInspection.status[axis].state), false);
 	});
 
 	it("never lets a completion-contract row promote an axis it does not establish", async () => {

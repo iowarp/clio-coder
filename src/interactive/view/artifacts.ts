@@ -2,15 +2,16 @@ import { createReadStream, readFileSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
-import {
-	isReceiptIntegrity,
-	type ReceiptIntegrityResult,
-	verifyReceiptIntegrity,
-} from "../../domains/dispatch/receipt-integrity.js";
+import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
 import { formatTrustSummaryLine } from "../../domains/evidence/trust-projection.js";
-import { inspectRunReceiptTrustStatus } from "../../domains/evidence/trust-status.js";
+import {
+	inspectRunReceiptTrustStatus,
+	type ReceiptIntegrityOutcome,
+	retiredReceiptIntegrity,
+	retiredReceiptIntegrityReason,
+} from "../../domains/evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
 import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
 import type {
@@ -74,7 +75,7 @@ export interface ViewArtifact {
 	toolName?: string;
 	searchText?: readonly string[];
 	load(): Promise<ViewArtifactLoadResult>;
-	verify?(): Promise<{ ok: boolean; detail: string }>;
+	verify?(): Promise<ViewArtifactVerification>;
 }
 
 export interface ArtifactProvider {
@@ -110,7 +111,14 @@ const ACCOUNTABILITY_TOP_CAUSES = 8;
 export const VIEW_ARTIFACT_LINE_CAP = 50_000;
 const JSON_PRETTY_MAX_BYTES = 10 * 1024 * 1024;
 
-export type ReceiptVerifyResult = ReceiptIntegrityResult;
+export type ReceiptVerifyResult = ReceiptIntegrityOutcome;
+
+/**
+ * What a verify action reports. `retired` marks a seal this build does not
+ * verify because its integrity version was retired: not a pass, and not the
+ * failure a tampered receipt reports.
+ */
+export type ViewArtifactVerification = { ok: true; detail: string } | { ok: false; detail: string; retired?: true };
 
 const RECEIPT_REQUIRED_KEYS = [
 	"runId",
@@ -415,6 +423,10 @@ export function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerif
 	if (!isNullableString(r.sessionId)) {
 		return { ok: false, reason: `sessionId invalid: ${String(r.sessionId)}` };
 	}
+	// A retired seal is diagnosed ahead of the shape check, which would
+	// otherwise report the older version as an invalid integrity block.
+	const retired = retiredReceiptIntegrity(r.integrity);
+	if (retired !== null) return { ok: false, reason: retiredReceiptIntegrityReason(retired), retired };
 	if (!isReceiptIntegrity(r.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
@@ -690,7 +702,9 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					load: () => loadJsonFileLines(path),
 					verify: async () => {
 						const result = verifyReceiptFile(this.deps.stateDir, env.id);
-						if (!result.ok) return { ok: false, detail: result.reason };
+						if (!result.ok) {
+							return { ok: false, detail: result.reason, ...(result.retired !== undefined ? { retired: true } : {}) };
+						}
 						// "integrity verified" alone read as a verified result. The
 						// canonical line says what the seal proves and what it does not.
 						return { ok: true, detail: receiptTrustDetail(this.deps.stateDir, env.id) };

@@ -15,6 +15,11 @@ export function printError(message: string, detail?: string): void {
 	if (detail) process.stderr.write(`  ${detail}\n`);
 }
 
+/** An expected condition worth a line on stderr that is neither an error nor a success. */
+export function printNote(message: string): void {
+	process.stderr.write(`${chalk.yellow("note:")} ${message}\n`);
+}
+
 export function printOk(message: string): void {
 	process.stdout.write(`${chalk.green("ok:")} ${message}\n`);
 }

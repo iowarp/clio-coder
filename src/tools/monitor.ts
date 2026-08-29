@@ -457,6 +457,17 @@ function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
 	const inspection = inspectRunReceiptTrustStatus(receipt, run);
 	const integrity = inspection.integrity;
 	if (!integrity.ok) {
+		// A retired seal is set aside unread, as a missing receipt is. It is
+		// not a failed one, so it never reads as tampering here either.
+		if (integrity.retired !== undefined) {
+			return {
+				...unavailableRunEvidence(
+					integrity.reason,
+					`${integrity.reason}; worker text is unavailable and validation is unknown.`,
+				),
+				trustStatus: inspection.status,
+			};
+		}
 		return {
 			...unavailableRunEvidence(
 				integrity.reason,

@@ -1,10 +1,10 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { RUN_RECEIPT_INTEGRITY_VERSION, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 
@@ -222,6 +222,17 @@ describe("contracts/monitor collect evidence labeling", () => {
 				receiptDraft("run-tampered", { verification: { state: "unverified", basis: "no-validation-tool" } }),
 				(sealed) => ({ ...sealed, verification: { state: "verified", basis: "validation-tool" } }),
 			),
+			writeSealedReceipt(
+				root,
+				receiptDraft("run-retired", { verification: { state: "unverified", basis: "no-validation-tool" } }),
+				(sealed) => ({
+					...sealed,
+					integrity: {
+						...sealed.integrity,
+						version: (RUN_RECEIPT_INTEGRITY_VERSION - 1) as RunReceipt["integrity"]["version"],
+					},
+				}),
+			),
 		];
 		const missingDraft = receiptDraft("run-missing", {
 			verification: { state: "verified", basis: "validation-tool" },
@@ -290,6 +301,20 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(tampered, /receipt integrity failed: integrity mismatch/);
 		strictEqual(tampered.includes("output run-tampered"), false, tampered);
 		strictEqual(tampered.includes("worker output (tool-verified):"), false, tampered);
+
+		// A retired seal is set aside unread and names both versions; it is
+		// never reported in the vocabulary of tampering.
+		const retired = runBlock(result.output, "run-retired");
+		match(retired, /worker claims \(unverified prose\):/);
+		match(
+			retired,
+			new RegExp(
+				`receipt_integrity=unavailable reason="receipt integrity v${RUN_RECEIPT_INTEGRITY_VERSION - 1} is retired; this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION}; the receipt is not read as evidence"`,
+			),
+		);
+		match(retired, /worker text is unavailable and validation is unknown/);
+		doesNotMatch(retired, /RECEIPT INTEGRITY FAILED|integrity failed|untrusted|invalid|broken|corrupt/);
+		strictEqual(retired.includes("output run-retired"), false, retired);
 
 		const missing = runBlock(result.output, "run-missing");
 		match(missing, /worker claims \(unverified prose\):/);
