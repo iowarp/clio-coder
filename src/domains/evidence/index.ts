@@ -5,6 +5,7 @@ export { buildEvalEvidence, evalEvidenceId } from "./eval.js";
 export { FINISH_CONTRACT_EVIDENCE_TAGS, finishContractEvidenceTags } from "./finish-contract-map.js";
 export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
+	admitRunProvenance,
 	extractRunProvenance,
 	hasRunProvenance,
 	PERSONA_HASH_PREFIX_CHARS,

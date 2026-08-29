@@ -268,8 +268,12 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 			else process.env.CLIO_CODER_DATA_DIR = previousData;
 		}
 		ok(stdout.includes(`trust run-bundle: ${CANONICAL_SUMMARY}\n  ${CANONICAL_AXES}\n`), stdout);
-		// The receipt grade and the canonical state are one fact in one word.
-		ok(stdout.includes("autonomy enforcement: mediated autonomy=auto-edit"), stdout);
+		// The autonomy axis is printed once as prose and once as the machine
+		// state; the provenance block carries only the policy detail behind it.
+		strictEqual(stdout.match(/\bmediated\b/gu)?.length, 1, stdout);
+		ok(stdout.includes("autonomyEnforcement:enforced"), stdout);
+		ok(stdout.includes("autonomy: auto-edit"), stdout);
+		ok(!stdout.includes("autonomy enforcement:"), "the second autonomy vocabulary is gone");
 		ok(!/autonomyEnforcement=/u.test(stdout), "the equals-joined formatter is gone");
 		const findings = readFileSync(join(built.directory, "findings.md"), "utf8");
 		ok(
