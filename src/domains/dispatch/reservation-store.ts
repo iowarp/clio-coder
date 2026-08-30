@@ -8,6 +8,7 @@ import {
 	type CapacityLimits,
 	type CapacityStateFile,
 	capacityStateLockPath,
+	describeEndpointCapacityHolders,
 	readCapacityStateUnsafe,
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
@@ -57,7 +58,7 @@ export interface DispatchReservationRecord {
 export interface ReservationCapacitySnapshot {
 	global: { active: number; limit: number };
 	nodes: Readonly<Record<string, { active: number; limit: number }>>;
-	endpoints: Readonly<Record<string, { active: number; limit: number }>>;
+	endpoints: Readonly<Record<string, { active: number; limit: number; leases?: number; foregroundStreams?: number }>>;
 	budget: { currentUsd: number; ceilingUsd: number };
 }
 
@@ -70,8 +71,16 @@ export interface ReservationAllocation {
 
 export type ReservationPlanResult = { ok: true; allocation: ReservationAllocation } | { ok: false; reason: string };
 
-function endpointCapacityDenial(endpointKey: string, limit: number): string {
-	return `dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${limit}/${limit} slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server`;
+function endpointCapacityDenial(input: {
+	endpointKey: string;
+	limit: number;
+	used: number;
+	requested: number;
+	leases: number;
+	reservations: number;
+	foregroundStreams: number;
+}): string {
+	return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity exceeded (${input.used + input.requested}/${input.limit} slots): ${describeEndpointCapacityHolders(input)}; reduce the same-wave worker count, collect in-flight runs, or point workers at a second server`;
 }
 
 function copyRecord(record: DispatchReservationRecord): DispatchReservationRecord {
@@ -213,7 +222,15 @@ function allocateReservation(
 		if (used + slots > endpoint.limit) {
 			return {
 				ok: false,
-				reason: endpointCapacityDenial(endpointKey, endpoint.limit),
+				reason: endpointCapacityDenial({
+					endpointKey,
+					limit: endpoint.limit,
+					used,
+					requested: slots,
+					leases: endpoint.leases ?? endpoint.active - (endpoint.foregroundStreams ?? 0),
+					reservations: heldSlots,
+					foregroundStreams: endpoint.foregroundStreams ?? 0,
+				}),
 			};
 		}
 	}
@@ -356,7 +373,17 @@ export function rebindDispatchReservationMember(input: {
 				);
 				const used = endpoint.active + otherHeld + siblingSlots;
 				if (used + 1 > endpoint.limit) {
-					throw new Error(endpointCapacityDenial(endpointKey, endpoint.limit));
+					throw new Error(
+						endpointCapacityDenial({
+							endpointKey,
+							limit: endpoint.limit,
+							used,
+							requested: 1,
+							leases: endpoint.leases ?? endpoint.active - (endpoint.foregroundStreams ?? 0),
+							reservations: otherHeld + siblingSlots,
+							foregroundStreams: endpoint.foregroundStreams ?? 0,
+						}),
+					);
 				}
 			}
 		}
@@ -419,6 +446,26 @@ export function releaseDispatchReservationMember(
 			record.status = "released";
 			record.settledAt = new Date(nowMs).toISOString();
 		}
+		writeStore(records);
+		return copyRecord(record);
+	});
+}
+
+/** Settle every member after the scheduler has finished the reserved plan. */
+export function releaseDispatchReservation(ownerId: string, nowMs = Date.now()): DispatchReservationRecord | null {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		const records = readStore();
+		const record = records.find((entry) => entry.ownerId === ownerId);
+		if (!record) return null;
+		if (record.status !== "active") return copyRecord(record);
+		const settledAt = new Date(nowMs).toISOString();
+		for (const member of record.members) {
+			if (member.status === "released") continue;
+			member.status = "released";
+			member.releasedAt = settledAt;
+		}
+		record.status = "released";
+		record.settledAt = settledAt;
 		writeStore(records);
 		return copyRecord(record);
 	});

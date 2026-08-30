@@ -256,7 +256,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 				};
 			},
 			cancel: (assignmentId) => input.dispatch.abort(assignmentId),
-			release: (ownerId) => input.dispatch.reservations?.rollbackUnconsumed(ownerId),
+			release: (ownerId) => input.dispatch.reservations?.release(ownerId),
 			releaseUnconsumed: (ownerId) => input.dispatch.reservations?.rollbackUnconsumed(ownerId),
 		},
 		input.signal,

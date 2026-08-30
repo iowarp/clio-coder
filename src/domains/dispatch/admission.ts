@@ -8,6 +8,8 @@ import {
 	type CapacityLease,
 	type CapacityLimits,
 	capacityLeaseUsage,
+	describeEndpointCapacityHolders,
+	type EndpointCapacityHolders,
 	heartbeatCapacityLease,
 	releaseCapacityLease,
 	renameCapacityLeaseAssignment,
@@ -116,6 +118,7 @@ function describeAdmissionFailure(input: {
 		global: number;
 		nodes: Readonly<Record<string, number>>;
 		endpoints: Readonly<Record<string, number>>;
+		endpointHolders?: Readonly<Record<string, EndpointCapacityHolders>>;
 	};
 }): string {
 	if (input.state === "canceled") return "dispatch: admission canceled before a capacity slot opened";
@@ -123,7 +126,12 @@ function describeAdmissionFailure(input: {
 		const endpointLimit = input.limits.endpoints[input.endpointKey];
 		const endpointActive = input.usage.endpoints[input.endpointKey] ?? 0;
 		if (endpointLimit !== undefined && endpointActive >= endpointLimit) {
-			return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity reached (${endpointActive}/${endpointLimit} slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server`;
+			const holders = input.usage.endpointHolders?.[input.endpointKey];
+			const occupancy =
+				holders === undefined
+					? "the supplied capacity snapshot does not attribute the occupied slots"
+					: describeEndpointCapacityHolders(holders);
+			return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity reached (${endpointActive}/${endpointLimit} slots): ${occupancy}; collect in-flight runs or point workers at a second server`;
 		}
 	}
 	const nodeLimit = input.limits.nodes[input.nodeId];
@@ -160,6 +168,7 @@ export function createCapacityAdmissionController(options: {
 		global: number;
 		nodes: Readonly<Record<string, number>>;
 		endpoints: Readonly<Record<string, number>>;
+		endpointHolders?: Readonly<Record<string, EndpointCapacityHolders>>;
 	};
 	now?: () => number;
 	maxQueueSize?: number;

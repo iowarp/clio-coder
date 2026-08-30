@@ -216,6 +216,7 @@ import {
 	planQueueSlot,
 	type ReservationCapacitySnapshot,
 	rebindDispatchReservationMember,
+	releaseDispatchReservation,
 	releaseDispatchReservationMember,
 	reservedBudgetUsd,
 	reservedPlanPeakSlots,
@@ -2485,7 +2486,12 @@ export function createDispatchBundle(
 		const endpoints = Object.fromEntries(
 			Object.entries(configuredEndpointLimits()).map(([key, limit]) => [
 				key,
-				{ active: usage.endpoints[key] ?? 0, limit },
+				{
+					active: usage.endpoints[key] ?? 0,
+					limit,
+					leases: usage.endpointHolders[key]?.leases ?? 0,
+					foregroundStreams: usage.endpointHolders[key]?.foregroundStreams ?? 0,
+				},
 			]),
 		);
 		return {
@@ -2584,7 +2590,13 @@ export function createDispatchBundle(
 				...(endpoint !== null && endpoint !== undefined ? { endpointKey: endpoint.key } : {}),
 				deadlineAt,
 				...plan,
-				...(req.reservation !== undefined && req.lineage === undefined ? { reservation: req.reservation } : {}),
+				// A fleet's first attempt carries lineage and still owns the held
+				// reservation member that admission must transfer into its lease.
+				// Retries carry the same reservation identity after that member was
+				// consumed, so they reacquire/rebind the assignment lease normally.
+				...(req.reservation !== undefined && (req.lineage === undefined || req.lineage.attempt === 0)
+					? { reservation: req.reservation }
+					: {}),
 			});
 			timing.admittedAt = new Date(admitted.admittedAt).toISOString();
 			return admitted.lease;
@@ -6372,6 +6384,7 @@ export function createDispatchBundle(
 		routeCandidates,
 		reservations: {
 			prepare: prepareReservation,
+			release: (ownerId) => releaseDispatchReservation(ownerId, now()),
 			rollback: (ownerId) => rollbackDispatchReservation(ownerId, now()),
 			rollbackUnconsumed: (ownerId) => rollbackUnconsumedDispatchReservation(ownerId, now()),
 			get: getDispatchReservation,

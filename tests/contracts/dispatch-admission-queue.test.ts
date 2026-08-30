@@ -131,7 +131,7 @@ describe("bounded dispatch admission queue", () => {
 					endpointKey,
 					deadlineAt: Date.now() + 60_000,
 				}),
-				/capacity reached \(1\/1 slots\).*orchestrator's own turn holds one/u,
+				/capacity reached \(1\/1 slots\).*1 foreground stream holds the slot/u,
 			);
 			strictEqual(listCapacityLeases().length, 0);
 		} finally {

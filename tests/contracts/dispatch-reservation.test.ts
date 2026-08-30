@@ -544,7 +544,7 @@ describe("dispatch batch reservations", () => {
 		}
 		strictEqual(
 			denial,
-			"dispatch: admission denied: endpoint 'mini:8080' capacity reached (1/1 slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server",
+			"dispatch: admission denied: endpoint 'mini:8080' capacity exceeded (4/1 slots): 1 active lease holds the slot; reduce the same-wave worker count, collect in-flight runs, or point workers at a second server",
 		);
 	});
 

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { parseFleetCommands } from "../../src/domains/agents/fleet-commands.js";
@@ -23,6 +24,7 @@ import { spliceExecutionPlan } from "../../src/domains/dispatch/execution-plan.j
 import { gateBaselineFailure, gateFailureLines } from "../../src/domains/dispatch/fleet-gate.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
 import { executeFleetRun, planFleetResume } from "../../src/domains/dispatch/fleet-run.js";
+import { listDispatchReservations } from "../../src/domains/dispatch/reservation-store.js";
 import { readFleetRun } from "../../src/domains/dispatch/state.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { formatFleetRunPreviewStep } from "../../src/interactive/overlays/fleet-run-approval.js";
@@ -57,8 +59,14 @@ const AGENT = [
 	"    dependencies: []",
 ].join("\n");
 
-function v5AgentHarness(): { context: ReturnType<typeof dispatchStubContext>; agents: AgentsContract } {
-	const context = dispatchStubContext({ agentTools: [ToolNames.Read, ToolNames.Write, ToolNames.Edit] });
+function v5AgentHarness(settings?: typeof DEFAULT_SETTINGS): {
+	context: ReturnType<typeof dispatchStubContext>;
+	agents: AgentsContract;
+} {
+	const context = dispatchStubContext({
+		...(settings === undefined ? {} : { settings }),
+		agentTools: [ToolNames.Read, ToolNames.Write, ToolNames.Edit],
+	});
 	const recipes: AgentRecipe[] = ["architect", "coder", "tester"].map((id) =>
 		agentRecipeFixture({
 			id,
@@ -421,6 +429,104 @@ describe("fleet v5 execution", () => {
 		roots.push(root);
 		return root;
 	};
+	const oneSlotSettings = (): typeof DEFAULT_SETTINGS => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [
+			{
+				id: "mini",
+				runtime: "llamacpp",
+				url: "http://mini:8080",
+				defaultModel: "fleet-model",
+				maxConcurrentRequests: 1,
+			},
+		];
+		settings.workers.default.target = "mini";
+		settings.workers.default.model = "fleet-model";
+		return settings;
+	};
+
+	it("transfers a one-step fleet reservation into the lease on a one-slot endpoint", async () => {
+		const root = workspace();
+		const { context, agents } = v5AgentHarness(oneSlotSettings());
+		let spawns = 0;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker() {
+				spawns += 1;
+				return spawnedWorker("inspected");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const contract = parseFleetContract(
+				source(
+					5,
+					["  - kind: agent", "    id: inspect", "    agent: coder", "    scope: readonly", "    dependencies: []"].join(
+						"\n",
+					),
+				),
+				"fleet.md",
+			);
+			const outcome = await executeFleetRun({
+				plan: compileV5(contract, agents),
+				contractName: contract.name,
+				commands: null,
+				workspaceRoot: root,
+				fleetRootId: "fleet-one-slot",
+				dispatch: bundle.contract,
+				agents,
+				attributionEnabled: false,
+			});
+
+			strictEqual(outcome.cleanRun, true);
+			strictEqual(spawns, 1);
+			const reservation = listDispatchReservations()[0];
+			ok(reservation);
+			strictEqual(reservation.members.length, 1);
+			strictEqual(reservation.status, "released");
+			strictEqual(reservation.members[0]?.status, "released");
+			ok(reservation.members[0]?.consumedAt, "fleet admission records when its held member became a lease");
+			ok(reservation.members[0]?.releasedAt, "fleet settlement records when the consumed member was released");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("refuses two same-wave fleet members that genuinely need two endpoint slots", async () => {
+		const root = workspace();
+		const { context, agents } = v5AgentHarness(oneSlotSettings());
+		let spawns = 0;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker() {
+				spawns += 1;
+				return spawnedWorker("unexpected");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const readonlyStep = (id: string): string =>
+				["  - kind: agent", `    id: ${id}`, "    agent: coder", "    scope: readonly", "    dependencies: []"].join("\n");
+			const contract = parseFleetContract(
+				source(5, [readonlyStep("inspect-a"), readonlyStep("inspect-b")].join("\n")),
+				"fleet.md",
+			);
+			await rejects(
+				executeFleetRun({
+					plan: compileV5(contract, agents),
+					contractName: contract.name,
+					commands: null,
+					workspaceRoot: root,
+					fleetRootId: "fleet-two-on-one-slot",
+					dispatch: bundle.contract,
+					agents,
+					attributionEnabled: false,
+				}),
+				/capacity exceeded \(2\/1 slots\).*no active lease, held reservation, or foreground stream/u,
+			);
+			strictEqual(spawns, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 
 	it("admits spliced writers through scheduler waves with lineage and dynamic boundary enforcement", async () => {
 		const root = workspace();
