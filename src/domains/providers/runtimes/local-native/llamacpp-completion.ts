@@ -157,7 +157,7 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
-		const props = await probeLlamaCppProps(base, ctx);
+		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
 		const status = await probeLlamaCppModelStatus(base, target, ctx);
 		const enriched: ProbeResult = { ...health };
 		const discoveredCapabilities = {

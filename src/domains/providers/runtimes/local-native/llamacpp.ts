@@ -55,8 +55,8 @@ const llamacppRuntime: RuntimeDescriptor = {
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
-		const props = await probeLlamaCppProps(base, ctx);
 		const status = await probeLlamaCppModelStatus(base, target, ctx);
+		const props = await probeLlamaCppProps(base, ctx, status.modelId ?? target.defaultModel);
 		const catalog = await probeOpenAIModelCatalog(base, ctx);
 		const result: ProbeResult = { ok: true };
 		if (catalog.models.length > 0) result.models = catalog.models;
@@ -66,6 +66,9 @@ const llamacppRuntime: RuntimeDescriptor = {
 		const discoveredCapabilities = {
 			...(props.discoveredCapabilities ?? {}),
 			...(status.discoveredCapabilities ?? {}),
+			...(props.discoveredCapabilities?.parallelSlots !== undefined
+				? { parallelSlots: props.discoveredCapabilities.parallelSlots }
+				: {}),
 		};
 		if (Object.keys(discoveredCapabilities).length > 0) {
 			result.discoveredCapabilities = discoveredCapabilities;

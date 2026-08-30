@@ -310,6 +310,7 @@ interface LlamaCppProps {
 	default_generation_settings?: { n_ctx?: unknown; n_predict?: unknown };
 	modalities?: { vision?: unknown };
 	build_info?: unknown;
+	total_slots?: unknown;
 }
 
 export interface LlamaCppPropsEnrichment {
@@ -499,6 +500,9 @@ export async function probeLlamaCppModelStatus(
 	if (flags.reasoning === true || flags.reasoningBudget !== undefined) caps.reasoning = true;
 	if (flags.mmproj) caps.vision = true;
 	if (flags.jinja === true) caps.tools = true;
+	if (flags.parallel !== undefined && Number.isInteger(flags.parallel) && flags.parallel > 0) {
+		caps.parallelSlots = flags.parallel;
+	}
 	const enrichment: LlamaCppStatusEnrichment = { modelId: selected.id, serverFlags: flags };
 	if (Object.keys(caps).length > 0) enrichment.discoveredCapabilities = caps;
 	const notes = statusNotes(selected.id, selected.status);
@@ -532,13 +536,28 @@ export async function detectModelMismatch(
 	return `wire model id ${expected} does not match server's loaded model ${loaded}; llama.cpp serves a single fixed model`;
 }
 
-export async function probeLlamaCppProps(base: string, ctx: ProbeContext): Promise<LlamaCppPropsEnrichment> {
-	const opts = { url: `${base}/props`, timeoutMs: ctx.httpTimeoutMs } as const;
-	const result = await (ctx.signal
-		? probeJson<LlamaCppProps>({ ...opts, signal: ctx.signal })
-		: probeJson<LlamaCppProps>(opts));
-	if (!result.ok || !result.data) return {};
-	const data = result.data;
+export async function probeLlamaCppProps(
+	base: string,
+	ctx: ProbeContext,
+	modelId?: string,
+): Promise<LlamaCppPropsEnrichment> {
+	const request = async (url: string): Promise<LlamaCppProps | null> => {
+		const opts = { url, timeoutMs: ctx.httpTimeoutMs } as const;
+		const result = await (ctx.signal
+			? probeJson<LlamaCppProps>({ ...opts, signal: ctx.signal })
+			: probeJson<LlamaCppProps>(opts));
+		return result.ok && result.data ? result.data : null;
+	};
+	const router = await request(`${base}/props`);
+	if (router === null) return {};
+	// A llama.cpp router reports its own role at /props and the selected
+	// worker's request slots at /props?model=<id>. A fixed-model server answers
+	// the first request directly, so the second GET is only made when needed.
+	const selected =
+		typeof router.total_slots === "number" || !modelId
+			? null
+			: await request(`${base}/props?model=${encodeURIComponent(modelId)}`);
+	const data = selected ?? router;
 	const enrichment: LlamaCppPropsEnrichment = {};
 	const caps: Partial<CapabilityFlags> = {};
 	const nCtx = data.default_generation_settings?.n_ctx;
@@ -547,9 +566,12 @@ export async function probeLlamaCppProps(base: string, ctx: ProbeContext): Promi
 	if (typeof nPredict === "number" && nPredict > 0) caps.maxTokens = nPredict;
 	const vision = data.modalities?.vision;
 	if (typeof vision === "boolean") caps.vision = vision;
+	const totalSlots = data.total_slots;
+	if (typeof totalSlots === "number" && Number.isInteger(totalSlots) && totalSlots > 0) caps.parallelSlots = totalSlots;
 	if (Object.keys(caps).length > 0) enrichment.discoveredCapabilities = caps;
-	if (typeof data.build_info === "string" && data.build_info.length > 0) {
-		enrichment.serverVersion = data.build_info;
+	const buildInfo = data.build_info ?? router.build_info;
+	if (typeof buildInfo === "string" && buildInfo.length > 0) {
+		enrichment.serverVersion = buildInfo;
 	}
 	return enrichment;
 }

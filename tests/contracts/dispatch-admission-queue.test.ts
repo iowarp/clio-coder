@@ -8,6 +8,7 @@ import {
 } from "../../src/domains/dispatch/admission-queue.js";
 import { capacityDrain, listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import { deriveRunPhaseDurations } from "../../src/domains/dispatch/phase-timing.js";
+import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { createTestClock } from "../harness/clock.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -88,7 +89,7 @@ describe("bounded dispatch admission queue", () => {
 	it("the controller holds one plan to its reserved peak", async () => {
 		const isolated = await isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({
-			limits: () => ({ global: 4, nodes: { local: 4 } }),
+			limits: () => ({ global: 4, nodes: { local: 4 }, endpoints: {} }),
 			reservedPlanPeak: (planId) => (planId === "plan-1" ? 1 : undefined),
 		});
 		try {
@@ -115,6 +116,30 @@ describe("bounded dispatch admission queue", () => {
 			isolated.restore();
 		}
 	});
+	it("endpoint saturation is refused immediately with the model-facing remedy", async () => {
+		const isolated = await isolateClioEnv("clio-admit-");
+		const endpointKey = "http://127.0.0.1:8080";
+		const releaseForeground = registerForegroundStream(endpointKey);
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 4, nodes: { local: 4 }, endpoints: { [endpointKey]: 1 } }),
+		});
+		try {
+			await rejects(
+				controller.admit({
+					assignmentId: "blocked-by-chat",
+					nodeId: "local",
+					endpointKey,
+					deadlineAt: Date.now() + 60_000,
+				}),
+				/capacity reached \(1\/1 slots\).*orchestrator's own turn holds one/u,
+			);
+			strictEqual(listCapacityLeases().length, 0);
+		} finally {
+			controller.stop();
+			releaseForeground();
+			isolated.restore();
+		}
+	});
 	/**
 	 * The defect this pins: a live dispatch waited nearly two minutes and came
 	 * back with "dispatch: admission timed_out", 39 bytes that named neither the
@@ -128,8 +153,8 @@ describe("bounded dispatch admission queue", () => {
 		// message here and neither test could tell you which it had run.
 		const clock = createTestClock();
 		const controller = createCapacityAdmissionController({
-			limits: () => ({ global: 1, nodes: { local: 1 } }),
-			usage: () => ({ global: 1, nodes: { local: 1 } }),
+			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
+			usage: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
 			now: clock.now,
 		});
 		try {
@@ -168,8 +193,8 @@ describe("bounded dispatch admission queue", () => {
 		// already-passed branch.
 		const clock = createTestClock();
 		const controller = createCapacityAdmissionController({
-			limits: () => ({ global: 4, nodes: { local: 4 } }),
-			usage: () => ({ global: 0, nodes: { local: 0 } }),
+			limits: () => ({ global: 4, nodes: { local: 4 }, endpoints: {} }),
+			usage: () => ({ global: 0, nodes: { local: 0 }, endpoints: {} }),
 			now: clock.now,
 		});
 		try {
@@ -192,7 +217,7 @@ describe("bounded dispatch admission queue", () => {
 	it("a rejected admission leaves nothing pending behind it", async () => {
 		const isolated = await isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({
-			limits: () => ({ global: 1, nodes: { local: 1 } }),
+			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
 			maxQueueSize: 1,
 		});
 		try {
@@ -213,7 +238,7 @@ describe("bounded dispatch admission queue", () => {
 	it("shutdown drain is process-local and cancels queued work", async () => {
 		const isolated = await isolateClioEnv("clio-admit-");
 		const controller = createCapacityAdmissionController({
-			limits: () => ({ global: 1, nodes: { local: 1 } }),
+			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
 		});
 		try {
 			const deadlineAt = Date.now() + 10_000;

@@ -89,6 +89,7 @@ function twoTargetSettings(): typeof DEFAULT_SETTINGS {
 const CAPACITY_ONE_LOCAL = {
 	global: { active: 0, limit: 1 },
 	nodes: { local: { active: 0, limit: 1 } },
+	endpoints: {},
 	budget: { currentUsd: 0, ceilingUsd: 5 },
 } as const;
 
@@ -417,6 +418,7 @@ describe("dispatch batch reservations", () => {
 			capacity: {
 				global: { active: 0, limit: 1 },
 				nodes: { local: { active: 0, limit: 1 } },
+				endpoints: {},
 				budget: { currentUsd: 0, ceilingUsd: 5 },
 			},
 		});
@@ -425,7 +427,7 @@ describe("dispatch batch reservations", () => {
 			memberId: task.memberId,
 			assignmentId: "assignment-1",
 			nodeId: task.nodeId,
-			limits: { global: 1, nodes: { local: 1 } },
+			limits: { global: 1, nodes: { local: 1 }, endpoints: {} },
 		});
 		releaseDispatchReservationMember(record.ownerId, task.memberId);
 		releaseDispatchReservationMember(record.ownerId, task.memberId);
@@ -442,6 +444,7 @@ describe("dispatch batch reservations", () => {
 			capacity: {
 				global: { active: 0, limit: 1 },
 				nodes: { local: { active: 0, limit: 1 } },
+				endpoints: {},
 				budget: { currentUsd: 0, ceilingUsd: 5 },
 			},
 		});
@@ -455,6 +458,7 @@ describe("dispatch batch reservations", () => {
 				capacity: {
 					global: { active: 0, limit: 1 },
 					nodes: { local: { active: 0, limit: 1 } },
+					endpoints: {},
 					budget: { currentUsd: 0, ceilingUsd: 5 },
 				},
 			});
@@ -502,10 +506,40 @@ describe("dispatch batch reservations", () => {
 		match(denial, /capacity exceeded \(3\/1\)/);
 	});
 
+	it("surfaces endpoint reservation saturation with the admission remedy", () => {
+		const endpointKey = "http://mini:8080";
+		let denial = "";
+		try {
+			createDispatchReservation({
+				topology: "parallel",
+				tasks: ["a", "b", "c"].map((memberId) => ({
+					memberId,
+					wave: 0,
+					nodeId: "local",
+					endpointKey,
+					costUpperBoundUsd: 0,
+				})),
+				capacity: {
+					global: { active: 0, limit: 4 },
+					nodes: { local: { active: 0, limit: 4 } },
+					endpoints: { [endpointKey]: { active: 1, limit: 1 } },
+					budget: { currentUsd: 0, ceilingUsd: 5 },
+				},
+			});
+		} catch (error) {
+			denial = error instanceof Error ? error.message : String(error);
+		}
+		strictEqual(
+			denial,
+			"dispatch: admission denied: endpoint 'mini:8080' capacity reached (1/1 slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server",
+		);
+	});
+
 	it("reclaims a dead owner's reservation at startup while preserving a live sibling's", async () => {
 		const capacity = {
 			global: { active: 0, limit: 8 },
 			nodes: { local: { active: 0, limit: 8 } },
+			endpoints: {},
 			budget: { currentUsd: 0, ceilingUsd: 50 },
 		};
 		const dead = createDispatchReservation({
@@ -652,6 +686,7 @@ describe("dispatch batch reservations", () => {
 		const capacity = {
 			global: { active: 0, limit: 4 },
 			nodes: { local: { active: 0, limit: 1 }, blade: { active: 1, limit: 1 } },
+			endpoints: {},
 			budget: { currentUsd: 0, ceilingUsd: 50 },
 		};
 		let denial = "";
@@ -685,7 +720,12 @@ describe("dispatch batch reservations", () => {
 				memberId: "task-1",
 				nodeId: "local",
 				costUpperBoundUsd: 9,
-				capacity: { global: { active: 0, limit: 4 }, nodes: {}, budget: { currentUsd: 1, ceilingUsd: 5 } },
+				capacity: {
+					global: { active: 0, limit: 4 },
+					nodes: {},
+					endpoints: {},
+					budget: { currentUsd: 1, ceilingUsd: 5 },
+				},
 			});
 		} catch (error) {
 			denial = error instanceof Error ? error.message : String(error);

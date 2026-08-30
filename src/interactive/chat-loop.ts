@@ -29,7 +29,13 @@ import { appendOutOfTurnUsageRow, type OutOfTurnUsageRow } from "../domains/obse
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { normalizeCostProvenance, runtimeTargetSnapshot, targetRequiresAuth } from "../domains/providers/index.js";
+import {
+	canonicalEndpointKey,
+	normalizeCostProvenance,
+	registerForegroundStream,
+	runtimeTargetSnapshot,
+	targetRequiresAuth,
+} from "../domains/providers/index.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/context-accounting.js";
@@ -1009,6 +1015,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 7. Run the prompt, then route the settled state through recovery.
 			state.streaming = true;
+			const endpointKey = canonicalEndpointKey(agentRuntime.runtimeResolution.target);
+			const releaseForeground = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
 			try {
 				options.onAdmitted?.();
 			} catch {
@@ -1072,6 +1080,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 			} finally {
+				releaseForeground();
 				if (askUserPolicy) {
 					try {
 						await finalizeAskUserInterviewForHost(

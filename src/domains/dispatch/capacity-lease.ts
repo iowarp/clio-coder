@@ -6,6 +6,7 @@ import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from ".
 import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { endpointLabel, foregroundStreamUsage } from "../providers/endpoint-capacity.js";
 
 export { processBirthToken } from "../../core/process-identity.js";
 
@@ -30,6 +31,8 @@ export interface CapacityLease {
 	leaseId: string;
 	assignmentId: string;
 	nodeId: string;
+	/** Canonical inference endpoint. Absent only on leases written before endpoint capacity existed. */
+	endpointKey?: string;
 	/** Owner host. Absent only on records written before the field existed; those are read as this host. */
 	host?: string;
 	ownerPid: number;
@@ -43,6 +46,7 @@ export interface CapacityLease {
 export interface CapacityLimits {
 	global: number;
 	nodes: Readonly<Record<string, number>>;
+	endpoints: Readonly<Record<string, number>>;
 }
 export interface CapacityDrain {
 	requestedByPid: number;
@@ -81,6 +85,7 @@ function valid(value: unknown): value is CapacityLease {
 		typeof lease.leaseId === "string" &&
 		typeof lease.assignmentId === "string" &&
 		typeof lease.nodeId === "string" &&
+		(lease.endpointKey === undefined || typeof lease.endpointKey === "string") &&
 		(lease.host === undefined || typeof lease.host === "string") &&
 		Number.isInteger(lease.ownerPid) &&
 		typeof lease.processBirthToken === "string" &&
@@ -182,9 +187,14 @@ const MEMBER_STATUSES = new Set(["held", "consumed", "released"]);
  * rejected here as well: silently skipping an unreadable record would under-count
  * capacity and admit past the cap.
  */
-function heldReservationUsage(values: ReadonlyArray<unknown>): { global: number; nodes: Record<string, number> } {
+function heldReservationUsage(values: ReadonlyArray<unknown>): {
+	global: number;
+	nodes: Record<string, number>;
+	endpoints: Record<string, number>;
+} {
 	let global = 0;
 	const nodes: Record<string, number> = {};
+	const endpoints: Record<string, number> = {};
 	for (const value of values) {
 		if (typeof value !== "object" || value === null)
 			throw new Error("dispatch capacity store has invalid reservation records");
@@ -194,10 +204,11 @@ function heldReservationUsage(values: ReadonlyArray<unknown>): { global: number;
 		if (record.status !== "active") continue;
 		const byWave = new Map<number, number>();
 		const byNodeWave = new Map<string, Map<number, number>>();
+		const byEndpointWave = new Map<string, Map<number, number>>();
 		for (const raw of record.members) {
 			if (typeof raw !== "object" || raw === null)
 				throw new Error("dispatch capacity store has invalid reservation records");
-			const member = raw as { status?: unknown; wave?: unknown; nodeId?: unknown };
+			const member = raw as { status?: unknown; wave?: unknown; nodeId?: unknown; endpointKey?: unknown };
 			if (
 				typeof member.status !== "string" ||
 				!MEMBER_STATUSES.has(member.status) ||
@@ -211,13 +222,26 @@ function heldReservationUsage(values: ReadonlyArray<unknown>): { global: number;
 			const nodeWaves = byNodeWave.get(member.nodeId) ?? new Map<number, number>();
 			nodeWaves.set(wave, (nodeWaves.get(wave) ?? 0) + 1);
 			byNodeWave.set(member.nodeId, nodeWaves);
+			if (member.endpointKey !== undefined && typeof member.endpointKey !== "string")
+				throw new Error("dispatch capacity store has invalid reservation records");
+			if (typeof member.endpointKey === "string") {
+				const endpointWaves = byEndpointWave.get(member.endpointKey) ?? new Map<number, number>();
+				endpointWaves.set(wave, (endpointWaves.get(wave) ?? 0) + 1);
+				byEndpointWave.set(member.endpointKey, endpointWaves);
+			}
 		}
 		global += Math.max(0, ...byWave.values());
 		for (const [id, waves] of byNodeWave) nodes[id] = (nodes[id] ?? 0) + Math.max(0, ...waves.values());
+		for (const [key, waves] of byEndpointWave) endpoints[key] = (endpoints[key] ?? 0) + Math.max(0, ...waves.values());
 	}
-	return { global, nodes };
+	return { global, nodes, endpoints };
 }
-function assertCapacity(file: CapacityStateFile, nodeId: string, limits: CapacityLimits): void {
+function assertCapacity(
+	file: CapacityStateFile,
+	nodeId: string,
+	endpointKey: string | undefined,
+	limits: CapacityLimits,
+): void {
 	const held = heldReservationUsage(file.reservations);
 	const globalUsed = file.leases.length + held.global;
 	// The denial names the compliant next move, not just the gate. A model told
@@ -235,10 +259,27 @@ function assertCapacity(file: CapacityStateFile, nodeId: string, limits: Capacit
 		if (used >= nodeLimit)
 			throw new Error(`dispatch: admission denied: node '${nodeId}' capacity reached (${used}/${nodeLimit})`);
 	}
+	if (endpointKey !== undefined) {
+		const endpointLimit = limits.endpoints[endpointKey];
+		if (endpointLimit !== undefined) {
+			if (endpointLimit < 1)
+				throw new Error(`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity unavailable`);
+			const foreground = foregroundStreamUsage()[endpointKey] ?? 0;
+			const used =
+				file.leases.filter((lease) => lease.endpointKey === endpointKey).length +
+				(held.endpoints[endpointKey] ?? 0) +
+				foreground;
+			if (used >= endpointLimit)
+				throw new Error(
+					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server`,
+				);
+		}
+	}
 }
 export function acquireCapacityLease(input: {
 	assignmentId: string;
 	nodeId: string;
+	endpointKey?: string;
 	limits: CapacityLimits;
 	nowMs?: number;
 	ttlMs?: number;
@@ -259,10 +300,12 @@ export function acquireCapacityLease(input: {
 			);
 		const existing = file.leases.find((lease) => lease.assignmentId === input.assignmentId);
 		if (existing) {
-			if (existing.nodeId !== input.nodeId) {
+			if (existing.nodeId !== input.nodeId || existing.endpointKey !== input.endpointKey) {
 				const without = { ...file, leases: file.leases.filter((lease) => lease !== existing) };
-				assertCapacity(without, input.nodeId, input.limits);
+				assertCapacity(without, input.nodeId, input.endpointKey, input.limits);
 				existing.nodeId = input.nodeId;
+				if (input.endpointKey === undefined) delete existing.endpointKey;
+				else existing.endpointKey = input.endpointKey;
 			}
 			existing.heartbeatAt = new Date(nowMs).toISOString();
 			existing.expiresAt = new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString();
@@ -270,7 +313,7 @@ export function acquireCapacityLease(input: {
 			return clone(existing);
 		}
 		input.onAcquiredUnderLock?.(file);
-		assertCapacity(file, input.nodeId, input.limits);
+		assertCapacity(file, input.nodeId, input.endpointKey, input.limits);
 		const token = input.processBirthToken ?? processBirthToken(input.ownerPid ?? process.pid);
 		if (!token) throw new Error("dispatch: cannot establish process birth token");
 		const at = new Date(nowMs).toISOString();
@@ -278,6 +321,7 @@ export function acquireCapacityLease(input: {
 			leaseId: `lease-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
 			assignmentId: input.assignmentId,
 			nodeId: input.nodeId,
+			...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
 			host: hostname(),
 			ownerPid: input.ownerPid ?? process.pid,
 			processBirthToken: token,
@@ -365,11 +409,16 @@ export function capacityDrain(nowMs = Date.now()): CapacityDrain | null {
 export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwnerProbe }): {
 	global: number;
 	nodes: Readonly<Record<string, number>>;
+	endpoints: Readonly<Record<string, number>>;
 } {
 	const leases = listCapacityLeases(options);
 	const nodes: Record<string, number> = {};
-	for (const lease of leases) nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
-	return { global: leases.length, nodes };
+	const endpoints: Record<string, number> = { ...foregroundStreamUsage() };
+	for (const lease of leases) {
+		nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
+		if (lease.endpointKey !== undefined) endpoints[lease.endpointKey] = (endpoints[lease.endpointKey] ?? 0) + 1;
+	}
+	return { global: leases.length, nodes, endpoints };
 }
 
 /**

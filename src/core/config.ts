@@ -521,6 +521,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"gateway",
 		"pricing",
 		"lmstudio",
+		"maxConcurrentRequests",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
 	const runtime = "runtime" in value ? expectString(issues, `${path}.runtime`, value.runtime) : undefined;
@@ -565,6 +566,10 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("lmstudio" in value) {
 		const v = validateLmStudioSettings(issues, `${path}.lmstudio`, value.lmstudio);
 		if (v !== undefined) target.lmstudio = v;
+	}
+	if ("maxConcurrentRequests" in value) {
+		const v = expectInteger(issues, `${path}.maxConcurrentRequests`, value.maxConcurrentRequests, { min: 1 });
+		if (v !== undefined) target.maxConcurrentRequests = v;
 	}
 	return target;
 }

@@ -14,6 +14,7 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import {
+	endpointCapacityForStatus,
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
 	ProvidersDomainModule,
@@ -1044,8 +1045,10 @@ export function formatContextWindow(
 		: `ctx ${window}`;
 }
 
-function formatNotes(status: TargetStatus): string {
+export function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
+	const endpoint = endpointCapacityForStatus(status);
+	if (endpoint) parts.push(`slots ${endpoint.limit}`);
 	if (status.target.gateway) parts.push("gateway");
 	if (status.runtime?.auth === "oauth") parts.push("oauth");
 	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
@@ -1120,6 +1123,7 @@ interface SerializedStatus {
 	tier: ProviderOutputTier;
 	detectedReasoning: boolean | null;
 	reasoningCandidateModelId: string | null;
+	endpointCapacity?: ReturnType<typeof endpointCapacityForStatus>;
 }
 
 function serializeStatus(
@@ -1141,6 +1145,8 @@ function serializeStatus(
 		detectedReasoning: extras.detectedReasoning,
 		reasoningCandidateModelId: extras.candidateModelId,
 	};
+	const endpointCapacity = endpointCapacityForStatus(status);
+	if (endpointCapacity !== null) out.endpointCapacity = endpointCapacity;
 	if (status.contextWindowProvenance !== undefined) {
 		out.contextWindowProvenance = status.contextWindowProvenance;
 	}

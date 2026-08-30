@@ -59,6 +59,8 @@ export interface ExecutionPlanAgentStep {
 	/** Exact per-step route defaults from a version 5 fleet contract. */
 	target?: string;
 	profile?: string;
+	/** Resolved inference scheduler bound used when waves are packed. */
+	endpoint?: { key: string; limit: number; foregroundHeld?: number };
 	/** Version 5 gate authoring and baseline execution facts. */
 	gate?: { path: string; commandId: string };
 	/** Version 5 dynamic planning facts. */
@@ -163,7 +165,12 @@ function canonicalSteps(steps: ReadonlyArray<ExecutionPlanStepInput>): Execution
 }
 
 export function executionPlanWaves(
-	steps: ReadonlyArray<{ id: string; dependencies: ReadonlyArray<string>; kind?: "agent" | "code" }>,
+	steps: ReadonlyArray<{
+		id: string;
+		dependencies: ReadonlyArray<string>;
+		kind?: "agent" | "code";
+		endpoint?: { key: string; limit: number; foregroundHeld?: number };
+	}>,
 	maxWorkers: number,
 ): string[][] {
 	if (!Number.isInteger(maxWorkers) || maxWorkers < 1)
@@ -191,11 +198,24 @@ export function executionPlanWaves(
 		// capacity lease, so they ride the first chunk of their ready set without
 		// displacing an agent step or forcing an extra wave.
 		const codeReady = ready.filter((step) => step.kind === "code").map((step) => step.id);
-		const agentReady = ready.filter((step) => step.kind !== "code").map((step) => step.id);
+		const agentReady = ready.filter((step) => step.kind !== "code");
 		const chunks: string[][] = [];
-		for (let offset = 0; offset < agentReady.length; offset += maxWorkers) {
-			chunks.push(agentReady.slice(offset, offset + maxWorkers));
+		let chunk: string[] = [];
+		let endpointCounts = new Map<string, number>();
+		for (const step of agentReady) {
+			const endpoint = step.endpoint;
+			const endpointLimit =
+				endpoint === undefined ? Number.POSITIVE_INFINITY : Math.max(1, endpoint.limit - (endpoint.foregroundHeld ?? 0));
+			const endpointFull = endpoint !== undefined && (endpointCounts.get(endpoint.key) ?? 0) >= endpointLimit;
+			if (chunk.length >= maxWorkers || endpointFull) {
+				chunks.push(chunk);
+				chunk = [];
+				endpointCounts = new Map<string, number>();
+			}
+			chunk.push(step.id);
+			if (endpoint !== undefined) endpointCounts.set(endpoint.key, (endpointCounts.get(endpoint.key) ?? 0) + 1);
 		}
+		if (chunk.length > 0) chunks.push(chunk);
 		if (chunks.length === 0) chunks.push([]);
 		chunks[0] = [...codeReady, ...(chunks[0] ?? [])];
 		for (const wave of chunks) {
@@ -315,6 +335,26 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 		waves,
 	};
 	return { ...canonical, hash: createHash("sha256").update(JSON.stringify(canonical)).digest("hex") };
+}
+
+/** Recompile one approved graph after route preflight supplies endpoint bounds. */
+export function bindExecutionPlanEndpoints(
+	plan: ExecutionPlan,
+	bindings: Readonly<Record<string, { key: string; limit: number; foregroundHeld?: number } | undefined>>,
+): ExecutionPlan {
+	return compileExecutionPlan({
+		topology: plan.topology,
+		rootTask: plan.rootTask,
+		maxWorkers: plan.maxWorkers,
+		...(plan.writers === 1 ? { writers: 1 as const } : {}),
+		onFailure: plan.onFailure,
+		steps: plan.steps.map((step) => {
+			if (step.kind === "code") return step;
+			const endpoint = bindings[step.id];
+			return endpoint === undefined ? step : { ...step, endpoint: { ...endpoint } };
+		}),
+		loops: plan.loops,
+	});
 }
 
 /** Transitive dependency closure of one plan step. */

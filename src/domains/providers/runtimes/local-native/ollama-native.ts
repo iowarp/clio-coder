@@ -33,6 +33,11 @@ function positiveNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+function ollamaParallelSlots(): number {
+	const parsed = Number(process.env.OLLAMA_NUM_PARALLEL);
+	return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
 /**
  * Resident models reported by `/api/ps`, keyed by wire id. Best-effort: the
  * probe still succeeds on `/api/tags` alone, so an `/api/ps` failure (older
@@ -83,7 +88,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 			if (result.latencyMs !== undefined) failed.latencyMs = result.latencyMs;
 			return failed;
 		}
-		const out: ProbeResult = { ok: true };
+		const out: ProbeResult = { ok: true, discoveredCapabilities: { parallelSlots: ollamaParallelSlots() } };
 		if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
 		const modelStates = await probeResidentModelStates(base, ctx);
 		if (modelStates) out.modelStates = modelStates;

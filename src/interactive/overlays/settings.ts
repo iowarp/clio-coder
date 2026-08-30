@@ -9,6 +9,7 @@ import {
 import { DEFAULT_SETTINGS, THINKING_LEVELS } from "../../core/defaults.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
+import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
 import {
 	delegationEntryForKind,
 	type InteropAgentId,
@@ -17,6 +18,8 @@ import {
 } from "../../domains/interop/index.js";
 import {
 	type CapabilityFlags,
+	endpointCapacitiesForStatuses,
+	endpointCapacityForStatus,
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
 	type ProvidersContract,
@@ -225,7 +228,8 @@ type EntrySettingId =
 	| `workers.profiles.${string}`
 	| `workers.agentBindings.${string}`
 	| `targets.${string}`
-	| `fleet.nodes.${string}`;
+	| `fleet.nodes.${string}`
+	| `fleet.endpoints.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
 type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement"}`;
 type TargetsCtaId = "targets.add-cta";
@@ -1482,6 +1486,7 @@ export function buildSettingItems(
 		}),
 		fleetGroupHeader("fleet.group.placement", "Placement"),
 		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
+		...fleetEndpointRows(options?.providers),
 		settingItem("targets", "", {
 			description: "Live inference target inventory and routing roles.",
 			affordance: "column heading",
@@ -1856,6 +1861,35 @@ function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): SettingsCenterI
 				},
 				{ text: ` · ${busy}`, tone: "neutral" },
 			],
+		});
+	});
+}
+
+/** Read-only endpoint rows show the independent inference scheduler dimension. */
+function fleetEndpointRows(providers: ProvidersContract | undefined): SettingsCenterItem[] {
+	if (providers === undefined) return [];
+	let usage: Readonly<Record<string, number>> = {};
+	try {
+		usage = capacityLeaseUsage().endpoints;
+	} catch {
+		// A damaged capacity file belongs to admission. Settings still shows the configured limits.
+	}
+	const capacities = endpointCapacitiesForStatuses(providers.list());
+	const targetsByEndpoint = new Map<string, string[]>();
+	for (const status of providers.list()) {
+		const endpoint = endpointCapacityForStatus(status);
+		if (endpoint === null) continue;
+		targetsByEndpoint.set(endpoint.key, [...(targetsByEndpoint.get(endpoint.key) ?? []), status.target.id]);
+	}
+	return Object.entries(capacities).map(([key, endpoint]) => {
+		const slots = `slots ${usage[key] ?? 0}/${endpoint.limit}`;
+		return settingItem(`fleet.endpoints.${key}`, slots, {
+			label: `endpoint ${endpoint.label}`,
+			description: `Targets: ${(targetsByEndpoint.get(key) ?? []).join(", ")} · Limit source: ${endpoint.source}`,
+			affordance: "read-only inference endpoint capacity",
+			readOnly: true,
+			presentationKind: "status",
+			valueSegments: [{ text: slots, tone: "neutral" }],
 		});
 	});
 }

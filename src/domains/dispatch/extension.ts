@@ -76,6 +76,9 @@ import { type EffectivePricing, resolveEffectivePricing } from "../providers/cat
 import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
+	type EndpointCapacity,
+	endpointCapacitiesForStatuses,
+	endpointCapacityForStatus,
 	firstRuntimeResolutionError,
 	isDispatchEligibleRuntime,
 	type ProvidersContract,
@@ -2430,7 +2433,7 @@ export function createDispatchBundle(
 			const settings = getEffectiveSettings();
 			const nodes: Record<string, number> = { local: configuredGlobalCapacity(settings) };
 			for (const node of settings?.fleet?.nodes ?? []) nodes[node.id] = node.maxWorkers;
-			return { global: configuredGlobalCapacity(settings), nodes };
+			return { global: configuredGlobalCapacity(settings), nodes, endpoints: configuredEndpointLimits() };
 		},
 		now,
 		reservedPlanPeak: (planId) =>
@@ -2443,6 +2446,21 @@ export function createDispatchBundle(
 		}),
 	);
 
+	function configuredEndpointLimits(): Readonly<Record<string, number>> {
+		return Object.fromEntries(
+			Object.entries(endpointCapacitiesForStatuses(providers.list())).map(([key, value]) => [key, value.limit]),
+		);
+	}
+
+	function endpointCapacityForTarget(targetId: string): EndpointCapacity | null {
+		const status = providers.list().find((entry) => entry.target.id === targetId);
+		if (status === undefined) return null;
+		const endpoint = endpointCapacityForStatus(status);
+		if (endpoint === null) return null;
+		const configured = endpointCapacitiesForStatuses(providers.list())[endpoint.key];
+		return configured ?? endpoint;
+	}
+
 	function reservationCapacitySnapshot(settings: EffectiveSettings): ReservationCapacitySnapshot {
 		const preflight = scheduling.preflight();
 		// Reservation planning compares against a fresh read, never the display cache.
@@ -2452,9 +2470,16 @@ export function createDispatchBundle(
 		};
 		for (const node of settings?.fleet?.nodes ?? [])
 			nodes[node.id] = { active: usage.nodes[node.id] ?? 0, limit: node.maxWorkers };
+		const endpoints = Object.fromEntries(
+			Object.entries(configuredEndpointLimits()).map(([key, limit]) => [
+				key,
+				{ active: usage.endpoints[key] ?? 0, limit },
+			]),
+		);
 		return {
 			global: { active: usage.global, limit: configuredGlobalCapacity(settings) },
 			nodes,
+			endpoints,
 			budget: { currentUsd: preflight.currentUsd, ceilingUsd: preflight.ceilingUsd },
 		};
 	}
@@ -2466,6 +2491,7 @@ export function createDispatchBundle(
 				memberId: task.memberId,
 				wave: task.wave,
 				nodeId: task.resolution.node.id,
+				...(task.resolution.endpoint !== undefined ? { endpointKey: task.resolution.endpoint.key } : {}),
 				costUpperBoundUsd: task.resolution.routeApproval?.totalCostUpperBoundUsd ?? task.resolution.costUpperBoundUsd,
 			})),
 			capacity: reservationCapacitySnapshot(getEffectiveSettings()),
@@ -2520,7 +2546,12 @@ export function createDispatchBundle(
 		return scheduling.maxWorkers?.() ?? (configured === "auto" || configured === undefined ? 4 : Math.max(1, configured));
 	}
 
-	async function admitAssignmentCapacity(req: DispatchRequest, nodeId: string, timing: RunPhaseMarks) {
+	async function admitAssignmentCapacity(
+		req: DispatchRequest,
+		nodeId: string,
+		timing: RunPhaseMarks,
+		endpoint?: EndpointCapacity | null,
+	) {
 		const queuedAt = now();
 		timing.queuedAt = new Date(queuedAt).toISOString();
 		const assignmentId = req.lineage?.rootRunId ?? `pending-${queuedAt.toString(36)}-${randomBytes(6).toString("hex")}`;
@@ -2538,6 +2569,7 @@ export function createDispatchBundle(
 			const admitted = await capacityAdmission.admit({
 				assignmentId,
 				nodeId,
+				...(endpoint !== null && endpoint !== undefined ? { endpointKey: endpoint.key } : {}),
 				deadlineAt,
 				...plan,
 				...(req.reservation !== undefined && req.lineage === undefined ? { reservation: req.reservation } : {}),
@@ -2557,6 +2589,7 @@ export function createDispatchBundle(
 	function rebindReservationSlot(
 		req: DispatchRequest,
 		nodeId: string,
+		endpoint: EndpointCapacity | null,
 		costUsd: number,
 		settings: EffectiveSettings,
 	): void {
@@ -2565,6 +2598,7 @@ export function createDispatchBundle(
 		const rebind = {
 			...req.reservation,
 			nodeId,
+			...(endpoint !== null ? { endpointKey: endpoint.key } : {}),
 			costUpperBoundUsd: req.routeApproval?.totalCostUpperBoundUsd ?? costUsd,
 			capacity,
 			nowMs: now(),
@@ -3493,7 +3527,7 @@ export function createDispatchBundle(
 
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
-		const capacityLease = await admitAssignmentCapacity(req, "local", timing);
+		const capacityLease = await admitAssignmentCapacity(req, "local", timing, null);
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
 
 		// Resolve the ledger before starting the ACP process: an external agent
@@ -4262,7 +4296,7 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
+			rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req, undefined, settings);
 			return attachRouteObservation({
 				...(await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer)),
@@ -4296,10 +4330,12 @@ export function createDispatchBundle(
 			model: lifecycle.target.wireModelId,
 			node: placement?.node?.id ?? "local",
 		};
+		const endpoint = endpointCapacityForTarget(lifecycle.target.target.id);
 		assertRouteWithinApprovedEnvelope(req, effectiveRoute);
 		rebindReservationSlot(
 			req,
 			effectiveRoute.node,
+			endpoint,
 			conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, admissionMaxOutputTokens(settings)),
 			settings,
 		);
@@ -4318,7 +4354,7 @@ export function createDispatchBundle(
 			shadow: () => observeShadowRoute(req, placed, settings),
 		});
 
-		const capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing);
+		const capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing, endpoint);
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
 
 		const ledgerRef = (() => {
@@ -4755,6 +4791,7 @@ export function createDispatchBundle(
 			// per-worker meter. All optional so consumers degrade to local/plain.
 			const fleetIdentity = {
 				budget: lifecycle.budgetEnvelope,
+				...(endpoint !== null ? { endpoint: { key: endpoint.key, label: endpoint.label, limit: endpoint.limit } } : {}),
 				...(placement !== undefined && placement !== null ? { node: placement.node.id } : {}),
 				...(req.gate !== undefined ? { gate: { role: req.gate.role, cycle: req.gate.cycle } } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
@@ -5628,12 +5665,14 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 		});
+		const endpoint = endpointCapacityForTarget(target.target.id);
 		return {
 			agentId: req.agentId,
 			specFingerprint: agentSpecFingerprint(agentSpec),
 			targetId: target.target.id,
 			wireModelId: target.wireModelId,
 			runtimeId: target.runtime.id,
+			...(endpoint !== null ? { endpoint: { key: endpoint.key, label: endpoint.label, limit: endpoint.limit } } : {}),
 			node: previewNode(req).node,
 			thinkingLevel: target.thinkingLevel,
 			toolSignature: toolSignature(effectiveTools),

@@ -57,4 +57,6 @@ export interface TargetDescriptor {
 	gateway?: boolean;
 	pricing?: TargetPricing;
 	lmstudio?: LmStudioTargetSettings;
+	/** Explicit request-slot limit for this inference endpoint. It overrides live discovery. */
+	maxConcurrentRequests?: number;
 }

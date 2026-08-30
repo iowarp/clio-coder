@@ -8,18 +8,28 @@ Source implementations: `src/domains/scheduling/` and `src/domains/dispatch/capa
 
 ## 1. Capacity Model & Admission Invariants
 
-Fleet dispatch manages compute resources across local and remote execution nodes as a unified capacity pool. Dispatched workers must acquire a durable capacity lease before they are spawned.
+Fleet dispatch manages compute resources across local and remote execution nodes as a unified capacity pool. Dispatched workers must acquire a durable capacity lease before they are spawned. Admission checks global, node, and inference-endpoint limits independently.
 
 ```mermaid
 graph TD
     req[Dispatch Request] --> lock[Acquire Cross-Process Lock: dispatch-admission.json.lock]
     lock --> reap[Reap Expired Leases & Dead PIDs]
-    reap --> check[Check Capacity Limits: global & per-node]
+    reap --> check[Check Capacity Limits: global, per-node, and per-endpoint]
     check -->|Within Limits| grant[Grant Capacity Lease & Write State]
     check -->|Limits Exceeded| queue[Queue / Reject Request]
     grant --> unlock[Release Lock]
     unlock --> spawn[Spawn Worker Process]
 ```
+
+| Dimension | Identity | Limit resolution |
+| :--- | :--- | :--- |
+| Global | All dispatches using the state directory. | `budget.concurrency: auto` remains four. |
+| Node | The local node or one configured fleet node. | The configured node limit applies. An unset local node cap remains unbounded. |
+| Inference endpoint | A normalized scheme, host, port, and base path. | A target's `maxConcurrentRequests` override wins, followed by cached probe discovery. Other local-native targets default to one slot. vLLM and SGLang remain unbounded. |
+
+The conventional final `/v1` mount and a trailing slash normalize to the same endpoint. Host aliases are not collapsed because Clio cannot prove they address the same server. For example, `http://localhost:8080/` and `http://127.0.0.1:8080/v1` remain distinct, while two target descriptors that use the same normalized URL share one endpoint limit.
+
+llama.cpp discovery reads `total_slots` from cached probe results. A router can expose the selected worker's value from `/props?model=<id>` even when router `/props` has no slot count. The selected model's `/v1/models` argv supplies a `--parallel` fallback. LM Studio defaults to one slot when its REST response supplies no concurrency fact. Ollama defaults to one unless `OLLAMA_NUM_PARALLEL` is visible to the local process.
 
 ### State Storage & Format
 
@@ -49,6 +59,7 @@ export interface CapacityLease {
   leaseId: string;              // Unique lease identifier
   assignmentId: string;         // Owning dispatch assignment ID
   nodeId: string;               // Execution node identifier ("local" or remote ID)
+  endpointKey?: string;         // Canonical inference endpoint identifier
   ownerPid: number;             // Process ID of the orchestrator/worker owner
   processBirthToken: string;    // OS-level token preventing PID reuse collisions
   acquiredAt: string;           // ISO-8601 acquisition timestamp
@@ -58,6 +69,10 @@ export interface CapacityLease {
   reservationMemberId: string | null;
 }
 ```
+
+The orchestrator's active model stream is registered in memory against the same endpoint key, so its own turn consumes one endpoint slot before a worker is admitted. This foreground count is not written to `dispatch-admission.json`; process exit releases it. Durable leases and held reservation members carry `endpointKey`, and held members count their peak per wave for the endpoint just as they do for a node.
+
+Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Endpoint saturation is refused with the endpoint label, the active and total slot count, and the next move rather than creating an endpoint-specific request queue.
 
 ### Constants & Operational Bounds
 

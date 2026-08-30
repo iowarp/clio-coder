@@ -140,7 +140,7 @@ describe("contracts/loaded context window", () => {
 				{
 					type: "llm",
 					key: MODEL,
-					loaded_instances: [{ id: MODEL, config: { context_length: LOADED_WINDOW } }],
+					loaded_instances: [{ id: MODEL, config: { context_length: LOADED_WINDOW, parallel: 2 } }],
 					max_context_length: MAX_WINDOW,
 					capabilities: { vision: true, trained_for_tool_use: true, reasoning: { default: "on" } },
 				},
@@ -162,6 +162,7 @@ describe("contracts/loaded context window", () => {
 		strictEqual(result.modelStates?.[MODEL]?.contextLength, LOADED_WINDOW);
 		strictEqual(result.modelCapabilities?.[MODEL]?.contextWindow, LOADED_WINDOW);
 		strictEqual(result.discoveredCapabilities?.contextWindow, LOADED_WINDOW);
+		strictEqual(result.discoveredCapabilities?.parallelSlots, 2);
 		strictEqual(result.modelCapabilities?.[MODEL]?.reasoning, true, "the resident row's facts survive the fold");
 	});
 
@@ -175,5 +176,6 @@ describe("contracts/loaded context window", () => {
 		strictEqual(result.modelStates?.[MODEL]?.state, "unloaded");
 		strictEqual(result.modelStates?.[MODEL]?.contextLength, undefined);
 		strictEqual(result.modelCapabilities?.[MODEL]?.contextWindow, MAX_WINDOW);
+		strictEqual(result.discoveredCapabilities?.parallelSlots, 1);
 	});
 });

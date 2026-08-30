@@ -116,6 +116,15 @@ describe("dispatch board island frames", () => {
 		const top = stripSgr(renderDispatchCard(makeRow({ agentId: "researcher", elapsedMs: 42_000 }), 80)[0] ?? "");
 		match(top, /^┌─ researcher ─+ 42s ─┐$/, `dispatch card top border "${top}"`);
 	});
+
+	it("shows active and total slots for the run's inference endpoint", () => {
+		const rendered = stripSgr(
+			renderDispatchCard(makeRow({ endpoint: { key: "http://mini:8080", label: "mini:8080", limit: 2 } }), 80, undefined, {
+				endpointActive: 1,
+			}).join("\n"),
+		);
+		ok(rendered.includes("slots 1/2 mini:8080"), rendered);
+	});
 });
 
 describe("dispatch board task island", () => {

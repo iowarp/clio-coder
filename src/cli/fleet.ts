@@ -47,8 +47,8 @@ import {
 	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
-import type { DispatchContract } from "../domains/dispatch/contract.js";
-import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
+import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import {
@@ -67,7 +67,7 @@ import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/ind
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { foregroundStreamUsage, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
@@ -371,6 +371,35 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	} catch (err) {
 		await loaded.stop();
 		return fail(err instanceof Error ? err.message : String(err));
+	}
+	if (dispatch.preview !== undefined) {
+		try {
+			const foreground = foregroundStreamUsage();
+			const bindings: Record<string, { key: string; limit: number; foregroundHeld?: number } | undefined> = {};
+			for (const step of plan.steps) {
+				if (step.kind === "code") continue;
+				const request: DispatchRequest = {
+					agentId: step.agentId,
+					executionRole: step.executionRole,
+					task: step.task,
+					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+					...(step.target !== undefined ? { target: step.target } : {}),
+					...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+				};
+				const endpoint = dispatch.preview(request).endpoint;
+				if (endpoint === undefined) continue;
+				const foregroundHeld = foreground[endpoint.key] ?? 0;
+				bindings[step.id] = {
+					key: endpoint.key,
+					limit: endpoint.limit,
+					...(foregroundHeld > 0 ? { foregroundHeld } : {}),
+				};
+			}
+			plan = bindExecutionPlanEndpoints(plan, bindings);
+		} catch (err) {
+			await loaded.stop();
+			return fail(`route preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 	try {
 		preflightWriteBoundaries(plan, process.cwd());

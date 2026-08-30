@@ -12,6 +12,7 @@ import {
 	proposeMemoryPromotion,
 } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
+import { foregroundStreamUsage } from "../domains/providers/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
@@ -434,10 +435,20 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				};
 				const resolution = deps.dispatch.preview?.(request);
 				if (!resolution) return null;
+				const foregroundHeld =
+					resolution.endpoint === undefined ? 0 : (foregroundStreamUsage()[resolution.endpoint.key] ?? 0);
 				return {
 					targetId: resolution.targetId,
 					wireModelId: resolution.wireModelId,
 					nodeId: resolution.node.id,
+					...(resolution.endpoint !== undefined
+						? {
+								endpoint: {
+									...resolution.endpoint,
+									...(foregroundHeld > 0 ? { foregroundHeld } : {}),
+								},
+							}
+						: {}),
 				};
 			},
 		});

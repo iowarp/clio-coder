@@ -21,6 +21,7 @@ import {
 	listDispatchReservations,
 	transferDispatchReservationToLease,
 } from "../../src/domains/dispatch/reservation-store.js";
+import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // The state dir is memoized, so a bare env edit would silently leave every test
@@ -30,7 +31,7 @@ async function home(): Promise<string> {
 	isolated = await isolateClioEnv("clio-lease-");
 	return isolated.dir;
 }
-const limits = { global: 1, nodes: { local: 1, mini: 1 } };
+const limits = { global: 1, nodes: { local: 1, mini: 1 }, endpoints: {} };
 
 describe("durable dispatch capacity leases", () => {
 	// Nested inside the describe, not at module top level: under
@@ -67,6 +68,66 @@ describe("durable dispatch capacity leases", () => {
 		first.kill();
 		second.kill();
 	});
+	it("two targets sharing a two-slot endpoint deny the third admission with the endpoint remedy", async () => {
+		await home();
+		const endpointKey = "http://127.0.0.1:8080";
+		const shared = { global: 4, nodes: { local: 4 }, endpoints: { [endpointKey]: 2 } };
+		acquireCapacityLease({ assignmentId: "target-a", nodeId: "local", endpointKey, limits: shared });
+		acquireCapacityLease({ assignmentId: "target-b", nodeId: "local", endpointKey, limits: shared });
+		throws(
+			() => acquireCapacityLease({ assignmentId: "target-c", nodeId: "local", endpointKey, limits: shared }),
+			(error: unknown) => {
+				ok(error instanceof Error);
+				strictEqual(
+					error.message,
+					"dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (2/2 slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server",
+				);
+				return true;
+			},
+		);
+	});
+	it("foreground chat occupancy leaves one worker slot on a two-slot endpoint", async () => {
+		await home();
+		const endpointKey = "http://127.0.0.1:8080";
+		const shared = { global: 4, nodes: { local: 4 }, endpoints: { [endpointKey]: 2 } };
+		const release = registerForegroundStream(endpointKey);
+		try {
+			acquireCapacityLease({ assignmentId: "one-free-slot", nodeId: "local", endpointKey, limits: shared });
+			throws(
+				() => acquireCapacityLease({ assignmentId: "no-second-slot", nodeId: "local", endpointKey, limits: shared }),
+				/capacity reached \(2\/2 slots\)/,
+			);
+		} finally {
+			release();
+		}
+	});
+	it("held reservation members consume their endpoint wave peak", async () => {
+		await home();
+		const endpointKey = "http://127.0.0.1:8080";
+		createDispatchReservation({
+			topology: "parallel",
+			tasks: [
+				{ memberId: "a", wave: 0, nodeId: "local", endpointKey, costUpperBoundUsd: 0 },
+				{ memberId: "b", wave: 0, nodeId: "local", endpointKey, costUpperBoundUsd: 0 },
+			],
+			capacity: {
+				global: { active: 0, limit: 4 },
+				nodes: { local: { active: 0, limit: 4 } },
+				endpoints: { [endpointKey]: { active: 0, limit: 2 } },
+				budget: { currentUsd: 0, ceilingUsd: 10 },
+			},
+		});
+		throws(
+			() =>
+				acquireCapacityLease({
+					assignmentId: "outside-plan",
+					nodeId: "local",
+					endpointKey,
+					limits: { global: 4, nodes: { local: 4 }, endpoints: { [endpointKey]: 2 } },
+				}),
+			/capacity reached \(2\/2 slots\)/,
+		);
+	});
 	it("concurrent processes racing one slot produce exactly one lease", async () => {
 		await home();
 		const startAtMs = Date.now() + 1_500;
@@ -98,6 +159,7 @@ describe("durable dispatch capacity leases", () => {
 			capacity: {
 				global: { active: 0, limit: 1 },
 				nodes: { local: { active: 0, limit: 1 } },
+				endpoints: {},
 				budget: { currentUsd: 0, ceilingUsd: 10 },
 			},
 		});
@@ -197,7 +259,8 @@ describe("durable dispatch capacity leases", () => {
 		const kept = listCapacityLeases({ nowMs: 1_000, probe: { birthToken: () => null } });
 		strictEqual(kept.map((entry) => entry.leaseId).join(","), "foreign");
 		strictEqual(
-			acquireCapacityLease({ assignmentId: "mine", nodeId: "local", limits: { global: 2, nodes: {} } }).host,
+			acquireCapacityLease({ assignmentId: "mine", nodeId: "local", limits: { global: 2, nodes: {}, endpoints: {} } })
+				.host,
 			hostname(),
 		);
 	});
@@ -228,7 +291,11 @@ describe("durable dispatch capacity leases", () => {
 		strictEqual(listCapacityLeases().length, 1);
 		let error: unknown;
 		try {
-			acquireCapacityLease({ assignmentId: "b", nodeId: "local", limits: { global: 2, nodes: { local: 2 } } });
+			acquireCapacityLease({
+				assignmentId: "b",
+				nodeId: "local",
+				limits: { global: 2, nodes: { local: 2 }, endpoints: {} },
+			});
 		} catch (caught) {
 			error = caught;
 		}
@@ -246,6 +313,7 @@ describe("durable dispatch capacity leases", () => {
 					capacity: {
 						global: { active: 0, limit: 1 },
 						nodes: { local: { active: 0, limit: 1 } },
+						endpoints: {},
 						budget: { currentUsd: 0, ceilingUsd: 10 },
 					},
 					nowMs: 1_001,
@@ -261,6 +329,7 @@ describe("durable dispatch capacity leases", () => {
 				capacity: {
 					global: { active: 0, limit: 1 },
 					nodes: { local: { active: 0, limit: 1 } },
+					endpoints: {},
 					budget: { currentUsd: 0, ceilingUsd: 10 },
 				},
 				nowMs: 1_003,
@@ -276,6 +345,7 @@ describe("durable dispatch capacity leases", () => {
 			capacity: {
 				global: { active: 0, limit: 1 },
 				nodes: { local: { active: 0, limit: 1 } },
+				endpoints: {},
 				budget: { currentUsd: 0, ceilingUsd: 10 },
 			},
 			nowMs: 1_000,
@@ -359,7 +429,7 @@ describe("durable dispatch capacity leases", () => {
 				acquireCapacityLease({
 					assignmentId: "overflow",
 					nodeId: "local",
-					limits: { global: MAX_CAPACITY_LEASES + 10, nodes: {} },
+					limits: { global: MAX_CAPACITY_LEASES + 10, nodes: {}, endpoints: {} },
 					nowMs: 2_000,
 				}),
 			/lease store is full/,

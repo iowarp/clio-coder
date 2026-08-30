@@ -356,6 +356,24 @@ describe("contracts/settings center", () => {
 		);
 	});
 
+	it("shows one read-only slot row per local inference endpoint", () => {
+		const settings = settingsWithTargets();
+		const base = providersWithHealth({ "target-a": "healthy", "target-b": "healthy" }, settings);
+		const providers = {
+			...base,
+			list: () =>
+				base.list().map((status) => ({
+					...status,
+					runtime: { id: "llamacpp", tier: "local-native" },
+					probeCapabilities: { parallelSlots: status.target.id === "target-a" ? 2 : 1 },
+				})),
+		} as unknown as ProvidersContract;
+		const rows = buildSettingItems(settings, { providers }).filter((item) => item.id.startsWith("fleet.endpoints."));
+		strictEqual(rows.length, 2);
+		strictEqual(rows[0]?.readOnly, true);
+		ok(rows.some((row) => /^slots \d+\/2$/u.test(row.currentValue)));
+	});
+
 	it("joins every status row without doubled separators", () => {
 		const items = buildSettingItems(settingsWithTargets(), {
 			providers: providersWithHealth({

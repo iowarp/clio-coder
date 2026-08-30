@@ -52,7 +52,7 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 		};
 		const head = await (ctx.signal ? probeHttp({ ...headOpts, signal: ctx.signal }) : probeHttp(headOpts));
 		if (!head.ok) return head;
-		const props = await probeLlamaCppProps(base, ctx);
+		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
 		const enriched: ProbeResult = { ...head };
 		if (props.discoveredCapabilities) enriched.discoveredCapabilities = props.discoveredCapabilities;
 		if (props.serverVersion) enriched.serverVersion = props.serverVersion;
