@@ -99,6 +99,8 @@ export interface InteractivePresentationDeps {
 	getShutdownArmed?: () => boolean;
 	/** Whether a permission prompt owns the keyboard, for the composer's CONFIRM rail. */
 	isAwaitingApproval?: () => boolean;
+	/** Whether that prompt has a mutation to inspect, and whether it is open (issue #254). */
+	getPermissionInspection?: () => import("./permission-hint.js").PermissionInspectionHint;
 	getCwd?: () => string;
 	resolveVisibleEventSequence?: (event: ChatLoopEvent) => number | null;
 	resolveStreamIngress?: (
@@ -418,6 +420,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		isStreaming: () => deps.chat.isStreaming(),
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
+		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
 		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Shift+Enter"),

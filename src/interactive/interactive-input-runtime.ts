@@ -60,6 +60,10 @@ export interface InteractiveInputRuntimeDeps {
 		closeOverlay(): void;
 		confirmPermission(): void;
 		stopTurnFromPermission(): void;
+		canInspectMutation(): boolean;
+		isInspectingMutation(): boolean;
+		toggleMutationInspection(): void;
+		scrollMutationInspection(delta: number): void;
 		cancelAskUser(): void;
 		toggleFooterDashboardState(): void;
 		toggleDispatchBoardOverlay(): void;
@@ -213,6 +217,10 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					confirmPermission: () => deps.overlay.confirmPermission(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					composerHasDraft: () => deps.editor.getText().length > 0,
+					canInspectMutation: () => deps.overlay.canInspectMutation(),
+					isInspectingMutation: () => deps.overlay.isInspectingMutation(),
+					toggleMutationInspection: () => deps.overlay.toggleMutationInspection(),
+					scrollMutationInspection: (delta) => deps.overlay.scrollMutationInspection(delta),
 					editDraft: (data) => {
 						deps.editor.handleInput?.(data);
 						deps.requestRender();

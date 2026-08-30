@@ -18,6 +18,7 @@ import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
 import { toolResultPresentationPolicy, toolResultPresentationText } from "../../tools/result-disposition.js";
+import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
@@ -490,6 +491,9 @@ export function renderToolAwaitingApproval(
 		["action", view.actionClass],
 		["axis", axis],
 		...(view.target !== undefined && view.target.length > 0 ? [["target", view.target]] : []),
+		// Size and digest, never the mutation text: this row is the transcript,
+		// which is written, replayed, and shared (issue #254).
+		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
 	] as const;
 	for (const [label, value] of facts) {
 		lines.push(...indentAndWrap(`${dim(`${label} ·`)} ${value}`, width, false));

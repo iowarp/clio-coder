@@ -12,6 +12,7 @@ import { createOverlayTransitions } from "./overlay-transitions.js";
 import {
 	createPermissionOverlayBody,
 	PERMISSION_OVERLAY_WIDTH,
+	type PermissionOverlayBodyHandle,
 	permissionOverlayHint,
 	permissionOverlayPlacement,
 	permissionOverlayTitle,
@@ -163,6 +164,12 @@ export interface OverlayLifecycleController {
 	toggleDispatchBoardOverlay(): void;
 	confirmPermission(): void;
 	stopTurnFromPermission(): void;
+	/** Whether the live permission card has a mutation the operator can read here. */
+	canInspectMutation(): boolean;
+	/** Whether that mutation is currently open. */
+	isInspectingMutation(): boolean;
+	toggleMutationInspection(): void;
+	scrollMutationInspection(delta: number): void;
 	cancelAskUser(): void;
 	dispose(): void;
 }
@@ -210,6 +217,16 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	} = deps;
 	let overlayPermission: OverlayPermissionLifecycle | null = null;
 	let overlayAskUser: OverlayAskUserLifecycle | null = null;
+	/**
+	 * The live permission card's body, held only while its dialog is on screen.
+	 * The mutation text it can show lives here and nowhere else, so dropping the
+	 * reference when the dialog closes drops the text with it.
+	 */
+	let permissionBody: PermissionOverlayBodyHandle | null = null;
+	const inspectionHint = (): import("./permission-hint.js").PermissionInspectionHint => {
+		if (permissionBody === null || !permissionBody.canInspect()) return "none";
+		return permissionBody.isInspecting() ? "open" : "closed";
+	};
 	const overlayTransitions = createOverlayTransitions({
 		stopDispatchBoardTicker: () => interactiveTickers.stopDispatchBoardTicker(),
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),
@@ -217,7 +234,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		requestRender: () => tui.requestRender(),
 		cancelPendingAskUser: () => overlayAskUser?.cancelPending() ?? false,
 		finishAuth: (dismiss) => overlayAuth.finish(dismiss),
-		onPermissionOverlayClosed: () => overlayPermission?.onPermissionOverlayClosed(),
+		onPermissionOverlayClosed: () => {
+			permissionBody = null;
+			overlayPermission?.onPermissionOverlayClosed();
+		},
 		onOverlayClosed: () => overlayPermission?.retryPending(),
 	});
 	const closeOverlay = overlayTransitions.close;
@@ -248,17 +268,20 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().autonomy ?? "auto-edit",
 		getOverlayState: () => overlayTransitions.state,
-		openPermissionOverlay: (view) => {
+		openPermissionOverlay: (view, inspect) => {
 			if (overlayTransitions.state !== "closed") return false;
 			overlayTransitions.state = "permission-confirm";
-			overlayTransitions.handle = showOverlayFrame(tui, createPermissionOverlayBody(view), {
+			const body = createPermissionOverlayBody(view, inspect);
+			permissionBody = body;
+			overlayTransitions.handle = showOverlayFrame(tui, body, {
 				...permissionOverlayPlacement(tui, editor, footer.view),
 				width: PERMISSION_OVERLAY_WIDTH,
 				title: permissionOverlayTitle(view),
 				tone: permissionOverlayTone(view),
 				// Read per frame: the footer names what Enter does right now, and
-				// that depends on whether the composer holds a draft.
-				footerHint: (innerWidth) => permissionOverlayHint(innerWidth, editor.getText().length > 0),
+				// that depends on whether the composer holds a draft and on whether
+				// the mutation is open.
+				footerHint: (innerWidth) => permissionOverlayHint(innerWidth, editor.getText().length > 0, inspectionHint()),
 			});
 			tui.requestRender();
 			return true;
@@ -462,6 +485,16 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		stopTurnFromPermission: () => {
 			overlayPermission?.stopTurn();
 			footer.refresh();
+			tui.requestRender();
+		},
+		canInspectMutation: () => permissionBody?.canInspect() ?? false,
+		isInspectingMutation: () => permissionBody?.isInspecting() ?? false,
+		toggleMutationInspection: () => {
+			permissionBody?.toggleInspect();
+			tui.requestRender();
+		},
+		scrollMutationInspection: (delta) => {
+			permissionBody?.scrollInspect(delta);
 			tui.requestRender();
 		},
 		cancelAskUser: overlayAskUser.cancel,

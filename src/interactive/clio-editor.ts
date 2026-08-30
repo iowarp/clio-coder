@@ -1,6 +1,6 @@
 import { Editor, stripTerminalSequences, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { fitHintEntries } from "./overlay-frame.js";
-import { permissionHintEntries } from "./permission-hint.js";
+import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
 
@@ -28,6 +28,12 @@ export interface EditorChrome {
 	 * dialog's keys whenever the prompt owns input (issues #186 and #194).
 	 */
 	isAwaitingApproval?: () => boolean;
+	/**
+	 * Whether that prompt is a mutation the operator can read locally, and
+	 * whether it is open. The rail carries the dialog's keys, so it names the
+	 * inspect key on exactly the cards that have one (issue #254).
+	 */
+	getPermissionInspection?: () => PermissionInspectionHint;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
 	/** Resolved submit binding, formatted for display. */
@@ -89,8 +95,13 @@ function lowerRailHint(theme: ClioTheme, chrome: EditorChrome): string {
  * both surfaces narrow in the same order and never drop allow or stop first.
  * The rule spends three columns around a right label, hence the subtraction.
  */
-function confirmRailHint(theme: ClioTheme, width: number, hasDraft: boolean): string {
-	return theme.fg("warning", fitHintEntries(permissionHintEntries(hasDraft), Math.max(1, width - 3)));
+function confirmRailHint(
+	theme: ClioTheme,
+	width: number,
+	hasDraft: boolean,
+	inspection: PermissionInspectionHint,
+): string {
+	return theme.fg("warning", fitHintEntries(permissionHintEntries(hasDraft, inspection), Math.max(1, width - 3)));
 }
 
 function modeToken(mode: ComposerMode): "action" | "accentDeep" | "warning" {
@@ -159,7 +170,7 @@ export class ClioEditor extends Editor {
 		// that a narrow composer can drop, the allow and deny keys are not.
 		if (bottomRail >= 0 && mode === "CONFIRM") {
 			lines[bottomRail] = rule(theme, safeWidth, {
-				right: confirmRailHint(theme, safeWidth, text.length > 0),
+				right: confirmRailHint(theme, safeWidth, text.length > 0, this.chrome.getPermissionInspection?.() ?? "none"),
 				fillToken: "frameStrong",
 				rightRaw: true,
 				rightTail: theme.style("frameStrong", "─", { bold: true }),
