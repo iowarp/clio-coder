@@ -355,20 +355,20 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 	}
 
 	const meter: ContextLedgerGroup[] = [...groups];
-	if (reserveTokens > 0) {
-		meter.push({
-			category: "reserve",
-			label: CONTEXT_CATEGORY_LABEL.reserve,
-			tokens: reserveTokens,
-			percent: percentOf(reserveTokens, window),
-		});
-	}
 	if (window > 0) {
 		meter.push({
 			category: "free",
 			label: CONTEXT_CATEGORY_LABEL.free,
 			tokens: freeTokens,
 			percent: percentOf(freeTokens, window),
+		});
+	}
+	if (reserveTokens > 0) {
+		meter.push({
+			category: "reserve",
+			label: CONTEXT_CATEGORY_LABEL.reserve,
+			tokens: reserveTokens,
+			percent: percentOf(reserveTokens, window),
 		});
 	}
 

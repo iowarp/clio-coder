@@ -35,7 +35,7 @@ The reconciled figure is not only a display value. Once a provider has answered,
 
 Session metadata enforces session format version 4 (`CURRENT_SESSION_FORMAT_VERSION = 4`). Version 4 is additive: it adds the `contextEviction` and `contextRecall` records and changes no existing entry. A version 3 session therefore migrates to 4 in place when Clio opens it, and no entry is rewritten. Only a session written by a newer build is refused, with an error naming the version it read and pointing at upgrading. The bump is one-way for the operator: a 0.3.3 binary cannot open a session this release wrote.
 
-The `/context` overlay and footer meter read the same ledger categories: `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
+The `/context` overlay and footer meter read the same ledger categories in display order: `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `streaming`, `free`, and `reserve`.
 
 ## Single-threshold compaction
 
@@ -106,7 +106,7 @@ Clio records these disturbances once on the next assistant entry as `promptCache
 
 The three tier-independent reasons moved the byte prefix itself, so a cloud prefix cache is cold for exactly the same reason a local one is. The other five disturb a local server or the template it renders, and a single-slot local cache is the only one an interleaved run actually displaces, so they are stamped only when the runtime's tier is `local-native`. Two of them are gated on identity as well as tier: `residency` compares the mutation's target key against this session's own runtime and base URL, and `background_memory` compares the memory step's canonical endpoint key against the target this session streams to, so work on a second server never explains a cold prefix on the first. `prompt_recompiled` deliberately does not fire on a process's first compile: a fresh or resumed session has no previous hash to have diverged from, and stamping it there would mark every session's opening turn as expected-cold.
 
-The user sees one dim notice per reason, and the same reasons persist on the run's first assistant entry in the session ledger next to the per-call cache data. The `/context` overlay renders each one in prose (`working-set eviction`, `dispatch traffic`, `residency change`, `thinking-level change`, `tool-surface change`, `prompt recompile`, `compaction`) and falls through to the wire value for anything it has no phrase for, which today is `background_memory`.
+The user sees one dim notice per reason, and the same reasons persist on the run's first assistant entry in the session ledger next to the per-call cache data. The `/context` overlay renders each one in prose (`working-set eviction`, `dispatch traffic`, `residency change`, `thinking-level change`, `tool-surface change`, `prompt recompile`, `compaction`, `background memory step`) and falls through to the wire value only for an unknown reason.
 
 Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are derived from provider usage and persisted with `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }` when available.
 

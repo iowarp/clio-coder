@@ -44,7 +44,7 @@ Those are the server's own numbers, not Clio's estimate. `server does not report
 last cold turn: working-set eviction (expected)
 ```
 
-The eight causes and what stamps each one are in [context-engine.md](context-engine.md#cache-divergence-honesty). `background_memory` renders as its wire value rather than as prose, so that one reads `last cold turn: background_memory (expected)`.
+The eight causes and what stamps each one are in [context-engine.md](context-engine.md#cache-divergence-honesty). `background_memory` renders in prose as `last cold turn: background memory step (expected)`.
 
 **3. Confirm it in the ledger.** The reasons are durable, so a finished session answers the same question without the TUI. Open `current.jsonl` under the session directory `clio-coder paths` reports and read the run's first assistant entry:
 
