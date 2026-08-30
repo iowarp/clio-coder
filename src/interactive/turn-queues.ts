@@ -83,14 +83,17 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	// works. The former per-steer transcript notice duplicated the panel and
 	// left a permanent line for a transient state.
 	const enqueue = (text: string, kind: QueuedMessageKind): boolean => {
-		const trimmed = text.trim();
-		if (trimmed.length === 0 || !state.streaming || !state.runtime) return false;
+		// The payload crosses to the model exactly as it was submitted; only the
+		// emptiness test reads a trimmed copy. A queued turn that shortened its own
+		// text here would land in the ledger disagreeing with the expansion that
+		// produced it, which is the same defect the persisted echo had (issue #244).
+		if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
 		const message = {
 			role: "user",
-			content: trimmed,
+			content: text,
 			timestamp: Date.now(),
 		} as AgentMessage;
-		queuedMirror.push({ text: trimmed, kind });
+		queuedMirror.push({ text, kind });
 		if (kind === "steer") {
 			state.runtime.agent.steer(message);
 		} else {
