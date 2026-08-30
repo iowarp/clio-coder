@@ -140,8 +140,16 @@ export function coordinateCodewikiWrite(
 	options: CodewikiCoordinateOptions = {},
 ): Promise<CodewikiCoordinatedResult | null> {
 	const workspace = resolve(cwd);
-	return enqueueWorkspace(workspace, () =>
-		withStateFileLock(codewikiPath(workspace), async () => {
+	return enqueueWorkspace(workspace, () => {
+		// Taking the lease creates the lock's parent, so a project that was never
+		// indexed gained an empty `.clio-coder/` from every successful write: the
+		// incremental refresh is contractually a no-op there, and it was
+		// materializing state before it could say so (issue #248). The check runs
+		// inside the queue, so a writer that built the codewiki ahead of this task
+		// has already finished and this one sees it. The recheck under the lock
+		// stays, and is what still decides the race.
+		if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
+		return withStateFileLock(codewikiPath(workspace), async () => {
 			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return null;
 			const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
 			const request = await select(current, workspace);
@@ -152,8 +160,8 @@ export function coordinateCodewikiWrite(
 			if (wrote) writeCodewiki(workspace, worker.codewiki);
 			await options.afterCommit?.(worker, workspace);
 			return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
-		}),
-	);
+		});
+	});
 }
 
 /** Serialize a non-build artifact transaction such as reset with every writer. */
