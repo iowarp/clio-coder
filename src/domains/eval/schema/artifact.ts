@@ -1,5 +1,6 @@
 import type { EvalScenarioAggregateV1 } from "../metrics/aggregate.js";
 import type { EvalClioProvenance, EvalEnvironmentProvenance } from "../types.js";
+import type { EvalBehaviorVerdictV1 } from "./behavioral.js";
 import type { EvalServingConfigurationV1 } from "./serving.js";
 import type { EvalVerdictEnvelopeV1 } from "./verdict.js";
 
@@ -50,6 +51,8 @@ export interface EvalArtifactResultV4 extends EvalArtifactAssignmentReference {
 	artifacts: Record<string, string | string[] | null>;
 	/** Additive Suite v2 adapter output. Current runners always populate it. */
 	verdict?: EvalVerdictEnvelopeV1;
+	/** Optional sibling document that references the unchanged verdict v1 identity. */
+	behavioral?: EvalBehaviorVerdictV1;
 }
 
 /** The only current eval artifact format. Routing accepts this version only. */

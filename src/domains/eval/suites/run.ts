@@ -28,7 +28,7 @@ import { runClioRunRunner } from "../runners/clio-run.js";
 import { runContextIndexRunner } from "../runners/context-index.js";
 import { runContextInitRunner } from "../runners/context-init.js";
 import { type EvalRunnerOutput, runExternalCommandRunner } from "../runners/external-command.js";
-import { adaptSuiteV2ResultToVerdictV1 } from "../schema/adapter.js";
+import { adaptSuiteV2ResultToBehaviorV1, adaptSuiteV2ResultToVerdictV1 } from "../schema/adapter.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../schema/artifact.js";
 import type { EvalServingConfigurationV1 } from "../schema/serving.js";
 import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
@@ -79,7 +79,7 @@ export async function runEvalSuiteV2(
 		// exceeds it, remaining items fail closed instead of running. A live
 		// suite can therefore never keep spending past its declared budget.
 		if (maxCostUsd !== undefined && spentUsd > maxCostUsd) {
-			results.push(budgetExhaustedResult(item.task.id, item.target, item.repeatIndex, spentUsd, maxCostUsd));
+			results.push(budgetExhaustedResult(item.task, item.target, item.repeatIndex, spentUsd, maxCostUsd));
 			continue;
 		}
 		const completed = await runMatrixItem(
@@ -106,7 +106,7 @@ export function resultCostUsd(result: Pick<EvalArtifactResultV4, "metrics">): nu
 }
 
 function budgetExhaustedResult(
-	taskId: string,
+	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	target: EvalSuiteTargetV2,
 	repeatIndex: number,
 	spentUsd: number,
@@ -115,7 +115,7 @@ function budgetExhaustedResult(
 	const result: EvalArtifactResultV4 = {
 		assignmentId: null,
 		terminalReceiptDigest: null,
-		taskId,
+		taskId: task.id,
 		repeatIndex,
 		target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
 		pass: false,
@@ -131,6 +131,7 @@ function budgetExhaustedResult(
 		},
 	};
 	result.verdict = adaptSuiteV2ResultToVerdictV1(result, emptyEvalTrackedMetrics());
+	attachBehavioralResult(result, task);
 	return result;
 }
 
@@ -225,6 +226,7 @@ async function runMatrixItem(
 				fallbackWallClockMs: runner.wallTimeMs,
 			}),
 		);
+		attachBehavioralResult(result, task);
 		return {
 			result,
 			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
@@ -259,6 +261,7 @@ async function runMatrixItem(
 				fallbackWallClockMs: runnerWallTimeMs,
 			}),
 		);
+		attachBehavioralResult(result, task);
 		return {
 			result,
 			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
@@ -271,6 +274,11 @@ async function runMatrixItem(
 			await rm(stateDir, { recursive: true, force: true });
 		}
 	}
+}
+
+function attachBehavioralResult(result: EvalArtifactResultV4, task: LoadedEvalSuiteV2["suite"]["tasks"][number]): void {
+	if (task.behavioral === undefined || result.verdict === undefined) return;
+	result.behavioral = adaptSuiteV2ResultToBehaviorV1(result, result.verdict, task.behavioral);
 }
 
 /** Journal-derived invariants for one finished item, read from its isolated state directory. */

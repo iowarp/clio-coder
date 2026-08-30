@@ -106,6 +106,7 @@ tasks:
 | `matrix` | `targets[]`, `repeats` | Matrix of execution targets (specifying model and thinking flags) and the repetition count. |
 | `workspace` | `kind`, `path`, `url`, `commit`, `checkout`, `excludes` | Workspace strategy: `local` (run in-place), `git` (clone from URL), or `temp-copy` (isolated copy of a directory). |
 | `runner` | `kind`, `prompt`, `command`, `commands`, `args`, `timeoutMs` | Runner type: `clio-run` (starts Clio agent loop), `context-index` (runs indexer), `context-init` (initializes context), `external-command` (spawns subprocess). |
+| `behavioral` | `schema`, `corpus`, `execution`, `expectedBehavior`, `forbiddenBehavior`, `judge` | Optional `clio.eval.scenario.v1` behavioral contract. Rules name a closed category and a typed predicate over transcript, tool, receipt, or grader facts. |
 | `verify` | `commands`, `measure`, `assertions`, `forbidPaths` | Validation steps: shell commands, a task-outcome grader, metric assertions (e.g. `op: lt` for max token counts), and files/directories that must not be created or modified (`forbidPaths`). |
 | `metrics` | `collect` | List of metric names to compile for the evaluation runs. |
 
@@ -225,7 +226,17 @@ Every result carries a strictly parsed `clio.eval.verdict.v1` envelope (`src/dom
 }
 ```
 
-The envelope is fail-closed by construction. `outcome` is one of `pass`, `fail`, or `unmeasured`; `machinery` is `ok` or `infrastructure_failure`; `reason` is null for a pass or unmeasured outcome and names the rule or failure class for every failure; `behavioral` must be exactly `null`, so a rubric or model-judge score has nowhere to hide until one is designed; and an envelope claiming both `infrastructure_failure` and `pass` is rejected at parse rather than recorded. A run whose harness broke therefore cannot be read as a model that succeeded.
+The envelope is fail-closed by construction. `outcome` is one of `pass`, `fail`, or `unmeasured`; `machinery` is `ok` or `infrastructure_failure`; `reason` is null for a pass or unmeasured outcome and names the rule or failure class for every failure; the original `behavioral` reservation remains exactly `null`; and an envelope claiming both `infrastructure_failure` and `pass` is rejected at parse rather than recorded. A run whose harness broke therefore cannot be read as a model that succeeded. Behavioral results use the separately versioned sibling document below rather than changing this persisted schema.
+
+### Behavioral scenario and verdict documents
+
+Behavioral evaluation is additive and does not change the persisted `clio.eval.verdict.v1` reader. A Suite v2 task may declare a `clio.eval.scenario.v1` block, and its Artifact v4 result then carries a sibling `clio.eval.behavior.v1` document whose `verdictRef` names the verdict schema, scenario id, and trial index. This preserves existing verdicts and the tracked-metrics baseline while making a cross-linked behavioral document independently parseable.
+
+The closed categories are `tool_choice`, `exploration`, `delegation`, `safety_comprehension`, `claim_grounding`, `denied_tool_recovery`, `completion_behavior`, and `task_correctness`. Each category result is exactly one of `satisfied`, `violated`, `unknown`, or `unmeasured`. The document outcome is `pass`, `behavioral_failure`, `unknown`, `unmeasured`, or `infrastructure_failure`; missing facts are never invented as successes, and an infrastructure failure cannot become a behavioral pass.
+
+Expected and forbidden rules contain typed predicates over facts sourced from `transcript`, `tool`, `receipt`, or `grader`. Facts cite a locator, SHA-256 digest, and optional bounded excerpt. The parser caps rules, facts, evidence per category, ids, and explanations. Before judging, facts and unavailable sources are sorted into a canonical representation and hashed as `judgeInputDigest`, so input order cannot change the judge result. Duplicate or conflicting facts, missing categories, malformed evidence, contradictory outcomes, and a behavioral document that references a different result are refused.
+
+Suite execution adapts scalar run metrics into these observable facts at the Suite v2 to Artifact v4 boundary. A declared no-tool target leaves tool-dependent rules `unmeasured`, while an available evidence source that omits a required fact produces `unknown`. Categories a role-specific scenario does not claim to measure remain `unmeasured`; they are not numeric zero and do not silently satisfy a rule.
 
 ### `trackedMetrics`
 

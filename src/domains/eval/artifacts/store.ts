@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { assertSafeId } from "../../../core/safe-id.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { EvalArtifactV4, EvalTokenAccountingV4 } from "../schema/artifact.js";
+import { assertEvalBehaviorReferencesVerdictV1, parseEvalBehaviorVerdictV1 } from "../schema/behavioral.js";
 import { parseEvalServingConfigurationV1 } from "../schema/serving.js";
 import { parseEvalVerdictEnvelopeV1 } from "../schema/verdict.js";
 import { evalRoot } from "../store.js";
@@ -122,6 +123,14 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 	const target = asRecord(record.target, `${source}.target`);
 	const verdict =
 		record.verdict === undefined ? undefined : parseEvalVerdictEnvelopeV1(record.verdict, `${source}.verdict`);
+	const behavioral =
+		record.behavioral === undefined ? undefined : parseEvalBehaviorVerdictV1(record.behavioral, `${source}.behavioral`);
+	if (behavioral !== undefined && verdict === undefined) {
+		throw new Error(`${source}.behavioral: sibling document requires a verdict`);
+	}
+	if (behavioral !== undefined && verdict !== undefined) {
+		assertEvalBehaviorReferencesVerdictV1(behavioral, verdict, `${source}.behavioral`);
+	}
 	return {
 		assignmentId: readNullableString(record, source, "assignmentId"),
 		terminalReceiptDigest: readNullableDigest(record, source, "terminalReceiptDigest"),
@@ -137,6 +146,7 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 		metrics: asRecord(record.metrics, `${source}.metrics`) as Record<string, number | string | boolean | null>,
 		artifacts: asRecord(record.artifacts, `${source}.artifacts`) as Record<string, string | string[] | null>,
 		...(verdict === undefined ? {} : { verdict }),
+		...(behavioral === undefined ? {} : { behavioral }),
 	};
 }
 

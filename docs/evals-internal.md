@@ -53,10 +53,11 @@ either way. Treat that refusal as the useful behavior it is: a private suite
 compared across a server restart that changed a flag, a quantization, or the
 thinking level is measuring the server, not the change under test.
 
-Two things this envelope deliberately does not carry. `behavioral` is fixed at
-`null`, so a private suite has nowhere to record a rubric score or a model
-judge's verdict; that stays out of the schema until one is designed rather than
-being smuggled in as a number. And a run whose harness broke records
+The verdict envelope keeps its original `behavioral: null` field for compatibility.
+A suite that declares a versioned behavioral scenario records the result as a
+separate `clio.eval.behavior.v1` document on the Artifact v4 result, cross-linked
+to the unchanged verdict identity. Its labels come only from bounded transcript,
+tool, receipt, or grader facts, never from an ungrounded judge paragraph. A run whose harness broke records
 `machinery: "infrastructure_failure"`, which the parser refuses to pair with a
 `pass`, so a private suite cannot report a passing rate that includes runs
 nothing measured.
@@ -309,4 +310,3 @@ thresholds:
       op: gt
       value: 0
 ```
-
