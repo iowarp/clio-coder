@@ -85,6 +85,9 @@ function isStrictAncestor(candidate: string, descendant: string): boolean {
 	return candidate !== descendant && isWithin(candidate, descendant);
 }
 
+/** Reads one environment variable; an empty, missing, or unreadable value is `undefined`. */
+export type EnvReader = (name: string) => string | undefined;
+
 function envValue(name: string): string | undefined {
 	try {
 		const value = Deno.env.get(name);
@@ -94,11 +97,14 @@ function envValue(name: string): string | undefined {
 	}
 }
 
-/** `$CLIO_WORKBENCH_STATE_DIR`, else `$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`. */
-export function resolveStateDir(homePath: string): string {
-	const explicit = envValue("CLIO_WORKBENCH_STATE_DIR");
+/**
+ * `$CLIO_WORKBENCH_STATE_DIR`, else `$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`.
+ * The installer passes its own reader so it records exactly the directory the app will use.
+ */
+export function resolveStateDir(homePath: string, env: EnvReader = envValue): string {
+	const explicit = env("CLIO_WORKBENCH_STATE_DIR");
 	if (explicit !== undefined && isAbsolute(explicit)) return resolve(explicit);
-	const xdg = envValue("XDG_STATE_HOME");
+	const xdg = env("XDG_STATE_HOME");
 	if (xdg !== undefined && isAbsolute(xdg)) return join(resolve(xdg), "clio-workbench");
 	return join(homePath, ".local", "state", "clio-workbench");
 }
