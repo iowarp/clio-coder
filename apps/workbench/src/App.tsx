@@ -148,6 +148,48 @@ const SOURCE_LABELS: Record<WireEventSource, string> = {
 	"replayed-from-clio": "Replayed from Clio",
 };
 
+const SOURCE_GUIDANCE: Record<WireEventSource, { label: string; description: string }> = {
+	"reported-by-clio": {
+		label: "Clio reported",
+		description: "Clio supplied this fact; Workbench did not measure it independently.",
+	},
+	"observed-on-acp": {
+		label: "Observed live",
+		description: "Workbench received this event on Clio's live control channel.",
+	},
+	"observed-by-workbench": {
+		label: "Observed locally",
+		description: "Workbench observed this fact in its own project or process boundary.",
+	},
+	"replayed-from-clio": {
+		label: "Earlier record",
+		description: "Clio replayed this from an earlier turn in the same session.",
+	},
+};
+
+const SETTING_GUIDANCE: Record<string, { label: string; description: string; scope: string | null }> = {
+	"orchestrator.target": {
+		label: "Clio target",
+		description: "The configured service or runtime Clio will route the next turn through.",
+		scope: "NEXT TURN",
+	},
+	"orchestrator.model": {
+		label: "Model",
+		description: "The model Clio will ask to work on the next turn.",
+		scope: "NEXT TURN",
+	},
+	"orchestrator.thinkingLevel": {
+		label: "Reasoning effort",
+		description: "Clio's configured reasoning depth. Workbench does not infer what the bound session already uses.",
+		scope: null,
+	},
+	autonomy: {
+		label: "Default working freedom",
+		description: "The autonomy level a newly created session will inherit. Change this session in the status bar.",
+		scope: "NEXT SESSION",
+	},
+};
+
 const AUTONOMY_LABELS: Record<WireAutonomyLevel, string> = {
 	"read-only": "read only",
 	suggest: "suggest",
@@ -815,26 +857,302 @@ function ApprovalBanner({
 	);
 }
 
+function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void }) {
+	return (
+		<section className="first-run" aria-labelledby="first-run-title">
+			<div className="first-run__intro">
+				<div className="eyebrow">A FIELD OBSERVATORY FOR CODE</div>
+				<h2 id="first-run-title">Bring a research folder. Keep every decision visible.</h2>
+				<p>
+					Workbench gives one real Clio process a bounded place to work, then turns its requests, actions, and outcomes
+					into a record you can inspect. You can start with a question; you do not need to start with a command.
+				</p>
+				<div className="first-run__actions">
+					<button type="button" className="button button--primary" onClick={onBrowse}>
+						Choose a project folder
+					</button>
+					<span>or enter a path in the Project panel</span>
+				</div>
+			</div>
+
+			<ol className="first-run__steps" aria-label="How Workbench works">
+				<li>
+					<span aria-hidden="true">01</span>
+					<div>
+						<strong>Open one project</strong>
+						<p>Choose the folder that contains your notes, data, scripts, or application.</p>
+					</div>
+				</li>
+				<li>
+					<span aria-hidden="true">02</span>
+					<div>
+						<strong>Describe the outcome</strong>
+						<p>Ask in your own words. Clio plans and uses the tools its configuration permits.</p>
+					</div>
+				</li>
+				<li>
+					<span aria-hidden="true">03</span>
+					<div>
+						<strong>Inspect the evidence</strong>
+						<p>See what was observed, what Clio reported, and where your approval was required.</p>
+					</div>
+				</li>
+			</ol>
+
+			<div className="first-run__assurances">
+				<article>
+					<div className="eyebrow">PROJECT BOUNDARY</div>
+					<p>{state.securityNote}</p>
+				</article>
+				<article>
+					<div className="eyebrow">LOCAL CONTROL</div>
+					<p>
+						The Workbench control channel stays on this machine. Prompts go only to the Clio target you configure.
+					</p>
+				</article>
+				<article>
+					<div className="eyebrow">WORKBENCH STATE</div>
+					<p>{state.stateDirNote}</p>
+				</article>
+			</div>
+		</section>
+	);
+}
+
+const TRACE_LIMIT = 24;
+const STARTER_PROMPTS = [
+	"Map this project and explain how its parts fit together.",
+	"Run the existing checks and summarize what the evidence shows.",
+	"Help me plan a careful change without editing anything yet.",
+] as const;
+
+function EvidenceRail({
+	state,
+	nowMs,
+	isDrawer,
+	drawerOpen,
+	onClose,
+	obscured,
+}: {
+	state: AppState;
+	nowMs: number;
+	isDrawer: boolean;
+	drawerOpen: boolean;
+	onClose(): void;
+	obscured: boolean;
+}) {
+	const open = state.open;
+	const timeline = open?.projection.timeline ?? [];
+	const activeTurn = open?.projection.activeTurn ?? null;
+	const trace = timeline.slice(-TRACE_LIMIT);
+	const sourceCounts = (Object.keys(SOURCE_GUIDANCE) as WireEventSource[]).map((source) => ({
+		source,
+		count: timeline.filter((item) => item.source === source).length,
+	})).filter(({ count }) => count > 0);
+	const toolCount = timeline.filter((item) => item.kind === "tool").length;
+	const outcomeCount = timeline.filter((item) => item.kind === "outcome").length;
+	const attentionCount = timeline.filter((item) => item.status === "failed" || item.status === "canceled").length;
+	const startedMs = activeTurn === null ? Number.NaN : Date.parse(activeTurn.startedAt);
+	const activeSeconds = Number.isFinite(startedMs) ? Math.max(0, Math.floor((nowMs - startedMs) / 1_000)) : 0;
+	const unavailable = obscured || (isDrawer && !drawerOpen);
+
+	return (
+		<aside
+			id="evidence-rail"
+			className={`evidence-rail instrument-panel${isDrawer && drawerOpen ? " is-open" : ""}`}
+			aria-label="Run and evidence overview"
+			aria-hidden={unavailable ? true : undefined}
+			inert={unavailable}
+		>
+			<header className="evidence-rail__header">
+				<div>
+					<div className="eyebrow">OBSERVATORY</div>
+					<h2>Run record</h2>
+				</div>
+				{isDrawer && (
+					<button type="button" className="icon-button evidence-rail__close" onClick={onClose}>
+						<Glyph>×</Glyph>
+						<span className="sr-only">Close run and evidence overview</span>
+					</button>
+				)}
+			</header>
+
+			<div className="evidence-rail__scroll">
+				<section className="observer-section" aria-labelledby="observer-now-title">
+					<div className="observer-section__heading">
+						<div>
+							<div className="eyebrow">RUN NOW</div>
+							<h3 id="observer-now-title">Current state</h3>
+						</div>
+						{open !== null && (
+							<StatusMark
+								tone={PHASE_PRESENTATION[open.clio.phase].tone}
+								label={PHASE_PRESENTATION[open.clio.phase].label}
+							/>
+						)}
+					</div>
+					{open === null
+						? (
+							<div className="observer-empty">
+								<div className="observer-empty__mark" aria-hidden="true">◎</div>
+								<strong>Observation starts with a folder.</strong>
+								<p>No run facts exist yet, so this panel intentionally has no telemetry to show.</p>
+							</div>
+						)
+						: (
+							<>
+								<p className="observer-lede">
+									{activeTurn === null
+										? "Clio is ready for the next research question."
+										: `Clio has been working for ${formatDuration(activeSeconds)}.`}
+								</p>
+								{activeTurn !== null && (
+									<div className="observer-activity">
+										<div>
+											<span>TOOL CALLS</span>
+											<strong>{activeTurn.toolCalls}</strong>
+										</div>
+										<div>
+											<span>REPEATED SHAPES</span>
+											<strong>{activeTurn.repeatedShapes}</strong>
+										</div>
+										{activeTurn.lastToolTitle !== null && (
+											<p>
+												<span>CLIO'S LATEST TOOL</span>
+												<strong>{activeTurn.lastToolTitle}</strong>
+											</p>
+										)}
+									</div>
+								)}
+							</>
+						)}
+				</section>
+
+				{open !== null && (
+					<section className="observer-section" aria-labelledby="observer-session-title">
+						<div className="eyebrow">SESSION ROUTING</div>
+						<h3 id="observer-session-title">Bound by Clio</h3>
+						{open.clio.session === null
+							? <p className="observer-note">No session is bound to this project.</p>
+							: (
+								<dl className="observer-facts">
+									<div>
+										<dt>Target</dt>
+										<dd>{open.clio.session.target ?? "unselected"}</dd>
+									</div>
+									<div>
+										<dt>Model</dt>
+										<dd>{open.clio.session.model ?? "unselected"}</dd>
+									</div>
+									<div>
+										<dt>Working freedom</dt>
+										<dd>{AUTONOMY_LABELS[open.clio.session.autonomy]}</dd>
+									</div>
+								</dl>
+							)}
+					</section>
+				)}
+
+				<section className="observer-section" aria-labelledby="observer-evidence-title">
+					<div className="observer-section__heading">
+						<div>
+							<div className="eyebrow">RECORDED EVIDENCE</div>
+							<h3 id="observer-evidence-title">Timeline at a glance</h3>
+						</div>
+						<strong className="observer-total">{timeline.length}</strong>
+					</div>
+					{timeline.length === 0
+						? <p className="observer-note">The first request will begin the evidence record.</p>
+						: (
+							<>
+								<ol className="evidence-trace" aria-label="Most recent recorded events">
+									{trace.map((item) => (
+										<li
+											key={item.id}
+											className={`evidence-trace__item evidence-trace__item--${item.kind} is-${item.status}`}
+											title={`${item.title} — ${SOURCE_LABELS[item.source]} — ${item.status}`}
+										>
+											<span className="sr-only">
+												{item.kind}: {item.title}, {SOURCE_LABELS[item.source]}, {item.status}
+											</span>
+										</li>
+									))}
+								</ol>
+								<div className="observer-counts">
+									<div>
+										<span>Actions</span>
+										<strong>{toolCount}</strong>
+									</div>
+									<div>
+										<span>Outcomes</span>
+										<strong>{outcomeCount}</strong>
+									</div>
+									<div>
+										<span>Failed / stopped</span>
+										<strong>{attentionCount}</strong>
+									</div>
+								</div>
+								{(open?.projection.timelineTruncated === true || open?.clio.session?.replayTruncated === true) && (
+									<p className="observer-note">This view is shortened; Clio still holds the full context.</p>
+								)}
+							</>
+						)}
+				</section>
+
+				<section className="observer-section" aria-labelledby="observer-sources-title">
+					<div className="eyebrow">PROVENANCE</div>
+					<h3 id="observer-sources-title">Where each fact came from</h3>
+					{sourceCounts.length === 0
+						? <p className="observer-note">Sources appear here only after Clio records activity.</p>
+						: (
+							<ul className="source-ledger">
+								{sourceCounts.map(({ source, count }) => (
+									<li key={source}>
+										<span className={`source-ledger__mark source-ledger__mark--${source}`} aria-hidden="true" />
+										<div>
+											<strong>{SOURCE_GUIDANCE[source].label}</strong>
+											<p>{SOURCE_GUIDANCE[source].description}</p>
+										</div>
+										<code>{count}</code>
+									</li>
+								))}
+							</ul>
+						)}
+					<p className="observer-method-note">
+						This panel summarizes the record. It never infers completion from silence or invents measurements.
+					</p>
+				</section>
+			</div>
+		</aside>
+	);
+}
+
 function ConversationCanvas({
 	state,
 	dispatch,
 	actions,
 	obscured,
 	nowMs,
+	inspectorOpen,
+	onInspectorToggle,
 }: {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
 	actions: WorkbenchActions;
 	obscured: boolean;
 	nowMs: number;
+	inspectorOpen: boolean;
+	onInspectorToggle(): void;
 }) {
 	const open = state.open;
 	const [prompt, setPrompt] = useState("");
+	const promptRef = useRef<HTMLTextAreaElement>(null);
 	const projection = open?.projection ?? null;
 	const activeTurn = projection?.activeTurn ?? null;
 	const pendingPermission = projection?.pendingPermission ?? null;
 	const elapsed = useElapsedSeconds(activeTurn?.startedAt ?? null);
 	const busy = isPromptBlocked(open);
+	const clioOccupied = open !== null && busy;
 	const canSubmit = open !== null && !busy && prompt.trim().length > 0 && state.pendingTurnStart === null;
 	const permissionWait = pendingPermission === null
 		? 0
@@ -858,6 +1176,11 @@ function ConversationCanvas({
 			event.preventDefault();
 			submit(event as unknown as FormEvent);
 		}
+	}
+
+	function startFromExample(example: string): void {
+		setPrompt(example);
+		requestAnimationFrame(() => promptRef.current?.focus());
 	}
 
 	return (
@@ -900,6 +1223,18 @@ function ConversationCanvas({
 						Settings
 					</button>
 				</div>
+				<div className="mobile-controls mobile-controls--evidence">
+					<button
+						type="button"
+						className="icon-button"
+						aria-controls="evidence-rail"
+						aria-expanded={inspectorOpen}
+						onClick={onInspectorToggle}
+					>
+						<Glyph>◫</Glyph>
+						<span className="sr-only">Open run and evidence overview</span>
+					</button>
+				</div>
 			</header>
 
 			{pendingPermission !== null && activeTurn !== null && (
@@ -913,60 +1248,65 @@ function ConversationCanvas({
 
 			{/* Focusable so a keyboard user can scroll the conversation without a pointer. */}
 			<div className="conversation__scroll" tabIndex={0} role="region" aria-label="Conversation history">
-				{open === null
-					? (
-						<section className="field-note" aria-labelledby="field-note-title">
-							<div className="eyebrow">LOCALHOST-FIRST INSTRUMENT</div>
-							<h2 id="field-note-title">Open a folder to start</h2>
-							<p>
-								Workbench drives one real Clio process for the folder you open. Prompts go only to the Clio target you
-								have configured, which may be a remote model.
-							</p>
-							<p className="field-note__stamp">{state.securityNote}</p>
-							<p className="field-note__stamp">{state.stateDirNote}</p>
-						</section>
-					)
-					: (
-						<>
-							{open.clio.lastFailure && (
-								<section className="conversation__failure" role="status">
-									<div className="eyebrow">CLIO REPORTED A FAILURE</div>
-									<p>{open.clio.lastFailure.summary}</p>
-									<code>{open.clio.lastFailure.code}</code>
-								</section>
-							)}
-							{(projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true) && (
-								<p className="timeline-note">Earlier turns are not shown; Clio still has the full context.</p>
-							)}
-							<section
-								className="evidence-timeline"
-								aria-label="Request, work, approval, and outcome timeline"
-								aria-live="polite"
-							>
-								{projection === null || projection.timeline.length === 0
-									? (
-										<div className="timeline-empty">
-											<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
-											<p>Nothing has run in this session yet.</p>
-										</div>
-									)
-									: projection.timeline.map((item) => <TimelineCard item={item} nowMs={nowMs} key={item.id} />)}
+				{open === null ? <FirstRunGuide state={state} onBrowse={() => actions.browseProjects()} /> : (
+					<>
+						{open.clio.lastFailure && (
+							<section className="conversation__failure" role="status">
+								<div className="eyebrow">CLIO REPORTED A FAILURE</div>
+								<p>{open.clio.lastFailure.summary}</p>
+								<code>{open.clio.lastFailure.code}</code>
 							</section>
-							{pendingPermission !== null && activeTurn !== null && (
-								<PermissionCard
-									permission={pendingPermission}
-									escalated={permissionEscalated}
-									elapsed={permissionWait}
-									onResolve={resolvePending}
-								/>
-							)}
-						</>
-					)}
+						)}
+						{(projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true) && (
+							<p className="timeline-note">Earlier turns are not shown; Clio still has the full context.</p>
+						)}
+						<section
+							className="evidence-timeline"
+							aria-label="Request, work, approval, and outcome timeline"
+							aria-live="polite"
+						>
+							{projection === null || projection.timeline.length === 0
+								? (
+									<div className="timeline-empty">
+										<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
+										<div>
+											<div className="eyebrow">NEW RESEARCH THREAD</div>
+											<h2>What would you like to understand or change?</h2>
+											<p>Start in your own words, or use one of these as a starting point.</p>
+										</div>
+										<div className="starter-prompts" aria-label="Example prompts">
+											{STARTER_PROMPTS.map((example) => (
+												<button
+													type="button"
+													key={example}
+													onClick={() => startFromExample(example)}
+												>
+													<span aria-hidden="true">↗</span>
+													{example}
+												</button>
+											))}
+										</div>
+									</div>
+								)
+								: projection.timeline.map((item) => <TimelineCard item={item} nowMs={nowMs} key={item.id} />)}
+						</section>
+						{pendingPermission !== null && activeTurn !== null && (
+							<PermissionCard
+								permission={pendingPermission}
+								escalated={permissionEscalated}
+								elapsed={permissionWait}
+								onResolve={resolvePending}
+							/>
+						)}
+					</>
+				)}
 			</div>
 
 			<form className="composer" onSubmit={submit}>
 				<div className="composer__mode">
-					<span className="composer__mode-label">{busy ? "RUNNING" : "MESSAGE"}</span>
+					<span className="composer__mode-label">
+						{open === null ? "START" : clioOccupied ? "RUNNING" : "MESSAGE"}
+					</span>
 					<span className="composer__status" role="status">
 						{activeTurn
 							? `${formatDuration(elapsed)} · ${activeTurn.toolCalls} tool calls${
@@ -979,6 +1319,7 @@ function ConversationCanvas({
 				</div>
 				<div className="composer__input-row">
 					<textarea
+						ref={promptRef}
 						value={prompt}
 						onChange={(event) => setPrompt(event.target.value)}
 						onKeyDown={onComposerKeyDown}
@@ -1004,7 +1345,9 @@ function ConversationCanvas({
 						)}
 				</div>
 				<div className="composer__footer">
-					{busy && !activeTurn && <span className="composer__notice">Clio is finishing the previous prompt.</span>}
+					{clioOccupied && !activeTurn && (
+						<span className="composer__notice">Clio is finishing the previous prompt.</span>
+					)}
 					<span className="composer__shortcut">Ctrl or Cmd + Enter sends</span>
 					<span className="composer__privacy">Prompts go only to the Clio target you configured.</span>
 				</div>
@@ -1014,7 +1357,13 @@ function ConversationCanvas({
 }
 
 function Modal(
-	{ title, eyebrow, children, onClose }: { title: string; eyebrow: string; children: ReactNode; onClose(): void },
+	{ title, eyebrow, children, onClose, size = "default" }: {
+		title: string;
+		eyebrow: string;
+		children: ReactNode;
+		onClose(): void;
+		size?: "default" | "wide";
+	},
 ) {
 	const headingId = useId();
 	const container = useRef<HTMLDivElement>(null);
@@ -1043,7 +1392,14 @@ function Modal(
 			role="presentation"
 			onMouseDown={(event) => event.target === event.currentTarget && onClose()}
 		>
-			<div className="modal" role="dialog" aria-modal="true" aria-labelledby={headingId} ref={container} tabIndex={-1}>
+			<div
+				className={`modal modal--${size}`}
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby={headingId}
+				ref={container}
+				tabIndex={-1}
+			>
 				<div className="modal__header">
 					<div>
 						<div className="eyebrow">{eyebrow}</div>
@@ -1208,8 +1564,18 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 	const editable = settings?.editable ?? [];
 	const targets = open?.targets ?? null;
 	return (
-		<Modal title="Clio settings" eyebrow="READ AND WRITTEN THROUGH CLIO" onClose={onClose}>
+		<Modal title="Clio settings" eyebrow="CONTROLS WITH EXPLICIT SCOPE" onClose={onClose} size="wide">
 			<div className="settings">
+				<div className="settings__intro">
+					<div>
+						<div className="eyebrow">CONFIGURATION</div>
+						<h3>How Clio will work</h3>
+					</div>
+					<p>
+						Workbench reads and writes these values through Clio. Timing labels distinguish this session from the next
+						turn or a newly created session.
+					</p>
+				</div>
 				{open === null && <p>Open a project before reading Clio's settings.</p>}
 				{open !== null && open.clio.capabilities?.settings !== true && (
 					<p className="settings__unavailable">This Clio does not expose settings over ACP.</p>
@@ -1228,9 +1594,21 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 						{Object.entries(settings.settings).map(([key, value]) => {
 							const options = settings.options[key] ?? [];
 							const canEdit = editable.includes(key) && !busy;
+							const guidance = SETTING_GUIDANCE[key] ?? {
+								label: key,
+								description: "A setting Clio exposes to this Workbench session.",
+								scope: null,
+							};
 							return (
 								<div key={key}>
-									<dt>{key}</dt>
+									<dt>
+										<div className="settings__label-line">
+											<strong>{guidance.label}</strong>
+											{guidance.scope !== null && <span>{guidance.scope}</span>}
+										</div>
+										<p>{guidance.description}</p>
+										<code>{key}</code>
+									</dt>
 									<dd>
 										{options.length === 0 ? <code>{value ?? "unset"}</code> : (
 											<select
@@ -1260,7 +1638,13 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 
 				{open !== null && (
 					<section className="settings__targets" aria-labelledby="settings-targets-title">
-						<h3 id="settings-targets-title" className="settings__heading">Targets</h3>
+						<div className="settings__section-heading">
+							<div>
+								<div className="eyebrow">ROUTING</div>
+								<h3 id="settings-targets-title">Configured targets</h3>
+							</div>
+							<p>Health is a point-in-time probe, never an assumed green light.</p>
+						</div>
 						{open.clio.capabilities?.targets !== true
 							? <p className="settings__unavailable">This Clio does not expose targets over ACP.</p>
 							: targets === null
@@ -1558,10 +1942,13 @@ function BottomStatus({ state, actions, obscured, approvalEscalated }: {
 export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) {
 	const open = state.open;
 	const leftRailIsDrawer = useMediaQuery("(max-width: 790px)");
+	const evidenceRailIsDrawer = useMediaQuery("(max-width: 1180px)");
 	const [fileDialog, setFileDialog] = useState<FileDialog>(null);
 	const [selectedNode, setSelectedNode] = useState<WireTreeNode | null>(null);
 	const [sessionToDelete, setSessionToDelete] = useState<WireSessionSummary | null>(null);
+	const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
 	const previousLeftDrawerOpen = useRef(state.leftDrawerOpen);
+	const previousEvidenceDrawerOpen = useRef(evidenceDrawerOpen);
 	const pendingPermission = open?.projection.pendingPermission ?? null;
 	const activeTurn = open?.projection.activeTurn ?? null;
 	// One clock for the whole shell, so the banner, the tool cards, and the status
@@ -1575,13 +1962,19 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	const modalIsOpen = fileDialog !== null || Boolean(open?.deleteChallenge) || state.browse !== null ||
 		state.settingsOpen || sessionToDelete !== null;
 	const leftDrawerObscures = leftRailIsDrawer && state.leftDrawerOpen;
-	const backgroundObscured = modalIsOpen || leftDrawerObscures;
+	const evidenceDrawerObscures = evidenceRailIsDrawer && evidenceDrawerOpen;
+	const backgroundObscured = modalIsOpen || leftDrawerObscures || evidenceDrawerObscures;
 
 	useEffect(() => {
 		setFileDialog(null);
 		setSelectedNode(null);
 		setSessionToDelete(null);
+		setEvidenceDrawerOpen(false);
 	}, [open?.project.id]);
+
+	useEffect(() => {
+		if (!evidenceRailIsDrawer) setEvidenceDrawerOpen(false);
+	}, [evidenceRailIsDrawer]);
 
 	useEffect(() => {
 		if (leftRailIsDrawer && state.leftDrawerOpen) {
@@ -1591,6 +1984,15 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		}
 		previousLeftDrawerOpen.current = state.leftDrawerOpen;
 	}, [leftRailIsDrawer, state.leftDrawerOpen]);
+
+	useEffect(() => {
+		if (evidenceRailIsDrawer && evidenceDrawerOpen) {
+			document.querySelector<HTMLButtonElement>(".evidence-rail__close")?.focus();
+		} else if (evidenceRailIsDrawer && previousEvidenceDrawerOpen.current) {
+			document.querySelector<HTMLButtonElement>(".mobile-controls--evidence button")?.focus();
+		}
+		previousEvidenceDrawerOpen.current = evidenceDrawerOpen;
+	}, [evidenceDrawerOpen, evidenceRailIsDrawer]);
 
 	useEffect(() => {
 		if (modalIsOpen || !leftDrawerObscures) return;
@@ -1605,6 +2007,20 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		document.addEventListener("keydown", constrainDrawerFocus);
 		return () => document.removeEventListener("keydown", constrainDrawerFocus);
 	}, [dispatch, leftDrawerObscures, modalIsOpen]);
+
+	useEffect(() => {
+		if (modalIsOpen || !evidenceDrawerObscures) return;
+		const constrainDrawerFocus = (event: globalThis.KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setEvidenceDrawerOpen(false);
+				return;
+			}
+			const drawer = document.querySelector<HTMLElement>("#evidence-rail");
+			if (drawer) containTabKey(event, drawer);
+		};
+		document.addEventListener("keydown", constrainDrawerFocus);
+		return () => document.removeEventListener("keydown", constrainDrawerFocus);
+	}, [evidenceDrawerObscures, modalIsOpen]);
 
 	// The approval is the one thing the operator must not miss.
 	useEffect(() => {
@@ -1660,8 +2076,11 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				{approvalEscalated ? `An approval has been waiting for ${escalatedSeconds} seconds.` : ""}
 			</div>
 			<div
-				className={`drawer-scrim${leftDrawerObscures ? " is-visible" : ""}`}
-				onClick={() => dispatch({ type: "drawer.left", open: false })}
+				className={`drawer-scrim${leftDrawerObscures || evidenceDrawerObscures ? " is-visible" : ""}`}
+				onClick={() => {
+					dispatch({ type: "drawer.left", open: false });
+					setEvidenceDrawerOpen(false);
+				}}
 				aria-hidden="true"
 			/>
 			<ProjectRail
@@ -1673,7 +2092,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onFileDialog={setFileDialog}
 				onDeleteSession={setSessionToDelete}
 				isDrawer={leftRailIsDrawer}
-				obscured={modalIsOpen}
+				obscured={modalIsOpen || evidenceDrawerObscures}
 			/>
 			<ConversationCanvas
 				state={state}
@@ -1681,6 +2100,16 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				actions={actions}
 				obscured={backgroundObscured}
 				nowMs={nowMs}
+				inspectorOpen={evidenceDrawerOpen}
+				onInspectorToggle={() => setEvidenceDrawerOpen((current) => !current)}
+			/>
+			<EvidenceRail
+				state={state}
+				nowMs={nowMs}
+				isDrawer={evidenceRailIsDrawer}
+				drawerOpen={evidenceDrawerOpen}
+				onClose={() => setEvidenceDrawerOpen(false)}
+				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus
 				state={state}

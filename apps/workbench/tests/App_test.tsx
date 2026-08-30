@@ -52,7 +52,7 @@ function stateWith(workspace: WireProjectWorkspace | null): AppState {
 	});
 }
 
-Deno.test("the shell renders two regions with accessible landmarks and no engine concept", () => {
+Deno.test("the shell renders three truthful regions with accessible landmarks and no engine concept", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		tree: [{
 			name: "analysis",
@@ -71,6 +71,7 @@ Deno.test("the shell renders two regions with accessible landmarks and no engine
 
 	match(html, /<main class="conversation" id="conversation">/u);
 	match(html, /aria-label="Projects, files, and sessions"/u);
+	match(html, /aria-label="Run and evidence overview"/u);
 	match(html, /aria-label="Request, work, approval, and outcome timeline"/u);
 	match(html, /aria-label="Workbench status"/u);
 	match(html, /aria-live="assertive"/u);
@@ -80,11 +81,52 @@ Deno.test("the shell renders two regions with accessible landmarks and no engine
 	match(html, /aria-label="Prompt for Clio"/u);
 	match(html, /Prompts go only to the Clio target you configured/u);
 	equal((html.match(/<main/gu) ?? []).length, 1);
-	equal((html.match(/<aside/gu) ?? []).length, 1);
+	equal((html.match(/<aside/gu) ?? []).length, 2);
 	ok(!html.includes("undefined"));
 	ok(!/engine/iu.test(html), "no product surface may mention an engine");
 	ok(!html.includes("activity-rail"));
 	ok(!html.includes("No prompt leaves this machine"));
+});
+
+Deno.test("the observatory summarizes recorded facts without inventing telemetry", () => {
+	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		timeline: [
+			{
+				id: "turn-1:request",
+				kind: "request",
+				title: "Check the field notes",
+				summary: "Review the notes and run the existing checks.",
+				status: "complete",
+				turnId: "turn-1",
+				origin: "live",
+				startedAt: "2026-08-18T12:00:00.000Z",
+				sequence: 1,
+				source: "observed-by-workbench",
+			},
+			{
+				id: "turn-1:tool:check",
+				kind: "tool",
+				title: "Run project checks",
+				summary: "Clio ran the configured checks.",
+				status: "failed",
+				turnId: "turn-1",
+				origin: "live",
+				startedAt: "2026-08-18T12:00:01.000Z",
+				endedAt: "2026-08-18T12:00:02.000Z",
+				sequence: 2,
+				source: "observed-on-acp",
+			},
+		],
+	});
+	const html = render(stateWith(workspace));
+
+	match(html, /Timeline at a glance/u);
+	match(html, /Check the field notes — Observed by Workbench — complete/u);
+	match(html, /Run project checks — Observed on ACP — failed/u);
+	match(html, /Observed locally/u);
+	match(html, /Observed live/u);
+	match(html, /This panel summarizes the record\. It never infers completion from silence or invents measurements\./u);
+	ok(!/memory|cpu|dependency map/iu.test(html), "the overview must not fabricate system telemetry");
 });
 
 Deno.test("with no project open the rail offers a path field and the canvas explains the boundary", () => {
@@ -92,9 +134,12 @@ Deno.test("with no project open the rail offers a path field and the canvas expl
 	match(html, /Project folder/u);
 	match(html, /name="projectPath"/u);
 	match(html, />Browse folders</u);
-	match(html, /Open a folder to start/u);
+	match(html, /Bring a research folder\. Keep every decision visible\./u);
+	match(html, /Choose a project folder/u);
 	match(html, /Workbench enforces the project boundary in its own code/u);
 	match(html, /No project open/u);
+	match(html, />START</u);
+	ok(!html.includes("Clio is finishing the previous prompt."));
 	ok(!html.includes("sandbox"));
 });
 
@@ -429,7 +474,7 @@ Deno.test("the settings page claims a target's health only after that target was
 	});
 	const html = render(appReducer(stateWith(workspace), { type: "settings.opened", open: true }));
 
-	match(html, /<h3[^>]*>Targets<\/h3>/u);
+	match(html, /<h3[^>]*>Configured targets<\/h3>/u);
 	match(html, />Probe lmstudio</u);
 	match(html, />Probe offline-lab</u);
 	match(html, /healthy/u);
@@ -438,6 +483,11 @@ Deno.test("the settings page claims a target's health only after that target was
 	match(html, /A target&#x27;s health is shown only after you probe it\./u);
 	match(html, /This list is shortened; Clio has more targets or models than are shown\./u);
 	match(html, /orchestrator\.thinkingLevel/u);
+	match(html, /Clio target/u);
+	match(html, /Reasoning effort/u);
+	match(html, /Default working freedom/u);
+	match(html, /NEXT TURN/u);
+	match(html, /NEXT SESSION/u);
 	// The unprobed target must not borrow the probed one's verdict.
 	const offlineRow = html.slice(html.indexOf("<strong>offline-lab</strong>"));
 	ok(!offlineRow.includes("unhealthy"));
