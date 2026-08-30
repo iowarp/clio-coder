@@ -1,4 +1,5 @@
 import { parseEvalBehaviorScenarioV1 } from "./behavioral.js";
+import { parseEvalExecutionMatrixDimensionsV1 } from "./execution-envelope.js";
 import {
 	EVAL_SUITE_V2_VERSION,
 	type EvalAssertionOp,
@@ -88,12 +89,26 @@ function readMatrix(value: unknown, path: string, issues: EvalValidationIssue[])
 		];
 	});
 	if (repeats === null || targets.length === 0) return null;
+	let dimensions: EvalSuiteV2["matrix"]["dimensions"];
+	if (value.dimensions !== undefined) {
+		try {
+			dimensions = parseEvalExecutionMatrixDimensionsV1(value.dimensions, `${path}.dimensions`);
+		} catch (error) {
+			issues.push({ path: `${path}.dimensions`, message: error instanceof Error ? error.message : String(error) });
+			return null;
+		}
+	}
 	const maxCostUsd = value.maxCostUsd;
 	if (maxCostUsd !== undefined && (typeof maxCostUsd !== "number" || !Number.isFinite(maxCostUsd) || maxCostUsd < 0)) {
 		issues.push({ path: `${path}.maxCostUsd`, message: "expected non-negative number" });
 		return null;
 	}
-	return { targets, repeats, ...(maxCostUsd === undefined ? {} : { maxCostUsd }) };
+	return {
+		targets,
+		repeats,
+		...(dimensions === undefined ? {} : { dimensions }),
+		...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+	};
 }
 
 function readTasks(value: unknown, path: string, issues: EvalValidationIssue[]): EvalSuiteTaskV2[] | null {

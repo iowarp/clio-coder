@@ -2,6 +2,7 @@ import type { EvalScenarioAggregateV1 } from "../metrics/aggregate.js";
 import type { EvalClioProvenance, EvalEnvironmentProvenance } from "../types.js";
 import type { EvalBehaviorVerdictV1 } from "./behavioral.js";
 import type { EvalBehaviorMetricsV1 } from "./behavioral-metrics.js";
+import type { EvalExecutionEnvelopeV1, EvalExecutionMatrixDimensionV1 } from "./execution-envelope.js";
 import type { EvalServingConfigurationV1 } from "./serving.js";
 import type { EvalVerdictEnvelopeV1 } from "./verdict.js";
 
@@ -56,6 +57,8 @@ export interface EvalArtifactResultV4 extends EvalArtifactAssignmentReference {
 	behavioral?: EvalBehaviorVerdictV1;
 	/** Additive, typed multi-metric projection for behavioral comparison. */
 	behavioralMetrics?: EvalBehaviorMetricsV1;
+	/** Exact prompt, route, policy, and project-context identity for a behavioral result. */
+	executionEnvelope?: EvalExecutionEnvelopeV1;
 }
 
 /** The only current eval artifact format. Routing accepts this version only. */
@@ -72,6 +75,8 @@ export interface EvalArtifactV4 {
 		target: string;
 		model: string | null;
 		thinking: string | null;
+		/** Envelope fields intentionally varied by this matrix. */
+		dimensions?: EvalExecutionMatrixDimensionV1[];
 	};
 	/** Exact serving facts used to decide whether two eval runs are comparable. */
 	servingConfiguration?: EvalServingConfigurationV1;

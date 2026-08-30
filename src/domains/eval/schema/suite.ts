@@ -1,4 +1,5 @@
 import type { EvalBehaviorScenarioV1 } from "./behavioral.js";
+import type { EvalExecutionMatrixDimensionV1 } from "./execution-envelope.js";
 
 export const EVAL_SUITE_V2_VERSION = 2;
 
@@ -154,6 +155,8 @@ export interface EvalSuiteTargetV2 {
 export interface EvalSuiteMatrixV2 {
 	targets: EvalSuiteTargetV2[];
 	repeats: number;
+	/** Execution-envelope fields this suite intentionally varies. All other fields must match for comparison. */
+	dimensions?: EvalExecutionMatrixDimensionV1[];
 	/**
 	 * Cumulative receipt-cost ceiling in USD for the whole matrix. Once the
 	 * summed `cost.usd` of finished items exceeds it, remaining items fail

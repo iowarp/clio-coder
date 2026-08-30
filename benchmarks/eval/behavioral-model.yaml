@@ -10,6 +10,7 @@ suite:
     corpusVersion: 1.0.0
     dataClassification: public
 matrix:
+  dimensions: [target, wireModel, thinkingLevel]
   targets:
     - id: mini
       model: qwen3.8-27b-dense

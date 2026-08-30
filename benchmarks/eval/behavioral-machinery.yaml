@@ -10,6 +10,7 @@ suite:
     corpusVersion: 1.0.0
     dataClassification: public
 matrix:
+  dimensions: []
   targets:
     - id: local
   repeats: 1

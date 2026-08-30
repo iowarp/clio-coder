@@ -18,6 +18,19 @@ const BUILTIN_DIR = join(ROOT, "src/domains/agents/builtins");
 const EVAL_DIR = join(ROOT, "benchmarks/eval");
 
 describe("contracts/public behavioral corpus", () => {
+	it("checks the stable machinery projection from the release gate", async () => {
+		const suite = (await loadEvalSuiteFile(join(EVAL_DIR, "behavioral-machinery.yaml"))).suite;
+		const baseline = JSON.parse(readFileSync(join(EVAL_DIR, "behavioral-machinery-baseline.json"), "utf8"));
+		strictEqual(baseline.schema, "clio.eval.behavior.release-baseline.v1");
+		strictEqual(baseline.results.length, suite.tasks.length);
+		for (const result of baseline.results) {
+			strictEqual(result.executionEnvelope.schema, "clio.eval.execution-envelope.v1");
+			strictEqual(Object.hasOwn(result.metrics, "latency.wallMs"), false);
+		}
+		const releaseGate = readFileSync(join(ROOT, "scripts/check-release.mjs"), "utf8");
+		strictEqual(releaseGate.includes("check-behavioral-release.mjs"), true);
+	});
+
 	it("covers every built-in role with stable positive and adversarial machinery scenarios", async () => {
 		const suite = (await loadEvalSuiteFile(join(EVAL_DIR, "behavioral-machinery.yaml"))).suite;
 		const builtins = readdirSync(BUILTIN_DIR)

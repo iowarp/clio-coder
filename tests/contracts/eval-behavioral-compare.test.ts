@@ -87,6 +87,72 @@ describe("contracts/eval behavioral multi-metric comparison", () => {
 		match(junit, /failure message="regressed"/u);
 	});
 
+	it("marks undeclared prompt drift incomparable and names affected scenario and role evidence", () => {
+		const baseline = artifact("eval-baseline", [trial(0, { "correctness.taskSolved": 1 })]);
+		const candidate = artifact("eval-candidate", [trial(0, { "correctness.taskSolved": 1 })]);
+		const baselineResult = baseline.results[0];
+		const candidateResult = candidate.results[0];
+		if (baselineResult === undefined || candidateResult === undefined) throw new Error("missing fixture result");
+		baselineResult.executionEnvelope = executionEnvelope("a");
+		candidateResult.executionEnvelope = executionEnvelope("b");
+
+		const compared = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(compared.hardGate.pass, false);
+		deepStrictEqual(
+			compared.envelopeMismatches.map((mismatch) => mismatch.fields),
+			[["prompt"]],
+		);
+		strictEqual(row(compared, "correctness.taskSolved").change, "incomparable");
+		deepStrictEqual(compared.affectedCorpusResults, [
+			{ scenarioId: "behavior-case", role: "main", changedFields: ["prompt"] },
+		]);
+		deepStrictEqual(compared.scenarioReports[0]?.metrics, {
+			improved: 0,
+			regressed: 0,
+			unchanged: 0,
+			incomparable: 10,
+		});
+		strictEqual(compared.roleReports[0]?.id, "main");
+		match(
+			renderEvalComparisonReportV1(compared, "text"),
+			/affected corpus result: behavior-case role=main changed=prompt/u,
+		);
+	});
+
+	it("allows envelope drift only when both artifacts declare that matrix dimension", () => {
+		const baseline = artifact("eval-baseline", [trial(0, { "correctness.taskSolved": 1 })]);
+		const candidate = artifact("eval-candidate", [trial(0, { "correctness.taskSolved": 1 })]);
+		baseline.matrix.dimensions = ["prompt"];
+		candidate.matrix.dimensions = ["prompt"];
+		const baselineResult = baseline.results[0];
+		const candidateResult = candidate.results[0];
+		if (baselineResult === undefined || candidateResult === undefined) throw new Error("missing fixture result");
+		baselineResult.executionEnvelope = executionEnvelope("a");
+		candidateResult.executionEnvelope = executionEnvelope("b");
+
+		const compared = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(compared.hardGate.pass, true);
+		deepStrictEqual(compared.envelopeMismatches, []);
+		strictEqual(row(compared, "correctness.taskSolved").change, "unchanged");
+	});
+
+	it("fails closed when only some trials carry execution provenance", () => {
+		const baseline = artifact("eval-baseline", [trial(0, {}), trial(1, {})]);
+		const candidate = artifact("eval-candidate", [trial(0, {}), trial(1, {})]);
+		const [baselineFirst] = baseline.results;
+		const [candidateFirst, candidateSecond] = candidate.results;
+		if (baselineFirst === undefined || candidateFirst === undefined || candidateSecond === undefined) {
+			throw new Error("missing fixture result");
+		}
+		baselineFirst.executionEnvelope = executionEnvelope("a");
+		candidateFirst.executionEnvelope = executionEnvelope("a");
+		candidateSecond.executionEnvelope = executionEnvelope("a");
+
+		const compared = compareEvalArtifactsV4(baseline, candidate);
+		strictEqual(compared.hardGate.pass, false);
+		deepStrictEqual(compared.envelopeMismatches[0]?.fields, ["executionEnvelope.missingTrial"]);
+	});
+
 	it("parses the additive projection and keeps artifact reports behaviorally fail-closed", () => {
 		const result = trial(0, { "correctness.taskSolved": 1 }, "behavioral_failure");
 		const input = artifact("eval-report", [result]);
@@ -219,6 +285,35 @@ function defaultValue(metric: EvalBehaviorMetricNameV1): number | null {
 		return 0;
 	}
 	return null;
+}
+
+function executionEnvelope(hashCharacter: string): NonNullable<EvalArtifactResultV4["executionEnvelope"]> {
+	const hash = hashCharacter.repeat(64);
+	return {
+		schema: "clio.eval.execution-envelope.v1",
+		prompt: {
+			fragments: [{ id: "identity.clio", version: 1, contentHash: hash }],
+			compositionHash: hash,
+		},
+		recipe: null,
+		target: "mini",
+		wireModel: "qwen",
+		runtime: "llamacpp",
+		thinkingLevel: "off",
+		toolSignature: DIGEST,
+		autonomy: "auto-edit",
+		policyHashes: { rulePack: DIGEST, project: null },
+		projectContext: {
+			kind: "session",
+			tier: "full",
+			contentHash: DIGEST,
+			chars: 100,
+			sections: ["context.workspace-root"],
+			rulesApplied: [],
+			operatorProfileApplied: false,
+		},
+		corpus: { id: "public-behavior", version: "1.0.0" },
+	};
 }
 
 function behavior(outcome: EvalBehaviorVerdictV1["outcome"], repeatIndex: number): EvalBehaviorVerdictV1 {

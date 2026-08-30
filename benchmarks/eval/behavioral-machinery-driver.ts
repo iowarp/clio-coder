@@ -114,6 +114,33 @@ try {
 			sealed: true,
 		})}\n`,
 	);
+	process.stdout.write(
+		`${JSON.stringify({
+			schema: "clio.eval.execution-observation.v1",
+			compositionHash: receipt.staticCompositionHash,
+			target: receipt.targetId,
+			wireModel: receipt.wireModelId,
+			runtime: receipt.runtimeId,
+			thinkingLevel: receipt.runtimeResolution?.effectiveThinkingLevel ?? null,
+			toolSignature: receipt.toolSignature ?? null,
+			autonomy: receipt.autonomyEnforcement?.autonomy ?? null,
+			policyHashes: {
+				rulePack: receipt.reproducibility?.safetyPolicy.rulePackHash ?? null,
+				project: receipt.reproducibility?.safetyPolicy.projectPolicyHash ?? null,
+			},
+			projectContext:
+				receipt.projectContext === undefined
+					? null
+					: {
+							tier: receipt.projectContext.tier,
+							contentHash: receipt.projectContext.contentHash ?? null,
+							chars: receipt.projectContext.chars ?? null,
+							sections: receipt.projectContext.sections ?? [],
+							rulesApplied: receipt.rulesApplied ?? [],
+							operatorProfileApplied: receipt.operatorProfileApplied ?? null,
+						},
+		})}\n`,
+	);
 } finally {
 	await bundle.extension.stop?.();
 	restoreDispatchState();
