@@ -65,6 +65,22 @@ if (command === "agents --json") {
 		}],
 		diagnostics: ["private catalog path /home/operator/library.yaml"],
 	};
+} else if (command === "extensions list --all --json") {
+	payload = {
+		extensions: [{
+			id: "fixture-lab-pack",
+			name: "Fixture Lab Pack",
+			version: "2.1.0",
+			description: "Contributes research agents, prompts, and skills to Clio.",
+			scope: "project",
+			rootPath: "/home/operator/project/.clio-coder/extensions/fixture-lab-pack",
+			manifestPath: "/home/operator/project/.clio-coder/extensions/fixture-lab-pack/clio-coder-extension.yaml",
+			enabled: true,
+			effective: true,
+			resources: { skills: "skills", prompts: "prompts", agents: "agents" },
+			diagnostics: [{ type: "warning", message: "private extension diagnostic sk-secret" }],
+		}],
+	};
 } else {
 	Deno.exit(23);
 }

@@ -205,11 +205,11 @@ try {
 	await effectiveMap.getByRole("button", { name: "Back to notebook" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
-	// The capability atlas is projected from three bounded JSON interfaces. Its
-	// fourth tab names the missing typed interface instead of scraping CLI text.
+	// The capability atlas is projected from four bounded JSON interfaces. Its
+	// fifth tab names the missing typed interface instead of scraping CLI text.
 	await page.getByRole("button", { name: "Catalog", exact: true }).click();
 	const catalog = page.locator(".catalog");
-	await catalog.getByRole("heading", { name: "Agents, skills & resource library" }).waitFor();
+	await catalog.getByRole("heading", { name: "Agents, skills, extensions & resource library" }).waitFor();
 	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
 	await catalog.getByText("24–64", { exact: true }).waitFor();
 	const catalogSearch = catalog.getByRole("searchbox", { name: "Filter this collection" });
@@ -226,6 +226,12 @@ try {
 	equal(await catalog.getByRole("tab", { name: /^Skills/u }).getAttribute("aria-selected"), "true");
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "experiment-protocol" }).waitFor();
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", { name: "Clio Lab Pack" }).waitFor();
+	await catalog.getByText("Project-scoped package", { exact: true }).waitFor();
+	await catalog.getByText("Native roots and lifecycle mutations remain host-side", { exact: true }).waitFor();
+	equal(await catalog.getByRole("tab", { name: /^Extensions/u }).getAttribute("aria-selected"), "true");
+	await page.screenshot({ path: new URL("catalog-extensions.png", artifactDirectory).pathname, fullPage: true });
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", {
 		name: "Verifier discovery is real, but it is not machine-readable yet",
@@ -1051,6 +1057,7 @@ try {
 				"initial.png",
 				"effective-clio.png",
 				"catalog.png",
+				"catalog-extensions.png",
 				"catalog-verifiers.png",
 				"catalog-compact.png",
 				"usage.png",

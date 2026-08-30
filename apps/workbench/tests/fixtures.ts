@@ -136,6 +136,23 @@ export function catalogInspectionFixture(): WireCatalogInspection {
 			truncated: false,
 			issueCount: 0,
 		},
+		extensions: {
+			availability: "available",
+			items: [{
+				id: "clio-lab-pack",
+				name: "Clio Lab Pack",
+				version: "2.1.0",
+				description: "Contributes research agents, prompts, and skills to this project.",
+				scope: "project",
+				enabled: true,
+				effective: true,
+				overriddenBy: null,
+				resources: ["skills", "prompts", "agents"],
+				issueCount: 0,
+			}],
+			truncated: false,
+			issueCount: 0,
+		},
 		verifiers: { availability: "typed-interface-required" },
 	};
 }

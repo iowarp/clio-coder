@@ -27,7 +27,8 @@ legible record. A supplementary Observatory summarizes that same record without 
 - Workbench may simplify vocabulary, but it must retain access to the exact underlying Clio key or fact where that is
   useful for auditability.
 - Resource inventories enter the browser only through bounded projections. Skill bodies, hashes, native locations,
-  source URLs, requirements, and raw diagnostics stay host-side; a formatted CLI table is not a typed fact source.
+  extension roots and manifests, source URLs, requirements, and raw diagnostics stay host-side; a formatted CLI table is
+  not a typed fact source.
 
 ## Information architecture
 
@@ -45,10 +46,10 @@ track immediately and restores focus predictably when reopened; it must not caus
 text is streaming.
 
 The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio, the Capability
-atlas, and the 30-day Usage record. These are alternate views of the same bounded workspace, not a second application
-shell or an invitation to add global navigation. They retain a direct path back to the notebook and expose unavailable
-interfaces honestly. Historical views must distinguish a missing store from zero activity and must not mix global
-records into a project canvas merely because an upstream report contains both.
+atlas—including installed extension precedence—and the 30-day Usage record. These are alternate views of the same
+bounded workspace, not a second application shell or an invitation to add global navigation. They retain a direct path
+back to the notebook and expose unavailable interfaces honestly. Historical views must distinguish a missing store from
+zero activity and must not mix global records into a project canvas merely because an upstream report contains both.
 
 Below 1180 px the Observatory becomes a contained drawer. Below 790 px the Project atlas becomes a contained drawer as
 well. Both drawers must move focus into the panel, contain Tab, close with Escape or the scrim, restore focus to their

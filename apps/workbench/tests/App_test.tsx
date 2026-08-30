@@ -131,7 +131,7 @@ Deno.test("the capability atlas renders bounded inventory facts and names the ve
 		/>,
 	);
 
-	match(html, /Agents, skills &amp; resource library/u);
+	match(html, /Agents, skills, extensions &amp; resource library/u);
 	match(html, /Researcher/u);
 	match(html, /research-report/u);
 	match(html, /Tool-call budget/u);
@@ -139,10 +139,14 @@ Deno.test("the capability atlas renders bounded inventory facts and names the ve
 	match(html, /Installed skills/u);
 	match(html, /1 reported loader issue/u);
 	match(html, /Library resources/u);
+	match(html, /Extensions/u);
+	match(html, /mutate an extension package/u);
 	match(html, /Typed interface required/u);
 	match(html, /Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side/u);
 	ok(!html.includes("sourcePath"));
 	ok(!html.includes("sourceUrl"));
+	ok(!html.includes("rootPath"));
+	ok(!html.includes("manifestPath"));
 	ok(!/https?:\/\//u.test(html));
 	ok(!html.includes("/home/"));
 });
