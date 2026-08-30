@@ -248,7 +248,7 @@ try {
 		[],
 	);
 	await page.screenshot({ path: new URL("effective-clio-coder.png", artifactDirectory).pathname, fullPage: true });
-	await effectiveMap.getByRole("button", { name: "Back to notebook" }).click();
+	await effectiveMap.getByRole("button", { name: "Back to conversation" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// The capability atlas is projected from four bounded JSON interfaces. Its
@@ -319,7 +319,7 @@ try {
 	ok(compactCatalogTabs.scrollWidth >= compactCatalogTabs.clientWidth);
 	await page.screenshot({ path: new URL("catalog-compact.png", artifactDirectory).pathname, fullPage: true });
 	await page.setViewportSize({ width: 1600, height: 1100 });
-	await catalog.getByRole("button", { name: "Back to notebook" }).click();
+	await catalog.getByRole("button", { name: "Back to conversation" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// Historical usage is a project-filtered, bounded snapshot. Global audit,
@@ -363,7 +363,7 @@ try {
 	ok(compactUsageGeometry.regionScrollWidth <= compactUsageGeometry.regionClientWidth + 1);
 	await page.screenshot({ path: new URL("usage-compact.png", artifactDirectory).pathname, fullPage: true });
 	await page.setViewportSize({ width: 1600, height: 1100 });
-	await usageRecord.getByRole("button", { name: "Back to notebook" }).click();
+	await usageRecord.getByRole("button", { name: "Back to conversation" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// Fleet status is deliberately a separate installation-wide snapshot. The
@@ -405,7 +405,7 @@ try {
 	ok(compactDispatchGeometry.regionScrollWidth <= compactDispatchGeometry.regionClientWidth + 1);
 	await page.screenshot({ path: new URL("dispatch-compact.png", artifactDirectory).pathname, fullPage: true });
 	await page.setViewportSize({ width: 1600, height: 1100 });
-	await dispatchRecord.getByRole("button", { name: "Back to notebook" }).click();
+	await dispatchRecord.getByRole("button", { name: "Back to conversation" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// Desktop rails collapse independently, reclaim their full grid tracks, and
@@ -491,7 +491,7 @@ try {
 	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
 	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
 	await page.getByRole("heading", { name: "Turn complete", exact: true }).waitFor();
-	equal(await page.locator(".timeline-card").count(), 7);
+	equal(await page.locator(".timeline-card").count(), 6);
 	equal(await composer.inputValue(), inProgressDraft);
 	await page.screenshot({ path: new URL("timeline.png", artifactDirectory).pathname });
 	await page.locator(".conversation__scroll").evaluate((region) => {
@@ -966,7 +966,8 @@ try {
 		const routingSearch = routingInventory.getByRole("searchbox", { name: "Filter models" });
 		await routingSearch.fill("4b");
 		await routingModelList.getByText("qwen3.8-4b", { exact: true }).waitFor();
-		equal(await routingModelList.getByText("qwen3.8-27b", { exact: true }).count(), 0);
+		// The filter applies through a deferred value, so wait for the row to leave.
+		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor({ state: "detached" });
 		await routingSearch.fill("");
 		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor();
 		equal(await routingInventory.getByText("/home/", { exact: false }).count(), 0);
