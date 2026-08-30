@@ -730,29 +730,26 @@ kbd {
 	}
 }
 
+/*
+ * A wrapping row rather than a grid: the six-view switcher is wider than the
+ * space left beside the title once both rails are open below about 1300 px,
+ * and it must drop under the title instead of shredding the project path.
+ */
 .conversation__header {
 	position: relative;
 	flex: 0 0 auto;
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
+	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
-	gap: 18px;
+	gap: 10px 18px;
 	min-height: 75px;
 	padding: 12px clamp(17px, 2.1vw, 30px);
 	border-bottom: 1px solid var(--hairline);
 	background: rgb(9 13 18 / 88%);
 }
 
-.conversation__header.has-project-control {
-	grid-template-columns: auto minmax(0, 1fr) auto;
-}
-
-.conversation__header.has-evidence-control {
-	grid-template-columns: minmax(0, 1fr) auto auto;
-}
-
-.conversation__header.has-project-control.has-evidence-control {
-	grid-template-columns: auto minmax(0, 1fr) auto auto;
+.conversation__header > .mobile-controls {
+	flex: 0 0 auto;
 }
 
 .conversation__header::after {
@@ -766,6 +763,7 @@ kbd {
 }
 
 .conversation__identity {
+	flex: 1 1 300px;
 	min-width: 0;
 }
 
@@ -792,7 +790,10 @@ kbd {
 
 .conversation__telemetry {
 	display: flex;
+	flex: 0 1 auto;
 	align-items: stretch;
+	max-width: 100%;
+	margin-left: auto;
 	border: 1px solid var(--hairline);
 	border-radius: var(--radius-small);
 	background: rgb(0 0 0 / 16%);
@@ -1841,10 +1842,6 @@ kbd {
 		grid-column: 2;
 	}
 
-	.conversation__header {
-		grid-template-columns: minmax(0, 1fr) auto auto;
-	}
-
 	.status-bar__connection {
 		flex-basis: 276px;
 	}
@@ -1900,7 +1897,7 @@ kbd {
 	}
 
 	.conversation__header {
-		grid-template-columns: auto minmax(0, 1fr) auto;
+		flex-wrap: nowrap;
 		gap: 10px;
 		padding: 10px 12px;
 	}
@@ -6574,10 +6571,6 @@ kbd {
 		grid-column: 2;
 	}
 
-	.conversation__header {
-		grid-template-columns: minmax(0, 1fr) auto auto;
-	}
-
 	.mobile-controls--evidence {
 		display: inline-grid;
 	}
@@ -6625,10 +6618,6 @@ kbd {
 
 	.conversation {
 		grid-column: 1;
-	}
-
-	.conversation__header {
-		grid-template-columns: auto minmax(0, 1fr) auto;
 	}
 
 	.conversation__identity {
@@ -6834,10 +6823,6 @@ kbd {
 	.evidence-rail {
 		will-change: transform;
 	}
-
-	.conversation__header.has-project-control.has-evidence-control {
-		grid-template-columns: auto minmax(0, 1fr) auto;
-	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -6862,6 +6847,11 @@ kbd {
 	gap: 26px;
 	min-width: 0;
 	padding-bottom: 8px;
+}
+
+/* The empty state shares its block with the Session Timeline, whose spine marker has no spine here. */
+.chat .timeline-empty::before {
+	content: none;
 }
 
 .chat__note {
