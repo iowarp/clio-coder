@@ -14,7 +14,8 @@ export type ClioReadCommandFailure =
 	| "status"
 	| "exit"
 	| "encoding"
-	| "json";
+	| "json"
+	| "row-limit";
 
 export class ClioReadCommandError extends Error {
 	override readonly name = "ClioReadCommandError";
@@ -105,6 +106,38 @@ export class ClioReadCommandRunner {
 	}
 
 	async runJson(cwd: string, fixedArgs: readonly string[]): Promise<unknown> {
+		const text = await this.#runText(cwd, fixedArgs);
+		try {
+			return JSON.parse(text);
+		} catch {
+			throw new ClioReadCommandError("json", "Clio returned invalid JSON for a read-only command.");
+		}
+	}
+
+	async runJsonLines(cwd: string, fixedArgs: readonly string[], maximumRows: number): Promise<readonly unknown[]> {
+		const rowLimit = positiveBound(maximumRows, "maximumRows", 10_000);
+		const text = await this.#runText(cwd, fixedArgs);
+		if (text.length === 0) return [];
+		const lines = text.split(/\r?\n/u);
+		if (lines.at(-1) === "") lines.pop();
+		if (lines.length > rowLimit) {
+			throw new ClioReadCommandError("row-limit", "The read-only Clio command exceeded Workbench's row bound.");
+		}
+		const rows: unknown[] = [];
+		for (const line of lines) {
+			if (line.trim().length === 0) {
+				throw new ClioReadCommandError("json", "Clio returned a blank row in JSONL output.");
+			}
+			try {
+				rows.push(JSON.parse(line));
+			} catch {
+				throw new ClioReadCommandError("json", "Clio returned invalid JSONL for a read-only command.");
+			}
+		}
+		return rows;
+	}
+
+	async #runText(cwd: string, fixedArgs: readonly string[]): Promise<string> {
 		const args = fixedArgs.map((argument, index) => commandPart(argument, `fixedArgs[${index}]`));
 		if (args.length === 0) throw new TypeError("fixedArgs must contain at least one command argument.");
 
@@ -188,10 +221,6 @@ export class ClioReadCommandRunner {
 		} catch {
 			throw new ClioReadCommandError("encoding", "Clio returned non-text output for a read-only command.");
 		}
-		try {
-			return JSON.parse(text);
-		} catch {
-			throw new ClioReadCommandError("json", "Clio returned invalid JSON for a read-only command.");
-		}
+		return text;
 	}
 }

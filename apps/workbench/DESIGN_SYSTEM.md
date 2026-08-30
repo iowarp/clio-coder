@@ -44,9 +44,11 @@ On desktop, the Project atlas and Observatory must collapse independently. Colla
 track immediately and restores focus predictably when reopened; it must not cause a full-shell animated reflow while
 text is streaming.
 
-The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio and the Capability
-atlas. These are alternate views of the same bounded workspace, not a second application shell or an invitation to add
-global navigation. They retain a direct path back to the notebook and expose unavailable interfaces honestly.
+The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio, the Capability
+atlas, and the 30-day Usage record. These are alternate views of the same bounded workspace, not a second application
+shell or an invitation to add global navigation. They retain a direct path back to the notebook and expose unavailable
+interfaces honestly. Historical views must distinguish a missing store from zero activity and must not mix global
+records into a project canvas merely because an upstream report contains both.
 
 Below 1180 px the Observatory becomes a contained drawer. Below 790 px the Project atlas becomes a contained drawer as
 well. Both drawers must move focus into the panel, contain Tab, close with Escape or the scrim, restore focus to their

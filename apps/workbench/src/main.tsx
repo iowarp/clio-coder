@@ -190,6 +190,10 @@ function App() {
 				const requestId = send("catalog.inspect", { projectId });
 				if (requestId !== null) dispatch({ type: "catalog.inspect.submitted", requestId });
 			},
+			inspectUsage(projectId) {
+				const requestId = send("usage.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "usage.inspect.submitted", requestId });
+			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
 			},
