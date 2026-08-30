@@ -11,7 +11,9 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { residencyTargetKey } from "../../src/core/residency-target-key.js";
 import { getSharedBus } from "../../src/core/shared-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { announceMemoryStepEndpoint } from "../../src/domains/middleware/memory-step-endpoint.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
+import { canonicalEndpointKey } from "../../src/domains/providers/endpoint-capacity.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -640,6 +642,84 @@ describe("contracts/chat-loop expected cold reasons", () => {
 
 		deepStrictEqual(persistedColdReasons(entries), ["residency"]);
 		assertExpectedColdOverlay(loop, "residency change");
+		loop.dispose();
+	});
+
+	/**
+	 * F2: a background memory step that times out against the chat target's own
+	 * endpoint still prefilled the trajectory into the single prefix slot, so the
+	 * next turn is cold for a reason Clio caused. The announcement rides the
+	 * client wrapper's `finally`, which is the only thing that runs on the throw
+	 * path; the usage sink never hears about a step whose usage stayed null.
+	 */
+	it("stamps a background memory step that threw against the chat endpoint", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = getSharedBus();
+		const contract = coldReasonProviders({ tier: "local-native", residency: true });
+		const status = contract.list()[0];
+		ok(status);
+		const endpointKey = canonicalEndpointKey(status.target);
+		ok(endpointKey);
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: contract,
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				if (calls === 2) {
+					const abort = new Error("The operation was aborted");
+					abort.name = "AbortError";
+					const complete = announceMemoryStepEndpoint({ bus, endpointKey, targetId: "background-target" }, () =>
+						Promise.reject(abort),
+					);
+					await complete({}).catch(() => {});
+				}
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		await loop.submit("after the memory step timed out");
+
+		deepStrictEqual(persistedColdReasons(entries), ["background_memory"]);
+		assertExpectedColdOverlay(loop, "background memory step");
+		loop.dispose();
+	});
+
+	it("ignores a background memory step on a different endpoint", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = getSharedBus();
+		let calls = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: coldReasonProviders({ tier: "local-native", residency: true }),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			prompts: coldPromptContract(() => "stable prompt"),
+			bus,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				calls += 1;
+				if (calls === 2) {
+					const complete = announceMemoryStepEndpoint(
+						{ bus, endpointKey: "http://another-host:8080", targetId: "background-target" },
+						() => Promise.reject(new Error("fetch failed")),
+					);
+					await complete({}).catch(() => {});
+				}
+				await emitColdAssistant(agent, `reply ${calls}`);
+			}),
+		} as never);
+
+		await loop.submit("baseline");
+		await loop.submit("a memory step disturbed another server");
+
+		strictEqual(persistedColdReasons(entries), undefined);
 		loop.dispose();
 	});
 
