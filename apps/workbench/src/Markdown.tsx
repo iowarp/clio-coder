@@ -7,7 +7,7 @@
  * mermaid.ts for the policy.
  */
 
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { Tokens } from "marked";
 import { highlightCode, type HighlightToken } from "./highlight.ts";
@@ -194,13 +194,22 @@ interface MermaidBlockProps {
 	readonly settled: boolean;
 }
 
+/**
+ * True while the surrounding turn is still streaming. Mermaid lays a diagram
+ * out in one synchronous main-thread task (a 76 ms microtask checkpoint was
+ * traced for a seven-node flowchart), so diagrams wait for the whole response
+ * to settle rather than landing between text frames.
+ */
+const StreamingContext = createContext(false);
+
 export const MermaidBlock = memo(function MermaidBlock({ source, settled }: MermaidBlockProps) {
 	const container = useRef<HTMLElement>(null);
 	const near = useNearViewport(container);
+	const streaming = useContext(StreamingContext);
 	const [result, setResult] = useState<MermaidResult | null>(null);
 	const [showSource, setShowSource] = useState(false);
 	const problem = mermaidSourceProblem(source);
-	const wantsRender = settled && near && problem === null;
+	const wantsRender = settled && !streaming && near && problem === null;
 	useEffect(() => {
 		if (!wantsRender) return;
 		let cancelled = false;
@@ -212,7 +221,7 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 			cancelled = true;
 		};
 	}, [wantsRender, source]);
-	const state = !settled
+	const state = !settled || streaming
 		? "pending"
 		: problem !== null
 		? "bounded"
@@ -481,31 +490,41 @@ interface MarkdownContentProps {
 	readonly source: string;
 	/** True once the narrative can no longer grow; the whole source is then lexed once, canonically. */
 	readonly complete: boolean;
+	/**
+	 * Keeps diagrams pending after this narrative completes, for a turn that is
+	 * still streaming later items: Clio Coder finishes a narrative before every
+	 * tool burst, so per-item completion is not a quiet moment.
+	 */
+	readonly deferDiagrams?: boolean;
 }
 
 /**
  * One narrative. While streaming, settled blocks keep their token identity and
  * only the tail after the last block boundary is re-lexed each frame.
  */
-export const MarkdownContent = memo(function MarkdownContent({ source, complete }: MarkdownContentProps) {
-	const incremental = useRef<IncrementalMarkdown | null>(null);
-	const split = useMemo(() => {
-		if (complete) return null;
-		incremental.current ??= new IncrementalMarkdown();
-		return incremental.current.update(source);
-	}, [source, complete]);
-	const finalTokens = useMemo(() => complete ? lexMarkdown(source) : null, [source, complete]);
-	if (finalTokens !== null) {
+export const MarkdownContent = memo(
+	function MarkdownContent({ source, complete, deferDiagrams = false }: MarkdownContentProps) {
+		const incremental = useRef<IncrementalMarkdown | null>(null);
+		const split = useMemo(() => {
+			if (complete) return null;
+			incremental.current ??= new IncrementalMarkdown();
+			return incremental.current.update(source);
+		}, [source, complete]);
+		const finalTokens = useMemo(() => complete ? lexMarkdown(source) : null, [source, complete]);
+		// The same element shape in both phases keeps settled blocks mounted when
+		// the narrative completes, so code is not re-highlighted and diagrams are
+		// rendered exactly once.
+		const settledTokens = finalTokens ?? split?.settled ?? NO_TOKENS;
+		const tailTokens = finalTokens === null ? split?.tail ?? NO_TOKENS : NO_TOKENS;
 		return (
-			<div className="markdown is-complete">
-				<Blocks tokens={finalTokens} settled />
-			</div>
+			<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
+				<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
+					<Blocks tokens={settledTokens} settled />
+					<Blocks tokens={tailTokens} settled={false} />
+				</div>
+			</StreamingContext.Provider>
 		);
-	}
-	return (
-		<div className="markdown is-streaming">
-			<Blocks tokens={split?.settled ?? []} settled />
-			<Blocks tokens={split?.tail ?? []} settled={false} />
-		</div>
-	);
-});
+	},
+);
+
+const NO_TOKENS: readonly MarkdownToken[] = [];

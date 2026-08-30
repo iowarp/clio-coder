@@ -16,7 +16,7 @@
  */
 
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, type Page } from "playwright-core";
 import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioLauncher } from "../clio-host.ts";
@@ -29,6 +29,8 @@ interface Options {
 	readonly paceMs: number;
 	readonly turns: number;
 	readonly out: string;
+	/** Also write each turn's raw Chrome trace next to the report, for attribution. */
+	readonly keepTrace: boolean;
 }
 
 function parseOptions(arguments_: readonly string[]): Options {
@@ -39,6 +41,7 @@ function parseOptions(arguments_: readonly string[]): Options {
 		paceMs: 4,
 		turns: 2,
 		out: ".artifacts/perf",
+		keepTrace: false,
 	};
 	for (const argument of arguments_) {
 		const [key, value] = argument.split("=", 2);
@@ -61,6 +64,9 @@ function parseOptions(arguments_: readonly string[]): Options {
 				break;
 			case "--out":
 				options.out = value;
+				break;
+			case "--keep-trace":
+				options.keepTrace = value === "1" || value === "true";
 				break;
 			default:
 				throw new Error(`Unknown perf argument: ${argument}`);
@@ -107,16 +113,18 @@ function summarize(values: readonly number[]) {
 const INSTRUMENTATION = `(() => {
 	const perf = {
 		longTasks: [], frames: [], keystrokes: [], keystrokePaint: [], events: [], latencies: [],
-		wsMessages: 0, wsTextEvents: 0, mutations: 0, heap: [], pendingTextAt: undefined, running: false,
+		wsMessages: 0, wsTextEvents: 0, mutations: 0, heap: [], pendingTextAt: undefined, lastTextAt: 0, running: false,
 		reset() {
 			this.longTasks = []; this.frames = []; this.keystrokes = []; this.keystrokePaint = []; this.events = [];
 			this.latencies = []; this.wsMessages = 0; this.wsTextEvents = 0; this.mutations = 0; this.heap = [];
-			this.pendingTextAt = undefined;
+			this.pendingTextAt = undefined; this.lastTextAt = 0;
 		},
 	};
 	globalThis.__perf = perf;
 	new PerformanceObserver((list) => {
-		for (const entry of list.getEntries()) perf.longTasks.push(Math.round(entry.duration));
+		for (const entry of list.getEntries()) {
+			perf.longTasks.push({ start: entry.startTime, duration: Math.round(entry.duration) });
+		}
 	}).observe({ type: "longtask", buffered: true });
 	try {
 		new PerformanceObserver((list) => {
@@ -148,6 +156,7 @@ const INSTRUMENTATION = `(() => {
 			perf.wsMessages += 1;
 			if (typeof event.data === "string" && event.data.includes('"kind":"turn.text"')) {
 				perf.wsTextEvents += 1;
+				perf.lastTextAt = performance.now();
 				if (perf.pendingTextAt === undefined) perf.pendingTextAt = performance.now();
 			}
 			return listener.call(this, event);
@@ -227,8 +236,14 @@ async function collect(page: Page) {
 	return await page.evaluate(() => {
 		const perf = (globalThis as unknown as { __perf: Record<string, unknown> }).__perf;
 		const heap = perf.heap as number[];
+		const longTasks = perf.longTasks as Array<{ start: number; duration: number }>;
+		const lastTextAt = perf.lastTextAt as number;
 		return {
-			longTasks: perf.longTasks as number[],
+			longTasks: longTasks.map((task) => task.duration),
+			// Tasks that began after the last text event ran once the stream had
+			// ended, for example a diagram rendered when the narrative settled.
+			longTasksDuringStream: longTasks.filter((task) => task.start <= lastTextAt).map((task) => task.duration),
+			longTasksAfterStream: longTasks.filter((task) => task.start > lastTextAt).map((task) => task.duration),
 			frames: perf.frames as number[],
 			keystrokes: perf.keystrokes as number[],
 			keystrokePaint: perf.keystrokePaint as number[],
@@ -265,7 +280,9 @@ async function waitIdle(page: Page, timeout: number): Promise<void> {
 
 const options = parseOptions(Deno.args);
 const distRoot = new URL(`../${options.dist.replace(/\/?$/u, "/")}`, import.meta.url);
-const outDirectory = new URL(`../${options.out.replace(/\/?$/u, "/")}`, import.meta.url);
+const outDirectory = options.out.startsWith("/")
+	? pathToFileURL(options.out.replace(/\/?$/u, "/"))
+	: new URL(`../${options.out.replace(/\/?$/u, "/")}`, import.meta.url);
 await Deno.mkdir(outDirectory, { recursive: true });
 
 const scratchRoot = await Deno.makeTempDir({ prefix: "workbench-perf-" });
@@ -365,6 +382,9 @@ try {
 		const draft = await composer.inputValue();
 
 		const traceSummary = summarizeTrace(trace);
+		if (options.keepTrace) {
+			await Deno.writeFile(new URL(`${options.label}-turn${turn}.trace.json`, outDirectory).pathname, trace);
+		}
 		turnReports.push({
 			turn,
 			durationMs: Number(durationMs.toFixed(0)),
@@ -379,6 +399,16 @@ try {
 				...summarize(after.longTasks),
 				over50: after.longTasks.filter((value) => value > 50).length,
 				over100: after.longTasks.filter((value) => value > 100).length,
+				duringStream: {
+					count: after.longTasksDuringStream.length,
+					over50: after.longTasksDuringStream.filter((value) => value > 50).length,
+					max: after.longTasksDuringStream.reduce((maximum, value) => Math.max(maximum, value), 0),
+				},
+				afterStream: {
+					count: after.longTasksAfterStream.length,
+					over50: after.longTasksAfterStream.filter((value) => value > 50).length,
+					max: after.longTasksAfterStream.reduce((maximum, value) => Math.max(maximum, value), 0),
+				},
 			},
 			frames: {
 				...summarize(after.frames),
