@@ -403,19 +403,83 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		void runHandoffExtraction(session, fromSessionId, verdict.goal);
 	}
 
+	/** Characters of the second round's answer quoted in the terminal refusal. */
+	const HANDOFF_REFUSAL_QUOTE_CHARS = 200;
+
+	/**
+	 * A refusal that says what was asked for and what came back, not only that no
+	 * JSON object arrived. Both rounds are named, so an operator reading it knows
+	 * two model calls were spent and on what.
+	 */
+	function terminalHandoffRefusal(firstReason: string, secondReason: string, secondText: string): string {
+		const answered = secondText.replace(/\s+/g, " ").trim().slice(0, HANDOFF_REFUSAL_QUOTE_CHARS);
+		return [
+			"the extraction round could not produce a handoff record after one repair attempt.",
+			`Asked for: one JSON object with decisions, facts, files, commands, and openQuestions.`,
+			`Round 1: ${firstReason}.`,
+			`Round 2: ${secondReason}.`,
+			`Round 2 returned: ${answered.length > 0 ? answered : "(nothing)"}`,
+		].join(" ");
+	}
+
+	/**
+	 * Extract, then repair once.
+	 *
+	 * A local model that answers with prose around the object, or with nothing
+	 * parseable, used to end `/handoff` outright: every downstream behavior (the
+	 * dropped-path listing, the `e` editor, accept-mints-a-session) was
+	 * unreachable and the operator had paid for the round either way (issue
+	 * #223). Exactly one repair round follows, quoting what came back and what
+	 * the parser objected to, and both rounds bill through the same out-of-turn
+	 * usage store.
+	 */
+	async function extractWithOneRepair(
+		goal: string,
+	): Promise<
+		| { ok: true; parsed: Extract<ReturnType<typeof parseHandoffExtraction>, { ok: true }> }
+		| { ok: false; level: "error" | "warn"; reason: string }
+	> {
+		const first = await deps.chat.extractHandoff(goal);
+		if (first.status !== "answered") {
+			return {
+				ok: false,
+				level: first.status === "failed" ? "error" : "warn",
+				reason: first.status === "aborted" ? "the extraction round was cancelled" : first.reason,
+			};
+		}
+		const parsedFirst = parseHandoffExtraction(first.text);
+		if (parsedFirst.ok) return { ok: true, parsed: parsedFirst };
+
+		const second = await deps.chat.extractHandoff(goal, {
+			repair: { complaint: parsedFirst.reason, previous: first.text },
+		});
+		if (second.status !== "answered") {
+			return {
+				ok: false,
+				level: second.status === "failed" ? "error" : "warn",
+				reason:
+					second.status === "aborted"
+						? "the repair round was cancelled"
+						: `round 1 could not be read (${parsedFirst.reason}); the repair round then failed: ${second.reason}`,
+			};
+		}
+		const parsedSecond = parseHandoffExtraction(second.text);
+		if (parsedSecond.ok) return { ok: true, parsed: parsedSecond };
+		return {
+			ok: false,
+			level: "error",
+			reason: terminalHandoffRefusal(parsedFirst.reason, parsedSecond.reason, second.text),
+		};
+	}
+
 	async function runHandoffExtraction(session: SessionContract, fromSessionId: string, goal: string): Promise<void> {
 		const notice = deps.getSlashNotice();
-		const outcome = await deps.chat.extractHandoff(goal);
-		if (outcome.status !== "answered") {
-			const reason = outcome.status === "aborted" ? "the extraction round was cancelled" : outcome.reason;
-			emitCommandNotice(notice, outcome.status === "failed" ? "error" : "warn", "handoff", reason);
+		const extraction = await extractWithOneRepair(goal);
+		if (!extraction.ok) {
+			emitCommandNotice(notice, extraction.level, "handoff", extraction.reason);
 			return;
 		}
-		const parsed = parseHandoffExtraction(outcome.text);
-		if (!parsed.ok) {
-			emitCommandNotice(notice, "error", "handoff", parsed.reason);
-			return;
-		}
+		const parsed = extraction.parsed;
 		const meta = session.current();
 		const cwd = typeof meta?.cwd === "string" && meta.cwd.length > 0 ? meta.cwd : null;
 		const entries = deps.readStructuredEntries(fromSessionId);

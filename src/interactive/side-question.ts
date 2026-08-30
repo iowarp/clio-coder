@@ -13,7 +13,13 @@
  * machine without adding an engine seam of its own. Tools are never sent.
  */
 
+import {
+	isResponseSchemaRejection,
+	type ResponseSchemaDialect,
+	responseSchemaDialectFor,
+} from "../core/response-schema.js";
 import { stream } from "../engine/ai.js";
+import { patchResponseSchemaPayloadForDialect } from "../engine/provider-payload.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
 
 /**
@@ -67,6 +73,18 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	systemPrompt: string;
 	/** The one message appended to the read-only copy of the history. */
 	userText: string;
+	/**
+	 * Bind the answer to a JSON schema on the wire, where the runtime takes one.
+	 *
+	 * A round that asked for a schema in prose and bound nothing is what made
+	 * `/handoff` refuse on local targets: the model answered with prose around
+	 * the object, or with no object at all, and the parser had nothing to work
+	 * with (issue #223). Absent, or on a runtime with no dialect, the request
+	 * goes out exactly as before and the prompt-level instruction carries it.
+	 */
+	responseSchema?: { name: string; schema: Record<string, unknown> };
+	/** Resolved runtime id, which is what decides the wire dialect. */
+	runtimeId?: string;
 }
 
 export interface SideQuestionResult {
@@ -133,11 +151,45 @@ export async function runSideQuestion(input: SideQuestionInput): Promise<SideQue
 	return runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText: question });
 }
 
+interface SchemaBinding {
+	dialect: ResponseSchemaDialect;
+	name: string;
+	schema: Record<string, unknown>;
+}
+
+/** The schema binding for this round, or null when nothing can be bound on the wire. */
+function schemaBindingFor(input: OutOfTurnRoundInput): SchemaBinding | null {
+	if (input.responseSchema === undefined || input.runtimeId === undefined) return null;
+	const dialect = responseSchemaDialectFor(input.runtimeId);
+	return dialect === null ? null : { dialect, ...input.responseSchema };
+}
+
 /** The shared round. See {@link OutOfTurnRoundInput}. */
 export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
+	const binding = schemaBindingFor(input);
+	if (binding === null) return runRound(input, null);
+	try {
+		return await runRound(input, binding);
+	} catch (error) {
+		// Native enforcement is an optimization here, never a precondition. A
+		// server that refuses the constrained request answers with the same 400
+		// the worker seam already recognizes, and the round is worth more
+		// unconstrained than not at all. Anything else is a real failure and
+		// rejects, so a broken target still costs exactly one round.
+		if (input.signal?.aborted === true) throw error;
+		if (!isResponseSchemaRejection(error instanceof Error ? error.message : String(error))) throw error;
+		return runRound(input, null);
+	}
+}
+
+async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | null): Promise<SideQuestionResult> {
 	const options: Record<string, unknown> = { maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS };
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.signal !== undefined) options.signal = input.signal;
+	if (binding !== null) {
+		options.onPayload = (payload: unknown): unknown | undefined =>
+			patchResponseSchemaPayloadForDialect(payload, binding.dialect, binding.schema, binding.name);
+	}
 
 	const context = {
 		systemPrompt: input.systemPrompt,

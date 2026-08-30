@@ -333,8 +333,15 @@ describe("contracts/handoff session seeding", () => {
 
 	interface HarnessOptions {
 		answer?: string;
+		/** One entry per extraction round, in order; the last repeats. Overrides `answer`. */
+		answers?: ReadonlyArray<string>;
 		/** What the review overlay does: accept the document, or cancel. */
 		review: "accept" | "cancel";
+	}
+
+	interface RoundRecord {
+		goal: string;
+		repair?: { complaint: string; previous: string };
 	}
 
 	function harness(options: HarnessOptions) {
@@ -349,6 +356,7 @@ describe("contracts/handoff session seeding", () => {
 			},
 		};
 		let reviewedDocument: string | null = null;
+		const rounds: RoundRecord[] = [];
 		const lifecycle = createOverlaySessionLifecycle({
 			tui: { requestRender() {} } as never,
 			transitions,
@@ -358,7 +366,13 @@ describe("contracts/handoff session seeding", () => {
 				isStreaming: () => false,
 				resetForSession(_leaf: string | null, _msgs?: ReadonlyArray<AgentMessage>) {},
 				whenSettled: async () => {},
-				extractHandoff: async () => ({ status: "answered" as const, text: options.answer ?? ANSWER }),
+				extractHandoff: async (goal: string, roundOptions?: { repair?: { complaint: string; previous: string } }) => {
+					const index = rounds.length;
+					rounds.push({ goal, ...(roundOptions?.repair ? { repair: roundOptions.repair } : {}) });
+					const scripted = options.answers;
+					const text = scripted ? (scripted[Math.min(index, scripted.length - 1)] ?? ANSWER) : (options.answer ?? ANSWER);
+					return { status: "answered" as const, text };
+				},
 			},
 			chatPanel: {
 				appendUser() {},
@@ -396,13 +410,75 @@ describe("contracts/handoff session seeding", () => {
 				return { hide() {}, document: () => deps.document } as never;
 			},
 		} as never);
-		return { bundle, contract, lifecycle, notices, document: () => reviewedDocument };
+		return { bundle, contract, lifecycle, notices, rounds, document: () => reviewedDocument };
 	}
 
 	/** The extraction and review run on a microtask, so let them settle. */
 	async function settle(): Promise<void> {
 		for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
 	}
+
+	/**
+	 * `/handoff` was recorded BLOCKED(model) in the 0.3.7 release test: two
+	 * attempts on a local target both ended "the extraction round returned no
+	 * JSON object", and every downstream behavior was unreachable because the
+	 * one round that could fail had no second chance (issue #223).
+	 */
+	it("repairs a first round the parser refused, and produces the document", async () => {
+		const h = harness({ review: "accept", answers: ["Sure! Here is the record: (I could not format it)", ANSWER] });
+		h.contract.create({ cwd: process.cwd() });
+		h.contract.append({ parentId: null, kind: "user", payload: { text: "hello" } });
+
+		h.lifecycle.startHandoff("finish the terminal lease work");
+		await settle();
+
+		strictEqual(h.rounds.length, 2, "exactly one repair round followed the refusal");
+		strictEqual(h.rounds[0]?.repair, undefined, "the first round is not a repair");
+		ok(h.rounds[1]?.repair !== undefined, "the second round is");
+		ok(
+			h.rounds[1]?.repair?.complaint.includes("no JSON object"),
+			`the repair quotes the parser's complaint: ${h.rounds[1]?.repair?.complaint}`,
+		);
+		ok(
+			h.rounds[1]?.repair?.previous.includes("I could not format it"),
+			`and what came back: ${h.rounds[1]?.repair?.previous}`,
+		);
+		ok(h.document()?.includes("keep the lease in terminal-lease.ts"), h.document() ?? "no document");
+
+		await h.bundle.contract.close();
+	});
+
+	it("stops at one repair and says what was asked for and what came back", async () => {
+		const h = harness({ review: "accept", answers: ["not json at all", "still not json"] });
+		h.contract.create({ cwd: process.cwd() });
+		h.contract.append({ parentId: null, kind: "user", payload: { text: "hello" } });
+
+		h.lifecycle.startHandoff("finish the terminal lease work");
+		await settle();
+
+		strictEqual(h.rounds.length, 2, "the repair is bounded at exactly one");
+		strictEqual(h.document(), null, "no document is reviewed");
+		const refusal = h.notices.find((line) => line.includes("handoff")) ?? "";
+		ok(refusal.includes("Asked for:"), `the refusal names what was asked for: ${refusal}`);
+		ok(refusal.includes("decisions, facts, files, commands, and openQuestions"), refusal);
+		ok(refusal.includes("Round 1:") && refusal.includes("Round 2:"), `both rounds are named: ${refusal}`);
+		ok(refusal.includes("still not json"), `and what came back is quoted: ${refusal}`);
+
+		await h.bundle.contract.close();
+	});
+
+	it("runs one round only when the first answer parses", async () => {
+		const h = harness({ review: "accept" });
+		h.contract.create({ cwd: process.cwd() });
+		h.contract.append({ parentId: null, kind: "user", payload: { text: "hello" } });
+
+		h.lifecycle.startHandoff("finish the terminal lease work");
+		await settle();
+
+		strictEqual(h.rounds.length, 1, "a parseable answer costs one round, not two");
+
+		await h.bundle.contract.close();
+	});
 
 	it("Esc cancels the handoff with nothing written anywhere", async () => {
 		const h = harness({ review: "cancel" });
