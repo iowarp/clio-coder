@@ -49,8 +49,12 @@ import {
 } from "./src/protocol.ts";
 import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "./src/timeline.ts";
 import { type RecentProject, WorkbenchState, WorkbenchStateError } from "./workbench-state.ts";
+import denoConfig from "./deno.json" with { type: "json" };
 
 const APP_NAME = PRODUCT_NAME;
+/** The GUI's own version, from `deno.json`; the compiled binary reports the same value. */
+export const APP_VERSION: string = denoConfig.version;
+export const CLI_NAME = "clio-coder-gui";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_PORT = 4173;
 /** How long the host waits after the last browser goes away before it stops a live turn. */
@@ -115,7 +119,28 @@ export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encode
 interface RuntimeCliOptions {
 	port: number;
 	smokeMs?: number;
+	/** Open the served URL in the operating system's default browser once listening. */
+	open: boolean;
+	/** Print the usage or version text and exit without serving. */
+	print?: "help" | "version";
 }
+
+export const CLI_USAGE = `${CLI_NAME} ${APP_VERSION}
+The desktop and browser GUI for ${PRODUCT_NAME}.
+
+Usage: ${CLI_NAME} [--port=N] [--open] [--smoke-ms=N]
+
+  --port=N       Listen on 127.0.0.1:N (default ${DEFAULT_PORT}; 0 picks a free port).
+  --open         Open the URL in the default browser with xdg-open once listening.
+  --smoke-ms=N   Stop on its own after N milliseconds (self-test).
+  --version      Print the version and exit.
+  --help         Print this text and exit.
+
+The GUI listens on the loopback interface only. Project folders come from the
+folder picker inside the app, and the ${PRODUCT_NAME} process is started per open
+project from the clio-coder executable on PATH. Local state lives in
+$CLIO_WORKBENCH_STATE_DIR, else $XDG_STATE_HOME/clio-workbench, else
+~/.local/state/clio-workbench.`;
 
 export interface WorkbenchServerOptions {
 	hostname?: string;
@@ -165,17 +190,39 @@ function parsePositiveInteger(value: string, label: string, maximum: number): nu
 	return parsed;
 }
 
-function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
+export function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
 	let port = DEFAULT_PORT;
 	let smokeMs: number | undefined;
+	let open = false;
+	let print: RuntimeCliOptions["print"];
 	for (const argument of args) {
 		if (argument.startsWith("--port=")) {
 			port = parsePositiveInteger(argument.slice("--port=".length), "port", 65_535);
 		} else if (argument.startsWith("--smoke-ms=")) {
 			smokeMs = parsePositiveInteger(argument.slice("--smoke-ms=".length), "smoke-ms", 120_000);
-		} else throw new Error(`Unknown GUI argument: ${argument}`);
+		} else if (argument === "--open") open = true;
+		else if (argument === "--version" || argument === "-V") print ??= "version";
+		else if (argument === "--help" || argument === "-h") print = "help";
+		else throw new Error(`Unknown GUI argument: ${argument}. Try --help.`);
 	}
-	return { port, ...(smokeMs === undefined ? {} : { smokeMs }) };
+	return { port, open, ...(smokeMs === undefined ? {} : { smokeMs }), ...(print === undefined ? {} : { print }) };
+}
+
+/**
+ * Hands the URL to the desktop's default browser. The GUI never picks a browser
+ * itself, and a missing or refused `xdg-open` only leaves the printed URL.
+ */
+async function openInBrowser(url: string): Promise<boolean> {
+	if (Deno.build.os !== "linux") return false;
+	try {
+		const command = new Deno.Command("xdg-open", { args: [url], stdin: "null", stdout: "null", stderr: "null" });
+		const child = command.spawn();
+		child.unref();
+		const status = await child.status;
+		return status.success;
+	} catch {
+		return false;
+	}
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -1241,8 +1288,25 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 }
 
 async function runMain(): Promise<void> {
-	const options = parseCliOptions(Deno.args);
+	let options: RuntimeCliOptions;
+	try {
+		options = parseCliOptions(Deno.args);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		Deno.exit(2);
+	}
+	if (options.print === "help") {
+		console.log(CLI_USAGE);
+		return;
+	}
+	if (options.print === "version") {
+		console.log(`${CLI_NAME} ${APP_VERSION}`);
+		return;
+	}
 	const running = await startWorkbenchServer({ port: options.port });
+	if (options.open && !(await openInBrowser(running.url))) {
+		console.log(`Could not open a browser with xdg-open; open ${running.url} yourself.`);
+	}
 	if (options.smokeMs !== undefined) {
 		setTimeout(async () => {
 			await running.close();
