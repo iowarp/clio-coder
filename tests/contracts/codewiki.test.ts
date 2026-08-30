@@ -3,6 +3,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
@@ -39,6 +40,8 @@ import {
 	writeCodewiki,
 } from "../../src/domains/context/index.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
+import { createFileMutationObserver } from "../../src/tools/observers.js";
+import { writeTool } from "../../src/tools/write.js";
 
 type BuiltCodewiki = Awaited<ReturnType<typeof buildCodewiki>>;
 type ContextBundle = ReturnType<typeof createContextBundle>;
@@ -1191,6 +1194,72 @@ describe("contracts/codewiki", () => {
 		// Indexing is opt-in; exiting in a directory is not a request to index it (issue #99).
 		strictEqual(existsSync(join(scratch, ".clio-coder")), false);
 		strictEqual(readCodewiki(scratch), null);
+	});
+
+	/**
+	 * `withStateFileLock` creates the lock's parent before anything inside it can
+	 * decide there is nothing to do, so `coordinateCodewikiWrite` acquired a lease
+	 * in `.clio-coder/` and only then rechecked `requireExisting`. Every
+	 * successful write in a never-indexed project therefore left an empty
+	 * `.clio-coder/` behind: the lock file was created, released, and deleted, and
+	 * the directory stayed (issue #248). Indexing is opt-in, and a write is not a
+	 * request to index.
+	 */
+	it("leaves no .clio-coder behind when a never-indexed project reports a file change", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const written = true;\n", "utf8");
+
+		await withContextBundle(scratch, async (bundle) => {
+			bundle.contract.noteFileChanges([join(scratch, "src", "index.ts")], scratch);
+		});
+
+		strictEqual(existsSync(join(scratch, ".clio-coder")), false, "the no-op materialized no state directory");
+		strictEqual(readCodewiki(scratch), null, "and indexed nothing");
+	});
+
+	/**
+	 * The observer path end to end: the real `write` tool, the real middleware
+	 * hook that reports its mutation, and the real incremental refresh behind it.
+	 * The only thing on disk afterwards is the file the operator asked for.
+	 */
+	it("produces only the requested mutation for a successful write in a never-indexed project", async () => {
+		const target = join(scratch, "probe", "output.txt");
+		await withContextBundle(scratch, async (bundle) => {
+			const observer = createFileMutationObserver((event) => bundle.contract.noteFileChanges(event.paths, scratch));
+			const result = await writeTool.run({ path: target, content: "hello\n" });
+			strictEqual(result.kind, "ok", JSON.stringify(result));
+			observer.evaluate({
+				toolName: "write",
+				toolArgs: { path: target, content: "hello\n" },
+				metadata: { resultKind: "ok" },
+			} as never);
+		});
+
+		strictEqual(readFileSync(target, "utf8"), "hello\n", "the write itself still happened");
+		strictEqual(existsSync(join(scratch, ".clio-coder")), false, "and left no residue beside it");
+		deepStrictEqual(readdirSync(scratch).sort(), ["probe"], "nothing else appeared in the project");
+	});
+
+	/**
+	 * The other half: an indexed project still runs its incremental refresh under
+	 * the same queue and lock, and the recheck under the lock is still what
+	 * decides the race.
+	 */
+	it("still refreshes incrementally once the project has a codewiki", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const before = 1;\n", "utf8");
+		const seeded = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		writeCodewiki(scratch, seeded);
+		ok(readCodewiki(scratch), "the fixture is indexed");
+
+		writeFileSync(join(scratch, "src", "index.ts"), "export const afterIncremental = 2;\n", "utf8");
+		await withContextBundle(scratch, async (bundle) => {
+			bundle.contract.noteFileChanges([join(scratch, "src", "index.ts")], scratch);
+		});
+
+		const codewiki = readCodewiki(scratch);
+		ok(codewiki);
+		ok(hasSymbol(codewiki, "src/index.ts", "afterIncremental", "const"), "the incremental refresh still lands");
 	});
 
 	it("skips TS function-local functions, classes, and object-literal methods", async () => {
