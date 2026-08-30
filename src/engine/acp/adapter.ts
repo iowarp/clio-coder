@@ -1,8 +1,10 @@
+import { performance } from "node:perf_hooks";
 import {
 	DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS,
 	DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
 	type DelegationAgentConfig,
 } from "../../core/defaults.js";
+import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
@@ -40,6 +42,10 @@ export interface AcpDelegationRunInput {
 	terminationWaitMs?: number;
 	/** Grace for session/cancel before abort escalates into hard termination. */
 	cancelGraceMs?: number;
+	/** Wall clock for the persisted heartbeat anchor. */
+	now?: () => number;
+	/** Monotonic clock for event-inactivity spans. */
+	monotonicNow?: () => number;
 }
 
 export interface AcpDelegationRunHandle {
@@ -54,7 +60,7 @@ export interface AcpDelegationRunHandle {
 	 * final observation bound expires.
 	 */
 	kill(): void;
-	heartbeatAt: { current: number };
+	heartbeatAt: HeartbeatStamp;
 	toolCallLog(): ReturnType<AcpToolMediator["snapshot"]>["toolCallLog"];
 }
 
@@ -176,7 +182,14 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	// peer into an unbounded request.
 	const connectTimeoutMs = input.agent.connectTimeoutMs ?? DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS;
 	const turnTimeoutMs = input.agent.turnTimeoutMs ?? DEFAULT_DELEGATION_TURN_TIMEOUT_MS;
-	const heartbeatAt = { current: Date.now() };
+	const now = input.now ?? Date.now;
+	const monotonicNow = input.monotonicNow ?? (() => performance.now());
+	const heartbeatWallAnchor = now();
+	const heartbeatMonotonicAnchor = monotonicNow();
+	const heartbeatAt: HeartbeatStamp = {
+		current: heartbeatWallAnchor,
+		monotonic: heartbeatMonotonicAnchor,
+	};
 	const queue = new AsyncEventQueue<AcpRunEvent>();
 	const usage = emptyUsage();
 	const mapper = new AcpEventMapper();
@@ -202,7 +215,9 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		cancelTimer = null;
 	};
 	const emit = (event: AcpRunEvent): void => {
-		heartbeatAt.current = Date.now();
+		const stamp = monotonicNow();
+		heartbeatAt.monotonic = stamp;
+		heartbeatAt.current = heartbeatWallAnchor + (stamp - heartbeatMonotonicAnchor);
 		queue.push(event);
 	};
 	const mediator = new AcpToolMediator({
