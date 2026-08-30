@@ -1,3 +1,4 @@
+import { parseEvalBehaviorScenarioV1 } from "./behavioral.js";
 import {
 	EVAL_SUITE_V2_VERSION,
 	type EvalAssertionOp,
@@ -121,16 +122,32 @@ function readTask(value: unknown, path: string, issues: EvalValidationIssue[]): 
 	const workspace = readWorkspace(value.workspace, `${path}.workspace`, issues);
 	const runner = readRunner(value.runner, `${path}.runner`, issues);
 	const timeoutMs = readPositiveInteger(value, path, "timeoutMs", issues);
+	const behavioral = readBehavioral(value.behavioral, `${path}.behavioral`, issues);
 	if (id === null || workspace === null || runner === null || timeoutMs === null) return null;
 	return {
 		id,
 		tags: readOptionalStringArray(value, "tags", `${path}.tags`, issues),
+		...(behavioral === undefined ? {} : { behavioral }),
 		workspace,
 		runner,
 		verify: readVerify(value.verify, `${path}.verify`, issues),
 		metrics: readMetrics(value.metrics, `${path}.metrics`, issues),
 		timeoutMs,
 	};
+}
+
+function readBehavioral(
+	value: unknown,
+	path: string,
+	issues: EvalValidationIssue[],
+): EvalSuiteTaskV2["behavioral"] | undefined {
+	if (value === undefined) return undefined;
+	try {
+		return parseEvalBehaviorScenarioV1(value, path);
+	} catch (error) {
+		issues.push({ path, message: error instanceof Error ? error.message : String(error) });
+		return undefined;
+	}
 }
 
 function readWorkspace(

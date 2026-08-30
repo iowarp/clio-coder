@@ -1,3 +1,5 @@
+import type { EvalBehaviorScenarioV1 } from "./behavioral.js";
+
 export const EVAL_SUITE_V2_VERSION = 2;
 
 export const CANONICAL_METRICS = [
@@ -200,6 +202,8 @@ export interface EvalMetricsSpecV2 {
 export interface EvalSuiteTaskV2 {
 	id: string;
 	tags: string[];
+	/** Additive behavioral contract evaluated against observable run facts. */
+	behavioral?: EvalBehaviorScenarioV1;
 	workspace: EvalWorkspaceV2;
 	runner: EvalRunnerV2;
 	verify: EvalVerifyV2;
