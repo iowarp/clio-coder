@@ -550,13 +550,13 @@ describe("contracts/ask-user decision visibility", () => {
 	it("names the exact keys for accepting and leaving the decision", async () => {
 		await askDecision((mounted) => {
 			const hint = (mounted.child() as unknown as { footerHint: () => string }).footerHint();
-			strictEqual(hint, "[Enter] record answer · [Esc] close");
+			strictEqual(hint, "[t] add text · [Enter] record answer · [Esc] close");
 		});
 
 		await askDecision(
 			(mounted) => {
 				const hint = (mounted.child() as unknown as { footerHint: () => string }).footerHint();
-				strictEqual(hint, "[Space] toggle · [Enter] record answer · [Esc] close");
+				strictEqual(hint, "[Space] toggle · [t] add text · [Enter] record answer · [Esc] close");
 			},
 			{
 				question: "Which checks should run before commit?",
@@ -703,7 +703,9 @@ describe("contracts/ask-user surfaces", () => {
 		]);
 		strictEqual(mounted.options()?.anchor, "bottom-center");
 		answer(mounted);
-		deepStrictEqual(await first, { answers: [{ question: "First root decision?", answer: "Narrow" }] });
+		deepStrictEqual(await first, {
+			answers: [{ question: "First root decision?", answer: "Narrow", options: ["Narrow"] }],
+		});
 
 		const second = mounted.session.ask([
 			{ header: "Depth", question: "Second root decision?", options: [{ label: "Shallow" }, { label: "Deep" }] },

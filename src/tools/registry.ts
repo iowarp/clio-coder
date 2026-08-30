@@ -234,13 +234,29 @@ export interface AskUserTranscriptQuestion {
 
 export interface AskUserTranscriptAnswer {
 	question: string;
+	/** The whole answer on one line: the chosen labels, then the typed text. */
 	answer: string;
+	/**
+	 * The option labels the operator chose, in list order. Absent when they only
+	 * typed. Present with no {@link value} is a label-only answer.
+	 */
+	options?: string[];
+	/**
+	 * The operator's typed text, exactly as submitted. Absent when they only
+	 * chose. Recording an option label without this is what lost the figures in
+	 * issue #228.
+	 */
+	value?: string;
 }
 
 export interface AskUserTranscriptDecision {
 	key: string;
 	value: string;
 	label?: string;
+	/** The chosen labels behind {@link value}, when the answer had any. Harness-derived. */
+	options?: string[];
+	/** The typed text behind {@link value}, when the answer had any. Harness-derived. */
+	text?: string;
 	source_question?: string;
 }
 

@@ -40,13 +40,27 @@ export interface AskUserQuestion {
 
 export interface AskUserAnswer {
 	question: string;
+	/** The whole answer on one line: the chosen labels, then the typed text. */
 	answer: string;
+	/**
+	 * The option labels the operator chose, in list order. Absent when they only
+	 * typed. Present with no {@link value} is a label-only answer, which is how a
+	 * reader tells "they picked the option" from "they picked it and typed a
+	 * figure" (issue #228).
+	 */
+	options?: string[];
+	/** The operator's typed text, exactly as submitted. Absent when they only chose. */
+	value?: string;
 }
 
 export interface AskUserDecision {
 	key: string;
 	value: string;
 	label?: string;
+	/** The chosen labels behind `value`; derived by the harness, not model-supplied. */
+	options?: string[];
+	/** The typed text behind `value`; derived by the harness, not model-supplied. */
+	text?: string;
 	/** Question that produced this decision; derived by the harness, not model-supplied. */
 	source_question?: string;
 }
@@ -299,6 +313,13 @@ export function cancelledAskUserResult(): AskUserResult {
 	return { answers: [], cancelled: true };
 }
 
+/** The chosen labels, dropped when the surface supplied nothing usable. */
+function normalizeAnswerOptions(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const labels = value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+	return labels.length > 0 ? labels : undefined;
+}
+
 function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, result: AskUserResult): AskUserResult {
 	if (result.cancelled === true) return cancelledAskUserResult();
 	const answers: AskUserAnswer[] = [];
@@ -308,7 +329,18 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 		if (!raw) continue;
 		const question = typeof raw.question === "string" && raw.question.trim().length > 0 ? raw.question : fallbackQuestion;
 		const answer = typeof raw.answer === "string" ? raw.answer.trim() : "";
-		if (question.length > 0 && answer.length > 0) answers.push({ question, answer });
+		if (question.length === 0 || answer.length === 0) continue;
+		// The typed text keeps every byte the operator submitted. The one-line
+		// `answer` is a rendering of the same decision and is trimmed like any
+		// other display string; `value` is the record.
+		const options = normalizeAnswerOptions(raw.options);
+		const value = typeof raw.value === "string" && raw.value.length > 0 ? raw.value : undefined;
+		answers.push({
+			question,
+			answer,
+			...(options ? { options } : {}),
+			...(value !== undefined ? { value } : {}),
+		});
 	}
 	return { answers };
 }
@@ -363,7 +395,12 @@ function transcriptQuestions(questions: ReadonlyArray<AskUserQuestion>): AskUser
 }
 
 function transcriptAnswers(answers: ReadonlyArray<AskUserAnswer>): AskUserTranscriptAnswer[] {
-	return answers.map((answer) => ({ question: answer.question, answer: answer.answer }));
+	return answers.map((answer) => ({
+		question: answer.question,
+		answer: answer.answer,
+		...(answer.options && answer.options.length > 0 ? { options: [...answer.options] } : {}),
+		...(answer.value !== undefined ? { value: answer.value } : {}),
+	}));
 }
 
 function toDecisionKey(value: string): string {
@@ -397,6 +434,8 @@ function decisionFromAnswer(
 		key,
 		value: answer.answer,
 		...(label ? { label } : {}),
+		...(answer.options && answer.options.length > 0 ? { options: [...answer.options] } : {}),
+		...(answer.value !== undefined ? { text: answer.value } : {}),
 		source_question: answer.question,
 	};
 }
@@ -406,6 +445,8 @@ function toTranscriptDecision(decision: AskUserDecision): AskUserTranscriptDecis
 		key: toDecisionKey(decision.key),
 		value: decision.value,
 		...(decision.label ? { label: decision.label } : {}),
+		...(decision.options && decision.options.length > 0 ? { options: [...decision.options] } : {}),
+		...(decision.text !== undefined ? { text: decision.text } : {}),
 		...(decision.source_question ? { source_question: decision.source_question } : {}),
 	};
 }
