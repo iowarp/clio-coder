@@ -301,8 +301,11 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			releaseActiveRound();
 			pendingTrigger = trigger;
 			if (timer !== null) return;
+			// Ref'd on purpose, same reasoning as `settled()` below: the timer is due
+			// in 0 ms, so it holds the event loop for one tick at most, and a Node 22
+			// loop that drains past a due unref'd timer would otherwise never start
+			// the round a test or caller is already awaiting.
 			timer = setTimeout(fire, 0);
-			timer.unref?.();
 		},
 
 		cancel(): void {
@@ -316,11 +319,18 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 
 		settled(): Promise<PrewarmOutcome | null> {
 			// One hop past the scheduling tick so a caller that just scheduled a
-			// round waits for that round rather than for the previous one.
+			// round waits for that round rather than for the previous one. The timer
+			// is deliberately ref'd, unlike the scheduling timer above: the caller is
+			// awaiting this promise, so the event loop must stay alive for the one
+			// tick that lets the scheduled round start. Node 22 drains the loop past
+			// a due unref'd timer when nothing else holds it, which left this promise
+			// pending forever and cancelled every later test in the lane; Node 24
+			// happens to fire the due timer first, which is why the hang never
+			// reproduced on a 24.x development machine.
 			return new Promise((resolve) => {
 				setTimeout(() => {
 					resolve(inFlight.catch(() => null));
-				}, 0).unref?.();
+				}, 0);
 			});
 		},
 
