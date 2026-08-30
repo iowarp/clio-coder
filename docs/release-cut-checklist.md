@@ -44,7 +44,7 @@ Run against the exact final candidate with `NO_COLOR` unset and
    runtime resources, and the tarball and unpacked size budgets). A baseline
    mismatch prints reviewable evidence and names prompt- or recipe-affected
    corpus results. For an intentional change, inspect that diff, run
-   `TMPDIR=/home/akougkas/.cache/clio-sprint-tmp node benchmarks/eval/check-behavioral-release.mjs --update`,
+   `node benchmarks/eval/check-behavioral-release.mjs --update` (with `TMPDIR` on a disk-backed path if `/tmp` is a small tmpfs),
    review `benchmarks/eval/behavioral-machinery-baseline.json`, and commit it
    with the change.
 9. Optional: step 8 again under Node 24. Hosted CI gates on Node 22 alone,
