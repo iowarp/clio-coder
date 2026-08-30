@@ -76,6 +76,23 @@ export interface RunEffects {
 	 * run there is no path left in the checkout that the record can clear.
 	 */
 	writeRecordComplete: boolean;
+	/**
+	 * Successful opaque calls that made the write record incomplete. The call id
+	 * and tool name are retained so a later write-boundary verdict can explain
+	 * exactly why attribution was downgraded instead of exposing only a boolean.
+	 */
+	writeRecordDowngrades: ReadonlyArray<WriteRecordDowngrade>;
+}
+
+export interface WriteRecordDowngrade {
+	reason: "opaque_tool_succeeded";
+	tool: string;
+	toolCallId: string;
+}
+
+export interface RunEffectsRecorderOptions {
+	/** Fires once, when the first successful opaque call opens the record. */
+	onWriteRecordDowngraded?(downgrade: WriteRecordDowngrade): void;
 }
 
 export interface RunEffectsRecorder {
@@ -87,6 +104,8 @@ export interface RunEffectsRecorder {
 }
 
 interface PendingEffects {
+	tool: string;
+	toolCallId: string;
 	paths: ReadonlyArray<string>;
 	validationCommand: string | null;
 	verificationCommand: string | null;
@@ -204,13 +223,13 @@ function validationCommandOf(
  * when its result comes back clean: a blocked write and a red command are not
  * evidence that the workspace changed or that a check passed.
  */
-export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
+export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
 	const verificationCommands = new Set<string>();
-	let opaqueWriteObserved = false;
+	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
 	return {
 		start(toolCallId, toolName, args) {
 			const paths = mutationTargets(toolName, args);
@@ -223,6 +242,8 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 			// A bash call may re-base its relative paths with its own cwd argument.
 			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 			pending.set(toolCallId, {
+				tool: toolName,
+				toolCallId,
 				paths: paths.map((target) => path.resolve(base, target)),
 				validationCommand,
 				verificationCommand,
@@ -240,7 +261,16 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 			// Success-gated on purpose. A shell command the safety policy blocked,
 			// or one that came back an error, never reached the filesystem, so it
 			// leaves the record closed.
-			if (effects.opaque) opaqueWriteObserved = true;
+			if (effects.opaque) {
+				const downgrade: WriteRecordDowngrade = {
+					reason: "opaque_tool_succeeded",
+					tool: effects.tool,
+					toolCallId: effects.toolCallId,
+				};
+				const recordWasComplete = writeRecordDowngrades.size === 0;
+				writeRecordDowngrades.set(effects.toolCallId, downgrade);
+				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
+			}
 			for (const target of effects.paths) mutatedPaths.add(target);
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
@@ -253,7 +283,8 @@ export function createRunEffectsRecorder(cwd: string): RunEffectsRecorder {
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
 				verificationCommands: new Set(verificationCommands),
-				writeRecordComplete: !opaqueWriteObserved,
+				writeRecordComplete: writeRecordDowngrades.size === 0,
+				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
 			};
 		},
 	};

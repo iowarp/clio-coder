@@ -145,17 +145,41 @@ describe("contracts/run-effects", () => {
 
 	it("downgrades the whole run's record once one opaque call succeeds", () => {
 		for (const tool of ["bash", "verify", "dispatch", "steer"]) {
-			const recorder = createRunEffectsRecorder(CWD);
+			const notices: unknown[] = [];
+			const recorder = createRunEffectsRecorder(CWD, {
+				onWriteRecordDowngraded: (downgrade) => notices.push(downgrade),
+			});
 			recorder.start("call-1", "write", { path: "src/a.ts", content: "x" });
 			recorder.finish("call-1", false);
 			recorder.start("call-2", tool, { command: "npm run build" });
 			recorder.finish("call-2", false);
 			const effects = recorder.snapshot();
 			strictEqual(effects.writeRecordComplete, false, `${tool} leaves the record open`);
+			deepStrictEqual(effects.writeRecordDowngrades, [{ reason: "opaque_tool_succeeded", tool, toolCallId: "call-2" }]);
+			deepStrictEqual(notices, effects.writeRecordDowngrades);
 			// The path set itself is unchanged: it is still every path the run was
 			// seen aiming a mutation at, now read as a lower bound.
 			deepStrictEqual([...effects.mutatedPaths], abs("src/a.ts"));
 		}
+	});
+
+	it("warns only when the first successful opaque call opens the record", () => {
+		const notices: unknown[] = [];
+		const recorder = createRunEffectsRecorder(CWD, {
+			onWriteRecordDowngraded: (downgrade) => notices.push(downgrade),
+		});
+		for (const [toolCallId, tool] of [
+			["call-1", "bash"],
+			["call-2", "verify"],
+		] as const) {
+			recorder.start(toolCallId, tool, {});
+			recorder.finish(toolCallId, false);
+		}
+		deepStrictEqual(notices, [{ reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-1" }]);
+		deepStrictEqual(recorder.snapshot().writeRecordDowngrades, [
+			{ reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-1" },
+			{ reason: "opaque_tool_succeeded", tool: "verify", toolCallId: "call-2" },
+		]);
 	});
 
 	it("leaves the record closed when the opaque call never landed", () => {

@@ -289,6 +289,7 @@ import {
 	type SpawnOptions as WorkerSpawnOptions,
 	type WorkerSpec,
 } from "./worker-spawn.js";
+import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
 
 interface RunTokenMeter {
 	inputTokens: number;
@@ -2409,9 +2410,9 @@ export function createDispatchBundle(
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 	const ownedReservations = new Set<string>();
 	/**
-	 * Paths each finalized run's own tool calls aimed a successful mutation at,
-	 * newest last. `null` records a run whose write record is unusable, which is
-	 * a different answer from an empty list and has to survive as one.
+	 * Attribution from each finalized run's successful tool calls, newest last.
+	 * An incomplete record retains its paths as a lower bound beside the reasons
+	 * it cannot be read as a closed list.
 	 *
 	 * Held in memory rather than sealed into the receipt: the only reader is the
 	 * write boundary closing a window seconds later in this process, and a
@@ -2419,13 +2420,13 @@ export function createDispatchBundle(
 	 * Bounded because a long session finalizes many runs and none of this is
 	 * needed once its window has closed.
 	 */
-	const runWriteTargets = new Map<string, ReadonlyArray<string> | null>();
-	const recordRunWriteTargets = (runId: string, paths: ReadonlyArray<string> | null): void => {
-		runWriteTargets.set(runId, paths);
-		while (runWriteTargets.size > RUN_WRITE_TARGET_HISTORY) {
-			const oldest = runWriteTargets.keys().next();
+	const runWriteAttributions = new Map<string, WriteBoundaryAttribution>();
+	const recordRunWriteAttribution = (runId: string, attribution: WriteBoundaryAttribution): void => {
+		runWriteAttributions.set(runId, attribution);
+		while (runWriteAttributions.size > RUN_WRITE_TARGET_HISTORY) {
+			const oldest = runWriteAttributions.keys().next();
 			if (oldest.done === true) break;
-			runWriteTargets.delete(oldest.value);
+			runWriteAttributions.delete(oldest.value);
 		}
 	};
 	const capacityAdmission = createCapacityAdmissionController({
@@ -4494,10 +4495,21 @@ export function createDispatchBundle(
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
 		const finishContractEntries: unknown[] = [];
+		let runIdForPermissionAudit: string | null = null;
 		// The worker's own tool calls, folded into what this run changed and what
 		// it validated. The sealed mutation-report contract is measured against
 		// this, so a reported path the run never touched cannot seal as fact.
-		const runEffects = createRunEffectsRecorder(lifecycle.cwd);
+		const runEffects = createRunEffectsRecorder(lifecycle.cwd, {
+			onWriteRecordDowngraded(downgrade) {
+				const runId = runIdForPermissionAudit;
+				if (runId === null) return;
+				context.bus.emit(BusChannels.DispatchProgress, {
+					runId,
+					agentId: req.agentId,
+					event: { type: "clio_write_record_downgraded", payload: downgrade },
+				});
+			},
+		});
 		let finishContractAssistantText = "";
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
@@ -4507,7 +4519,6 @@ export function createDispatchBundle(
 		const acceptsOutcomeCodeEvents =
 			lifecycle.runtimeKind === "http" ||
 			(lifecycle.runtimeKind === "sdk" && lifecycle.target.runtime.id === "claude-sdk");
-		let runIdForPermissionAudit: string | null = null;
 		let workerPolicyPermissionCounter = 0;
 		const outputCapture = createWorkerOutputCapture();
 		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
@@ -5406,9 +5417,28 @@ export function createDispatchBundle(
 				// the set. That run's window keeps today's blame-the-whole-diff
 				// behaviour; a run that never touched such a tool keeps the
 				// protection.
-				const writeRecordUsable =
-					receipt.safety?.toolTelemetry?.coverage === "complete" && observedRunEffects.writeRecordComplete;
-				recordRunWriteTargets(envelope.id, writeRecordUsable ? [...observedRunEffects.mutatedPaths] : null);
+				const toolTelemetryComplete = receipt.safety?.toolTelemetry?.coverage === "complete";
+				const downgrades: WriteBoundaryAttributionDowngrade[] = observedRunEffects.writeRecordDowngrades.map((entry) => ({
+					reason: entry.reason,
+					tool: entry.tool,
+					toolCallId: entry.toolCallId,
+					runId: envelope.id,
+					stepId: null,
+				}));
+				if (!toolTelemetryComplete) {
+					downgrades.push({
+						reason: "incomplete_tool_telemetry",
+						tool: null,
+						toolCallId: null,
+						runId: envelope.id,
+						stepId: null,
+					});
+				}
+				recordRunWriteAttribution(envelope.id, {
+					recorded: [...observedRunEffects.mutatedPaths],
+					complete: toolTelemetryComplete && observedRunEffects.writeRecordComplete,
+					downgrades,
+				});
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
@@ -6345,7 +6375,17 @@ export function createDispatchBundle(
 		observedRunWrites(runId) {
 			// A run this process never finalized, or finalized long enough ago to
 			// have been evicted, is unknown rather than silent, so both answer null.
-			return runWriteTargets.get(runId) ?? null;
+			const attribution = runWriteAttributions.get(runId);
+			return attribution?.complete === true ? [...attribution.recorded] : null;
+		},
+		observedRunWriteAttribution(runId) {
+			const attribution = runWriteAttributions.get(runId);
+			if (attribution === undefined) return null;
+			return {
+				recorded: [...attribution.recorded],
+				complete: attribution.complete,
+				downgrades: attribution.downgrades?.map((entry) => ({ ...entry })) ?? [],
+			};
 		},
 		assignments: {
 			get: (id) => assignments.get(id),

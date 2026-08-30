@@ -502,6 +502,19 @@ describe("contracts/write-boundary", () => {
 				root,
 				rootId: "fleet-record",
 				boundaryFor: () => ["src/"],
+				recordedWritesFor: (stepId) => ({
+					recorded: [],
+					complete: false,
+					downgrades: [
+						{
+							reason: "opaque_tool_succeeded",
+							tool: "bash",
+							toolCallId: "call-durable",
+							runId: "run-durable",
+							stepId,
+						},
+					],
+				}),
 				onVerdict: (_verdict, path) => recorded.push(path),
 			});
 			enforcer.begin("wave-0", ["build"]);
@@ -514,11 +527,21 @@ describe("contracts/write-boundary", () => {
 			const sealed = JSON.parse(readFileSync(recorded[0] ?? "", "utf8")) as {
 				version: number;
 				violations: string[];
+				attributionDowngrades: Array<{ reason: string; tool: string | null; toolCallId: string | null }>;
 				digest: string;
 				baselineHead: string;
 			};
 			strictEqual(sealed.version, 1);
 			deepStrictEqual(sealed.violations, ["outside.txt"]);
+			deepStrictEqual(sealed.attributionDowngrades, [
+				{
+					reason: "opaque_tool_succeeded",
+					tool: "bash",
+					toolCallId: "call-durable",
+					runId: "run-durable",
+					stepId: "build",
+				},
+			]);
 			strictEqual(sealed.digest.length, 64);
 			strictEqual(sealed.baselineHead, git(root, ["rev-parse", "HEAD"]));
 		});
@@ -557,6 +580,7 @@ describe("contracts/write-boundary", () => {
 			deepStrictEqual(verdict.violations, []);
 			deepStrictEqual(verdict.unattributed, ["README.md"]);
 			strictEqual(verdict.attributionComplete, true);
+			deepStrictEqual(verdict.attributionDowngrades, []);
 			deepStrictEqual(verdict.rolledBack, []);
 			// The whole point: the operator's bytes are still there.
 			strictEqual(readFileSync(join(root, "README.md"), "utf8"), "the operator's uncommitted edit\n");
@@ -605,7 +629,7 @@ describe("contracts/write-boundary", () => {
 			strictEqual(readFileSync(join(root, "keepsake.txt"), "utf8"), "unrelated\n");
 		});
 
-		it("keeps blaming the whole diff when the window has no complete write record", () => {
+		it("names the opaque tool that made the window's write record incomplete", () => {
 			const root = repo({ "src/a.ts": "committed\n" });
 			const snapshot = captureWorkspaceSnapshot(root);
 			write(root, "outside.txt", "x\n");
@@ -614,15 +638,36 @@ describe("contracts/write-boundary", () => {
 				window: "wave-0",
 				stepIds: ["compile"],
 				allow: ["src/"],
-				// A code step in the window: nothing enumerates what its command wrote.
-				attribution: { recorded: [], complete: false },
+				attribution: {
+					recorded: [],
+					complete: false,
+					downgrades: [
+						{
+							reason: "opaque_tool_succeeded",
+							tool: "bash",
+							toolCallId: "call-7",
+							runId: "run-7",
+							stepId: "compile",
+						},
+					],
+				},
 			});
 
 			strictEqual(verdict.status, "rolled-back");
 			strictEqual(verdict.attributionComplete, false);
 			deepStrictEqual(verdict.violations, ["outside.txt"]);
 			deepStrictEqual(verdict.unattributed, []);
-			match(verdict.detail ?? "", /no complete write record/);
+			deepStrictEqual(verdict.attributionDowngrades, [
+				{
+					reason: "opaque_tool_succeeded",
+					tool: "bash",
+					toolCallId: "call-7",
+					runId: "run-7",
+					stepId: "compile",
+				},
+			]);
+			match(verdict.detail ?? "", /successful 'bash' call \(call call-7\)/);
+			match(verdict.detail ?? "", /every change outside the declaration was blamed/);
 		});
 
 		it("still refuses to touch a path that was already dirty at snapshot time, even when the step recorded writing it", () => {

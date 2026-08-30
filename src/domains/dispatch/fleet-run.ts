@@ -46,6 +46,7 @@ import {
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import { type FleetRunRecord, writeFleetRun } from "./state.js";
 import type { RunReceipt } from "./types.js";
+import type { WriteBoundaryAttribution } from "./write-boundary.js";
 import { createWriteBoundaryEnforcer } from "./write-boundary-enforcer.js";
 
 /** Owner id for a plan with no model runs; it holds nothing to release. */
@@ -278,10 +279,29 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			// A code step runs a registered command in a subprocess. Nothing
 			// enumerates what that command wrote, so the step contributes no record
 			// and its window falls back to blaming the whole diff.
-			if (step === undefined || step.kind !== "agent") return null;
+			if (step === undefined) return null;
+			if (step.kind !== "agent") {
+				return {
+					recorded: [],
+					complete: false,
+					downgrades: [
+						{
+							reason: "code_step_untracked",
+							tool: null,
+							toolCallId: null,
+							runId: null,
+							stepId,
+						},
+					],
+				} satisfies WriteBoundaryAttribution;
+			}
 			const receipt = receiptsByStep.get(stepId);
 			if (receipt === undefined) return null;
-			return dispatch.observedRunWrites?.(receipt.runId) ?? null;
+			if (dispatch.observedRunWriteAttribution !== undefined) {
+				return dispatch.observedRunWriteAttribution(receipt.runId);
+			}
+			const recorded = dispatch.observedRunWrites?.(receipt.runId) ?? null;
+			return recorded === null ? null : { recorded, complete: true, downgrades: [] };
 		},
 		onVerdict(verdict, path) {
 			// Concurrent changes are reported too. The window did not fail for them

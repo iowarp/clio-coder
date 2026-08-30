@@ -283,6 +283,49 @@ export interface WriteBoundaryAttribution {
 	 * change outside the allowlist, and the verdict says it did.
 	 */
 	complete: boolean;
+	/** Durable causes for an incomplete record. Empty only when complete is true. */
+	downgrades?: ReadonlyArray<WriteBoundaryAttributionDowngrade>;
+}
+
+export type WriteBoundaryAttributionDowngradeReason =
+	| "opaque_tool_succeeded"
+	| "incomplete_tool_telemetry"
+	| "code_step_untracked"
+	| "write_record_unavailable";
+
+/** Why one step could not offer a closed write record. */
+export interface WriteBoundaryAttributionDowngrade {
+	reason: WriteBoundaryAttributionDowngradeReason;
+	/** Tool whose successful call opened the record, or null for a non-tool cause. */
+	tool: string | null;
+	/** Exact worker call when telemetry supplied one, or null for a non-tool cause. */
+	toolCallId: string | null;
+	/** Run that observed the cause, when one reached dispatch. */
+	runId: string | null;
+	/** Fleet step whose record was downgraded. */
+	stepId: string | null;
+}
+
+/** One operator-facing explanation shared by live and durable surfaces. */
+export function describeWriteBoundaryAttributionDowngrade(downgrade: WriteBoundaryAttributionDowngrade): string {
+	if (downgrade.reason === "opaque_tool_succeeded") {
+		const tool = downgrade.tool ?? "unknown";
+		const call = downgrade.toolCallId === null ? "" : ` (call ${downgrade.toolCallId})`;
+		return `a successful '${tool}' call${call} can write paths its arguments do not name`;
+	}
+	if (downgrade.reason === "incomplete_tool_telemetry") {
+		return downgrade.runId === null
+			? "tool telemetry was incomplete"
+			: `run '${downgrade.runId}' reported incomplete tool telemetry`;
+	}
+	if (downgrade.reason === "code_step_untracked") {
+		return downgrade.stepId === null
+			? "a code step ran through the untracked command runner"
+			: `code step '${downgrade.stepId}' ran through the untracked command runner`;
+	}
+	return downgrade.stepId === null
+		? "no usable write record was available"
+		: `step '${downgrade.stepId}' supplied no usable write record`;
 }
 
 export interface WriteBoundaryVerdict {
@@ -307,6 +350,8 @@ export interface WriteBoundaryVerdict {
 	unattributed: ReadonlyArray<string>;
 	/** Whether every step in the window offered an enumerable write record. */
 	attributionComplete: boolean;
+	/** Why attribution was incomplete, including the causal tool call when known. */
+	attributionDowngrades: ReadonlyArray<WriteBoundaryAttributionDowngrade>;
 	rolledBack: ReadonlyArray<WriteBoundaryRollback>;
 	unrecoverable: ReadonlyArray<WriteBoundaryUnrecoverable>;
 	status: WriteBoundaryStatus;
@@ -417,6 +462,19 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 	const changes = diffWorkspace(input.snapshot);
 	const outside = changes.filter((change) => !writeBoundaryCovers(allow, change.path));
 	const attributionComplete = input.attribution?.complete === true;
+	const attributionDowngrades: ReadonlyArray<WriteBoundaryAttributionDowngrade> = attributionComplete
+		? []
+		: input.attribution?.downgrades !== undefined && input.attribution.downgrades.length > 0
+			? input.attribution.downgrades.map((entry) => ({ ...entry }))
+			: [
+					{
+						reason: "write_record_unavailable",
+						tool: null,
+						toolCallId: null,
+						runId: null,
+						stepId: input.stepIds.length === 1 ? (input.stepIds[0] ?? null) : null,
+					},
+				];
 	const recorded = new Set<string>();
 	for (const target of input.attribution?.recorded ?? []) {
 		const relativeTarget = repoRelative(input.snapshot.root, target);
@@ -457,7 +515,9 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 								.join("; ")}.`,
 					attributionComplete
 						? "Each was blamed on this window because a run in it recorded writing that path."
-						: "This window had no complete write record, so every change outside the declaration was blamed on it.",
+						: `Attribution was incomplete because ${attributionDowngrades
+								.map(describeWriteBoundaryAttributionDowngrade)
+								.join("; ")}, so every change outside the declaration was blamed on this window.`,
 					"If the change was legitimate, widen the step's `writes:` declaration to cover it.",
 				];
 	const concurrentDetail =
@@ -482,6 +542,7 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 		violations: violations.map((change) => change.path),
 		unattributed: unattributed.map((change) => change.path),
 		attributionComplete,
+		attributionDowngrades,
 		rolledBack,
 		unrecoverable,
 		status,
