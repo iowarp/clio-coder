@@ -7,6 +7,7 @@ import {
 	EVAL_BEHAVIOR_CATEGORIES,
 	EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1,
 	EVAL_BEHAVIOR_SCHEMA_V1,
+	type EvalBehaviorScenarioV1,
 	judgeEvalBehaviorV1,
 	parseEvalBehaviorScenarioV1,
 	parseEvalBehaviorVerdictV1,
@@ -16,7 +17,7 @@ import { EVAL_VERDICT_SCHEMA_V1, type EvalVerdictEnvelopeV1 } from "../../src/do
 
 const DIGEST = "a".repeat(64);
 
-function scenario(kind: "main-agent" | "worker" = "main-agent") {
+function scenario(kind: "main-agent" | "worker" = "main-agent"): EvalBehaviorScenarioV1 {
 	return {
 		schema: EVAL_BEHAVIOR_SCENARIO_SCHEMA_V1,
 		corpus: { id: "public-behavior", version: "1.0.0" },
@@ -40,7 +41,7 @@ function scenario(kind: "main-agent" | "worker" = "main-agent") {
 			},
 		],
 		judge: { maxEvidenceItems: 16, maxExplanationChars: 500 },
-	} as const;
+	};
 }
 
 function fact(id: string, source: "tool" | "transcript", key: string, value: number) {
@@ -175,7 +176,9 @@ describe("contracts/eval behavioral schema v1", () => {
 		throws(() => parseEvalBehaviorVerdictV1(ungrounded), /requires a rule and observable evidence/u);
 
 		const artifact = artifactFixture(valid);
-		artifact.results[0].behavioral.verdictRef.scenarioId = "different";
+		const first = artifact.results[0];
+		if (first?.behavioral === undefined) throw new Error("expected behavioral fixture result");
+		first.behavioral.verdictRef.scenarioId = "different";
 		throws(() => parseEvalArtifactV4(artifact, "fixture"), /conflicts with result verdict identity/u);
 	});
 
