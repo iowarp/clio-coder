@@ -396,7 +396,7 @@ the named affected corpus results, then update explicitly:
 
 ```sh
 npm run build
-TMPDIR=/home/akougkas/.cache/clio-sprint-tmp node benchmarks/eval/check-behavioral-release.mjs --update
+node benchmarks/eval/check-behavioral-release.mjs --update
 git diff -- benchmarks/eval/behavioral-machinery-baseline.json
 ```
 
