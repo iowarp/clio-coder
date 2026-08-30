@@ -22,6 +22,7 @@ import { createRegistry } from "../../src/tools/registry.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 interface SpawnRecord {
 	spec: WorkerSpec;
@@ -43,7 +44,7 @@ function successfulFabric(): {
 				events: (async function* () {
 					yield {
 						type: "message_end",
-						message: { role: "assistant", content: "done", usage: { input: 1, output: 1 } },
+						message: { role: "assistant", content: mutationReport("done"), usage: { input: 1, output: 1 } },
 					};
 				})(),
 				abort: () => {},
@@ -332,7 +333,7 @@ describe("resolved dispatch plan admission", () => {
 							type: "message_end",
 							message: {
 								role: "assistant",
-								content: `OUTPUT-OF(${spec.task})`,
+								content: mutationReport(`OUTPUT-OF(${spec.task})`),
 								usage: { input: 1, output: 1 },
 							},
 						};

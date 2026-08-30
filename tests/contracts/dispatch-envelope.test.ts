@@ -8,6 +8,7 @@ import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { holdEventLoop, isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 const TARGET = "route-target";
 const MODEL = "route-model";
@@ -17,7 +18,7 @@ function worker(exitCode: number): SpawnedWorker {
 		if (exitCode === 0) {
 			yield {
 				type: "message_end",
-				message: { role: "assistant", content: "fallback complete", usage: { input: 1, output: 1 } },
+				message: { role: "assistant", content: mutationReport("fallback complete"), usage: { input: 1, output: 1 } },
 			};
 		}
 	})();

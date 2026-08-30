@@ -18,6 +18,7 @@ import { createMonitorTool } from "../../src/tools/monitor.js";
 import { createSteerTool } from "../../src/tools/steer.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 async function waitFor(predicate: () => boolean, message: string, timeoutMs = 8000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -30,7 +31,10 @@ async function waitFor(predicate: () => boolean, message: string, timeoutMs = 80
 
 function okWorker(text = "done"): SpawnedWorker {
 	const events = (async function* () {
-		yield { type: "message_end", message: { role: "assistant", content: text, usage: { input: 1, output: 1 } } };
+		yield {
+			type: "message_end",
+			message: { role: "assistant", content: mutationReport(text), usage: { input: 1, output: 1 } },
+		};
 	})();
 	return {
 		pid: 100,
@@ -50,7 +54,10 @@ function gatedWorker(): { worker: SpawnedWorker; finish: (exitCode: number) => v
 	const events = (async function* (): AsyncIterableIterator<unknown> {
 		const result = await promise;
 		if (result.exitCode === 0) {
-			yield { type: "message_end", message: { role: "assistant", content: "gated done", usage: { input: 1, output: 1 } } };
+			yield {
+				type: "message_end",
+				message: { role: "assistant", content: mutationReport("gated done"), usage: { input: 1, output: 1 } },
+			};
 		}
 	})();
 	return {
@@ -118,7 +125,7 @@ function steerableGatedWorker(): {
 		finish: () => {
 			emit({
 				type: "message_end",
-				message: { role: "assistant", content: "steered sync done", usage: { input: 1, output: 1 } },
+				message: { role: "assistant", content: mutationReport("steered sync done"), usage: { input: 1, output: 1 } },
 			});
 			ended = true;
 			emit({ type: "clio_worker_complete" });
@@ -223,7 +230,7 @@ describe("detached dispatch + collect", () => {
 		}
 	});
 
-	it("classifies the same missing-final event stream identically for synchronous and detached dispatch", async () => {
+	it("classifies the same incomplete tool-use output identically for synchronous and detached dispatch", async () => {
 		const missingFinalWorker = (): SpawnedWorker => ({
 			pid: 103,
 			promise: Promise.resolve({ exitCode: 0, signal: null }),
@@ -258,7 +265,7 @@ describe("detached dispatch + collect", () => {
 			ok(synchronousRunId);
 			const synchronousRow = bundle.contract.getRun(synchronousRunId);
 			strictEqual(synchronousRow?.outcome, "failed");
-			strictEqual(synchronousRow?.outcomeCode, "worker_final_output_missing");
+			strictEqual(synchronousRow?.outcomeCode, "result_contract_exhausted");
 			ok(!synchronous.message.includes("I will inspect one more file."), "transient preamble is not a successful answer");
 
 			const detached = (await dispatch.run(
@@ -668,7 +675,11 @@ describe("detached dispatch + collect", () => {
 				runId: string;
 				output?: { state: string; bytes: number; truncated: boolean };
 			}>;
-			deepStrictEqual(runsDetail[0]?.output, { state: "final", bytes: 14, truncated: false });
+			deepStrictEqual(runsDetail[0]?.output, {
+				state: "final",
+				bytes: Buffer.byteLength(mutationReport("resumed answer"), "utf8"),
+				truncated: false,
+			});
 		} finally {
 			await second.extension.stop?.();
 		}
@@ -692,7 +703,11 @@ describe("detached dispatch + collect", () => {
 					yield { type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } };
 					yield {
 						type: "message_end",
-						message: { role: "assistant", content: "detached done", usage: { input: 1, output: 1 } },
+						message: {
+							role: "assistant",
+							content: mutationReport("detached done"),
+							usage: { input: 1, output: 1 },
+						},
 					};
 				})(),
 				abort: () => {},

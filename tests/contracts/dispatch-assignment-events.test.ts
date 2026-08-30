@@ -5,6 +5,7 @@ import { createAssignmentEventStream } from "../../src/domains/dispatch/assignme
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 function events(text?: string): AsyncIterableIterator<unknown> {
 	return (async function* () {
@@ -48,13 +49,14 @@ describe("assignment event stream", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.workers.maxRetries = 1;
 		let spawns = 0;
+		const finalOutput = mutationReport("ATTEMPT-TWO-FINAL");
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
 			spawnWorker: () => {
 				spawns += 1;
 				return spawns === 1
 					? worker({ exitCode: 1, signal: null, stderrTail: "provider queue full" }, "ATTEMPT-ONE-PARTIAL")
-					: worker({ exitCode: 0, signal: null }, "ATTEMPT-TWO-FINAL");
+					: worker({ exitCode: 0, signal: null }, finalOutput);
 			},
 		});
 		await bundle.extension.start();
@@ -92,7 +94,7 @@ describe("assignment event stream", () => {
 				.map(assistantText)
 				.filter(Boolean);
 			deepStrictEqual(firstTexts, ["ATTEMPT-ONE-PARTIAL"]);
-			deepStrictEqual(secondTexts, ["ATTEMPT-TWO-FINAL"]);
+			deepStrictEqual(secondTexts, [finalOutput]);
 			// Both attempts' frames are present, in attempt order, and the stream
 			// completed on its own rather than being abandoned.
 			ok(frameTypes(frames).filter((type) => type === "agent_start").length >= 2);
@@ -105,13 +107,14 @@ describe("assignment event stream", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.workers.maxRetries = 1;
 		let spawns = 0;
+		const finalOutput = mutationReport("ANSWER-VISIBILITY-PROBE");
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
 			spawnWorker: () => {
 				spawns += 1;
 				return spawns === 1
 					? worker({ exitCode: 1, signal: null, stderrTail: "provider queue full" }, "STALE-ANSWER")
-					: worker({ exitCode: 0, signal: null }, "ANSWER-VISIBILITY-PROBE");
+					: worker({ exitCode: 0, signal: null }, finalOutput);
 			},
 		});
 		await bundle.extension.start();
@@ -127,7 +130,7 @@ describe("assignment event stream", () => {
 				if (text.length > 0) lastAssistantText = text;
 			}
 			const receipt = await handle.finalPromise;
-			strictEqual(lastAssistantText, "ANSWER-VISIBILITY-PROBE");
+			strictEqual(lastAssistantText, finalOutput);
 			strictEqual(receipt.output?.text, lastAssistantText);
 		} finally {
 			await bundle.extension.stop?.();

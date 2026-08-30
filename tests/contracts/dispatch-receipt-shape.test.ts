@@ -7,13 +7,14 @@ import type { RunLineage, RunReceipt } from "../../src/domains/dispatch/types.js
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 function worker(exitCode: number): SpawnedWorker {
 	const events = (async function* () {
 		if (exitCode === 0) {
 			yield {
 				type: "message_end",
-				message: { role: "assistant", content: "done", usage: { input: 1, output: 1 } },
+				message: { role: "assistant", content: mutationReport("done"), usage: { input: 1, output: 1 } },
 			};
 		}
 	})();

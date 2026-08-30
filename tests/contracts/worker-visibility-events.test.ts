@@ -16,11 +16,19 @@ import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 function worker(exitCode: number, text?: string): SpawnedWorker {
 	const events = (async function* () {
 		if (text !== undefined) {
-			yield { type: "message_end", message: { role: "assistant", content: text, usage: { input: 1, output: 1 } } };
+			yield {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: exitCode === 0 ? mutationReport(text) : text,
+					usage: { input: 1, output: 1 },
+				},
+			};
 		}
 	})();
 	return {

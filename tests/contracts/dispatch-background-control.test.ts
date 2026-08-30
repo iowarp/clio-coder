@@ -17,6 +17,7 @@ import { createDispatchBackgroundRegistry } from "../../src/tools/dispatch-backg
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
@@ -44,7 +45,10 @@ function gatedWorker(): { worker: SpawnedWorker; finish: (exitCode: number) => v
 	const events = (async function* (): AsyncIterableIterator<unknown> {
 		const result = await promise;
 		if (result.exitCode === 0) {
-			yield { type: "message_end", message: { role: "assistant", content: "gated done", usage: { input: 1, output: 1 } } };
+			yield {
+				type: "message_end",
+				message: { role: "assistant", content: mutationReport("gated done"), usage: { input: 1, output: 1 } },
+			};
 		}
 	})();
 	return {

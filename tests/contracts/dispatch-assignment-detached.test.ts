@@ -11,6 +11,7 @@ import type { ToolResult } from "../../src/tools/registry.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 const approvedDispatch = {
 	approval: { requestId: "assignment-detached", requestedBy: "test-operator", actionClass: "dispatch" as const },
@@ -22,7 +23,14 @@ function worker(exitCode: number, text?: string): SpawnedWorker {
 		promise: Promise.resolve({ exitCode, signal: null }),
 		events: (async function* () {
 			if (text !== undefined) {
-				yield { type: "message_end", message: { role: "assistant", content: text, usage: { input: 1, output: 1 } } };
+				yield {
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: exitCode === 0 ? mutationReport(text) : text,
+						usage: { input: 1, output: 1 },
+					},
+				};
 			}
 		})(),
 		abort: () => {},

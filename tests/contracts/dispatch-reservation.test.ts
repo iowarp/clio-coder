@@ -28,6 +28,7 @@ import {
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 function settingsWithNode(maxWorkers = 1): typeof DEFAULT_SETTINGS {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -160,7 +161,10 @@ describe("dispatch batch reservations", () => {
 				pid: nextPid++,
 				promise: Promise.resolve({ exitCode: 0, signal: null }),
 				events: (async function* () {
-					yield { type: "message_end", message: { role: "assistant", content: "done", usage: { input: 1, output: 1 } } };
+					yield {
+						type: "message_end",
+						message: { role: "assistant", content: mutationReport("done"), usage: { input: 1, output: 1 } },
+					};
 				})(),
 				abort: () => {},
 				heartbeatAt: { current: Date.now() },
@@ -587,7 +591,7 @@ describe("dispatch batch reservations", () => {
 				spawns += 1;
 				return spawns === 1
 					? retryWorker({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" })
-					: retryWorker({ exitCode: 0, signal: null }, "recovered on secondary");
+					: retryWorker({ exitCode: 0, signal: null }, mutationReport("recovered on secondary"));
 			},
 		});
 		await bundle.extension.start();
@@ -644,7 +648,7 @@ describe("dispatch batch reservations", () => {
 				spawns += 1;
 				return spawns === 1
 					? retryWorker({ exitCode: 255, signal: null, stderrTail: "ssh channel failed" })
-					: retryWorker({ exitCode: 0, signal: null }, "recovered on blade");
+					: retryWorker({ exitCode: 0, signal: null }, mutationReport("recovered on blade"));
 			},
 		});
 		await bundle.extension.start();

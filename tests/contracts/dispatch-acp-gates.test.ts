@@ -15,6 +15,7 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { holdEventLoop, isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
@@ -129,13 +130,20 @@ function nativeFabric(): {
 				const candidate = /candidate-(\d+)$/.exec(cwd)?.[1] ?? String(spawns.length);
 				writeFileSync(join(cwd, `candidate-${candidate}.txt`), `candidate ${candidate}\n`);
 			}
+			const mutatedPaths = cwd?.includes(join(".clio-coder", "worktrees"))
+				? [`candidate-${/candidate-(\d+)$/.exec(cwd)?.[1] ?? String(spawns.length)}.txt`]
+				: [];
 			return {
 				pid: 6000 + spawns.length,
 				promise: Promise.resolve({ exitCode: 0, signal: null }),
 				events: (async function* () {
 					yield {
 						type: "message_end",
-						message: { role: "assistant", content: "native done", usage: { input: 1, output: 1 } },
+						message: {
+							role: "assistant",
+							content: mutationReport("native done", mutatedPaths),
+							usage: { input: 1, output: 1 },
+						},
 					};
 				})(),
 				abort: () => {},
