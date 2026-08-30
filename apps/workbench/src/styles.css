@@ -1365,7 +1365,9 @@ select {
 	position: relative;
 	z-index: 3;
 	flex: 0 0 auto;
-	margin: 0 clamp(14px, 2vw, 28px) 14px;
+	/* The same column as .conversation__content, so collapsing the rails widens both together. */
+	width: min(960px, 100% - 2 * clamp(14px, 2vw, 28px));
+	margin: 0 auto 14px;
 	border: 1px solid var(--control-border);
 	border-radius: var(--radius);
 	background: rgb(14 20 26 / 96%);
@@ -1823,6 +1825,11 @@ kbd {
 		display: none;
 	}
 
+	/* The operation state is the one status word that must never truncate. */
+	.status-bar__operation {
+		flex-shrink: 0;
+	}
+
 	.field-note {
 		grid-template-columns: 68px minmax(0, 1fr) 62px;
 	}
@@ -1848,6 +1855,10 @@ kbd {
 
 	.status-bar__operation {
 		flex-basis: 130px;
+	}
+
+	.status-bar__autonomy small {
+		display: none;
 	}
 
 	.drawer-scrim {
@@ -1880,6 +1891,8 @@ kbd {
 		left: 0;
 		z-index: 30;
 		width: min(310px, 90vw);
+		/* On the desktop grid the shell paints behind the rail; a fixed drawer must paint itself. */
+		background: var(--graphite-925);
 		transform: translateX(-105%);
 		transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 	}
@@ -3923,9 +3936,12 @@ kbd {
 }
 
 .observer-map-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
 	width: 100%;
 	margin-top: 12px;
-	justify-content: space-between;
 	border-color: rgb(70 229 208 / 20%);
 	color: var(--accent);
 }
@@ -4047,7 +4063,9 @@ kbd {
 
 .effective-map__masthead h2 {
 	margin-top: 3px;
+	text-wrap: balance;
 	font-size: clamp(1.75rem, 3vw, 2.8rem);
+	line-height: 1.02;
 }
 
 .effective-map__masthead > div:first-child > p {
@@ -4691,6 +4709,7 @@ kbd {
 .catalog--empty h2,
 .catalog__masthead h2 {
 	color: var(--paper-strong);
+	text-wrap: balance;
 	font-family: var(--font-editorial);
 	font-size: clamp(1.8rem, 3.3vw, 2.8rem);
 	font-variation-settings: "opsz" 34, "wght" 560;
@@ -4946,6 +4965,15 @@ kbd {
 	color: var(--paper);
 	font: inherit;
 	font-size: 0.65rem;
+}
+
+.catalog__query > div:focus-within {
+	border-color: rgb(70 229 208 / 48%);
+	box-shadow: var(--focus);
+}
+
+.catalog__query input:focus-visible {
+	box-shadow: none;
 }
 
 .catalog__query input:disabled {
@@ -5400,6 +5428,7 @@ kbd {
 .usage-notebook--empty h2,
 .usage-notebook__masthead h2 {
 	color: var(--paper-strong);
+	text-wrap: balance;
 	font-family: var(--font-editorial);
 	font-size: clamp(1.8rem, 3.3vw, 2.8rem);
 	font-variation-settings: "opsz" 34, "wght" 560;
@@ -6071,6 +6100,7 @@ kbd {
 
 .dispatch-ledger--empty h2,
 .dispatch-ledger__masthead h2 {
+	text-wrap: balance;
 	margin-top: 4px;
 	color: var(--paper-strong);
 	font-family: var(--font-editorial);

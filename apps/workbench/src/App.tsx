@@ -3571,9 +3571,11 @@ function ConversationCanvas({
 					</span>
 					<span className="composer__status" role="status" aria-live="polite">
 						{activeTurn
-							? `${formatDuration(elapsed)} · ${activeTurn.toolCalls} tool calls${
-								activeTurn.lastToolTitle === null ? "" : ` · ${activeTurn.lastToolTitle}`
-							}${activeTurn.repeatedShapes > 0 ? ` · ${activeTurn.repeatedShapes} repeated` : ""}`
+							? `${formatDuration(elapsed)} · ${activeTurn.toolCalls} tool ${
+								activeTurn.toolCalls === 1 ? "call" : "calls"
+							}${activeTurn.lastToolTitle === null ? "" : ` · ${activeTurn.lastToolTitle}`}${
+								activeTurn.repeatedShapes > 0 ? ` · ${activeTurn.repeatedShapes} repeated` : ""
+							}`
 							: open === null
 							? "Open a project folder to talk to Clio Coder."
 							: "Ready for your next prompt."}
