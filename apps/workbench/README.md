@@ -84,7 +84,13 @@ lifecycle (`tests/gui_lifecycle_test.ts`) against a stand-in binary.
 deno task verify         # format check, lint, type check, unit tests, production build
 deno task smoke:browser  # builds, then drives six fixture-backed hosts through headless Chrome with Axe checks
 deno run -A scripts/perf-workload.ts --label=NAME   # the rendering workload behind PERFORMANCE.md
+deno run -A scripts/visual-probe.ts                  # one PNG per surface and width into .artifacts/visual/
 ```
+
+The visual probe exists to be looked at: it drives the empty state, collapsed rails, a streaming and a settled Markdown
+conversation with code and a diagram, both compact drawers, every alternate view, and the settings dialog at 1600, 1260,
+1050, 790, and 375 px, and prints any page that overflows horizontally. Read the PNGs after a styling change; the smoke
+only asserts geometry it was told to.
 
 `/tmp` on the development machine is a small tmpfs; run the browser and test commands with `TMPDIR` pointing at a
 disk-backed directory. Screenshots land in `.artifacts/browser/`, perf reports in `.artifacts/perf/`.

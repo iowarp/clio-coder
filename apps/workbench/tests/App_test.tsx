@@ -387,6 +387,7 @@ Deno.test("a pending approval is announced, titled, and never leaks wire identif
 	});
 	const html = render(stateWith(workspace));
 
+	match(html, /1 tool call · Write notes\.md/u);
 	match(html, /APPROVAL NEEDED · ONE USE/u);
 	match(html, /Update project file/u);
 	match(html, /src\/solver\.ts/u);
