@@ -75,6 +75,15 @@ function retryWorker(result: SpawnedWorkerResult, text?: string): SpawnedWorker 
 	};
 }
 
+async function waitFor(predicate: () => boolean, message: string, timeoutMs = 8000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		if (predicate()) return;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	throw new Error(message);
+}
+
 function twoTargetSettings(): typeof DEFAULT_SETTINGS {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [
@@ -621,6 +630,72 @@ describe("dispatch batch reservations", () => {
 			strictEqual(settled?.members.filter((entry) => entry.consumedAt !== null).length, 1);
 			strictEqual(member.status, "released");
 			strictEqual(settled?.status, "released");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("retries a transient failure on a reserved fleet step in wave two", async () => {
+		const settings = twoTargetSettings();
+		const scheduling = schedulingFor(settings, 4, 0, 50);
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, scheduling }), {
+			resilienceCooldownMs: 0,
+			previewNode: () => ({ node: { id: "local", kind: "local" } }),
+			spawnWorker: () => {
+				spawns += 1;
+				if (spawns === 2) {
+					return retryWorker({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
+				}
+				return retryWorker({ exitCode: 0, signal: null }, mutationReport(`fleet spawn ${spawns} succeeded`));
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const firstRequest = { agentId: "coder", executionRole: "builder" as const, task: "wave one" };
+			const secondRequest = { agentId: "coder", executionRole: "builder" as const, task: "wave two" };
+			const firstResolution = bundle.contract.preview?.(firstRequest);
+			const secondResolution = bundle.contract.preview?.(secondRequest);
+			ok(firstResolution && secondResolution);
+			const reservation = bundle.contract.reservations?.prepare({
+				topology: "sequential",
+				tasks: [
+					{ memberId: "wave-one", wave: 0, resolution: firstResolution },
+					{ memberId: "wave-two", wave: 1, resolution: secondResolution },
+				],
+			});
+			ok(reservation);
+			const rootRunId = "fleet-later-step-retry";
+			const lineage = { parentRunId: rootRunId, rootRunId, attempt: 0, depth: 1 };
+			const first = await bundle.contract.dispatch({
+				...firstRequest,
+				lineage,
+				reservation: { ownerId: reservation.ownerId, memberId: "wave-one" },
+			});
+			strictEqual((await first.finalPromise).outcome, "succeeded");
+			releaseDispatchReservationMember(reservation.ownerId, "wave-one");
+			await waitFor(
+				() => bundle.contract.assignments?.get(rootRunId)?.status === "succeeded",
+				"wave one's shared root assignment did not settle",
+			);
+			strictEqual(bundle.contract.assignments?.get(rootRunId)?.status, "succeeded");
+
+			const second = await bundle.contract.dispatch({
+				...secondRequest,
+				lineage,
+				failover: "automatic",
+				target: "primary",
+				reservation: { ownerId: reservation.ownerId, memberId: "wave-two" },
+			});
+			strictEqual((await second.finalPromise).outcome, "failed", "wave two's first attempt is the transient failure");
+			await waitFor(
+				() =>
+					spawns === 3 &&
+					bundle.contract.listRuns().some((run) => run.lineage?.parentRunId === second.runId && run.outcome === "succeeded"),
+				"wave two did not run its configured retry",
+			);
+			strictEqual(spawns, 3, "wave two receives one retry after its transient failure");
+			releaseDispatchReservationMember(reservation.ownerId, "wave-two");
 		} finally {
 			await bundle.extension.stop?.();
 		}
