@@ -6,6 +6,12 @@ import {
 	type EvalBehaviorMetricNameV1,
 	type EvalBehaviorMetricSourceV1,
 } from "../schema/behavioral-metrics.js";
+import type { EvalExecutionMatrixDimensionV1 } from "../schema/execution-envelope.js";
+import {
+	compareEvalExecutionEnvelopesV1,
+	type EvalEnvelopeComparabilityV1,
+	type EvalEnvelopeMismatchV1,
+} from "./envelope.js";
 
 export type EvalMetricChangeV1 = "improved" | "regressed" | "unchanged" | "incomparable";
 
@@ -36,10 +42,12 @@ export interface EvalBehaviorMetricComparisonV1 {
 	meanDelta: number | null;
 	varianceChange: EvalMetricChangeV1;
 	varianceDelta: number | null;
+	comparability: EvalEnvelopeComparabilityV1;
 }
 
 export interface EvalBehaviorHardGateV1 {
 	pass: boolean;
+	envelopeFailures: EvalEnvelopeMismatchV1[];
 	failures: Array<{
 		scenarioId: string;
 		role: string;
@@ -59,16 +67,35 @@ interface BehaviorGroup {
 export function compareEvalBehaviorMetricsV1(
 	baseline: EvalArtifactV4,
 	candidate: EvalArtifactV4,
-): { comparisons: EvalBehaviorMetricComparisonV1[]; hardGate: EvalBehaviorHardGateV1 } {
+): {
+	comparisons: EvalBehaviorMetricComparisonV1[];
+	hardGate: EvalBehaviorHardGateV1;
+	envelopeMismatches: EvalEnvelopeMismatchV1[];
+} {
 	const baselineGroups = behaviorGroups(baseline);
 	const candidateGroups = behaviorGroups(candidate);
 	const keys = new Set([...baselineGroups.keys(), ...candidateGroups.keys()]);
 	const comparisons: EvalBehaviorMetricComparisonV1[] = [];
+	const envelopeMismatches: EvalEnvelopeMismatchV1[] = [];
+	const baselineDimensions = baseline.matrix.dimensions ?? ([] as EvalExecutionMatrixDimensionV1[]);
+	const candidateDimensions = candidate.matrix.dimensions ?? ([] as EvalExecutionMatrixDimensionV1[]);
 	for (const key of [...keys].sort((left, right) => left.localeCompare(right))) {
 		const baselineGroup = baselineGroups.get(key);
 		const candidateGroup = candidateGroups.get(key);
 		const identity = baselineGroup ?? candidateGroup;
 		if (identity === undefined) continue;
+		const envelopeMismatch = compareEvalExecutionEnvelopesV1(
+			identity,
+			baselineGroup?.results ?? [],
+			candidateGroup?.results ?? [],
+			baselineDimensions,
+			candidateDimensions,
+		);
+		if (envelopeMismatch !== null) envelopeMismatches.push(envelopeMismatch);
+		const comparability: EvalEnvelopeComparabilityV1 = {
+			comparable: envelopeMismatch === null,
+			mismatchedFields: envelopeMismatch?.fields ?? [],
+		};
 		for (const definition of EVAL_BEHAVIOR_METRIC_DEFINITIONS_V1) {
 			const baselineDistribution = behaviorDistribution(baselineGroup?.results ?? [], definition);
 			const candidateDistribution = behaviorDistribution(candidateGroup?.results ?? [], definition);
@@ -82,10 +109,17 @@ export function compareEvalBehaviorMetricsV1(
 				hardGate: definition.hardGate,
 				baseline: baselineDistribution,
 				candidate: candidateDistribution,
-				change: classifyChange(baselineDistribution.mean, candidateDistribution.mean, definition.direction),
+				change:
+					envelopeMismatch === null
+						? classifyChange(baselineDistribution.mean, candidateDistribution.mean, definition.direction)
+						: "incomparable",
 				meanDelta: subtractNullable(candidateDistribution.mean, baselineDistribution.mean),
-				varianceChange: classifyChange(baselineDistribution.variance, candidateDistribution.variance, "lower"),
+				varianceChange:
+					envelopeMismatch === null
+						? classifyChange(baselineDistribution.variance, candidateDistribution.variance, "lower")
+						: "incomparable",
 				varianceDelta: subtractNullable(candidateDistribution.variance, baselineDistribution.variance),
+				comparability,
 			});
 		}
 	}
@@ -104,7 +138,15 @@ export function compareEvalBehaviorMetricsV1(
 				]
 			: [],
 	);
-	return { comparisons, hardGate: { pass: failures.length === 0, failures } };
+	return {
+		comparisons,
+		hardGate: {
+			pass: failures.length === 0 && envelopeMismatches.length === 0,
+			failures,
+			envelopeFailures: envelopeMismatches,
+		},
+		envelopeMismatches,
+	};
 }
 
 export function classifyChange(

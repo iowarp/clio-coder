@@ -14,6 +14,7 @@ import {
 	type EvalBehaviorMetricComparisonV1,
 	type EvalMetricChangeV1,
 } from "./behavioral.js";
+import type { EvalEnvelopeMismatchV1 } from "./envelope.js";
 
 export interface EvalCompareV4Options {
 	metric?: string;
@@ -45,6 +46,23 @@ export interface EvalCompareV4Summary {
 	trackedMetrics: EvalTrackedMetricComparisonV1[];
 	behavioralMetrics: EvalBehaviorMetricComparisonV1[];
 	hardGate: EvalBehaviorHardGateV1;
+	envelopeMismatches: EvalEnvelopeMismatchV1[];
+	scenarioReports: EvalBehaviorComparisonRollupV1[];
+	roleReports: EvalBehaviorComparisonRollupV1[];
+	affectedCorpusResults: Array<{ scenarioId: string; role: string; changedFields: string[] }>;
+}
+
+export interface EvalBehaviorComparisonRollupV1 {
+	id: string;
+	metrics: EvalChangeCountsV1;
+	variance: EvalChangeCountsV1;
+}
+
+export interface EvalChangeCountsV1 {
+	improved: number;
+	regressed: number;
+	unchanged: number;
+	incomparable: number;
 }
 
 export class EvalServingConfigurationDriftError extends Error {
@@ -100,10 +118,27 @@ export function compareEvalArtifactsV4(
 		trackedMetrics,
 		behavioralMetrics,
 		hardGate: behavioral.hardGate,
+		envelopeMismatches: behavioral.envelopeMismatches,
+		scenarioReports: behaviorRollups(behavioralMetrics, (row) => row.scenarioId),
+		roleReports: behaviorRollups(behavioralMetrics, (row) => row.role),
+		affectedCorpusResults: behavioral.envelopeMismatches.flatMap((mismatch) => {
+			const changedFields = mismatch.fields.filter((field) => field === "prompt" || field === "recipe");
+			return changedFields.length === 0 ? [] : [{ scenarioId: mismatch.scenarioId, role: mismatch.role, changedFields }];
+		}),
 	};
 }
 
 export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
+	const envelopeFailures = summary.envelopeMismatches.map(
+		(mismatch) =>
+			`  incomparable envelope: ${mismatch.scenarioId} ${mismatch.role} ${mismatch.target.id}/${mismatch.target.model ?? "none"} fields=${mismatch.fields.join(",")}`,
+	);
+	const affected = summary.affectedCorpusResults.map(
+		(result) =>
+			`  affected corpus result: ${result.scenarioId} role=${result.role} changed=${result.changedFields.join(",")}`,
+	);
+	const scenarioReports = renderRollups("per-scenario baseline/candidate report", summary.scenarioReports);
+	const roleReports = renderRollups("per-role baseline/candidate report", summary.roleReports);
 	const hardFailures = summary.hardGate.failures.map(
 		(failure) =>
 			`  hard failure: ${failure.scenarioId} ${failure.role} ${failure.target.id}/${failure.target.model ?? "none"} ${failure.metric} ${failure.change}`,
@@ -136,7 +171,7 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 		...(index === 0
 			? [
 					"behavioral metrics:",
-					"scenario role target model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta change variance_change gate source",
+					"scenario role target model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta change variance_change comparability gate source",
 				]
 			: []),
 		[
@@ -156,6 +191,7 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 			formatSignedMetric(row.varianceDelta),
 			row.change,
 			row.varianceChange,
+			row.comparability.comparable ? "comparable" : `incomparable:${row.comparability.mismatchedFields.join(",")}`,
 			row.hardGate ? "hard" : "informational",
 			row.baseline.source,
 		].join(" "),
@@ -169,12 +205,55 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 		`pass-rate delta: ${(summary.passRateDelta * 100).toFixed(2)}%`,
 		`token delta: ${summary.tokenDelta === null ? "unmeasured" : summary.tokenDelta}`,
 		`wall-time delta ms: ${summary.wallTimeDelta}`,
-		`behavioral hard gate: ${summary.hardGate.pass ? "pass" : `fail (${summary.hardGate.failures.length})`}`,
+		`behavioral hard gate: ${summary.hardGate.pass ? "pass" : `fail (${summary.hardGate.failures.length + summary.hardGate.envelopeFailures.length})`}`,
 		...hardFailures,
+		...envelopeFailures,
+		...affected,
+		...scenarioReports,
+		...roleReports,
 		...tracked,
 		...behavioral,
 		"",
 	].join("\n");
+}
+
+function behaviorRollups(
+	rows: ReadonlyArray<EvalBehaviorMetricComparisonV1>,
+	keyOf: (row: EvalBehaviorMetricComparisonV1) => string,
+): EvalBehaviorComparisonRollupV1[] {
+	const groups = new Map<string, EvalBehaviorMetricComparisonV1[]>();
+	for (const row of rows) groups.set(keyOf(row), [...(groups.get(keyOf(row)) ?? []), row]);
+	return [...groups.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([id, grouped]) => ({
+			id,
+			metrics: changeCounts(grouped.map((row) => row.change)),
+			variance: changeCounts(grouped.map((row) => row.varianceChange)),
+		}));
+}
+
+function changeCounts(changes: ReadonlyArray<EvalMetricChangeV1>): EvalChangeCountsV1 {
+	return {
+		improved: changes.filter((change) => change === "improved").length,
+		regressed: changes.filter((change) => change === "regressed").length,
+		unchanged: changes.filter((change) => change === "unchanged").length,
+		incomparable: changes.filter((change) => change === "incomparable").length,
+	};
+}
+
+function renderRollups(title: string, reports: ReadonlyArray<EvalBehaviorComparisonRollupV1>): string[] {
+	if (reports.length === 0) return [];
+	return [
+		`${title}:`,
+		...reports.map(
+			(report) =>
+				`  ${report.id}: metrics ${renderChangeCounts(report.metrics)}; variance ${renderChangeCounts(report.variance)}`,
+		),
+	];
+}
+
+function renderChangeCounts(counts: EvalChangeCountsV1): string {
+	return `improved=${counts.improved} regressed=${counts.regressed} unchanged=${counts.unchanged} incomparable=${counts.incomparable}`;
 }
 
 function compareTrackedMetrics(

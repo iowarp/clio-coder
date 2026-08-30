@@ -39,8 +39,14 @@ Run against the exact final candidate with `NO_COLOR` unset and
 7. `npm run ci` (runs 1 through 6)
 8. `npm run ci:release` (7 plus `scripts/check-release.mjs`: dist shebang
    integrity, version coherence between `package.json` and the top
-   `CHANGELOG.md` heading, the forbidden-file list, the required runtime
-   resources, and the tarball and unpacked size budgets)
+   `CHANGELOG.md` heading, the deterministic 26-scenario behavioral machinery
+   corpus against its checked baseline, the forbidden-file list, the required
+   runtime resources, and the tarball and unpacked size budgets). A baseline
+   mismatch prints reviewable evidence and names prompt- or recipe-affected
+   corpus results. For an intentional change, inspect that diff, run
+   `TMPDIR=/home/akougkas/.cache/clio-sprint-tmp node benchmarks/eval/check-behavioral-release.mjs --update`,
+   review `benchmarks/eval/behavioral-machinery-baseline.json`, and commit it
+   with the change.
 9. Optional: step 8 again under Node 24. Hosted CI gates on Node 22 alone,
    the `engines` floor; the weekly `flake-hunt` workflow carries Node 24.
    Repeat locally only when the cut touches runtime-sensitive code.
@@ -58,7 +64,17 @@ Run against the exact final candidate with `NO_COLOR` unset and
 12. Install that tarball into a clean temporary prefix with an empty
     `CLIO_CODER_HOME` and verify `--version`, `--help`, an empty-state non-TTY
     launch, `doctor`, and `uninstall --dry-run` without developer-local state.
-13. Interactive release testing, which this cut added because the release is
+13. Before interactive release testing, run the model-required public
+    behavioral corpus manually against the release target and built CLI:
+    `node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-model.yaml --target mini --clio-coder-entry dist/cli/index.js`
+    and
+    `node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-model-negative-control.yaml --target mini --clio-coder-entry dist/cli/index.js`.
+    Retain both Artifact v4 files as release evidence. The positive corpus must
+    report its scenario and role rows without an undeclared envelope mismatch;
+    the negative control must still record violated exploration and safety
+    labels. These model-dependent runs are manual and are never required by
+    ordinary deterministic CI. Continue with interactive release testing,
+    which this cut added because the release is
     almost entirely interactive surface: a tester agent drives the step-12
     install through real TUI sessions in a throwaway repository, one session
     per shipped feature, against local targets for the main session and a

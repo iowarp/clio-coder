@@ -103,7 +103,7 @@ tasks:
 | --- | --- | --- |
 | `version` | - | Must equal `2`. |
 | `suite` | `id`, `title`, `visibility`, `description` | Metadata identifying the evaluation suite. |
-| `matrix` | `targets[]`, `repeats` | Matrix of execution targets (specifying model and thinking flags) and the repetition count. |
+| `matrix` | `targets[]`, `repeats`, `dimensions[]` | Matrix of execution targets, repetition count, and the execution-envelope fields intentionally varied by the suite. |
 | `workspace` | `kind`, `path`, `url`, `commit`, `checkout`, `excludes` | Workspace strategy: `local` (run in-place), `git` (clone from URL), or `temp-copy` (isolated copy of a directory). |
 | `runner` | `kind`, `prompt`, `command`, `commands`, `args`, `timeoutMs` | Runner type: `clio-run` (starts Clio agent loop), `context-index` (runs indexer), `context-init` (initializes context), `external-command` (spawns subprocess). |
 | `behavioral` | `schema`, `corpus`, `execution`, `expectedBehavior`, `forbiddenBehavior`, `judge` | Optional `clio.eval.scenario.v1` behavioral contract. Rules name a closed category and a typed predicate over transcript, tool, receipt, or grader facts. |
@@ -352,6 +352,61 @@ Comparison output supports `text`, `json`, `md`, and `junit`. All four carry
 the same hard-gate result and closed classifications. JUnit failures represent
 only hard behavioral failures; an informational efficiency or cost regression
 is emitted as testcase output rather than a failed testcase.
+
+### Execution-envelope provenance and comparability
+
+Every newly written behavioral result carries an additive
+`clio.eval.execution-envelope.v1` sibling. Artifact v4,
+`clio.eval.verdict.v1`, and `clio.eval.behavior.metrics.v1` retain their
+existing identities. The envelope records the selected prompt fragment ids,
+authored versions or `unversioned` marker, fragment content hashes, prompt
+composition hash, recipe id/version/fingerprint when a worker recipe applies,
+target, wire model, runtime, thinking level, tool signature, effective
+autonomy, rule-pack and project-policy hashes, bounded project-context
+provenance, and corpus id/version. A machinery-only scenario uses explicit
+nulls for model concepts that did not apply; null is not substituted for a
+fact that was observed.
+
+Suite v2 may declare `matrix.dimensions` from `prompt`, `recipe`, `target`,
+`wireModel`, `runtime`, `thinkingLevel`, `toolSignature`, `autonomy`, `policy`,
+`projectContext`, and `corpus`. Comparison ignores only dimensions declared by
+both artifacts. Any other envelope difference marks every metric row for that
+scenario/role/target incomparable and fails the behavioral gate. A missing
+envelope on only one side is also incomparable. Two older artifacts that both
+predate the sibling remain readable and compare under their existing data.
+
+Text, JSON, Markdown, and JUnit comparison reports carry the same envelope
+mismatch. Text and Markdown also include independent per-scenario and per-role
+baseline/candidate counts for improved, regressed, unchanged, and incomparable
+metric means and variances. When the prompt or recipe identity changes, the
+generated evidence names each affected corpus scenario and role instead of
+hiding it behind an aggregate score.
+
+### Checked behavioral release baseline
+
+The checked deterministic baseline is
+`benchmarks/eval/behavioral-machinery-baseline.json`. The release gate runs all
+26 machinery-only scenarios through the built CLI and compares a stable
+projection of their labels, metrics, and execution envelopes with that file.
+It requires no model, private endpoint, credential, or mutable dataset.
+
+When an intentional prompt, recipe, policy, or expected-behavior change moves
+the evidence, run the same machinery suite first, inspect the failing diff and
+the named affected corpus results, then update explicitly:
+
+```sh
+npm run build
+TMPDIR=/home/akougkas/.cache/clio-sprint-tmp node benchmarks/eval/check-behavioral-release.mjs --update
+git diff -- benchmarks/eval/behavioral-machinery-baseline.json
+```
+
+The baseline update belongs in the reviewed change that caused it. Do not use
+the update command merely to make a red gate green. The model-required and
+negative-control suites remain manual release evidence because their outputs
+depend on a live target; they are never folded into the deterministic baseline.
+The projection excludes `latency.wallMs` because scheduler timing is not stable
+evidence. Behavioral labels, deterministic metrics, and the execution envelope
+remain checked byte for byte.
 
 ### Hard thresholds and informational budgets
 

@@ -315,12 +315,18 @@ async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 			process.stdout.write("gate: pass\n");
 			return 0;
 		}
-		const failureCount = gate.failures.length + comparison.hardGate.failures.length;
+		const failureCount =
+			gate.failures.length + comparison.hardGate.failures.length + comparison.hardGate.envelopeFailures.length;
 		process.stdout.write(`gate: fail (${failureCount} hard failure)\n`);
 		for (const failure of gate.failures) process.stdout.write(renderGateFailure(failure));
 		for (const failure of comparison.hardGate.failures) {
 			process.stdout.write(
 				`  ${failure.metric} [${failure.scenarioId}:${failure.role}:${failure.target.id}/${failure.target.model ?? "none"}]: ${failure.change} (hard behavioral gate)\n`,
+			);
+		}
+		for (const failure of comparison.hardGate.envelopeFailures) {
+			process.stdout.write(
+				`  execution envelope [${failure.scenarioId}:${failure.role}:${failure.target.id}/${failure.target.model ?? "none"}]: incomparable fields ${failure.fields.join(", ")}\n`,
 			);
 		}
 		return 1;

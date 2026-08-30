@@ -15,6 +15,29 @@ import type {
 export interface EvalLedgerSnapshot {
 	entries: SessionEntry[];
 	compiledPromptHashes: string[];
+	promptManifests: EvalPromptManifestObservation[];
+	contextSnapshots: EvalContextSnapshotObservation[];
+}
+
+export interface EvalPromptManifestObservation {
+	systemPromptHash: string;
+	thinkingLevel: string | null;
+	projectPreload: {
+		mode: "full" | "synopsis" | "none";
+		chars: number;
+		lines: number;
+		reason: string | null;
+		nearLimit: boolean;
+		label: string;
+	} | null;
+	fragments: Array<{ id: string; contentHash: string }>;
+}
+
+export interface EvalContextSnapshotObservation {
+	runtimeId: string | null;
+	modelId: string | null;
+	promptHash: string | null;
+	toolSignature: string | null;
 }
 
 export interface BuildEvalTrackedMetricsInput {
@@ -41,6 +64,8 @@ export async function readEvalLedgerSnapshot(stateDir: string): Promise<EvalLedg
 	const refs = await listSessionLedgerRefs(stateDir);
 	const entries: SessionEntry[] = [];
 	const compiledPromptHashes: string[] = [];
+	const promptManifests: EvalPromptManifestObservation[] = [];
+	const contextSnapshots: EvalContextSnapshotObservation[] = [];
 	for (const ref of refs) {
 		try {
 			const raw = await readFile(ref.path, "utf8");
@@ -52,14 +77,33 @@ export async function readEvalLedgerSnapshot(stateDir: string): Promise<EvalLedg
 			const manifest = await readFile(join(dirname(ref.path), "prompt-manifest.jsonl"), "utf8");
 			for (const line of manifest.split(/\r?\n/u)) {
 				const record = parseJsonRecord(line);
+				if (record === null) continue;
 				const hash = record?.systemPromptHash;
-				if (typeof hash === "string" && /^[a-f0-9]{64}$/u.test(hash)) compiledPromptHashes.push(hash);
+				if (typeof hash !== "string" || !/^[a-f0-9]{64}$/u.test(hash)) continue;
+				compiledPromptHashes.push(hash);
+				const observation = promptManifestObservation(record);
+				if (observation !== null) promptManifests.push(observation);
 			}
 		} catch {
 			// A missing manifest leaves compiled prompt provenance unresolved.
 		}
+		try {
+			const snapshots = await readFile(join(dirname(ref.path), "context-snapshots.jsonl"), "utf8");
+			for (const line of snapshots.split(/\r?\n/u)) {
+				const record = parseJsonRecord(line);
+				if (record === null) continue;
+				contextSnapshots.push({
+					runtimeId: nullableString(record.runtimeId),
+					modelId: nullableString(record.modelId),
+					promptHash: nullableDigest(record.promptHash),
+					toolSignature: nullableDigest(record.toolSignature),
+				});
+			}
+		} catch {
+			// A missing context snapshot leaves runtime and tool-surface provenance unresolved.
+		}
 	}
-	return { entries, compiledPromptHashes: [...new Set(compiledPromptHashes)] };
+	return { entries, compiledPromptHashes: [...new Set(compiledPromptHashes)], promptManifests, contextSnapshots };
 }
 
 /** Fold structured ledger calls and a sealed receipt into verdict metrics. */
@@ -317,6 +361,51 @@ function parseJsonRecord(line: string): Record<string, unknown> | null {
 	} catch {
 		return null;
 	}
+}
+
+function promptManifestObservation(record: Record<string, unknown>): EvalPromptManifestObservation | null {
+	const systemPromptHash = nullableDigest(record.systemPromptHash);
+	if (systemPromptHash === null || !Array.isArray(record.fragments)) return null;
+	const fragments = record.fragments.flatMap((entry) => {
+		if (!isRecord(entry) || typeof entry.id !== "string") return [];
+		const contentHash = nullableDigest(entry.contentHash);
+		return contentHash === null ? [] : [{ id: entry.id, contentHash }];
+	});
+	const preload = record.projectPreload;
+	const projectPreload: EvalPromptManifestObservation["projectPreload"] =
+		preload === null
+			? null
+			: isRecord(preload) &&
+					(preload.mode === "full" || preload.mode === "synopsis" || preload.mode === "none") &&
+					typeof preload.chars === "number" &&
+					Number.isInteger(preload.chars) &&
+					typeof preload.lines === "number" &&
+					Number.isInteger(preload.lines) &&
+					typeof preload.nearLimit === "boolean" &&
+					typeof preload.label === "string"
+				? {
+						mode: preload.mode as "full" | "synopsis" | "none",
+						chars: preload.chars,
+						lines: preload.lines,
+						reason: nullableString(preload.reason),
+						nearLimit: preload.nearLimit,
+						label: preload.label,
+					}
+				: null;
+	return {
+		systemPromptHash,
+		thinkingLevel: nullableString(record.thinkingLevel),
+		projectPreload,
+		fragments,
+	};
+}
+
+function nullableString(value: unknown): string | null {
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function nullableDigest(value: unknown): string | null {
+	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value) ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

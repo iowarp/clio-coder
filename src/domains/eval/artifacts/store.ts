@@ -5,6 +5,7 @@ import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { EvalArtifactV4, EvalTokenAccountingV4 } from "../schema/artifact.js";
 import { assertEvalBehaviorReferencesVerdictV1, parseEvalBehaviorVerdictV1 } from "../schema/behavioral.js";
 import { parseEvalBehaviorMetricsV1 } from "../schema/behavioral-metrics.js";
+import { parseEvalExecutionEnvelopeV1, parseEvalExecutionMatrixDimensionsV1 } from "../schema/execution-envelope.js";
 import { parseEvalServingConfigurationV1 } from "../schema/serving.js";
 import { parseEvalVerdictEnvelopeV1 } from "../schema/verdict.js";
 import { evalRoot } from "../store.js";
@@ -74,6 +75,9 @@ export function parseEvalArtifactV4(value: unknown, source: string): EvalArtifac
 			target: readString(matrix, `${source}.matrix`, "target"),
 			model: readNullableString(matrix, `${source}.matrix`, "model"),
 			thinking: readNullableString(matrix, `${source}.matrix`, "thinking"),
+			...(matrix.dimensions === undefined
+				? {}
+				: { dimensions: parseEvalExecutionMatrixDimensionsV1(matrix.dimensions, `${source}.matrix.dimensions`) }),
 		},
 		...(servingConfiguration === undefined ? {} : { servingConfiguration }),
 		summary: {
@@ -130,6 +134,10 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 		record.behavioralMetrics === undefined
 			? undefined
 			: parseEvalBehaviorMetricsV1(record.behavioralMetrics, `${source}.behavioralMetrics`);
+	const executionEnvelope =
+		record.executionEnvelope === undefined
+			? undefined
+			: parseEvalExecutionEnvelopeV1(record.executionEnvelope, `${source}.executionEnvelope`);
 	if (behavioral !== undefined && verdict === undefined) {
 		throw new Error(`${source}.behavioral: sibling document requires a verdict`);
 	}
@@ -146,6 +154,16 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 			behavioralMetrics.target.model !== readNullableString(target, `${source}.target`, "model")
 		) {
 			throw new Error(`${source}.behavioralMetrics.target: conflicts with result target`);
+		}
+	}
+	if (executionEnvelope !== undefined) {
+		if (behavioral === undefined) throw new Error(`${source}.executionEnvelope: requires a behavioral verdict`);
+		if (
+			executionEnvelope.target !== readString(target, `${source}.target`, "id") ||
+			executionEnvelope.corpus.id !== behavioral.corpus.id ||
+			executionEnvelope.corpus.version !== behavioral.corpus.version
+		) {
+			throw new Error(`${source}.executionEnvelope: conflicts with result target or behavioral corpus`);
 		}
 	}
 	return {
@@ -165,6 +183,7 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 		...(verdict === undefined ? {} : { verdict }),
 		...(behavioral === undefined ? {} : { behavioral }),
 		...(behavioralMetrics === undefined ? {} : { behavioralMetrics }),
+		...(executionEnvelope === undefined ? {} : { executionEnvelope }),
 	};
 }
 

@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
+import { buildEvalExecutionEnvelopeV1, type EvalExecutionObservationV1 } from "../execution-provenance.js";
 import { aggregateEvalVerdicts } from "../metrics/aggregate.js";
 import { collectContextMetrics } from "../metrics/context.js";
 import { fleetLoopReceiptAgreement } from "../metrics/fleet-loop-stream.js";
@@ -80,7 +81,7 @@ export async function runEvalSuiteV2(
 		// exceeds it, remaining items fail closed instead of running. A live
 		// suite can therefore never keep spending past its declared budget.
 		if (maxCostUsd !== undefined && spentUsd > maxCostUsd) {
-			results.push(budgetExhaustedResult(item.task, item.target, item.repeatIndex, spentUsd, maxCostUsd));
+			results.push(budgetExhaustedResult(loaded, item.task, item.target, item.repeatIndex, spentUsd, maxCostUsd));
 			continue;
 		}
 		const completed = await runMatrixItem(
@@ -107,6 +108,7 @@ export function resultCostUsd(result: Pick<EvalArtifactResultV4, "metrics">): nu
 }
 
 function budgetExhaustedResult(
+	loaded: LoadedEvalSuiteV2,
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	target: EvalSuiteTargetV2,
 	repeatIndex: number,
@@ -133,6 +135,7 @@ function budgetExhaustedResult(
 	};
 	result.verdict = adaptSuiteV2ResultToVerdictV1(result, emptyEvalTrackedMetrics());
 	attachBehavioralResult(result, task);
+	attachExecutionEnvelope(result, task, target, loaded.baseDir, null, emptyLedgerSnapshot());
 	return result;
 }
 
@@ -148,6 +151,7 @@ async function runMatrixItem(
 	let workspace: PreparedEvalWorkspace | null = null;
 	let receipt: EvalRunnerOutput["receipt"] = null;
 	let runnerWallTimeMs = 0;
+	let executionObservation: EvalExecutionObservationV1 | undefined;
 	// One matrix item, one Clio journal. An item measures Clio, and a shared
 	// state directory would mix sibling processes' runs and yesterday's sessions
 	// into the reading; pinning it here also means an item leaves nothing behind
@@ -173,6 +177,10 @@ async function runMatrixItem(
 		// Clio sealed for this item, judged against its own ledger, and whether
 		// the workers it attested are still running.
 		const journalMetrics = invariantMetrics(stateDir, receiptExitCode);
+		const measurement = await measureTaskOutcome(task, workspace.dir, {
+			CLIO_EVAL_RUNNER_STDOUT_FILE: runnerStdoutFile,
+		});
+		executionObservation = measurement.executionObservation;
 		const metrics: Record<string, number | string | boolean | null> = {
 			...zeroToolCallMetrics(),
 			...collectContextMetrics(workspace.dir),
@@ -188,7 +196,7 @@ async function runMatrixItem(
 			"patch.testFilesModified": patch.testFilesModified,
 			"result.pass": runner.exitCode === 0,
 			"result.failureClass": runner.exitCode === 0 ? null : "runner_failed",
-			...(await measureTaskOutcome(task, workspace.dir, { CLIO_EVAL_RUNNER_STDOUT_FILE: runnerStdoutFile })),
+			...measurement.metrics,
 		};
 		const verifier = await runVerifiers(task, workspace.dir, metrics);
 		const graderFailed = metrics["task.solved"] === false;
@@ -230,6 +238,7 @@ async function runMatrixItem(
 			}),
 		);
 		attachBehavioralResult(result, task);
+		attachExecutionEnvelope(result, task, target, workspace.dir, receipt ?? null, snapshot, executionObservation);
 		return {
 			result,
 			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
@@ -265,6 +274,15 @@ async function runMatrixItem(
 			}),
 		);
 		attachBehavioralResult(result, task);
+		attachExecutionEnvelope(
+			result,
+			task,
+			target,
+			workspace?.dir ?? loaded.baseDir,
+			receipt ?? null,
+			snapshot,
+			executionObservation,
+		);
 		return {
 			result,
 			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
@@ -283,6 +301,30 @@ function attachBehavioralResult(result: EvalArtifactResultV4, task: LoadedEvalSu
 	if (task.behavioral === undefined || result.verdict === undefined) return;
 	result.behavioral = adaptSuiteV2ResultToBehaviorV1(result, result.verdict, task.behavioral);
 	result.behavioralMetrics = buildEvalBehaviorMetricsV1(result, task.behavioral.execution.subject.role);
+}
+
+function attachExecutionEnvelope(
+	result: EvalArtifactResultV4,
+	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
+	target: EvalSuiteTargetV2,
+	cwd: string | null,
+	receipt: NonNullable<EvalRunnerOutput["receipt"]> | null,
+	ledger: Awaited<ReturnType<typeof readEvalLedgerSnapshot>>,
+	observation?: EvalExecutionObservationV1,
+): void {
+	if (task.behavioral === undefined) return;
+	result.executionEnvelope = buildEvalExecutionEnvelopeV1({
+		task,
+		target,
+		cwd,
+		receipt,
+		ledger,
+		...(observation === undefined ? {} : { observation }),
+	});
+}
+
+function emptyLedgerSnapshot(): Awaited<ReturnType<typeof readEvalLedgerSnapshot>> {
+	return { entries: [], compiledPromptHashes: [], promptManifests: [], contextSnapshots: [] };
 }
 
 /** Journal-derived invariants for one finished item, read from its isolated state directory. */
@@ -335,19 +377,27 @@ async function measureTaskOutcome(
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	cwd: string,
 	env?: NodeJS.ProcessEnv,
-): Promise<Record<string, number | boolean>> {
+): Promise<{ metrics: Record<string, number | boolean>; executionObservation?: EvalExecutionObservationV1 }> {
 	const commands = task.verify.measure ?? [];
-	if (commands.length === 0) return {};
+	if (commands.length === 0) return { metrics: {} };
 	const result = await runCommandVerifiers(commands, cwd, task.timeoutMs, env);
+	const behavioral = graderBehaviorMeasurement(result.stdout);
 	return {
-		"task.exitCode": result.exitCode,
-		"task.solved": result.exitCode === 0,
-		...graderBehaviorMetrics(result.stdout),
+		metrics: {
+			"task.exitCode": result.exitCode,
+			"task.solved": result.exitCode === 0,
+			...behavioral.metrics,
+		},
+		...(behavioral.executionObservation === undefined ? {} : { executionObservation: behavioral.executionObservation }),
 	};
 }
 
-function graderBehaviorMetrics(stdout: string): Record<string, number | boolean> {
+function graderBehaviorMeasurement(stdout: string): {
+	metrics: Record<string, number | boolean>;
+	executionObservation?: EvalExecutionObservationV1;
+} {
 	const metrics: Record<string, number | boolean> = {};
+	let executionObservation: EvalExecutionObservationV1 | undefined;
 	for (const line of stdout.split(/\r?\n/u)) {
 		if (line.trim().length === 0) continue;
 		let value: unknown;
@@ -356,13 +406,45 @@ function graderBehaviorMetrics(stdout: string): Record<string, number | boolean>
 		} catch {
 			continue;
 		}
-		if (!isRecord(value) || value.schema !== "clio.eval.measure.v1" || !isRecord(value.metrics)) continue;
-		for (const [key, metric] of Object.entries(value.metrics)) {
-			if (key !== "claims.unsupported" && key !== "completion.reported") continue;
-			if (typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric))) metrics[key] = metric;
+		if (!isRecord(value)) continue;
+		if (value.schema === "clio.eval.measure.v1" && isRecord(value.metrics)) {
+			for (const [key, metric] of Object.entries(value.metrics)) {
+				if (key !== "claims.unsupported" && key !== "completion.reported") continue;
+				if (typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric))) metrics[key] = metric;
+			}
+		}
+		if (value.schema === "clio.eval.execution-observation.v1") {
+			executionObservation = parseExecutionObservation(value);
 		}
 	}
-	return metrics;
+	return { metrics, ...(executionObservation === undefined ? {} : { executionObservation }) };
+}
+
+function parseExecutionObservation(value: Record<string, unknown>): EvalExecutionObservationV1 {
+	const policies = isRecord(value.policyHashes) ? value.policyHashes : {};
+	const project = isRecord(value.projectContext) ? value.projectContext : null;
+	return {
+		compositionHash: nullableDigest(value.compositionHash),
+		target: nullableString(value.target),
+		wireModel: nullableString(value.wireModel),
+		runtime: nullableString(value.runtime),
+		thinkingLevel: nullableString(value.thinkingLevel),
+		toolSignature: nullableDigest(value.toolSignature),
+		autonomy: nullableString(value.autonomy),
+		policyHashes: { rulePack: nullableDigest(policies.rulePack), project: nullableDigest(policies.project) },
+		projectContext:
+			project === null
+				? null
+				: {
+						tier: nullableString(project.tier),
+						contentHash: nullableDigest(project.contentHash),
+						chars: nullableNonNegativeInteger(project.chars),
+						sections: stringArray(project.sections),
+						rulesApplied: stringArray(project.rulesApplied),
+						operatorProfileApplied:
+							typeof project.operatorProfileApplied === "boolean" ? project.operatorProfileApplied : null,
+					},
+	};
 }
 
 async function runVerifiers(
@@ -423,7 +505,10 @@ function buildArtifact(
 		suite: { id: loaded.suite.suite.id, hash: loaded.hash },
 		clio: evalClioProvenance({ entry: clioEntry }),
 		environment: evalEnvironmentProvenance(),
-		matrix: artifactMatrixIdentity(loaded.suite.matrix.targets),
+		matrix: {
+			...artifactMatrixIdentity(loaded.suite.matrix.targets),
+			...(loaded.suite.matrix.dimensions === undefined ? {} : { dimensions: loaded.suite.matrix.dimensions }),
+		},
 		servingConfiguration,
 		summary: {
 			runs: results.length,
@@ -446,4 +531,20 @@ function assertionMessage(assertion: EvalMetricAssertion, actual: number | strin
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nullableString(value: unknown): string | null {
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function nullableDigest(value: unknown): string | null {
+	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value) ? value : null;
+}
+
+function nullableNonNegativeInteger(value: unknown): number | null {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function stringArray(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
