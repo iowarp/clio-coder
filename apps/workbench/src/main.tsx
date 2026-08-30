@@ -15,6 +15,7 @@ import {
 	WebSocketLocalTransport,
 } from "./protocol.ts";
 import { appReducer, initialAppState, parseBootstrapPayload } from "./state.ts";
+import { fetchWithNetworkRetry, reloadFailedStylesheets } from "./startup.ts";
 import "./styles.css";
 
 function App() {
@@ -29,12 +30,16 @@ function App() {
 
 		async function connect() {
 			try {
-				const response = await fetch("/api/bootstrap", {
-					headers: { accept: "application/json" },
-					cache: "no-store",
-					credentials: "same-origin",
-					signal: abortController.signal,
-				});
+				const response = await fetchWithNetworkRetry(
+					() =>
+						fetch("/api/bootstrap", {
+							headers: { accept: "application/json" },
+							cache: "no-store",
+							credentials: "same-origin",
+							signal: abortController.signal,
+						}),
+					abortController.signal,
+				);
 				if (!response.ok) throw new Error(`Bootstrap failed with HTTP ${response.status}.`);
 				const bootstrap = parseBootstrapPayload(await response.json());
 				if (!mounted) return;
@@ -224,4 +229,5 @@ function App() {
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error(`${PRODUCT_NAME} could not find its root element.`);
+reloadFailedStylesheets(document);
 createRoot(rootElement).render(<App />);

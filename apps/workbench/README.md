@@ -31,6 +31,11 @@ and each browser tab authenticates with the token the page carries, so a second 
 Local state (recent projects, session labels, layout) lives in `$CLIO_WORKBENCH_STATE_DIR`, else
 `$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`.
 
+Chrome cancels every in-flight request with `net::ERR_NETWORK_CHANGED` when a network interface appears or disappears,
+which WSL2 and VPN hosts do in the first seconds after launch. The page recovers from that on its own: a cancelled
+bootstrap request is retried three times over about 2.5 s before the failure screen appears, and a cancelled stylesheet
+is requested again (`src/startup.ts`). A cancelled font file falls back to the system stack.
+
 ## Install as an application
 
 The lifecycle lives in `scripts/gui-lifecycle.ts` and is wrapped by five tasks (`gui:compile` builds the binary without
@@ -83,6 +88,12 @@ deno run -A scripts/perf-workload.ts --label=NAME   # the rendering workload beh
 
 `/tmp` on the development machine is a small tmpfs; run the browser and test commands with `TMPDIR` pointing at a
 disk-backed directory. Screenshots land in `.artifacts/browser/`, perf reports in `.artifacts/perf/`.
+
+The smoke prints every request the browser dropped as `requestFailures`, and on an assertion failure it prints the
+dropped requests and console errors first. Before the launch recovery above, an interface change on the WSL2 machine
+failed about one run in eight with an assertion that only made sense once those lists were visible (a page that had
+rendered without its stylesheet). The two entries always present are the stylesheet and bootstrap requests the smoke
+cancels deliberately.
 
 ## Documents
 

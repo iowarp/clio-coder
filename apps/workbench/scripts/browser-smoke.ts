@@ -105,6 +105,7 @@ const running = await startWorkbenchServer({
 
 const browser = await chromium.launch({ executablePath: options.chrome, headless: true });
 const browserErrors: string[] = [];
+const requestFailures: string[] = [];
 
 try {
 	const context = await browser.newContext({
@@ -112,6 +113,12 @@ try {
 		colorScheme: "dark",
 		reducedMotion: "reduce",
 		deviceScaleFactor: 1,
+	});
+	// Request failures on any page are diagnostics, not verdicts: Chrome cancels
+	// in-flight requests with net::ERR_NETWORK_CHANGED whenever a WSL2 or VPN
+	// interface flaps, and the app is expected to recover from that (see below).
+	context.on("requestfailed", (request) => {
+		requestFailures.push(`${request.method()} ${request.url()} (${request.failure()?.errorText ?? "failed"})`);
 	});
 	const page = await context.newPage();
 	page.on("console", (message) => {
@@ -132,6 +139,34 @@ try {
 	equal(await page.getByRole("textbox", { name: "Prompt for Clio Coder" }).count(), 1);
 	equal(await page.getByText("No project open", { exact: true }).count(), 1);
 	await page.screenshot({ path: new URL("initial.png", artifactDirectory).pathname });
+
+	// A launch whose first stylesheet and bootstrap requests the browser cancels
+	// (what net::ERR_NETWORK_CHANGED does on WSL2) must still come up styled and
+	// connected: the app reloads the failed stylesheet and retries the bootstrap.
+	const flappingPage = await context.newPage();
+	flappingPage.on("pageerror", (error) => browserErrors.push(`page: ${error.message}`));
+	let stylesheetCancelled = false;
+	let bootstrapCancelled = false;
+	await flappingPage.route("**/*.css", (route) => {
+		stylesheetCancelled = true;
+		return route.abort("failed");
+	}, { times: 1 });
+	await flappingPage.route("**/api/bootstrap", (route) => {
+		bootstrapCancelled = true;
+		return route.abort("failed");
+	}, { times: 1 });
+	await flappingPage.goto(running.url, { waitUntil: "networkidle" });
+	await flappingPage.getByText("connected", { exact: true }).waitFor();
+	ok(stylesheetCancelled && bootstrapCancelled);
+	deepEqual(
+		await flappingPage.evaluate(() => ({
+			stylesheetRules: [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')]
+				.map((link) => (link.sheet?.cssRules.length ?? 0) > 0),
+			statusBarDisplay: getComputedStyle(document.querySelector(".status-bar")!).display,
+		})),
+		{ stylesheetRules: [true], statusBarDisplay: "flex" },
+	);
+	await flappingPage.close();
 
 	// The directory browser lists folders only and refuses the guarded home root.
 	await page.getByRole("button", { name: "Browse folders" }).click();
@@ -1266,6 +1301,7 @@ try {
 			scopedFileAndFolderLifecycle: true,
 			approvalTitleFlipped: true,
 			conversationSurvivedReload: true,
+			launchRecoveredFromCancelledStylesheetAndBootstrap: true,
 			conversationRendersMarkdownWithFoldedActivity: true,
 			sessionTimelineKeepsDraftAndScrollAcrossViews: true,
 			reportedUsageVisibleAndSurvivedReload: true,
@@ -1306,6 +1342,7 @@ try {
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
 			browserErrors: browserErrors.length,
+			requestFailures,
 			screenshots: [
 				"initial.png",
 				"browse-folder.png",
@@ -1344,6 +1381,11 @@ try {
 		null,
 		2,
 	));
+} catch (error) {
+	// The assertion that failed rarely names the cause; the requests the browser
+	// dropped and the console errors it logged usually do.
+	console.error(JSON.stringify({ browserErrors, requestFailures }, null, 2));
+	throw error;
 } finally {
 	await browser.close();
 	await running.close();
