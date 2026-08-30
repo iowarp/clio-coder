@@ -183,6 +183,30 @@ Deno.test("turn events fold into the projection and clear the pending submission
 	);
 });
 
+Deno.test("a frame batch folds every validated event in sequence with one reducer action", () => {
+	const state = readyState();
+	const started = serverEventFixture("turn.started", {
+		promptSummary: "Measure the frame batch.",
+		origin: "live",
+		startedAt: "2026-08-18T12:05:00.000Z",
+		source: "observed-by-workbench",
+	}, { sequence: 2 });
+	const first = serverEventFixture(
+		"turn.text",
+		{ text: "alpha ", source },
+		{ sequence: 3, eventId: "event-frame-alpha" },
+	);
+	const second = serverEventFixture(
+		"turn.text",
+		{ text: "beta", source },
+		{ sequence: 4, eventId: "event-frame-beta" },
+	);
+	const next = appReducer(state, { type: "host.events", events: [started, first, second] });
+
+	equal(next.lastSequence, 4);
+	equal(next.open?.projection.timeline.at(-1)?.summary, "alpha beta");
+});
+
 Deno.test("events for another project or an older sequence are ignored", () => {
 	const state = readyState();
 	const foreign = appReducer(state, {
@@ -224,6 +248,17 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 	equal(state.notice?.tone, "warning");
 	equal(state.pendingTurnStart, null);
 	equal(state.announcement, "Clio is still working on the previous prompt. Cancel it or wait.");
+
+	state = appReducer(state, { type: "config.inspect.submitted", requestId: "request-config" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio could not inspect configuration.",
+			requestId: "request-config",
+		}, { sequence: 3 }),
+	});
+	equal(state.pendingConfigInspect, null);
 });
 
 Deno.test("a protocol error fails the connection", () => {
@@ -256,7 +291,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, and target events land on the open workspace", () => {
+Deno.test("session, settings, configuration, and target events land on the open workspace", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -305,6 +340,24 @@ Deno.test("session, settings, and target events land on the open workspace", () 
 		}, { sequence: 5 }),
 	});
 	deepStrictEqual(state.open?.settings?.editable, ["orchestrator.target"]);
+
+	state = appReducer(state, { type: "config.inspect.submitted", requestId: "request-config" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("config.state", {
+			inspection: {
+				inspectedAt: "2026-08-29T12:00:00.000Z",
+				settings: [{ key: "autonomy", source: "project", value: "suggest", valueKind: "exact" }],
+				settingsTruncated: false,
+				entries: [],
+				entriesTruncated: false,
+				issueCounts: [],
+				issuesTruncated: false,
+			},
+		}, { sequence: 6 }),
+	});
+	equal(state.open?.configInspection?.settings[0]?.value, "suggest");
+	equal(state.pendingConfigInspect, null);
 });
 
 Deno.test("a browse listing is held until it is dismissed", () => {

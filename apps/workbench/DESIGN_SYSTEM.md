@@ -38,6 +38,10 @@ The desktop shell has three complementary regions and one status strip:
 4. **Status strip** — connection, bound-session facts, next-turn differences, next-session differences, autonomy, and
    current operation.
 
+On desktop, the Project atlas and Observatory must collapse independently. Collapsing either rail removes its layout
+track immediately and restores focus predictably when reopened; it must not cause a full-shell animated reflow while
+text is streaming.
+
 Below 1180 px the Observatory becomes a contained drawer. Below 790 px the Project atlas becomes a contained drawer as
 well. Both drawers must move focus into the panel, contain Tab, close with Escape or the scrim, restore focus to their
 trigger, and make the obscured application inert.
@@ -92,6 +96,21 @@ Color is always supplementary. Text, labels, shape, or pattern must carry the sa
 - Use short entrance and state-change transitions only when they clarify hierarchy or causality.
 - No continuous pulse, blinking cursor, animated fake waveform, or ambient dashboard motion.
 - Every transition must collapse under `prefers-reduced-motion`.
+
+### Streaming and scroll performance
+
+- Project narrative and visible reasoning at the browser's display cadence: batch only those high-frequency deltas with
+  `requestAnimationFrame`, retain wire order, and cap each buffered batch. Tool, approval, terminal, control, and error
+  events remain immediate and flush any preceding narrative first.
+- Keep the request editor's draft and scroll position inside an isolated component so incoming agent frames do not
+  reconcile the operator's keystrokes or textarea scroll.
+- Prefer native scrolling with stable gutters and local layout/paint containment on long text surfaces. Do not force
+  smooth scrolling, continuously measure geometry, or place backdrop filters and other expensive effects over moving
+  text.
+- Memoize settled evidence cards. Only the active card may receive a ticking duration, and high-frequency state must not
+  invalidate the rails, composer, or completed history.
+- Treat 120 Hz and higher displays as a first-class target: preserve input responsiveness and coalesce work to paints;
+  never add artificial timers merely to make streaming appear animated.
 
 ## Interaction language
 

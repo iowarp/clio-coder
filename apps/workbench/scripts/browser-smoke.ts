@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioLauncher } from "../clio-host.ts";
+import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
+import { configInspectionFixture } from "../tests/fixtures.ts";
 
 interface SmokeOptions {
 	readonly chrome: string;
@@ -71,6 +73,9 @@ const running = await startWorkbenchServer({
 	stateDir: join(scratchRoot, "state"),
 	homePath,
 	clioLauncher: fixtureLauncher("permission"),
+	configInspector: {
+		inspect: () => Promise.resolve(configInspectionFixture()),
+	} satisfies ClioConfigInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -164,6 +169,69 @@ try {
 	ok(desktopRailGeometry.scrollWidth <= desktopRailGeometry.clientWidth);
 	equal(desktopRailGeometry.scrollLeft, 0);
 
+	// The first broad read-only harness surface is a real, bounded Clio graph,
+	// not raw CLI JSON or a second configuration implementation in React.
+	await page.getByRole("button", { name: "Effective Clio", exact: true }).click();
+	const effectiveMap = page.getByRole("region", { name: "Effective Clio map" });
+	await effectiveMap.getByRole("heading", { name: "Why Clio behaves this way" }).waitFor();
+	await effectiveMap.getByText("From source to behavior", { exact: true }).waitFor();
+	await effectiveMap.getByText("CLIO-CODER.md", { exact: true }).first().waitFor();
+	await effectiveMap.getByText("qwen3.8-27b", { exact: true }).waitFor();
+	await effectiveMap.getByText("Project sources use project-relative paths", { exact: false }).waitFor();
+	equal(await effectiveMap.getByText("/home/", { exact: false }).count(), 0);
+	const configMapAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const configMapBlockingViolations = configMapAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		configMapBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("effective-clio.png", artifactDirectory).pathname, fullPage: true });
+	await effectiveMap.getByRole("button", { name: "Back to notebook" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// Desktop rails collapse independently, reclaim their full grid tracks, and
+	// return focus to the control that can reverse the operation.
+	const conversationWidth = () => page.locator(".conversation").evaluate((element) => element.clientWidth);
+	const initialConversationWidth = await conversationWidth();
+	await page.getByRole("button", { name: "Collapse projects, files, and sessions" }).click();
+	await page.locator("#project-rail").waitFor({ state: "hidden" });
+	const showProjects = page.getByRole("button", { name: "Show projects, files, and sessions" });
+	await showProjects.waitFor();
+	equal(await showProjects.evaluate((element) => element === document.activeElement), true);
+	ok(await conversationWidth() > initialConversationWidth + 200);
+	await showProjects.click();
+	await page.locator("#project-rail").waitFor({ state: "visible" });
+	equal(
+		await page.getByRole("button", { name: "Collapse projects, files, and sessions" }).evaluate((element) =>
+			element === document.activeElement
+		),
+		true,
+	);
+
+	await page.getByRole("button", { name: "Collapse run and evidence overview" }).click();
+	await page.locator("#evidence-rail").waitFor({ state: "hidden" });
+	const showEvidence = page.getByRole("button", { name: "Show run and evidence overview" });
+	await showEvidence.waitFor();
+	equal(await showEvidence.evaluate((element) => element === document.activeElement), true);
+	ok(await conversationWidth() > initialConversationWidth + 240);
+	await showEvidence.click();
+	await page.locator("#evidence-rail").waitFor({ state: "visible" });
+	equal(
+		await page.getByRole("button", { name: "Collapse run and evidence overview" }).evaluate((element) =>
+			element === document.activeElement
+		),
+		true,
+	);
+	equal(await conversationWidth(), initialConversationWidth);
+
 	// One real conversation: prompt, mediated approval, completed turn.
 	const composer = page.getByRole("textbox", { name: "Prompt for Clio" });
 	await composer.fill("Write the fixture note.");
@@ -172,6 +240,14 @@ try {
 	equal(await page.title(), "● Approval needed — Clio Workbench");
 	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
 	await page.screenshot({ path: new URL("permission.png", artifactDirectory).pathname });
+	const inProgressDraft = Array.from({ length: 24 }, (_, index) => `Draft line ${index + 1}`).join("\n");
+	await composer.fill(inProgressDraft);
+	const draftScrollTop = await composer.evaluate((element) => {
+		const textarea = element as HTMLTextAreaElement;
+		textarea.scrollTop = textarea.scrollHeight;
+		return textarea.scrollTop;
+	});
+	ok(draftScrollTop > 0);
 	// Both the banner and the anchored card offer the answer, so name which one.
 	equal(await page.getByRole("button", { name: "Allow once" }).count(), 2);
 	await page.locator(".approval-card").getByRole("button", { name: "Allow once" }).click();
@@ -181,6 +257,8 @@ try {
 	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
 	await page.locator(".token-ledger__row--input").getByText("5", { exact: true }).waitFor();
 	await page.getByText("Workbench does not infer a price.", { exact: false }).waitFor();
+	equal(await composer.inputValue(), inProgressDraft);
+	ok(await composer.evaluate((element) => (element as HTMLTextAreaElement).scrollTop) > 0);
 	await completedOutcome.scrollIntoViewIfNeeded();
 	await page.screenshot({ path: new URL("complete.png", artifactDirectory).pathname });
 
@@ -833,6 +911,9 @@ try {
 			targetProbedBeforeAnyHealthClaim: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
+			desktopRailsCollapseAndRestoreFocus: true,
+			streamUpdatesPreservedTheDraftAndItsScrollPosition: true,
+			effectiveClioMapUsesTheBoundedReadOnlyAdapter: true,
 			approvalBannerVisibleWhenScrolledAwayAndBlurred: true,
 			approvalAnsweredByKeyboardChord: true,
 			escalatedWithoutAnotherWireEvent: true,
@@ -843,12 +924,14 @@ try {
 			forcedColorsFocusVisible: true,
 			shortHeightRailScrollable: true,
 			desktopRailHasNoHorizontalOverflow: true,
-			seriousOrCriticalAccessibilityViolations: blockingViolations.length + compactBlockingViolations.length +
+			seriousOrCriticalAccessibilityViolations: configMapBlockingViolations.length + blockingViolations.length +
+				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
 			browserErrors: browserErrors.length,
 			screenshots: [
 				"initial.png",
+				"effective-clio.png",
 				"permission.png",
 				"complete.png",
 				"compact-project-drawer.png",

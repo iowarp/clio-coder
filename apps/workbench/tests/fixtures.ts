@@ -4,6 +4,7 @@ import {
 	type ServerEventOf,
 	type ServerEventPayloadByKind,
 	type WireClioSnapshot,
+	type WireConfigInspection,
 	type WireProjectWorkspace,
 	type WireSessionSummary,
 	type WireTimelineItem,
@@ -13,6 +14,65 @@ import type { WireBootstrap } from "../src/state.ts";
 
 export const FIXTURE_PROJECT_ID = "project-alpha-0001";
 export const FIXTURE_ROOT = "/tmp/workbench-fixture/alpha";
+
+export function configInspectionFixture(): WireConfigInspection {
+	return {
+		inspectedAt: "2026-08-29T12:00:00.000Z",
+		settings: [
+			{ key: "autonomy", source: "project", value: "suggest", valueKind: "exact" },
+			{ key: "orchestrator.model", source: "project", value: "qwen3.8-27b", valueKind: "exact" },
+			{ key: "retry.maxRetries", source: "user", value: "3", valueKind: "exact" },
+			{ key: "targets", source: "user", value: "4 items", valueKind: "collection" },
+		],
+		settingsTruncated: false,
+		entries: [
+			{
+				category: "clio-md",
+				id: "CLIO-CODER.md",
+				scope: "project",
+				sourcePath: { segments: ["CLIO-CODER.md"] },
+				hash: "a1b2c3d4",
+				trust: "trusted",
+				precedence: "single",
+				reloadClass: "next-turn",
+				contextCostTokens: 164,
+				facts: [{ label: "Preload", value: "included" }],
+			},
+			{
+				category: "rule",
+				id: "project-safety",
+				scope: "project",
+				sourcePath: { segments: [".clio-coder", "rules", "safety.yaml"] },
+				trust: "trusted",
+				precedence: "winner",
+				reloadClass: "next-turn",
+				contextCostTokens: 28,
+				facts: [{ label: "Enabled", value: "yes" }],
+			},
+			{
+				category: "extension",
+				id: "lab-notebook",
+				scope: "user",
+				trust: "untrusted",
+				precedence: "winner",
+				reloadClass: "restart",
+				facts: [{ label: "Version", value: "1.2.0" }, { label: "Effective", value: "yes" }],
+			},
+			{
+				category: "memory",
+				id: "memory-store",
+				scope: "user",
+				trust: "trusted",
+				precedence: "single",
+				reloadClass: "hot",
+				facts: [{ label: "Present", value: "yes" }, { label: "Records", value: "7" }],
+			},
+		],
+		entriesTruncated: false,
+		issueCounts: [{ surface: "hook", count: 1 }],
+		issuesTruncated: false,
+	};
+}
 
 export function clioSnapshotFixture(
 	phase: WireClioSnapshot["phase"] = "idle",
@@ -91,6 +151,7 @@ export function workspaceFixture(
 		pendingPermission: null,
 		deleteChallenge: null,
 		settings: null,
+		configInspection: null,
 		targets: null,
 		targetsTruncated: false,
 		processGeneration: "generation-alpha-0001",
@@ -142,6 +203,7 @@ const PROJECT_EVENT_KINDS = new Set<ServerEventKind>([
 	"clio.state",
 	"session.list",
 	"settings.state",
+	"config.state",
 	"targets.state",
 	"targets.probed",
 ]);

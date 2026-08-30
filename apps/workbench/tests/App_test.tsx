@@ -1,10 +1,11 @@
 import { equal, match, ok } from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
+import { EffectiveClioMap, type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
 import { appReducer, type AppState, initialAppState, parseBootstrapPayload } from "../src/state.ts";
 import {
 	bootstrapFixture,
 	clioSnapshotFixture,
+	configInspectionFixture,
 	FIXTURE_PROJECT_ID,
 	serverEventFixture,
 	sessionSummaryFixture,
@@ -33,6 +34,7 @@ const inertActions: WorkbenchActions = {
 	resolvePermission() {},
 	getSettings() {},
 	patchSettings() {},
+	inspectConfig() {},
 	listTargets() {},
 	probeTarget() {},
 	setAutonomy() {},
@@ -80,12 +82,39 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	match(html, /class="file-node file-node--file"/u);
 	match(html, /aria-label="Prompt for Clio"/u);
 	match(html, /Prompts go only to the Clio target you configured/u);
+	match(html, /Collapse projects, files, and sessions/u);
+	match(html, /Collapse run and evidence overview/u);
 	equal((html.match(/<main/gu) ?? []).length, 1);
 	equal((html.match(/<aside/gu) ?? []).length, 2);
 	ok(!html.includes("undefined"));
 	ok(!/engine/iu.test(html), "no product surface may mention an engine");
 	ok(!html.includes("activity-rail"));
 	ok(!html.includes("No prompt leaves this machine"));
+});
+
+Deno.test("the Effective Clio map renders provenance, apply timing, redaction, and bounded issues without raw JSON", () => {
+	const html = renderToStaticMarkup(
+		<EffectiveClioMap
+			inspection={configInspectionFixture()}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+
+	match(html, /Why Clio behaves this way/u);
+	match(html, /From source to behavior/u);
+	match(html, /Project context/u);
+	match(html, /Next turn/u);
+	match(html, /Restart/u);
+	match(html, /Estimated context cost/u);
+	match(html, /orchestrator\.model/u);
+	match(html, /qwen3\.8-27b/u);
+	match(html, /Clio could not fully inspect every surface/u);
+	match(html, /Project sources use project-relative paths/u);
+	ok(!html.includes("sourcePath"));
+	ok(!html.includes("issueCounts"));
+	ok(!html.includes("/home/"));
 });
 
 Deno.test("the observatory summarizes recorded facts without inventing telemetry", () => {

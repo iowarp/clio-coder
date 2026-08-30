@@ -1,9 +1,14 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
 import type { Dispatch, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { AUTONOMY_LEVELS, THINKING_LEVELS } from "./protocol.ts";
 import type {
 	WireAutonomyLevel,
 	WireClioPhase,
+	WireConfigInspection,
+	WireConfigSettingSource,
+	WireCustomizationCategory,
+	WireCustomizationEntry,
+	WireCustomizationReloadClass,
 	WireDeleteChallenge,
 	WireEventSource,
 	WirePendingPermission,
@@ -43,6 +48,7 @@ export interface WorkbenchActions {
 	resolvePermission(projectId: string, turnId: string, permissionId: string, decision: "allow-once" | "reject"): void;
 	getSettings(projectId: string): void;
 	patchSettings(projectId: string, patch: WireSettingsPatch): void;
+	inspectConfig(projectId: string): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
 	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
@@ -55,6 +61,7 @@ interface WorkbenchViewProps {
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
+type WorkspaceView = "notebook" | "effective-clio";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -220,6 +227,53 @@ const SESSION_STATE_LABELS: Record<WireSessionSummary["state"], string> = {
 };
 
 const UNKNOWN_SESSION_NOTE = "Clio cannot tell whether another process still holds this session.";
+
+const CUSTOMIZATION_CATEGORY_PRESENTATION: Record<
+	WireCustomizationCategory,
+	{ readonly label: string; readonly short: string; readonly description: string }
+> = {
+	settings: { label: "Settings", short: "SET", description: "Layered values that shape Clio's behavior." },
+	"clio-md": {
+		label: "Project context",
+		short: "CTX",
+		description: "CLIO-CODER.md context Clio can add to the next turn.",
+	},
+	rule: { label: "Rules", short: "RUL", description: "Project rules and conditional context boundaries." },
+	"operator-profile": {
+		label: "Operator profile",
+		short: "OPR",
+		description: "Declared operator preferences added to context.",
+	},
+	hook: { label: "Hooks", short: "HOK", description: "Middleware reactions loaded by Clio." },
+	extension: { label: "Extensions", short: "EXT", description: "Installed packages and their effective precedence." },
+	"skill-root": { label: "Skill roots", short: "SKL", description: "Locations Clio searches for skills." },
+	"prompt-root": { label: "Prompt roots", short: "PMT", description: "Locations Clio searches for saved prompts." },
+	agents: { label: "Agents", short: "AGT", description: "Agent recipe sources visible to this project." },
+	safety: { label: "Safety", short: "SAFE", description: "Effective working-freedom and safety facts." },
+	memory: { label: "Memory", short: "MEM", description: "The durable memory surface Clio can consult." },
+};
+
+const CUSTOMIZATION_CATEGORY_ORDER = Object.keys(
+	CUSTOMIZATION_CATEGORY_PRESENTATION,
+) as WireCustomizationCategory[];
+
+const RELOAD_PRESENTATION: Record<
+	WireCustomizationReloadClass,
+	{ readonly label: string; readonly description: string }
+> = {
+	hot: { label: "Now", description: "Clio reports this surface as hot-reloadable." },
+	"next-turn": { label: "Next turn", description: "Clio reads this surface when the next turn begins." },
+	restart: { label: "Restart", description: "A new Clio process is required before this changes." },
+	"n/a": { label: "Informational", description: "No apply timing is attached to this entry." },
+};
+
+const SETTING_SOURCE_LABELS: Record<WireConfigSettingSource, string> = {
+	"built-in": "Built in",
+	user: "User",
+	project: "Project",
+	"project.local": "Project local",
+	cli: "Command line",
+};
 
 function formatTimestamp(value: string): string {
 	const timestamp = new Date(value);
@@ -608,6 +662,8 @@ function ProjectRail({
 	onFileDialog,
 	onDeleteSession,
 	isDrawer,
+	desktopCollapsed,
+	onDesktopCollapse,
 	obscured,
 }: {
 	state: AppState;
@@ -618,13 +674,15 @@ function ProjectRail({
 	onFileDialog(dialog: FileDialog): void;
 	onDeleteSession(session: WireSessionSummary): void;
 	isDrawer: boolean;
+	desktopCollapsed: boolean;
+	onDesktopCollapse(): void;
 	obscured: boolean;
 }) {
 	const open = state.open;
 	// Only a live turn locks project switching; having no project open must never
 	// disable the control that opens one.
 	const busy = open !== null && isPromptBlocked(open);
-	const unavailable = obscured || (isDrawer && !state.leftDrawerOpen);
+	const unavailable = obscured || (isDrawer && !state.leftDrawerOpen) || (!isDrawer && desktopCollapsed);
 	return (
 		<aside
 			id="project-rail"
@@ -632,19 +690,20 @@ function ProjectRail({
 			aria-label="Projects, files, and sessions"
 			aria-hidden={unavailable ? true : undefined}
 			inert={unavailable}
+			hidden={!isDrawer && desktopCollapsed}
 		>
 			<div className="left-rail__brand">
 				<BrandLockup compact />
-				{isDrawer && (
-					<button
-						type="button"
-						className="icon-button left-rail__close"
-						onClick={() => dispatch({ type: "drawer.left", open: false })}
-					>
-						<Glyph>×</Glyph>
-						<span className="sr-only">Close projects and files</span>
-					</button>
-				)}
+				<button
+					type="button"
+					className="icon-button left-rail__close"
+					onClick={() => isDrawer ? dispatch({ type: "drawer.left", open: false }) : onDesktopCollapse()}
+				>
+					<Glyph>{isDrawer ? "×" : "‹"}</Glyph>
+					<span className="sr-only">
+						{isDrawer ? "Close projects and files" : "Collapse projects, files, and sessions"}
+					</span>
+				</button>
 			</div>
 
 			<section className="rail-section rail-section--projects" aria-labelledby="project-library-title">
@@ -815,7 +874,7 @@ function ProjectRail({
 /** A tool that has been open this long is worth saying so about, in seconds. */
 const LONG_RUNNING_TOOL_SECONDS = 30;
 
-function TimelineCard({ item, nowMs }: { item: WireTimelineItem; nowMs: number }) {
+const TimelineCard = memo(function TimelineCard({ item, nowMs }: { item: WireTimelineItem; nowMs: number }) {
 	const startedMs = item.startedAt === null ? Number.NaN : Date.parse(item.startedAt);
 	const activeSeconds = item.status === "active" && Number.isFinite(startedMs)
 		? Math.max(0, Math.floor((nowMs - startedMs) / 1_000))
@@ -852,7 +911,7 @@ function TimelineCard({ item, nowMs }: { item: WireTimelineItem; nowMs: number }
 			</div>
 		</article>
 	);
-}
+});
 
 function PermissionCard({
 	permission,
@@ -1012,6 +1071,10 @@ function EvidenceRail({
 	isDrawer,
 	drawerOpen,
 	onClose,
+	desktopCollapsed,
+	onDesktopCollapse,
+	workspaceView,
+	onOpenConfigMap,
 	obscured,
 }: {
 	state: AppState;
@@ -1019,6 +1082,10 @@ function EvidenceRail({
 	isDrawer: boolean;
 	drawerOpen: boolean;
 	onClose(): void;
+	desktopCollapsed: boolean;
+	onDesktopCollapse(): void;
+	workspaceView: WorkspaceView;
+	onOpenConfigMap(): void;
 	obscured: boolean;
 }) {
 	const open = state.open;
@@ -1038,9 +1105,15 @@ function EvidenceRail({
 		(maximum, field) => visibleUsage.totals[field.key] > maximum ? visibleUsage.totals[field.key] : maximum,
 		0n,
 	);
+	const configInspection = open?.configInspection ?? null;
+	const configContextTokens = configInspection?.entries.reduce(
+		(total, entry) => total + (entry.contextCostTokens ?? 0),
+		0,
+	) ?? 0;
+	const configIssues = configInspection?.issueCounts.reduce((total, issue) => total + issue.count, 0) ?? 0;
 	const startedMs = activeTurn === null ? Number.NaN : Date.parse(activeTurn.startedAt);
 	const activeSeconds = Number.isFinite(startedMs) ? Math.max(0, Math.floor((nowMs - startedMs) / 1_000)) : 0;
-	const unavailable = obscured || (isDrawer && !drawerOpen);
+	const unavailable = obscured || (isDrawer && !drawerOpen) || (!isDrawer && desktopCollapsed);
 
 	return (
 		<aside
@@ -1049,18 +1122,23 @@ function EvidenceRail({
 			aria-label="Run and evidence overview"
 			aria-hidden={unavailable ? true : undefined}
 			inert={unavailable}
+			hidden={!isDrawer && desktopCollapsed}
 		>
 			<header className="evidence-rail__header">
 				<div>
 					<div className="eyebrow">OBSERVATORY</div>
 					<h2>Run record</h2>
 				</div>
-				{isDrawer && (
-					<button type="button" className="icon-button evidence-rail__close" onClick={onClose}>
-						<Glyph>×</Glyph>
-						<span className="sr-only">Close run and evidence overview</span>
-					</button>
-				)}
+				<button
+					type="button"
+					className="icon-button evidence-rail__close"
+					onClick={isDrawer ? onClose : onDesktopCollapse}
+				>
+					<Glyph>{isDrawer ? "×" : "›"}</Glyph>
+					<span className="sr-only">
+						{isDrawer ? "Close run and evidence overview" : "Collapse run and evidence overview"}
+					</span>
+				</button>
 			</header>
 
 			<div className="evidence-rail__scroll" tabIndex={0} role="region" aria-label="Run and evidence details">
@@ -1136,6 +1214,50 @@ function EvidenceRail({
 									</div>
 								</dl>
 							)}
+					</section>
+				)}
+
+				{open !== null && (
+					<section className="observer-section observer-section--effective" aria-labelledby="observer-effective-title">
+						<div className="eyebrow">CONFIGURATION PROVENANCE</div>
+						<h3 id="observer-effective-title">Why Clio behaves this way</h3>
+						{configInspection === null
+							? (
+								<p className="observer-note">
+									{state.pendingConfigInspect === null
+										? "The read-only Effective Clio inspection has not produced a map yet."
+										: "Clio is inspecting settings, context, rules, resources, and apply timing."}
+								</p>
+							)
+							: (
+								<dl className="effective-summary">
+									<div>
+										<dt>Setting facts</dt>
+										<dd>{configInspection.settings.length}</dd>
+									</div>
+									<div>
+										<dt>Surfaces</dt>
+										<dd>{configInspection.entries.length}</dd>
+									</div>
+									<div>
+										<dt>Context estimate</dt>
+										<dd>{configContextTokens > 0 ? `~${configContextTokens}` : "—"}</dd>
+									</div>
+									<div>
+										<dt>Issues</dt>
+										<dd>{configIssues}</dd>
+									</div>
+								</dl>
+							)}
+						<button
+							type="button"
+							className="button button--quiet observer-map-button"
+							aria-pressed={workspaceView === "effective-clio"}
+							onClick={onOpenConfigMap}
+						>
+							<span aria-hidden="true">⌘</span>
+							{workspaceView === "effective-clio" ? "Effective map open" : "Open Effective Clio map"}
+						</button>
 					</section>
 				)}
 
@@ -1268,33 +1390,497 @@ function EvidenceRail({
 	);
 }
 
+function settingFamily(key: string): string {
+	return key.split(/[.[]/u, 1)[0] ?? key;
+}
+
+function entrySource(entry: WireCustomizationEntry): string {
+	if (entry.sourcePath === undefined) return `${entry.scope} scope`;
+	const path = formatProjectPath(entry.sourcePath);
+	return path === "/" ? "project root" : path;
+}
+
+function scopeLabel(scope: string): string {
+	switch (scope.toLocaleLowerCase("en-US")) {
+		case "project":
+			return "Project";
+		case "project.local":
+			return "Project local";
+		case "user":
+			return "User";
+		case "package":
+			return "Package";
+		case "extension":
+			return "Extension";
+		case "cli":
+			return "Command line";
+		default:
+			return scope;
+	}
+}
+
+function formatContextEstimate(value: number): string {
+	return `~${new Intl.NumberFormat().format(value)}`;
+}
+
+export const EffectiveClioMap = memo(function EffectiveClioMap({
+	inspection,
+	pending,
+	onRefresh,
+	onBack,
+}: {
+	inspection: WireConfigInspection | null;
+	pending: boolean;
+	onRefresh(): void;
+	onBack(): void;
+}) {
+	if (inspection === null) {
+		return (
+			<section
+				className="effective-map effective-map--empty"
+				aria-labelledby="effective-clio-title"
+				aria-busy={pending}
+			>
+				<div className="effective-map__empty-instrument" aria-hidden="true">
+					<span>01</span>
+					<i />
+					<span>03</span>
+				</div>
+				<div>
+					<div className="eyebrow">READ-ONLY CLIO INSPECTION</div>
+					<h2 id="effective-clio-title">Build the map behind Clio's behavior</h2>
+					<p>
+						Workbench asks Clio which settings, context, rules, hooks, extensions, resources, safety, and memory
+						surfaces are effective for this project. Raw values and paths outside the project stay on the host.
+					</p>
+				</div>
+				<div className="effective-map__empty-actions">
+					<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+						{pending ? "Inspecting with Clio…" : "Inspect Effective Clio"}
+					</button>
+					<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+				</div>
+				<p className="effective-map__boundary">
+					This command is read-only and runs independently of the live ACP control lane.
+				</p>
+			</section>
+		);
+	}
+
+	const categoryGroups = CUSTOMIZATION_CATEGORY_ORDER.map((category) => ({
+		category,
+		entries: inspection.entries.filter((entry) => entry.category === category),
+	})).filter((group) => group.entries.length > 0);
+	const settingGroups = [...new Set(inspection.settings.map((setting) => settingFamily(setting.key)))].map((
+		family,
+	) => ({
+		family,
+		settings: inspection.settings.filter((setting) => settingFamily(setting.key) === family),
+	})).sort((left, right) => left.family.localeCompare(right.family, "en-US"));
+	const sourceCounts = new Map<string, number>();
+	for (const setting of inspection.settings) {
+		const label = SETTING_SOURCE_LABELS[setting.source];
+		sourceCounts.set(label, (sourceCounts.get(label) ?? 0) + 1);
+	}
+	for (const entry of inspection.entries) {
+		const label = scopeLabel(entry.scope);
+		sourceCounts.set(label, (sourceCounts.get(label) ?? 0) + 1);
+	}
+	const sources = [...sourceCounts.entries()].sort((left, right) =>
+		right[1] - left[1] || left[0].localeCompare(right[0])
+	);
+	const reloads = (Object.keys(RELOAD_PRESENTATION) as WireCustomizationReloadClass[]).map((reloadClass) => ({
+		reloadClass,
+		count: inspection.entries.filter((entry) => entry.reloadClass === reloadClass).length,
+	})).filter((entry) => entry.count > 0);
+	const contextTokens = inspection.entries.reduce((total, entry) => total + (entry.contextCostTokens ?? 0), 0);
+	const issueTotal = inspection.issueCounts.reduce((total, issue) => total + issue.count, 0);
+	const restartCount = inspection.entries.filter((entry) => entry.reloadClass === "restart").length;
+
+	return (
+		<section className="effective-map" aria-labelledby="effective-clio-title">
+			<header className="effective-map__masthead">
+				<div>
+					<div className="eyebrow">EFFECTIVE CLIO · REPORTED BY CLIO</div>
+					<h2 id="effective-clio-title">Why Clio behaves this way</h2>
+					<p>
+						A bounded snapshot of the layers Clio says it loaded, where they came from, and when a change takes effect.
+					</p>
+				</div>
+				<div className="effective-map__masthead-actions">
+					<span>{pending ? "Refreshing inspection…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
+					<div>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+							Refresh map
+						</button>
+					</div>
+				</div>
+			</header>
+
+			<dl className="effective-map__summary" aria-label="Effective Clio inspection summary">
+				<div>
+					<dt>Effective setting facts</dt>
+					<dd>{inspection.settings.length}</dd>
+					<dd className="effective-map__summary-note">
+						{inspection.settingsTruncated ? "bounded result" : "reported in this snapshot"}
+					</dd>
+				</div>
+				<div>
+					<dt>Customization surfaces</dt>
+					<dd>{inspection.entries.length}</dd>
+					<dd className="effective-map__summary-note">{categoryGroups.length} represented categories</dd>
+				</div>
+				<div>
+					<dt>Estimated context cost</dt>
+					<dd>{contextTokens === 0 ? "—" : formatContextEstimate(contextTokens)}</dd>
+					<dd className="effective-map__summary-note">
+						{contextTokens === 0 ? "none reported" : "tokens across costed entries"}
+					</dd>
+				</div>
+				<div>
+					<dt>Needs a restart</dt>
+					<dd>{restartCount}</dd>
+					<dd className="effective-map__summary-note">
+						{issueTotal === 0 ? "no reported inspection issues" : `${issueTotal} reported issues`}
+					</dd>
+				</div>
+			</dl>
+
+			<section className="effective-map__flow" aria-labelledby="effective-flow-title">
+				<div className="effective-map__section-heading">
+					<div className="eyebrow">INFLUENCE PATH</div>
+					<h3 id="effective-flow-title">From source to behavior</h3>
+				</div>
+				<div className="effective-flow">
+					<div className="effective-flow__stage effective-flow__stage--sources">
+						<span className="effective-flow__index">01</span>
+						<h4>Sources</h4>
+						<p>Scopes and setting layers Clio inspected.</p>
+						<ul>
+							{sources.slice(0, 8).map(([source, count]) => (
+								<li key={source}>
+									<span>{source}</span>
+									<strong>{count}</strong>
+								</li>
+							))}
+						</ul>
+					</div>
+					<span className="effective-flow__connector" aria-hidden="true">→</span>
+					<div className="effective-flow__stage effective-flow__stage--layers">
+						<span className="effective-flow__index">02</span>
+						<h4>Loaded layers</h4>
+						<p>Bounded surfaces in the effective graph.</p>
+						<ul>
+							{categoryGroups.map(({ category, entries }) => (
+								<li key={category}>
+									<code>{CUSTOMIZATION_CATEGORY_PRESENTATION[category].short}</code>
+									<span>{CUSTOMIZATION_CATEGORY_PRESENTATION[category].label}</span>
+									<strong>{entries.length}</strong>
+								</li>
+							))}
+						</ul>
+					</div>
+					<span className="effective-flow__connector" aria-hidden="true">→</span>
+					<div className="effective-flow__stage effective-flow__stage--timing">
+						<span className="effective-flow__index">03</span>
+						<h4>Apply timing</h4>
+						<p>When Clio says each surface can change behavior.</p>
+						<ul>
+							{reloads.map(({ reloadClass, count }) => (
+								<li key={reloadClass}>
+									<span>{RELOAD_PRESENTATION[reloadClass].label}</span>
+									<strong>{count}</strong>
+									<small>{RELOAD_PRESENTATION[reloadClass].description}</small>
+								</li>
+							))}
+						</ul>
+					</div>
+				</div>
+			</section>
+
+			<div className="effective-map__catalogs">
+				<section className="config-catalog" aria-labelledby="customization-catalog-title">
+					<div className="effective-map__section-heading">
+						<div>
+							<div className="eyebrow">CUSTOMIZATION INVENTORY</div>
+							<h3 id="customization-catalog-title">What Clio loaded</h3>
+						</div>
+						<strong>{inspection.entries.length}</strong>
+					</div>
+					{categoryGroups.length === 0
+						? <p className="config-catalog__empty">Clio reported no customization entries for this project.</p>
+						: categoryGroups.map(({ category, entries }, categoryIndex) => {
+							const presentation = CUSTOMIZATION_CATEGORY_PRESENTATION[category];
+							return (
+								<details className="config-category" open={categoryIndex < 2} key={category}>
+									<summary>
+										<code>{presentation.short}</code>
+										<span>
+											<strong>{presentation.label}</strong>
+											<small>{presentation.description}</small>
+										</span>
+										<b>{entries.length}</b>
+									</summary>
+									<ul className="config-entry-list">
+										{entries.map((entry, entryIndex) => (
+											<li className="config-entry" key={`${entry.id}:${entry.scope}:${entryIndex}`}>
+												<div className="config-entry__heading">
+													<div>
+														<strong>{entry.id}</strong>
+														<span>{entrySource(entry)}</span>
+													</div>
+													{entry.hash && <code title="Content fingerprint">#{entry.hash}</code>}
+												</div>
+												<div className="config-entry__badges">
+													<span>{RELOAD_PRESENTATION[entry.reloadClass].label}</span>
+													{entry.trust && <span>{entry.trust}</span>}
+													{entry.precedence && <span>{entry.precedence}</span>}
+													{entry.contextCostTokens !== undefined && (
+														<span>{formatContextEstimate(entry.contextCostTokens)} context tokens</span>
+													)}
+												</div>
+												{entry.facts.length > 0 && (
+													<dl className="config-entry__facts">
+														{entry.facts.map((entryFact) => (
+															<div key={entryFact.label}>
+																<dt>{entryFact.label}</dt>
+																<dd>{entryFact.value}</dd>
+															</div>
+														))}
+													</dl>
+												)}
+											</li>
+										))}
+									</ul>
+								</details>
+							);
+						})}
+					{inspection.entriesTruncated && (
+						<p className="config-catalog__note">The entry inventory reached Workbench's display bound.</p>
+					)}
+				</section>
+
+				<section className="settings-catalog" aria-labelledby="settings-catalog-title">
+					<div className="effective-map__section-heading">
+						<div>
+							<div className="eyebrow">EFFECTIVE SETTING FACTS</div>
+							<h3 id="settings-catalog-title">What each layer set</h3>
+						</div>
+						<strong>{inspection.settings.length}</strong>
+					</div>
+					<p className="settings-catalog__lede">
+						Exact values appear only for the small public-safe set and non-sensitive numbers or booleans. Everything
+						else says configured without copying the raw value.
+					</p>
+					{settingGroups.length === 0
+						? <p className="config-catalog__empty">Clio reported only built-in defaults.</p>
+						: settingGroups.map(({ family, settings }, groupIndex) => (
+							<details
+								className="setting-family"
+								open={family === "orchestrator" || family === "autonomy" || groupIndex === 0}
+								key={family}
+							>
+								<summary>
+									<code>{family}</code>
+									<span>{settings.length}</span>
+								</summary>
+								<div className="setting-table-wrap">
+									<table>
+										<thead>
+											<tr>
+												<th>Exact key</th>
+												<th>Effective value</th>
+												<th>Source</th>
+											</tr>
+										</thead>
+										<tbody>
+											{settings.map((setting) => (
+												<tr key={setting.key}>
+													<th scope="row">
+														<code>{setting.key}</code>
+													</th>
+													<td className={`is-${setting.valueKind}`}>{setting.value}</td>
+													<td>{SETTING_SOURCE_LABELS[setting.source]}</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</div>
+							</details>
+						))}
+					{inspection.settingsTruncated && (
+						<p className="config-catalog__note">The setting inventory reached Workbench's display bound.</p>
+					)}
+				</section>
+			</div>
+
+			{inspection.issueCounts.length > 0 && (
+				<section className="config-issues" aria-labelledby="config-issues-title">
+					<div>
+						<div className="eyebrow">INSPECTION ISSUES</div>
+						<h3 id="config-issues-title">Clio could not fully inspect every surface</h3>
+						<p>
+							Raw diagnostic text and native paths remain on the host. Use the CLI when the exact repair detail is
+							needed.
+						</p>
+					</div>
+					<ul>
+						{inspection.issueCounts.map((issue) => (
+							<li key={issue.surface}>
+								<span>{issue.surface}</span>
+								<strong>{issue.count}</strong>
+							</li>
+						))}
+					</ul>
+					{inspection.issuesTruncated && <p>The issue summary reached Workbench's display bound.</p>}
+				</section>
+			)}
+
+			<footer className="effective-map__method">
+				<strong>Boundary note</strong>
+				<p>
+					Project sources use project-relative paths. User, package, and extension locations are named only by scope.
+					Values marked configured are deliberately redacted; this map never receives credentials, raw environment
+					values, stderr, or generic CLI detail.
+				</p>
+			</footer>
+		</section>
+	);
+});
+
+interface PromptEditorHandle {
+	useExample(prompt: string): void;
+}
+
+interface PromptEditorProps {
+	projectId: string | null;
+	activeTurnId: string | null;
+	occupied: boolean;
+	pendingTurnStart: boolean;
+	actions: WorkbenchActions;
+}
+
+/**
+ * The editor owns its text so stream-frame state changes do not reconcile the
+ * textarea the operator is actively typing or scrolling. Its scalar props are
+ * stable for the lifetime of a turn, while the live status above it can update
+ * independently at the display cadence.
+ */
+const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor(
+	{ projectId, activeTurnId, occupied, pendingTurnStart, actions },
+	ref,
+) {
+	const [prompt, setPrompt] = useState("");
+	const textarea = useRef<HTMLTextAreaElement>(null);
+	const canSubmit = projectId !== null && !occupied && !pendingTurnStart && prompt.trim().length > 0;
+
+	useImperativeHandle(ref, () => ({
+		useExample(example: string): void {
+			setPrompt(example);
+			requestAnimationFrame(() => textarea.current?.focus());
+		},
+	}), []);
+
+	function submit(event: FormEvent): void {
+		event.preventDefault();
+		const value = prompt.trim();
+		if (!canSubmit || projectId === null) return;
+		actions.startTurn(projectId, value);
+		setPrompt("");
+	}
+
+	function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+		if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return;
+		event.preventDefault();
+		event.currentTarget.form?.requestSubmit();
+	}
+
+	return (
+		<form className="composer__entry" onSubmit={submit}>
+			<div className="composer__input-row">
+				<textarea
+					ref={textarea}
+					value={prompt}
+					onChange={(event) => setPrompt(event.target.value)}
+					onKeyDown={onKeyDown}
+					placeholder={projectId === null ? "Open a project first" : "Ask Clio to do something in this project"}
+					aria-label="Prompt for Clio"
+					rows={3}
+					disabled={projectId === null}
+				/>
+				{activeTurnId !== null
+					? (
+						<button
+							type="button"
+							className="composer__submit composer__submit--cancel"
+							onClick={() => projectId !== null && actions.cancelTurn(projectId, activeTurnId)}
+						>
+							Stop
+						</button>
+					)
+					: (
+						<button type="submit" className="composer__submit" disabled={!canSubmit}>
+							Send
+						</button>
+					)}
+			</div>
+			<div className="composer__footer">
+				{occupied && activeTurnId === null && (
+					<span className="composer__notice">Clio is finishing the previous prompt.</span>
+				)}
+				<span className="composer__shortcut">Ctrl or Cmd + Enter sends</span>
+				<span className="composer__privacy">Prompts go only to the Clio target you configured.</span>
+			</div>
+		</form>
+	);
+}));
+
 function ConversationCanvas({
 	state,
 	dispatch,
 	actions,
 	obscured,
 	nowMs,
+	projectRailIsDrawer,
+	projectRailCollapsed,
+	onProjectRailToggle,
+	inspectorIsDrawer,
+	inspectorCollapsed,
 	inspectorOpen,
 	onInspectorToggle,
+	workspaceView,
+	onWorkspaceViewChange,
+	onNotebookOpen,
+	onRefreshConfig,
 }: {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
 	actions: WorkbenchActions;
 	obscured: boolean;
 	nowMs: number;
+	projectRailIsDrawer: boolean;
+	projectRailCollapsed: boolean;
+	onProjectRailToggle(): void;
+	inspectorIsDrawer: boolean;
+	inspectorCollapsed: boolean;
 	inspectorOpen: boolean;
 	onInspectorToggle(): void;
+	workspaceView: WorkspaceView;
+	onWorkspaceViewChange(view: WorkspaceView): void;
+	onNotebookOpen(): void;
+	onRefreshConfig(): void;
 }) {
 	const open = state.open;
-	const [prompt, setPrompt] = useState("");
-	const promptRef = useRef<HTMLTextAreaElement>(null);
+	const promptEditor = useRef<PromptEditorHandle>(null);
 	const projection = open?.projection ?? null;
 	const activeTurn = projection?.activeTurn ?? null;
 	const pendingPermission = projection?.pendingPermission ?? null;
 	const elapsed = useElapsedSeconds(activeTurn?.startedAt ?? null);
 	const busy = isPromptBlocked(open);
 	const clioOccupied = open !== null && busy;
-	const canSubmit = open !== null && !busy && prompt.trim().length > 0 && state.pendingTurnStart === null;
+	const projectControlVisible = projectRailIsDrawer || projectRailCollapsed;
+	const evidenceControlVisible = inspectorIsDrawer || inspectorCollapsed;
 	const permissionWait = pendingPermission === null
 		? 0
 		: Math.max(0, Math.floor((nowMs - Date.parse(pendingPermission.requestedAt)) / 1_000));
@@ -1305,23 +1891,8 @@ function ConversationCanvas({
 		actions.resolvePermission(open.project.id, activeTurn.turnId, pendingPermission.permissionId, decision);
 	}
 
-	function submit(event: FormEvent) {
-		event.preventDefault();
-		if (!canSubmit || open === null) return;
-		actions.startTurn(open.project.id, prompt.trim());
-		setPrompt("");
-	}
-
-	function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-		if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-			event.preventDefault();
-			submit(event as unknown as FormEvent);
-		}
-	}
-
 	function startFromExample(example: string): void {
-		setPrompt(example);
-		requestAnimationFrame(() => promptRef.current?.focus());
+		promptEditor.current?.useExample(example);
 	}
 
 	return (
@@ -1331,21 +1902,27 @@ function ConversationCanvas({
 			aria-hidden={obscured ? true : undefined}
 			inert={obscured}
 		>
-			<header className="conversation__header">
-				<div className="mobile-controls">
+			<header
+				className={`conversation__header${projectControlVisible ? " has-project-control" : ""}${
+					evidenceControlVisible ? " has-evidence-control" : ""
+				}`}
+			>
+				<div className={`mobile-controls rail-control--project${projectControlVisible ? " is-visible" : ""}`}>
 					<button
 						type="button"
 						className="icon-button"
 						aria-controls="project-rail"
-						aria-expanded={state.leftDrawerOpen}
-						onClick={() => dispatch({ type: "drawer.left", open: !state.leftDrawerOpen })}
+						aria-expanded={projectRailIsDrawer ? state.leftDrawerOpen : !projectRailCollapsed}
+						onClick={onProjectRailToggle}
 					>
-						<Glyph>≡</Glyph>
-						<span className="sr-only">Open projects and files</span>
+						<Glyph>{projectRailIsDrawer ? "≡" : "›"}</Glyph>
+						<span className="sr-only">
+							{projectRailIsDrawer ? "Open projects and files" : "Show projects, files, and sessions"}
+						</span>
 					</button>
 				</div>
 				<div className="conversation__identity">
-					<div className="eyebrow">ACTIVE PROJECT</div>
+					<div className="eyebrow">{workspaceView === "effective-clio" ? "EFFECTIVE CLIO FOR" : "ACTIVE PROJECT"}</div>
 					<h1>{open === null ? "No project open" : open.project.displayName}</h1>
 					{open && <p className="conversation__root">{open.project.rootPath}</p>}
 				</div>
@@ -1356,6 +1933,16 @@ function ConversationCanvas({
 							label={PHASE_PRESENTATION[open.clio.phase].label}
 						/>
 					)}
+					{open && (
+						<button
+							type="button"
+							className="button button--quiet"
+							aria-pressed={workspaceView === "effective-clio"}
+							onClick={() => onWorkspaceViewChange(workspaceView === "effective-clio" ? "notebook" : "effective-clio")}
+						>
+							{workspaceView === "effective-clio" ? "Notebook" : "Effective Clio"}
+						</button>
+					)}
 					<button
 						type="button"
 						className="button button--quiet"
@@ -1364,16 +1951,22 @@ function ConversationCanvas({
 						Settings
 					</button>
 				</div>
-				<div className="mobile-controls mobile-controls--evidence">
+				<div
+					className={`mobile-controls mobile-controls--evidence rail-control--evidence${
+						evidenceControlVisible ? " is-visible" : ""
+					}`}
+				>
 					<button
 						type="button"
 						className="icon-button"
 						aria-controls="evidence-rail"
-						aria-expanded={inspectorOpen}
+						aria-expanded={inspectorIsDrawer ? inspectorOpen : !inspectorCollapsed}
 						onClick={onInspectorToggle}
 					>
-						<Glyph>◫</Glyph>
-						<span className="sr-only">Open run and evidence overview</span>
+						<Glyph>{inspectorIsDrawer ? "◫" : "‹"}</Glyph>
+						<span className="sr-only">
+							{inspectorIsDrawer ? "Open run and evidence overview" : "Show run and evidence overview"}
+						</span>
 					</button>
 				</div>
 			</header>
@@ -1388,62 +1981,80 @@ function ConversationCanvas({
 			)}
 
 			{/* Focusable so a keyboard user can scroll the conversation without a pointer. */}
-			<div className="conversation__scroll" tabIndex={0} role="region" aria-label="Conversation history">
-				{open === null ? <FirstRunGuide state={state} onBrowse={() => actions.browseProjects()} /> : (
-					<>
-						{open.clio.lastFailure && (
-							<section className="conversation__failure" role="status">
-								<div className="eyebrow">CLIO REPORTED A FAILURE</div>
-								<p>{open.clio.lastFailure.summary}</p>
-								<code>{open.clio.lastFailure.code}</code>
+			<div
+				className="conversation__scroll"
+				tabIndex={0}
+				role="region"
+				aria-label={workspaceView === "effective-clio" ? "Effective Clio map" : "Conversation history"}
+			>
+				{open !== null && workspaceView === "effective-clio"
+					? (
+						<EffectiveClioMap
+							inspection={open.configInspection}
+							pending={state.pendingConfigInspect !== null}
+							onRefresh={onRefreshConfig}
+							onBack={onNotebookOpen}
+						/>
+					)
+					: open === null
+					? <FirstRunGuide state={state} onBrowse={() => actions.browseProjects()} />
+					: (
+						<>
+							{open.clio.lastFailure && (
+								<section className="conversation__failure" role="status">
+									<div className="eyebrow">CLIO REPORTED A FAILURE</div>
+									<p>{open.clio.lastFailure.summary}</p>
+									<code>{open.clio.lastFailure.code}</code>
+								</section>
+							)}
+							{(projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true) && (
+								<p className="timeline-note">Earlier turns are not shown; Clio still has the full context.</p>
+							)}
+							<section
+								className="evidence-timeline"
+								aria-label="Request, work, approval, and outcome timeline"
+								aria-live="polite"
+							>
+								{projection === null || projection.timeline.length === 0
+									? (
+										<div className="timeline-empty">
+											<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
+											<div>
+												<div className="eyebrow">NEW RESEARCH THREAD</div>
+												<h2>What would you like to understand or change?</h2>
+												<p>Start in your own words, or use one of these as a starting point.</p>
+											</div>
+											<div className="starter-prompts" aria-label="Example prompts">
+												{STARTER_PROMPTS.map((example) => (
+													<button
+														type="button"
+														key={example}
+														onClick={() => startFromExample(example)}
+													>
+														<span aria-hidden="true">↗</span>
+														{example}
+													</button>
+												))}
+											</div>
+										</div>
+									)
+									: projection.timeline.map((item) => (
+										<TimelineCard item={item} nowMs={item.status === "active" ? nowMs : 0} key={item.id} />
+									))}
 							</section>
-						)}
-						{(projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true) && (
-							<p className="timeline-note">Earlier turns are not shown; Clio still has the full context.</p>
-						)}
-						<section
-							className="evidence-timeline"
-							aria-label="Request, work, approval, and outcome timeline"
-							aria-live="polite"
-						>
-							{projection === null || projection.timeline.length === 0
-								? (
-									<div className="timeline-empty">
-										<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
-										<div>
-											<div className="eyebrow">NEW RESEARCH THREAD</div>
-											<h2>What would you like to understand or change?</h2>
-											<p>Start in your own words, or use one of these as a starting point.</p>
-										</div>
-										<div className="starter-prompts" aria-label="Example prompts">
-											{STARTER_PROMPTS.map((example) => (
-												<button
-													type="button"
-													key={example}
-													onClick={() => startFromExample(example)}
-												>
-													<span aria-hidden="true">↗</span>
-													{example}
-												</button>
-											))}
-										</div>
-									</div>
-								)
-								: projection.timeline.map((item) => <TimelineCard item={item} nowMs={nowMs} key={item.id} />)}
-						</section>
-						{pendingPermission !== null && activeTurn !== null && (
-							<PermissionCard
-								permission={pendingPermission}
-								escalated={permissionEscalated}
-								elapsed={permissionWait}
-								onResolve={resolvePending}
-							/>
-						)}
-					</>
-				)}
+							{pendingPermission !== null && activeTurn !== null && (
+								<PermissionCard
+									permission={pendingPermission}
+									escalated={permissionEscalated}
+									elapsed={permissionWait}
+									onResolve={resolvePending}
+								/>
+							)}
+						</>
+					)}
 			</div>
 
-			<form className="composer" onSubmit={submit}>
+			<div className={`composer${activeTurn !== null ? " composer--active" : ""}`}>
 				<div className="composer__mode">
 					<span className="composer__mode-label">
 						{open === null ? "START" : clioOccupied ? "RUNNING" : "MESSAGE"}
@@ -1458,41 +2069,15 @@ function ConversationCanvas({
 							: "Ready for your next prompt."}
 					</span>
 				</div>
-				<div className="composer__input-row">
-					<textarea
-						ref={promptRef}
-						value={prompt}
-						onChange={(event) => setPrompt(event.target.value)}
-						onKeyDown={onComposerKeyDown}
-						placeholder={open === null ? "Open a project first" : "Ask Clio to do something in this project"}
-						aria-label="Prompt for Clio"
-						rows={3}
-						disabled={open === null}
-					/>
-					{activeTurn
-						? (
-							<button
-								type="button"
-								className="composer__submit composer__submit--cancel"
-								onClick={() => open && actions.cancelTurn(open.project.id, activeTurn.turnId)}
-							>
-								Stop
-							</button>
-						)
-						: (
-							<button type="submit" className="composer__submit" disabled={!canSubmit}>
-								Send
-							</button>
-						)}
-				</div>
-				<div className="composer__footer">
-					{clioOccupied && !activeTurn && (
-						<span className="composer__notice">Clio is finishing the previous prompt.</span>
-					)}
-					<span className="composer__shortcut">Ctrl or Cmd + Enter sends</span>
-					<span className="composer__privacy">Prompts go only to the Clio target you configured.</span>
-				</div>
-			</form>
+				<PromptEditor
+					ref={promptEditor}
+					projectId={open?.project.id ?? null}
+					activeTurnId={activeTurn?.turnId ?? null}
+					occupied={clioOccupied}
+					pendingTurnStart={state.pendingTurnStart !== null}
+					actions={actions}
+				/>
+			</div>
 		</main>
 	);
 }
@@ -2088,6 +2673,10 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	const [selectedNode, setSelectedNode] = useState<WireTreeNode | null>(null);
 	const [sessionToDelete, setSessionToDelete] = useState<WireSessionSummary | null>(null);
 	const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
+	const [projectRailCollapsed, setProjectRailCollapsed] = useState(false);
+	const [evidenceRailCollapsed, setEvidenceRailCollapsed] = useState(false);
+	const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notebook");
+	const automaticallyInspectedProject = useRef<string | null>(null);
 	const previousLeftDrawerOpen = useRef(state.leftDrawerOpen);
 	const previousEvidenceDrawerOpen = useRef(evidenceDrawerOpen);
 	const pendingPermission = open?.projection.pendingPermission ?? null;
@@ -2111,11 +2700,25 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		setSelectedNode(null);
 		setSessionToDelete(null);
 		setEvidenceDrawerOpen(false);
+		setWorkspaceView("notebook");
 	}, [open?.project.id]);
+
+	useEffect(() => {
+		if (
+			state.connection !== "connected" || open === null || open.configInspection !== null ||
+			automaticallyInspectedProject.current === open.project.id
+		) return;
+		automaticallyInspectedProject.current = open.project.id;
+		actions.inspectConfig(open.project.id);
+	}, [actions, open?.project.id, state.connection]);
 
 	useEffect(() => {
 		if (!evidenceRailIsDrawer) setEvidenceDrawerOpen(false);
 	}, [evidenceRailIsDrawer]);
+
+	useEffect(() => {
+		if (!leftRailIsDrawer && state.leftDrawerOpen) dispatch({ type: "drawer.left", open: false });
+	}, [dispatch, leftRailIsDrawer, state.leftDrawerOpen]);
 
 	useEffect(() => {
 		if (leftRailIsDrawer && state.leftDrawerOpen) {
@@ -2134,6 +2737,51 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		}
 		previousEvidenceDrawerOpen.current = evidenceDrawerOpen;
 	}, [evidenceDrawerOpen, evidenceRailIsDrawer]);
+
+	function collapseProjectRail(): void {
+		setProjectRailCollapsed(true);
+		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".rail-control--project button")?.focus());
+	}
+
+	function toggleProjectRail(): void {
+		if (leftRailIsDrawer) {
+			dispatch({ type: "drawer.left", open: !state.leftDrawerOpen });
+			return;
+		}
+		setProjectRailCollapsed(false);
+		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".left-rail__close")?.focus());
+	}
+
+	function collapseEvidenceRail(): void {
+		setEvidenceRailCollapsed(true);
+		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".rail-control--evidence button")?.focus());
+	}
+
+	function toggleEvidenceRail(): void {
+		if (evidenceRailIsDrawer) {
+			setEvidenceDrawerOpen((current) => !current);
+			return;
+		}
+		setEvidenceRailCollapsed(false);
+		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".evidence-rail__close")?.focus());
+	}
+
+	const changeWorkspaceView = useCallback((view: WorkspaceView): void => {
+		setWorkspaceView(view);
+	}, []);
+
+	const openNotebook = useCallback((): void => {
+		setWorkspaceView("notebook");
+	}, []);
+
+	const openConfigMap = useCallback((): void => {
+		setWorkspaceView("effective-clio");
+		setEvidenceDrawerOpen(false);
+	}, []);
+
+	const refreshConfig = useCallback((): void => {
+		if (open !== null) actions.inspectConfig(open.project.id);
+	}, [actions, open?.project.id]);
 
 	useEffect(() => {
 		if (modalIsOpen || !leftDrawerObscures) return;
@@ -2210,7 +2858,11 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	if (state.boot === "failed") return <FailureScreen message={state.bootError ?? "Workbench could not start."} />;
 
 	return (
-		<div className="workbench-shell">
+		<div
+			className={`workbench-shell${projectRailCollapsed ? " is-project-rail-collapsed" : ""}${
+				evidenceRailCollapsed ? " is-evidence-rail-collapsed" : ""
+			}`}
+		>
 			<div className="ambient-grid" aria-hidden="true" />
 			<div className="sr-only" aria-live="assertive" aria-atomic="true">{state.announcement}</div>
 			<div className="sr-only" aria-live="assertive" aria-atomic="true">
@@ -2233,6 +2885,8 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onFileDialog={setFileDialog}
 				onDeleteSession={setSessionToDelete}
 				isDrawer={leftRailIsDrawer}
+				desktopCollapsed={projectRailCollapsed}
+				onDesktopCollapse={collapseProjectRail}
 				obscured={modalIsOpen || evidenceDrawerObscures}
 			/>
 			<ConversationCanvas
@@ -2241,8 +2895,17 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				actions={actions}
 				obscured={backgroundObscured}
 				nowMs={nowMs}
+				projectRailIsDrawer={leftRailIsDrawer}
+				projectRailCollapsed={projectRailCollapsed}
+				onProjectRailToggle={toggleProjectRail}
+				inspectorIsDrawer={evidenceRailIsDrawer}
+				inspectorCollapsed={evidenceRailCollapsed}
 				inspectorOpen={evidenceDrawerOpen}
-				onInspectorToggle={() => setEvidenceDrawerOpen((current) => !current)}
+				onInspectorToggle={toggleEvidenceRail}
+				workspaceView={workspaceView}
+				onWorkspaceViewChange={changeWorkspaceView}
+				onNotebookOpen={openNotebook}
+				onRefreshConfig={refreshConfig}
 			/>
 			<EvidenceRail
 				state={state}
@@ -2250,6 +2913,10 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				isDrawer={evidenceRailIsDrawer}
 				drawerOpen={evidenceDrawerOpen}
 				onClose={() => setEvidenceDrawerOpen(false)}
+				desktopCollapsed={evidenceRailCollapsed}
+				onDesktopCollapse={collapseEvidenceRail}
+				workspaceView={workspaceView}
+				onOpenConfigMap={openConfigMap}
 				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus

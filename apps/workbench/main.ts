@@ -1,4 +1,5 @@
 import { extname } from "node:path";
+import { ClioCliConfigInspector, ClioConfigInspectError, type ClioConfigInspector } from "./clio-config-inspector.ts";
 import {
 	type ClioLauncher,
 	ClioProjectHost,
@@ -11,6 +12,7 @@ import type { AcpClientTiming } from "./acp-client.ts";
 import { ProjectStore, ProjectStoreError, type ProjectSummary, type ProjectTreeNode } from "./project-store.ts";
 import {
 	type ClientCommand,
+	type ClientCommandOf,
 	type CommandErrorCode,
 	encodeServerEvent,
 	MAX_CLIENT_FRAME_BYTES,
@@ -21,6 +23,7 @@ import {
 	type ServerEventKind,
 	type ServerEventPayloadByKind,
 	validateServerEvent,
+	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
@@ -99,6 +102,8 @@ export interface WorkbenchServerOptions {
 	mode?: "browser" | "desktop";
 	distRoot?: URL;
 	clioLauncher?: ClioLauncher;
+	/** Overrides the fixed read-only Clio configuration adapter (tests). */
+	configInspector?: ClioConfigInspector;
 	/** Overrides the Workbench state directory (tests). */
 	stateDir?: string;
 	/** Overrides `$HOME` for the guards and browser (tests). */
@@ -218,6 +223,7 @@ interface OpenProject {
 	tree: readonly WireTreeNode[];
 	treeTruncated: boolean;
 	deleteChallenge: WireDeleteChallenge | null;
+	configInspection: WireConfigInspection | null;
 }
 
 type EventContext = { projectId?: string; processGeneration?: string; sessionId?: string; turnId?: string };
@@ -228,6 +234,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #store: ProjectStore;
 	readonly #state: WorkbenchState;
 	readonly #launcher: ClioLauncher;
+	readonly #configInspector: ClioConfigInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
@@ -240,6 +247,7 @@ class WorkbenchRuntime implements HostSink {
 	#open: OpenProject | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
+	#readCommandQueue: Promise<void> = Promise.resolve();
 	#graceTimer: ReturnType<typeof setTimeout> | null = null;
 	#closed = false;
 
@@ -250,7 +258,12 @@ class WorkbenchRuntime implements HostSink {
 			& Required<Pick<WorkbenchServerOptions, "quiet" | "mode" | "distRoot" | "disconnectGraceMs">>
 			& Pick<
 				WorkbenchServerOptions,
-				"clioLauncher" | "permissionEscalateMs" | "permissionBudgetMs" | "promptTimeoutMs" | "acpTiming"
+				| "clioLauncher"
+				| "configInspector"
+				| "permissionEscalateMs"
+				| "permissionBudgetMs"
+				| "promptTimeoutMs"
+				| "acpTiming"
 			>,
 	) {
 		this.#store = store;
@@ -259,6 +272,9 @@ class WorkbenchRuntime implements HostSink {
 		this.#mode = options.mode;
 		this.#distRoot = normalizeStaticRoot(options.distRoot);
 		this.#launcher = options.clioLauncher ?? defaultClioLauncher();
+		this.#configInspector = options.configInspector ?? new ClioCliConfigInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
 		this.#hostOptions = {
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
@@ -291,7 +307,7 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; Clio's own state and settings are never read or written by Workbench.`,
+				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; Clio reads its own configuration when Workbench requests a bounded, redacted inspection, and that inspection never writes it.`,
 			securityNote: SECURITY_NOTE,
 		};
 	}
@@ -338,6 +354,7 @@ class WorkbenchRuntime implements HostSink {
 			pendingPermission: open.projection.pendingPermission,
 			deleteChallenge: open.deleteChallenge,
 			settings: open.host.settings,
+			configInspection: open.configInspection,
 			targets: open.host.targets,
 			targetsTruncated: open.host.targetsTruncated,
 			processGeneration: open.host.generation,
@@ -365,7 +382,10 @@ class WorkbenchRuntime implements HostSink {
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#clearGrace();
-		await this.#commandQueue.catch(() => undefined);
+		await Promise.all([
+			this.#commandQueue.catch(() => undefined),
+			this.#readCommandQueue.catch(() => undefined),
+		]);
 		const open = this.#open;
 		this.#open = null;
 		if (open !== null) {
@@ -439,6 +459,12 @@ class WorkbenchRuntime implements HostSink {
 	// ---------------------------------------------------------------- commands
 
 	handleCommand(session: SocketSession, command: ClientCommand): Promise<void> {
+		// Read-only CLI adapters have their own serialized lane. They may run
+		// alongside the owned ACP child, but can never delay Stop, permission,
+		// project, or session controls on the primary lane.
+		if (command.kind === "config.inspect") {
+			return this.#serializeRead(() => this.#dispatchConfigInspect(session, command));
+		}
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
 
@@ -446,6 +472,35 @@ class WorkbenchRuntime implements HostSink {
 		const queued = this.#commandQueue.then(operation, operation);
 		this.#commandQueue = queued.then(() => undefined, () => undefined);
 		return queued;
+	}
+
+	#serializeRead<T>(operation: () => Promise<T>): Promise<T> {
+		const queued = this.#readCommandQueue.then(operation, operation);
+		this.#readCommandQueue = queued.then(() => undefined, () => undefined);
+		return queued;
+	}
+
+	async #dispatchConfigInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"config.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#configInspector.inspect(open.project.identity.canonicalPath);
+			// Project switching and inspection are intentionally concurrent. A late
+			// result belongs only to the exact OpenProject instance that requested it.
+			if (this.#closed || this.#open !== open) return;
+			open.configInspection = inspection;
+			this.#broadcast("config.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
 	}
 
 	#requireOpen(projectId: string): OpenProject {
@@ -678,6 +733,7 @@ class WorkbenchRuntime implements HostSink {
 			tree: [],
 			treeTruncated: false,
 			deleteChallenge: null,
+			configInspection: null,
 		};
 		this.#open = open;
 		try {
@@ -823,6 +879,7 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (error instanceof WorkbenchStateError) return { code: error.code, message: error.message };
 		if (error instanceof HostError) return { code: error.code, message: error.message };
+		if (error instanceof ClioConfigInspectError) return { code: error.code, message: error.message };
 		if (!this.#quiet) console.error("Workbench command failed", error);
 		return { code: "internal", message: "The local command could not be completed." };
 	}
@@ -945,6 +1002,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		distRoot: options.distRoot ?? new URL("./dist/", import.meta.url),
 		disconnectGraceMs: options.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS,
 		...(options.clioLauncher === undefined ? {} : { clioLauncher: options.clioLauncher }),
+		...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),
