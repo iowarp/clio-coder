@@ -192,7 +192,7 @@ async function initializeAndCreateSession(harness: FixtureHarness): Promise<void
 		protocolVersion: 1,
 		agentInfo: {
 			name: "clio-coder",
-			title: "Clio Workbench ACP fixture",
+			title: "Clio Coder ACP fixture",
 			version: "0.0.0",
 		},
 		agentCapabilities: {
@@ -236,8 +236,8 @@ function assertSafeFailure(harness: FixtureHarness, expectedCode: AcpFailure["co
 	equal(
 		observed.failure.message,
 		expectedCode === "protocol-failure"
-			? "The Clio ACP connection violated its bounded protocol."
-			: "The owned Clio ACP process exited unexpectedly.",
+			? "The Clio Coder ACP connection violated its bounded protocol."
+			: "The owned Clio Coder ACP process exited unexpectedly.",
 	);
 }
 
@@ -523,7 +523,7 @@ Deno.test("a minimal tool update inherits the already validated start identity a
 	});
 });
 
-Deno.test("an exact 16 KiB UTF-8 Clio delta remains within the wire bound", async () => {
+Deno.test("an exact 16 KiB UTF-8 Clio Coder delta remains within the wire bound", async () => {
 	await withFixture("unicode-delta", async (harness) => {
 		await initializeAndCreateSession(harness);
 		equal((await prompt(harness.client) as { stopReason?: unknown }).stopReason, "end_turn");
@@ -535,7 +535,7 @@ Deno.test("an exact 16 KiB UTF-8 Clio delta remains within the wire bound", asyn
 	});
 });
 
-Deno.test("a Clio text delta beyond 16 KiB UTF-8 bytes fails the connection closed", async () => {
+Deno.test("a Clio Coder text delta beyond 16 KiB UTF-8 bytes fails the connection closed", async () => {
 	await withFixture("unicode-delta-oversize", async (harness) => {
 		await initializeAndCreateSession(harness);
 		await rejects(
@@ -838,7 +838,7 @@ Deno.test("a duplicate response resolves once and then fails the connection clos
 	});
 });
 
-Deno.test("remote JSON-RPC errors expose only bounded Clio metadata and a generic local message", async () => {
+Deno.test("remote JSON-RPC errors expose only bounded Clio Coder metadata and a generic local message", async () => {
 	await withFixture("remote-error-protocol-version", async (harness) => {
 		let observed: unknown;
 		try {

@@ -379,8 +379,8 @@ Deno.test("outside-root locations are dropped as untrusted presentation without 
 
 for (
 	const [scenario, summary] of [
-		["initialize-version-invalid", "Clio returned an invalid ACP initialize result."],
-		["initialize-capabilities-missing", "Clio returned unsupported ACP capabilities."],
+		["initialize-version-invalid", "Clio Coder returned an invalid ACP initialize result."],
+		["initialize-capabilities-missing", "Clio Coder returned unsupported ACP capabilities."],
 	] as const
 ) {
 	Deno.test(`${scenario} fails the open before any session exists`, async () => {
@@ -401,7 +401,7 @@ for (
 	});
 }
 
-Deno.test("a Clio that advertises session loading is accepted rather than refused", async () => {
+Deno.test("a Clio Coder that advertises session loading is accepted rather than refused", async () => {
 	const test = await harness("initialize-capabilities-unsupported");
 	try {
 		equal(test.host.snapshot().capabilities?.load, true);
@@ -418,7 +418,7 @@ Deno.test("allowlisted protocol metadata reports only numeric versions", async (
 		await rejects(test.host.open(), assertHostError("not-ready"));
 		deepStrictEqual(test.host.snapshot().lastFailure, {
 			code: "clio-protocol-version-unsupported",
-			summary: "Clio does not support the ACP protocol version required by Workbench. Supported versions: 1.",
+			summary: "Clio Coder does not support the ACP protocol version required by the GUI. Supported versions: 1.",
 		});
 		ok(!JSON.stringify(test.sink.events).includes("unsupported protocol version"));
 	} finally {
@@ -432,7 +432,7 @@ Deno.test("unknown remote metadata fails the ACP connection without renderer exp
 		await rejects(test.host.open(), assertHostError("not-ready"));
 		deepStrictEqual(test.host.snapshot().lastFailure, {
 			code: "acp-protocol-failure",
-			summary: "The Clio ACP connection violated its bounded protocol.",
+			summary: "The Clio Coder ACP connection violated its bounded protocol.",
 		});
 		const projection = JSON.stringify(test.sink.events) + JSON.stringify(test.host.snapshot());
 		for (
@@ -470,7 +470,7 @@ Deno.test("an allowlisted admission reason maps to fixed public code and prose",
 			{
 				outcome: "failed",
 				code: "clio-admission-model-not-configured",
-				summary: "Clio has no model configured for the orchestrator. Choose one in Settings.",
+				summary: "Clio Coder has no model configured for the orchestrator. Choose one in Settings.",
 				source: "reported-by-clio",
 			},
 		);
@@ -718,7 +718,7 @@ Deno.test("a permission capability from a retired generation cannot settle the n
 	}
 });
 
-Deno.test("an unanswered approval stops the turn without ever telling Clio no", async () => {
+Deno.test("an unanswered approval stops the turn without ever telling Clio Coder no", async () => {
 	const test = await harness("permission", {
 		permissionEscalateMs: 40,
 		permissionBudgetMs: 120,
@@ -736,7 +736,7 @@ Deno.test("an unanswered approval stops the turn without ever telling Clio no", 
 		const terminal = await waitForEvent(test.sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
 		equal(terminal.payload.outcome, "canceled");
 		equal(terminal.payload.code, "approval-unanswered");
-		ok(terminal.payload.summary.includes("Clio was not told no"));
+		ok(terminal.payload.summary.includes("Clio Coder was not told no"));
 		await rejects(
 			test.host.resolvePermission(context.turnId, permission.payload.permissionId, "allow_once"),
 			assertHostError("not-found"),
@@ -1140,7 +1140,7 @@ Deno.test("one session serves three prompts and each one sees the ones before it
 	}
 });
 
-Deno.test("a bound session carries the target, model, and autonomy Clio attributed", async () => {
+Deno.test("a bound session carries the target, model, and autonomy Clio Coder attributed", async () => {
 	const test = await harness("conversation");
 	try {
 		const snapshot = test.host.snapshot();
@@ -1216,7 +1216,7 @@ Deno.test("a load result with false resumed attribution retires the child visibl
 		equal(test.host.snapshot().session, null);
 		deepStrictEqual(test.host.snapshot().lastFailure, {
 			code: "acp-contract-failure",
-			summary: "Clio returned inconsistent session resume attribution.",
+			summary: "Clio Coder returned inconsistent session resume attribution.",
 		});
 	} finally {
 		await test.dispose();
@@ -1521,7 +1521,7 @@ Deno.test("settings and targets prime into one bounded projection with truthful 
 			"orchestrator.target",
 			"orchestrator.thinkingLevel",
 		]);
-		// The model options are the selected target's models, not every model Clio knows.
+		// The model options are the selected target's models, not every model Clio Coder knows.
 		deepStrictEqual(settings.settings.options["orchestrator.target"], ["lmstudio", "offline-lab"]);
 		deepStrictEqual(settings.settings.options["orchestrator.model"], ["qwen3.8-27b", "qwen3.8-4b"]);
 		deepStrictEqual(settings.settings.options.autonomy, ["read-only", "suggest", "auto-edit", "full-auto"]);
@@ -1599,8 +1599,8 @@ for (const scenario of ["sessions-missing-preview", "sessions-invalid-hosted"] a
 			deepStrictEqual(test.host.snapshot().lastFailure, {
 				code: "acp-contract-failure",
 				summary: scenario === "sessions-missing-preview"
-					? "Clio omitted session field preview."
-					: "Clio returned invalid session presentation fields.",
+					? "Clio Coder omitted session field preview."
+					: "Clio Coder returned invalid session presentation fields.",
 			});
 		} finally {
 			await test.dispose();
@@ -1664,7 +1664,7 @@ Deno.test("a safe settings patch round-trips and an unknown target is refused wh
 		equal(afterFailure.settings.settings["orchestrator.target"], "lmstudio");
 		equal(afterFailure.settings.settings["orchestrator.model"], "qwen3.8-4b");
 
-		// Workbench refuses a key outside the closed set before it reaches Clio.
+		// Workbench refuses a key outside the closed set before it reaches Clio Coder.
 		await rejects(
 			test.host.patchSettings({ "provider.apiKey": "secret" }),
 			assertHostError("invalid"),
@@ -1731,7 +1731,7 @@ Deno.test("autonomy set over ACP is what the next prompt runs under", async () =
 	}
 });
 
-Deno.test("a Clio without the settings and targets capabilities refuses rather than pretends", async () => {
+Deno.test("a Clio Coder without the settings and targets capabilities refuses rather than pretends", async () => {
 	const test = await harness("conversation");
 	try {
 		const capabilities = test.host.snapshot().capabilities;
@@ -1804,7 +1804,7 @@ Deno.test("seventeen mediated bash calls project as seventeen tool cards with no
 	}
 });
 
-Deno.test("a repeated command shape is reported by Clio rather than detected in the client", async () => {
+Deno.test("a repeated command shape is reported by Clio Coder rather than detected in the client", async () => {
 	const test = await harness("seventeen-bash", { permissionEscalateMs: 30_000, permissionBudgetMs: 60_000 });
 	try {
 		const context = await test.host.startTurn("Audit the convergence study.");
@@ -1872,7 +1872,7 @@ Deno.test("a rejected bash call is retried under a rephrased title rather than a
 	}
 });
 
-Deno.test("an approval that expires mid-run never reaches Clio as a rejection", async () => {
+Deno.test("an approval that expires mid-run never reaches Clio Coder as a rejection", async () => {
 	const test = await harness("seventeen-bash", {
 		permissionEscalateMs: 40,
 		permissionBudgetMs: 160,
@@ -1890,7 +1890,7 @@ Deno.test("an approval that expires mid-run never reaches Clio as a rejection", 
 		const terminal = await waitForEvent(test.sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
 		equal(terminal.payload.outcome, "canceled");
 		equal(terminal.payload.code, "approval-unanswered");
-		match(terminal.payload.summary, /Clio was not told no/u);
+		match(terminal.payload.summary, /Clio Coder was not told no/u);
 
 		// The whole point of parking rather than denying: the child never saw a no,
 		// so it has no denial to reformulate around.

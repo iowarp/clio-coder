@@ -8,19 +8,27 @@
 
 import {
 	type CommandErrorCode,
+	PRODUCT_NAME,
 	type ProjectBrowseListingPayload,
 	PROTOCOL_VERSION,
 	type ServerEvent,
+	validateDispatchInspection,
 	validateServerEvent,
+	type WireCatalogInspection,
 	type WireClioSnapshot,
+	type WireConfigInspection,
 	type WireDeleteChallenge,
+	type WireDispatchInspection,
 	type WireProjectPath,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
+	type WireRecoveryInspection,
+	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireSettingsState,
 	type WireTarget,
 	type WireTreeNode,
+	type WireUsageInspection,
 } from "./protocol.ts";
 import {
 	applyTurnEvent,
@@ -42,6 +50,10 @@ export interface OpenWorkspaceState {
 	readonly projection: TurnProjection;
 	readonly deleteChallenge: WireDeleteChallenge | null;
 	readonly settings: WireSettingsState | null;
+	readonly configInspection: WireConfigInspection | null;
+	readonly catalogInspection: WireCatalogInspection | null;
+	readonly usageInspection: WireUsageInspection | null;
+	readonly routingInspection: WireRoutingInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -49,7 +61,7 @@ export interface OpenWorkspaceState {
 
 export interface WireBootstrap {
 	readonly protocolVersion: typeof PROTOCOL_VERSION;
-	readonly appName: "Clio Workbench";
+	readonly appName: typeof PRODUCT_NAME;
 	readonly workspaceInstanceId: string;
 	readonly localToken: string;
 	readonly mode: "browser" | "desktop";
@@ -59,6 +71,7 @@ export interface WireBootstrap {
 	readonly homePath: string;
 	readonly stateDirNote: string;
 	readonly securityNote: string;
+	readonly dispatchInspection: WireDispatchInspection | null;
 }
 
 export interface Notice {
@@ -78,6 +91,8 @@ export interface AppState {
 	readonly homePath: string;
 	readonly stateDirNote: string;
 	readonly securityNote: string;
+	readonly dispatchInspection: WireDispatchInspection | null;
+	readonly recoveryInspection: WireRecoveryInspection | null;
 	readonly browse: ProjectBrowseListingPayload | null;
 	readonly leftDrawerOpen: boolean;
 	readonly settingsOpen: boolean;
@@ -91,6 +106,18 @@ export interface AppState {
 	readonly notice: Notice | null;
 	/** Request id of a submitted prompt whose acknowledgement has not arrived. */
 	readonly pendingTurnStart: string | null;
+	/** Request id of the one serialized read-only configuration inspection. */
+	readonly pendingConfigInspect: string | null;
+	/** Request id of the one serialized read-only resource catalog inspection. */
+	readonly pendingCatalogInspect: string | null;
+	/** Request id of the one serialized project usage inspection. */
+	readonly pendingUsageInspect: string | null;
+	/** Request id of the one serialized offline model and worker-routing inspection. */
+	readonly pendingRoutingInspect: string | null;
+	/** Request id of the installation-wide, read-only dispatch snapshot. */
+	readonly pendingDispatchInspect: string | null;
+	/** Request id of the redacted Clio Coder doctor/paths sweep. */
+	readonly pendingRecoveryInspect: string | null;
 	/**
 	 * The recent project a `project.select` is waiting on. A refusal for this
 	 * exact request is the only evidence the renderer has that a remembered folder
@@ -111,7 +138,14 @@ export type AppAction =
 	| { readonly type: "notice.dismissed" }
 	| { readonly type: "notice.raised"; readonly tone: Notice["tone"]; readonly message: string }
 	| { readonly type: "turn.submitted"; readonly requestId: string }
+	| { readonly type: "config.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "catalog.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "usage.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "routing.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "dispatch.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "recovery.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "project.select.submitted"; readonly requestId: string; readonly projectId: string }
+	| { readonly type: "host.events"; readonly events: readonly ServerEvent[] }
 	| { readonly type: "host.event"; readonly event: ServerEvent };
 
 export const initialAppState: AppState = {
@@ -124,15 +158,23 @@ export const initialAppState: AppState = {
 	open: null,
 	recent: [],
 	homePath: "/",
-	stateDirNote: "Workbench has not reported where it keeps its own state yet.",
-	securityNote: "Workbench has not reported its project boundary yet.",
+	stateDirNote: "The desktop app has not reported where it keeps its own state yet.",
+	securityNote: "The desktop app has not reported its project boundary yet.",
+	dispatchInspection: null,
+	recoveryInspection: null,
 	browse: null,
 	leftDrawerOpen: false,
 	settingsOpen: false,
 	desktopNotifications: true,
-	announcement: "Loading Clio Workbench",
+	announcement: `Loading ${PRODUCT_NAME}`,
 	notice: null,
 	pendingTurnStart: null,
+	pendingConfigInspect: null,
+	pendingCatalogInspect: null,
+	pendingUsageInspect: null,
+	pendingRoutingInspect: null,
+	pendingDispatchInspect: null,
+	pendingRecoveryInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
 };
@@ -150,10 +192,11 @@ const BOOTSTRAP_KEYS = [
 	"homePath",
 	"stateDirNote",
 	"securityNote",
+	"dispatchInspection",
 ] as const;
 
 function invalidBootstrap(detail: string): never {
-	throw new Error(`The Workbench bootstrap response did not match protocol v${PROTOCOL_VERSION}: ${detail}.`);
+	throw new Error(`The GUI bootstrap response did not match protocol v${PROTOCOL_VERSION}: ${detail}.`);
 }
 
 function expectExactBootstrapRecord(value: unknown): Record<string, unknown> {
@@ -212,7 +255,7 @@ function expectAbsolutePath(value: unknown, label: string): string {
 export function workspaceConsistencyError(workspace: WireProjectWorkspace): string | null {
 	const awaiting = workspace.clio.phase === "awaiting-approval";
 	if (awaiting !== (workspace.pendingPermission !== null)) {
-		return "pendingPermission must be present exactly while Clio awaits approval";
+		return "pendingPermission must be present exactly while Clio Coder awaits approval";
 	}
 	if (workspace.pendingPermission !== null && workspace.activeTurn === null) {
 		return "pendingPermission requires an active turn";
@@ -282,7 +325,7 @@ function validateRecent(value: unknown, workspaceInstanceId: string): readonly W
 export function parseBootstrapPayload(value: unknown): WireBootstrap {
 	const record = expectExactBootstrapRecord(value);
 	if (record.protocolVersion !== PROTOCOL_VERSION) invalidBootstrap(`protocolVersion must be ${PROTOCOL_VERSION}`);
-	if (record.appName !== "Clio Workbench") invalidBootstrap("appName is invalid");
+	if (record.appName !== PRODUCT_NAME) invalidBootstrap("appName is invalid");
 	const workspaceInstanceId = expectBootstrapId(record.workspaceInstanceId, "workspaceInstanceId");
 	const localToken = expectBootstrapString(record.localToken, "localToken", { maxBytes: 512, trim: true });
 	if (record.mode !== "browser" && record.mode !== "desktop") invalidBootstrap("mode is invalid");
@@ -298,7 +341,7 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 	}
 	return {
 		protocolVersion: PROTOCOL_VERSION,
-		appName: "Clio Workbench",
+		appName: PRODUCT_NAME,
 		workspaceInstanceId,
 		localToken,
 		mode: record.mode,
@@ -308,6 +351,9 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 		homePath: expectAbsolutePath(record.homePath, "homePath"),
 		stateDirNote: expectBootstrapString(record.stateDirNote, "stateDirNote", { maxBytes: 4096 }),
 		securityNote: expectBootstrapString(record.securityNote, "securityNote", { maxBytes: 4096 }),
+		dispatchInspection: record.dispatchInspection === null
+			? null
+			: validateDispatchInspection(record.dispatchInspection, "bootstrap.dispatchInspection"),
 	};
 }
 
@@ -327,6 +373,10 @@ export function workspaceFromWire(workspace: WireProjectWorkspace): OpenWorkspac
 		}),
 		deleteChallenge: workspace.deleteChallenge,
 		settings: workspace.settings,
+		configInspection: workspace.configInspection,
+		catalogInspection: workspace.catalogInspection,
+		usageInspection: workspace.usageInspection,
+		routingInspection: workspace.routingInspection,
 		targets: workspace.targets,
 		targetsTruncated: workspace.targetsTruncated,
 		processGeneration: workspace.processGeneration,
@@ -362,6 +412,14 @@ function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string):
 			return { ...open, sessions: event.payload.sessions, sessionsTruncated: event.payload.truncated };
 		case "settings.state":
 			return { ...open, settings: event.payload.settings };
+		case "config.state":
+			return { ...open, configInspection: event.payload.inspection };
+		case "catalog.state":
+			return { ...open, catalogInspection: event.payload.inspection };
+		case "usage.state":
+			return { ...open, usageInspection: event.payload.inspection };
+		case "routing.state":
+			return { ...open, routingInspection: event.payload.inspection };
 		case "targets.state":
 			return { ...open, targets: event.payload.targets, targetsTruncated: event.payload.truncated };
 		case "targets.probed": {
@@ -382,12 +440,12 @@ function announcementFor(event: ServerEvent): string | null {
 		case "turn.permission.requested":
 			return `${event.payload.title} needs your approval`;
 		case "turn.terminal":
-			return event.payload.outcome === "completed" ? "Clio finished this turn." : event.payload.summary;
+			return event.payload.outcome === "completed" ? "Clio Coder finished this turn." : event.payload.summary;
 		case "turn.loop":
-			return `Clio blocked a repeated ${event.payload.tool} call`;
+			return `Clio Coder blocked a repeated ${event.payload.tool} call`;
 		case "clio.state":
 			return event.payload.snapshot.phase === "failed"
-				? (event.payload.snapshot.lastFailure?.summary ?? "Clio failed.")
+				? (event.payload.snapshot.lastFailure?.summary ?? "Clio Coder failed.")
 				: null;
 		case "project.opened":
 			return `${event.payload.workspace.project.displayName} is open`;
@@ -419,8 +477,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				homePath: action.payload.homePath,
 				stateDirNote: action.payload.stateDirNote,
 				securityNote: action.payload.securityNote,
+				dispatchInspection: action.payload.dispatchInspection,
+				pendingConfigInspect: null,
+				pendingCatalogInspect: null,
+				pendingUsageInspect: null,
+				pendingRoutingInspect: null,
+				pendingDispatchInspect: null,
 				announcement: open === null
-					? "Clio Workbench is ready. Open a project folder to begin."
+					? `${PRODUCT_NAME} is ready. Open a project folder to begin.`
 					: `${open.project.displayName} is open`,
 			};
 		}
@@ -438,9 +502,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				connection: action.connection,
 				lastSequence: action.connection === "connected" ? 0 : state.lastSequence,
 				announcement: action.connection === "connected"
-					? "Local Workbench connection ready"
+					? "Local GUI connection ready"
 					: action.connection === "disconnected"
-					? "The local Workbench connection dropped; reconnecting"
+					? "The local GUI connection dropped; reconnecting"
 					: state.announcement,
 			};
 		case "drawer.left":
@@ -457,8 +521,25 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, notice: { tone: action.tone, message: action.message }, announcement: action.message };
 		case "turn.submitted":
 			return { ...state, pendingTurnStart: action.requestId };
+		case "config.inspect.submitted":
+			return { ...state, pendingConfigInspect: action.requestId };
+		case "catalog.inspect.submitted":
+			return { ...state, pendingCatalogInspect: action.requestId };
+		case "usage.inspect.submitted":
+			return { ...state, pendingUsageInspect: action.requestId };
+		case "routing.inspect.submitted":
+			return { ...state, pendingRoutingInspect: action.requestId };
+		case "dispatch.inspect.submitted":
+			return { ...state, pendingDispatchInspect: action.requestId };
+		case "recovery.inspect.submitted":
+			return { ...state, pendingRecoveryInspect: action.requestId };
 		case "project.select.submitted":
 			return { ...state, pendingProjectSelect: { requestId: action.requestId, projectId: action.projectId } };
+		case "host.events": {
+			let next = state;
+			for (const event of action.events) next = appReducer(next, { type: "host.event", event });
+			return next;
+		}
 		case "host.event": {
 			const event = action.event;
 			if (state.workspaceInstanceId !== null && event.workspaceInstanceId !== state.workspaceInstanceId) return state;
@@ -467,7 +548,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 					...state,
 					connection: "connected",
 					lastSequence: event.sequence,
-					announcement: "Local Workbench connection ready",
+					announcement: "Local GUI connection ready",
 				};
 			}
 			if (event.sequence <= state.lastSequence) return state;
@@ -480,6 +561,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						notice: { tone: "error", message: event.payload.message },
 						announcement: event.payload.message,
 						pendingTurnStart: null,
+						pendingConfigInspect: null,
+						pendingCatalogInspect: null,
+						pendingUsageInspect: null,
+						pendingRoutingInspect: null,
+						pendingDispatchInspect: null,
+						pendingRecoveryInspect: null,
 					};
 				case "command.error": {
 					const pendingSelect = state.pendingProjectSelect;
@@ -499,17 +586,57 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 							event.payload.requestId === undefined || event.payload.requestId === state.pendingTurnStart
 								? null
 								: state.pendingTurnStart,
+						pendingConfigInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingConfigInspect
+								? null
+								: state.pendingConfigInspect,
+						pendingCatalogInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingCatalogInspect
+								? null
+								: state.pendingCatalogInspect,
+						pendingUsageInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingUsageInspect
+								? null
+								: state.pendingUsageInspect,
+						pendingRoutingInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingRoutingInspect
+								? null
+								: state.pendingRoutingInspect,
+						pendingDispatchInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingDispatchInspect
+								? null
+								: state.pendingDispatchInspect,
+						pendingRecoveryInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingRecoveryInspect
+								? null
+								: state.pendingRecoveryInspect,
 						pendingProjectSelect: answersSelect ? null : pendingSelect,
 					};
 				}
 				case "project.browse.listing":
 					return { ...sequenced, browse: event.payload };
+				case "dispatch.state":
+					return {
+						...sequenced,
+						dispatchInspection: event.payload.inspection,
+						pendingDispatchInspect: null,
+						announcement: "Installation-wide dispatch snapshot updated",
+					};
+				case "recovery.state":
+					return {
+						...sequenced,
+						recoveryInspection: event.payload.inspection,
+						pendingRecoveryInspect: null,
+						announcement: event.payload.inspection.healthy
+							? "Clio Coder diagnostics found no failures"
+							: "Clio Coder diagnostics found failures",
+					};
 				case "project.opened": {
 					const consistency = workspaceConsistencyError(event.payload.workspace);
 					if (consistency !== null) {
 						return {
 							...sequenced,
-							notice: { tone: "error", message: "Workbench received a contradictory project snapshot and ignored it." },
+							notice: { tone: "error", message: "The GUI received a contradictory project snapshot and ignored it." },
 						};
 					}
 					const open = workspaceFromWire(event.payload.workspace);
@@ -518,6 +645,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						open,
 						leftDrawerOpen: false,
 						browse: null,
+						pendingConfigInspect: null,
+						pendingCatalogInspect: null,
+						pendingUsageInspect: null,
+						pendingRoutingInspect: null,
+						pendingRecoveryInspect: null,
+						recoveryInspection: state.recoveryInspection?.projectContext ? null : state.recoveryInspection,
 						recent: state.recent.some((entry) => entry.id === open.project.id)
 							? state.recent.map((entry) => entry.id === open.project.id ? open.project : entry)
 							: [open.project, ...state.recent],
@@ -531,6 +664,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 					return {
 						...sequenced,
 						open: event.projectId === state.open?.project.id ? null : state.open,
+						pendingConfigInspect: event.projectId === state.open?.project.id ? null : state.pendingConfigInspect,
+						pendingCatalogInspect: event.projectId === state.open?.project.id ? null : state.pendingCatalogInspect,
+						pendingUsageInspect: event.projectId === state.open?.project.id ? null : state.pendingUsageInspect,
+						pendingRoutingInspect: event.projectId === state.open?.project.id ? null : state.pendingRoutingInspect,
+						pendingRecoveryInspect: event.projectId === state.open?.project.id ? null : state.pendingRecoveryInspect,
+						recoveryInspection: event.projectId === state.open?.project.id && state.recoveryInspection?.projectContext
+							? null
+							: state.recoveryInspection,
 						recent: state.recent.filter((entry) => entry.id !== event.projectId),
 						pendingProjectSelect: state.pendingProjectSelect?.projectId === event.projectId
 							? null
@@ -544,6 +685,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						...sequenced,
 						open,
 						pendingTurnStart: event.kind === "turn.started" ? null : state.pendingTurnStart,
+						pendingConfigInspect: event.kind === "config.state" ? null : state.pendingConfigInspect,
+						pendingCatalogInspect: event.kind === "catalog.state" ? null : state.pendingCatalogInspect,
+						pendingUsageInspect: event.kind === "usage.state" ? null : state.pendingUsageInspect,
+						pendingRoutingInspect: event.kind === "routing.state" ? null : state.pendingRoutingInspect,
 						announcement: announcementFor(event) ?? state.announcement,
 					};
 				}

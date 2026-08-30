@@ -1,5 +1,5 @@
 /**
- * Explicit, no-network joint proof for the Workbench -> Clio ACP boundary.
+ * Explicit, no-network joint proof for the Workbench -> Clio Coder ACP boundary.
  *
  * The non-standard filename intentionally keeps this expensive built-binary
  * fixture out of `deno task test`. Run it only through `deno task
@@ -421,7 +421,7 @@ function projectFor(caseName: CaseName, trustedRoot: string): HostProject {
 	return {
 		projectId: `project-clio-${caseName.replace("_", "-")}`,
 		trustedRoot,
-		displayName: `Clio ${caseName} joint proof`,
+		displayName: `Clio Coder ${caseName} joint proof`,
 	};
 }
 
@@ -593,7 +593,7 @@ async function startExpandedHarness(caseName: CaseName, options: ExpandedHarness
 			permissionEscalateMs,
 			permissionBudgetMs,
 		});
-		await withTimeout(host.open(), COMMAND_TIMEOUT_MS, "the expanded real Clio process to initialize");
+		await withTimeout(host.open(), COMMAND_TIMEOUT_MS, "the expanded real Clio Coder process to initialize");
 		await withTimeout(host.newSession(), COMMAND_TIMEOUT_MS, "the expanded real session to bind");
 		return {
 			paths,
@@ -682,7 +682,7 @@ async function runJointCase(decision: PermissionDecision): Promise<void> {
 			permissionEscalateMs: 5_000,
 			permissionBudgetMs: PERMISSION_TIMEOUT_MS,
 		});
-		await withTimeout(host.open(), COMMAND_TIMEOUT_MS, "the real Clio process to initialize");
+		await withTimeout(host.open(), COMMAND_TIMEOUT_MS, "the real Clio Coder process to initialize");
 		equal(host.phase, "unbound");
 		const agent = host.snapshot().agent;
 		equal(agent?.name, "clio-coder");
@@ -758,7 +758,7 @@ async function runJointCase(decision: PermissionDecision): Promise<void> {
 
 for (const decision of ["allow_once", "reject_once"] as const) {
 	Deno.test({
-		name: `real Clio ACP ${decision} stays project-bound and fully mediated`,
+		name: `real Clio Coder ACP ${decision} stays project-bound and fully mediated`,
 		sanitizeOps: true,
 		sanitizeResources: true,
 		fn: () => runJointCase(decision),
@@ -808,7 +808,7 @@ async function runConfigurationCase(): Promise<void> {
 			permissionEscalateMs: 5_000,
 			permissionBudgetMs: PERMISSION_TIMEOUT_MS,
 		});
-		await withTimeout(host.open(), COMMAND_TIMEOUT_MS, "the real Clio process to initialize");
+		await withTimeout(host.open(), COMMAND_TIMEOUT_MS, "the real Clio Coder process to initialize");
 		const capabilities = host.snapshot().capabilities;
 		ok(capabilities, "the real server advertised no capability projection");
 		equal(capabilities.settings, true, "the real server did not advertise clio-coder/settings");
@@ -897,7 +897,7 @@ async function runConfigurationCase(): Promise<void> {
 }
 
 Deno.test({
-	name: "real Clio ACP settings, targets, probe, and autonomy stay bounded and credential-free",
+	name: "real Clio Coder ACP settings, targets, probe, and autonomy stay bounded and credential-free",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	fn: runConfigurationCase,
@@ -928,7 +928,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP preserves three prompt continuity on one hosted session",
+	name: "real Clio Coder ACP preserves three prompt continuity on one hosted session",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {
@@ -970,7 +970,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP close and load replays 64 of 65 turns and reports truncation",
+	name: "real Clio Coder ACP close and load replays 64 of 65 turns and reports truncation",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {
@@ -1021,7 +1021,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP label and delete round trip through a closed session",
+	name: "real Clio Coder ACP label and delete round trip through a closed session",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {
@@ -1050,7 +1050,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP unanswered approval cancels without sending reject once",
+	name: "real Clio Coder ACP unanswered approval cancels without sending reject once",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {
@@ -1096,7 +1096,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP server permission expiry reaches the dedicated host failure",
+	name: "real Clio Coder ACP server permission expiry reaches the dedicated host failure",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {
@@ -1119,7 +1119,7 @@ Deno.test({
 			equal(terminal.payload.code, "clio-permission-expired");
 			equal(
 				terminal.payload.summary,
-				"An approval waited past Clio's own ceiling. Clio stopped the turn; nothing was denied.",
+				"An approval waited past Clio Coder's own ceiling. Clio Coder stopped the turn; nothing was denied.",
 			);
 			equal(test.fixture.streamingRequestCount, 1);
 			equal(await pathExists(join(test.paths.project, "note.txt")), false);
@@ -1130,7 +1130,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP loopback repetition emits a safety loop blocked event",
+	name: "real Clio Coder ACP loopback repetition emits a safety loop blocked event",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {
@@ -1160,7 +1160,7 @@ Deno.test({
 });
 
 Deno.test({
-	name: "real Clio ACP suppresses the 129th tool start and reports max turn requests",
+	name: "real Clio Coder ACP suppresses the 129th tool start and reports max turn requests",
 	sanitizeOps: true,
 	sanitizeResources: true,
 	async fn() {

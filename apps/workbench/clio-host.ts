@@ -1,10 +1,10 @@
 /**
- * One Clio process per open project, alive across many prompts.
+ * One Clio Coder process per open project, alive across many prompts.
  *
  * `ClioProjectHost` owns exactly one `clio-coder acp` child at a time. The child
  * is spawned when the project opens, initialized once, and then either binds a
  * session (`session/new` or `session/load`) or answers pre-session methods such
- * as the session list. Because one process backs one Clio session, closing or
+ * as the session list. Because one process backs one Clio Coder session, closing or
  * switching a session retires the child and spawns a fresh one.
  *
  * Everything that crosses to the renderer is a bounded DTO from
@@ -30,6 +30,7 @@ import {
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
 	AUTONOMY_LEVELS,
+	PRODUCT_NAME,
 	type ServerEventPayloadByKind,
 	THINKING_LEVELS,
 	type WireAutonomyLevel,
@@ -159,7 +160,8 @@ const SAFE_SETTING_KEYS = [
 	"orchestrator.thinkingLevel",
 	"autonomy",
 ] as const;
-const CLIENT_INFO = { name: "clio-workbench", title: "Clio Workbench", version: "0.0.1" } as const;
+// Keep the machine identifier stable for ACP compatibility. The visible title is the product name.
+const CLIENT_INFO = { name: "clio-workbench", title: PRODUCT_NAME, version: "0.0.1" } as const;
 const EVENT_OPT_IN = { version: 1, kinds: ["safety.loopBlocked"] } as const;
 
 function bytes(value: string): number {
@@ -273,12 +275,12 @@ export function safeToolTitle(kind: string): string {
 		think: "Reason about the task",
 		fetch: "Fetch external content",
 		switch_mode: "Change work mode",
-		other: "Use a Clio tool",
+		other: "Use a Clio Coder tool",
 	};
-	return labels[kind] ?? labels.other ?? "Use a Clio tool";
+	return labels[kind] ?? labels.other ?? "Use a Clio Coder tool";
 }
 
-/** Clio's own tool title, with the project root hidden and unsafe characters removed. */
+/** Clio Coder's own tool title, with the project root hidden and unsafe characters removed. */
 function presentableToolTitle(rawTitle: string, trustedRoot: string, kind: string): string {
 	let text = rawTitle.replaceAll(trustedRoot, "[project]");
 	text = Array.from(text).filter((character) => {
@@ -307,23 +309,25 @@ interface ValidatedInitialize {
 
 function validateInitialize(value: unknown): ValidatedInitialize {
 	if (!isRecord(value) || value.protocolVersion !== 1 || !isRecord(value.agentInfo)) {
-		throw new HostError("internal", "Clio returned an invalid ACP initialize result.");
+		throw new HostError("internal", "Clio Coder returned an invalid ACP initialize result.");
 	}
 	if (value.agentInfo.name !== "clio-coder" || !isRecord(value.agentCapabilities)) {
-		throw new HostError("internal", "The ACP peer did not identify as Clio.");
+		throw new HostError("internal", "The ACP peer did not identify as Clio Coder.");
 	}
-	const version = boundedString(value.agentInfo.version ?? "unknown", "Clio version", 128);
+	const version = boundedString(value.agentInfo.version ?? "unknown", "Clio Coder version", 128);
 	const capabilities = value.agentCapabilities;
 	if (
 		typeof capabilities.loadSession !== "boolean" || !isRecord(capabilities.promptCapabilities) ||
 		!isRecord(capabilities.mcpCapabilities) || !isRecord(capabilities._meta)
-	) throw new HostError("internal", "Clio returned unsupported ACP capabilities.");
+	) throw new HostError("internal", "Clio Coder returned unsupported ACP capabilities.");
 	const meta = capabilities._meta;
 	const sessionMeta = meta["clio-coder/session"];
 	if (!isRecord(sessionMeta) || sessionMeta.close !== true || meta["clio-coder/tools"] !== "mediated") {
-		throw new HostError("internal", "Clio did not advertise the mediated ACP session contract.");
+		throw new HostError("internal", "Clio Coder did not advertise the mediated ACP session contract.");
 	}
-	if (!Array.isArray(value.authMethods)) throw new HostError("internal", "Clio returned invalid ACP auth metadata.");
+	if (!Array.isArray(value.authMethods)) {
+		throw new HostError("internal", "Clio Coder returned invalid ACP auth metadata.");
+	}
 	const flag = (record: unknown, key: string): boolean => isRecord(record) && record[key] === true;
 	const settingsMeta = meta["clio-coder/settings"];
 	const targetsMeta = meta["clio-coder/targets"];
@@ -362,32 +366,34 @@ interface ValidatedSessionMeta {
 }
 
 function validateSessionResult(value: unknown, mode: "new" | "load", requestedId: string | null): ValidatedSessionMeta {
-	if (!isRecord(value)) throw new HostError("internal", "Clio returned an invalid ACP session result.");
+	if (!isRecord(value)) throw new HostError("internal", "Clio Coder returned an invalid ACP session result.");
 	const meta = isRecord(value._meta) ? value._meta["clio-coder/session"] : undefined;
 	let rawSessionId: string;
-	if (mode === "new") rawSessionId = boundedString(value.sessionId, "Clio sessionId", MAX_SESSION_ID_BYTES);
+	if (mode === "new") rawSessionId = boundedString(value.sessionId, "Clio Coder sessionId", MAX_SESSION_ID_BYTES);
 	else if (requestedId === null) throw new HostError("internal", "A session load lost its identity.");
 	else rawSessionId = requestedId;
-	if (!isRecord(meta)) throw new HostError("internal", "Clio omitted required session attribution.");
+	if (!isRecord(meta)) throw new HostError("internal", "Clio Coder omitted required session attribution.");
 	for (const field of ["sessionId", "target", "model", "autonomy", "createdAt", "resumed"] as const) {
 		if (!Object.hasOwn(meta, field)) {
-			throw new HostError("internal", `Clio omitted session attribution field ${field}.`);
+			throw new HostError("internal", `Clio Coder omitted session attribution field ${field}.`);
 		}
 	}
-	if (boundedString(meta.sessionId, "Clio sessionId", MAX_SESSION_ID_BYTES) !== rawSessionId) {
-		throw new HostError("internal", "Clio attributed a different session than it bound.");
+	if (boundedString(meta.sessionId, "Clio Coder sessionId", MAX_SESSION_ID_BYTES) !== rawSessionId) {
+		throw new HostError("internal", "Clio Coder attributed a different session than it bound.");
 	}
 	const expectedResumed = mode === "load";
 	if (meta.resumed !== expectedResumed) {
-		throw new HostError("internal", "Clio returned inconsistent session resume attribution.");
+		throw new HostError("internal", "Clio Coder returned inconsistent session resume attribution.");
 	}
 	let replayedTurns = 0;
 	let replayTruncated = false;
 	if (mode === "load") {
-		if (!isRecord(meta.replayed)) throw new HostError("internal", "Clio omitted replay metadata on session load.");
+		if (!isRecord(meta.replayed)) {
+			throw new HostError("internal", "Clio Coder omitted replay metadata on session load.");
+		}
 		replayedTurns = safeInteger(meta.replayed.turns) ?? -1;
 		if (replayedTurns < 0 || typeof meta.replayed.truncated !== "boolean") {
-			throw new HostError("internal", "Clio returned invalid replay metadata.");
+			throw new HostError("internal", "Clio Coder returned invalid replay metadata.");
 		}
 		replayTruncated = meta.replayed.truncated;
 	}
@@ -404,14 +410,14 @@ function validateSessionResult(value: unknown, mode: "new" | "load", requestedId
 }
 
 function validateUsage(value: unknown): WireUsage {
-	if (!isRecord(value)) throw new HostError("internal", "Clio returned invalid bounded usage metadata.");
+	if (!isRecord(value)) throw new HostError("internal", "Clio Coder returned invalid bounded usage metadata.");
 	const input = safeInteger(value.input);
 	const output = safeInteger(value.output);
 	const cacheRead = safeInteger(value.cacheRead);
 	const cacheWrite = safeInteger(value.cacheWrite);
 	const reasoning = safeInteger(value.reasoning);
 	if (input === null || output === null || cacheRead === null || cacheWrite === null || reasoning === null) {
-		throw new HostError("internal", "Clio returned invalid bounded usage metadata.");
+		throw new HostError("internal", "Clio Coder returned invalid bounded usage metadata.");
 	}
 	return { input, output, cacheRead, cacheWrite, reasoning };
 }
@@ -422,12 +428,12 @@ interface ProjectedPromptResult {
 }
 
 function validatePromptResult(value: unknown): ProjectedPromptResult {
-	if (!isRecord(value)) throw new HostError("internal", "Clio returned an invalid ACP prompt result.");
-	const stopReason = boundedString(value.stopReason, "Clio stopReason", MAX_STOP_REASON_BYTES);
+	if (!isRecord(value)) throw new HostError("internal", "Clio Coder returned an invalid ACP prompt result.");
+	const stopReason = boundedString(value.stopReason, "Clio Coder stopReason", MAX_STOP_REASON_BYTES);
 	if (!(PROMPT_STOP_REASONS as readonly string[]).includes(stopReason)) {
-		throw new HostError("internal", "Clio returned an unsupported ACP stop reason.");
+		throw new HostError("internal", "Clio Coder returned an unsupported ACP stop reason.");
 	}
-	if (!isRecord(value._meta)) throw new HostError("internal", "Clio omitted bounded ACP usage metadata.");
+	if (!isRecord(value._meta)) throw new HostError("internal", "Clio Coder omitted bounded ACP usage metadata.");
 	const usage = validateUsage(value._meta["clio-coder/usage"]);
 	return { stopReason: stopReason as ProjectedPromptResult["stopReason"], usage };
 }
@@ -437,85 +443,85 @@ type PublicClioFailure = Readonly<{ code: string; summary: string }>;
 const CLIO_REMOTE_FAILURES: Readonly<Record<string, PublicClioFailure>> = {
 	not_initialized: {
 		code: "clio-not-initialized",
-		summary: "Clio rejected the operation because its ACP session was not initialized.",
+		summary: "Clio Coder rejected the operation because its ACP session was not initialized.",
 	},
 	already_initialized: {
 		code: "clio-already-initialized",
-		summary: "Clio reported that its ACP connection was already initialized.",
+		summary: "Clio Coder reported that its ACP connection was already initialized.",
 	},
 	protocol_version_unsupported: {
 		code: "clio-protocol-version-unsupported",
-		summary: "Clio does not support the ACP protocol version required by Workbench.",
+		summary: "Clio Coder does not support the ACP protocol version required by the GUI.",
 	},
-	invalid_params: { code: "clio-invalid-params", summary: "Clio rejected the bounded ACP parameters." },
+	invalid_params: { code: "clio-invalid-params", summary: "Clio Coder rejected the bounded ACP parameters." },
 	session_cwd_mismatch: {
 		code: "clio-session-cwd-mismatch",
-		summary: "Clio rejected the session because its project root did not match the launched workspace.",
+		summary: "Clio Coder rejected the session because its project root did not match the launched workspace.",
 	},
 	session_limit: {
 		code: "clio-session-limit",
-		summary: "Clio rejected an unexpected additional session on this owned process.",
+		summary: "Clio Coder rejected an unexpected additional session on this owned process.",
 	},
-	session_unknown: { code: "clio-session-unknown", summary: "Clio does not know that session for this project." },
+	session_unknown: { code: "clio-session-unknown", summary: "Clio Coder does not know that session for this project." },
 	session_open: {
 		code: "clio-session-open",
-		summary: "Clio cannot tell whether another process still holds that session, so it refused.",
+		summary: "Clio Coder cannot tell whether another process still holds that session, so it refused.",
 	},
-	prompt_active: { code: "clio-prompt-active", summary: "Clio is still working on the previous prompt." },
-	prompt_not_admitted: { code: "clio-prompt-not-admitted", summary: "Clio could not admit this turn." },
-	turn_failed: { code: "clio-turn-failed", summary: "Clio reported that the admitted turn failed." },
+	prompt_active: { code: "clio-prompt-active", summary: "Clio Coder is still working on the previous prompt." },
+	prompt_not_admitted: { code: "clio-prompt-not-admitted", summary: "Clio Coder could not admit this turn." },
+	turn_failed: { code: "clio-turn-failed", summary: "Clio Coder reported that the admitted turn failed." },
 	permission_expired: {
 		code: "clio-permission-expired",
-		summary: "An approval waited past Clio's own ceiling. Clio stopped the turn; nothing was denied.",
+		summary: "An approval waited past Clio Coder's own ceiling. Clio Coder stopped the turn; nothing was denied.",
 	},
-	parse_error: { code: "clio-parse-error", summary: "Clio rejected input that did not parse as JSON." },
-	invalid_request: { code: "clio-invalid-request", summary: "Clio rejected an invalid JSON-RPC request shape." },
-	method_not_found: { code: "clio-method-not-found", summary: "This Clio does not support that method." },
-	internal_error: { code: "clio-internal-error", summary: "Clio reported an internal ACP handler failure." },
+	parse_error: { code: "clio-parse-error", summary: "Clio Coder rejected input that did not parse as JSON." },
+	invalid_request: { code: "clio-invalid-request", summary: "Clio Coder rejected an invalid JSON-RPC request shape." },
+	method_not_found: { code: "clio-method-not-found", summary: "This Clio Coder does not support that method." },
+	internal_error: { code: "clio-internal-error", summary: "Clio Coder reported an internal ACP handler failure." },
 	input_line_too_large: {
 		code: "clio-input-line-too-large",
-		summary: "Clio rejected an ACP input line that exceeded its bound.",
+		summary: "Clio Coder rejected an ACP input line that exceeded its bound.",
 	},
 	invalid_request_id: {
 		code: "clio-invalid-request-id",
-		summary: "Clio rejected an invalid JSON-RPC request identifier.",
+		summary: "Clio Coder rejected an invalid JSON-RPC request identifier.",
 	},
 };
 
 const CLIO_ADMISSION_FAILURES: Readonly<Record<string, PublicClioFailure>> = {
 	"orchestrator-not-configured": {
 		code: "clio-admission-orchestrator-not-configured",
-		summary: "Clio has no orchestrator target configured. Choose one in Settings.",
+		summary: "Clio Coder has no orchestrator target configured. Choose one in Settings.",
 	},
 	"target-unknown": {
 		code: "clio-admission-target-unknown",
-		summary: "Clio does not recognize the configured target for this turn.",
+		summary: "Clio Coder does not recognize the configured target for this turn.",
 	},
 	"target-not-configured": {
 		code: "clio-admission-target-not-configured",
-		summary: "Clio requires a configured target before it can start this turn.",
+		summary: "Clio Coder requires a configured target before it can start this turn.",
 	},
 	"target-not-found": {
 		code: "clio-admission-target-not-found",
-		summary: "Clio could not locate the configured target for this turn.",
+		summary: "Clio Coder could not locate the configured target for this turn.",
 	},
 	"runtime-not-registered": {
 		code: "clio-admission-runtime-not-registered",
-		summary: "Clio requires a registered runtime for the configured target.",
+		summary: "Clio Coder requires a registered runtime for the configured target.",
 	},
 	"model-not-configured": {
 		code: "clio-admission-model-not-configured",
-		summary: "Clio has no model configured for the orchestrator. Choose one in Settings.",
+		summary: "Clio Coder has no model configured for the orchestrator. Choose one in Settings.",
 	},
 	"chat-unsupported": {
 		code: "clio-admission-chat-unsupported",
-		summary: "The configured Clio target does not support chat turns.",
+		summary: "The configured Clio Coder target does not support chat turns.",
 	},
 	"streaming-unsupported": {
 		code: "clio-admission-streaming-unsupported",
-		summary: "The configured Clio target does not support streaming turns.",
+		summary: "The configured Clio Coder target does not support streaming turns.",
 	},
-	"admission-failed": { code: "clio-admission-failed", summary: "Clio could not admit this turn." },
+	"admission-failed": { code: "clio-admission-failed", summary: "Clio Coder could not admit this turn." },
 };
 
 function protocolVersionFailure(supported: readonly number[] | undefined): PublicClioFailure {
@@ -539,14 +545,14 @@ export function failureProjection(error: unknown, transportFailure: AcpFailure |
 			: CLIO_REMOTE_FAILURES[error.remote.code];
 		return {
 			code: projected?.code ?? "clio-operation-rejected",
-			summary: projected?.summary ?? "Clio rejected the bounded ACP operation.",
+			summary: projected?.summary ?? "Clio Coder rejected the bounded ACP operation.",
 			source: "reported-by-clio",
 		};
 	}
 	if (error instanceof AcpRemoteError) {
 		return {
 			code: "clio-operation-rejected",
-			summary: "Clio rejected the bounded ACP operation.",
+			summary: "Clio Coder rejected the bounded ACP operation.",
 			source: "reported-by-clio",
 		};
 	}
@@ -556,14 +562,14 @@ export function failureProjection(error: unknown, transportFailure: AcpFailure |
 	if (error instanceof AcpTimeoutError) {
 		return {
 			code: "acp-request-timeout",
-			summary: `Clio did not answer ${error.method} within its bound.`,
+			summary: `Clio Coder did not answer ${error.method} within its bound.`,
 			source: "observed-by-workbench",
 		};
 	}
 	if (error instanceof AcpClientError) {
 		return {
 			code: "acp-client-failure",
-			summary: "The bounded Clio ACP client could not complete this operation.",
+			summary: "The bounded Clio Coder ACP client could not complete this operation.",
 			source: "observed-by-workbench",
 		};
 	}
@@ -572,7 +578,7 @@ export function failureProjection(error: unknown, transportFailure: AcpFailure |
 	}
 	return {
 		code: "acp-contract-failure",
-		summary: "Clio did not satisfy the bounded Workbench integration contract.",
+		summary: "Clio Coder did not satisfy the bounded GUI integration contract.",
 		source: "observed-by-workbench",
 	};
 }
@@ -780,7 +786,7 @@ export class ClioProjectHost {
 		return this.#targets;
 	}
 
-	/** True when Clio's own byte budget dropped a target or model from the list. */
+	/** True when Clio Coder's own byte budget dropped a target or model from the list. */
 	get targetsTruncated(): boolean {
 		return this.#targetsTruncated;
 	}
@@ -860,7 +866,7 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (process.turn !== null) {
-				throw new HostError("conflict", "Clio is still working. Cancel or wait before starting a new session.");
+				throw new HostError("conflict", "Clio Coder is still working. Cancel or wait before starting a new session.");
 			}
 			let target = process;
 			if (process.session !== null) {
@@ -876,10 +882,10 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (!process.initialized?.capabilities.load) {
-				throw new HostError("unsupported", "This Clio cannot resume sessions.");
+				throw new HostError("unsupported", "This Clio Coder cannot resume sessions.");
 			}
 			if (process.turn !== null) {
-				throw new HostError("conflict", "Clio is still working. Cancel or wait before resuming a session.");
+				throw new HostError("conflict", "Clio Coder is still working. Cancel or wait before resuming a session.");
 			}
 			const rawSessionId = this.#rawSessionIds.get(publicSessionId);
 			if (rawSessionId === undefined) throw new HostError("not-found", "That session is not in this project's list.");
@@ -899,7 +905,7 @@ export class ClioProjectHost {
 			const process = await this.#requireProcess();
 			if (process.session === null) return;
 			if (process.turn !== null) {
-				throw new HostError("conflict", "Clio is still working. Cancel or wait before closing the session.");
+				throw new HostError("conflict", "Clio Coder is still working. Cancel or wait before closing the session.");
 			}
 			await this.#retire(process, { closeSession: true });
 			const fresh = await this.#spawn();
@@ -918,7 +924,7 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (!process.initialized?.capabilities.label) {
-				throw new HostError("unsupported", "This Clio cannot label sessions.");
+				throw new HostError("unsupported", "This Clio Coder cannot label sessions.");
 			}
 			const rawSessionId = this.#rawSessionIds.get(publicSessionId);
 			if (rawSessionId === undefined) throw new HostError("not-found", "That session is not in this project's list.");
@@ -931,7 +937,7 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (!process.initialized?.capabilities.delete) {
-				throw new HostError("unsupported", "This Clio cannot delete sessions.");
+				throw new HostError("unsupported", "This Clio Coder cannot delete sessions.");
 			}
 			const rawSessionId = this.#rawSessionIds.get(publicSessionId);
 			if (rawSessionId === undefined) throw new HostError("not-found", "That session is not in this project's list.");
@@ -957,14 +963,14 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (!process.initialized?.capabilities.settings) {
-				throw new HostError("unsupported", "This Clio cannot change settings over ACP.");
+				throw new HostError("unsupported", "This Clio Coder cannot change settings over ACP.");
 			}
 			if (process.turn !== null) {
-				throw new HostError("conflict", "Clio is still working. Settings change between turns.");
+				throw new HostError("conflict", "Clio Coder is still working. Settings change between turns.");
 			}
 			for (const key of Object.keys(patch)) {
 				if (!(SAFE_SETTING_KEYS as readonly string[]).includes(key)) {
-					throw new HostError("invalid", "That setting is not one Workbench may change.");
+					throw new HostError("invalid", "That setting is not one the GUI may change.");
 				}
 			}
 			const nested: Record<string, unknown> = {};
@@ -991,7 +997,7 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (!process.initialized?.capabilities.targets) {
-				throw new HostError("unsupported", "This Clio cannot probe targets over ACP.");
+				throw new HostError("unsupported", "This Clio Coder cannot probe targets over ACP.");
 			}
 			if (this.#targets === null) await this.#refreshTargets(process, false);
 			if (!(this.#targets ?? []).some((target) => target.id === targetId)) {
@@ -1003,15 +1009,15 @@ export class ClioProjectHost {
 				boundedString(result.targetId, "probe targetId", 128) !== targetId ||
 				!Object.hasOwn(result, "latencyMs") || !Object.hasOwn(result, "reason")
 			) {
-				throw new HostError("internal", "Clio returned an invalid probe result.");
+				throw new HostError("internal", "Clio Coder returned an invalid probe result.");
 			}
 			const latency = result.latencyMs === null ? null : safeInteger(result.latencyMs);
 			if (result.latencyMs !== null && latency === null) {
-				throw new HostError("internal", "Clio returned an invalid probe latency.");
+				throw new HostError("internal", "Clio Coder returned an invalid probe latency.");
 			}
 			const reason = result.reason === null ? null : boundedString(result.reason, "probe reason", 64);
 			if (reason !== null && !(PROBE_REASONS as readonly string[]).includes(reason)) {
-				throw new HostError("internal", "Clio returned an unknown probe reason.");
+				throw new HostError("internal", "Clio Coder returned an unknown probe reason.");
 			}
 			const health: WireTargetHealth = {
 				healthy: result.healthy,
@@ -1034,12 +1040,12 @@ export class ClioProjectHost {
 		return this.#serialize(async () => {
 			const process = await this.#requireProcess();
 			if (!process.initialized?.capabilities.autonomy) {
-				throw new HostError("unsupported", "This Clio cannot change autonomy over ACP.");
+				throw new HostError("unsupported", "This Clio Coder cannot change autonomy over ACP.");
 			}
 			const session = process.session;
 			if (session === null) throw new HostError("not-ready", "Start or resume a session before changing its autonomy.");
 			if (process.turn !== null) {
-				throw new HostError("conflict", "Clio is still working. Autonomy changes between turns.");
+				throw new HostError("conflict", "Clio Coder is still working. Autonomy changes between turns.");
 			}
 			const result = await this.#request(
 				process,
@@ -1047,10 +1053,10 @@ export class ClioProjectHost {
 				{ sessionId: session.rawSessionId, level },
 				METHOD_TIMEOUT_MS,
 			);
-			if (!isRecord(result)) throw new HostError("internal", "Clio returned an invalid autonomy result.");
+			if (!isRecord(result)) throw new HostError("internal", "Clio Coder returned an invalid autonomy result.");
 			const autonomy = autonomyLevel(result.level, "autonomy level");
 			if (result.source !== "settings" && result.source !== "session") {
-				throw new HostError("internal", "Clio returned an invalid autonomy source.");
+				throw new HostError("internal", "Clio Coder returned an invalid autonomy source.");
 			}
 			session.autonomy = autonomy;
 			session.autonomySource = result.source;
@@ -1070,7 +1076,7 @@ export class ClioProjectHost {
 				throw new HostError("invalid", "The prompt must contain at most 8 KiB of non-blank text.");
 			}
 			if (process.turn !== null) {
-				throw new HostError("conflict", "Clio is still working on the previous prompt. Cancel it or wait.");
+				throw new HostError("conflict", "Clio Coder is still working on the previous prompt. Cancel it or wait.");
 			}
 			session.turnCounter += 1;
 			const context: HostTurnContext = {
@@ -1130,7 +1136,7 @@ export class ClioProjectHost {
 		} catch {
 			await this.#failTurn(process, turn, {
 				code: "permission-settlement-failed",
-				summary: "Workbench could not deliver the permission decision to Clio.",
+				summary: "The GUI could not deliver the permission decision to Clio Coder.",
 				source: "observed-by-workbench",
 			});
 			throw new HostError("internal", "The permission decision could not be delivered safely.");
@@ -1172,7 +1178,7 @@ export class ClioProjectHost {
 			// A crashed child is replaced on the next command so the operator is never stuck.
 			return await this.#spawn();
 		}
-		if (this.#process.initialized === null) throw new HostError("not-ready", "Clio is still starting.");
+		if (this.#process.initialized === null) throw new HostError("not-ready", "Clio Coder is still starting.");
 		return this.#process;
 	}
 
@@ -1202,13 +1208,13 @@ export class ClioProjectHost {
 		const client = AcpClient.spawn(this.#launcher.launch(this.project.trustedRoot), {
 			onUpdate: (generation, update) => {
 				if (process === null || generation !== process.generation) {
-					throw new HostError("internal", "A stale Clio update crossed its process generation.");
+					throw new HostError("internal", "A stale Clio Coder update crossed its process generation.");
 				}
 				this.#handleUpdate(process, update);
 			},
 			onPermission: (generation, request) => {
 				if (process === null || generation !== process.generation) {
-					throw new HostError("internal", "A stale Clio permission crossed its process generation.");
+					throw new HostError("internal", "A stale Clio Coder permission crossed its process generation.");
 				}
 				this.#handlePermission(process, request);
 			},
@@ -1272,7 +1278,7 @@ export class ClioProjectHost {
 				await this.#finishTurn(process, turn, {
 					outcome: "canceled",
 					code: "clio-process-retired",
-					summary: "The Clio process was retired before the turn finished.",
+					summary: "The Clio Coder process was retired before the turn finished.",
 					stopReason: "cancelled",
 					source: "observed-by-workbench",
 				});
@@ -1428,14 +1434,14 @@ export class ClioProjectHost {
 			return;
 		}
 		if (!isRecord(result) || !Array.isArray(result.sessions) || typeof result.truncated !== "boolean") {
-			throw new HostError("internal", "Clio returned an invalid session list.");
+			throw new HostError("internal", "Clio Coder returned an invalid session list.");
 		}
 		if (result.sessions.length > MAX_SESSIONS_LISTED) {
-			throw new HostError("internal", "Clio returned too many sessions.");
+			throw new HostError("internal", "Clio Coder returned too many sessions.");
 		}
 		const sessions: WireSessionSummary[] = [];
 		for (const entry of result.sessions) {
-			if (!isRecord(entry)) throw new HostError("internal", "Clio returned an invalid session entry.");
+			if (!isRecord(entry)) throw new HostError("internal", "Clio Coder returned an invalid session entry.");
 			for (
 				const field of [
 					"sessionId",
@@ -1450,7 +1456,7 @@ export class ClioProjectHost {
 					"hosted",
 				] as const
 			) {
-				if (!Object.hasOwn(entry, field)) throw new HostError("internal", `Clio omitted session field ${field}.`);
+				if (!Object.hasOwn(entry, field)) throw new HostError("internal", `Clio Coder omitted session field ${field}.`);
 			}
 			const rawSessionId = boundedString(entry.sessionId, "session id", MAX_SESSION_ID_BYTES);
 			const state = entry.state === "open"
@@ -1460,13 +1466,13 @@ export class ClioProjectHost {
 				: entry.state === "unknown"
 				? "unknown"
 				: null;
-			if (state === null) throw new HostError("internal", "Clio returned an unknown session state.");
+			if (state === null) throw new HostError("internal", "Clio Coder returned an unknown session state.");
 			const turns = safeInteger(entry.turns);
-			if (turns === null) throw new HostError("internal", "Clio returned an invalid turn count.");
+			if (turns === null) throw new HostError("internal", "Clio Coder returned an invalid turn count.");
 			if (
 				typeof entry.preview !== "string" || bytes(entry.preview) > 512 || hasControlCharacter(entry.preview) ||
 				typeof entry.hosted !== "boolean"
-			) throw new HostError("internal", "Clio returned invalid session presentation fields.");
+			) throw new HostError("internal", "Clio Coder returned invalid session presentation fields.");
 			sessions.push({
 				id: this.#publicSessionId(rawSessionId),
 				label: requiredNullableBoundedString(entry, "label", "session label", 256),
@@ -1510,7 +1516,7 @@ export class ClioProjectHost {
 
 	async #refreshSettings(process: Process, emitError: boolean): Promise<void> {
 		if (!process.initialized?.capabilities.settings) {
-			if (emitError) throw new HostError("unsupported", "This Clio does not expose settings over ACP.");
+			if (emitError) throw new HostError("unsupported", "This Clio Coder does not expose settings over ACP.");
 			return;
 		}
 		let result: unknown;
@@ -1526,22 +1532,22 @@ export class ClioProjectHost {
 
 	#settingsDto(result: unknown): WireSettingsState {
 		if (!isRecord(result) || !isRecord(result.settings) || !Array.isArray(result.editable)) {
-			throw new HostError("internal", "Clio returned an invalid settings projection.");
+			throw new HostError("internal", "Clio Coder returned an invalid settings projection.");
 		}
 		if (!isRecord(result.settings.orchestrator) || !Object.hasOwn(result.settings, "autonomy")) {
-			throw new HostError("internal", "Clio omitted required safe settings.");
+			throw new HostError("internal", "Clio Coder omitted required safe settings.");
 		}
 		const orchestrator = result.settings.orchestrator;
 		for (const field of ["target", "model", "thinkingLevel"] as const) {
-			if (!Object.hasOwn(orchestrator, field)) throw new HostError("internal", `Clio omitted setting ${field}.`);
+			if (!Object.hasOwn(orchestrator, field)) throw new HostError("internal", `Clio Coder omitted setting ${field}.`);
 		}
 		const thinkingLevel = boundedString(orchestrator.thinkingLevel, "orchestrator.thinkingLevel", 16);
 		const autonomy = boundedString(result.settings.autonomy, "autonomy", 16);
 		if (!(THINKING_LEVELS as readonly string[]).includes(thinkingLevel)) {
-			throw new HostError("internal", "Clio returned an unknown thinking level.");
+			throw new HostError("internal", "Clio Coder returned an unknown thinking level.");
 		}
 		if (!(AUTONOMY_LEVELS as readonly string[]).includes(autonomy)) {
-			throw new HostError("internal", "Clio returned an unknown autonomy level.");
+			throw new HostError("internal", "Clio Coder returned an unknown autonomy level.");
 		}
 		const settings: Record<string, string | null> = {
 			"orchestrator.target": requiredNullableBoundedString(
@@ -1559,7 +1565,7 @@ export class ClioProjectHost {
 		if (
 			editable.length !== SAFE_SETTING_KEYS.length || editableSet.size !== SAFE_SETTING_KEYS.length ||
 			!SAFE_SETTING_KEYS.every((key) => editableSet.has(key))
-		) throw new HostError("internal", "Clio returned an invalid editable settings set.");
+		) throw new HostError("internal", "Clio Coder returned an invalid editable settings set.");
 		const targets = this.#targets ?? [];
 		const selectedTarget = settings["orchestrator.target"];
 		const options: Record<string, readonly string[]> = {
@@ -1573,7 +1579,7 @@ export class ClioProjectHost {
 
 	async #refreshTargets(process: Process, emitError: boolean): Promise<void> {
 		if (!process.initialized?.capabilities.targets) {
-			if (emitError) throw new HostError("unsupported", "This Clio does not expose targets over ACP.");
+			if (emitError) throw new HostError("unsupported", "This Clio Coder does not expose targets over ACP.");
 			return;
 		}
 		let result: unknown;
@@ -1584,16 +1590,16 @@ export class ClioProjectHost {
 			return;
 		}
 		if (!isRecord(result) || !Array.isArray(result.targets) || result.targets.length > 64) {
-			throw new HostError("internal", "Clio returned an invalid target list.");
+			throw new HostError("internal", "Clio Coder returned an invalid target list.");
 		}
 		const previous = new Map((this.#targets ?? []).map((target) => [target.id, target.health]));
 		const targets: WireTarget[] = [];
 		for (const entry of result.targets) {
 			if (!isRecord(entry) || !Array.isArray(entry.models) || entry.models.length > 64) {
-				throw new HostError("internal", "Clio returned an invalid target entry.");
+				throw new HostError("internal", "Clio Coder returned an invalid target entry.");
 			}
 			if (typeof entry.isOrchestrator !== "boolean") {
-				throw new HostError("internal", "Clio returned an invalid target role.");
+				throw new HostError("internal", "Clio Coder returned an invalid target role.");
 			}
 			const id = boundedString(entry.id, "target id", 128);
 			targets.push({
@@ -1671,7 +1677,7 @@ export class ClioProjectHost {
 						title: safeToolTitle(tool.kind),
 						kind: tool.kind,
 						status: "failed",
-						summary: "Clio ended before reporting a terminal tool status.",
+						summary: "Clio Coder ended before reporting a terminal tool status.",
 						locations: tool.locations.map((segments) => ({ segments })),
 						source: "observed-by-workbench",
 					},
@@ -1681,7 +1687,7 @@ export class ClioProjectHost {
 				await this.#finishTurn(process, turn, {
 					outcome: "failed",
 					code: "incomplete-tool-lifecycle",
-					summary: "Clio ended with an incomplete tool lifecycle.",
+					summary: "Clio Coder ended with an incomplete tool lifecycle.",
 					stopReason: projected.stopReason,
 					usage: projected.usage,
 					source: "observed-by-workbench",
@@ -1693,7 +1699,7 @@ export class ClioProjectHost {
 				await this.#finishTurn(process, turn, {
 					outcome: "failed",
 					code: "empty-turn",
-					summary: "Clio returned an empty turn without any message or tool activity.",
+					summary: "Clio Coder returned an empty turn without any message or tool activity.",
 					stopReason: projected.stopReason,
 					usage: projected.usage,
 					source: "observed-on-acp",
@@ -1707,25 +1713,25 @@ export class ClioProjectHost {
 				"approval-unanswered": {
 					code: "approval-unanswered",
 					summary:
-						"An approval waited unanswered for the whole budget, so Workbench stopped the turn. Clio was not told no; send a new prompt to continue.",
+						"An approval waited unanswered for the whole budget, so the GUI stopped the turn. Clio Coder was not told no; send a new prompt to continue.",
 				},
 				"client-disconnected": {
 					code: "client-disconnected",
-					summary: "The Workbench window went away, so the turn was stopped. Send a new prompt to continue.",
+					summary: "The GUI window went away, so the turn was stopped. Send a new prompt to continue.",
 				},
-				"host-shutdown": { code: "host-shutdown", summary: "Workbench shut down and stopped the turn." },
+				"host-shutdown": { code: "host-shutdown", summary: "The GUI shut down and stopped the turn." },
 			};
 			const cancel = turn.cancelReason === null
-				? { code: "clio-cancelled", summary: "Clio reported that the turn was cancelled." }
+				? { code: "clio-cancelled", summary: "Clio Coder reported that the turn was cancelled." }
 				: cancelSummary[turn.cancelReason];
 			await this.#finishTurn(process, turn, {
 				outcome: completed ? "completed" : cancelled ? "canceled" : "failed",
 				code: completed ? "clio-completed" : cancelled ? cancel.code : `clio-${projected.stopReason}`,
 				summary: completed
-					? "Clio finished this turn."
+					? "Clio Coder finished this turn."
 					: cancelled
 					? cancel.summary
-					: `Clio stopped the turn with ${projected.stopReason.replaceAll("_", " ")}.`,
+					: `Clio Coder stopped the turn with ${projected.stopReason.replaceAll("_", " ")}.`,
 				stopReason: projected.stopReason,
 				usage: projected.usage,
 				source: cancelled && turn.cancelReason !== null ? "observed-by-workbench" : "reported-by-clio",
@@ -1761,22 +1767,24 @@ export class ClioProjectHost {
 			this.#handleReplayUpdate(process, process.replay, update);
 			return;
 		}
-		if (update.replay !== null) throw new HostError("internal", "Clio sent replay metadata outside a session load.");
+		if (update.replay !== null) {
+			throw new HostError("internal", "Clio Coder sent replay metadata outside a session load.");
+		}
 		const turn = process.turn;
 		if (
 			turn === null || process.session === null || update.sessionId !== process.session.rawSessionId ||
 			!turn.promptActive
 		) {
-			throw new HostError("internal", "A Clio update crossed its bounded session turn.");
+			throw new HostError("internal", "A Clio Coder update crossed its bounded session turn.");
 		}
-		if (update.type === "user") throw new HostError("internal", "Clio echoed a user message outside a replay.");
+		if (update.type === "user") throw new HostError("internal", "Clio Coder echoed a user message outside a replay.");
 		if (turn.projectionClosed) return;
 		if (turn.updateCount >= MAX_ACP_UPDATES_PER_TURN) {
 			this.#closeProjectionForBudget(
 				process,
 				turn,
 				"workbench-update-budget-exceeded",
-				"Workbench stopped this turn after the bounded update budget was exceeded.",
+				"The GUI stopped this turn after the bounded update budget was exceeded.",
 			);
 			return;
 		}
@@ -1788,7 +1796,7 @@ export class ClioProjectHost {
 					process,
 					turn,
 					"workbench-stream-budget-exceeded",
-					"Workbench stopped this turn after the bounded text budget was exceeded.",
+					"The GUI stopped this turn after the bounded text budget was exceeded.",
 				);
 				return;
 			}
@@ -1803,12 +1811,12 @@ export class ClioProjectHost {
 			if (
 				update.variant !== "start" || turn.tools.size >= MAX_TOOLS_PER_TURN || update.status === "completed" ||
 				update.status === "failed"
-			) throw new HostError("internal", "Clio emitted an invalid tool lifecycle.");
+			) throw new HostError("internal", "Clio Coder emitted an invalid tool lifecycle.");
 			turn.toolCounter += 1;
 			tool = {
 				publicId: `tool-${turn.context.turnId}-${turn.toolCounter}`,
 				rawTitle: update.title,
-				kind: boundedString(update.kind, "Clio tool kind", MAX_TOOL_KIND_BYTES),
+				kind: boundedString(update.kind, "Clio Coder tool kind", MAX_TOOL_KIND_BYTES),
 				locations,
 				terminal: false,
 			};
@@ -1816,7 +1824,7 @@ export class ClioProjectHost {
 		} else if (
 			update.variant !== "update" || tool.terminal || tool.rawTitle !== update.title || tool.kind !== update.kind ||
 			!sameLocations(tool.locations, locations)
-		) throw new HostError("internal", "Clio changed or replayed a bounded tool identity.");
+		) throw new HostError("internal", "Clio Coder changed or replayed a bounded tool identity.");
 		const terminal = update.status === "completed" || update.status === "failed";
 		if (terminal) tool.terminal = true;
 		turn.hasSubstantiveActivity = true;
@@ -1836,13 +1844,15 @@ export class ClioProjectHost {
 	}
 
 	#handleReplayUpdate(process: Process, replay: Replay, update: ValidatedAcpUpdate): void {
-		if (update.replay === null) throw new HostError("internal", "Clio replayed a frame without replay metadata.");
+		if (update.replay === null) throw new HostError("internal", "Clio Coder replayed a frame without replay metadata.");
 		replay.frames += 1;
-		if (update.replay.turn < replay.currentTurn) throw new HostError("internal", "Clio replayed turns out of order.");
+		if (update.replay.turn < replay.currentTurn) {
+			throw new HostError("internal", "Clio Coder replayed turns out of order.");
+		}
 		if (update.replay.turn > replay.currentTurn) {
 			this.#flushReplayText(process);
 			if (replay.turnCounter >= MAX_REPLAY_TURNS) {
-				throw new HostError("internal", "Clio replayed more turns than the contract allows.");
+				throw new HostError("internal", "Clio Coder replayed more turns than the contract allows.");
 			}
 			replay.currentTurn = update.replay.turn;
 			replay.turnCounter += 1;
@@ -1895,18 +1905,18 @@ export class ClioProjectHost {
 		let tool = replay.tools.get(update.toolCallId);
 		if (tool === undefined) {
 			if (update.variant !== "start" || replay.toolCounter >= MAX_REPLAY_TOOLS) {
-				throw new HostError("internal", "Clio replayed an invalid tool lifecycle.");
+				throw new HostError("internal", "Clio Coder replayed an invalid tool lifecycle.");
 			}
 			replay.toolCounter += 1;
 			tool = {
 				publicId: `tool-${replay.context.turnId}-${replay.tools.size + 1}`,
 				rawTitle: update.title,
-				kind: boundedString(update.kind, "Clio tool kind", MAX_TOOL_KIND_BYTES),
+				kind: boundedString(update.kind, "Clio Coder tool kind", MAX_TOOL_KIND_BYTES),
 				locations,
 				terminal: false,
 			};
 			replay.tools.set(update.toolCallId, tool);
-		} else if (tool.terminal) throw new HostError("internal", "Clio replayed a terminal tool twice.");
+		} else if (tool.terminal) throw new HostError("internal", "Clio Coder replayed a terminal tool twice.");
 		const terminal = update.status === "completed" || update.status === "failed";
 		if (terminal) tool.terminal = true;
 		this.#sink.emit({
@@ -1959,7 +1969,7 @@ export class ClioProjectHost {
 			process.initialized.eventWorkspaceInstanceId === null ||
 			event.workspaceInstanceId !== process.initialized.eventWorkspaceInstanceId ||
 			event.sessionId !== process.session.rawSessionId || event.sequence <= process.lastExtensionSequence
-		) throw new HostError("internal", "A Clio extension event crossed its process or turn boundary.");
+		) throw new HostError("internal", "A Clio Coder extension event crossed its process or turn boundary.");
 		if (event.kind !== "safety.loopBlocked") return;
 		process.lastExtensionSequence = event.sequence;
 		this.#sink.emit({
@@ -1991,14 +2001,14 @@ export class ClioProjectHost {
 			turn === null || !turn.promptActive || process.session === null ||
 			request.sessionId !== process.session.rawSessionId ||
 			turn.permission !== null
-		) throw new HostError("internal", "A stale or concurrent Clio permission crossed its turn boundary.");
+		) throw new HostError("internal", "A stale or concurrent Clio Coder permission crossed its turn boundary.");
 		const tool = turn.tools.get(request.toolCallId);
 		if (tool === undefined || tool.terminal || tool.rawTitle !== request.title || tool.kind !== request.kind) {
-			throw new HostError("internal", "Clio requested permission for an unknown tool identity.");
+			throw new HostError("internal", "Clio Coder requested permission for an unknown tool identity.");
 		}
 		const locations = projectLocations(this.project.trustedRoot, request.locations);
 		if (!sameLocations(tool.locations, locations)) {
-			throw new HostError("internal", "Clio changed a tool location at the permission boundary.");
+			throw new HostError("internal", "Clio Coder changed a tool location at the permission boundary.");
 		}
 		if (turn.cancelReason !== null || turn.settling) {
 			void request.resolve("cancelled").catch(() => undefined);
@@ -2015,7 +2025,7 @@ export class ClioProjectHost {
 			// Honest rather than clamped: a short server permission ceiling simply
 			// leaves no room to escalate before the turn is stopped.
 			this.#log(
-				`Workbench cannot escalate this approval: the Clio permission ceiling leaves ${
+				`The GUI cannot escalate this approval: the Clio Coder permission ceiling leaves ${
 					expiresAt - requestedAt
 				} ms, shorter than the ${this.#permissionEscalateMs} ms escalation budget.`,
 			);
@@ -2119,18 +2129,18 @@ export class ClioProjectHost {
 			if (graceTimer !== undefined) clearTimeout(graceTimer);
 		});
 		if (!settled && !turn.settling) {
-			// Clio did not settle its cancelled prompt in time: retire the child so nothing lingers.
+			// Clio Coder did not settle its cancelled prompt in time: retire the child so nothing lingers.
 			await this.#finishTurn(process, turn, {
 				outcome: "canceled",
 				code: reason === "operator" ? "operator-cancelled" : reason,
-				summary: "Clio did not confirm the cancellation in time, so its process was retired.",
+				summary: "Clio Coder did not confirm the cancellation in time, so its process was retired.",
 				stopReason: "cancelled",
 				source: "observed-by-workbench",
 			}, { settleToIdle: false });
 			await this.#retire(process, { closeSession: false });
 			this.#lastFailure = {
 				code: "acp-cancel-timeout",
-				summary: "Clio did not confirm a cancellation and was retired.",
+				summary: "Clio Coder did not confirm a cancellation and was retired.",
 			};
 			this.#setPhase("failed");
 		}

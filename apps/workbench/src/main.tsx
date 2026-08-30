@@ -4,15 +4,18 @@ import "@fontsource/commit-mono/400.css";
 import { useEffect, useMemo, useReducer, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { type WorkbenchActions, WorkbenchView } from "./App.tsx";
+import { FrameEventBuffer } from "./event-buffer.ts";
 import {
 	type ClientCommand,
 	type ClientCommandKind,
 	type ClientCommandPayloadByKind,
 	type LocalTransport,
+	PRODUCT_NAME,
 	PROTOCOL_VERSION,
 	WebSocketLocalTransport,
 } from "./protocol.ts";
 import { appReducer, initialAppState, parseBootstrapPayload } from "./state.ts";
+import { fetchWithNetworkRetry, reloadFailedStylesheets } from "./startup.ts";
 import "./styles.css";
 
 function App() {
@@ -23,15 +26,20 @@ function App() {
 		const abortController = new AbortController();
 		let mounted = true;
 		let transport: LocalTransport | null = null;
+		let eventBuffer: FrameEventBuffer | null = null;
 
 		async function connect() {
 			try {
-				const response = await fetch("/api/bootstrap", {
-					headers: { accept: "application/json" },
-					cache: "no-store",
-					credentials: "same-origin",
-					signal: abortController.signal,
-				});
+				const response = await fetchWithNetworkRetry(
+					() =>
+						fetch("/api/bootstrap", {
+							headers: { accept: "application/json" },
+							cache: "no-store",
+							credentials: "same-origin",
+							signal: abortController.signal,
+						}),
+					abortController.signal,
+				);
 				if (!response.ok) throw new Error(`Bootstrap failed with HTTP ${response.status}.`);
 				const bootstrap = parseBootstrapPayload(await response.json());
 				if (!mounted) return;
@@ -42,12 +50,16 @@ function App() {
 				endpoint.searchParams.set("token", bootstrap.localToken);
 				transport = new WebSocketLocalTransport(endpoint);
 				transportRef.current = transport;
+				eventBuffer = new FrameEventBuffer((events) => {
+					if (mounted) dispatch({ type: "host.events", events });
+				});
 				transport.onEvent((event) => {
 					if (!mounted) return;
-					dispatch({ type: "host.event", event });
+					eventBuffer?.push(event);
 				});
 				transport.onDisconnect((disconnect) => {
 					if (!mounted || disconnect.cause === "client-close") return;
+					eventBuffer?.flush();
 					dispatch({
 						type: "connection.changed",
 						connection: disconnect.cause === "protocol-error" ? "failed" : "disconnected",
@@ -62,7 +74,7 @@ function App() {
 				if (!mounted || abortController.signal.aborted) return;
 				dispatch({
 					type: "bootstrap.failed",
-					message: error instanceof Error ? error.message : "The Workbench bootstrap request failed.",
+					message: error instanceof Error ? error.message : "The local GUI bootstrap request failed.",
 				});
 			}
 		}
@@ -71,7 +83,8 @@ function App() {
 		return () => {
 			mounted = false;
 			abortController.abort();
-			transport?.close(1000, "Workbench renderer closed");
+			eventBuffer?.close();
+			transport?.close(1000, "Clio Coder renderer closed");
 			if (transportRef.current === transport) transportRef.current = null;
 		};
 	}, []);
@@ -175,6 +188,30 @@ function App() {
 			patchSettings(projectId, patch) {
 				send("settings.patch", { projectId, patch });
 			},
+			inspectConfig(projectId) {
+				const requestId = send("config.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "config.inspect.submitted", requestId });
+			},
+			inspectCatalog(projectId) {
+				const requestId = send("catalog.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "catalog.inspect.submitted", requestId });
+			},
+			inspectUsage(projectId) {
+				const requestId = send("usage.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "usage.inspect.submitted", requestId });
+			},
+			inspectRouting(projectId) {
+				const requestId = send("routing.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "routing.inspect.submitted", requestId });
+			},
+			inspectDispatch() {
+				const requestId = send("dispatch.inspect", {});
+				if (requestId !== null) dispatch({ type: "dispatch.inspect.submitted", requestId });
+			},
+			inspectRecovery() {
+				const requestId = send("recovery.inspect", {});
+				if (requestId !== null) dispatch({ type: "recovery.inspect.submitted", requestId });
+			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
 			},
@@ -191,5 +228,6 @@ function App() {
 }
 
 const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error("Clio Workbench could not find its root element.");
+if (!rootElement) throw new Error(`${PRODUCT_NAME} could not find its root element.`);
+reloadFailedStylesheets(document);
 createRoot(rootElement).render(<App />);

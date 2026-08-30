@@ -2,7 +2,7 @@
  * Workbench UI state: the recent-project list, the refuse-to-open guards, and
  * the host-side directory browser.
  *
- * This is Workbench state, not Clio configuration. The only file it owns is
+ * This is Workbench state, not Clio Coder configuration. The only file it owns is
  * `projects.json` under the Workbench state directory. Deno's read/write grants
  * are broad at launch, so the boundary that keeps the operator away from `/`,
  * `$HOME`, dot-config directories, and system trees is enforced here, in
@@ -85,6 +85,9 @@ function isStrictAncestor(candidate: string, descendant: string): boolean {
 	return candidate !== descendant && isWithin(candidate, descendant);
 }
 
+/** Reads one environment variable; an empty, missing, or unreadable value is `undefined`. */
+export type EnvReader = (name: string) => string | undefined;
+
 function envValue(name: string): string | undefined {
 	try {
 		const value = Deno.env.get(name);
@@ -94,11 +97,14 @@ function envValue(name: string): string | undefined {
 	}
 }
 
-/** `$CLIO_WORKBENCH_STATE_DIR`, else `$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`. */
-export function resolveStateDir(homePath: string): string {
-	const explicit = envValue("CLIO_WORKBENCH_STATE_DIR");
+/**
+ * `$CLIO_WORKBENCH_STATE_DIR`, else `$XDG_STATE_HOME/clio-workbench`, else `~/.local/state/clio-workbench`.
+ * The installer passes its own reader so it records exactly the directory the app will use.
+ */
+export function resolveStateDir(homePath: string, env: EnvReader = envValue): string {
+	const explicit = env("CLIO_WORKBENCH_STATE_DIR");
 	if (explicit !== undefined && isAbsolute(explicit)) return resolve(explicit);
-	const xdg = envValue("XDG_STATE_HOME");
+	const xdg = env("XDG_STATE_HOME");
 	if (xdg !== undefined && isAbsolute(xdg)) return join(resolve(xdg), "clio-workbench");
 	return join(homePath, ".local", "state", "clio-workbench");
 }
@@ -106,7 +112,7 @@ export function resolveStateDir(homePath: string): string {
 export function resolveHomePath(): string {
 	const home = envValue("HOME");
 	if (home === undefined || !isAbsolute(home)) {
-		throw new WorkbenchStateError("internal", "Workbench needs an absolute HOME to place its state.");
+		throw new WorkbenchStateError("internal", "The GUI needs an absolute HOME to place its state.");
 	}
 	return resolve(home);
 }
@@ -184,7 +190,7 @@ export class WorkbenchState {
 	/** Reads `projects.json`. A corrupt or unreadable file starts the list empty and logs one line to stderr. */
 	static async open(options: WorkbenchStateOptions = {}): Promise<WorkbenchState> {
 		const homePath = resolve(options.homePath ?? resolveHomePath());
-		if (!isAbsolute(homePath)) throw new WorkbenchStateError("internal", "The Workbench home path must be absolute.");
+		if (!isAbsolute(homePath)) throw new WorkbenchStateError("internal", "The GUI home path must be absolute.");
 		const stateDir = resolve(options.stateDir ?? resolveStateDir(homePath));
 		const state = new WorkbenchState(stateDir, homePath, options);
 		await state.#load();
@@ -253,9 +259,9 @@ export class WorkbenchState {
 				return `Directories under ~/${name} hold configuration or credentials and cannot be opened as a project.`;
 			}
 		}
-		if (isWithin(this.stateDir, path)) return "The Workbench state directory cannot be opened as a project.";
+		if (isWithin(this.stateDir, path)) return "The GUI state directory cannot be opened as a project.";
 		if (isStrictAncestor(path, this.stateDir)) {
-			return "A directory that contains the Workbench state cannot be opened as a project.";
+			return "A directory that contains the GUI state cannot be opened as a project.";
 		}
 		for (const root of SYSTEM_ROOTS) {
 			if (isWithin(root, path)) return `System directories under ${root} cannot be opened as a project.`;
@@ -392,12 +398,12 @@ export class WorkbenchState {
 			text = await Deno.readTextFile(file);
 		} catch (error) {
 			if (error instanceof Deno.errors.NotFound) return;
-			this.#log(`Workbench could not read its recent-project list; starting empty (${errorName(error)}).`);
+			this.#log(`The GUI could not read its recent-project list; starting empty (${errorName(error)}).`);
 			return;
 		}
 		const parsed = parseRecentFile(text);
 		if (parsed === null) {
-			this.#log("Workbench found a corrupt recent-project list and is starting with an empty one.");
+			this.#log("The GUI found a corrupt recent-project list and is starting with an empty one.");
 			return;
 		}
 		this.#recent = parsed;
@@ -416,7 +422,7 @@ export class WorkbenchState {
 		return write.catch((error: unknown) => {
 			throw new WorkbenchStateError(
 				"internal",
-				`Workbench could not save its recent-project list (${errorName(error)}).`,
+				`The GUI could not save its recent-project list (${errorName(error)}).`,
 			);
 		});
 	}

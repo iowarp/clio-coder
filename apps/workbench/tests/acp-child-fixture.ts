@@ -145,6 +145,7 @@ const SCENARIOS = [
 	"event-tool-fields-invalid",
 	"event-count-invalid",
 	"event-interruption-invalid",
+	"stream-workload",
 ] as const;
 
 type Scenario = (typeof SCENARIOS)[number];
@@ -257,7 +258,7 @@ const SEVENTEEN_BASH_CALLS = 17;
 const SEVENTEEN_BASH_CANDIDATE_LIMIT = 128;
 /** Blocks a turn may spend before the disposition stops being a plain block. */
 const LOOP_BUDGET = 8;
-/** A shape must be seen this many times before Clio reports it as a loop. */
+/** A shape must be seen this many times before Clio Coder reports it as a loop. */
 const LOOP_REPEAT_THRESHOLD = 3;
 
 /** The first two words of a command, which is what repeats when a model rephrases. */
@@ -322,6 +323,194 @@ function isJsonRpcId(value: unknown): value is JsonRpcId {
 	return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 }
 
+/** Fixture-only stream pacing for the `stream-workload` scenario, in milliseconds per tick. */
+function streamWorkloadPaceMs(): number {
+	const value = Deno.args.find((argument) => argument.startsWith("--pace-ms="))?.slice("--pace-ms=".length);
+	if (value === undefined) return 4;
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 1_000) throw new Error("--pace-ms must be 0..1000");
+	return parsed;
+}
+
+/** Splits Markdown at blank lines outside fenced code, keeping the separators with the preceding block. */
+function streamWorkloadBlocks(markdown: string): string[] {
+	const blocks: string[] = [];
+	let current = "";
+	let fence: string | null = null;
+	for (const line of markdown.split("\n")) {
+		const opening = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
+		if (opening !== null) {
+			const run = opening[1] ?? "";
+			if (fence === null) fence = run;
+			else if (run.startsWith(fence[0] ?? "`") && run.length >= fence.length) fence = null;
+		}
+		current += `${line}\n`;
+		if (fence === null && line.trim().length === 0 && current.trim().length > 0) {
+			blocks.push(current);
+			current = "";
+		}
+	}
+	if (current.length > 0) blocks.push(current);
+	return blocks;
+}
+
+/** Deterministic Markdown covering every construct the renderer must handle, including hostile input. */
+export function streamWorkloadMarkdown(): string {
+	const lines: string[] = [];
+	lines.push("# Convergence audit of the atlas field study");
+	lines.push("");
+	lines.push(
+		"I read the notes under `analysis/`, re-ran the mesh **convergence** checks, and compared the *reported* residuals against the tolerances in the study plan. The short version: three of four cases converge; the coarse case does not.",
+	);
+	lines.push("");
+	lines.push("## What I checked");
+	lines.push("");
+	lines.push("1. The mesh hierarchy declared in the notes");
+	lines.push("   - four refinement levels, each halving the cell size");
+	lines.push("   - the coarse level uses a different time step, see [the study plan](https://example.org/atlas/plan)");
+	lines.push("2. The residual history for each level");
+	lines.push("   1. steady-state residual below `1e-6`");
+	lines.push("   2. monotone decrease after iteration 40");
+	lines.push("3. The reported Richardson extrapolation");
+	lines.push("");
+	lines.push("- [x] notes read");
+	lines.push("- [x] checks re-run");
+	lines.push("- [ ] coarse case explained");
+	lines.push("");
+	lines.push(
+		"> The coarse case was never expected to converge at the declared tolerance; the plan flags it as a smoke run.",
+	);
+	lines.push("> That flag is easy to miss because it lives in a footnote.");
+	lines.push("");
+	lines.push("## Results");
+	lines.push("");
+	lines.push("| Level | Cells | Final residual | Iterations | Converged |");
+	lines.push("| --- | ---: | ---: | ---: | :---: |");
+	lines.push("| L0 (coarse) | 12,800 | 3.2e-4 | 400 | no |");
+	lines.push("| L1 | 51,200 | 8.9e-7 | 212 | yes |");
+	lines.push("| L2 | 204,800 | 6.1e-7 | 231 | yes |");
+	lines.push("| L3 (fine) | 819,200 | 4.4e-7 | 248 | yes |");
+	lines.push("| Extrapolated | — | 2.0e-7 | — | — |");
+	lines.push("");
+	lines.push(
+		"The observed order of accuracy is 1.93, which matches the second-order scheme within the usual tolerance.",
+	);
+	lines.push("");
+	lines.push("---");
+	lines.push("");
+	lines.push("## The check script");
+	lines.push("");
+	lines.push("```ts");
+	lines.push('import { readFile } from "node:fs/promises";');
+	lines.push("");
+	lines.push("interface Level {");
+	lines.push("\treadonly name: string;");
+	lines.push("\treadonly cells: number;");
+	lines.push("\treadonly residuals: readonly number[];");
+	lines.push("}");
+	lines.push("");
+	lines.push("export async function loadLevels(path: string): Promise<Level[]> {");
+	lines.push('\tconst raw = await readFile(path, "utf8");');
+	lines.push("\treturn JSON.parse(raw) as Level[];");
+	lines.push("}");
+	lines.push("");
+	lines.push("export function converged(level: Level, tolerance = 1e-6): boolean {");
+	lines.push("\tconst last = level.residuals.at(-1) ?? Number.POSITIVE_INFINITY;");
+	lines.push(
+		"\tconst monotone = level.residuals.slice(40).every((value, index, all) => index === 0 || value <= all[index - 1]!);",
+	);
+	lines.push("\treturn last < tolerance && monotone; // both conditions from the plan");
+	lines.push("}");
+	lines.push("");
+	lines.push("export function observedOrder(levels: readonly Level[]): number {");
+	lines.push("\tconst [a, b, c] = levels.slice(-3).map((level) => level.residuals.at(-1) ?? 0);");
+	lines.push("\treturn Math.log((a! - b!) / (b! - c!)) / Math.log(2);");
+	lines.push("}");
+	lines.push("```");
+	lines.push("");
+	lines.push("And the same check in Python, which the notes actually used:");
+	lines.push("");
+	lines.push("```python");
+	lines.push("import json");
+	lines.push("import math");
+	lines.push("from pathlib import Path");
+	lines.push("");
+	lines.push("");
+	lines.push("def load_levels(path: Path) -> list[dict]:");
+	lines.push("    return json.loads(path.read_text())");
+	lines.push("");
+	lines.push("");
+	lines.push("def converged(level: dict, tolerance: float = 1e-6) -> bool:");
+	lines.push('    residuals = level["residuals"]');
+	lines.push("    tail = residuals[40:]");
+	lines.push("    monotone = all(b <= a for a, b in zip(tail, tail[1:]))");
+	lines.push("    return residuals[-1] < tolerance and monotone");
+	lines.push("");
+	lines.push("");
+	lines.push("def observed_order(levels: list[dict]) -> float:");
+	lines.push('    a, b, c = (lvl["residuals"][-1] for lvl in levels[-3:])');
+	lines.push("    return math.log((a - b) / (b - c)) / math.log(2)");
+	lines.push("```");
+	lines.push("");
+	lines.push("A snippet in a language the highlighter will not know:");
+	lines.push("");
+	lines.push("```atlasql");
+	lines.push("SELECT level, last(residual) FROM history GROUP BY level HAVING last(residual) < 1e-6;");
+	lines.push("```");
+	lines.push("");
+	lines.push("## How the levels relate");
+	lines.push("");
+	lines.push("```mermaid");
+	lines.push("flowchart LR");
+	lines.push('  L0["L0 coarse"] --> L1["L1"]');
+	lines.push('  L1 --> L2["L2"]');
+	lines.push('  L2 --> L3["L3 fine"]');
+	lines.push('  L1 -.-> R{{"Richardson"}}');
+	lines.push("  L2 -.-> R");
+	lines.push("  L3 -.-> R");
+	lines.push("```");
+	lines.push("");
+	lines.push("The diagram below is deliberately malformed to show the failure state:");
+	lines.push("");
+	lines.push("```mermaid");
+	lines.push("flowchart LR");
+	lines.push("  A --> ");
+	lines.push("  --> B[");
+	lines.push("```");
+	lines.push("");
+	lines.push("## Hostile input the renderer must neutralize");
+	lines.push("");
+	lines.push(
+		'Raw HTML: <script>alert(1)</script> and <img src=x onerror=alert(1)> and <a href="javascript:alert(1)">x</a>.',
+	);
+	lines.push("");
+	lines.push(
+		"Links: [safe](https://example.org/ok), [unsafe](javascript:alert(1)), [data](data:text/html;base64,PHNjcmlwdD4=), ![image](https://evil.example/tracker.png).",
+	);
+	lines.push("");
+	lines.push("Autolink <https://example.org/auto> and a bare URL https://example.org/bare and `<b>` in code.");
+	lines.push("");
+	lines.push("## Long paragraphs");
+	lines.push("");
+	for (let paragraph = 0; paragraph < 6; paragraph += 1) {
+		lines.push(
+			`Paragraph ${paragraph + 1}. The residual history shows the usual transient in the first forty iterations, ` +
+				"then a clean monotone decrease. Cases L1 through L3 reach the tolerance with margin, and the observed " +
+				"order of accuracy is consistent with the scheme. The coarse case stalls at a residual three orders of " +
+				"magnitude above the tolerance, which the plan anticipates. Nothing in the notes suggests a bug; the " +
+				"stall is the expected behavior of a mesh that cannot resolve the boundary layer.",
+		);
+		lines.push("");
+	}
+	lines.push("## Conclusion");
+	lines.push("");
+	lines.push(
+		"The study converges as declared. I recommend marking the coarse run as a smoke test in the table itself rather than in a footnote.",
+	);
+	lines.push("");
+	return lines.join("\n");
+}
+
 function selectedScenario(): Scenario {
 	const value = Deno.args.find((argument) => argument.startsWith("--scenario="))?.slice("--scenario=".length) ??
 		"happy";
@@ -341,7 +530,7 @@ function selectedCallLogPath(): string | null {
 /**
  * Separate from the call log so its array shape stays untouched. This one records
  * every answer the client sent to an outbound permission request, which is how a
- * test proves an expiry never reached Clio as a rejection.
+ * test proves an expiry never reached Clio Coder as a rejection.
  */
 function selectedPermissionLogPath(): string | null {
 	return Deno.args.find((argument) => argument.startsWith("--permission-log="))?.slice("--permission-log=".length) ??
@@ -399,7 +588,7 @@ async function run(): Promise<void> {
 	let hostedSessionId = SESSION_ID;
 	let sessionCwd = Deno.cwd();
 	let activeTurn: ActiveTurn | null = null;
-	// A real Clio never reuses a JSON-RPC id across turns, so neither does this.
+	// A real Clio Coder never reuses a JSON-RPC id across turns, so neither does this.
 	let turnOrdinal = 0;
 	let resistantInterval: ReturnType<typeof setInterval> | undefined;
 	const calls: RecordedCall[] = [];
@@ -577,7 +766,7 @@ async function run(): Promise<void> {
 
 	const initializeResult: JsonRpcRecord = {
 		protocolVersion: 1,
-		agentInfo: { name: "clio-coder", title: "Clio Workbench ACP fixture", version: "0.0.0" },
+		agentInfo: { name: "clio-coder", title: "Clio Coder ACP fixture", version: "0.0.0" },
 		agentCapabilities: supportedAgentCapabilities,
 		authMethods: [],
 	};
@@ -612,7 +801,7 @@ async function run(): Promise<void> {
 		return scenarioInitializeResult;
 	};
 
-	// A per-process session store. Real Clio persists this; the fixture keeps it in
+	// A per-process session store. Real Clio Coder persists this; the fixture keeps it in
 	// memory so list, label, and delete are observable end to end.
 	const sessions = new Map<string, StoredSession>();
 	if (conversational) {
@@ -1179,7 +1368,7 @@ async function run(): Promise<void> {
 			const base = SEVENTEEN_BASH_COMMANDS[Math.min(commandIndex, SEVENTEEN_BASH_COMMANDS.length - 1)] ?? "git status";
 			const command = retryAttempt === 0 ? base : rephraseCommand(base, retryAttempt);
 
-			// Clio notices the repeat when the shape lands for the third time, and
+			// Clio Coder notices the repeat when the shape lands for the third time, and
 			// blocks that candidate before any tool start reaches ACP.
 			const shape = commandShape(command);
 			const repeatCount = (shapeCounts.get(shape) ?? 0) + 1;
@@ -1301,6 +1490,100 @@ async function run(): Promise<void> {
 		await settleTurn(turn, "end_turn");
 	};
 
+	/**
+	 * A representative rich-output workload for rendering measurements: one long
+	 * Markdown answer streamed in small chunks at a fixed pace, with bursts of tool
+	 * starts and completions, a failed tool, and reasoning chunks interleaved. The
+	 * pace is deliberately faster than a real model so hot paths are exercised.
+	 */
+	const runStreamWorkloadTurn = async (turn: ActiveTurn, waitMs: number): Promise<void> => {
+		if (waitMs > 0) await delay(waitMs);
+		if (turn.cancelled) {
+			await settleTurn(turn, "cancelled");
+			return;
+		}
+		const paceMs = streamWorkloadPaceMs();
+		const chunkChars = 5;
+		const chunksPerTick = 4;
+		// Tool calls and reasoning land only between Markdown blocks, as a real
+		// agent finishes a content block before it calls a tool.
+		const blocks = streamWorkloadBlocks(streamWorkloadMarkdown());
+		let toolOrdinal = 0;
+		const startTool = async (): Promise<void> => {
+			toolOrdinal += 1;
+			const ordinal = String(toolOrdinal).padStart(3, "0");
+			const kind = toolOrdinal % 5 === 0 ? "edit" : toolOrdinal % 3 === 0 ? "execute" : "read";
+			const title = kind === "execute"
+				? `bash: rg --files analysis | head -${toolOrdinal}`
+				: kind === "edit"
+				? `Edit analysis/convergence-notes.md (${ordinal})`
+				: `Read analysis/convergence-notes.md (${ordinal})`;
+			const toolCallId = `workload-tool-${ordinal}`;
+			turn.toolStarted = true;
+			turn.toolTerminal = false;
+			turn.openTool = { toolCallId, title, kind };
+			await emit(updateMessage(turn.sessionId, {
+				sessionUpdate: "tool_call",
+				toolCallId,
+				title,
+				kind,
+				status: "in_progress",
+				locations: [{ path: fixtureLocation() }],
+			}));
+		};
+		const finishTool = async (): Promise<void> => {
+			const tool = turn.openTool;
+			if (tool === null) return;
+			const failed = toolOrdinal === 7;
+			turn.toolTerminal = true;
+			turn.openTool = null;
+			await emit(updateMessage(turn.sessionId, {
+				sessionUpdate: "tool_call_update",
+				toolCallId: tool.toolCallId,
+				title: tool.title,
+				kind: tool.kind,
+				status: failed ? "failed" : "completed",
+				content: [{ type: "content", content: { type: "text", text: failed ? "exit status 1" : "ok" } }],
+				locations: [{ path: fixtureLocation() }],
+			}));
+		};
+		await emit(updateMessage(turn.sessionId, {
+			sessionUpdate: "agent_thought_chunk",
+			content: { type: "text", text: "Planning the audit: read the notes, run the checks, then summarize. " },
+		}));
+		let chunkIndex = 0;
+		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+			if (turn.cancelled || turn.settled) return;
+			if (blockIndex > 0 && blockIndex % 3 === 0) {
+				const burst = 1 + (blockIndex % 4);
+				for (let call = 0; call < burst; call += 1) {
+					await startTool();
+					if (paceMs > 0) await delay(paceMs);
+					await finishTool();
+				}
+			}
+			if (blockIndex === Math.floor(blocks.length / 2)) {
+				await emit(updateMessage(turn.sessionId, {
+					sessionUpdate: "agent_thought_chunk",
+					content: { type: "text", text: "Halfway. The remaining sections describe the results. " },
+				}));
+			}
+			const characters = Array.from(blocks[blockIndex] ?? "");
+			for (let index = 0; index < characters.length; index += chunkChars) {
+				if (turn.cancelled || turn.settled) return;
+				await emit(updateMessage(turn.sessionId, {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: characters.slice(index, index + chunkChars).join("") },
+				}));
+				chunkIndex += 1;
+				if (paceMs > 0 && chunkIndex % chunksPerTick === 0) await delay(paceMs);
+			}
+		}
+		await finishTool();
+		if (turn.cancelled || turn.settled) return;
+		await settleTurn(turn, "end_turn");
+	};
+
 	const runTurn = async (turn: ActiveTurn, waitMs: number): Promise<void> => {
 		if (scenario === "exit-during-turn") {
 			await emit(updateMessage(turn.sessionId, {
@@ -1320,6 +1603,10 @@ async function run(): Promise<void> {
 		}
 		if (LOOP_SCENARIOS.has(scenario)) {
 			await runSeventeenBashTurn(turn, waitMs);
+			return;
+		}
+		if (scenario === "stream-workload") {
+			await runStreamWorkloadTurn(turn, waitMs);
 			return;
 		}
 		if (scenario.startsWith("permission")) {

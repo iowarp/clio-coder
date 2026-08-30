@@ -3,16 +3,315 @@ import {
 	type ServerEventKind,
 	type ServerEventOf,
 	type ServerEventPayloadByKind,
+	type WireCatalogInspection,
 	type WireClioSnapshot,
+	type WireConfigInspection,
+	type WireDispatchInspection,
 	type WireProjectWorkspace,
+	type WireRecoveryInspection,
+	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireTimelineItem,
 	type WireTreeNode,
+	type WireUsageInspection,
 } from "../src/protocol.ts";
 import type { WireBootstrap } from "../src/state.ts";
 
 export const FIXTURE_PROJECT_ID = "project-alpha-0001";
 export const FIXTURE_ROOT = "/tmp/workbench-fixture/alpha";
+
+export function dispatchInspectionFixture(): WireDispatchInspection {
+	return {
+		scope: "installation",
+		inspectedAt: "2026-08-30T14:02:00.000Z",
+		generatedAt: "2026-08-30T14:01:28.728Z",
+		admission: { state: "open", expiresAt: null },
+		running: { total: 5, alive: 3, stale: 1, dead: 1, unreported: 0 },
+		retryingCount: 0,
+		totals: {
+			inputTokens: 9_557_544,
+			outputTokens: 517_406,
+			totalTokens: 15_918_587,
+			costUsd: 1.78098108,
+			runtimeSeconds: 42_963.751,
+		},
+	};
+}
+
+export function recoveryInspectionFixture(): WireRecoveryInspection {
+	return {
+		scope: "installation",
+		projectContext: true,
+		inspectedAt: "2026-08-30T15:00:00.000Z",
+		healthy: false,
+		pathsResolved: 4,
+		versions: { clioCoder: "0.3.9", node: "v24.9.0", platform: "linux-x64" },
+		summary: { checks: 15, passed: 10, warnings: 3, failures: 2 },
+		sections: [
+			{ id: "runtime", checks: 4, passed: 4, warnings: 0, failures: 0 },
+			{ id: "storage", checks: 4, passed: 4, warnings: 0, failures: 0 },
+			{ id: "configuration", checks: 2, passed: 1, warnings: 0, failures: 1 },
+			{ id: "history", checks: 1, passed: 1, warnings: 0, failures: 0 },
+			{ id: "models", checks: 2, passed: 0, warnings: 1, failures: 1 },
+			{ id: "interoperability", checks: 1, passed: 0, warnings: 1, failures: 0 },
+			{ id: "fleet", checks: 1, passed: 0, warnings: 1, failures: 0 },
+		],
+	};
+}
+
+export function configInspectionFixture(): WireConfigInspection {
+	return {
+		inspectedAt: "2026-08-29T12:00:00.000Z",
+		settings: [
+			{ key: "autonomy", source: "project", value: "suggest", valueKind: "exact" },
+			{ key: "orchestrator.model", source: "project", value: "qwen3.8-27b", valueKind: "exact" },
+			{ key: "retry.maxRetries", source: "user", value: "3", valueKind: "exact" },
+			{ key: "targets", source: "user", value: "4 items", valueKind: "collection" },
+		],
+		settingsTruncated: false,
+		entries: [
+			{
+				category: "clio-md",
+				id: "CLIO-CODER.md",
+				scope: "project",
+				sourcePath: { segments: ["CLIO-CODER.md"] },
+				hash: "a1b2c3d4",
+				trust: "trusted",
+				precedence: "single",
+				reloadClass: "next-turn",
+				contextCostTokens: 164,
+				facts: [{ label: "Preload", value: "included" }],
+			},
+			{
+				category: "rule",
+				id: "project-safety",
+				scope: "project",
+				sourcePath: { segments: [".clio-coder", "rules", "safety.yaml"] },
+				trust: "trusted",
+				precedence: "winner",
+				reloadClass: "next-turn",
+				contextCostTokens: 28,
+				facts: [{ label: "Enabled", value: "yes" }],
+			},
+			{
+				category: "extension",
+				id: "lab-notebook",
+				scope: "user",
+				trust: "untrusted",
+				precedence: "winner",
+				reloadClass: "restart",
+				facts: [{ label: "Version", value: "1.2.0" }, { label: "Effective", value: "yes" }],
+			},
+			{
+				category: "memory",
+				id: "memory-store",
+				scope: "user",
+				trust: "trusted",
+				precedence: "single",
+				reloadClass: "hot",
+				facts: [{ label: "Present", value: "yes" }, { label: "Records", value: "7" }],
+			},
+		],
+		entriesTruncated: false,
+		issueCounts: [{ surface: "hook", count: 1 }],
+		issuesTruncated: false,
+	};
+}
+
+export function catalogInspectionFixture(): WireCatalogInspection {
+	return {
+		inspectedAt: "2026-08-29T13:00:00.000Z",
+		agents: {
+			availability: "available",
+			items: [{
+				id: "researcher",
+				name: "Researcher",
+				description: "Finds and synthesizes citation-ready evidence without modifying the project.",
+				version: 1,
+				source: "builtin",
+				audience: "base",
+				category: "research",
+				capability: "read-only",
+				latency: "deep",
+				contextTier: "none",
+				tags: ["evidence", "citations"],
+				skills: ["arxiv-literature"],
+				tools: ["read", "web_fetch", "code_nav"],
+				resultKind: "research-report",
+				budget: {
+					toolCalls: 24,
+					readReserve: 4,
+					synthesis: true,
+					maximumToolCalls: 64,
+					maximumReadReserve: 10,
+				},
+			}],
+			truncated: false,
+			issueCount: 0,
+		},
+		skills: {
+			availability: "available",
+			items: [{
+				name: "frontend-design",
+				description: "Creates distinctive production-grade web interfaces with strong visual hierarchy.",
+				scope: "user",
+				source: "claude",
+				trusted: true,
+				precedence: 20,
+				modelInvocable: true,
+				issueCount: 0,
+			}],
+			truncated: false,
+			issueCount: 1,
+		},
+		library: {
+			availability: "available",
+			items: [{
+				kind: "skill",
+				name: "experiment-protocol",
+				description: "Pre-registers thresholds and verdict conditions before scientific performance measurements.",
+				version: "0.1.2",
+				category: "research",
+				origin: "catalog",
+				audit: "pass",
+			}],
+			truncated: false,
+			issueCount: 0,
+		},
+		extensions: {
+			availability: "available",
+			items: [{
+				id: "clio-lab-pack",
+				name: "Clio Coder Lab Pack",
+				version: "2.1.0",
+				description: "Contributes research agents, prompts, and skills to this project.",
+				scope: "project",
+				enabled: true,
+				effective: true,
+				overriddenBy: null,
+				resources: ["skills", "prompts", "agents"],
+				issueCount: 0,
+			}],
+			truncated: false,
+			issueCount: 0,
+		},
+		verifiers: { availability: "typed-interface-required" },
+	};
+}
+
+export function routingInspectionFixture(): WireRoutingInspection {
+	return {
+		inspectedAt: "2026-08-29T15:00:00.000Z",
+		models: {
+			availability: "available",
+			items: [
+				{
+					targetId: "lmstudio",
+					runtimeId: "openai-compatible",
+					modelId: "qwen3.8-27b",
+					capabilities: ["chat", "tools", "reasoning"],
+					contextWindow: 262_144,
+					maxOutputTokens: 32_768,
+					residency: "loaded",
+				},
+				{
+					targetId: "lmstudio",
+					runtimeId: "openai-compatible",
+					modelId: "qwen3.8-4b",
+					capabilities: ["chat", "tools"],
+					contextWindow: 131_072,
+					maxOutputTokens: 16_384,
+					residency: "unloaded",
+				},
+			],
+			truncated: false,
+			emptyTargetCount: 1,
+		},
+		profiles: {
+			availability: "available",
+			items: [{
+				name: "deep-research",
+				target: "lmstudio",
+				runtime: "openai-compatible",
+				model: "qwen3.8-27b",
+				thinkingLevel: "high",
+			}],
+			truncated: false,
+		},
+		bindings: {
+			availability: "available",
+			items: [
+				{
+					agentId: "researcher",
+					profile: "deep-research",
+					target: "lmstudio",
+					model: "qwen3.8-27b",
+					resolved: true,
+				},
+				{
+					agentId: "critic",
+					profile: "missing-profile",
+					target: null,
+					model: null,
+					resolved: false,
+				},
+			],
+			truncated: false,
+		},
+	};
+}
+
+export function usageInspectionFixture(): WireUsageInspection {
+	return {
+		inspectedAt: "2026-08-29T14:00:00.000Z",
+		schema: "experimental",
+		windowDays: 30,
+		windowFrom: "2026-07-30T13:00:00.000Z",
+		windowTo: "2026-08-29T13:00:00.000Z",
+		stores: { sessions: "available", dispatchReceipts: "available" },
+		sessionCount: 3,
+		dispatchRunCount: 2,
+		totals: {
+			apiCalls: 42,
+			input: 8_500_000,
+			output: 1_200_000,
+			cacheRead: 3_400_000,
+			cacheWrite: 22_000,
+			reasoning: 800_000,
+			totalTokens: 13_922_000,
+			costUsd: 4.125,
+			turns: 38,
+			sideQuestions: 3,
+			handoffs: 1,
+		},
+		models: [{
+			provider: "lmstudio",
+			model: "qwen3.8-27b",
+			apiCalls: 42,
+			input: 8_500_000,
+			output: 1_200_000,
+			cacheRead: 3_400_000,
+			cacheWrite: 22_000,
+			reasoning: 800_000,
+			totalTokens: 13_922_000,
+			costUsd: 4.125,
+		}],
+		modelsTruncated: false,
+		tools: [{ name: "read", calls: 17, successful: 16, errors: 1, blocked: 0 }],
+		toolsTruncated: false,
+		skills: [
+			{ name: "frontend-design", activations: 5, observedInWindow: true },
+			{ name: "experiment-protocol", activations: 0, observedInWindow: false },
+		],
+		skillsTruncated: false,
+		recipes: [{ agentId: "researcher", runs: 4 }],
+		recipesTruncated: false,
+		opportunities: [
+			{ kind: "workflow-distiller", count: 1 },
+			{ kind: "recipe", count: 1 },
+		],
+	};
+}
 
 export function clioSnapshotFixture(
 	phase: WireClioSnapshot["phase"] = "idle",
@@ -91,6 +390,10 @@ export function workspaceFixture(
 		pendingPermission: null,
 		deleteChallenge: null,
 		settings: null,
+		configInspection: null,
+		catalogInspection: null,
+		usageInspection: null,
+		routingInspection: null,
 		targets: null,
 		targetsTruncated: false,
 		processGeneration: "generation-alpha-0001",
@@ -102,7 +405,7 @@ export function workspaceFixture(
 export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBootstrap {
 	return {
 		protocolVersion: PROTOCOL_VERSION,
-		appName: "Clio Workbench" as const,
+		appName: "Clio Coder" as const,
 		workspaceInstanceId: "workspace-fixture-0001",
 		localToken: "token-fixture-0000000000000001",
 		mode: "browser" as const,
@@ -116,8 +419,9 @@ export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBo
 			available: true,
 		}],
 		homePath: "/home/operator",
-		stateDirNote: "Workbench keeps only its recent-project list under /tmp/workbench-fixture/state.",
-		securityNote: "Workbench enforces the project boundary in its own code; Deno grants are broad.",
+		stateDirNote: "The desktop app keeps only its recent-project list under /tmp/workbench-fixture/state.",
+		securityNote: "The desktop app enforces the project boundary in its own code; Deno grants are broad.",
+		dispatchInspection: null,
 		...overrides,
 	};
 }
@@ -142,6 +446,10 @@ const PROJECT_EVENT_KINDS = new Set<ServerEventKind>([
 	"clio.state",
 	"session.list",
 	"settings.state",
+	"config.state",
+	"catalog.state",
+	"usage.state",
+	"routing.state",
 	"targets.state",
 	"targets.probed",
 ]);

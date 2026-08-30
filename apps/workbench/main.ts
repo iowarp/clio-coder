@@ -1,4 +1,18 @@
 import { extname } from "node:path";
+import { type ClioCatalogInspector, ClioCliCatalogInspector } from "./clio-catalog-inspector.ts";
+import { ClioCliConfigInspector, ClioConfigInspectError, type ClioConfigInspector } from "./clio-config-inspector.ts";
+import {
+	ClioCliDispatchInspector,
+	ClioDispatchInspectError,
+	type ClioDispatchInspector,
+} from "./clio-dispatch-inspector.ts";
+import {
+	ClioCliRecoveryInspector,
+	ClioRecoveryInspectError,
+	type ClioRecoveryInspector,
+} from "./clio-recovery-inspector.ts";
+import { ClioCliUsageInspector, ClioUsageInspectError, type ClioUsageInspector } from "./clio-usage-inspector.ts";
+import { ClioCliRoutingInspector, type ClioRoutingInspector } from "./clio-routing-inspector.ts";
 import {
 	type ClioLauncher,
 	ClioProjectHost,
@@ -11,31 +25,42 @@ import type { AcpClientTiming } from "./acp-client.ts";
 import { ProjectStore, ProjectStoreError, type ProjectSummary, type ProjectTreeNode } from "./project-store.ts";
 import {
 	type ClientCommand,
+	type ClientCommandOf,
 	type CommandErrorCode,
 	encodeServerEvent,
 	MAX_CLIENT_FRAME_BYTES,
 	parseClientCommand,
+	PRODUCT_NAME,
 	PROTOCOL_VERSION,
 	ProtocolValidationError,
 	type ServerEvent,
 	type ServerEventKind,
 	type ServerEventPayloadByKind,
 	validateServerEvent,
+	type WireCatalogInspection,
+	type WireConfigInspection,
 	type WireDeleteChallenge,
+	type WireDispatchInspection,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
+	type WireRoutingInspection,
 	type WireTreeNode,
+	type WireUsageInspection,
 } from "./src/protocol.ts";
 import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "./src/timeline.ts";
 import { type RecentProject, WorkbenchState, WorkbenchStateError } from "./workbench-state.ts";
+import denoConfig from "./deno.json" with { type: "json" };
 
-const APP_NAME = "Clio Workbench" as const;
+const APP_NAME = PRODUCT_NAME;
+/** The GUI's own version, from `deno.json`; the compiled binary reports the same value. */
+export const APP_VERSION: string = denoConfig.version;
+export const CLI_NAME = "clio-coder-gui";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_PORT = 4173;
 /** How long the host waits after the last browser goes away before it stops a live turn. */
 export const DEFAULT_DISCONNECT_GRACE_MS = 10_000;
-const INVALID_CLIENT_FRAME_CLOSE_REASON = "Invalid Workbench client protocol frame";
-const SLOW_CLIENT_CLOSE_REASON = "Workbench client fell behind";
+const INVALID_CLIENT_FRAME_CLOSE_REASON = "Invalid GUI client protocol frame";
+const SLOW_CLIENT_CLOSE_REASON = "GUI client fell behind";
 const TREE_DEPTH = 5;
 const TREE_NODES = 200;
 export const MAX_WEBSOCKET_OUTBOUND_BYTES = 256 * 1024;
@@ -43,7 +68,11 @@ const encoder = new TextEncoder();
 const CSP = [
 	"default-src 'self'",
 	"script-src 'self'",
-	"style-src 'self'",
+	// Inline styles are allowed for Mermaid diagrams only: strict Mermaid output
+	// is DOMPurify-sanitized SVG whose theme lives in an embedded stylesheet, and
+	// no code path renders model-authored HTML. Scripts remain same-origin only,
+	// and img-src, font-src, and connect-src still block CSS-driven fetches.
+	"style-src 'self' 'unsafe-inline'",
 	"img-src 'self' data:",
 	"font-src 'self'",
 	"connect-src 'self' ws: wss:",
@@ -77,7 +106,7 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 };
 
 export const SECURITY_NOTE =
-	"Workbench enforces the project boundary in its own code against the canonical root you opened; Deno's file grants are broad at launch, so that boundary is not a sandbox.";
+	"The desktop app enforces the project boundary in its own code against the canonical root you opened; Deno's file grants are broad at launch, so that boundary is not a sandbox.";
 
 export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encodedFrameBytes: number): boolean {
 	if (
@@ -90,7 +119,28 @@ export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encode
 interface RuntimeCliOptions {
 	port: number;
 	smokeMs?: number;
+	/** Open the served URL in the operating system's default browser once listening. */
+	open: boolean;
+	/** Print the usage or version text and exit without serving. */
+	print?: "help" | "version";
 }
+
+export const CLI_USAGE = `${CLI_NAME} ${APP_VERSION}
+The desktop and browser GUI for ${PRODUCT_NAME}.
+
+Usage: ${CLI_NAME} [--port=N] [--open] [--smoke-ms=N]
+
+  --port=N       Listen on 127.0.0.1:N (default ${DEFAULT_PORT}; 0 picks a free port).
+  --open         Open the URL in the default browser with xdg-open once listening.
+  --smoke-ms=N   Stop on its own after N milliseconds (self-test).
+  --version      Print the version and exit.
+  --help         Print this text and exit.
+
+The GUI listens on the loopback interface only. Project folders come from the
+folder picker inside the app, and the ${PRODUCT_NAME} process is started per open
+project from the clio-coder executable on PATH. Local state lives in
+$CLIO_WORKBENCH_STATE_DIR, else $XDG_STATE_HOME/clio-workbench, else
+~/.local/state/clio-workbench.`;
 
 export interface WorkbenchServerOptions {
 	hostname?: string;
@@ -99,6 +149,18 @@ export interface WorkbenchServerOptions {
 	mode?: "browser" | "desktop";
 	distRoot?: URL;
 	clioLauncher?: ClioLauncher;
+	/** Overrides the fixed read-only Clio Coder configuration adapter (tests). */
+	configInspector?: ClioConfigInspector;
+	/** Overrides the fixed read-only Clio Coder resource-catalog adapter (tests). */
+	catalogInspector?: ClioCatalogInspector;
+	/** Overrides the fixed project-scoped Clio Coder usage adapter (tests). */
+	usageInspector?: ClioUsageInspector;
+	/** Overrides the fixed offline model and worker-routing adapter (tests). */
+	routingInspector?: ClioRoutingInspector;
+	/** Overrides the fixed installation-wide dispatch status adapter (tests). */
+	dispatchInspector?: ClioDispatchInspector;
+	/** Overrides the redacted Clio Coder doctor/paths adapter (tests). */
+	recoveryInspector?: ClioRecoveryInspector;
 	/** Overrides the Workbench state directory (tests). */
 	stateDir?: string;
 	/** Overrides `$HOME` for the guards and browser (tests). */
@@ -128,17 +190,39 @@ function parsePositiveInteger(value: string, label: string, maximum: number): nu
 	return parsed;
 }
 
-function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
+export function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
 	let port = DEFAULT_PORT;
 	let smokeMs: number | undefined;
+	let open = false;
+	let print: RuntimeCliOptions["print"];
 	for (const argument of args) {
 		if (argument.startsWith("--port=")) {
 			port = parsePositiveInteger(argument.slice("--port=".length), "port", 65_535);
 		} else if (argument.startsWith("--smoke-ms=")) {
 			smokeMs = parsePositiveInteger(argument.slice("--smoke-ms=".length), "smoke-ms", 120_000);
-		} else throw new Error(`Unknown Workbench argument: ${argument}`);
+		} else if (argument === "--open") open = true;
+		else if (argument === "--version" || argument === "-V") print ??= "version";
+		else if (argument === "--help" || argument === "-h") print = "help";
+		else throw new Error(`Unknown GUI argument: ${argument}. Try --help.`);
 	}
-	return { port, ...(smokeMs === undefined ? {} : { smokeMs }) };
+	return { port, open, ...(smokeMs === undefined ? {} : { smokeMs }), ...(print === undefined ? {} : { print }) };
+}
+
+/**
+ * Hands the URL to the desktop's default browser. The GUI never picks a browser
+ * itself, and a missing or refused `xdg-open` only leaves the printed URL.
+ */
+async function openInBrowser(url: string): Promise<boolean> {
+	if (Deno.build.os !== "linux") return false;
+	try {
+		const command = new Deno.Command("xdg-open", { args: [url], stdin: "null", stdout: "null", stderr: "null" });
+		const child = command.spawn();
+		child.unref();
+		const status = await child.status;
+		return status.success;
+	} catch {
+		return false;
+	}
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -165,7 +249,7 @@ function textResponse(value: string, status: number): Response {
 
 function normalizeStaticRoot(value: URL): URL {
 	const root = new URL(value.href);
-	if (root.protocol !== "file:") throw new Error("Workbench distRoot must be a local file URL.");
+	if (root.protocol !== "file:") throw new Error("GUI distRoot must be a local file URL.");
 	root.search = "";
 	root.hash = "";
 	if (!root.pathname.endsWith("/")) root.pathname = `${root.pathname}/`;
@@ -206,7 +290,7 @@ export function defaultClioLauncher(platform = Deno.build.os): ClioLauncher {
 	if (platform !== "windows") return createLocalClioLauncher();
 	return {
 		launch() {
-			throw new HostError("not-ready", "Native Windows Clio launch requires an explicit WSL configuration.");
+			throw new HostError("not-ready", "Native Windows Clio Coder launch requires an explicit WSL configuration.");
 		},
 	};
 }
@@ -218,6 +302,10 @@ interface OpenProject {
 	tree: readonly WireTreeNode[];
 	treeTruncated: boolean;
 	deleteChallenge: WireDeleteChallenge | null;
+	configInspection: WireConfigInspection | null;
+	catalogInspection: WireCatalogInspection | null;
+	usageInspection: WireUsageInspection | null;
+	routingInspection: WireRoutingInspection | null;
 }
 
 type EventContext = { projectId?: string; processGeneration?: string; sessionId?: string; turnId?: string };
@@ -228,6 +316,12 @@ class WorkbenchRuntime implements HostSink {
 	readonly #store: ProjectStore;
 	readonly #state: WorkbenchState;
 	readonly #launcher: ClioLauncher;
+	readonly #configInspector: ClioConfigInspector;
+	readonly #catalogInspector: ClioCatalogInspector;
+	readonly #usageInspector: ClioUsageInspector;
+	readonly #routingInspector: ClioRoutingInspector;
+	readonly #dispatchInspector: ClioDispatchInspector;
+	readonly #recoveryInspector: ClioRecoveryInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
@@ -238,8 +332,10 @@ class WorkbenchRuntime implements HostSink {
 	>;
 	readonly #sockets = new Set<SocketSession>();
 	#open: OpenProject | null = null;
+	#dispatchInspection: WireDispatchInspection | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
+	#readCommandQueue: Promise<void> = Promise.resolve();
 	#graceTimer: ReturnType<typeof setTimeout> | null = null;
 	#closed = false;
 
@@ -250,7 +346,17 @@ class WorkbenchRuntime implements HostSink {
 			& Required<Pick<WorkbenchServerOptions, "quiet" | "mode" | "distRoot" | "disconnectGraceMs">>
 			& Pick<
 				WorkbenchServerOptions,
-				"clioLauncher" | "permissionEscalateMs" | "permissionBudgetMs" | "promptTimeoutMs" | "acpTiming"
+				| "clioLauncher"
+				| "configInspector"
+				| "catalogInspector"
+				| "usageInspector"
+				| "routingInspector"
+				| "dispatchInspector"
+				| "recoveryInspector"
+				| "permissionEscalateMs"
+				| "permissionBudgetMs"
+				| "promptTimeoutMs"
+				| "acpTiming"
 			>,
 	) {
 		this.#store = store;
@@ -259,6 +365,24 @@ class WorkbenchRuntime implements HostSink {
 		this.#mode = options.mode;
 		this.#distRoot = normalizeStaticRoot(options.distRoot);
 		this.#launcher = options.clioLauncher ?? defaultClioLauncher();
+		this.#configInspector = options.configInspector ?? new ClioCliConfigInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#catalogInspector = options.catalogInspector ?? new ClioCliCatalogInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#usageInspector = options.usageInspector ?? new ClioCliUsageInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#routingInspector = options.routingInspector ?? new ClioCliRoutingInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#dispatchInspector = options.dispatchInspector ?? new ClioCliDispatchInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#recoveryInspector = options.recoveryInspector ?? new ClioCliRecoveryInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
 		this.#hostOptions = {
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
@@ -291,8 +415,9 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; Clio's own state and settings are never read or written by Workbench.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
 			securityNote: SECURITY_NOTE,
+			dispatchInspection: this.#dispatchInspection,
 		};
 	}
 
@@ -338,6 +463,10 @@ class WorkbenchRuntime implements HostSink {
 			pendingPermission: open.projection.pendingPermission,
 			deleteChallenge: open.deleteChallenge,
 			settings: open.host.settings,
+			configInspection: open.configInspection,
+			catalogInspection: open.catalogInspection,
+			usageInspection: open.usageInspection,
+			routingInspection: open.routingInspection,
 			targets: open.host.targets,
 			targetsTruncated: open.host.targetsTruncated,
 			processGeneration: open.host.generation,
@@ -365,18 +494,21 @@ class WorkbenchRuntime implements HostSink {
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#clearGrace();
-		await this.#commandQueue.catch(() => undefined);
+		await Promise.all([
+			this.#commandQueue.catch(() => undefined),
+			this.#readCommandQueue.catch(() => undefined),
+		]);
 		const open = this.#open;
 		this.#open = null;
 		if (open !== null) {
 			try {
 				await open.host.close();
 			} catch (error) {
-				if (!this.#quiet) console.error("Workbench could not close the Clio host cleanly", error);
+				if (!this.#quiet) console.error("The GUI could not close the Clio Coder host cleanly", error);
 			}
 			this.#store.unregister(open.project.id);
 		}
-		for (const session of this.#sockets) session.close(1001, "Workbench is shutting down");
+		for (const session of this.#sockets) session.close(1001, "The GUI is shutting down");
 		this.#sockets.clear();
 	}
 
@@ -439,6 +571,28 @@ class WorkbenchRuntime implements HostSink {
 	// ---------------------------------------------------------------- commands
 
 	handleCommand(session: SocketSession, command: ClientCommand): Promise<void> {
+		// Fixed inspection adapters have their own serialized lane. They may run
+		// alongside the owned ACP child, but can never delay Stop, permission,
+		// project, or session controls on the primary lane. Recovery diagnostics
+		// may refresh Clio Coder's fleet preflight facts but never configuration.
+		if (command.kind === "config.inspect") {
+			return this.#serializeRead(() => this.#dispatchConfigInspect(session, command));
+		}
+		if (command.kind === "catalog.inspect") {
+			return this.#serializeRead(() => this.#dispatchCatalogInspect(session, command));
+		}
+		if (command.kind === "usage.inspect") {
+			return this.#serializeRead(() => this.#dispatchUsageInspect(session, command));
+		}
+		if (command.kind === "routing.inspect") {
+			return this.#serializeRead(() => this.#dispatchRoutingInspect(session, command));
+		}
+		if (command.kind === "dispatch.inspect") {
+			return this.#serializeRead(() => this.#dispatchDispatchInspect(session, command));
+		}
+		if (command.kind === "recovery.inspect") {
+			return this.#serializeRead(() => this.#dispatchRecoveryInspect(session, command));
+		}
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
 
@@ -446,6 +600,137 @@ class WorkbenchRuntime implements HostSink {
 		const queued = this.#commandQueue.then(operation, operation);
 		this.#commandQueue = queued.then(() => undefined, () => undefined);
 		return queued;
+	}
+
+	#serializeRead<T>(operation: () => Promise<T>): Promise<T> {
+		const queued = this.#readCommandQueue.then(operation, operation);
+		this.#readCommandQueue = queued.then(() => undefined, () => undefined);
+		return queued;
+	}
+
+	async #dispatchConfigInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"config.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#configInspector.inspect(open.project.identity.canonicalPath);
+			// Project switching and inspection are intentionally concurrent. A late
+			// result belongs only to the exact OpenProject instance that requested it.
+			if (this.#closed || this.#open !== open) return;
+			open.configInspection = inspection;
+			this.#broadcast("config.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
+	}
+
+	async #dispatchCatalogInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"catalog.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#catalogInspector.inspect(open.project.identity.canonicalPath);
+			// As with config inspection, a project switch invalidates a late result.
+			if (this.#closed || this.#open !== open) return;
+			open.catalogInspection = inspection;
+			this.#broadcast("catalog.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
+	}
+
+	async #dispatchUsageInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"usage.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#usageInspector.inspect(open.project.identity.canonicalPath);
+			// Read adapters may outlive a project switch; late results are discarded
+			// instead of being attached to whichever project is open now.
+			if (this.#closed || this.#open !== open) return;
+			open.usageInspection = inspection;
+			this.#broadcast("usage.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
+	}
+
+	async #dispatchRoutingInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"routing.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#routingInspector.inspect(open.project.identity.canonicalPath);
+			// The routing listing is a cached project snapshot. A late result cannot
+			// attach to a project selected while the read was in flight.
+			if (this.#closed || this.#open !== open) return;
+			open.routingInspection = inspection;
+			this.#broadcast("routing.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
+	}
+
+	async #dispatchDispatchInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"dispatch.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const inspection = await this.#dispatchInspector.inspect(this.#state.homePath);
+			if (this.#closed || session.closed) return;
+			this.#dispatchInspection = inspection;
+			this.#broadcast("dispatch.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
+		}
+	}
+
+	async #dispatchRecoveryInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"recovery.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#open;
+			const projectContext = open !== null;
+			const cwd = open?.project.identity.canonicalPath ?? this.#state.homePath;
+			const inspection = await this.#recoveryInspector.inspect(cwd, projectContext);
+			if (this.#closed || session.closed || (projectContext && this.#open !== open)) return;
+			this.#broadcast("recovery.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
+		}
 	}
 
 	#requireOpen(projectId: string): OpenProject {
@@ -484,7 +769,7 @@ class WorkbenchRuntime implements HostSink {
 						if (this.#open.host.hasActivePrompt) {
 							throw new HostError(
 								"conflict",
-								"Clio is still working in this project. Cancel the turn before forgetting it.",
+								"Clio Coder is still working in this project. Cancel the turn before forgetting it.",
 							);
 						}
 						await this.#closeOpen();
@@ -643,7 +928,7 @@ class WorkbenchRuntime implements HostSink {
 		if (this.#open?.host.hasActivePrompt) {
 			throw new HostError(
 				"conflict",
-				"Clio is still working in the open project. Cancel the turn or wait before opening another project.",
+				"Clio Coder is still working in the open project. Cancel the turn or wait before opening another project.",
 			);
 		}
 		const resolved = await this.#state.resolveOpenable(typedPath);
@@ -678,6 +963,10 @@ class WorkbenchRuntime implements HostSink {
 			tree: [],
 			treeTruncated: false,
 			deleteChallenge: null,
+			configInspection: null,
+			catalogInspection: null,
+			usageInspection: null,
+			routingInspection: null,
 		};
 		this.#open = open;
 		try {
@@ -745,7 +1034,7 @@ class WorkbenchRuntime implements HostSink {
 			this.#graceTimer = null;
 			if (this.#closed || this.#sockets.size > 0 || this.#open !== open) return;
 			void open.host.abandon().catch((error) => {
-				if (!this.#quiet) console.error("Workbench could not stop the abandoned turn", error);
+				if (!this.#quiet) console.error("The GUI could not stop the abandoned turn", error);
 			});
 		}, this.#disconnectGraceMs);
 	}
@@ -801,7 +1090,7 @@ class WorkbenchRuntime implements HostSink {
 			try {
 				bytes = await Deno.readFile(assetUrl);
 			} catch {
-				return textResponse("Workbench UI has not been built. Run deno task build.", 503);
+				return textResponse("The Clio Coder GUI has not been built. Run deno task build.", 503);
 			}
 		}
 		const headers = new Headers(STATIC_SECURITY_HEADERS);
@@ -823,7 +1112,11 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (error instanceof WorkbenchStateError) return { code: error.code, message: error.message };
 		if (error instanceof HostError) return { code: error.code, message: error.message };
-		if (!this.#quiet) console.error("Workbench command failed", error);
+		if (error instanceof ClioConfigInspectError) return { code: error.code, message: error.message };
+		if (error instanceof ClioUsageInspectError) return { code: error.code, message: error.message };
+		if (error instanceof ClioDispatchInspectError) return { code: error.code, message: error.message };
+		if (error instanceof ClioRecoveryInspectError) return { code: error.code, message: error.message };
+		if (!this.#quiet) console.error("GUI command failed", error);
 		return { code: "internal", message: "The local command could not be completed." };
 	}
 }
@@ -866,7 +1159,7 @@ class SocketSession {
 		} catch (error) {
 			// A DTO the host cannot validate never reaches the renderer; the socket
 			// stays open and the failure is loud on stderr.
-			console.error(`Workbench refused to send an invalid ${kind} event`, error);
+			console.error(`The GUI refused to send an invalid ${kind} event`, error);
 			return;
 		}
 		const frame = encodeServerEvent(event);
@@ -878,7 +1171,7 @@ class SocketSession {
 			this.#socket.send(frame);
 			this.#sequence = sequence;
 		} catch {
-			this.close(1011, "Workbench could not send the server event");
+			this.close(1011, "The GUI could not send the server event");
 		}
 	}
 
@@ -901,11 +1194,11 @@ class SocketSession {
 
 	#onMessage(event: MessageEvent): void {
 		if (typeof event.data !== "string") {
-			this.close(1003, "Workbench accepts text protocol frames only");
+			this.close(1003, "The GUI accepts text protocol frames only");
 			return;
 		}
 		if (encoder.encode(event.data).byteLength > MAX_CLIENT_FRAME_BYTES) {
-			this.close(1009, "Workbench client frame exceeded 16 KiB");
+			this.close(1009, "GUI client frame exceeded 16 KiB");
 			return;
 		}
 		let command: ClientCommand;
@@ -929,7 +1222,7 @@ class SocketSession {
 
 export async function startWorkbenchServer(options: WorkbenchServerOptions = {}): Promise<RunningWorkbenchServer> {
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
-	if (hostname !== DEFAULT_HOSTNAME) throw new Error("Workbench may bind only to 127.0.0.1.");
+	if (hostname !== DEFAULT_HOSTNAME) throw new Error("The GUI may bind only to 127.0.0.1.");
 	const port = options.port ?? DEFAULT_PORT;
 	const desktopAddress = options.mode === undefined ? Deno.env.get("DENO_SERVE_ADDRESS") : undefined;
 	const mode = options.mode ?? (desktopAddress ? "desktop" : "browser");
@@ -945,6 +1238,12 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		distRoot: options.distRoot ?? new URL("./dist/", import.meta.url),
 		disconnectGraceMs: options.disconnectGraceMs ?? DEFAULT_DISCONNECT_GRACE_MS,
 		...(options.clioLauncher === undefined ? {} : { clioLauncher: options.clioLauncher }),
+		...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
+		...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
+		...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
+		...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
+		...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
+		...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),
@@ -989,8 +1288,25 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 }
 
 async function runMain(): Promise<void> {
-	const options = parseCliOptions(Deno.args);
+	let options: RuntimeCliOptions;
+	try {
+		options = parseCliOptions(Deno.args);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		Deno.exit(2);
+	}
+	if (options.print === "help") {
+		console.log(CLI_USAGE);
+		return;
+	}
+	if (options.print === "version") {
+		console.log(`${CLI_NAME} ${APP_VERSION}`);
+		return;
+	}
 	const running = await startWorkbenchServer({ port: options.port });
+	if (options.open && !(await openInBrowser(running.url))) {
+		console.log(`Could not open a browser with xdg-open; open ${running.url} yourself.`);
+	}
 	if (options.smokeMs !== undefined) {
 		setTimeout(async () => {
 			await running.close();
