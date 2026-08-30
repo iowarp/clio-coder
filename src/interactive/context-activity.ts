@@ -32,6 +32,8 @@ const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "genera
  * happen.
  */
 const WIKI_PHASES: ReadonlyArray<ContextActivityPhase> = ["codewiki", "generate", "state", "done"];
+/** Compaction is one bounded operation, not the five-stage context-init pipeline. */
+const COMPACTION_PHASES: ReadonlyArray<ContextActivityPhase> = ["compact", "done"];
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
 	// "index" rather than "wiki": this phase is the codewiki index build, and
@@ -40,6 +42,7 @@ const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	generate: "draft",
 	"clio-md": "CLIO-CODER.md",
 	state: "state",
+	compact: "compact",
 	done: "done",
 };
 const WIKI_PHASE_LABELS: Partial<Record<ContextActivityPhase, string>> = {
@@ -55,9 +58,10 @@ const KINDS: ReadonlySet<string> = new Set<ContextActivityKind>([
 	"context-wiki",
 	"compaction",
 ]);
-const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>(PHASES);
+const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>([...PHASES, ...COMPACTION_PHASES]);
 
 function phasesFor(kind: ContextActivityKind): ReadonlyArray<ContextActivityPhase> {
+	if (kind === "compaction") return COMPACTION_PHASES;
 	return kind === "context-wiki" ? WIKI_PHASES : PHASES;
 }
 

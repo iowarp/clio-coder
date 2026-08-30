@@ -469,9 +469,10 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 		strictEqual(activities.length, 2, "one started + one completed");
 		strictEqual(activities[0]?.status, "started");
 		strictEqual(activities[0]?.kind, "compaction");
-		strictEqual(activities[0]?.phase, "done");
+		strictEqual(activities[0]?.phase, "compact");
 		ok(activities[0]?.message.includes("summary"), "started message names the summary stage");
 		strictEqual(activities[1]?.status, "completed");
+		strictEqual(activities[1]?.phase, "done");
 		ok(activities[1]?.message.includes("tokens"), "completed message reports a token delta");
 	});
 

@@ -47,6 +47,30 @@ describe("context activity island", () => {
 		ok(rendered.includes("Context Refresh"), rendered);
 	});
 
+	it("renders a running compaction as live work instead of a completed context-init pipeline", () => {
+		const rendered = stripAnsi(
+			formatContextActivityIslandLines(
+				makeActivity({
+					kind: "compaction",
+					phase: "compact",
+					status: "started",
+					message: "compacting context (summary)",
+					current: null,
+					total: null,
+				}),
+				CONTEXT_ISLAND_WIDTH,
+				2000,
+				1,
+			).join("\n"),
+		);
+		ok(rendered.includes("Context Compact"), rendered);
+		ok(rendered.includes("compact"), rendered);
+		ok(rendered.includes("  0%"), rendered);
+		strictEqual(rendered.includes("done"), false, rendered);
+		strictEqual(rendered.includes("100%"), false, rendered);
+		strictEqual(rendered.includes("scan › index › draft"), false, rendered);
+	});
+
 	// context-wiki is declared in ContextActivityKind and emitted by the context
 	// domain, but the island's KINDS set omitted it, so isContextActivityPayload
 	// rejected every wiki event and the island stayed blank for a whole wiki run.

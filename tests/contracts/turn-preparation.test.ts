@@ -31,6 +31,8 @@ import type { AgentEvent, AgentMessage, EngineModel } from "../../src/engine/typ
 import { createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
+import { createInteractiveSlashRuntime } from "../../src/interactive/interactive-slash-runtime.js";
+import { createStatusController } from "../../src/interactive/status/controller.js";
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
 import type { TurnPreparationPhase } from "../../src/interactive/turn-state.js";
@@ -336,6 +338,76 @@ describe("contracts/turn preparation", () => {
 				.map(stripAnsi);
 			ok(after[0]?.startsWith("MESSAGE "), `and the composer goes back to idle: ${after[0]}`);
 		} finally {
+			await harness.dispose();
+		}
+	});
+
+	/**
+	 * The production path paints through the slash runtime and a scheduled TUI
+	 * commit. Rendering the editor manually against a held chat loop proved the
+	 * components understood the state, but it did not prove a frame reached the
+	 * terminal before a fast admission closed that state again.
+	 */
+	it("commits the pending row, preparing rail, and preparing footer before admission starts", async () => {
+		const harness = await preparedLoop();
+		const panel = createChatPanel({} as never);
+		const editor = editorFor({ getTurnPreparation: () => harness.loop.turnPreparation().phase });
+		const status = createStatusController({ chat: harness.loop, providers: providers() });
+		const committedFrames: Array<{ editor: string; transcript: string; footerPhase: string; reason: string }> = [];
+		const runtime = createInteractiveSlashRuntime({
+			io: { stdout() {}, stderr() {} },
+			bus: createSafeEventBus(),
+			dispatch: {},
+			providers: providers(),
+			chat: harness.loop,
+			chatPanel: {
+				appendReplayBlock: (...args: Parameters<typeof panel.appendReplayBlock>) => panel.appendReplayBlock(...args),
+				appendUser: (...args: Parameters<typeof panel.appendUser>) => panel.appendUser(...args),
+				clearFoldOverrides: () => panel.clearFoldOverrides(),
+			},
+			stateDir: "/unused",
+			shutdown() {},
+			requestRender() {},
+			beforeSemanticSubmit() {},
+			settleVisibleFrame: async (reason: string) => {
+				committedFrames.push({
+					editor: editor.render(80).map(stripAnsi).join("\n"),
+					transcript: panel.render(80).map(stripAnsi).join("\n"),
+					footerPhase: status.current().phase,
+					reason,
+				});
+			},
+			refreshFooter() {},
+			dismissContextBootstrapNotices() {},
+			recordSubmittedTurn() {},
+			readStructuredEntries: () => harness.entries,
+			expandSubmit: async (text: string) => ({
+				text,
+				images: [],
+				workingContextPaths: [],
+				pendingSkillRequests: [],
+			}),
+		} as never);
+
+		const admission = runtime.admitCommand("plan the significance section");
+		try {
+			await settle();
+			const frame = committedFrames[0];
+			ok(frame, "the real submit path commits once before it enters the held compaction");
+			strictEqual(frame.reason, "submit-preparing");
+			ok(frame.editor.startsWith("PREPARING "), frame.editor);
+			ok(!frame.editor.includes("Ask Clio…"), frame.editor);
+			ok(frame.transcript.includes("plan the significance section · preparing"), frame.transcript);
+			strictEqual(frame.footerPhase, "preparing", "the footer no longer owns the previous turn's receipt");
+			strictEqual(
+				harness.entries.some((entry) => entry.kind === "message" && (entry as { role?: string }).role === "user"),
+				false,
+				"the visible frame precedes the durable user append",
+			);
+		} finally {
+			harness.releaseCompaction(COMPACT_RESULT);
+			await admission;
+			status.dispose();
 			await harness.dispose();
 		}
 	});
