@@ -18,16 +18,21 @@ import {
 	CATALOG_AGENT_SOURCES,
 	CATALOG_AUDIT_STATES,
 	CATALOG_CONTEXT_TIERS,
+	CATALOG_EXTENSION_RESOURCE_KINDS,
+	CATALOG_EXTENSION_SCOPES,
 	CATALOG_LIBRARY_KINDS,
 	CATALOG_LIBRARY_ORIGINS,
 	CATALOG_RESOURCE_SCOPES,
 	CATALOG_SKILL_SOURCES,
 	MAX_WIRE_CATALOG_AGENTS,
+	MAX_WIRE_CATALOG_EXTENSIONS,
 	MAX_WIRE_CATALOG_LABELS,
 	MAX_WIRE_CATALOG_LIBRARY_ENTRIES,
 	MAX_WIRE_CATALOG_SKILLS,
 	type WireCatalogAgent,
 	type WireCatalogAgentCollection,
+	type WireCatalogExtension,
+	type WireCatalogExtensionCollection,
 	type WireCatalogInspection,
 	type WireCatalogLibraryCollection,
 	type WireCatalogLibraryEntry,
@@ -292,6 +297,73 @@ export function projectLibraryCatalog(value: unknown): WireCatalogLibraryCollect
 	};
 }
 
+function projectExtension(value: unknown): WireCatalogExtension | null {
+	if (!isRecord(value)) return null;
+	const rawResources = value.resources;
+	if (!isRecord(rawResources)) return null;
+	const id = exactText(value.id, 128);
+	const name = exactText(value.name, 128);
+	const version = exactText(value.version, 64);
+	const summary = description(value.description);
+	const issueCount = diagnosticCount(value.diagnostics);
+	if (
+		id === null || name === null || version === null || summary === null || issueCount === null ||
+		!isOneOf(value.scope, CATALOG_EXTENSION_SCOPES) || typeof value.enabled !== "boolean" ||
+		typeof value.effective !== "boolean"
+	) return null;
+	const overriddenBy = value.overriddenBy === undefined || value.overriddenBy === null
+		? null
+		: isOneOf(value.overriddenBy, CATALOG_EXTENSION_SCOPES)
+		? value.overriddenBy
+		: null;
+	if (value.overriddenBy !== undefined && value.overriddenBy !== null && overriddenBy === null) return null;
+	if (!value.effective) {
+		if (value.scope !== "user" || overriddenBy !== "project") return null;
+	} else if (overriddenBy !== null) return null;
+	const rawResourceKinds = Object.keys(rawResources);
+	if (
+		rawResourceKinds.length > CATALOG_EXTENSION_RESOURCE_KINDS.length ||
+		rawResourceKinds.some((kind) =>
+			!isOneOf(kind, CATALOG_EXTENSION_RESOURCE_KINDS) || exactText(rawResources[kind], 4_096) === null
+		)
+	) return null;
+	const resources = CATALOG_EXTENSION_RESOURCE_KINDS.filter((kind) => Object.hasOwn(rawResources, kind));
+	return {
+		id,
+		name,
+		version,
+		description: summary,
+		scope: value.scope,
+		enabled: value.enabled,
+		effective: value.effective,
+		overriddenBy,
+		resources,
+		issueCount,
+	};
+}
+
+export function projectExtensionCatalog(value: unknown): WireCatalogExtensionCollection {
+	if (!isRecord(value) || !Array.isArray(value.extensions) || value.extensions.length > MAX_RAW_CATALOG_ITEMS) {
+		throw new ClioCatalogProjectionError("Clio returned an invalid extension catalog.");
+	}
+	const candidates = value.extensions.map(projectExtension).filter((
+		entry,
+	): entry is WireCatalogExtension => entry !== null);
+	const projected = uniqueBy(candidates, (entry) => `${entry.scope}:${entry.id}`);
+	const items = projected.slice(0, MAX_WIRE_CATALOG_EXTENSIONS);
+	const issueCount = items.reduce((total, item) => total + item.issueCount, 0);
+	if (issueCount > MAX_CATALOG_NUMBER) {
+		throw new ClioCatalogProjectionError("Clio returned too many extension diagnostics.");
+	}
+	return {
+		availability: "available",
+		items,
+		truncated: candidates.length !== value.extensions.length || projected.length !== candidates.length ||
+			projected.length > items.length,
+		issueCount,
+	};
+}
+
 interface FailedCatalogCollection {
 	readonly availability: "failed";
 	readonly items: readonly never[];
@@ -342,16 +414,18 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 
 	async inspect(trustedRoot: string): Promise<WireCatalogInspection> {
 		const root = resolve(trustedRoot);
-		const [agents, skills, library] = await Promise.all([
+		const [agents, skills, library, extensions] = await Promise.all([
 			this.#collection(root, "agent", ["agents", "--json"], projectAgentCatalog),
 			this.#collection(root, "skill", ["skills", "list", "--json"], projectSkillCatalog),
 			this.#collection(root, "library", ["library", "list", "--json"], projectLibraryCatalog),
+			this.#collection(root, "extension", ["extensions", "list", "--all", "--json"], projectExtensionCatalog),
 		]);
 		return {
 			inspectedAt: new Date(this.#now()).toISOString(),
 			agents,
 			skills,
 			library,
+			extensions,
 			verifiers: { availability: "typed-interface-required" },
 		};
 	}

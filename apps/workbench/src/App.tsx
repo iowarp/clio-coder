@@ -14,6 +14,7 @@ import { AUTONOMY_LEVELS, THINKING_LEVELS } from "./protocol.ts";
 import type {
 	WireAutonomyLevel,
 	WireCatalogAgent,
+	WireCatalogExtension,
 	WireCatalogInspection,
 	WireCatalogLibraryEntry,
 	WireCatalogSkill,
@@ -1308,7 +1309,7 @@ const EvidenceRail = memo(function EvidenceRail({
 							? (
 								<p className="observer-note">
 									{state.pendingCatalogInspect === null
-										? "Open the read-only atlas to inspect agents, installed skills, and library resources."
+										? "Open the read-only atlas to inspect agents, skills, extensions, and library resources."
 										: "Clio is reading its typed resource catalogs."}
 								</p>
 							)
@@ -1327,8 +1328,8 @@ const EvidenceRail = memo(function EvidenceRail({
 										<dd>{catalogInspection.library.items.length}</dd>
 									</div>
 									<div>
-										<dt>Typed gaps</dt>
-										<dd>1</dd>
+										<dt>Extensions</dt>
+										<dd>{catalogInspection.extensions.items.length}</dd>
 									</div>
 								</dl>
 							)}
@@ -1943,12 +1944,13 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 	);
 });
 
-type CatalogTab = "agents" | "skills" | "library" | "verifiers";
+type CatalogTab = "agents" | "skills" | "library" | "extensions" | "verifiers";
 
 const CATALOG_TABS: ReadonlyArray<{ id: CatalogTab; label: string; note: string }> = [
 	{ id: "agents", label: "Agents", note: "Discovered recipes" },
 	{ id: "skills", label: "Skills", note: "Installed workflows" },
 	{ id: "library", label: "Library", note: "Available resources" },
+	{ id: "extensions", label: "Extensions", note: "Installed packages" },
 	{ id: "verifiers", label: "Verifiers", note: "Project checks" },
 ];
 
@@ -2092,6 +2094,52 @@ function LibraryCatalogCard({ entry }: { entry: WireCatalogLibraryEntry }) {
 	);
 }
 
+function ExtensionCatalogCard({ extension }: { extension: WireCatalogExtension }) {
+	const state = !extension.enabled ? "Disabled" : extension.effective ? "Active" : "Shadowed";
+	const stateClass = !extension.enabled ? "disabled" : extension.effective ? "active" : "shadowed";
+	return (
+		<article className="catalog-card catalog-card--extension">
+			<header className="catalog-card__header">
+				<div>
+					<div className="eyebrow">{catalogLabel(extension.scope)} · Extension package</div>
+					<h3>{extension.name}</h3>
+					<code>{extension.id}</code>
+				</div>
+				<span className={`catalog-card__signal catalog-card__signal--extension-${stateClass}`}>{state}</span>
+			</header>
+			<p className="catalog-card__description">{extension.description}</p>
+			<dl className="catalog-card__facts catalog-card__facts--three">
+				<div>
+					<dt>Version</dt>
+					<dd>{extension.version}</dd>
+				</div>
+				<div>
+					<dt>Precedence</dt>
+					<dd>{extension.effective ? "Winner" : `Shadowed by ${catalogLabel(extension.overriddenBy ?? "higher")}`}</dd>
+				</div>
+				<div>
+					<dt>Reported issues</dt>
+					<dd>{extension.issueCount}</dd>
+				</div>
+			</dl>
+			<div className="catalog-card__binding">
+				<strong>Contributed resource kinds</strong>
+				{extension.resources.length === 0
+					? <p className="catalog-card__empty-binding">No resource roots declared</p>
+					: (
+						<div className="catalog-chips">
+							{extension.resources.map((resource) => <span key={resource}>{catalogLabel(resource)}</span>)}
+						</div>
+					)}
+			</div>
+			<footer className="catalog-card__footer">
+				<span>{extension.scope === "project" ? "Project-scoped package" : "User-scoped package"}</span>
+				<span>Native roots and lifecycle mutations remain host-side</span>
+			</footer>
+		</article>
+	);
+}
+
 function CatalogCollectionFailure({ label, onRefresh }: { label: string; onRefresh(): void }) {
 	return (
 		<div className="catalog-state catalog-state--failed" role="status">
@@ -2146,14 +2194,14 @@ export const ClioCatalog = memo(function ClioCatalog({
 					<span>A</span>
 					<span>S</span>
 					<span>L</span>
-					<span>V</span>
+					<span>E</span>
 				</div>
 				<div>
 					<div className="eyebrow">READ-ONLY RESOURCE DISCOVERY</div>
 					<h2 id="clio-catalog-title">Map the capabilities Clio can actually see</h2>
 					<p>
-						Inspect discovered agents, installed skills, and available library resources through their public JSON
-						interfaces. Verifiers remain explicitly unavailable until Clio offers a typed listing.
+						Inspect discovered agents, installed skills and extensions, and available library resources through their
+						public JSON interfaces. Verifiers remain explicitly unavailable until Clio offers a typed listing.
 					</p>
 				</div>
 				<div className="catalog__empty-actions">
@@ -2198,12 +2246,26 @@ export const ClioCatalog = memo(function ClioCatalog({
 			entry.audit,
 		])
 	);
+	const extensions = inspection.extensions.items.filter((extension) =>
+		includesCatalogQuery(deferredQuery, [
+			extension.id,
+			extension.name,
+			extension.description,
+			extension.version,
+			extension.scope,
+			extension.enabled ? "enabled" : "disabled",
+			extension.effective ? "active" : "shadowed",
+			...extension.resources,
+		])
+	);
 	const activeCount = tab === "agents"
 		? agents.length
 		: tab === "skills"
 		? skills.length
 		: tab === "library"
 		? library.length
+		: tab === "extensions"
+		? extensions.length
 		: 0;
 	const activeAvailability = tab === "agents"
 		? inspection.agents.availability
@@ -2211,6 +2273,8 @@ export const ClioCatalog = memo(function ClioCatalog({
 		? inspection.skills.availability
 		: tab === "library"
 		? inspection.library.availability
+		: tab === "extensions"
+		? inspection.extensions.availability
 		: "available";
 	const activeTruncated = tab === "agents"
 		? inspection.agents.truncated
@@ -2218,6 +2282,8 @@ export const ClioCatalog = memo(function ClioCatalog({
 		? inspection.skills.truncated
 		: tab === "library"
 		? inspection.library.truncated
+		: tab === "extensions"
+		? inspection.extensions.truncated
 		: false;
 	function selectTab(nextTab: CatalogTab): void {
 		setTab(nextTab);
@@ -2253,7 +2319,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 			<header className="catalog__masthead">
 				<div>
 					<div className="eyebrow">CLIO CAPABILITY ATLAS · REPORTED BY CLIO</div>
-					<h2 id="clio-catalog-title">Agents, skills &amp; resource library</h2>
+					<h2 id="clio-catalog-title">Agents, skills, extensions &amp; resource library</h2>
 					<p>A searchable inventory of what this project can discover—not a fictional control plane.</p>
 				</div>
 				<div className="catalog__masthead-actions">
@@ -2284,6 +2350,14 @@ export const ClioCatalog = memo(function ClioCatalog({
 					<dt>Library resources</dt>
 					<dd>{inspection.library.availability === "available" ? inspection.library.items.length : "—"}</dd>
 					<dd className="catalog__summary-note">{catalogLabel(inspection.library.availability)}</dd>
+				</div>
+				<div>
+					<dt>Extensions</dt>
+					<dd>{inspection.extensions.availability === "available" ? inspection.extensions.items.length : "—"}</dd>
+					<dd className="catalog__summary-note">
+						{inspection.extensions.issueCount} reported package{" "}
+						{inspection.extensions.issueCount === 1 ? "issue" : "issues"}
+					</dd>
 				</div>
 				<div>
 					<dt>Verifier listing</dt>
@@ -2385,6 +2459,10 @@ export const ClioCatalog = memo(function ClioCatalog({
 							{tab === "skills" && skills.map((skill) => <SkillCatalogCard skill={skill} key={skill.name} />)}
 							{tab === "library" &&
 								library.map((entry) => <LibraryCatalogCard entry={entry} key={`${entry.kind}:${entry.name}`} />)}
+							{tab === "extensions" &&
+								extensions.map((extension) => (
+									<ExtensionCatalogCard extension={extension} key={`${extension.scope}:${extension.id}`} />
+								))}
 						</div>
 					)}
 				{activeTruncated && tab !== "verifiers" && (
@@ -2399,8 +2477,9 @@ export const ClioCatalog = memo(function ClioCatalog({
 				<strong>Read-only boundary</strong>
 				<p>
 					Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side. This atlas can
-					explain discovered capability. It cannot run an agent directly, activate a skill, or install a library
-					resource because those operations need explicit Clio contracts, review, progress, and terminal outcomes.
+					explain discovered capability. It cannot run an agent directly, activate a skill, install a library resource,
+					or mutate an extension package because those operations need explicit review, progress, terminal outcomes, and
+					recovery semantics.
 				</p>
 			</footer>
 		</section>

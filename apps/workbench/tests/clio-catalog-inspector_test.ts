@@ -2,6 +2,7 @@ import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import {
 	ClioCliCatalogInspector,
 	projectAgentCatalog,
+	projectExtensionCatalog,
 	projectLibraryCatalog,
 	projectSkillCatalog,
 } from "../clio-catalog-inspector.ts";
@@ -70,13 +71,32 @@ Deno.test("catalog projections retain useful inventory while dropping bodies, pa
 		}],
 		diagnostics: ["private /home/operator/library.yaml"],
 	});
+	const extensions = projectExtensionCatalog({
+		extensions: [{
+			id: "lab-pack",
+			name: "Lab Pack",
+			version: "2.1.0",
+			description: "Adds research workflows.",
+			scope: "user",
+			enabled: true,
+			effective: false,
+			overriddenBy: "project",
+			resources: { skills: "/home/operator/extensions/lab/skills", agents: "agents" },
+			diagnostics: [{ type: "warning", message: "private extension diagnostic sk-extension-secret" }],
+			rootPath: "/home/operator/extensions/lab",
+			manifestPath: "/home/operator/extensions/lab/clio-coder-extension.yaml",
+		}],
+	});
 
 	equal(agents.items[0]?.budget.toolCalls, 24);
 	equal(agents.items[0]?.resultKind, "research-report");
 	equal(skills.items[0]?.issueCount, 1);
 	equal(skills.issueCount, 1);
 	equal(library.items[0]?.audit, "warn");
-	const frame = JSON.stringify({ agents, skills, library });
+	equal(extensions.items[0]?.effective, false);
+	deepStrictEqual(extensions.items[0]?.resources, ["skills", "agents"]);
+	equal(extensions.items[0]?.issueCount, 1);
+	const frame = JSON.stringify({ agents, skills, library, extensions });
 	for (
 		const forbidden of [
 			"/home/operator",
@@ -85,6 +105,7 @@ Deno.test("catalog projections retain useful inventory while dropping bodies, pa
 			"private-hash",
 			"token@example",
 			"skill:secret",
+			"sk-extension-secret",
 		]
 	) ok(!frame.includes(forbidden), `catalog projection leaked ${forbidden}`);
 });
@@ -97,7 +118,7 @@ Deno.test("an agent with more labels than the wire can name is omitted instead o
 	equal(collection.truncated, true);
 });
 
-Deno.test("the catalog adapter invokes only the three fixed JSON listings", async () => {
+Deno.test("the catalog adapter invokes only the four fixed JSON listings", async () => {
 	const root = await Deno.makeTempDir({ prefix: "workbench-catalog-inspect-" });
 	try {
 		const inspection = await fixtureInspector().inspect(root);
@@ -108,6 +129,9 @@ Deno.test("the catalog adapter invokes only the three fixed JSON listings", asyn
 		equal(inspection.skills.items[0]?.name, "fixture-skill");
 		equal(inspection.skills.truncated, true);
 		equal(inspection.library.items[0]?.name, "fixture-market-skill");
+		equal(inspection.extensions.availability, "available");
+		equal(inspection.extensions.items[0]?.id, "fixture-lab-pack");
+		deepStrictEqual(inspection.extensions.items[0]?.resources, ["skills", "prompts", "agents"]);
 		deepStrictEqual(inspection.verifiers, { availability: "typed-interface-required" });
 		const frame = JSON.stringify(inspection);
 		for (const forbidden of ["/home/operator", "sk-secret", "raw private", "sourceUrl", "private-hash"]) {
@@ -126,6 +150,7 @@ Deno.test("one catalog command can fail without hiding the other typed collectio
 		equal(inspection.skills.availability, "failed");
 		deepStrictEqual(inspection.skills.items, []);
 		equal(inspection.library.availability, "available");
+		equal(inspection.extensions.availability, "available");
 		ok(!JSON.stringify(inspection).includes("private diagnostic"));
 	} finally {
 		await Deno.remove(root, { recursive: true });

@@ -595,10 +595,15 @@ export const CATALOG_LIBRARY_ORIGINS = ["catalog", "index"] as const;
 export type WireCatalogLibraryOrigin = (typeof CATALOG_LIBRARY_ORIGINS)[number];
 export const CATALOG_AUDIT_STATES = ["pass", "warn", "fail", "unknown", "not-reported"] as const;
 export type WireCatalogAuditState = (typeof CATALOG_AUDIT_STATES)[number];
+export const CATALOG_EXTENSION_SCOPES = ["user", "project"] as const;
+export type WireCatalogExtensionScope = (typeof CATALOG_EXTENSION_SCOPES)[number];
+export const CATALOG_EXTENSION_RESOURCE_KINDS = ["skills", "prompts", "agents", "fleets", "themes"] as const;
+export type WireCatalogExtensionResourceKind = (typeof CATALOG_EXTENSION_RESOURCE_KINDS)[number];
 
 export const MAX_WIRE_CATALOG_AGENTS = 64;
 export const MAX_WIRE_CATALOG_SKILLS = 64;
 export const MAX_WIRE_CATALOG_LIBRARY_ENTRIES = 64;
+export const MAX_WIRE_CATALOG_EXTENSIONS = 64;
 export const MAX_WIRE_CATALOG_LABELS = 32;
 
 export interface WireCatalogAgentBudget {
@@ -648,6 +653,20 @@ export interface WireCatalogLibraryEntry {
 	readonly audit: WireCatalogAuditState;
 }
 
+export interface WireCatalogExtension {
+	readonly id: string;
+	readonly name: string;
+	readonly version: string;
+	readonly description: string;
+	readonly scope: WireCatalogExtensionScope;
+	readonly enabled: boolean;
+	readonly effective: boolean;
+	readonly overriddenBy: WireCatalogExtensionScope | null;
+	/** Resource kinds only. Their native roots never cross the protocol. */
+	readonly resources: readonly WireCatalogExtensionResourceKind[];
+	readonly issueCount: number;
+}
+
 export interface WireCatalogAgentCollection {
 	readonly availability: WireCatalogAvailability;
 	readonly items: readonly WireCatalogAgent[];
@@ -669,11 +688,19 @@ export interface WireCatalogLibraryCollection {
 	readonly issueCount: number;
 }
 
+export interface WireCatalogExtensionCollection {
+	readonly availability: WireCatalogAvailability;
+	readonly items: readonly WireCatalogExtension[];
+	readonly truncated: boolean;
+	readonly issueCount: number;
+}
+
 export interface WireCatalogInspection {
 	readonly inspectedAt: string;
 	readonly agents: WireCatalogAgentCollection;
 	readonly skills: WireCatalogSkillCollection;
 	readonly library: WireCatalogLibraryCollection;
+	readonly extensions: WireCatalogExtensionCollection;
 	/** Clio currently offers no typed verifier listing; Workbench never scrapes its table. */
 	readonly verifiers: Readonly<{ availability: "typed-interface-required" }>;
 }
@@ -1964,6 +1991,51 @@ function validateCatalogLibraryEntry(value: unknown, label: string): WireCatalog
 	};
 }
 
+function validateCatalogExtension(value: unknown, label: string): WireCatalogExtension {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"name",
+		"version",
+		"description",
+		"scope",
+		"enabled",
+		"effective",
+		"overriddenBy",
+		"resources",
+		"issueCount",
+	]);
+	const scope = expectEnum(record.scope, `${label}.scope`, CATALOG_EXTENSION_SCOPES);
+	const enabled = expectBoolean(record.enabled, `${label}.enabled`);
+	const effective = expectBoolean(record.effective, `${label}.effective`);
+	const overriddenBy = record.overriddenBy === null
+		? null
+		: expectEnum(record.overriddenBy, `${label}.overriddenBy`, CATALOG_EXTENSION_SCOPES);
+	if (!effective) {
+		if (scope !== "user" || overriddenBy !== "project") {
+			invalid(`${label} shadowing must describe a user extension overridden by project scope`);
+		}
+	} else if (overriddenBy !== null) invalid(`${label} can name an overriding scope only when ineffective`);
+	const resources = expectArray(
+		record.resources,
+		`${label}.resources`,
+		CATALOG_EXTENSION_RESOURCE_KINDS.length,
+		(entry, entryLabel) => expectEnum(entry, entryLabel, CATALOG_EXTENSION_RESOURCE_KINDS),
+	);
+	if (new Set(resources).size !== resources.length) invalid(`${label}.resources contains duplicate kinds`);
+	return {
+		id: expectPresentationText(record.id, `${label}.id`, 128),
+		name: expectPresentationText(record.name, `${label}.name`, 128),
+		version: expectPresentationText(record.version, `${label}.version`, 64),
+		description: expectPresentationText(record.description, `${label}.description`, 512),
+		scope,
+		enabled,
+		effective,
+		overriddenBy,
+		resources,
+		issueCount: expectCatalogCount(record.issueCount, `${label}.issueCount`),
+	};
+}
+
 function validateCatalogCollection<T>(
 	value: unknown,
 	label: string,
@@ -1983,7 +2055,14 @@ function validateCatalogCollection<T>(
 }
 
 function validateCatalogInspection(value: unknown, label: string): WireCatalogInspection {
-	const record = expectExactKeys(value, label, ["inspectedAt", "agents", "skills", "library", "verifiers"]);
+	const record = expectExactKeys(value, label, [
+		"inspectedAt",
+		"agents",
+		"skills",
+		"library",
+		"extensions",
+		"verifiers",
+	]);
 	const verifiers = expectExactKeys(record.verifiers, `${label}.verifiers`, ["availability"]);
 	if (verifiers.availability !== "typed-interface-required") {
 		invalid(`${label}.verifiers.availability must be typed-interface-required`);
@@ -2007,6 +2086,12 @@ function validateCatalogInspection(value: unknown, label: string): WireCatalogIn
 			`${label}.library`,
 			MAX_WIRE_CATALOG_LIBRARY_ENTRIES,
 			validateCatalogLibraryEntry,
+		),
+		extensions: validateCatalogCollection(
+			record.extensions,
+			`${label}.extensions`,
+			MAX_WIRE_CATALOG_EXTENSIONS,
+			validateCatalogExtension,
 		),
 		verifiers: { availability: "typed-interface-required" },
 	};
