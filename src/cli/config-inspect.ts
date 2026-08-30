@@ -1,7 +1,7 @@
 /**
  * The effective-customization graph behind `clio-coder config inspect`. This is the
  * "why is Clio behaving this way" surface: it answers what settings, context
- * files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and
+ * files, rules, skills, prompts, agents, fleets, extensions, safety, memory, hooks, and
  * the operator profile loaded, from where, with what precedence, and what each
  * costs in context.
  *
@@ -12,8 +12,9 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
+import { resolvePackageRoot } from "../core/package-root.js";
 import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
 import { clioDataDir } from "../core/xdg.js";
 import {
@@ -39,7 +40,8 @@ export type CustomizationCategory =
 	| "extension"
 	| "skill-root"
 	| "prompt-root"
-	| "agents"
+	| "agent-root"
+	| "fleet-root"
 	| "safety"
 	| "memory";
 
@@ -265,18 +267,43 @@ function inspectResourceRoots(cwd: string, graph: CustomizationGraph): void {
 	for (const [kind, category] of [
 		["skills", "skill-root"],
 		["prompts", "prompt-root"],
+		["agents", "agent-root"],
+		["fleets", "fleet-root"],
 	] as const) {
 		try {
+			if (kind === "agents" || kind === "fleets") {
+				const builtinPath = join(
+					resolvePackageRoot(),
+					"src",
+					"domains",
+					"agents",
+					kind === "agents" ? "builtins" : "fleets",
+				);
+				graph.entries.push({
+					category,
+					id: `${kind}:builtin`,
+					scope: "builtin",
+					sourcePath: builtinPath,
+					trust: "trusted",
+					precedence: "layer",
+					reloadClass: "next-turn",
+					detail: { present: existsSync(builtinPath), source: "builtin", resourcePrecedence: 0 },
+				});
+			}
 			for (const root of defaultScopedResourceRoots(kind, cwd)) {
 				graph.entries.push({
 					category,
 					id: `${kind}:${root.scope}`,
-					scope: root.scope,
+					scope: root.scope === "package" ? "extension" : root.scope,
 					sourcePath: root.path,
 					trust: root.scope === "package" ? "untrusted" : "trusted",
-					precedence: "single",
+					precedence: "layer",
 					reloadClass: "next-turn",
-					detail: { present: existsSync(root.path), source: root.source },
+					detail: {
+						present: existsSync(root.path),
+						source: root.source,
+						...(root.precedence === undefined ? {} : { resourcePrecedence: root.precedence }),
+					},
 				});
 			}
 		} catch (err) {

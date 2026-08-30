@@ -292,5 +292,42 @@ describe("contracts/customization", () => {
 			ok((rule?.contextCostTokens ?? 0) > 0, "rule must carry a context cost");
 			ok(typeof rule?.reloadClass === "string", "every entry carries a reload class");
 		});
+
+		it("reports agent and fleet roots across builtin, extension, user, and project precedence", () => {
+			const { cwd } = scratch();
+			const extensionRoot = join(cwd, ".clio-coder", "extensions", "provenance-pack");
+			write(
+				join(extensionRoot, "clio-coder-extension.yaml"),
+				[
+					"manifestVersion: 1",
+					"id: provenance-pack",
+					"name: Provenance Pack",
+					"version: 1.0.0",
+					"description: Agent and fleet provenance fixture.",
+					"resources:",
+					"  agents: agents",
+					"  fleets: fleets",
+					"",
+				].join("\n"),
+			);
+			write(join(extensionRoot, "agents", "reviewer.md"), "# Reviewer\n");
+			write(join(extensionRoot, "fleets", "review.md"), "# Review\n");
+
+			const graph = buildCustomizationGraph(cwd);
+			const categories = new Set(graph.entries.map((entry) => entry.category));
+			ok(categories.has("agent-root"));
+			ok(categories.has("fleet-root"));
+
+			for (const category of ["agent-root", "fleet-root"] as const) {
+				const entries = graph.entries.filter((entry) => entry.category === category);
+				deepStrictEqual(new Set(entries.map((entry) => entry.scope)), new Set(["builtin", "extension", "user", "project"]));
+				deepStrictEqual(
+					entries.map((entry) => entry.detail?.resourcePrecedence),
+					[0, 10, 30, 50],
+				);
+				ok(entries.every((entry) => entry.precedence === "layer"));
+				ok(entries.find((entry) => entry.scope === "extension")?.sourcePath?.startsWith(extensionRoot));
+			}
+		});
 	});
 });
