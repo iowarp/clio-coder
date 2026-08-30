@@ -3,6 +3,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
@@ -41,6 +42,7 @@ import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
+import { writeInputWedgeDump } from "./render-trace.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import type {
@@ -429,6 +431,21 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		});
 	const { terminal, tui } = shell;
 	const renderTrace = getActiveRenderTrace();
+	// SIGTERM is the kill an operator reaches for when a pane stops answering, so
+	// it is where the always-on input-wedge ring has to land (#224). It writes
+	// synchronously from its own listener rather than from a termination hook: a
+	// session wedged badly enough to be killed may never reach the coordinator's
+	// asynchronous drain, and this dump has to survive that.
+	const dumpInputWedgeOnTerminate = renderTrace
+		? (): void => {
+				try {
+					writeInputWedgeDump(clioStateDir(), renderTrace.snapshotInputWedge());
+				} catch {
+					// Best effort. The process is ending either way.
+				}
+			}
+		: null;
+	if (dumpInputWedgeOnTerminate) process.on("SIGTERM", dumpInputWedgeOnTerminate);
 	const visibleEventIngress = new WeakMap<
 		object,
 		{ sequence: number; traceSequence: number; generation: number; ingressAt: number }
@@ -954,6 +971,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onShutdown: async () => {
 			try {
+				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
 				await deps.onShutdown();
 			} finally {
 				if (lease) await lease.close();
