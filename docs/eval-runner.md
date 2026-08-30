@@ -15,10 +15,10 @@ The CLI commands under `clio-coder eval` support running, validating, reporting,
 
 ```bash
 clio-coder eval validate --suite <suite.yaml>
-clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
+clio-coder eval run --suite <suite.yaml> [--trials <n>] [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
 clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
 clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
-clio-coder eval compare <baselineEvalId> <candidateEvalId>
+clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--allow-config-drift]
 clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 ```
 
@@ -194,8 +194,79 @@ export interface EvalArtifactV4 {
   matrix: { target: string; model: string | null; thinking: string | null };
   summary: EvalArtifactSummaryV4;
   results: EvalArtifactResultV4[];
+  servingConfiguration?: EvalServingConfigurationV1;
+  aggregates?: EvalScenarioAggregateV1[];
 }
 ```
+
+`servingConfiguration` and `aggregates` are additive. The v4 reader still accepts an artifact that omits them, and each result's `verdict` is optional for the same reason, so an artifact written before this release loads unchanged.
+
+---
+
+## The verdict envelope
+
+Every result carries a strictly parsed `clio.eval.verdict.v1` envelope (`src/domains/eval/schema/verdict.ts`). Suite v2 results are adapted into it at one explicit boundary (`src/domains/eval/schema/adapter.ts`) rather than by widening the artifact version, because the envelope carries no information a v4 artifact cannot hold.
+
+```json
+{
+  "schema": "clio.eval.verdict.v1",
+  "scenarioId": "latency-nonnegative",
+  "trialIndex": 0,
+  "outcome": "pass",
+  "machinery": "ok",
+  "trackedMetrics": { "...": "see below" },
+  "behavioral": null,
+  "evidence": {
+    "assignmentId": "qcy5rfopdrfw",
+    "terminalReceiptDigest": "d85a3ad4f8ae...",
+    "graderExitCode": 0
+  }
+}
+```
+
+The envelope is fail-closed by construction. `outcome` is one of `pass`, `fail`, or `unmeasured`; `machinery` is `ok` or `infrastructure_failure`; `behavioral` must be exactly `null`, so a rubric or model-judge score has nowhere to hide until one is designed; and an envelope claiming both `infrastructure_failure` and `pass` is rejected at parse rather than recorded. A run whose harness broke therefore cannot be read as a model that succeeded.
+
+### `trackedMetrics`
+
+Eleven numbers plus a reason histogram, each carrying the source it came from. `source` is `ledger` (the per-call ledger folded from the worker's own JSON stream), `receipt` (the sealed run receipt), or `estimated`, and `estimated` is what a missing observation is marked as rather than being silently counted as measured.
+
+| Metric | Usual source |
+| --- | --- |
+| `modelCalls` | ledger |
+| `uncachedPrefillTokens` | ledger, from `promptCache.backend` |
+| `cacheReadTokens` | ledger, from `promptCache.backend`, falling back to pi-ai cache reads |
+| `generatedTokens` | ledger |
+| `reasoningTokens` | receipt; nullable, because absent and zero are different claims |
+| `toolCalls`, `toolErrors` | ledger when present, otherwise receipt |
+| `ttftMsFirstCall` | ledger |
+| `wallClockMs` | receipt |
+| `contextTokensAtEnd` | ledger |
+| `compactions` | ledger |
+| `expectedColdReasons` | ledger, one sourced count per reason |
+
+A dispatched worker's receipt reports `sessionId: null` and writes no session archive, which is why the ledger source exists at all: the runner folds structured usage, backend timing, cache, and monotonic TTFT facts out of the worker's `message_end` events. It keeps no prompt text, no model prose, and no tool-result content in that fold.
+
+### Scenario aggregates
+
+`aggregates` groups verdicts by `scenarioId`, sets `k` to the trial count, and records `passAtK` (any trial passed) and `passPowK` (every trial passed) alongside a mean and a nearest-rank p90 for each numeric metric, with the set of sources observed for it. At `k: 1` the mean and p90 are the same observed value.
+
+### `--trials N`
+
+`--trials N` overrides the suite's `matrix.repeats` and asks for an isolated workspace per matrix item. A `local` workspace is converted to a temporary copy for the run, so an explicit trial run never mutates the directory it was pointed at; `git` and `temp-copy` workspaces already produce a distinct preparation directory per item. The trial index rides through to each verdict's `trialIndex`.
+
+### Serving-configuration provenance and drift refusal
+
+`servingConfiguration` records what the numbers were measured against: `targetId`, `runtimeId`, `modelId`, `serverBuild`, `total_slots`, `thinkingLevel`, and `compiledPromptHash`. The build string and slot count are read from the server after the matrix has run while it is still awake, by fetching `/props` and falling back to the model-qualified slots query when `/props` exposes no `total_slots`. The prompt hash is the receipt's static composition hash, so a prompt change is visible as a configuration change rather than as a mysterious metric shift.
+
+`eval compare` prints both configurations and refuses outright when they differ:
+
+```text
+serving configuration drift; pass --allow-config-drift to compare these runs
+baseline serving: target=mini runtime=llamacpp model=... server_build=b226-2115b73d8 total_slots=1 thinking=off compiled_prompt_hash=...
+candidate serving: ...
+```
+
+`--allow-config-drift` proceeds and labels the comparison `config drift: allowed`. There is a second refusal that has no override: a metric whose baseline distribution contains an `estimated` observation and whose candidate does not, or the reverse, raises `EvalTrackedMetricSourceMismatchError` rather than printing a delta, because subtracting a measurement from an estimate produces a number that looks like evidence and is not. `--metric <name>` filters the tracked-metric rows, accepts `expectedColdReasons` or a specific `expectedColdReasons.<reason>`, and errors when the name matches nothing.
 
 ---
 

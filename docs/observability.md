@@ -69,8 +69,28 @@ An `EvidenceIndexRow` has the following schema:
 | `turns` | `turns in window` and the `tokens` fact | Folded calls that were turns, so labelled calls are subtracted exactly as `/cost` subtracts them. |
 | `sideQuestions` | `side questions in window` and the `tokens` fact | `/btw` rounds in the window. |
 | `handoffs` | `handoffs in window` and the `tokens` fact | `/handoff` extraction rounds in the window. |
+| `prewarms` | `pre-warms in window` and the `tokens` fact | Prompt pre-warm rounds in the window. |
+| `backgroundMemorySteps` | `background memory steps in window` and the `tokens` fact | Proactive-memory model steps in the window. |
 
-The last three fields appear only when at least one labelled call falls in the window. An archive with no `/btw` or `/handoff` round in it renders exactly as it did before those fields existed, so their presence is itself the signal that money was spent beside a session.
+The last five fields appear only when at least one labelled call falls in the window, and each individual line is printed only when its own count is above zero. An archive with no labelled call in it renders exactly as it did before those fields existed, so their presence is itself the signal that money was spent beside a session. All four labelled kinds are subtracted from `turns` the same way, so a session's turn count never includes a round the operator did not take.
+
+The report also prints a prompt-cache block, one row per session that recorded any cache telemetry:
+
+```text
+  prompt cache by session (from backend timings and persisted verdicts)
+  session       uncached prefill  hot/partial/cold/small
+  3vpu6z19ee7t  130353            4/3/2/0
+```
+
+`uncached prefill` is the sum of the backend's own newly evaluated prompt tokens across every persisted call in that session, and reads `n/a` rather than `0` when the server reported no cache figure to subtract. The four counts are the per-call verdicts. Both facts are also in `--json` under a `session-cache` fact per session.
+
+`clio-coder doctor` reports the same evidence for the latest session only, as one row, so a cache problem is visible without opening the TUI or a report:
+
+```text
+OK cache telemetry  last session 3vpu6z19ee7t: hot 4 · partial 3 · cold 2 · small 0; top expected reason dispatch (3)
+```
+
+The row reads `top expected reason none` when the session recorded verdicts but no expected-cold reason, and it degrades to a warning saying `no prompt-cache telemetry recorded` when the latest session has none at all, which is the honest answer for a target whose backend reports nothing rather than a claim of a perfect cache. "Latest" selects the most recent `current.jsonl` by its newest entry timestamp, falling back to the file's mtime, so the other diagnostic JSONL files in a session directory cannot be mistaken for the conversation.
 
 ### The Out-of-Turn Usage Store
 
@@ -101,6 +121,8 @@ A row has the following schema:
 ```
 
 `repoIdentity` is the same cwd hash the session ledger is filed under, which is what lets `usage report --repo <path>` select these rows with the hash it already computes for the ledgers.
+
+`label` is one of `side-question`, `handoff`, `prewarm`, or `background-memory`. The last two joined for the same reason as the first two: a prompt pre-warm and a proactive-memory step are provider calls the operator did not ask for and would otherwise never see, and neither appends anything to the session JSONL. A row may also carry `timing { durationMs }` and a `promptCache` block built from the backend's own prefill facts when the server reported them; a backend that reports no timings simply omits the block, as LM Studio's OpenAI-compatible port does.
 
 ---
 

@@ -139,6 +139,9 @@ targets:
     runtime: lmstudio
     url: http://127.0.0.1:1234
     defaultModel: your-model-id
+    # Optional. Request slots this inference endpoint can serve at once.
+    # Overrides live discovery; omit it and Clio reads the server's own count.
+    maxConcurrentRequests: 2
     capabilities:
       reasoning: true       # optional; only if your model/runtime supports it
     lmstudio:
@@ -256,6 +259,9 @@ context:
     protectLastTurns: 6
     minEvictableTokens: 200
 
+prewarm:
+  enabled: true       # send the next turn's prefix early; local-native targets only
+
 retry:
   enabled: true
   maxRetries: 3
@@ -272,6 +278,26 @@ guardrails:
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
+
+### `maxConcurrentRequests`
+
+`maxConcurrentRequests` is a per-target integer of at least 1, validated with the rest of the target block, and it is the operator's override for how many requests the inference endpoint behind that target can serve at once. It is not a settings-file default and has no shipped value, so it does not appear in the settings inventory below.
+
+Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then one slot for any other `local-native` runtime; then no bound at all for a cloud runtime, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama reads `OLLAMA_NUM_PARALLEL` from the environment the Clio process can see and otherwise reports one.
+
+The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See [capacity-and-scheduling.md](capacity-and-scheduling.md) for the admission model and the exact denial text.
+
+### The `local-native` tier
+
+Three behaviors in this release are gated on a runtime's tier being `local-native` rather than on a target id or a server name, so it is worth stating what the tier is. It is a property of the runtime descriptor (`RuntimeTier` in `src/domains/providers/types/runtime-descriptor.ts`), and the runtimes that carry it are `llamacpp` with its completion, embedding, rerank, and Anthropic-surface variants, `lmstudio`, `ollama-native`, `vllm`, `sglang`, and the two `lemonade` surfaces. Everything else is `cloud`, `protocol`, or `subscription`.
+
+The tier means "an inference server the operator runs, whose prefix cache and resident model Clio's own behavior can displace." That is what the three gates are actually asking:
+
+- **Pre-warm** runs only here, whatever `prewarm.enabled` says, because a cloud provider bills the request and caches on its own schedule. The check is made twice, once from configuration before any runtime is resolved and once against the resolved runtime, so an unreachable target does not pay for a capability probe at boot just to be told no.
+- **Endpoint capacity** defaults to one slot here when discovery reports nothing, and to unbounded elsewhere. vLLM and SGLang are the deliberate exceptions inside the tier: both serve genuinely concurrent requests, so an undiscovered limit is left unbounded rather than guessed at one.
+- **Five of the eight expected-cold reasons** are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in [context-engine.md](context-engine.md#cache-divergence-honesty).
+
+The tool-prose-loop detector is keyed on the same tier, for the same reason: narrating a tool call instead of emitting one is a behavior of open-weight models served locally, and a list of server names would have left an Ollama or vLLM run with no cutoff at all.
 
 ### LM Studio transport and settings
 

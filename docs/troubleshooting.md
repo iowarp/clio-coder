@@ -26,6 +26,56 @@ This guide provides concrete, actionable remediation procedures for operational 
 
 ---
 
+## Reading a cold cache
+
+On a local server prefill is most of what a turn costs, so a cold prefix cache is the difference between a first token in under a second and one in fifty. This is how to find out why a turn went cold, starting from what the TUI shows.
+
+**1. Read the `/context` cache lines.** Two lines answer different questions. The prompt-cache line says what the provider reported and whether the compiled prompt shell was reused. The prefill line says what the server itself did:
+
+```text
+prefill: 34,951 uncached · 0 cached · 48,617 ms
+```
+
+Those are the server's own numbers, not Clio's estimate. `server does not report cache reads` in place of the cached figure means the backend gave no `cache_n` at all, which is LM Studio 2.29.0's OpenAI-compatible port today; on that target the verdict comes from the provider's `cached_tokens` instead and the prefill line reports only total prompt work and milliseconds.
+
+**2. Look for the expected-cold line.** When the last settled run came back `cold` and Clio had recorded a cause, `/context` names it rather than warning:
+
+```text
+last cold turn: working-set eviction (expected)
+```
+
+The eight causes and what stamps each one are in [context-engine.md](context-engine.md#cache-divergence-honesty). `background_memory` renders as its wire value rather than as prose, so that one reads `last cold turn: background_memory (expected)`.
+
+**3. Confirm it in the ledger.** The reasons are durable, so a finished session answers the same question without the TUI. Open `current.jsonl` under the session directory `clio-coder paths` reports and read the run's first assistant entry:
+
+```json
+{
+  "timing": { "ttftMs": 53194, "apiMs": 56770 },
+  "promptCache": {
+    "input": 34951, "cacheRead": 0, "cacheWrite": 0,
+    "backendVerdict": "cold",
+    "expectedColdReasons": ["dispatch", "residency"],
+    "backend": {
+      "promptTokens": 34951, "cachedTokens": 0, "predictedTokens": 24,
+      "promptMs": 48617, "predictedMs": 373, "source": "llamacpp-timings"
+    }
+  }
+}
+```
+
+`expectedColdReasons` is stamped once per run, on its first persisted call, so a turn with several model calls carries it on the first one only. `clio-coder doctor` folds the latest session for you and prints the verdict counts plus the most frequent reason, and `clio-coder usage report` gives per-session uncached prefill and verdict counts across the window.
+
+**4. When there is no reason, the warning is the finding.** A cold backend with a reused prompt shell and no recorded reason is a real disagreement: Clio kept the bytes stable and the server re-prefilled anyway. `/context` leaves the warning in place for exactly that case. Four causes are worth checking in order, and none of them is a Clio bug:
+
+- **The server slept.** A llama.cpp router started with `--sleep-idle-seconds N` drops the slot's prefix cache when it sleeps, and `--cache-ram` does not reliably restore a large state. A gap longer than that setting between two turns explains a cold turn completely. Raise the flag, or accept that a session left idle pays for its first turn back.
+- **Something else used the endpoint.** A worker, a second Clio session, or another client on the same server evicts the slot. Clio stamps `dispatch`, `residency`, and `background_memory` only for work it can attribute to itself on that endpoint; a foreign process leaves no stamp. `clio-coder targets --probe` reports the endpoint's slot count, and `/fleet` settings show active slots per endpoint.
+- **The model was swapped.** A router serving one model at a time reloads on a residency change, and everything the previous model had cached is gone. This normally does stamp `residency`, but only when the mutation went through Clio.
+- **The prompt moved for a reason Clio did not classify.** Compare the run's `promptHash` and `toolSignature` in `context-snapshots.jsonl` against the previous run's. Equal hashes with a cold backend point at the server; different hashes with no `prompt_recompiled` or `tool_surface_change` stamp is worth an issue.
+
+One case is expected on hybrid architectures and looks like a bug. Qwen3.8 keeps recurrent state that llama.cpp cannot roll back to an arbitrary token, so a change anywhere inside a cached prefix re-prefills from the last context checkpoint rather than from the changed byte. A small edit to old history can therefore cost thousands of tokens of prefill with the prompt hash otherwise stable. The server's checkpoint count and its `--checkpoint-min-step` are the levers; see the `qwen3.8-27b` family's `serving` and `measuredUnder` notes in `src/domains/providers/models/local-models/clio-local-coding-targets.yaml` for the measured figures and the exact argv they were taken under.
+
+---
+
 ## Diagnostic Commands
 
 When encountering unexpected system behavior:

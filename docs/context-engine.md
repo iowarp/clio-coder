@@ -91,9 +91,43 @@ The same arithmetic governs the compiled system prompt, which sits ahead of ever
 
 Compaction and eviction both change the replayed history. On a local backend with a single prefix-cache slot, the next turn after either one is expected to be cold because the byte prefix moved. Dispatch traffic can disturb the same slot.
 
-Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The recorded reasons are `working_set_evict` for an applied eviction event, `compaction` for the summary path, and `dispatch` for interleaved worker traffic. `compaction` and `dispatch` are stamped only on `local-native` targets, because a single-slot local cache is the one an interleaved run actually disturbs. `working_set_evict` is stamped on every tier: the eviction moved the byte prefix itself, so the cloud prefix cache is cold for the same reason. The user sees one dim notice, and the same reasons persist on that entry in the session ledger next to the per-call cache data.
+Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. There are eight recorded reasons, and they split into two groups by what they disturb.
+
+| Reason | Stamped when | Tier |
+| --- | --- | --- |
+| `working_set_evict` | An eviction event was applied to the replayed history. | every tier |
+| `tool_surface_change` | The session's tool signature differs from the last completed run's. | every tier |
+| `prompt_recompiled` | A recompile changed the prompt text and the manifest holds a previous hash to name. | every tier |
+| `compaction` | The summary compaction path ran. | `local-native` |
+| `dispatch` | A dispatch started, completed, or failed between turns. | `local-native` |
+| `residency` | A residency load or eviction succeeded on this session's own serving endpoint. | `local-native` |
+| `thinking_change` | The resolved thinking level for this run differs from the last completed backend run's. | `local-native` |
+| `background_memory` | A proactive-memory step completed against the endpoint this session streams to. | `local-native` |
+
+The three tier-independent reasons moved the byte prefix itself, so a cloud prefix cache is cold for exactly the same reason a local one is. The other five disturb a local server or the template it renders, and a single-slot local cache is the only one an interleaved run actually displaces, so they are stamped only when the runtime's tier is `local-native`. Two of them are gated on identity as well as tier: `residency` compares the mutation's target key against this session's own runtime and base URL, and `background_memory` compares the memory step's canonical endpoint key against the target this session streams to, so work on a second server never explains a cold prefix on the first. `prompt_recompiled` deliberately does not fire on a process's first compile: a fresh or resumed session has no previous hash to have diverged from, and stamping it there would mark every session's opening turn as expected-cold.
+
+The user sees one dim notice per reason, and the same reasons persist on the run's first assistant entry in the session ledger next to the per-call cache data. The `/context` overlay renders each one in prose (`working-set eviction`, `dispatch traffic`, `residency change`, `thinking-level change`, `tool-surface change`, `prompt recompile`, `compaction`) and falls through to the wire value for anything it has no phrase for, which today is `background_memory`.
 
 Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are derived from provider usage and persisted with `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }` when available.
+
+### What the serving backend reports
+
+On a llama.cpp or LM Studio target, Clio also persists the server's own prefill accounting rather than inferring it from pi-ai's token counts. The observer reads the last complete timing object off the final ordinary SSE event of a stream, or the top-level one on a non-streaming response, from the response the turn already makes; it opens no second connection and sets no extra payload flag. What lands on the assistant entry is `promptCache.backend`:
+
+| Field | Meaning |
+| --- | --- |
+| `promptTokens` | The whole prompt the server accounted for. On the observed llama.cpp build that is `prompt_n + cache_n`, since `prompt_n` counts only newly evaluated work. |
+| `cachedTokens` | `cache_n`, the prompt work the slot reused. `null` when the server reports no cache figure at all. |
+| `predictedTokens` | `predicted_n`, tokens generated. |
+| `promptMs` | `prompt_ms`, wall-clock milliseconds spent in prefill. |
+| `predictedMs` | `predicted_ms`, wall-clock milliseconds spent generating. |
+| `source` | `llamacpp-timings` or `lmstudio-timings`. |
+
+`uncachedPrefillTokens` is derived centrally as `promptTokens - cachedTokens`, and only when both figures are present and consistent. That distinction carries all the way to the surfaces: a missing `cache_n` persists `cachedTokens: null` and leaves the pi-ai verdict in force, so `/context` says `server does not report cache reads` instead of calling the backend cold. LM Studio 2.29.0 is that case today. Its OpenAI-compatible port returns `usage`, `stats`, and `system_fingerprint` and no `timings` object, on both the streaming and non-streaming shapes and with `timings_per_token` explicitly requested, so `lmstudio-timings` is a shape Clio accepts and has not yet observed.
+
+The verdict keeps its existing pi-ai path unless pi-ai reports `cacheRead === 0` while the backend reports a numeric `cachedTokens`. In that one case the same hot, partial, cold, and small thresholds are applied to the measured counts instead. No timing ratio or wall-clock heuristic participates in a verdict.
+
+`/context` renders the last call as `prefill: N uncached · M cached · X ms`, and falls back to `prefill: N prompt · X ms` when the server gave no cache figure. `/cost` folds every durable call in the session into a total uncached prefill plus the four verdict counts, `clio-coder usage report` carries the same two facts per session, and `clio-coder doctor` reports the latest session's verdict counts and its most frequent expected-cold reason without opening the TUI.
 
 The `/context` overlay closes the loop. When the last settled run came back `cold` and Clio had recorded a reason for it, the overlay adds a line naming that reason, for example `last cold turn: working-set eviction (expected)`, and reports the cache line without the warning token. A reused prompt shell with a cold backend and no recorded reason stays a warning: Clio kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.
 

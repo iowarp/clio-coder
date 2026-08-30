@@ -73,7 +73,11 @@ decision afterward.
   compiled prompt and tool schemas byte-stable so a llama.cpp prefix cache
   stays hot across turns and sessions, bounds every tool result so one `grep`
   cannot blow the window, and records a per-call cache verdict in the ledger
-  so you can see when and why the cache went cold.
+  so you can see when and why the cache went cold. It also sends that prefix
+  ahead of your first keystroke on a session start, a resume, or a compaction,
+  and counts request slots per inference endpoint rather than per node, so a
+  fleet cannot admit four workers onto a one-slot server the orchestrator is
+  already streaming against.
 - **Work goes to bounded workers, not one long context.** The orchestrator
   dispatches focused agents with explicit tool profiles, call budgets, cost
   ceilings, and typed result contracts. A worker that cannot produce a
