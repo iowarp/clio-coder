@@ -44,7 +44,7 @@ import type {
 	WireUsageInspection,
 } from "./protocol.ts";
 import { groupTurns, SOURCE_LABELS } from "./chat.ts";
-import { ChatTranscript, JumpToLatest, useFollowLatest } from "./Chat.tsx";
+import { ChatTranscript, JumpToLatest, type ScrollPosition, useFollowLatest } from "./Chat.tsx";
 import { formatDuration, formatTimestamp } from "./format.ts";
 import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
 
@@ -3258,26 +3258,27 @@ function ConversationCanvas({
 			item.kind === "approval" && item.status === "waiting" && item.id.endsWith(`:${pendingPermission.permissionId}`)
 		);
 	const scrollRegion = useRef<HTMLDivElement>(null);
-	const scrollMemory = useRef(new Map<WorkspaceView, number>());
+	const scrollMemory = useRef(new Map<WorkspaceView, ScrollPosition>());
 	const follow = useFollowLatest(scrollRegion, transcriptView, timeline);
-	const jumpToLatest = follow.jumpToLatest;
-	const followingRef = useRef(follow.following);
-	followingRef.current = follow.following;
+	const { jumpToLatest, snapshot: snapshotScroll, restore: restoreScroll } = follow;
 
-	// Each view remembers where the operator left it; a transcript view that was
-	// following the latest output keeps following after the switch.
+	// Each view remembers where the operator left it, including whether it was
+	// following the latest output. Restoring through the hook keeps the scroll
+	// event caused by swapping content from reading as the operator's, so a
+	// Timeline left scrolled up stays there even after a short Conversation
+	// clamped the region back to the top in between.
 	useLayoutEffect(() => {
 		const element = scrollRegion.current;
 		if (element === null) return;
 		const remembered = scrollMemory.current.get(workspaceView);
-		element.scrollTop = transcriptView && followingRef.current ? element.scrollHeight : remembered ?? 0;
-	}, [workspaceView, transcriptView]);
+		if (transcriptView) restoreScroll(remembered ?? { top: 0, following: true });
+		else element.scrollTop = remembered?.top ?? 0;
+	}, [workspaceView, transcriptView, restoreScroll]);
 
 	const changeView = useCallback((view: WorkspaceView): void => {
-		const element = scrollRegion.current;
-		if (element !== null) scrollMemory.current.set(workspaceView, element.scrollTop);
+		scrollMemory.current.set(workspaceView, snapshotScroll());
 		onWorkspaceViewChange(view);
-	}, [onWorkspaceViewChange, workspaceView]);
+	}, [onWorkspaceViewChange, workspaceView, snapshotScroll]);
 
 	const resolvePending = useCallback((decision: "allow-once" | "reject"): void => {
 		if (projectId === null || permissionId === null || activeTurnId === null) return;

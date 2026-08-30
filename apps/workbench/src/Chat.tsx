@@ -311,11 +311,25 @@ export function ChatTranscript(
 	);
 }
 
+/** Where a view was left: its scroll offset and whether it was following the latest output. */
+export interface ScrollPosition {
+	readonly top: number;
+	readonly following: boolean;
+}
+
 export interface FollowLatest {
 	readonly following: boolean;
 	/** Timeline activity arrived while the operator was scrolled away. */
 	readonly unseen: boolean;
 	jumpToLatest(): void;
+	/** The current position, for a view that is about to be replaced. */
+	snapshot(): ScrollPosition;
+	/**
+	 * Restores a remembered position without reading the resulting scroll event
+	 * as the operator's. A following view pins to the end; a non-following view
+	 * returns to its offset and stays unpinned even if the new content fits.
+	 */
+	restore(position: ScrollPosition): void;
 }
 
 const BOTTOM_TOLERANCE_PX = 32;
@@ -408,6 +422,20 @@ export function useFollowLatest(
 		};
 	}, [scrollRef, enabled, setFollow]);
 
+	const snapshot = useCallback((): ScrollPosition => ({
+		top: scrollRef.current?.scrollTop ?? 0,
+		following: followingRef.current,
+	}), [scrollRef]);
+
+	const restore = useCallback((position: ScrollPosition) => {
+		const element = scrollRef.current;
+		if (element === null) return;
+		settling.current = null;
+		setFollow(position.following);
+		element.scrollTop = position.following ? element.scrollHeight : position.top;
+		programmaticTop.current = element.scrollTop;
+	}, [scrollRef, setFollow]);
+
 	const jumpToLatest = useCallback(() => {
 		const element = scrollRef.current;
 		if (element === null) return;
@@ -422,7 +450,7 @@ export function useFollowLatest(
 		element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
 	}, [scrollRef, setFollow]);
 
-	return { following, unseen, jumpToLatest };
+	return { following, unseen, jumpToLatest, snapshot, restore };
 }
 
 export function JumpToLatest({ follow }: { follow: FollowLatest }) {
