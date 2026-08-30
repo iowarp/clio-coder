@@ -86,13 +86,18 @@ import {
 	rewriteStallAbortMessage,
 } from "./turn-recovery.js";
 import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError } from "./turn-runtime.js";
-import { type AgentRuntime, type ChatLoopRunSnapshot, createTurnState } from "./turn-state.js";
+import {
+	type AgentRuntime,
+	type ChatLoopRunSnapshot,
+	createTurnState,
+	type TurnPreparationPhase,
+} from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
 export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot, SteeringMode } from "./turn-queues.js";
 export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
-export type { ChatLoopRunSnapshot } from "./turn-state.js";
+export type { ChatLoopRunSnapshot, TurnPreparationPhase } from "./turn-state.js";
 
 export interface QueueUpdateEvent {
 	type: "queue_update";
@@ -271,6 +276,15 @@ export interface ChatLoop {
 	getSessionId(): string | null;
 	lastRunSnapshot?(): ChatLoopRunSnapshot | null;
 	isStreaming(): boolean;
+	/**
+	 * Where a consumed prompt currently is between the editor and the stream.
+	 * The composer and the footer read it so the window in which the prompt has
+	 * been taken but the turn has not been admitted is never rendered as idle
+	 * (issue #251).
+	 */
+	turnPreparation(): { phase: TurnPreparationPhase; since: number };
+	/** Fires on every preparation transition, including back to `idle`. */
+	onTurnPreparation(handler: (phase: TurnPreparationPhase) => void): () => void;
 	contextUsage(): ContextUsageSnapshot;
 	/**
 	 * Categorized context-window ledger for the `/context` overlay: where every
@@ -519,6 +533,56 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState(deps.getSettings().orchestrator.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
+
+	const preparationListeners = new Set<(phase: TurnPreparationPhase) => void>();
+	/**
+	 * Move the consumed prompt to a new preparation phase and tell everything
+	 * that renders it. Idempotent, so the two compaction sites and the two
+	 * clearing sites (admission and settlement, because a refusal never reaches
+	 * admission) can all set the phase they mean without ordering rules.
+	 */
+	const setTurnPreparation = (phase: TurnPreparationPhase): void => {
+		if (state.turnPreparation === phase) return;
+		// `since` is the age of the whole window, not of its current sub-state:
+		// what the operator is judging is how long ago they pressed Enter.
+		if (state.turnPreparation === "idle") state.turnPreparationSince = Date.now();
+		if (phase === "idle") state.turnPreparationSince = 0;
+		state.turnPreparation = phase;
+		for (const listener of preparationListeners) {
+			try {
+				listener(phase);
+			} catch {
+				// Preparation observers are presentation only and cannot fail a turn.
+			}
+		}
+	};
+
+	/**
+	 * Submits currently holding a consumed prompt. The FIFO gate lets a second
+	 * submit open its window while the first is still settling, so the phase is
+	 * refcounted rather than owned: the last one out turns the light off.
+	 */
+	let preparingSubmits = 0;
+	const enterPreparation = (): void => {
+		preparingSubmits += 1;
+		// Opening a window never narrows one that is already open: a second submit
+		// arriving while the first is compacting must not flip the composer from
+		// COMPACTING back to PREPARING while the compaction is still running.
+		if (state.turnPreparation === "idle") setTurnPreparation("preparing");
+	};
+	const leavePreparation = (): void => {
+		preparingSubmits = Math.max(0, preparingSubmits - 1);
+		if (preparingSubmits === 0) setTurnPreparation("idle");
+	};
+	/**
+	 * Return to the plain preparing state after a compaction inside the window.
+	 * Refcount-aware, because two submits share the window and the slower one's
+	 * compaction can finish after the window has already closed; restoring
+	 * `preparing` there would re-open it with nothing left to prepare.
+	 */
+	const endPreparationCompaction = (): void => {
+		setTurnPreparation(preparingSubmits > 0 ? "preparing" : "idle");
+	};
 
 	const emit = (event: ChatLoopEvent): void => {
 		for (const listener of listeners) {
@@ -991,9 +1055,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
 			try {
+				setTurnPreparation("compacting");
 				await context.runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText);
 			} catch (err) {
 				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
+			} finally {
+				endPreparationCompaction();
 			}
 
 			// 3. Ensure the session prompt (compiles only on explicit events)
@@ -1034,7 +1101,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(
 					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${totalEstimate - reservedOutput} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
 				);
-				const compacted = await context.runAutoCompact(agentRuntime, true, undefined, undefined, submittedText);
+				setTurnPreparation("compacting");
+				const compacted = await context
+					.runAutoCompact(agentRuntime, true, undefined, undefined, submittedText)
+					.finally(endPreparationCompaction);
 				if (!compacted) {
 					emitNotice(
 						"[Clio Coder] Compaction could not reclaim enough space. Request blocked; trim the prompt, reduce active tools, or start a fresh session.",
@@ -1278,6 +1348,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return state.streaming;
 		},
 
+		turnPreparation() {
+			return { phase: state.turnPreparation, since: state.turnPreparationSince };
+		},
+
+		onTurnPreparation(handler) {
+			preparationListeners.add(handler);
+			return () => {
+				preparationListeners.delete(handler);
+			};
+		},
+
 		contextUsage: () => context.contextUsage(),
 		contextLedger: () => context.contextLedger(),
 		whenSettled: () => activeSubmit,
@@ -1472,15 +1553,30 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			release();
 			if (admissionTail === ticket) admissionTail = null;
 		};
+		// The window opens here, not at admission: the caller has already cleared
+		// the editor and painted the prompt, and a submit that queues behind the
+		// FIFO gate is still a prompt Clio is holding. It closes once, at
+		// whichever of admission and settlement comes first, so a refused probe
+		// and a blocked overflow preflight close it as reliably as a turn that
+		// reaches the stream.
+		enterPreparation();
+		let leftPreparation = false;
+		const leaveOnce = (): void => {
+			if (leftPreparation) return;
+			leftPreparation = true;
+			leavePreparation();
+		};
 		const start = (): Promise<void> =>
 			submitTracked(text, {
 				...options,
 				onAdmitted: () => {
 					releaseTicket();
+					leaveOnce();
 					options.onAdmitted?.();
 				},
 			}).finally(releaseTicket);
-		return previous ? previous.then(start) : start();
+		const run = previous ? previous.then(start) : start();
+		return run.finally(leaveOnce);
 	};
 
 	return api;

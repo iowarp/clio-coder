@@ -53,6 +53,13 @@ export interface ChatLoopRunSnapshot {
 	cwd: string;
 }
 
+/**
+ * What a consumed prompt is doing before it owns the stream. `compacting` is
+ * the sub-state that made the defect visible, because it is the one that lasts
+ * long enough for an operator to conclude the keystroke was lost.
+ */
+export type TurnPreparationPhase = "idle" | "preparing" | "compacting";
+
 export interface ChatTurnState {
 	/** Live agent runtime; built or hot-swapped by turn-runtime. */
 	runtime: AgentRuntime | null;
@@ -60,6 +67,20 @@ export interface ChatTurnState {
 	lastTurnId: string | null;
 	/** True while a submit is in flight. */
 	streaming: boolean;
+	/**
+	 * Where a consumed prompt is between the editor and the live stream.
+	 *
+	 * The editor is cleared and the prompt painted into the transcript before
+	 * admission, and everything from the capability probe through pre-submit
+	 * compaction to the prompt compile happens after that and before
+	 * `streaming`. With nothing naming that window the composer went straight
+	 * back to `MESSAGE` and the footer still read the previous turn as done, so
+	 * a 77-second compaction was indistinguishable from a dropped Enter
+	 * (issue #251).
+	 */
+	turnPreparation: TurnPreparationPhase;
+	/** When the current preparation window opened, for its elapsed counter. */
+	turnPreparationSince: number;
 	/** Thinking level the active request runs under; read by onPayload. */
 	currentThinkingLevel: ThinkingLevel;
 	/** Provider context rebuilt on session switch, consumed by the next runtime build. */
@@ -115,6 +136,8 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		runtime: null,
 		lastTurnId: null,
 		streaming: false,
+		turnPreparation: "idle",
+		turnPreparationSince: 0,
 		currentThinkingLevel: initialThinkingLevel,
 		replayedContextMessages: [],
 		activeUserTurnId: null,

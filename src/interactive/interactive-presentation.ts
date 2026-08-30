@@ -421,6 +421,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		isStreaming: () => deps.chat.isStreaming(),
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
+		getTurnPreparation: () => deps.chat.turnPreparation().phase,
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
 		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Shift+Enter"),

@@ -62,6 +62,7 @@ export interface InteractiveSlashSubmitExpansion {
 
 type SlashChat = Pick<ChatLoop, "getSessionId" | "isStreaming" | "submit">;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser" | "clearFoldOverrides">;
+type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
 type SlashResources = Pick<ResourcesContract, "prompts" | "expandPromptTemplate" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
 type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
@@ -245,7 +246,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const willQueue = deps.chat.isStreaming();
 			deps.recordSubmittedTurn();
 			deps.refreshFooter();
-			if (!willQueue) deps.chatPanel.appendUser(sub.text);
+			// The row is painted now, so the operator sees their prompt land, but
+			// it is marked pending until the durable append at admission: nothing
+			// is in the ledger yet, and a refused preflight must not leave a row
+			// that reads like a committed turn (issue #251).
+			let rowStatus: UserTurnStatus = "pending";
+			if (!willQueue) deps.chatPanel.appendUser(sub.text, () => rowStatus);
 			deps.requestRender();
 			deps.beforeSemanticSubmit?.();
 			let acknowledgeAdmission = (): void => {};
@@ -257,7 +263,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
 				...(awaitAdmission && willQueue ? { steering: "end-of-turn" as const } : {}),
-				...(awaitAdmission ? { onAdmitted: acknowledgeAdmission } : {}),
+				onAdmitted: () => {
+					rowStatus = "committed";
+					deps.requestRender();
+					if (awaitAdmission) acknowledgeAdmission();
+				},
 			});
 			const settlement = turn
 				.then(() => deps.settleVisibleFrame?.("submit-return"))
@@ -265,7 +275,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					const msg = err instanceof Error ? err.message : String(err);
 					deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
 				})
-				.finally(deps.requestRender);
+				.finally(() => {
+					// Settlement without admission is a refusal: the probe failed, the
+					// overflow preflight blocked the request, or the submit became a
+					// steer. Say so on the row rather than leaving a phantom turn.
+					if (rowStatus === "pending") rowStatus = willQueue ? "committed" : "refused";
+					deps.requestRender();
+				});
 			return awaitAdmission ? Promise.race([admitted, settlement]) : settlement;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
