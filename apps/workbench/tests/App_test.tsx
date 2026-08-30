@@ -17,6 +17,7 @@ import {
 	configInspectionFixture,
 	dispatchInspectionFixture,
 	FIXTURE_PROJECT_ID,
+	recoveryInspectionFixture,
 	routingInspectionFixture,
 	serverEventFixture,
 	sessionSummaryFixture,
@@ -51,6 +52,7 @@ const inertActions: WorkbenchActions = {
 	inspectUsage() {},
 	inspectRouting() {},
 	inspectDispatch() {},
+	inspectRecovery() {},
 	listTargets() {},
 	probeTarget() {},
 	setAutonomy() {},
@@ -108,6 +110,21 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	ok(!/engine/iu.test(html), "no product surface may mention an engine");
 	ok(!html.includes("activity-rail"));
 	ok(!html.includes("No prompt leaves this machine"));
+});
+
+Deno.test("an empty-directory delete challenge uses a human folder label without changing the protocol term", () => {
+	const html = render(stateWith(workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		deleteChallenge: {
+			confirmationId: "confirmation-alpha",
+			target: { segments: ["analysis", "empty"] },
+			displayPath: "analysis/empty",
+			targetKind: "empty-directory",
+			expiresAt: "2026-08-18T12:01:00.000Z",
+		},
+	})));
+	match(html, /Delete empty folder/u);
+	match(html, /analysis\/empty/u);
+	ok(!html.includes("Delete empty-directory"));
 });
 
 Deno.test("the Effective Clio Coder map renders provenance, apply timing, redaction, and bounded issues without raw JSON", () => {
@@ -937,4 +954,22 @@ Deno.test("the settings page offers desktop notifications without ever asking fo
 	// Server-rendered there is no Notification API, which must degrade quietly.
 	match(html, /This browser cannot post desktop notifications\./u);
 	match(html, /A notification carries the tool title only\. The GUI never puts a project path in one\./u);
+});
+
+Deno.test("settings renders redacted Clio Coder recovery diagnostics without raw doctor details", () => {
+	const html = render({
+		...stateWith(workspaceFixture()),
+		settingsOpen: true,
+		recoveryInspection: recoveryInspectionFixture(),
+	});
+	match(html, /Clio Coder recovery check/u);
+	match(html, /ATTENTION REQUIRED/u);
+	match(html, /2 reported failures/u);
+	match(html, /Targets &amp; models/u);
+	match(html, /0\/2 passed · 1 warn · 1 fail/u);
+	match(html, /0\.3\.9/u);
+	match(html, /selected-project context/u);
+	for (const forbidden of ["/private/", "http://", "model-secret", "ssh-private", "settings.yaml is invalid"]) {
+		ok(!html.includes(forbidden), `recovery UI leaked ${forbidden}`);
+	}
 });

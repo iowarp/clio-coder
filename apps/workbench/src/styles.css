@@ -3337,6 +3337,7 @@ kbd {
 
 .settings__targets,
 .settings__notifications,
+.settings__recovery,
 .settings__routing {
 	padding: 15px 0 0;
 	border-top: 1px solid var(--hairline);
@@ -3353,6 +3354,184 @@ kbd {
 
 .settings__notifications > .button {
 	justify-self: start;
+}
+
+.settings__recovery {
+	display: grid;
+	gap: 12px;
+	contain: layout paint;
+}
+
+.recovery-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+}
+
+.recovery-actions > span {
+	color: var(--muted);
+	font-size: 0.68rem;
+}
+
+.recovery-record {
+	display: grid;
+	gap: 10px;
+	padding: 12px;
+	border: 1px solid var(--hairline);
+	background:
+		linear-gradient(120deg, rgb(70 229 208 / 3%), transparent 36%),
+		rgb(7 12 17 / 72%);
+}
+
+.recovery-verdict {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 14px;
+	padding-left: 9px;
+	border-left: 2px solid var(--success);
+}
+
+.recovery-verdict.is-failed {
+	border-left-color: var(--danger);
+}
+
+.recovery-verdict > div {
+	display: grid;
+	gap: 2px;
+}
+
+.recovery-verdict span {
+	color: var(--success);
+	font-family: var(--font-mono);
+	font-size: 0.51rem;
+	font-weight: 650;
+	letter-spacing: 0.09em;
+}
+
+.recovery-verdict.is-failed span {
+	color: var(--danger);
+}
+
+.recovery-verdict strong {
+	color: var(--paper-strong);
+	font-family: var(--font-editorial);
+	font-size: 1rem;
+	font-variation-settings: "opsz" 22, "wght" 560;
+}
+
+.recovery-verdict small {
+	color: var(--dim);
+	font-family: var(--font-mono);
+	font-size: 0.52rem;
+}
+
+.recovery-summary {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	border: 1px solid var(--hairline);
+}
+
+.recovery-summary > div {
+	padding: 9px 10px;
+	border-left: 1px solid var(--hairline);
+}
+
+.recovery-summary > div:first-child {
+	border-left: 0;
+}
+
+.recovery-summary dt {
+	color: var(--dim);
+	font-size: 0.55rem;
+}
+
+.recovery-summary dd {
+	margin-top: 3px;
+	color: var(--paper-strong);
+	font-family: var(--font-editorial);
+	font-size: 1.15rem;
+}
+
+.recovery-versions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+
+.recovery-versions span {
+	padding: 4px 6px;
+	border: 1px solid var(--hairline);
+	color: var(--muted);
+	font-size: 0.56rem;
+}
+
+.recovery-versions code {
+	margin-left: 3px;
+	color: var(--info);
+	font-size: inherit;
+}
+
+.recovery-sections {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.recovery-sections li {
+	display: flex;
+	align-items: start;
+	justify-content: space-between;
+	gap: 10px;
+	min-width: 0;
+	padding: 9px;
+	border: 1px solid var(--hairline);
+	border-left: 2px solid var(--success);
+}
+
+.recovery-sections li.is-warning {
+	border-left-color: var(--warning);
+}
+
+.recovery-sections li.is-failed {
+	border-left-color: var(--danger);
+}
+
+.recovery-sections li > div {
+	min-width: 0;
+}
+
+.recovery-sections strong {
+	color: var(--paper);
+	font-size: 0.7rem;
+}
+
+.recovery-sections p {
+	margin-top: 2px;
+	color: var(--dim);
+	font-size: 0.56rem;
+	line-height: 1.35;
+}
+
+.recovery-sections li > span {
+	flex: 0 0 auto;
+	color: var(--muted);
+	font-family: var(--font-mono);
+	font-size: 0.49rem;
+}
+
+.recovery-boundary {
+	padding-left: 9px;
+	border-left: 2px solid var(--info);
+	color: var(--dim);
+	font-size: 0.61rem;
+	line-height: 1.48;
+}
+
+.recovery-boundary code {
+	color: var(--paper);
+	font-size: inherit;
 }
 
 .target-list {
@@ -3707,7 +3886,7 @@ kbd {
 	border-left: 2px solid var(--accent-deep);
 }
 
-/* --- Effective Clio field map ------------------------------------------- */
+/* --- Effective Clio Coder field map ------------------------------------- */
 
 .observer-section--effective {
 	background:
@@ -6521,8 +6700,27 @@ kbd {
 	.routing-inventory__summary dl,
 	.routing-models__controls,
 	.routing-model-list,
-	.routing-workforce {
+	.routing-workforce,
+	.recovery-sections {
 		grid-template-columns: 1fr;
+	}
+
+	.recovery-verdict {
+		align-items: start;
+		flex-direction: column;
+	}
+
+	.recovery-summary {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.recovery-summary > div:nth-child(3) {
+		border-top: 1px solid var(--hairline);
+		border-left: 0;
+	}
+
+	.recovery-summary > div:nth-child(4) {
+		border-top: 1px solid var(--hairline);
 	}
 
 	.routing-inventory__summary dl > div {

@@ -6,6 +6,7 @@ import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
+import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import {
@@ -23,12 +24,14 @@ import {
 	type WireCatalogInspection,
 	type WireConfigInspection,
 	type WireDispatchInspection,
+	type WireRecoveryInspection,
 	type WireRoutingInspection,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
 import {
 	catalogInspectionFixture,
 	dispatchInspectionFixture,
+	recoveryInspectionFixture,
 	routingInspectionFixture,
 	usageInspectionFixture,
 } from "./fixtures.ts";
@@ -102,6 +105,7 @@ interface FixtureOptions {
 	readonly usageInspector?: ClioUsageInspector;
 	readonly routingInspector?: ClioRoutingInspector;
 	readonly dispatchInspector?: ClioDispatchInspector;
+	readonly recoveryInspector?: ClioRecoveryInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
@@ -143,6 +147,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 			...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 			...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
+			...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -871,6 +876,40 @@ Deno.test("dispatch inspection is global, uses the configured home, and survives
 			dispatchInspection: WireDispatchInspection;
 		};
 		deepStrictEqual(bootstrap.dispatchInspection, dispatchInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("recovery inspection uses home or the selected trusted root without exposing project context", async () => {
+	const calls: Array<{ cwd: string; projectContext: boolean }> = [];
+	const recoveryInspector: ClioRecoveryInspector = {
+		inspect(cwd, projectContext) {
+			calls.push({ cwd, projectContext });
+			return Promise.resolve({ ...recoveryInspectionFixture(), projectContext });
+		},
+	};
+	const fixture = await startFixture({ recoveryInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-recovery-home", "recovery.inspect", {});
+		const homeRecovery = (await collectThrough(socket, "recovery.state")).at(-1);
+		ok(homeRecovery?.kind === "recovery.state");
+		equal(homeRecovery.projectId, undefined);
+		deepStrictEqual(calls[0], { cwd: fixture.homePath, projectContext: false });
+		equal(homeRecovery.payload.inspection.projectContext, false);
+
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		await sendCommand(socket, "request-recovery-project", "recovery.inspect", {});
+		const projectRecovery = (await collectThrough(socket, "recovery.state")).at(-1);
+		ok(projectRecovery?.kind === "recovery.state");
+		deepStrictEqual(calls[1], { cwd: await Deno.realPath(fixture.projectRoot), projectContext: true });
+		deepStrictEqual(projectRecovery.payload.inspection as WireRecoveryInspection, recoveryInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

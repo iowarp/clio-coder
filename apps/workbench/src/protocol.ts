@@ -46,6 +46,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"usage.inspect",
 	"routing.inspect",
 	"dispatch.inspect",
+	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
 	"autonomy.set",
@@ -233,6 +234,8 @@ export interface RoutingInspectPayload {
 
 export type DispatchInspectPayload = Readonly<Record<string, never>>;
 
+export type RecoveryInspectPayload = Readonly<Record<string, never>>;
+
 export interface TargetsListPayload {
 	readonly projectId: string;
 }
@@ -274,6 +277,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "usage.inspect": UsageInspectPayload;
 	readonly "routing.inspect": RoutingInspectPayload;
 	readonly "dispatch.inspect": DispatchInspectPayload;
+	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
 	readonly "autonomy.set": AutonomySetPayload;
@@ -306,6 +310,7 @@ export const SERVER_EVENT_KINDS = [
 	"usage.state",
 	"routing.state",
 	"dispatch.state",
+	"recovery.state",
 	"targets.state",
 	"targets.probed",
 	"turn.started",
@@ -906,6 +911,47 @@ export interface WireDispatchInspection {
 	}>;
 }
 
+export const RECOVERY_SECTION_IDS = [
+	"runtime",
+	"storage",
+	"configuration",
+	"history",
+	"models",
+	"interoperability",
+	"fleet",
+	"other",
+] as const;
+export type WireRecoverySectionId = (typeof RECOVERY_SECTION_IDS)[number];
+
+export interface WireRecoveryCounts {
+	readonly checks: number;
+	readonly passed: number;
+	readonly warnings: number;
+	readonly failures: number;
+}
+
+export interface WireRecoverySection extends WireRecoveryCounts {
+	readonly id: WireRecoverySectionId;
+}
+
+/** Redacted aggregate of the fixed Clio Coder `doctor` and `paths` reports. */
+export interface WireRecoveryInspection {
+	readonly scope: "installation";
+	/** Whether project-aware checks used the selected project's trusted root. */
+	readonly projectContext: boolean;
+	readonly inspectedAt: string;
+	readonly healthy: boolean;
+	/** Exact fixed path categories resolved; the native values never cross the host. */
+	readonly pathsResolved: number;
+	readonly versions: Readonly<{
+		clioCoder: string | null;
+		node: string | null;
+		platform: string | null;
+	}>;
+	readonly summary: WireRecoveryCounts;
+	readonly sections: readonly WireRecoverySection[];
+}
+
 export interface WireTarget {
 	readonly id: string;
 	readonly runtime: string;
@@ -1003,6 +1049,10 @@ export interface RoutingStatePayload {
 
 export interface DispatchStatePayload {
 	readonly inspection: WireDispatchInspection;
+}
+
+export interface RecoveryStatePayload {
+	readonly inspection: WireRecoveryInspection;
 }
 
 export interface TargetsStatePayload {
@@ -1112,6 +1162,7 @@ export interface ServerEventPayloadByKind {
 	readonly "usage.state": UsageStatePayload;
 	readonly "routing.state": RoutingStatePayload;
 	readonly "dispatch.state": DispatchStatePayload;
+	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
@@ -1389,6 +1440,7 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 	const label = `${kind} payload`;
 	switch (kind) {
 		case "dispatch.inspect":
+		case "recovery.inspect":
 			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
 		case "project.browse": {
 			const record = expectExactKeys(value, label, [], ["path"]);
@@ -2659,6 +2711,97 @@ export function validateDispatchInspection(value: unknown, label = "dispatch ins
 	};
 }
 
+function validateRecoveryCounts(value: unknown, label: string): WireRecoveryCounts {
+	const record = expectExactKeys(value, label, ["checks", "passed", "warnings", "failures"]);
+	const counts = {
+		checks: expectDispatchNumber(record.checks, `${label}.checks`, true),
+		passed: expectDispatchNumber(record.passed, `${label}.passed`, true),
+		warnings: expectDispatchNumber(record.warnings, `${label}.warnings`, true),
+		failures: expectDispatchNumber(record.failures, `${label}.failures`, true),
+	};
+	if (counts.passed + counts.warnings + counts.failures !== counts.checks) {
+		invalid(`${label} severity counts must sum to checks`);
+	}
+	return counts;
+}
+
+export function validateRecoveryInspection(value: unknown, label = "recovery inspection"): WireRecoveryInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"projectContext",
+		"inspectedAt",
+		"healthy",
+		"pathsResolved",
+		"versions",
+		"summary",
+		"sections",
+	]);
+	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
+	const pathsResolved = expectDispatchNumber(record.pathsResolved, `${label}.pathsResolved`, true);
+	if (pathsResolved !== 4) invalid(`${label}.pathsResolved must describe all four fixed roots`);
+	const versionsRecord = expectExactKeys(record.versions, `${label}.versions`, ["clioCoder", "node", "platform"]);
+	const versions = {
+		clioCoder: expectNullablePresentationText(versionsRecord.clioCoder, `${label}.versions.clioCoder`, 64),
+		node: expectNullablePresentationText(versionsRecord.node, `${label}.versions.node`, 64),
+		platform: expectNullablePresentationText(versionsRecord.platform, `${label}.versions.platform`, 64),
+	};
+	const summary = validateRecoveryCounts(record.summary, `${label}.summary`);
+	if (summary.checks === 0) invalid(`${label}.summary must contain at least one reported check`);
+	const seen = new Set<WireRecoverySectionId>();
+	const sections = expectArray(
+		record.sections,
+		`${label}.sections`,
+		RECOVERY_SECTION_IDS.length,
+		(row, rowLabel): WireRecoverySection => {
+			const sectionRecord = expectExactKeys(row, rowLabel, [
+				"id",
+				"checks",
+				"passed",
+				"warnings",
+				"failures",
+			]);
+			const id = expectEnum(sectionRecord.id, `${rowLabel}.id`, RECOVERY_SECTION_IDS);
+			if (seen.has(id)) invalid(`${label}.sections repeats ${id}`);
+			seen.add(id);
+			const counts = validateRecoveryCounts(
+				{
+					checks: sectionRecord.checks,
+					passed: sectionRecord.passed,
+					warnings: sectionRecord.warnings,
+					failures: sectionRecord.failures,
+				},
+				rowLabel,
+			);
+			return { id, ...counts };
+		},
+	);
+	const sectionTotals = sections.reduce<WireRecoveryCounts>(
+		(total, section) => ({
+			checks: total.checks + section.checks,
+			passed: total.passed + section.passed,
+			warnings: total.warnings + section.warnings,
+			failures: total.failures + section.failures,
+		}),
+		{ checks: 0, passed: 0, warnings: 0, failures: 0 },
+	);
+	if (
+		sectionTotals.checks !== summary.checks || sectionTotals.passed !== summary.passed ||
+		sectionTotals.warnings !== summary.warnings || sectionTotals.failures !== summary.failures
+	) invalid(`${label}.sections contradict the summary`);
+	const healthy = expectBoolean(record.healthy, `${label}.healthy`);
+	if (healthy !== (summary.failures === 0)) invalid(`${label}.healthy contradicts its failure count`);
+	return {
+		scope: "installation",
+		projectContext: expectBoolean(record.projectContext, `${label}.projectContext`),
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		healthy,
+		pathsResolved,
+		versions,
+		summary,
+		sections,
+	};
+}
+
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
 	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
@@ -2853,6 +2996,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "dispatch.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return { inspection: validateDispatchInspection(record.inspection, `${label}.inspection`) };
+		}
+		case "recovery.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return { inspection: validateRecoveryInspection(record.inspection, `${label}.inspection`) };
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -3060,6 +3207,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"protocol.error",
 	"project.browse.listing",
 	"dispatch.state",
+	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"project.opened",

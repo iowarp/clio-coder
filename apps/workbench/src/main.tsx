@@ -203,6 +203,10 @@ function App() {
 				const requestId = send("dispatch.inspect", {});
 				if (requestId !== null) dispatch({ type: "dispatch.inspect.submitted", requestId });
 			},
+			inspectRecovery() {
+				const requestId = send("recovery.inspect", {});
+				if (requestId !== null) dispatch({ type: "recovery.inspect.submitted", requestId });
+			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
 			},

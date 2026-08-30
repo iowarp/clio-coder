@@ -22,6 +22,7 @@ import {
 	type WireProjectPath,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
+	type WireRecoveryInspection,
 	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireSettingsState,
@@ -91,6 +92,7 @@ export interface AppState {
 	readonly stateDirNote: string;
 	readonly securityNote: string;
 	readonly dispatchInspection: WireDispatchInspection | null;
+	readonly recoveryInspection: WireRecoveryInspection | null;
 	readonly browse: ProjectBrowseListingPayload | null;
 	readonly leftDrawerOpen: boolean;
 	readonly settingsOpen: boolean;
@@ -114,6 +116,8 @@ export interface AppState {
 	readonly pendingRoutingInspect: string | null;
 	/** Request id of the installation-wide, read-only dispatch snapshot. */
 	readonly pendingDispatchInspect: string | null;
+	/** Request id of the redacted Clio Coder doctor/paths sweep. */
+	readonly pendingRecoveryInspect: string | null;
 	/**
 	 * The recent project a `project.select` is waiting on. A refusal for this
 	 * exact request is the only evidence the renderer has that a remembered folder
@@ -139,6 +143,7 @@ export type AppAction =
 	| { readonly type: "usage.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "routing.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "dispatch.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "recovery.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "project.select.submitted"; readonly requestId: string; readonly projectId: string }
 	| { readonly type: "host.events"; readonly events: readonly ServerEvent[] }
 	| { readonly type: "host.event"; readonly event: ServerEvent };
@@ -156,6 +161,7 @@ export const initialAppState: AppState = {
 	stateDirNote: "The desktop app has not reported where it keeps its own state yet.",
 	securityNote: "The desktop app has not reported its project boundary yet.",
 	dispatchInspection: null,
+	recoveryInspection: null,
 	browse: null,
 	leftDrawerOpen: false,
 	settingsOpen: false,
@@ -168,6 +174,7 @@ export const initialAppState: AppState = {
 	pendingUsageInspect: null,
 	pendingRoutingInspect: null,
 	pendingDispatchInspect: null,
+	pendingRecoveryInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
 };
@@ -524,6 +531,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingRoutingInspect: action.requestId };
 		case "dispatch.inspect.submitted":
 			return { ...state, pendingDispatchInspect: action.requestId };
+		case "recovery.inspect.submitted":
+			return { ...state, pendingRecoveryInspect: action.requestId };
 		case "project.select.submitted":
 			return { ...state, pendingProjectSelect: { requestId: action.requestId, projectId: action.projectId } };
 		case "host.events": {
@@ -557,6 +566,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingUsageInspect: null,
 						pendingRoutingInspect: null,
 						pendingDispatchInspect: null,
+						pendingRecoveryInspect: null,
 					};
 				case "command.error": {
 					const pendingSelect = state.pendingProjectSelect;
@@ -596,6 +606,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 							event.payload.requestId === undefined || event.payload.requestId === state.pendingDispatchInspect
 								? null
 								: state.pendingDispatchInspect,
+						pendingRecoveryInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingRecoveryInspect
+								? null
+								: state.pendingRecoveryInspect,
 						pendingProjectSelect: answersSelect ? null : pendingSelect,
 					};
 				}
@@ -607,6 +621,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						dispatchInspection: event.payload.inspection,
 						pendingDispatchInspect: null,
 						announcement: "Installation-wide dispatch snapshot updated",
+					};
+				case "recovery.state":
+					return {
+						...sequenced,
+						recoveryInspection: event.payload.inspection,
+						pendingRecoveryInspect: null,
+						announcement: event.payload.inspection.healthy
+							? "Clio Coder diagnostics found no failures"
+							: "Clio Coder diagnostics found failures",
 					};
 				case "project.opened": {
 					const consistency = workspaceConsistencyError(event.payload.workspace);
@@ -626,6 +649,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingCatalogInspect: null,
 						pendingUsageInspect: null,
 						pendingRoutingInspect: null,
+						pendingRecoveryInspect: null,
+						recoveryInspection: state.recoveryInspection?.projectContext ? null : state.recoveryInspection,
 						recent: state.recent.some((entry) => entry.id === open.project.id)
 							? state.recent.map((entry) => entry.id === open.project.id ? open.project : entry)
 							: [open.project, ...state.recent],
@@ -643,6 +668,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingCatalogInspect: event.projectId === state.open?.project.id ? null : state.pendingCatalogInspect,
 						pendingUsageInspect: event.projectId === state.open?.project.id ? null : state.pendingUsageInspect,
 						pendingRoutingInspect: event.projectId === state.open?.project.id ? null : state.pendingRoutingInspect,
+						pendingRecoveryInspect: event.projectId === state.open?.project.id ? null : state.pendingRecoveryInspect,
+						recoveryInspection: event.projectId === state.open?.project.id && state.recoveryInspection?.projectContext
+							? null
+							: state.recoveryInspection,
 						recent: state.recent.filter((entry) => entry.id !== event.projectId),
 						pendingProjectSelect: state.pendingProjectSelect?.projectId === event.projectId
 							? null

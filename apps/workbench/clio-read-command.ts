@@ -1,5 +1,5 @@
 /**
- * Process boundary shared by the GUI's public, read-only Clio Coder adapters.
+ * Process boundary shared by the GUI's public, fixed Clio Coder inspection adapters.
  *
  * Callers still own the command-specific projection. This runner only enforces
  * fixed argv execution, time and byte ceilings, process retirement, UTF-8, and
@@ -105,12 +105,16 @@ export class ClioReadCommandRunner {
 		this.#maximumStderrBytes = positiveBound(options.maximumStderrBytes, "maximumStderrBytes", 256 * 1024);
 	}
 
-	async runJson(cwd: string, fixedArgs: readonly string[]): Promise<unknown> {
-		const text = await this.#runText(cwd, fixedArgs);
+	async runJson(
+		cwd: string,
+		fixedArgs: readonly string[],
+		acceptedExitCodes: readonly number[] = [0],
+	): Promise<unknown> {
+		const text = await this.#runText(cwd, fixedArgs, acceptedExitCodes);
 		try {
 			return JSON.parse(text);
 		} catch {
-			throw new ClioReadCommandError("json", "Clio Coder returned invalid JSON for a read-only command.");
+			throw new ClioReadCommandError("json", "Clio Coder returned invalid JSON for a fixed inspection command.");
 		}
 	}
 
@@ -121,25 +125,33 @@ export class ClioReadCommandRunner {
 		const lines = text.split(/\r?\n/u);
 		if (lines.at(-1) === "") lines.pop();
 		if (lines.length > rowLimit) {
-			throw new ClioReadCommandError("row-limit", "The read-only Clio Coder command exceeded the GUI's row bound.");
+			throw new ClioReadCommandError("row-limit", "The fixed Clio Coder inspection exceeded the GUI's row bound.");
 		}
 		const rows: unknown[] = [];
 		for (const line of lines) {
 			if (line.trim().length === 0) {
-				throw new ClioReadCommandError("json", "Clio Coder returned a blank row in JSONL output.");
+				throw new ClioReadCommandError("json", "Clio Coder returned a blank row in JSONL inspection output.");
 			}
 			try {
 				rows.push(JSON.parse(line));
 			} catch {
-				throw new ClioReadCommandError("json", "Clio Coder returned invalid JSONL for a read-only command.");
+				throw new ClioReadCommandError("json", "Clio Coder returned invalid JSONL for a fixed inspection command.");
 			}
 		}
 		return rows;
 	}
 
-	async #runText(cwd: string, fixedArgs: readonly string[]): Promise<string> {
+	async #runText(
+		cwd: string,
+		fixedArgs: readonly string[],
+		acceptedExitCodes: readonly number[] = [0],
+	): Promise<string> {
 		const args = fixedArgs.map((argument, index) => commandPart(argument, `fixedArgs[${index}]`));
 		if (args.length === 0) throw new TypeError("fixedArgs must contain at least one command argument.");
+		const allowedStatuses = new Set(
+			acceptedExitCodes.map((code, index) => positiveBound(code + 1, `acceptedExitCodes[${index}]`, 256) - 1),
+		);
+		if (allowedStatuses.size === 0) throw new TypeError("acceptedExitCodes must contain at least one exit code.");
 
 		let child: Deno.ChildProcess;
 		try {
@@ -151,7 +163,7 @@ export class ClioReadCommandRunner {
 				stderr: "piped",
 			}).spawn();
 		} catch {
-			throw new ClioReadCommandError("spawn", "The GUI could not start the read-only Clio Coder command.");
+			throw new ClioReadCommandError("spawn", "The GUI could not start the fixed Clio Coder inspection command.");
 		}
 
 		let timedOut = false;
@@ -190,7 +202,7 @@ export class ClioReadCommandRunner {
 		if (hardStop !== null) clearTimeout(hardStop);
 
 		if (timedOut) {
-			throw new ClioReadCommandError("timeout", "The read-only Clio Coder command did not finish in time.");
+			throw new ClioReadCommandError("timeout", "The fixed Clio Coder inspection did not finish in time.");
 		}
 		if (stdoutResult.status === "rejected" || stderrResult.status === "rejected") {
 			const exceeded = (stdoutResult.status === "rejected" && stdoutResult.reason instanceof OutputLimitError) ||
@@ -198,18 +210,18 @@ export class ClioReadCommandRunner {
 			throw new ClioReadCommandError(
 				exceeded ? "byte-limit" : "read",
 				exceeded
-					? "The read-only Clio Coder command exceeded the GUI's byte bound."
-					: "The GUI could not read the read-only Clio Coder command.",
+					? "The fixed Clio Coder inspection exceeded the GUI's byte bound."
+					: "The GUI could not read the fixed Clio Coder inspection command.",
 			);
 		}
 		if (statusResult.status === "rejected") {
-			throw new ClioReadCommandError("status", "The GUI could not observe the read-only Clio Coder command.");
+			throw new ClioReadCommandError("status", "The GUI could not observe the fixed Clio Coder inspection command.");
 		}
 		const diagnostic = decodeDiagnostic(stderrResult.value);
-		if (!statusResult.value.success) {
+		if (!allowedStatuses.has(statusResult.value.code)) {
 			throw new ClioReadCommandError(
 				"exit",
-				"The read-only Clio Coder command did not complete successfully.",
+				"The fixed Clio Coder inspection command did not complete successfully.",
 				diagnostic,
 				statusResult.value.code,
 			);
@@ -219,7 +231,7 @@ export class ClioReadCommandRunner {
 		try {
 			text = new TextDecoder("utf-8", { fatal: true }).decode(stdoutResult.value);
 		} catch {
-			throw new ClioReadCommandError("encoding", "Clio Coder returned non-text output for a read-only command.");
+			throw new ClioReadCommandError("encoding", "Clio Coder returned non-text output for a fixed inspection command.");
 		}
 		return text;
 	}

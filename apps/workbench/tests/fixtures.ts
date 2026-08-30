@@ -8,6 +8,7 @@ import {
 	type WireConfigInspection,
 	type WireDispatchInspection,
 	type WireProjectWorkspace,
+	type WireRecoveryInspection,
 	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireTimelineItem,
@@ -34,6 +35,27 @@ export function dispatchInspectionFixture(): WireDispatchInspection {
 			costUsd: 1.78098108,
 			runtimeSeconds: 42_963.751,
 		},
+	};
+}
+
+export function recoveryInspectionFixture(): WireRecoveryInspection {
+	return {
+		scope: "installation",
+		projectContext: true,
+		inspectedAt: "2026-08-30T15:00:00.000Z",
+		healthy: false,
+		pathsResolved: 4,
+		versions: { clioCoder: "0.3.9", node: "v24.9.0", platform: "linux-x64" },
+		summary: { checks: 15, passed: 10, warnings: 3, failures: 2 },
+		sections: [
+			{ id: "runtime", checks: 4, passed: 4, warnings: 0, failures: 0 },
+			{ id: "storage", checks: 4, passed: 4, warnings: 0, failures: 0 },
+			{ id: "configuration", checks: 2, passed: 1, warnings: 0, failures: 1 },
+			{ id: "history", checks: 1, passed: 1, warnings: 0, failures: 0 },
+			{ id: "models", checks: 2, passed: 0, warnings: 1, failures: 1 },
+			{ id: "interoperability", checks: 1, passed: 0, warnings: 1, failures: 0 },
+			{ id: "fleet", checks: 1, passed: 0, warnings: 1, failures: 0 },
+		],
 	};
 }
 

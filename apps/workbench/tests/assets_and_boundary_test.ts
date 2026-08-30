@@ -50,5 +50,6 @@ Deno.test("product-facing source never abbreviates Clio Coder to the ambiguous b
 		const source = await Deno.readTextFile(file);
 		ok(!/\bClio\b(?! Coder)/u.test(source), `${file.pathname} contains a bare Clio product reference`);
 		ok(!/\bCLIO\b(?! CODER|-CODER)/u.test(source), `${file.pathname} contains a bare CLIO product reference`);
+		ok(!/\bclio[-_ ]gui\b/iu.test(source), `${file.pathname} abbreviates Clio Coder GUI`);
 	}
 });

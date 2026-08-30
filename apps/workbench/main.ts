@@ -6,6 +6,11 @@ import {
 	ClioDispatchInspectError,
 	type ClioDispatchInspector,
 } from "./clio-dispatch-inspector.ts";
+import {
+	ClioCliRecoveryInspector,
+	ClioRecoveryInspectError,
+	type ClioRecoveryInspector,
+} from "./clio-recovery-inspector.ts";
 import { ClioCliUsageInspector, ClioUsageInspectError, type ClioUsageInspector } from "./clio-usage-inspector.ts";
 import { ClioCliRoutingInspector, type ClioRoutingInspector } from "./clio-routing-inspector.ts";
 import {
@@ -125,6 +130,8 @@ export interface WorkbenchServerOptions {
 	routingInspector?: ClioRoutingInspector;
 	/** Overrides the fixed installation-wide dispatch status adapter (tests). */
 	dispatchInspector?: ClioDispatchInspector;
+	/** Overrides the redacted Clio Coder doctor/paths adapter (tests). */
+	recoveryInspector?: ClioRecoveryInspector;
 	/** Overrides the Workbench state directory (tests). */
 	stateDir?: string;
 	/** Overrides `$HOME` for the guards and browser (tests). */
@@ -263,6 +270,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #usageInspector: ClioUsageInspector;
 	readonly #routingInspector: ClioRoutingInspector;
 	readonly #dispatchInspector: ClioDispatchInspector;
+	readonly #recoveryInspector: ClioRecoveryInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
@@ -293,6 +301,7 @@ class WorkbenchRuntime implements HostSink {
 				| "usageInspector"
 				| "routingInspector"
 				| "dispatchInspector"
+				| "recoveryInspector"
 				| "permissionEscalateMs"
 				| "permissionBudgetMs"
 				| "promptTimeoutMs"
@@ -318,6 +327,9 @@ class WorkbenchRuntime implements HostSink {
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#dispatchInspector = options.dispatchInspector ?? new ClioCliDispatchInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#recoveryInspector = options.recoveryInspector ?? new ClioCliRecoveryInspector({
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
@@ -352,7 +364,7 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, and installation-wide dispatch inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
 			securityNote: SECURITY_NOTE,
 			dispatchInspection: this.#dispatchInspection,
 		};
@@ -508,9 +520,10 @@ class WorkbenchRuntime implements HostSink {
 	// ---------------------------------------------------------------- commands
 
 	handleCommand(session: SocketSession, command: ClientCommand): Promise<void> {
-		// Read-only CLI adapters have their own serialized lane. They may run
+		// Fixed inspection adapters have their own serialized lane. They may run
 		// alongside the owned ACP child, but can never delay Stop, permission,
-		// project, or session controls on the primary lane.
+		// project, or session controls on the primary lane. Recovery diagnostics
+		// may refresh Clio Coder's fleet preflight facts but never configuration.
 		if (command.kind === "config.inspect") {
 			return this.#serializeRead(() => this.#dispatchConfigInspect(session, command));
 		}
@@ -525,6 +538,9 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (command.kind === "dispatch.inspect") {
 			return this.#serializeRead(() => this.#dispatchDispatchInspect(session, command));
+		}
+		if (command.kind === "recovery.inspect") {
+			return this.#serializeRead(() => this.#dispatchRecoveryInspect(session, command));
 		}
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
@@ -642,6 +658,24 @@ class WorkbenchRuntime implements HostSink {
 			if (this.#closed || session.closed) return;
 			this.#dispatchInspection = inspection;
 			this.#broadcast("dispatch.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
+		}
+	}
+
+	async #dispatchRecoveryInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"recovery.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#open;
+			const projectContext = open !== null;
+			const cwd = open?.project.identity.canonicalPath ?? this.#state.homePath;
+			const inspection = await this.#recoveryInspector.inspect(cwd, projectContext);
+			if (this.#closed || session.closed || (projectContext && this.#open !== open)) return;
+			this.#broadcast("recovery.state", {}, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
@@ -1030,6 +1064,7 @@ class WorkbenchRuntime implements HostSink {
 		if (error instanceof ClioConfigInspectError) return { code: error.code, message: error.message };
 		if (error instanceof ClioUsageInspectError) return { code: error.code, message: error.message };
 		if (error instanceof ClioDispatchInspectError) return { code: error.code, message: error.message };
+		if (error instanceof ClioRecoveryInspectError) return { code: error.code, message: error.message };
 		if (!this.#quiet) console.error("GUI command failed", error);
 		return { code: "internal", message: "The local command could not be completed." };
 	}
@@ -1157,6 +1192,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 		...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 		...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
+		...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),
