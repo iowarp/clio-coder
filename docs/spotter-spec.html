@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CLIO SPOTTER — Terminal Telemetry & Full-Fidelity Streaming Specification</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            clio: {
+              bg: '#080c10',
+              card: '#0f1720',
+              border: '#1b2a38',
+              accent: '#46E5D0',      // Clio teal
+              accentDeep: '#1FB7A6',  // Deep teal
+              action: '#FF7E29',      // Clio action neon orange
+              success: '#57E389',     // Green
+              warning: '#FFB454',     // Amber
+              error: '#FF5C66',       // Red
+              info: '#5BA8FF',        // Blue
+              reason: '#9D8CFF',      // Purple
+              dim: '#6A7A85',
+              muted: '#8A99A4'
+            }
+          },
+          fontFamily: {
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #080c10;
+      color: #e1e7ec;
+      font-family: 'Inter', sans-serif;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .glow-teal {
+      box-shadow: 0 0 35px -5px rgba(70, 229, 208, 0.18);
+    }
+    .glow-orange {
+      box-shadow: 0 0 35px -5px rgba(255, 126, 41, 0.22);
+    }
+    .border-glow:hover {
+      border-color: #46E5D0;
+      box-shadow: 0 0 20px -3px rgba(70, 229, 208, 0.25);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #0b1117;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #1b2a38;
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #46E5D0;
+    }
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.02); }
+    }
+    .animate-pulse-slow {
+      animation: pulse-slow 3s ease-in-out infinite;
+    }
+    .cursor-blink {
+      display: inline-block;
+      width: 8px;
+      height: 15px;
+      background-color: #46E5D0;
+      animation: blink 1s step-start infinite;
+      vertical-align: middle;
+      margin-left: 2px;
+    }
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+  </style>
+</head>
+<body class="custom-scrollbar antialiased selection:bg-clio-accent/30 selection:text-clio-accent">
+
+  <!-- TOP NAVIGATION -->
+  <nav class="sticky top-0 z-50 backdrop-blur-md bg-clio-bg/90 border-b border-clio-border/80 px-6 py-3.5 transition-all">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center space-x-4">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-clio-accent to-clio-accentDeep flex items-center justify-center p-0.5 shadow-lg shadow-clio-accent/20">
+          <div class="w-full h-full bg-clio-bg rounded-[7px] flex items-center justify-center">
+            <span class="font-mono font-black text-clio-accent text-lg tracking-tighter">C</span>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-bold tracking-tight text-white font-mono text-base">CLIO-CODER</span>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-clio-action/15 text-clio-action border border-clio-action/30">SPOTTER SPEC</span>
+          </div>
+          <p class="text-[11px] text-clio-dim hidden sm:block">IOWarp Autonomous Science Ecosystem · HPC Agentic Telemetry</p>
+        </div>
+      </div>
+
+      <div class="hidden md:flex items-center space-x-6 text-sm font-medium">
+        <a href="#overview" class="text-clio-muted hover:text-clio-accent transition">Overview</a>
+        <a href="#demo" class="text-clio-muted hover:text-clio-accent transition">Interactive Spotter</a>
+        <a href="#architecture" class="text-clio-muted hover:text-clio-accent transition">Architecture</a>
+        <a href="#integration" class="text-clio-muted hover:text-clio-accent transition">Integration Angles</a>
+        <a href="#blueprint" class="text-clio-muted hover:text-clio-accent transition">Implementation</a>
+      </div>
+
+      <div class="flex items-center space-x-3">
+        <span class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-clio-card border border-clio-border text-xs text-clio-muted">
+          <span class="w-2 h-2 rounded-full bg-clio-success animate-ping"></span>
+          <span class="font-mono text-[11px]">ALIS v3.0 / Cast v3</span>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO SECTION -->
+  <header class="relative overflow-hidden pt-12 pb-16 px-6 border-b border-clio-border/60">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(70,229,208,0.12),rgba(255,255,255,0))]"></div>
+    <div class="max-w-7xl mx-auto relative z-10">
+      
+      <div class="max-w-3xl">
+        <div class="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-clio-accent/10 border border-clio-accent/25 text-clio-accent text-xs font-mono mb-6">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+          <span>MISSION CONTROL FOR AGENTIC SCIENCE</span>
+        </div>
+        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white mb-6 leading-[1.1]">
+          Clio Spotter <span class="text-transparent bg-clip-text bg-gradient-to-r from-clio-accent via-clio-accentDeep to-clio-action">Technology</span>
+        </h1>
+        <p class="text-lg text-clio-muted leading-relaxed mb-8">
+          Full-fidelity terminal telemetry, deterministic session recording, and real-time live streaming across HPC clusters, cloud relays, and web control surfaces — powered by 
+          <span class="text-white font-medium">Asciinema v3 protocol</span> and <span class="text-white font-medium">zero-overhead native NDJSON streaming</span>.
+        </p>
+
+        <!-- PILL METRICS -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+          <div class="p-3.5 rounded-xl bg-clio-card border border-clio-border/80">
+            <div class="text-xs text-clio-dim mb-1">RECORDING FORMAT</div>
+            <div class="text-base font-bold text-clio-accent">asciicast v3</div>
+            <div class="text-[10px] text-clio-muted">NDJSON + zstd (~8% size)</div>
+          </div>
+          <div class="p-3.5 rounded-xl bg-clio-card border border-clio-border/80">
+            <div class="text-xs text-clio-dim mb-1">STREAM PROTOCOL</div>
+            <div class="text-base font-bold text-clio-action">ALIS Relay</div>
+            <div class="text-[10px] text-clio-muted">WebSocket & Raw SSE</div>
+          </div>
+          <div class="p-3.5 rounded-xl bg-clio-card border border-clio-border/80">
+            <div class="text-xs text-clio-dim mb-1">AUDIT EVIDENCE</div>
+            <div class="text-base font-bold text-clio-success">RunReceipt v20</div>
+            <div class="text-[10px] text-clio-muted">SHA-256 Verified Seal</div>
+          </div>
+          <div class="p-3.5 rounded-xl bg-clio-card border border-clio-border/80">
+            <div class="text-xs text-clio-dim mb-1">HPC PORTABILITY</div>
+            <div class="text-base font-bold text-clio-reason">Musl Static</div>
+            <div class="text-[10px] text-clio-muted">Zero-root, Non-invasive</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-7xl mx-auto px-6 py-12 space-y-24">
+
+    <!-- SECTION 1: INTERACTIVE LIVE DEMO & PLAYER SIMULATION -->
+    <section id="demo" class="space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div>
+          <div class="flex items-center space-x-2 text-clio-action font-mono text-xs font-semibold tracking-wider uppercase mb-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-clio-action"></span>
+            <span>Interactive Experience</span>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">The Spotter Control Center</h2>
+          <p class="text-sm text-clio-muted">Experience how Clio Coder streams multi-agent reasoning, Slurm MPI tools, and evidence markers in real time.</p>
+        </div>
+
+        <!-- STREAM SELECTOR -->
+        <div class="flex items-center bg-clio-card p-1 rounded-xl border border-clio-border text-xs font-mono">
+          <button id="tab-local" onclick="switchStream('local')" class="px-3 py-1.5 rounded-lg bg-clio-accent/15 text-clio-accent font-semibold transition">
+            Local TUI Stream
+          </button>
+          <button id="tab-fleet" onclick="switchStream('fleet')" class="px-3 py-1.5 rounded-lg text-clio-muted hover:text-white transition">
+            HPC Worker (Polaris #04)
+          </button>
+          <button id="tab-council" onclick="switchStream('council')" class="px-3 py-1.5 rounded-lg text-clio-muted hover:text-white transition">
+            Council Debate
+          </button>
+        </div>
+      </div>
+
+      <!-- SPOTTER CONSOLE / TERMINAL SIMULATOR -->
+      <div class="rounded-2xl bg-clio-card border border-clio-border shadow-2xl overflow-hidden glow-teal">
+        
+        <!-- TERMINAL CHROME BAR -->
+        <div class="bg-[#0b1117] border-b border-clio-border/80 px-4 py-3 flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="flex space-x-1.5">
+              <div class="w-3 h-3 rounded-full bg-clio-error/80"></div>
+              <div class="w-3 h-3 rounded-full bg-clio-warning/80"></div>
+              <div class="w-3 h-3 rounded-full bg-clio-success/80"></div>
+            </div>
+            <div class="h-4 w-px bg-clio-border"></div>
+            <div class="flex items-center space-x-2 text-xs font-mono text-clio-muted">
+              <svg class="w-3.5 h-3.5 text-clio-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+              <span id="session-title" class="font-semibold text-white">clio-coder: session-882c4fc6 · [120x34]</span>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-4 text-xs font-mono">
+            <div class="flex items-center space-x-1.5 text-clio-success">
+              <span class="w-2 h-2 rounded-full bg-clio-success animate-pulse"></span>
+              <span id="live-indicator">LIVE STREAMING</span>
+            </div>
+            <div class="hidden sm:flex items-center space-x-2 text-clio-dim">
+              <span>ALIS RELAY:</span>
+              <span class="text-clio-muted font-bold">127.0.0.1:8448</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- TERMINAL SCREEN BODY -->
+        <div id="terminal-body" class="p-6 bg-[#06090d] min-h-[380px] max-h-[480px] overflow-y-auto font-mono text-sm leading-relaxed custom-scrollbar space-y-1.5 selection:bg-clio-accent/40 selection:text-white">
+          <!-- Live dynamic content populated via JS -->
+        </div>
+
+        <!-- PLAYBACK CONTROLS & TELEMETRY BAR -->
+        <div class="bg-[#0b1117] border-t border-clio-border px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono">
+          
+          <!-- CONTROLS -->
+          <div class="flex items-center space-x-3">
+            <button id="btn-play-pause" onclick="togglePlayback()" class="p-2 rounded-lg bg-clio-border hover:bg-clio-accent/20 hover:text-clio-accent text-white transition flex items-center justify-center">
+              <svg id="icon-pause" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              <svg id="icon-play" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button onclick="restartPlayback()" class="p-2 rounded-lg bg-clio-border hover:bg-clio-border/80 text-clio-muted hover:text-white transition" title="Restart">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            </button>
+            <div class="h-4 w-px bg-clio-border"></div>
+            <div class="text-clio-muted">
+              <span id="current-time" class="text-clio-accent font-bold">00:04.2</span> / <span id="total-time">00:12.8</span>
+            </div>
+          </div>
+
+          <!-- PROGRESS SCRUBBER -->
+          <div class="w-full sm:max-w-md flex items-center space-x-2">
+            <div class="w-full h-1.5 bg-clio-border rounded-full overflow-hidden relative cursor-pointer" onclick="scrubTimeline(event)">
+              <div id="progress-bar" class="h-full bg-gradient-to-r from-clio-accent to-clio-action w-1/3 transition-all duration-150"></div>
+            </div>
+          </div>
+
+          <!-- TELEMETRY BADGES -->
+          <div class="flex items-center space-x-3 text-[11px] text-clio-dim">
+            <span class="bg-clio-card px-2 py-1 rounded border border-clio-border text-clio-muted">
+              Markers: <span id="marker-count" class="text-clio-action font-bold">3</span>
+            </span>
+            <span class="bg-clio-card px-2 py-1 rounded border border-clio-border text-clio-muted">
+              Size: <span id="cast-size" class="text-clio-success font-bold">14.2 KB</span>
+            </span>
+            <span class="bg-clio-card px-2 py-1 rounded border border-clio-border text-clio-muted hidden lg:inline">
+              Speed: <span class="text-white font-bold">1.0x</span>
+            </span>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 2: WHY SPOTTER MATTERS & DESIGN PRINCIPLES -->
+    <section id="overview" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      
+      <div class="p-6 rounded-2xl bg-clio-card border border-clio-border hover:border-clio-accent/40 transition group">
+        <div class="w-10 h-10 rounded-xl bg-clio-accent/10 border border-clio-accent/20 flex items-center justify-center text-clio-accent mb-4 group-hover:scale-110 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+        </div>
+        <h3 class="text-lg font-bold text-white mb-2">Zero Latency & PTY Isolation</h3>
+        <p class="text-sm text-clio-muted leading-relaxed">
+          Standard screen recording consumes high CPU/GPU and drops frames. Spotter taps directly into Clio's stream pacer and raw PTY output with microseconds latency and no visual artifacts.
+        </p>
+      </div>
+
+      <div class="p-6 rounded-2xl bg-clio-card border border-clio-border hover:border-clio-action/40 transition group">
+        <div class="w-10 h-10 rounded-xl bg-clio-action/10 border border-clio-action/20 flex items-center justify-center text-clio-action mb-4 group-hover:scale-110 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+        </div>
+        <h3 class="text-lg font-bold text-white mb-2">Cryptographic Evidence Binding</h3>
+        <p class="text-sm text-clio-muted leading-relaxed">
+          Every <code class="text-clio-action">.cast</code> stream is hashed (SHA-256) and permanently sealed into Clio's <code class="text-white">RunReceipt v20</code>, guaranteeing deterministic auditability and scientific reproducibility.
+        </p>
+      </div>
+
+      <div class="p-6 rounded-2xl bg-clio-card border border-clio-border hover:border-clio-reason/40 transition group">
+        <div class="w-10 h-10 rounded-xl bg-clio-reason/10 border border-clio-reason/20 flex items-center justify-center text-clio-reason mb-4 group-hover:scale-110 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        </div>
+        <h3 class="text-lg font-bold text-white mb-2">Stream to Anywhere</h3>
+        <p class="text-sm text-clio-muted leading-relaxed">
+          Broadcast live terminal feeds over local ephemeral HTTP servers, remote ALIS relays (ALCF/NERSC cluster nodes), or embedded WebSocket channels in Clio Workbench.
+        </p>
+      </div>
+
+    </div>
+
+    <!-- SECTION 3: SYSTEM ARCHITECTURE -->
+    <section id="architecture" class="space-y-8">
+      <div>
+        <div class="flex items-center space-x-2 text-clio-accent font-mono text-xs font-semibold tracking-wider uppercase mb-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-clio-accent"></span>
+          <span>Architectural Blueprint</span>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">The 4-Layer Integration Stack</h2>
+        <p class="text-sm text-clio-muted">How Spotter weaves through Clio Coder without introducing heavy dependencies or altering existing contracts.</p>
+      </div>
+
+      <!-- ARCHITECTURE INTERACTIVE DIAGRAM -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- LAYER SELECTOR (LEFT) -->
+        <div class="lg:col-span-5 space-y-3 font-mono">
+          
+          <div onclick="selectArchLayer(1)" id="arch-card-1" class="p-4 rounded-xl bg-clio-card border-2 border-clio-accent cursor-pointer transition">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-clio-accent font-bold">LAYER 1</span>
+              <span class="text-[10px] bg-clio-accent/20 text-clio-accent px-2 py-0.5 rounded">Core Engine</span>
+            </div>
+            <div class="text-sm font-bold text-white">In-Process TypeScript NDJSON Writer</div>
+            <div class="text-xs text-clio-muted mt-1">Zero-dep asciicast v3 generation directly from Clio render pipeline</div>
+          </div>
+
+          <div onclick="selectArchLayer(2)" id="arch-card-2" class="p-4 rounded-xl bg-clio-card border border-clio-border cursor-pointer hover:border-clio-action/50 transition">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-clio-action font-bold">LAYER 2</span>
+              <span class="text-[10px] bg-clio-action/20 text-clio-action px-2 py-0.5 rounded">Binary Carrier</span>
+            </div>
+            <div class="text-sm font-bold text-white">Bundled Asciinema v3 Musl Static</div>
+            <div class="text-xs text-clio-muted mt-1">Standalone Rust PTY wrapper for interactive shell recording & ALIS relay</div>
+          </div>
+
+          <div onclick="selectArchLayer(3)" id="arch-card-3" class="p-4 rounded-xl bg-clio-card border border-clio-border cursor-pointer hover:border-clio-reason/50 transition">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-clio-reason font-bold">LAYER 3</span>
+              <span class="text-[10px] bg-clio-reason/20 text-clio-reason px-2 py-0.5 rounded">Broadcasting</span>
+            </div>
+            <div class="text-sm font-bold text-white">Multi-Topology Streaming Relay</div>
+            <div class="text-xs text-clio-muted mt-1">Local HTTP, WebSockets, and remote cluster relay across firewalls</div>
+          </div>
+
+          <div onclick="selectArchLayer(4)" id="arch-card-4" class="p-4 rounded-xl bg-clio-card border border-clio-border cursor-pointer hover:border-clio-success/50 transition">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs text-clio-success font-bold">LAYER 4</span>
+              <span class="text-[10px] bg-clio-success/20 text-clio-success px-2 py-0.5 rounded">Governance</span>
+            </div>
+            <div class="text-sm font-bold text-white">Evidence & Trust Projection</div>
+            <div class="text-xs text-clio-muted mt-1">Receipt SHA-256 seal, audit log integration, and replay verification</div>
+          </div>
+
+        </div>
+
+        <!-- LAYER DETAIL VIEW (RIGHT) -->
+        <div class="lg:col-span-7 rounded-2xl bg-clio-card border border-clio-border p-6 flex flex-col justify-between">
+          <div id="arch-detail-content" class="space-y-4">
+            <!-- Dynamic layer info -->
+          </div>
+
+          <div class="mt-6 pt-4 border-t border-clio-border/80 flex items-center justify-between text-xs font-mono text-clio-dim">
+            <span>Target: <code class="text-white">src/domains/spotter/</code></span>
+            <span class="text-clio-accent">Status: Architecture Approved</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 4: INTEGRATION CODE ANGLES -->
+    <section id="integration" class="space-y-6">
+      <div>
+        <div class="flex items-center space-x-2 text-clio-action font-mono text-xs font-semibold tracking-wider uppercase mb-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-clio-action"></span>
+          <span>Technical Implementation</span>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">Code Integration Deep Dive</h2>
+        <p class="text-sm text-clio-muted">Inspect the concrete code contracts enabling Spotter in Clio Coder.</p>
+      </div>
+
+      <!-- CODE TABS -->
+      <div class="rounded-2xl bg-clio-card border border-clio-border overflow-hidden">
+        
+        <div class="flex border-b border-clio-border bg-[#0b1117] text-xs font-mono overflow-x-auto custom-scrollbar">
+          <button onclick="showCodeTab('writer')" id="btn-code-writer" class="px-5 py-3 border-b-2 border-clio-accent text-clio-accent font-bold whitespace-nowrap">
+            1. cast-writer.ts (TypeScript Engine)
+          </button>
+          <button onclick="showCodeTab('receipt')" id="btn-code-receipt" class="px-5 py-3 border-b-2 border-transparent text-clio-muted hover:text-white font-medium whitespace-nowrap">
+            2. RunReceipt v20 Binding
+          </button>
+          <button onclick="showCodeTab('bash')" id="btn-code-bash" class="px-5 py-3 border-b-2 border-transparent text-clio-muted hover:text-white font-medium whitespace-nowrap">
+            3. bash-exec.ts Hook
+          </button>
+          <button onclick="showCodeTab('player')" id="btn-code-player" class="px-5 py-3 border-b-2 border-transparent text-clio-muted hover:text-white font-medium whitespace-nowrap">
+            4. Workbench React Player
+          </button>
+        </div>
+
+        <div class="p-6 bg-[#06090d] font-mono text-xs overflow-x-auto custom-scrollbar">
+          <pre id="code-display" class="text-gray-300 leading-relaxed">
+            <!-- Code populated via JS -->
+          </pre>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 5: CLI CHEATSHEET -->
+    <section class="space-y-6">
+      <div>
+        <div class="flex items-center space-x-2 text-clio-success font-mono text-xs font-semibold tracking-wider uppercase mb-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-clio-success"></span>
+          <span>Operator Ergonomics</span>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">Spotter CLI Commands</h2>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-xs">
+        
+        <div class="p-4 rounded-xl bg-clio-card border border-clio-border space-y-2">
+          <div class="flex items-center justify-between text-clio-accent">
+            <span class="font-bold">1. Live Interactive Streaming</span>
+            <span class="text-[10px] text-clio-dim">CLI</span>
+          </div>
+          <div class="p-2.5 rounded bg-black/60 text-clio-accent font-semibold">
+            clio-coder spotter live --local 0.0.0.0:8448
+          </div>
+          <p class="text-clio-muted text-[11px]">Launches Clio interactive chat while streaming live to local web player for peer review.</p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-clio-card border border-clio-border space-y-2">
+          <div class="flex items-center justify-between text-clio-action">
+            <span class="font-bold">2. Remote HPC Cluster Relay</span>
+            <span class="text-[10px] text-clio-dim">HPC / SLURM</span>
+          </div>
+          <div class="p-2.5 rounded bg-black/60 text-clio-action font-semibold">
+            clio-coder fleet run --spotter-relay wss://spotter.iowarp.ai
+          </div>
+          <p class="text-clio-muted text-[11px]">Streams headless Slurm/MPI compute node jobs across isolated networks to team dashboard.</p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-clio-card border border-clio-border space-y-2">
+          <div class="flex items-center justify-between text-clio-reason">
+            <span class="font-bold">3. Replay with Marker Navigation</span>
+            <span class="text-[10px] text-clio-dim">AUDIT</span>
+          </div>
+          <div class="p-2.5 rounded bg-black/60 text-clio-reason font-semibold">
+            clio-coder spotter play run-2135i51e5gys --pause-on-markers
+          </div>
+          <p class="text-clio-muted text-[11px]">Replays a recorded worker run inside terminal, stepping directly through tool/bash decisions.</p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-clio-card border border-clio-border space-y-2">
+          <div class="flex items-center justify-between text-clio-success">
+            <span class="font-bold">4. Export to High-Gloss Media</span>
+            <span class="text-[10px] text-clio-dim">EXPORT</span>
+          </div>
+          <div class="p-2.5 rounded bg-black/60 text-clio-success font-semibold">
+            clio-coder spotter export run-2135i51e5gys -o pr-demo.gif
+          </div>
+          <p class="text-clio-muted text-[11px]">Renders asciicast recording into lightweight GIF/MP4 via bundled Rust <code class="text-white">agg</code> engine.</p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 6: IMPLEMENTATION ROADMAP -->
+    <section id="blueprint" class="p-8 rounded-3xl bg-gradient-to-b from-clio-card to-[#070b0f] border border-clio-border space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight">Implementation Plan for Clio Coder</h2>
+          <p class="text-xs text-clio-muted mt-1 font-mono">Target Milestone: v0.3.9 · Domain: <code class="text-clio-accent">src/domains/spotter</code></p>
+        </div>
+        <div class="px-3 py-1.5 rounded-lg bg-clio-success/15 border border-clio-success/30 text-clio-success font-mono text-xs font-bold flex items-center space-x-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          <span>Production Ready Spec</span>
+        </div>
+      </div>
+
+      <div class="space-y-3 font-mono text-xs">
+        
+        <div class="p-4 rounded-xl bg-[#080c10] border border-clio-border flex items-start space-x-3">
+          <div class="w-6 h-6 rounded-full bg-clio-accent/20 text-clio-accent flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">1</div>
+          <div class="space-y-1">
+            <div class="font-bold text-white">Create <code class="text-clio-accent">src/domains/spotter/</code> Domain</div>
+            <p class="text-clio-muted text-[11px]">Implement <code class="text-gray-300">cast-writer.ts</code>, <code class="text-gray-300">alis-streamer.ts</code>, and <code class="text-gray-300">binary-resolver.ts</code>.</p>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-[#080c10] border border-clio-border flex items-start space-x-3">
+          <div class="w-6 h-6 rounded-full bg-clio-action/20 text-clio-action flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">2</div>
+          <div class="space-y-1">
+            <div class="font-bold text-white">Hook Into Interactive TUI & Tool Pipeline</div>
+            <p class="text-clio-muted text-[11px]">Attach stream tap to <code class="text-gray-300">src/interactive/render-trace.ts</code> and <code class="text-gray-300">src/core/bash-exec.ts</code> to record ANSI chunks and tool markers.</p>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-[#080c10] border border-clio-border flex items-start space-x-3">
+          <div class="w-6 h-6 rounded-full bg-clio-reason/20 text-clio-reason flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">3</div>
+          <div class="space-y-1">
+            <div class="font-bold text-white">Bind Spotter Artifacts to Evidence Receipts</div>
+            <p class="text-clio-muted text-[11px]">Update <code class="text-gray-300">src/domains/evidence/types.ts</code> to seal <code class="text-gray-300">recordingSha256</code> in <code class="text-gray-300">RunReceipt</code>.</p>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-[#080c10] border border-clio-border flex items-start space-x-3">
+          <div class="w-6 h-6 rounded-full bg-clio-success/20 text-clio-success flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">4</div>
+          <div class="space-y-1">
+            <div class="font-bold text-white">Add Web Player to Workbench & Trace Viewer</div>
+            <p class="text-clio-muted text-[11px]">Mount <code class="text-gray-300">asciinema-player</code> in <code class="text-gray-300">apps/workbench</code> and <code class="text-gray-300">apps/trace-viewer</code> for zero-latency browser telemetry.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-clio-border/60 bg-[#06090d] py-8 px-6 text-center text-xs font-mono text-clio-dim">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center space-x-2">
+        <span class="text-clio-accent font-bold">IOWarp CLIO Ecosystem</span>
+        <span>·</span>
+        <span>Scientific Agentic Intelligence</span>
+      </div>
+      <div>
+        <span>Design Specification & Architecture Reference</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- SCRIPT ENGINE: SIMULATOR & INTERACTIVITY -->
+  <script>
+    // SIMULATION STREAM DATA
+    const STREAMS = {
+      local: {
+        title: "clio-coder: session-882c4fc6 · [120x34]",
+        markers: 3,
+        size: "14.2 KB",
+        frames: [
+          { time: 0.2, text: '<span class="text-clio-dim">[00:00.2]</span> <span class="text-clio-accent font-bold">clio-coder</span> <span class="text-clio-muted">v0.3.8 (x86_64-linux)</span>' },
+          { time: 0.6, text: '<span class="text-clio-dim">[00:00.6]</span> <span class="text-clio-info">ℹ Context:</span> Indexed 1,204 repository files into codewiki.' },
+          { time: 1.2, text: '<span class="text-clio-dim">[00:01.2]</span> <span class="text-clio-action font-bold">User Prompt:</span> "Optimize the MPI non-blocking halo exchange in src/solver.c"' },
+          { time: 1.8, text: '<span class="text-clio-dim">[00:01.8]</span> <span class="text-clio-reason">Thinking...</span> Analyzing communication patterns and overlap opportunities...' },
+          { time: 2.5, text: '<span class="text-clio-dim">[00:02.5]</span> <span class="text-clio-action">▶ Tool Call:</span> <code class="text-clio-accent">read("src/solver.c", { start: 140, end: 210 })</code>' },
+          { time: 3.4, text: '<span class="text-clio-dim">[00:03.4]</span> <span class="text-clio-success">✔ Marker:</span> <span class="text-clio-muted">Tool boundary verified · write boundary clean</span>' },
+          { time: 4.1, text: '<span class="text-clio-dim">[00:04.1]</span> <span class="text-clio-action">▶ Tool Call:</span> <code class="text-clio-accent">edit("src/solver.c", replacementChunk)</code>' },
+          { time: 5.2, text: '<span class="text-clio-dim">[00:05.2]</span> <span class="text-clio-success">✔ Succeeded:</span> Replaced synchronous <code class="text-white">MPI_Send</code> with double-buffered <code class="text-white">MPI_Isend / MPI_Irecv</code>.' },
+          { time: 6.0, text: '<span class="text-clio-dim">[00:06.0]</span> <span class="text-clio-action font-bold">Sealed Receipt:</span> <span class="text-clio-accent">RunReceipt v20 (sha256: 8f4e2b01...)</span>' }
+        ]
+      },
+      fleet: {
+        title: "hpc-worker-04: polaris.alcf.anl.gov · [140x40]",
+        markers: 5,
+        size: "38.6 KB",
+        frames: [
+          { time: 0.3, text: '<span class="text-clio-dim">[00:00.3]</span> <span class="text-clio-accent font-bold">[Fleet Node 04]</span> Connecting to Slurm job allocation #491028...' },
+          { time: 0.9, text: '<span class="text-clio-dim">[00:00.9]</span> <span class="text-clio-info">ℹ Environment:</span> Cray MPICH 8.1.28 · 4x NVIDIA A100-SXM4-40GB' },
+          { time: 1.7, text: '<span class="text-clio-dim">[00:01.7]</span> <span class="text-clio-action">▶ Executing:</span> <code class="text-clio-accent">mpirun -n 16 ./bin/halo_benchmark --grid 1024x1024x512</code>' },
+          { time: 2.8, text: '<span class="text-clio-dim">[00:02.8]</span> <span class="text-clio-muted">Rank 00..15: Initialized mesh boundaries in 0.412s</span>' },
+          { time: 4.0, text: '<span class="text-clio-dim">[00:04.0]</span> <span class="text-clio-success">✔ Throughput:</span> <span class="text-white font-bold">142.8 GB/s</span> (2.4x baseline bandwidth achieved)' },
+          { time: 5.1, text: '<span class="text-clio-dim">[00:05.1]</span> <span class="text-clio-action font-bold">Telemetry:</span> Streamed 48.2 MB telemetry via ALIS relay to IOWarp Spotter' }
+        ]
+      },
+      council: {
+        title: "clio-council: deliberation-3a7i3vzj · [120x34]",
+        markers: 4,
+        size: "21.9 KB",
+        frames: [
+          { time: 0.2, text: '<span class="text-clio-dim">[00:00.2]</span> <span class="text-clio-accent font-bold">[Council Initiated]</span> Synthesis Mode: <span class="text-white">Vote (2 Members + Coordinator)</span>' },
+          { time: 1.0, text: '<span class="text-clio-dim">[00:01.0]</span> <span class="text-clio-reason">[Member: local]</span> Sealing ballot for memory safety analysis: <span class="text-clio-success">verdict: "yes"</span>' },
+          { time: 1.8, text: '<span class="text-clio-dim">[00:01.8]</span> <span class="text-clio-reason">[Member: mini]</span> Sealing ballot for numerical stability: <span class="text-clio-success">verdict: "yes"</span>' },
+          { time: 2.7, text: '<span class="text-clio-dim">[00:02.7]</span> <span class="text-clio-action font-bold">[Coordinator Synthesis]</span> Tally: <span class="text-clio-success font-bold">yes=2, no=0</span> · Consensus reached.' },
+          { time: 3.5, text: '<span class="text-clio-dim">[00:03.5]</span> <span class="text-clio-success">✔ Gate Decision:</span> Admission granted for release candidate splice.' }
+        ]
+      }
+    };
+
+    let activeStreamKey = 'local';
+    let currentFrameIndex = 0;
+    let isPlaying = true;
+    let playbackInterval = null;
+
+    function renderTerminal() {
+      const stream = STREAMS[activeStreamKey];
+      const term = document.getElementById('terminal-body');
+      term.innerHTML = '';
+
+      for (let i = 0; i <= currentFrameIndex && i < stream.frames.length; i++) {
+        const div = document.createElement('div');
+        div.innerHTML = stream.frames[i].text;
+        term.appendChild(div);
+      }
+
+      if (isPlaying && currentFrameIndex < stream.frames.length - 1) {
+        const cursor = document.createElement('span');
+        cursor.className = 'cursor-blink';
+        term.appendChild(cursor);
+      }
+
+      term.scrollTop = term.scrollHeight;
+
+      // Update time & progress
+      const current = stream.frames[currentFrameIndex];
+      const maxTime = stream.frames[stream.frames.length - 1].time;
+      document.getElementById('current-time').textContent = `00:0${current.time.toFixed(1)}`;
+      document.getElementById('total-time').textContent = `00:0${maxTime.toFixed(1)}`;
+      const pct = (current.time / maxTime) * 100;
+      document.getElementById('progress-bar').style.width = `${pct}%`;
+    }
+
+    function stepPlayback() {
+      const stream = STREAMS[activeStreamKey];
+      if (currentFrameIndex < stream.frames.length - 1) {
+        currentFrameIndex++;
+        renderTerminal();
+      } else {
+        // Pause at end
+        pausePlayback();
+      }
+    }
+
+    function togglePlayback() {
+      if (isPlaying) {
+        pausePlayback();
+      } else {
+        startPlayback();
+      }
+    }
+
+    function startPlayback() {
+      isPlaying = true;
+      document.getElementById('icon-pause').classList.remove('hidden');
+      document.getElementById('icon-play').classList.add('hidden');
+      document.getElementById('live-indicator').textContent = 'LIVE STREAMING';
+      playbackInterval = setInterval(stepPlayback, 1200);
+    }
+
+    function pausePlayback() {
+      isPlaying = false;
+      document.getElementById('icon-pause').classList.add('hidden');
+      document.getElementById('icon-play').classList.remove('hidden');
+      document.getElementById('live-indicator').textContent = 'PAUSED';
+      clearInterval(playbackInterval);
+    }
+
+    function restartPlayback() {
+      currentFrameIndex = 0;
+      renderTerminal();
+      startPlayback();
+    }
+
+    function switchStream(key) {
+      activeStreamKey = key;
+      currentFrameIndex = 0;
+      
+      ['local', 'fleet', 'council'].forEach(k => {
+        const btn = document.getElementById(`tab-${k}`);
+        if (k === key) {
+          btn.className = 'px-3 py-1.5 rounded-lg bg-clio-accent/15 text-clio-accent font-semibold transition';
+        } else {
+          btn.className = 'px-3 py-1.5 rounded-lg text-clio-muted hover:text-white transition';
+        }
+      });
+
+      const s = STREAMS[key];
+      document.getElementById('session-title').textContent = s.title;
+      document.getElementById('marker-count').textContent = s.markers;
+      document.getElementById('cast-size').textContent = s.size;
+
+      renderTerminal();
+      startPlayback();
+    }
+
+    // ARCHITECTURE LAYERS INTERACTIVITY
+    const ARCH_LAYERS = {
+      1: {
+        title: "Layer 1: In-Process Native NDJSON Writer",
+        summary: "Zero-dependency pure TypeScript engine for streaming and recording",
+        details: `
+          <div class="space-y-3 font-mono text-xs">
+            <p class="text-clio-muted"><strong class="text-white">Purpose:</strong> Emits asciicast v3 standard newline-delimited JSON directly from Clio's TUI render loop and tool dispatchers without spawning child processes or installing native C++ addons.</p>
+            <div class="p-3 bg-[#06090d] rounded-lg border border-clio-border">
+              <span class="text-clio-accent">Key Module:</span> <code class="text-white">src/domains/spotter/cast-writer.ts</code><br/>
+              <span class="text-clio-action">Latency:</span> <code class="text-white">&lt; 0.05 ms per frame</code><br/>
+              <span class="text-clio-success">Payload:</span> <code class="text-white">[timestamp_delta, "o", ansi_chunk]</code>
+            </div>
+            <p class="text-clio-muted">Integrates with Clio's existing <code class="text-white">render-trace.ts</code> to capture exact cursor coordinates, ANSI colors, and tool markers.</p>
+          </div>
+        `
+      },
+      2: {
+        title: "Layer 2: Rust Carrier Runtime (Bundled Asciinema v3)",
+        summary: "Static binary for PTY allocation & interactive shell encapsulation",
+        details: `
+          <div class="space-y-3 font-mono text-xs">
+            <p class="text-clio-muted"><strong class="text-white">Purpose:</strong> Provides robust pseudo-terminal (PTY) virtualization when Clio runs interactive bash sessions or needs native ALIS streaming relay capabilities.</p>
+            <div class="p-3 bg-[#06090d] rounded-lg border border-clio-border">
+              <span class="text-clio-accent">Distribution:</span> <code class="text-white">@iowarp/asciinema-linux-x64 (musl static)</code><br/>
+              <span class="text-clio-action">Memory Footprint:</span> <code class="text-white">&lt; 8 MB RSS</code><br/>
+              <span class="text-clio-success">HPC Guarantee:</span> <code class="text-white">100% Non-root & compatible with older glibc (RHEL 8/9, Ubuntu)</code>
+            </div>
+            <p class="text-clio-muted">Packaged as optional platform dependencies (identical to esbuild and Biome), resolving instantly with zero compile step.</p>
+          </div>
+        `
+      },
+      3: {
+        title: "Layer 3: Multi-Topology Streaming & ALIS Relay",
+        summary: "Live broadcasting across local sockets, WebSockets, and HPC firewalls",
+        details: `
+          <div class="space-y-3 font-mono text-xs">
+            <p class="text-clio-muted"><strong class="text-white">Purpose:</strong> Allows developers, teams, and orchestrators to watch autonomous coding agents live as they reason and execute commands.</p>
+            <div class="p-3 bg-[#06090d] rounded-lg border border-clio-border">
+              <span class="text-clio-accent">Mode A: Local Web Server:</span> <code class="text-white">http://127.0.0.1:8448 (ephemeral)</code><br/>
+              <span class="text-clio-action">Mode B: HPC Reverse Relay:</span> <code class="text-white">Outbound WSS to spotter.iowarp.ai / internal hub</code><br/>
+              <span class="text-clio-success">Mode C: Workbench Channel:</span> <code class="text-white">Direct WebSocket feed into apps/workbench</code>
+            </div>
+            <p class="text-clio-muted">Supports reverse-proxy tunnels for compute nodes locked behind strict outbound-only institutional firewalls.</p>
+          </div>
+        `
+      },
+      4: {
+        title: "Layer 4: Cryptographic Evidence & Trust Integration",
+        summary: "Permanent tamper-proof audit trail bound to RunReceipt v20",
+        details: `
+          <div class="space-y-3 font-mono text-xs">
+            <p class="text-clio-muted"><strong class="text-white">Purpose:</strong> Ties terminal video records directly to Clio's scientific governance and trust projection model.</p>
+            <div class="p-3 bg-[#06090d] rounded-lg border border-clio-border">
+              <span class="text-clio-accent">Receipt Property:</span> <code class="text-white">receipt.spotter.recordingSha256</code><br/>
+              <span class="text-clio-action">Compression:</span> <code class="text-white">Zstandard (.cast.zst)</code><br/>
+              <span class="text-clio-success">Inspection CLI:</span> <code class="text-white">clio-coder evidence inspect &lt;runId&gt;</code>
+            </div>
+            <p class="text-clio-muted">Allows replaying the exact terminal state during scientific peer review or reproducing unexpected compiler anomalies.</p>
+          </div>
+        `
+      }
+    };
+
+    function selectArchLayer(id) {
+      for (let i = 1; i <= 4; i++) {
+        const card = document.getElementById(`arch-card-${i}`);
+        if (i === id) {
+          card.className = 'p-4 rounded-xl bg-clio-card border-2 border-clio-accent cursor-pointer transition';
+        } else {
+          card.className = 'p-4 rounded-xl bg-clio-card border border-clio-border cursor-pointer hover:border-clio-border/80 transition';
+        }
+      }
+
+      const layer = ARCH_LAYERS[id];
+      const container = document.getElementById('arch-detail-content');
+      container.innerHTML = `
+        <div class="space-y-1">
+          <div class="text-xs font-mono text-clio-accent font-bold">SELECTED LAYER ${id}</div>
+          <h3 class="text-xl font-bold text-white">${layer.title}</h3>
+          <p class="text-sm text-clio-muted">${layer.summary}</p>
+        </div>
+        <div class="pt-4 border-t border-clio-border/80">
+          ${layer.details}
+        </div>
+      `;
+    }
+
+    // CODE TABS DATA
+    const CODE_SNIPPETS = {
+      writer: `// src/domains/spotter/cast-writer.ts
+import { createWriteStream, type WriteStream } from "node:fs";
+import { createZstdCompressStream } from "./zstd.js";
+
+export interface AsciicastHeader {
+  version: 3;
+  width: number;
+  height: number;
+  timestamp: number;
+  title?: string;
+  env?: Record<string, string>;
+}
+
+export class AsciicastWriter {
+  private startTime = Date.now();
+  private stream: WriteStream;
+
+  constructor(filePath: string, header: AsciicastHeader) {
+    this.stream = createWriteStream(filePath, { flags: "w" });
+    this.stream.write(JSON.stringify(header) + "\\n");
+  }
+
+  public recordChunk(data: string | Buffer): void {
+    const elapsed = (Date.now() - this.startTime) / 1000;
+    const frame = JSON.stringify([Number(elapsed.toFixed(3)), "o", data.toString()]);
+    this.stream.write(frame + "\\n");
+  }
+
+  public recordMarker(label: string): void {
+    const elapsed = (Date.now() - this.startTime) / 1000;
+    const marker = JSON.stringify([Number(elapsed.toFixed(3)), "m", label]);
+    this.stream.write(marker + "\\n");
+  }
+
+  public close(): Promise<void> {
+    return new Promise(resolve => this.stream.end(resolve));
+  }
+}`,
+      receipt: `// src/domains/evidence/types.ts
+export interface RunReceipt {
+  schemaVersion: 20;
+  runId: string;
+  executionRole: "scout" | "worker" | "judge" | "coordinator";
+  outcome: "succeeded" | "failed" | "canceled";
+  
+  /** Spotter terminal recording & telemetry provenance */
+  spotter?: {
+    recordingPath: string;      // e.g. "evidence/runs/2135i51e5gys.cast.zst"
+    recordingSha256: string;    // SHA-256 integrity seal of the terminal recording
+    liveStreamUrl?: string;     // Historical stream link if relayed
+    durationSeconds: number;
+    markersCount: number;       // Markers matching tool calls (bash, edit, gate)
+  };
+}`,
+      bash: `// src/core/bash-exec.ts (Spotter integration hook)
+import { getActiveSpotterWriter } from "../domains/spotter/index.js";
+
+export function runBashCommand(command: string, options: RunBashCommandOptions) {
+  const spotter = getActiveSpotterWriter();
+  
+  if (spotter) {
+    spotter.recordMarker(\`tool:bash start "\${command.slice(0, 40)}"\`);
+  }
+
+  child.stdout.on("data", (chunk) => {
+    // 1. Normal Clio accumulator
+    accumulate(chunk);
+    
+    // 2. Real-time Spotter feed
+    if (spotter) {
+      spotter.recordChunk(chunk);
+    }
+  });
+}`,
+      player: `// apps/workbench/src/components/SpotterPlayer.tsx
+import React, { useEffect, useRef } from "react";
+import * as AsciinemaPlayer from "asciinema-player";
+import "asciinema-player/dist/bundle/asciinema-player.css";
+
+export const SpotterPlayer: React.FC<{ recordingSrc: string }> = ({ recordingSrc }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    const player = AsciinemaPlayer.create(recordingSrc, containerRef.current, {
+      autoPlay: true,
+      speed: 1.5,
+      idleTimeLimit: 2.0,
+      theme: "clio-dark",
+      terminalFontFamily: "JetBrains Mono, monospace"
+    });
+
+    return () => player.dispose();
+  }, [recordingSrc]);
+
+  return <div ref={containerRef} className="rounded-xl overflow-hidden border border-clio-border shadow-2xl" />;
+};`
+    };
+
+    function showCodeTab(tab) {
+      ['writer', 'receipt', 'bash', 'player'].forEach(t => {
+        const btn = document.getElementById(`btn-code-${t}`);
+        if (t === tab) {
+          btn.className = 'px-5 py-3 border-b-2 border-clio-accent text-clio-accent font-bold whitespace-nowrap';
+        } else {
+          btn.className = 'px-5 py-3 border-b-2 border-transparent text-clio-muted hover:text-white font-medium whitespace-nowrap';
+        }
+      });
+
+      document.getElementById('code-display').textContent = CODE_SNIPPETS[tab];
+    }
+
+    // INITIALIZATION
+    window.addEventListener('DOMContentLoaded', () => {
+      renderTerminal();
+      startPlayback();
+      selectArchLayer(1);
+      showCodeTab('writer');
+    });
+  </script>
+</body>
+</html>
