@@ -165,7 +165,9 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	it("keeps demoted commands working under both the dev prefix and their bare names", async () => {
 		const listing = await runCli(["dev", "--help"], { env: scratch.env });
 		strictEqual(listing.code, 0);
-		for (const name of ["components", "evolve", "share"]) {
+		const names = [...listing.stdout.matchAll(/^\s+clio-coder dev (\S+)\s+/gmu)].map((match) => match[1] as string);
+		ok(names.length > 0, `the dev listing must expose its commands: ${listing.stdout}`);
+		for (const name of names) {
 			match(listing.stdout, new RegExp(`clio-coder dev ${name}`), `${name} must be listed under dev`);
 
 			const prefixed = await runCli(["dev", name, "--help"], { env: scratch.env });
@@ -176,13 +178,19 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 	});
 
 	it("hides the demoted commands from the default help and shows them under --all", async () => {
+		const listing = await runCli(["dev", "--help"], { env: scratch.env });
 		const brief = await runCli(["--help"], { env: scratch.env });
 		const full = await runCli(["--help", "--all"], { env: scratch.env });
+		strictEqual(listing.code, 0);
 		strictEqual(brief.code, 0);
 		strictEqual(full.code, 0);
-		for (const name of ["components", "evolve", "share"]) {
+		const names = [...listing.stdout.matchAll(/^\s+clio-coder dev (\S+)\s+/gmu)].map((match) => match[1] as string);
+		ok(names.length > 0, `the dev listing must expose its commands: ${listing.stdout}`);
+		for (const name of names) {
 			strictEqual(brief.stdout.includes(`clio-coder ${name} `), false, `${name} must not be in the default listing`);
 			match(full.stdout, new RegExp(`clio-coder dev ${name}`), `${name} must be in --all`);
+			const bare = await runCli([name, "--help"], { env: scratch.env });
+			strictEqual(bare.code, 0, `${name} must still resolve bare: ${bare.stderr}`);
 		}
 		match(brief.stdout, /clio-coder dev <command>/);
 	});
