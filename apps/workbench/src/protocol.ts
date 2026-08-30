@@ -40,6 +40,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"permission.resolve",
 	"settings.get",
 	"settings.patch",
+	"config.inspect",
 	"targets.list",
 	"targets.probe",
 	"autonomy.set",
@@ -209,6 +210,10 @@ export interface SettingsPatchPayload {
 	readonly patch: WireSettingsPatch;
 }
 
+export interface ConfigInspectPayload {
+	readonly projectId: string;
+}
+
 export interface TargetsListPayload {
 	readonly projectId: string;
 }
@@ -245,6 +250,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "permission.resolve": PermissionResolvePayload;
 	readonly "settings.get": SettingsGetPayload;
 	readonly "settings.patch": SettingsPatchPayload;
+	readonly "config.inspect": ConfigInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
 	readonly "autonomy.set": AutonomySetPayload;
@@ -272,6 +278,7 @@ export const SERVER_EVENT_KINDS = [
 	"clio.state",
 	"session.list",
 	"settings.state",
+	"config.state",
 	"targets.state",
 	"targets.probed",
 	"turn.started",
@@ -446,6 +453,83 @@ export interface WireSettingsState {
 	readonly checkedAt: string;
 }
 
+export const CONFIG_SETTING_SOURCES = ["built-in", "user", "project", "project.local", "cli"] as const;
+export type WireConfigSettingSource = (typeof CONFIG_SETTING_SOURCES)[number];
+
+export const CONFIG_VALUE_KINDS = ["exact", "configured", "collection", "unset"] as const;
+export type WireConfigValueKind = (typeof CONFIG_VALUE_KINDS)[number];
+
+export const CUSTOMIZATION_CATEGORIES = [
+	"settings",
+	"clio-md",
+	"rule",
+	"operator-profile",
+	"hook",
+	"extension",
+	"skill-root",
+	"prompt-root",
+	"agents",
+	"safety",
+	"memory",
+] as const;
+export type WireCustomizationCategory = (typeof CUSTOMIZATION_CATEGORIES)[number];
+
+export const CUSTOMIZATION_TRUST = ["trusted", "untrusted", "n/a"] as const;
+export type WireCustomizationTrust = (typeof CUSTOMIZATION_TRUST)[number];
+export const CUSTOMIZATION_PRECEDENCE = ["winner", "loser", "single", "layer"] as const;
+export type WireCustomizationPrecedence = (typeof CUSTOMIZATION_PRECEDENCE)[number];
+export const CUSTOMIZATION_RELOAD_CLASSES = ["hot", "next-turn", "restart", "n/a"] as const;
+export type WireCustomizationReloadClass = (typeof CUSTOMIZATION_RELOAD_CLASSES)[number];
+
+export const MAX_WIRE_CONFIG_SETTINGS = 192;
+export const MAX_WIRE_CUSTOMIZATION_ENTRIES = 256;
+export const MAX_WIRE_CUSTOMIZATION_FACTS = 8;
+export const MAX_WIRE_CONFIG_ISSUE_GROUPS = 16;
+
+/** A value summary projected by the host; raw setting values never cross the boundary. */
+export interface WireConfigSetting {
+	readonly key: string;
+	readonly source: WireConfigSettingSource;
+	readonly value: string;
+	readonly valueKind: WireConfigValueKind;
+}
+
+/** A host-allowlisted detail, never a generic copy of the CLI entry's `detail`. */
+export interface WireCustomizationFact {
+	readonly label: string;
+	readonly value: string;
+}
+
+export interface WireCustomizationEntry {
+	readonly category: WireCustomizationCategory;
+	readonly id: string;
+	readonly scope: string;
+	/** Present only when the source is inside the open project; always project-relative. */
+	readonly sourcePath?: WireProjectPath;
+	readonly hash?: string;
+	readonly trust?: WireCustomizationTrust;
+	readonly precedence?: WireCustomizationPrecedence;
+	readonly reloadClass: WireCustomizationReloadClass;
+	readonly contextCostTokens?: number;
+	readonly facts: readonly WireCustomizationFact[];
+}
+
+/** Raw CLI diagnostics stay host-side; the renderer receives counts by bounded surface only. */
+export interface WireConfigIssueCount {
+	readonly surface: string;
+	readonly count: number;
+}
+
+export interface WireConfigInspection {
+	readonly inspectedAt: string;
+	readonly settings: readonly WireConfigSetting[];
+	readonly settingsTruncated: boolean;
+	readonly entries: readonly WireCustomizationEntry[];
+	readonly entriesTruncated: boolean;
+	readonly issueCounts: readonly WireConfigIssueCount[];
+	readonly issuesTruncated: boolean;
+}
+
 export interface WireTarget {
 	readonly id: string;
 	readonly runtime: string;
@@ -474,6 +558,7 @@ export interface WireProjectWorkspace {
 	readonly pendingPermission: WirePendingPermission | null;
 	readonly deleteChallenge: WireDeleteChallenge | null;
 	readonly settings: WireSettingsState | null;
+	readonly configInspection: WireConfigInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -519,6 +604,10 @@ export interface SessionListPayload_ {
 
 export interface SettingsStatePayload {
 	readonly settings: WireSettingsState;
+}
+
+export interface ConfigStatePayload {
+	readonly inspection: WireConfigInspection;
 }
 
 export interface TargetsStatePayload {
@@ -623,6 +712,7 @@ export interface ServerEventPayloadByKind {
 	readonly "clio.state": ClioStatePayload;
 	readonly "session.list": SessionListPayload_;
 	readonly "settings.state": SettingsStatePayload;
+	readonly "config.state": ConfigStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
@@ -914,6 +1004,7 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 		case "session.close":
 		case "session.list":
 		case "settings.get":
+		case "config.inspect":
 		case "targets.list": {
 			const record = expectExactKeys(value, label, ["projectId"]);
 			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
@@ -1395,6 +1486,120 @@ function validateSettingsState(value: unknown, label: string): WireSettingsState
 	return { settings, editable, options, checkedAt: expectTimestamp(record.checkedAt, `${label}.checkedAt`) };
 }
 
+function expectConfigText(value: unknown, label: string, maximumBytes: number): string {
+	return expectString(value, label, {
+		minBytes: 1,
+		maxBytes: maximumBytes,
+		trim: true,
+		noControls: true,
+	});
+}
+
+function validateConfigSetting(value: unknown, label: string): WireConfigSetting {
+	const record = expectExactKeys(value, label, ["key", "source", "value", "valueKind"]);
+	return {
+		key: expectConfigText(record.key, `${label}.key`, 256),
+		source: expectEnum(record.source, `${label}.source`, CONFIG_SETTING_SOURCES),
+		value: expectConfigText(record.value, `${label}.value`, 256),
+		valueKind: expectEnum(record.valueKind, `${label}.valueKind`, CONFIG_VALUE_KINDS),
+	};
+}
+
+function validateCustomizationFact(value: unknown, label: string): WireCustomizationFact {
+	const record = expectExactKeys(value, label, ["label", "value"]);
+	return {
+		label: expectConfigText(record.label, `${label}.label`, 64),
+		value: expectConfigText(record.value, `${label}.value`, 256),
+	};
+}
+
+function validateCustomizationEntry(value: unknown, label: string): WireCustomizationEntry {
+	const record = expectExactKeys(
+		value,
+		label,
+		["category", "id", "scope", "reloadClass", "facts"],
+		["sourcePath", "hash", "trust", "precedence", "contextCostTokens"],
+	);
+	const sourcePath = Object.hasOwn(record, "sourcePath")
+		? validateWireProjectPath(record.sourcePath, `${label}.sourcePath`)
+		: undefined;
+	let hash: string | undefined;
+	if (Object.hasOwn(record, "hash")) {
+		hash = expectConfigText(record.hash, `${label}.hash`, 128);
+		if (!/^[A-Fa-f0-9]{4,128}$/u.test(hash)) invalid(`${label}.hash must be hexadecimal`);
+	}
+	const trust = Object.hasOwn(record, "trust")
+		? expectEnum(record.trust, `${label}.trust`, CUSTOMIZATION_TRUST)
+		: undefined;
+	const precedence = Object.hasOwn(record, "precedence")
+		? expectEnum(record.precedence, `${label}.precedence`, CUSTOMIZATION_PRECEDENCE)
+		: undefined;
+	const contextCostTokens = Object.hasOwn(record, "contextCostTokens")
+		? expectInteger(record.contextCostTokens, `${label}.contextCostTokens`)
+		: undefined;
+	return {
+		category: expectEnum(record.category, `${label}.category`, CUSTOMIZATION_CATEGORIES),
+		id: expectConfigText(record.id, `${label}.id`, 256),
+		scope: expectConfigText(record.scope, `${label}.scope`, 128),
+		...(sourcePath === undefined ? {} : { sourcePath }),
+		...(hash === undefined ? {} : { hash }),
+		...(trust === undefined ? {} : { trust }),
+		...(precedence === undefined ? {} : { precedence }),
+		reloadClass: expectEnum(record.reloadClass, `${label}.reloadClass`, CUSTOMIZATION_RELOAD_CLASSES),
+		...(contextCostTokens === undefined ? {} : { contextCostTokens }),
+		facts: expectArray(
+			record.facts,
+			`${label}.facts`,
+			MAX_WIRE_CUSTOMIZATION_FACTS,
+			validateCustomizationFact,
+		),
+	};
+}
+
+function validateConfigIssueCount(value: unknown, label: string): WireConfigIssueCount {
+	const record = expectExactKeys(value, label, ["surface", "count"]);
+	return {
+		surface: expectConfigText(record.surface, `${label}.surface`, 64),
+		count: expectInteger(record.count, `${label}.count`, 1),
+	};
+}
+
+function validateConfigInspection(value: unknown, label: string): WireConfigInspection {
+	const record = expectExactKeys(value, label, [
+		"inspectedAt",
+		"settings",
+		"settingsTruncated",
+		"entries",
+		"entriesTruncated",
+		"issueCounts",
+		"issuesTruncated",
+	]);
+	return {
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		settings: expectArray(
+			record.settings,
+			`${label}.settings`,
+			MAX_WIRE_CONFIG_SETTINGS,
+			validateConfigSetting,
+		),
+		settingsTruncated: expectBoolean(record.settingsTruncated, `${label}.settingsTruncated`),
+		entries: expectArray(
+			record.entries,
+			`${label}.entries`,
+			MAX_WIRE_CUSTOMIZATION_ENTRIES,
+			validateCustomizationEntry,
+		),
+		entriesTruncated: expectBoolean(record.entriesTruncated, `${label}.entriesTruncated`),
+		issueCounts: expectArray(
+			record.issueCounts,
+			`${label}.issueCounts`,
+			MAX_WIRE_CONFIG_ISSUE_GROUPS,
+			validateConfigIssueCount,
+		),
+		issuesTruncated: expectBoolean(record.issuesTruncated, `${label}.issuesTruncated`),
+	};
+}
+
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
 	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
@@ -1439,6 +1644,7 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		"pendingPermission",
 		"deleteChallenge",
 		"settings",
+		"configInspection",
 		"targets",
 		"targetsTruncated",
 		"processGeneration",
@@ -1466,6 +1672,9 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 			? null
 			: validateWireDeleteChallenge(record.deleteChallenge, `${label}.deleteChallenge`),
 		settings: record.settings === null ? null : validateSettingsState(record.settings, `${label}.settings`),
+		configInspection: record.configInspection === null
+			? null
+			: validateConfigInspection(record.configInspection, `${label}.configInspection`),
 		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
 		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
 		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
@@ -1553,6 +1762,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "settings.state": {
 			const record = expectExactKeys(value, label, ["settings"]);
 			return { settings: validateSettingsState(record.settings, `${label}.settings`) };
+		}
+		case "config.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return { inspection: validateConfigInspection(record.inspection, `${label}.inspection`) };
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -1769,6 +1982,7 @@ const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"clio.state",
 	"session.list",
 	"settings.state",
+	"config.state",
 	"targets.state",
 	"targets.probed",
 ]);

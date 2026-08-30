@@ -4,6 +4,7 @@ import "@fontsource/commit-mono/400.css";
 import { useEffect, useMemo, useReducer, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { type WorkbenchActions, WorkbenchView } from "./App.tsx";
+import { FrameEventBuffer } from "./event-buffer.ts";
 import {
 	type ClientCommand,
 	type ClientCommandKind,
@@ -23,6 +24,7 @@ function App() {
 		const abortController = new AbortController();
 		let mounted = true;
 		let transport: LocalTransport | null = null;
+		let eventBuffer: FrameEventBuffer | null = null;
 
 		async function connect() {
 			try {
@@ -42,12 +44,16 @@ function App() {
 				endpoint.searchParams.set("token", bootstrap.localToken);
 				transport = new WebSocketLocalTransport(endpoint);
 				transportRef.current = transport;
+				eventBuffer = new FrameEventBuffer((events) => {
+					if (mounted) dispatch({ type: "host.events", events });
+				});
 				transport.onEvent((event) => {
 					if (!mounted) return;
-					dispatch({ type: "host.event", event });
+					eventBuffer?.push(event);
 				});
 				transport.onDisconnect((disconnect) => {
 					if (!mounted || disconnect.cause === "client-close") return;
+					eventBuffer?.flush();
 					dispatch({
 						type: "connection.changed",
 						connection: disconnect.cause === "protocol-error" ? "failed" : "disconnected",
@@ -71,6 +77,7 @@ function App() {
 		return () => {
 			mounted = false;
 			abortController.abort();
+			eventBuffer?.close();
 			transport?.close(1000, "Workbench renderer closed");
 			if (transportRef.current === transport) transportRef.current = null;
 		};
@@ -174,6 +181,10 @@ function App() {
 			},
 			patchSettings(projectId, patch) {
 				send("settings.patch", { projectId, patch });
+			},
+			inspectConfig(projectId) {
+				const requestId = send("config.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "config.inspect.submitted", requestId });
 			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });

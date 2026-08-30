@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type ClioLauncher, HostError } from "../clio-host.ts";
 import type { AcpLaunchSpec } from "../acp-client.ts";
+import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import {
 	defaultClioLauncher,
 	MAX_WEBSOCKET_OUTBOUND_BYTES,
@@ -10,7 +11,13 @@ import {
 	startWorkbenchServer,
 	wouldExceedWebSocketHighWaterMark,
 } from "../main.ts";
-import { MAX_CLIENT_FRAME_BYTES, parseServerEvent, PROTOCOL_VERSION, type ServerEvent } from "../src/protocol.ts";
+import {
+	MAX_CLIENT_FRAME_BYTES,
+	parseServerEvent,
+	PROTOCOL_VERSION,
+	type ServerEvent,
+	type WireConfigInspection,
+} from "../src/protocol.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -76,6 +83,7 @@ interface FixtureOptions {
 	/** Records the ACP child's pid so a test can prove it is the only one. */
 	readonly pidFile?: boolean;
 	readonly clioLauncher?: ClioLauncher;
+	readonly configInspector?: ClioConfigInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
@@ -112,6 +120,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			},
 			clioLauncher: options.clioLauncher ??
 				fixtureLauncher(options.scenario ?? "happy", options.pidFile === true ? pidPath : undefined),
+			...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -441,6 +450,28 @@ function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function configInspectionFixture(): WireConfigInspection {
+	return {
+		inspectedAt: "2026-08-29T12:00:00.000Z",
+		settings: [{ key: "orchestrator.model", source: "project", value: "fixture-model", valueKind: "exact" }],
+		settingsTruncated: false,
+		entries: [{
+			category: "clio-md",
+			id: "CLIO-CODER.md",
+			scope: "project",
+			sourcePath: { segments: ["CLIO-CODER.md"] },
+			trust: "trusted",
+			precedence: "single",
+			reloadClass: "next-turn",
+			contextCostTokens: 42,
+			facts: [{ label: "Preload", value: "included" }],
+		}],
+		entriesTruncated: false,
+		issueCounts: [],
+		issuesTruncated: false,
+	};
+}
+
 Deno.test("outbound WebSocket high-water accounting includes the next UTF-8 frame at the exact boundary", () => {
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES - 1, 1), false);
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES, 0), false);
@@ -620,6 +651,70 @@ Deno.test("an authenticated socket opens a real project and drives one contiguou
 		equal(restored.activeTurn, null);
 		deepStrictEqual((bootstrap.recent as Array<Record<string, unknown>>).map((entry) => entry.id), [projectId]);
 	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("configuration inspection is cached but never blocks the live ACP control lane", async () => {
+	let markStarted: (() => void) | undefined;
+	const started = new Promise<void>((resolve) => {
+		markStarted = resolve;
+	});
+	let releaseInspection: (() => void) | undefined;
+	const released = new Promise<void>((resolve) => {
+		releaseInspection = resolve;
+	});
+	let inspectedRoot: string | null = null;
+	const configInspector: ClioConfigInspector = {
+		async inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			markStarted?.();
+			await released;
+			return configInspectionFixture();
+		},
+	};
+	const fixture = await startFixture({ scenario: "permission", configInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.configInspection, null);
+
+		await sendCommand(socket, "request-config", "config.inspect", { projectId });
+		await started;
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+
+		// The read process is still parked, yet turn and permission commands run
+		// to completion on the independent primary control lane.
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "Do not wait for the config map." });
+		const permission = (await collectThrough(socket, "turn.permission.requested")).at(-1);
+		ok(permission?.kind === "turn.permission.requested" && permission.turnId !== undefined);
+		await sendCommand(socket, "request-allow", "permission.resolve", {
+			projectId,
+			turnId: permission.turnId,
+			permissionId: permission.payload.permissionId,
+			decision: "allow-once",
+		});
+		const terminal = (await collectThrough(socket, "turn.terminal")).at(-1);
+		ok(terminal?.kind === "turn.terminal");
+		equal(terminal.payload.outcome, "completed");
+
+		releaseInspection?.();
+		const config = (await collectThrough(socket, "config.state")).at(-1);
+		ok(config?.kind === "config.state");
+		deepStrictEqual(config.payload.inspection, configInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { configInspection: WireConfigInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.configInspection, configInspectionFixture());
+	} finally {
+		releaseInspection?.();
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
 	}
