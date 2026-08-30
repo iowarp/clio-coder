@@ -7,6 +7,7 @@ import {
 	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
+import { stateStorageFinding } from "./doctor-state-size.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder doctor [--fix] [--json]
@@ -35,6 +36,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// gets every check on the home it just built.
 	const untouched = !fix && isUninitializedHome();
 	const findings = runDoctor({ fix });
+	const storageChecks = untouched ? [] : [stateStorageFinding()];
 	const runtimeChecks = await runDoctorRuntimeChecks();
 	// Every model pointer is checked against what its target advertises, so a
 	// placeholder id saved by configure is reported here and not on the first turn.
@@ -47,7 +49,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
 	const fleetChecks = untouched ? [] : await runDoctorFleetChecks();
-	const all = [...findings, ...runtimeChecks, ...modelChecks, ...interopChecks, ...fleetChecks];
+	const all = [...findings, ...storageChecks, ...runtimeChecks, ...modelChecks, ...interopChecks, ...fleetChecks];
 	const ok = all.every((f) => f.ok);
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ ok, fix, findings: all }, null, 2)}\n`);

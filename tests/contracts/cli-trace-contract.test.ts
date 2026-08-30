@@ -19,6 +19,7 @@ const READ_SUBCOMMANDS: ReadonlyArray<ReadonlyArray<string>> = [
 	["trace", "runs", "--limit", "5"],
 	["trace", "phases", "nosuchrun"],
 	["trace", "procs", "nosuchrun"],
+	["trace", "prune"],
 	["trace", "sql", "SELECT 1"],
 ];
 
@@ -65,5 +66,35 @@ describe("contracts/cli-trace", () => {
 		const result = await runCli(["trace", "runs", "--db", db], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		match(result.stdout, /^STATUS {3}STARTED/);
+	});
+
+	it("prunes an existing database and reports rows and bytes in JSON", async () => {
+		const db = join(scratch.dir, "prune.sqlite");
+		const store = new TraceStore(db);
+		store.upsertRun({
+			runId: "old-run",
+			agentId: "coder",
+			task: "old trace",
+			requestOrigin: "agent",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "native",
+			runtimeKind: "subprocess",
+		});
+		store.db
+			.prepare("UPDATE runs SET status='success', ended_at='2026-01-01T00:00:00.000Z' WHERE run_id='old-run'")
+			.run();
+		store.close();
+
+		const result = await runCli(
+			["trace", "prune", "--db", db, "--max-age-days", "30", "--max-bytes", String(128 * 1024 * 1024), "--json"],
+			{ env: scratch.env },
+		);
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const report = JSON.parse(result.stdout) as Record<string, unknown>;
+		strictEqual(report.runsRemoved, 1);
+		strictEqual(report.rowsRemoved, 2);
+		strictEqual(typeof report.bytesRemoved, "number");
+		strictEqual((report.policy as { maxAgeDays: number }).maxAgeDays, 30);
 	});
 });

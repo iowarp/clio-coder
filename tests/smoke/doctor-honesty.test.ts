@@ -150,6 +150,9 @@ describe("clio-coder doctor honesty about its own roots", { concurrency: false }
 		for (const name of ["config dir", "data dir", "state dir", "cache dir"]) {
 			ok(rowFor(fixed.stdout, name).startsWith("OK"), `${name} should be OK after --fix`);
 		}
+		const storage = rowFor(fixed.stdout, "state storage");
+		match(storage, /^OK/u);
+		match(storage, /bytes\); largest contributor /u);
 		// A root Clio created and can use must not trip the new usability check.
 		mkdirSync(join(scratch.dir, "cache", "sub"), { recursive: true });
 		const again = await runCli(["doctor"], { env: scratch.env });
