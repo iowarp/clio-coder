@@ -1,7 +1,7 @@
 # Tool Usage Reference
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive seven-plane tool atlas and observation envelope truncation/offload calculator is located at [docs/html/tool_usage_blueprint.html](html/tool_usage_blueprint.html) (Version: 0.3.8).
+> **Interactive Spec Available:** An interactive seven-plane tool atlas and observation envelope truncation/offload calculator is located at [docs/html/tool_usage_blueprint.html](html/tool_usage_blueprint.html) (Version: 0.3.9).
 
 This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `context(scope="docs", query=...)` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 
