@@ -106,6 +106,13 @@ export interface AgentStatus {
 	toolStartedAt?: number | undefined;
 	retry?: RetryOverlay | undefined;
 	dispatch?: DispatchOverlay | undefined;
+	/**
+	 * Set while the `preparing` phase belongs to a consumed prompt that has not
+	 * yet been admitted, rather than to a run the engine has started. It is what
+	 * lets `agent_start` take over a window this opened instead of treating an
+	 * already-active phase as a duplicate start (issue #251).
+	 */
+	preparingSubmission?: boolean | undefined;
 	summary?: TurnSummary | undefined;
 	/** Usage settled so far in the active run. Reset by `agent_start`. */
 	runTally?: RunTally | undefined;

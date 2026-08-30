@@ -178,6 +178,17 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 		notify(prev, status, force);
 	};
 
+	// The window between the editor and the stream. `preparing` and `idle`
+	// bracket it; `compacting` inside it is already carried by the compaction
+	// bus overlay, which now lands because `preparing` is an active phase.
+	if (deps.chat.onTurnPreparation) {
+		unsubscribes.push(
+			deps.chat.onTurnPreparation((phase) => {
+				apply({ type: phase === "idle" ? "submit_settled" : "submit_accepted" }, true);
+			}),
+		);
+	}
+
 	unsubscribes.push(
 		deps.chat.onEvent((event: ChatLoopEvent) => {
 			if (event.type === "agent_status") return;

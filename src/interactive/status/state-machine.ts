@@ -53,6 +53,21 @@ export interface DispatchProgressStatusEvent {
 	type: "dispatch_progress";
 }
 
+/**
+ * A prompt has left the editor and Clio is preparing the turn: capability
+ * probe, pre-submit compaction, prompt compile, overflow preflight. None of
+ * that produces an engine event, so without this the footer kept reporting the
+ * previous turn as done for the whole window (issue #251).
+ */
+export interface SubmitAcceptedStatusEvent {
+	type: "submit_accepted";
+}
+
+/** The prepared turn was admitted, refused, or failed. Either way the window is over. */
+export interface SubmitSettledStatusEvent {
+	type: "submit_settled";
+}
+
 export type StatusInputEvent =
 	| ChatLoopEvent
 	| WatchdogTickEvent
@@ -60,7 +75,9 @@ export type StatusInputEvent =
 	| OverlayPopEvent
 	| RunAbortedStatusEvent
 	| ForceCancelledStatusEvent
-	| DispatchProgressStatusEvent;
+	| DispatchProgressStatusEvent
+	| SubmitAcceptedStatusEvent
+	| SubmitSettledStatusEvent;
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
 const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
@@ -292,8 +309,43 @@ function retryOverlay(status: {
 
 export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
 	switch (event.type) {
-		case "agent_start":
+		// A consumed prompt occupies `preparing` before any engine event exists,
+		// and the previous turn's summary rides along untouched: a refused
+		// admission puts the footer back on the last turn that actually ran,
+		// which is still the truth about what happened.
+		case "submit_accepted":
 			if (isActive(prev.phase)) return prev;
+			return {
+				...prev,
+				phase: "preparing",
+				since: ctx.now,
+				lastMeaningfulAt: ctx.now,
+				localRuntime: ctx.localRuntime,
+				preparingSubmission: true,
+				watchdogTier: 0,
+				resumePhase: undefined,
+				activePhases: undefined,
+				overlayStack: [],
+				tool: undefined,
+				toolStartedAt: undefined,
+				retry: undefined,
+				dispatch: undefined,
+			};
+		case "submit_settled":
+			if (prev.preparingSubmission !== true) return prev;
+			return {
+				...prev,
+				phase: prev.summary ? "ended" : "idle",
+				since: ctx.now,
+				preparingSubmission: undefined,
+				resumePhase: undefined,
+				activePhases: undefined,
+				overlayStack: [],
+			};
+		case "agent_start":
+			// A window this opened is the same turn arriving, not a duplicate
+			// start, so the run resets through it rather than being ignored.
+			if (isActive(prev.phase) && prev.preparingSubmission !== true) return prev;
 			return {
 				...INITIAL_STATUS,
 				phase: "preparing",

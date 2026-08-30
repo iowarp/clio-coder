@@ -3,10 +3,13 @@ import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
+import type { TurnPreparationPhase } from "./turn-state.js";
 
 const REVERSE_VIDEO_BLANK = `${String.fromCharCode(27)}[7m ${String.fromCharCode(27)}[0m`;
 const EMPTY_PROMPT = "Ask Clio…  / for commands";
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
+const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
+const COMPACTING_PROMPT = "Clio has your prompt and is compacting the context first";
 const MIN_HINT_WIDTH = 60;
 
 function hasScrollIndicator(line: string): boolean {
@@ -34,6 +37,13 @@ export interface EditorChrome {
 	 * inspect key on exactly the cards that have one (issue #254).
 	 */
 	getPermissionInspection?: () => PermissionInspectionHint;
+	/**
+	 * Where a consumed prompt is between the editor and the stream. The editor
+	 * is cleared before admission, so without this the composer went straight
+	 * back to `MESSAGE` and a 77-second pre-submit compaction was
+	 * indistinguishable from a dropped Enter (issue #251).
+	 */
+	getTurnPreparation?: () => TurnPreparationPhase;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
 	/** Resolved submit binding, formatted for display. */
@@ -42,7 +52,7 @@ export interface EditorChrome {
 	getNewlineKeyLabel?: () => string;
 }
 
-type ComposerMode = "MESSAGE" | "FOLLOW-UP" | "STEER" | "CONFIRM";
+type ComposerMode = "MESSAGE" | "FOLLOW-UP" | "STEER" | "CONFIRM" | "PREPARING" | "COMPACTING";
 
 function normalizeThinkingHint(value: string): string {
 	return value
@@ -78,7 +88,15 @@ function styledRailLabel(theme: ClioTheme, chrome: EditorChrome): string {
 
 function composerMode(chrome: EditorChrome, text: string): ComposerMode {
 	if (chrome.isAwaitingApproval?.() ?? false) return "CONFIRM";
-	if (!(chrome.isStreaming?.() ?? false)) return "MESSAGE";
+	if (!(chrome.isStreaming?.() ?? false)) {
+		// A prompt Clio is holding is not an idle composer. Streaming outranks it
+		// because a steer typed during a live run is what the rail is for, and a
+		// steer's own submit passes through this window on its way to the queue.
+		const preparation = chrome.getTurnPreparation?.() ?? "idle";
+		if (preparation === "compacting") return "COMPACTING";
+		if (preparation === "preparing") return "PREPARING";
+		return "MESSAGE";
+	}
 	const willSteer = chrome.willEnterSteer?.(text) ?? text.trim().length > 0;
 	return willSteer ? "STEER" : "FOLLOW-UP";
 }
@@ -105,9 +123,17 @@ function confirmRailHint(
 }
 
 function modeToken(mode: ComposerMode): "action" | "accentDeep" | "warning" {
-	if (mode === "STEER") return "action";
+	if (mode === "STEER" || mode === "PREPARING" || mode === "COMPACTING") return "action";
 	if (mode === "CONFIRM") return "warning";
 	return "accentDeep";
+}
+
+/** The line the empty composer shows for the mode it is in. */
+function emptyPromptFor(mode: ComposerMode): string {
+	if (mode === "CONFIRM") return CONFIRM_PROMPT;
+	if (mode === "PREPARING") return PREPARING_PROMPT;
+	if (mode === "COMPACTING") return COMPACTING_PROMPT;
+	return EMPTY_PROMPT;
 }
 
 function renderEmptyPrompt(line: string, width: number, theme: ClioTheme, text = EMPTY_PROMPT): string {
@@ -162,7 +188,7 @@ export class ClioEditor extends Editor {
 		}
 
 		if (text.length === 0 && lines[1]) {
-			lines[1] = renderEmptyPrompt(lines[1], safeWidth, theme, mode === "CONFIRM" ? CONFIRM_PROMPT : EMPTY_PROMPT);
+			lines[1] = renderEmptyPrompt(lines[1], safeWidth, theme, emptyPromptFor(mode));
 		}
 
 		const bottomRail = findBottomRail(lines, safeWidth);

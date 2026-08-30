@@ -252,7 +252,7 @@ type ReplayBlockRenderer = (width: number, detail: TranscriptDetailPolicy) => st
 type AssistantStatusLine = { phase: StatusPhase; verb: string; toneHint: VerbRender["toneHint"] };
 
 type TranscriptEntry =
-	| { role: "user"; text: string }
+	| { role: "user"; text: string; status?: () => UserTurnStatus }
 	| { role: "retryStatus"; status: RetryStatusPayload }
 	| {
 			role: "assistant";
@@ -308,8 +308,20 @@ export interface ReplayBlockFoldControl {
 	setFold(fold: FoldOverride): void;
 }
 
+/**
+ * Whether a painted operator turn exists in the ledger yet. `pending` is the
+ * window between the editor being consumed and admission; `refused` is a
+ * submit that never reached the durable append.
+ */
+export type UserTurnStatus = "pending" | "committed" | "refused";
+
 export interface ChatPanel extends Component {
-	appendUser(text: string): void;
+	/**
+	 * Paint an operator turn. `status`, when given, is read every frame while it
+	 * reports anything but `committed`, so the row the transcript shows before
+	 * admission is visibly not the durable turn it will become.
+	 */
+	appendUser(text: string, status?: () => UserTurnStatus): void;
 	/**
 	 * Append a caller-rendered block. Pass `isLive` when the closure reads state
 	 * that keeps changing after the append, so the panel keeps re-rendering it
@@ -675,6 +687,15 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number): string[] {
 const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
 const CLIO_PREFIX_ERROR = `${RED_CRIT}${AGENT_GLYPH}${RESET} `;
 const USER_PREFIX = `${TEAL}${USER_GLYPH}${RESET} `;
+/**
+ * A prompt Clio has taken but not yet committed. The glyph is dim rather than
+ * teal and the row says so, because the transcript used to paint an
+ * uncommitted prompt exactly like a durable user turn while the ledger still
+ * had no entry for it (issue #251).
+ */
+const USER_PREFIX_PENDING = `${DIM}${USER_GLYPH}${RESET} `;
+const USER_PENDING_TAIL = `${DIM} · preparing${RESET}`;
+const USER_REFUSED_TAIL = `${DIM} · not sent${RESET}`;
 const PROSE_GUTTER = "  ";
 const PROSE_GUTTER_WIDTH = 2;
 
@@ -964,8 +985,14 @@ function renderEntryLines(
 		const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 		const lines: string[] = [];
 		for (const sourceLine of entry.text.split("\n")) lines.push(...wrapTextWithAnsi(sourceLine, contentWidth));
-		const rendered = hangProseLines(lines, USER_PREFIX);
+		const status = entry.status?.() ?? "committed";
+		const rendered = hangProseLines(lines, status === "committed" ? USER_PREFIX : USER_PREFIX_PENDING);
 		if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
+		if (status !== "committed") {
+			const tail = status === "pending" ? USER_PENDING_TAIL : USER_REFUSED_TAIL;
+			const last = rendered.length - 1;
+			if (rendered[last] !== undefined) rendered[last] = `${rendered[last]}${tail}`;
+		}
 		return rendered;
 	}
 	if (entry.role === "retryStatus") {
@@ -1450,7 +1477,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// only thinking still needs the time-keyed render key.
 			) ||
 				(entry.pending && openThinkingSegment(entry)?.startedAtMs !== undefined))) ||
-		(entry.role === "replayBlock" && entry.isLive?.() === true);
+		(entry.role === "replayBlock" && entry.isLive?.() === true) ||
+		(entry.role === "user" && (entry.status?.() ?? "committed") !== "committed");
 
 	/**
 	 * Settled entries whose render is a pure function of the base key. A live
@@ -1460,7 +1488,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * declares itself live is excluded on the same grounds.
 	 */
 	const entryIsStable = (entry: TranscriptEntry): boolean =>
-		entry.role === "user" ||
+		(entry.role === "user" && (entry.status?.() ?? "committed") === "committed") ||
 		(entry.role === "replayBlock" && entry.isLive?.() !== true) ||
 		(entry.role === "worker" && !entry.state.pending) ||
 		(entry.role === "assistant" &&
@@ -1593,8 +1621,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	return {
-		appendUser(text: string): void {
-			transcript.push({ role: "user", text });
+		appendUser(text: string, status?: () => UserTurnStatus): void {
+			transcript.push({ role: "user", text, ...(status ? { status } : {}) });
 			markDirty();
 		},
 		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean, fold?: ReplayBlockFoldControl): void {
