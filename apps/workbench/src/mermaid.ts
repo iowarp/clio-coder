@@ -109,10 +109,22 @@ function describeError(error: unknown): string {
 	return (firstLines.length === 0 ? "Mermaid could not render this diagram." : firstLines).slice(0, 400);
 }
 
+/**
+ * Renders run one at a time with a macrotask between them, so several diagrams
+ * settling together become several short tasks rather than one long one.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
 /** Renders `source` to sanitized SVG markup, or explains why it could not. */
-export async function renderMermaid(source: string): Promise<MermaidResult> {
+export function renderMermaid(source: string): Promise<MermaidResult> {
 	const problem = mermaidSourceProblem(source);
-	if (problem !== null) return { ok: false, error: problem };
+	if (problem !== null) return Promise.resolve({ ok: false, error: problem });
+	const turn = queue.then(() => new Promise<void>((resolve) => setTimeout(resolve, 0))).then(() => renderNow(source));
+	queue = turn.catch(() => undefined);
+	return turn;
+}
+
+async function renderNow(source: string): Promise<MermaidResult> {
 	let runtime: { mermaid: MermaidLike; sanitizer: SanitizerLike };
 	try {
 		runtime = await load();

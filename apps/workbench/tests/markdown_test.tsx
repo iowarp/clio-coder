@@ -182,8 +182,7 @@ Deno.test("hostile Markdown never becomes markup, a live unsafe link, or a fetch
 Deno.test("fenced code renders a label, a copy control, a line count, and plain text for unknown languages", () => {
 	const known = renderToStaticMarkup(
 		<CodeBlock
-			code="const a = 1;
-const b = 2;"
+			code={"const a = 1;\nconst b = 2;"}
 			info="ts"
 			settled
 		/>,
@@ -214,8 +213,7 @@ Deno.test("code with markup-like content stays escaped inside the block", () => 
 Deno.test("Mermaid blocks wait for settled source, bound size, and show the source with the failure", () => {
 	const pending = renderToStaticMarkup(
 		<MermaidBlock
-			source="flowchart LR
-  A --> B"
+			source={"flowchart LR\n  A --> B"}
 			settled={false}
 		/>,
 	);
@@ -225,8 +223,7 @@ Deno.test("Mermaid blocks wait for settled source, bound size, and show the sour
 
 	const rendering = renderToStaticMarkup(
 		<MermaidBlock
-			source="flowchart LR
-  A --> B"
+			source={"flowchart LR\n  A --> B"}
 			settled
 		/>,
 	);

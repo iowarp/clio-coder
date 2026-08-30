@@ -247,7 +247,12 @@ const ChatTurnView = memo(
 								switch (segment.kind) {
 									case "response":
 										return (
-											<MarkdownContent source={segment.item.summary} complete={settledSegment} key={segment.item.id} />
+											<MarkdownContent
+												source={segment.item.summary}
+												complete={settledSegment}
+												deferDiagrams={live}
+												key={segment.item.id}
+											/>
 										);
 									case "reasoning":
 										return <ReasoningDisclosure item={segment.item} key={segment.item.id} />;
