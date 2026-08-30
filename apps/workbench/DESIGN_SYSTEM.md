@@ -1,10 +1,10 @@
-# Clio Workbench design system
+# Clio Coder GUI design system
 
 ## Product thesis
 
-Clio Workbench is a field observatory for code: a calm scientific instrument wrapped around one real Clio process. It
-helps scientists, researchers, and domain experts describe an outcome, observe work, make consequential decisions, and
-inspect the evidence without first learning an IDE or terminal vocabulary.
+The Clio Coder GUI is a field observatory for code: a calm scientific instrument wrapped around one real Clio process.
+It helps scientists, researchers, and domain experts describe an outcome, observe work, make consequential decisions,
+and inspect the evidence without first learning an IDE or terminal vocabulary.
 
 The interface should feel like a field notebook joined to a calibrated instrument. It must not feel like a terminal
 emulator, a fictional mission-control dashboard, a generic chat application, or a second implementation of Clio.
@@ -12,11 +12,19 @@ emulator, a fictional mission-control dashboard, a generic chat application, or 
 The memorable visual element is the evidence spine. Requests, actions, approvals, narrative, and outcomes form one
 legible record. A supplementary Observatory summarizes that same record without inventing facts.
 
+### Product naming
+
+The product name shown to people is **Clio Coder**. “GUI” and “desktop app” are descriptions used only when the
+interface must distinguish its local observations or settings from Clio's authoritative state. “Workbench” is an
+internal compatibility name for the source directory, persisted state, protocol provenance, and implementation types; it
+is not a separate product, API, or user-facing brand. A future `apps/workbench` to `apps/gui` source move must be a
+separate migration that preserves upgrades and local state.
+
 ## Authority and truthfulness
 
 - Clio remains authoritative for sessions, tools, routing, models, autonomy, permissions, context, agents, skills, and
-  outcomes. Workbench renders only facts exposed through its bounded protocol.
-- UI summaries must say whether a fact was reported by Clio, observed live on ACP, observed locally by Workbench, or
+  outcomes. The GUI renders only facts exposed through its bounded protocol.
+- UI summaries must say whether a fact was reported by Clio, observed live on ACP, observed locally by the GUI, or
   replayed by Clio.
 - Missing evidence is not success. Silence is not completion. A target is not healthy until an explicit, timestamped
   probe says so.
@@ -24,7 +32,7 @@ legible record. A supplementary Observatory summarizes that same record without 
 - A pending approval is never answered implicitly. An unanswered approval is never presented as a rejection.
 - Internal identifiers, hidden reasoning, raw provider payloads, untrusted paths, and speculative dependency graphs do
   not become presentation data.
-- Workbench may simplify vocabulary, but it must retain access to the exact underlying Clio key or fact where that is
+- The GUI may simplify vocabulary, but it must retain access to the exact underlying Clio key or fact where that is
   useful for auditability.
 - Resource inventories enter the browser only through bounded projections. Skill bodies, hashes, native locations,
   extension roots and manifests, source URLs, requirements, and raw diagnostics stay host-side; a formatted CLI table is
@@ -52,6 +60,10 @@ atlas—including installed extension precedence—and the 30-day Usage record. 
 bounded workspace, not a second application shell or an invitation to add global navigation. They retain a direct path
 back to the notebook and expose unavailable interfaces honestly. Historical views must distinguish a missing store from
 zero activity and must not mix global records into a project canvas merely because an upstream report contains both.
+
+The Dispatch snapshot is the narrow exception: it is explicitly installation-wide because Clio's public fleet status has
+no project selector. It must announce that scope in the header, summary, and method note, remain a manually refreshed
+read-only aggregate, and never masquerade as a project view or a live run board.
 
 Configuration-adjacent inventories that support an existing decision, such as offline model capabilities, worker
 profiles, and agent bindings, belong inside the Settings instrument rather than becoming another top-level canvas. Keep
@@ -142,9 +154,9 @@ Color is always supplementary. Text, labels, shape, or pattern must carry the sa
 
 ## Open-source component policy
 
-Workbench uses one design language even when implementation primitives come from several source-available libraries.
-Copy only the component source needed for a concrete product surface, adapt it to Workbench tokens and semantics, and
-keep the result local and testable.
+The GUI uses one design language even when implementation primitives come from several source-available libraries. Copy
+only the component source needed for a concrete product surface, adapt it to the GUI tokens and semantics, and keep the
+result local and testable.
 
 Preferred sources, in order:
 
@@ -152,8 +164,7 @@ Preferred sources, in order:
 2. **Kibo UI (MIT)** for data-heavy views such as a bounded tree, code presentation, lists, tables, status, Kanban, or a
    Gantt-like run view when the real protocol supplies the necessary facts.
 3. **Agent Elements by 21st.dev (MIT)** for selectively adopted agent/tool, plan, question, MCP, and subagent
-   presentation patterns. Treat it as a younger source: inspect the code, remove runtime assumptions, and add Workbench
-   tests.
+   presentation patterns. Treat it as a younger source: inspect the code, remove runtime assumptions, and add GUI tests.
 4. **Blocks.so (MIT)** for onboarding, forms, command menus, file upload, statistics, and responsive shell composition.
 5. **Public ReUI repository components (MIT)** when the individual source file is present under the public repository's
    license and fills a real gap.
@@ -169,7 +180,7 @@ Before adopting any block:
 
 - verify the exact file and version's license;
 - remove demo data and decorative metrics;
-- map all colors, type, spacing, radii, and motion to Workbench tokens;
+- map all colors, type, spacing, radii, and motion to the GUI tokens;
 - replace developer vocabulary with domain-appropriate language without weakening precision;
 - preserve keyboard, focus, screen-reader, forced-colors, reduced-motion, and compact-layout behavior;
 - prove every displayed fact can be traced to a protocol field or a clearly labelled local observation;
@@ -203,4 +214,4 @@ Every UI change must preserve:
 - contained and restored focus for dialogs and drawers;
 - meaningful loading, empty, unavailable, truncated, replayed, failed, waiting, and stopped states without relying on
   animation or color;
-- no changes under `clio-coder/src/` as part of Workbench-only design work.
+- no changes under `clio-coder/src/` as part of GUI-only design work.

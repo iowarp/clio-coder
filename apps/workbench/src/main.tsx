@@ -10,6 +10,7 @@ import {
 	type ClientCommandKind,
 	type ClientCommandPayloadByKind,
 	type LocalTransport,
+	PRODUCT_NAME,
 	PROTOCOL_VERSION,
 	WebSocketLocalTransport,
 } from "./protocol.ts";
@@ -68,7 +69,7 @@ function App() {
 				if (!mounted || abortController.signal.aborted) return;
 				dispatch({
 					type: "bootstrap.failed",
-					message: error instanceof Error ? error.message : "The Workbench bootstrap request failed.",
+					message: error instanceof Error ? error.message : "The local GUI bootstrap request failed.",
 				});
 			}
 		}
@@ -78,7 +79,7 @@ function App() {
 			mounted = false;
 			abortController.abort();
 			eventBuffer?.close();
-			transport?.close(1000, "Workbench renderer closed");
+			transport?.close(1000, "Clio Coder renderer closed");
 			if (transportRef.current === transport) transportRef.current = null;
 		};
 	}, []);
@@ -198,6 +199,10 @@ function App() {
 				const requestId = send("routing.inspect", { projectId });
 				if (requestId !== null) dispatch({ type: "routing.inspect.submitted", requestId });
 			},
+			inspectDispatch() {
+				const requestId = send("dispatch.inspect", {});
+				if (requestId !== null) dispatch({ type: "dispatch.inspect.submitted", requestId });
+			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
 			},
@@ -214,5 +219,5 @@ function App() {
 }
 
 const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error("Clio Workbench could not find its root element.");
+if (!rootElement) throw new Error(`${PRODUCT_NAME} could not find its root element.`);
 createRoot(rootElement).render(<App />);

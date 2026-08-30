@@ -1,5 +1,5 @@
 /**
- * Process boundary shared by Workbench's public, read-only Clio adapters.
+ * Process boundary shared by the GUI's public, read-only Clio adapters.
  *
  * Callers still own the command-specific projection. This runner only enforces
  * fixed argv execution, time and byte ceilings, process retirement, UTF-8, and
@@ -121,7 +121,7 @@ export class ClioReadCommandRunner {
 		const lines = text.split(/\r?\n/u);
 		if (lines.at(-1) === "") lines.pop();
 		if (lines.length > rowLimit) {
-			throw new ClioReadCommandError("row-limit", "The read-only Clio command exceeded Workbench's row bound.");
+			throw new ClioReadCommandError("row-limit", "The read-only Clio command exceeded the GUI's row bound.");
 		}
 		const rows: unknown[] = [];
 		for (const line of lines) {
@@ -151,7 +151,7 @@ export class ClioReadCommandRunner {
 				stderr: "piped",
 			}).spawn();
 		} catch {
-			throw new ClioReadCommandError("spawn", "Workbench could not start the read-only Clio command.");
+			throw new ClioReadCommandError("spawn", "The GUI could not start the read-only Clio command.");
 		}
 
 		let timedOut = false;
@@ -198,12 +198,12 @@ export class ClioReadCommandRunner {
 			throw new ClioReadCommandError(
 				exceeded ? "byte-limit" : "read",
 				exceeded
-					? "The read-only Clio command exceeded Workbench's byte bound."
-					: "Workbench could not read the read-only Clio command.",
+					? "The read-only Clio command exceeded the GUI's byte bound."
+					: "The GUI could not read the read-only Clio command.",
 			);
 		}
 		if (statusResult.status === "rejected") {
-			throw new ClioReadCommandError("status", "Workbench could not observe the read-only Clio command.");
+			throw new ClioReadCommandError("status", "The GUI could not observe the read-only Clio command.");
 		}
 		const diagnostic = decodeDiagnostic(stderrResult.value);
 		if (!statusResult.value.success) {

@@ -192,7 +192,7 @@ async function initializeAndCreateSession(harness: FixtureHarness): Promise<void
 		protocolVersion: 1,
 		agentInfo: {
 			name: "clio-coder",
-			title: "Clio Workbench ACP fixture",
+			title: "Clio Coder ACP fixture",
 			version: "0.0.0",
 		},
 		agentCapabilities: {

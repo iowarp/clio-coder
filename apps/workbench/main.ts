@@ -1,6 +1,11 @@
 import { extname } from "node:path";
 import { type ClioCatalogInspector, ClioCliCatalogInspector } from "./clio-catalog-inspector.ts";
 import { ClioCliConfigInspector, ClioConfigInspectError, type ClioConfigInspector } from "./clio-config-inspector.ts";
+import {
+	ClioCliDispatchInspector,
+	ClioDispatchInspectError,
+	type ClioDispatchInspector,
+} from "./clio-dispatch-inspector.ts";
 import { ClioCliUsageInspector, ClioUsageInspectError, type ClioUsageInspector } from "./clio-usage-inspector.ts";
 import { ClioCliRoutingInspector, type ClioRoutingInspector } from "./clio-routing-inspector.ts";
 import {
@@ -20,6 +25,7 @@ import {
 	encodeServerEvent,
 	MAX_CLIENT_FRAME_BYTES,
 	parseClientCommand,
+	PRODUCT_NAME,
 	PROTOCOL_VERSION,
 	ProtocolValidationError,
 	type ServerEvent,
@@ -29,6 +35,7 @@ import {
 	type WireCatalogInspection,
 	type WireConfigInspection,
 	type WireDeleteChallenge,
+	type WireDispatchInspection,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
 	type WireRoutingInspection,
@@ -38,13 +45,13 @@ import {
 import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "./src/timeline.ts";
 import { type RecentProject, WorkbenchState, WorkbenchStateError } from "./workbench-state.ts";
 
-const APP_NAME = "Clio Workbench" as const;
+const APP_NAME = PRODUCT_NAME;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_PORT = 4173;
 /** How long the host waits after the last browser goes away before it stops a live turn. */
 export const DEFAULT_DISCONNECT_GRACE_MS = 10_000;
-const INVALID_CLIENT_FRAME_CLOSE_REASON = "Invalid Workbench client protocol frame";
-const SLOW_CLIENT_CLOSE_REASON = "Workbench client fell behind";
+const INVALID_CLIENT_FRAME_CLOSE_REASON = "Invalid GUI client protocol frame";
+const SLOW_CLIENT_CLOSE_REASON = "GUI client fell behind";
 const TREE_DEPTH = 5;
 const TREE_NODES = 200;
 export const MAX_WEBSOCKET_OUTBOUND_BYTES = 256 * 1024;
@@ -86,7 +93,7 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 };
 
 export const SECURITY_NOTE =
-	"Workbench enforces the project boundary in its own code against the canonical root you opened; Deno's file grants are broad at launch, so that boundary is not a sandbox.";
+	"The desktop app enforces the project boundary in its own code against the canonical root you opened; Deno's file grants are broad at launch, so that boundary is not a sandbox.";
 
 export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encodedFrameBytes: number): boolean {
 	if (
@@ -116,6 +123,8 @@ export interface WorkbenchServerOptions {
 	usageInspector?: ClioUsageInspector;
 	/** Overrides the fixed offline model and worker-routing adapter (tests). */
 	routingInspector?: ClioRoutingInspector;
+	/** Overrides the fixed installation-wide dispatch status adapter (tests). */
+	dispatchInspector?: ClioDispatchInspector;
 	/** Overrides the Workbench state directory (tests). */
 	stateDir?: string;
 	/** Overrides `$HOME` for the guards and browser (tests). */
@@ -153,7 +162,7 @@ function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
 			port = parsePositiveInteger(argument.slice("--port=".length), "port", 65_535);
 		} else if (argument.startsWith("--smoke-ms=")) {
 			smokeMs = parsePositiveInteger(argument.slice("--smoke-ms=".length), "smoke-ms", 120_000);
-		} else throw new Error(`Unknown Workbench argument: ${argument}`);
+		} else throw new Error(`Unknown GUI argument: ${argument}`);
 	}
 	return { port, ...(smokeMs === undefined ? {} : { smokeMs }) };
 }
@@ -182,7 +191,7 @@ function textResponse(value: string, status: number): Response {
 
 function normalizeStaticRoot(value: URL): URL {
 	const root = new URL(value.href);
-	if (root.protocol !== "file:") throw new Error("Workbench distRoot must be a local file URL.");
+	if (root.protocol !== "file:") throw new Error("GUI distRoot must be a local file URL.");
 	root.search = "";
 	root.hash = "";
 	if (!root.pathname.endsWith("/")) root.pathname = `${root.pathname}/`;
@@ -253,6 +262,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #catalogInspector: ClioCatalogInspector;
 	readonly #usageInspector: ClioUsageInspector;
 	readonly #routingInspector: ClioRoutingInspector;
+	readonly #dispatchInspector: ClioDispatchInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
@@ -263,6 +273,7 @@ class WorkbenchRuntime implements HostSink {
 	>;
 	readonly #sockets = new Set<SocketSession>();
 	#open: OpenProject | null = null;
+	#dispatchInspection: WireDispatchInspection | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
 	#readCommandQueue: Promise<void> = Promise.resolve();
@@ -281,6 +292,7 @@ class WorkbenchRuntime implements HostSink {
 				| "catalogInspector"
 				| "usageInspector"
 				| "routingInspector"
+				| "dispatchInspector"
 				| "permissionEscalateMs"
 				| "permissionBudgetMs"
 				| "promptTimeoutMs"
@@ -303,6 +315,9 @@ class WorkbenchRuntime implements HostSink {
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#routingInspector = options.routingInspector ?? new ClioCliRoutingInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#dispatchInspector = options.dispatchInspector ?? new ClioCliDispatchInspector({
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
@@ -337,8 +352,9 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, and offline routing inspections ask Clio for typed data, redact it on the host, and never change Clio configuration.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, and installation-wide dispatch inspections ask Clio for typed data, redact it on the host, and never change Clio configuration.`,
 			securityNote: SECURITY_NOTE,
+			dispatchInspection: this.#dispatchInspection,
 		};
 	}
 
@@ -425,11 +441,11 @@ class WorkbenchRuntime implements HostSink {
 			try {
 				await open.host.close();
 			} catch (error) {
-				if (!this.#quiet) console.error("Workbench could not close the Clio host cleanly", error);
+				if (!this.#quiet) console.error("The GUI could not close the Clio host cleanly", error);
 			}
 			this.#store.unregister(open.project.id);
 		}
-		for (const session of this.#sockets) session.close(1001, "Workbench is shutting down");
+		for (const session of this.#sockets) session.close(1001, "The GUI is shutting down");
 		this.#sockets.clear();
 	}
 
@@ -506,6 +522,9 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (command.kind === "routing.inspect") {
 			return this.#serializeRead(() => this.#dispatchRoutingInspect(session, command));
+		}
+		if (command.kind === "dispatch.inspect") {
+			return this.#serializeRead(() => this.#dispatchDispatchInspect(session, command));
 		}
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
@@ -610,6 +629,22 @@ class WorkbenchRuntime implements HostSink {
 				{ projectId: command.payload.projectId },
 				{ ...mapped, requestId: command.requestId },
 			);
+		}
+	}
+
+	async #dispatchDispatchInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"dispatch.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const inspection = await this.#dispatchInspector.inspect(this.#state.homePath);
+			if (this.#closed || session.closed) return;
+			this.#dispatchInspection = inspection;
+			this.#broadcast("dispatch.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
 		}
 	}
 
@@ -914,7 +949,7 @@ class WorkbenchRuntime implements HostSink {
 			this.#graceTimer = null;
 			if (this.#closed || this.#sockets.size > 0 || this.#open !== open) return;
 			void open.host.abandon().catch((error) => {
-				if (!this.#quiet) console.error("Workbench could not stop the abandoned turn", error);
+				if (!this.#quiet) console.error("The GUI could not stop the abandoned turn", error);
 			});
 		}, this.#disconnectGraceMs);
 	}
@@ -970,7 +1005,7 @@ class WorkbenchRuntime implements HostSink {
 			try {
 				bytes = await Deno.readFile(assetUrl);
 			} catch {
-				return textResponse("Workbench UI has not been built. Run deno task build.", 503);
+				return textResponse("The Clio Coder GUI has not been built. Run deno task build.", 503);
 			}
 		}
 		const headers = new Headers(STATIC_SECURITY_HEADERS);
@@ -994,7 +1029,8 @@ class WorkbenchRuntime implements HostSink {
 		if (error instanceof HostError) return { code: error.code, message: error.message };
 		if (error instanceof ClioConfigInspectError) return { code: error.code, message: error.message };
 		if (error instanceof ClioUsageInspectError) return { code: error.code, message: error.message };
-		if (!this.#quiet) console.error("Workbench command failed", error);
+		if (error instanceof ClioDispatchInspectError) return { code: error.code, message: error.message };
+		if (!this.#quiet) console.error("GUI command failed", error);
 		return { code: "internal", message: "The local command could not be completed." };
 	}
 }
@@ -1037,7 +1073,7 @@ class SocketSession {
 		} catch (error) {
 			// A DTO the host cannot validate never reaches the renderer; the socket
 			// stays open and the failure is loud on stderr.
-			console.error(`Workbench refused to send an invalid ${kind} event`, error);
+			console.error(`The GUI refused to send an invalid ${kind} event`, error);
 			return;
 		}
 		const frame = encodeServerEvent(event);
@@ -1049,7 +1085,7 @@ class SocketSession {
 			this.#socket.send(frame);
 			this.#sequence = sequence;
 		} catch {
-			this.close(1011, "Workbench could not send the server event");
+			this.close(1011, "The GUI could not send the server event");
 		}
 	}
 
@@ -1072,11 +1108,11 @@ class SocketSession {
 
 	#onMessage(event: MessageEvent): void {
 		if (typeof event.data !== "string") {
-			this.close(1003, "Workbench accepts text protocol frames only");
+			this.close(1003, "The GUI accepts text protocol frames only");
 			return;
 		}
 		if (encoder.encode(event.data).byteLength > MAX_CLIENT_FRAME_BYTES) {
-			this.close(1009, "Workbench client frame exceeded 16 KiB");
+			this.close(1009, "GUI client frame exceeded 16 KiB");
 			return;
 		}
 		let command: ClientCommand;
@@ -1100,7 +1136,7 @@ class SocketSession {
 
 export async function startWorkbenchServer(options: WorkbenchServerOptions = {}): Promise<RunningWorkbenchServer> {
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
-	if (hostname !== DEFAULT_HOSTNAME) throw new Error("Workbench may bind only to 127.0.0.1.");
+	if (hostname !== DEFAULT_HOSTNAME) throw new Error("The GUI may bind only to 127.0.0.1.");
 	const port = options.port ?? DEFAULT_PORT;
 	const desktopAddress = options.mode === undefined ? Deno.env.get("DENO_SERVE_ADDRESS") : undefined;
 	const mode = options.mode ?? (desktopAddress ? "desktop" : "browser");
@@ -1120,6 +1156,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
 		...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 		...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
+		...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),

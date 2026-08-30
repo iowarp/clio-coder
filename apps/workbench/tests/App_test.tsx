@@ -2,6 +2,7 @@ import { equal, match, ok } from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
 	ClioCatalog,
+	DispatchLedger,
 	EffectiveClioMap,
 	RoutingInventory,
 	UsageNotebook,
@@ -14,6 +15,7 @@ import {
 	catalogInspectionFixture,
 	clioSnapshotFixture,
 	configInspectionFixture,
+	dispatchInspectionFixture,
 	FIXTURE_PROJECT_ID,
 	routingInspectionFixture,
 	serverEventFixture,
@@ -48,6 +50,7 @@ const inertActions: WorkbenchActions = {
 	inspectCatalog() {},
 	inspectUsage() {},
 	inspectRouting() {},
+	inspectDispatch() {},
 	listTargets() {},
 	probeTarget() {},
 	setAutonomy() {},
@@ -88,7 +91,8 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	match(html, /aria-label="Projects, files, and sessions"/u);
 	match(html, /aria-label="Run and evidence overview"/u);
 	match(html, /aria-label="Request, work, approval, and outcome timeline"/u);
-	match(html, /aria-label="Workbench status"/u);
+	match(html, /aria-label="Clio Coder status"/u);
+	match(html, /class="brand-lockup__name">Clio Coder</u);
 	match(html, /aria-live="assertive"/u);
 	match(html, /aria-live="polite"/u);
 	match(html, /class="file-tree"/u);
@@ -100,6 +104,7 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	equal((html.match(/<main/gu) ?? []).length, 1);
 	equal((html.match(/<aside/gu) ?? []).length, 2);
 	ok(!html.includes("undefined"));
+	ok(!html.includes(">Workbench<"), "Workbench must not appear as a product label");
 	ok(!/engine/iu.test(html), "no product surface may mention an engine");
 	ok(!html.includes("activity-rail"));
 	ok(!html.includes("No prompt leaves this machine"));
@@ -187,6 +192,25 @@ Deno.test("the Usage record renders exact project aggregates and its honest upst
 	ok(!html.includes("/home/"));
 });
 
+Deno.test("the Dispatch snapshot is installation-wide and omits raw fleet identities and controls", () => {
+	const html = renderToStaticMarkup(
+		<DispatchLedger
+			inspection={dispatchInspectionFixture()}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+	match(html, /Dispatch across this Clio installation/u);
+	match(html, /Installation-wide dispatch summary/u);
+	match(html, /15,918,587/u);
+	match(html, /Alive/u);
+	match(html, /cross-process status command cannot observe/u);
+	for (const forbidden of ["runId", "agentId", '"node":', "requestedByPid", "Drain fleet", "Resume fleet"]) {
+		ok(!html.includes(forbidden), `dispatch surface leaked or offered ${forbidden}`);
+	}
+});
+
 Deno.test("the routing inventory renders offline model limits and explicit agent-profile resolution", () => {
 	const html = renderToStaticMarkup(
 		<RoutingInventory
@@ -245,7 +269,7 @@ Deno.test("the observatory summarizes recorded facts without inventing telemetry
 	const html = render(stateWith(workspace));
 
 	match(html, /Timeline at a glance/u);
-	match(html, /Check the field notes — Observed by Workbench — complete/u);
+	match(html, /Check the field notes — Observed by desktop — complete/u);
 	match(html, /Run project checks — Observed on ACP — failed/u);
 	match(html, /Observed locally/u);
 	match(html, /Observed live/u);
@@ -288,7 +312,7 @@ Deno.test("reported terminal usage becomes a legible per-turn record and a visib
 	match(html, /<code>cacheRead<\/code>/u);
 	match(html, /1,024/u);
 	match(html, /800/u);
-	match(html, /Workbench does not infer a price/u);
+	match(html, /the GUI does not infer a price/u);
 	ok(!html.includes("$"), "per-turn token reporting must not fabricate a cost");
 });
 
@@ -299,7 +323,7 @@ Deno.test("with no project open the rail offers a path field and the canvas expl
 	match(html, />Browse folders</u);
 	match(html, /Bring a research folder\. Keep every decision visible\./u);
 	match(html, /Choose a project folder/u);
-	match(html, /Workbench enforces the project boundary in its own code/u);
+	match(html, /The desktop app enforces the project boundary in its own code/u);
 	match(html, /No project open/u);
 	match(html, />START</u);
 	ok(!html.includes("Clio is finishing the previous prompt."));
@@ -587,7 +611,7 @@ Deno.test("a remembered folder that can no longer be opened explains itself and 
 	match(html, /cannot be opened/u);
 	match(
 		html,
-		/Workbench can no longer open this folder\. It may have been moved, renamed, or deleted, or it may now be a location Workbench refuses to open\. Removing it from this list changes nothing on disk\./u,
+		/The GUI can no longer open this folder\. It may have been moved, renamed, or deleted, or it may now be a location the GUI refuses to open\. Removing it from this list changes nothing on disk\./u,
 	);
 	match(html, />Remove Beta from this list<\/button>/u);
 	// The unopenable row must not also carry the compact forget glyph, and the
@@ -874,7 +898,7 @@ Deno.test("a tool call that has been open past thirty seconds says so", () => {
 	match(html, /timeline-card--long/u);
 });
 
-Deno.test("a repeated command shape is reported as Clio's finding, never as a Workbench guess", () => {
+Deno.test("a repeated command shape is reported as Clio's finding, never as a GUI guess", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		clio: clioSnapshotFixture("running"),
 		activeTurn: {
@@ -912,5 +936,5 @@ Deno.test("the settings page offers desktop notifications without ever asking fo
 	match(html, /<h3[^>]*>Approvals<\/h3>/u);
 	// Server-rendered there is no Notification API, which must degrade quietly.
 	match(html, /This browser cannot post desktop notifications\./u);
-	match(html, /A notification carries the tool title only\. Workbench never puts a project path in one\./u);
+	match(html, /A notification carries the tool title only\. The GUI never puts a project path in one\./u);
 });

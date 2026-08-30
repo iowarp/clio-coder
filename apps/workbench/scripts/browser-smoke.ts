@@ -1,5 +1,5 @@
 /**
- * Browser smoke for Clio Workbench.
+ * Browser smoke for the Clio Coder GUI.
  *
  * The server runs in this process against the deterministic ACP child fixture,
  * so the browser drives a real conversation over the real client code path
@@ -15,12 +15,14 @@ import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioLauncher } from "../clio-host.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
+import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
 import {
 	catalogInspectionFixture,
 	configInspectionFixture,
+	dispatchInspectionFixture,
 	routingInspectionFixture,
 	usageInspectionFixture,
 } from "../tests/fixtures.ts";
@@ -93,6 +95,9 @@ const running = await startWorkbenchServer({
 	routingInspector: {
 		inspect: () => Promise.resolve(routingInspectionFixture()),
 	} satisfies ClioRoutingInspector,
+	dispatchInspector: {
+		inspect: () => Promise.resolve(dispatchInspectionFixture()),
+	} satisfies ClioDispatchInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -117,7 +122,7 @@ try {
 
 	const response = await page.goto(running.url, { waitUntil: "networkidle" });
 	equal(response?.status(), 200);
-	equal(await page.title(), "Clio Workbench");
+	equal(await page.title(), "Clio Coder");
 	await page.getByText("connected", { exact: true }).waitFor();
 	equal(await page.getByRole("main").count(), 1);
 	equal(await page.getByRole("complementary").count(), 2);
@@ -324,6 +329,48 @@ try {
 	await usageRecord.getByRole("button", { name: "Back to notebook" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
+	// Fleet status is deliberately a separate installation-wide snapshot. The
+	// fixed adapter reduces durable rows to heartbeat counts and totals before
+	// anything reaches the browser.
+	await page.getByRole("button", { name: "Dispatch", exact: true }).click();
+	const dispatchRecord = page.getByRole("region", { name: "Installation-wide dispatch snapshot" });
+	await dispatchRecord.getByRole("heading", { name: "Dispatch across this Clio installation" }).waitFor();
+	await dispatchRecord.getByText("15,918,587", { exact: true }).waitFor();
+	await dispatchRecord.getByText("Alive", { exact: true }).waitFor();
+	await dispatchRecord.getByText("5", { exact: true }).first().waitFor();
+	await dispatchRecord.getByText("Never a GUI estimate", { exact: true }).waitFor();
+	for (const forbidden of ["run-secret", "agentId", "requestedByPid", "ssh-private-node"]) {
+		equal(await dispatchRecord.getByText(forbidden, { exact: false }).count(), 0);
+	}
+	const dispatchAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const dispatchBlockingViolations = dispatchAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		dispatchBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("dispatch.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactDispatchGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+		regionScrollWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.scrollWidth ?? 0,
+		regionClientWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.clientWidth ?? 0,
+	}));
+	ok(compactDispatchGeometry.documentWidth <= compactDispatchGeometry.viewportWidth);
+	ok(compactDispatchGeometry.regionScrollWidth <= compactDispatchGeometry.regionClientWidth + 1);
+	await page.screenshot({ path: new URL("dispatch-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await dispatchRecord.getByRole("button", { name: "Back to notebook" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
 	// Desktop rails collapse independently, reclaim their full grid tracks, and
 	// return focus to the control that can reverse the operation.
 	const conversationWidth = () => page.locator(".conversation").evaluate((element) => element.clientWidth);
@@ -364,7 +411,7 @@ try {
 	await composer.fill("Write the fixture note.");
 	await page.getByRole("button", { name: "Send" }).click();
 	await page.locator("#permission-title").waitFor();
-	equal(await page.title(), "● Approval needed — Clio Workbench");
+	equal(await page.title(), "● Approval needed — Clio Coder");
 	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
 	await page.screenshot({ path: new URL("permission.png", artifactDirectory).pathname });
 	const inProgressDraft = Array.from({ length: 24 }, (_, index) => `Draft line ${index + 1}`).join("\n");
@@ -380,10 +427,10 @@ try {
 	await page.locator(".approval-card").getByRole("button", { name: "Allow once" }).click();
 	const completedOutcome = page.getByRole("heading", { name: "Turn complete", exact: true });
 	await completedOutcome.waitFor();
-	equal(await page.title(), "Clio Workbench");
+	equal(await page.title(), "Clio Coder");
 	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
 	await page.locator(".token-ledger__row--input").getByText("5", { exact: true }).waitFor();
-	await page.getByText("Workbench does not infer a price.", { exact: false }).waitFor();
+	await page.getByText("the GUI does not infer a price.", { exact: false }).waitFor();
 	equal(await composer.inputValue(), inProgressDraft);
 	ok(await composer.evaluate((element) => (element as HTMLTextAreaElement).scrollTop) > 0);
 	await completedOutcome.scrollIntoViewIfNeeded();
@@ -556,10 +603,10 @@ try {
 		const renamedRow = resumePage.locator(".session-row").filter({ hasText: "Renamed in the browser" });
 		await renamedRow.waitFor();
 
-		// The delete confirmation is Workbench's own, and cancelling it sends nothing.
+		// The delete confirmation is the GUI's own, and cancelling it sends nothing.
 		await renamedRow.getByRole("button", { name: "Delete" }).click();
 		const deleteSessionDialog = resumePage.getByRole("dialog", { name: "Delete this session" });
-		await deleteSessionDialog.getByText(/Workbench cannot bring them back/u).waitFor();
+		await deleteSessionDialog.getByText(/Neither the GUI nor Clio can bring them back/u).waitFor();
 		await deleteSessionDialog.getByRole("button", { name: "Keep session" }).click();
 		await renamedRow.waitFor();
 
@@ -660,7 +707,7 @@ try {
 
 		const missingRow = recoveryPage.locator(".project-card-row.is-missing");
 		await missingRow.waitFor();
-		await missingRow.getByText(/Workbench can no longer open this folder\./u).waitFor();
+		await missingRow.getByText(/The GUI can no longer open this folder\./u).waitFor();
 		await missingRow.getByText(/Removing it from this list changes nothing on disk\./u).waitFor();
 		equal(await missingRow.locator(".project-card").isDisabled(), true);
 		equal(await recoveryPage.locator(".project-card-row.is-missing").count(), 1);
@@ -870,7 +917,7 @@ try {
 
 		const banner = loopPage.locator(".approval-banner");
 		await banner.waitFor();
-		equal(await loopPage.title(), "● Approval needed — Clio Workbench");
+		equal(await loopPage.title(), "● Approval needed — Clio Coder");
 
 		// Sixteen answered with the keyboard alone, which is the documented chord.
 		// Progress is counted from settled approval cards rather than from the
@@ -917,7 +964,7 @@ try {
 		equal(discoverability.inlineVisible, false, "the anchored card must be scrolled away for this to prove anything");
 		// Prominent, never focus-trapping: the operator may keep working.
 		equal(discoverability.focusedInsideBanner, false);
-		equal(await loopPage.title(), "● Approval needed — Clio Workbench");
+		equal(await loopPage.title(), "● Approval needed — Clio Coder");
 		await loopPage.screenshot({ path: new URL("approval-banner.png", artifactDirectory).pathname });
 
 		// Gate: with no model prose at all, the operator can still tell what is
@@ -1000,7 +1047,7 @@ try {
 		// Nobody answers. The card must park the turn, not deny the tool.
 		await expiryPage.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor({ timeout: 15_000 });
 		const stoppedSentence =
-			/An approval waited unanswered for the whole budget, so Workbench stopped the turn\. Clio was not told no; send a new prompt to continue\./u;
+			/An approval waited unanswered for the whole budget, so the GUI stopped the turn\. Clio was not told no; send a new prompt to continue\./u;
 		await expiryPage.locator(".evidence-timeline").getByText(stoppedSentence).waitFor();
 		// The same sentence reaches a screen reader through the live region.
 		equal(await expiryPage.locator('[aria-live="assertive"]').getByText(stoppedSentence).count(), 1);
@@ -1008,7 +1055,7 @@ try {
 			/Nobody answered\. The turn was stopped; Clio was not told no\./u,
 		).waitFor();
 		equal(await expiryPage.locator(".approval-banner").count(), 0);
-		equal(await expiryPage.title(), "Clio Workbench");
+		equal(await expiryPage.title(), "Clio Coder");
 		await expiryPage.screenshot({ path: new URL("approval-unanswered.png", artifactDirectory).pathname });
 		await expiryPage.close();
 	} finally {
@@ -1056,7 +1103,7 @@ try {
 			reportedUsageVisibleAndSurvivedReload: true,
 			stopNeverDeniedTheTool: true,
 			sessionRenamedResumedAndReplayed: true,
-			sessionDeleteConfirmedByWorkbench: true,
+			sessionDeleteConfirmedByGui: true,
 			unavailableProjectExplainedAndRemovable: true,
 			targetProbedBeforeAnyHealthClaim: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
@@ -1066,9 +1113,11 @@ try {
 			effectiveClioMapUsesTheBoundedReadOnlyAdapter: true,
 			catalogUsesBoundedReadOnlyAdapters: true,
 			routingInventoryUsesOfflineBoundedAdapters: true,
+			dispatchUsesInstallationWideBoundedAdapter: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,
+			compactDispatchHasNoPageOverflow: true,
 			approvalBannerVisibleWhenScrolledAwayAndBlurred: true,
 			approvalAnsweredByKeyboardChord: true,
 			escalatedWithoutAnotherWireEvent: true,
@@ -1082,6 +1131,7 @@ try {
 			seriousOrCriticalAccessibilityViolations: configMapBlockingViolations.length + blockingViolations.length +
 				catalogBlockingViolations.length +
 				usageBlockingViolations.length +
+				dispatchBlockingViolations.length +
 				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
@@ -1095,6 +1145,8 @@ try {
 				"catalog-compact.png",
 				"usage.png",
 				"usage-compact.png",
+				"dispatch.png",
+				"dispatch-compact.png",
 				"permission.png",
 				"complete.png",
 				"compact-project-drawer.png",

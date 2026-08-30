@@ -5,6 +5,7 @@ import { type ClioLauncher, HostError } from "../clio-host.ts";
 import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
+import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import {
@@ -21,10 +22,16 @@ import {
 	type ServerEvent,
 	type WireCatalogInspection,
 	type WireConfigInspection,
+	type WireDispatchInspection,
 	type WireRoutingInspection,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
-import { catalogInspectionFixture, routingInspectionFixture, usageInspectionFixture } from "./fixtures.ts";
+import {
+	catalogInspectionFixture,
+	dispatchInspectionFixture,
+	routingInspectionFixture,
+	usageInspectionFixture,
+} from "./fixtures.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -94,6 +101,7 @@ interface FixtureOptions {
 	readonly catalogInspector?: ClioCatalogInspector;
 	readonly usageInspector?: ClioUsageInspector;
 	readonly routingInspector?: ClioRoutingInspector;
+	readonly dispatchInspector?: ClioDispatchInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
@@ -134,6 +142,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
 			...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 			...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
+			...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -504,7 +513,7 @@ Deno.test("startWorkbenchServer serves a v3 bootstrap and static assets with bou
 		assertSecurityHeaders(bootstrapResponse.headers);
 		const bootstrap = await bootstrapResponse.json() as Record<string, unknown>;
 		equal(bootstrap.protocolVersion, PROTOCOL_VERSION);
-		equal(bootstrap.appName, "Clio Workbench");
+		equal(bootstrap.appName, "Clio Coder");
 		equal(bootstrap.workspaceInstanceId, running.workspaceInstanceId);
 		equal(bootstrap.localToken, running.token);
 		equal(bootstrap.mode, "browser");
@@ -832,6 +841,36 @@ Deno.test("routing inspection uses the trusted root, broadcasts the bounded snap
 			workspace: { routingInspection: WireRoutingInspection };
 		};
 		deepStrictEqual(bootstrap.workspace.routingInspection, routingInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("dispatch inspection is global, uses the configured home, and survives browser reload", async () => {
+	let inspectedCwd: string | null = null;
+	const dispatchInspector: ClioDispatchInspector = {
+		inspect(cwd) {
+			inspectedCwd = cwd;
+			return Promise.resolve(dispatchInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ dispatchInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-dispatch", "dispatch.inspect", {});
+		const dispatch = (await collectThrough(socket, "dispatch.state")).at(-1);
+		ok(dispatch?.kind === "dispatch.state");
+		equal(dispatch.projectId, undefined);
+		equal(inspectedCwd, fixture.homePath);
+		deepStrictEqual(dispatch.payload.inspection, dispatchInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			dispatchInspection: WireDispatchInspection;
+		};
+		deepStrictEqual(bootstrap.dispatchInspection, dispatchInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
