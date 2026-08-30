@@ -7,7 +7,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -27,6 +27,32 @@ export const TRACE_DATABASE_FILE = "trace.sqlite";
 export const TRACE_EVENT_POLL_LIMIT = 500;
 export const TRACE_PAYLOAD_LIMIT_BYTES = 16 * 1024;
 export const TRACE_WRITE_QUEUE_LIMIT = 2048;
+export const TRACE_RETENTION_DAYS_ENV = "CLIO_CODER_TRACE_RETENTION_DAYS";
+export const TRACE_MAX_BYTES_ENV = "CLIO_CODER_TRACE_MAX_BYTES";
+
+export interface TraceRetentionPolicy {
+	maxAgeDays: number;
+	maxBytes: number;
+}
+
+export interface TracePruneResult {
+	runsRemoved: number;
+	rowsRemoved: number;
+	bytesBefore: number;
+	bytesAfter: number;
+	bytesRemoved: number;
+	vacuumed: boolean;
+	protectedRuns: number;
+}
+
+/** Thirty days or 128 MiB, whichever limit the mirror reaches first. */
+export const DEFAULT_TRACE_RETENTION_POLICY: Readonly<TraceRetentionPolicy> = Object.freeze({
+	maxAgeDays: 30,
+	maxBytes: 128 * 1024 * 1024,
+});
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const VACUUM_RECLAIMABLE_FRACTION = 0.2;
 
 type DatabaseSyncConstructor = typeof import("node:sqlite").DatabaseSync;
 let sqliteConstructor: DatabaseSyncConstructor | null = null;
@@ -108,6 +134,40 @@ function databaseSyncConstructor(): DatabaseSyncConstructor {
 
 export function traceDatabasePath(stateDir: string): string {
 	return join(stateDir, TRACE_DATABASE_FILE);
+}
+
+/** Resolve the two operator-configurable retention bounds. */
+export function resolveTraceRetentionPolicy(
+	overrides: Partial<TraceRetentionPolicy> = {},
+	environment: NodeJS.ProcessEnv = process.env,
+): TraceRetentionPolicy {
+	const maxAgeDays =
+		overrides.maxAgeDays ??
+		parsePositiveRetentionNumber(environment[TRACE_RETENTION_DAYS_ENV], TRACE_RETENTION_DAYS_ENV, 1);
+	const maxBytes =
+		overrides.maxBytes ??
+		parsePositiveRetentionNumber(environment[TRACE_MAX_BYTES_ENV], TRACE_MAX_BYTES_ENV, 1024 * 1024);
+	return {
+		maxAgeDays: requirePositiveRetentionNumber(maxAgeDays, TRACE_RETENTION_DAYS_ENV, 1),
+		maxBytes: requirePositiveRetentionNumber(maxBytes, TRACE_MAX_BYTES_ENV, 1024 * 1024),
+	};
+}
+
+function parsePositiveRetentionNumber(raw: string | undefined, name: string, fallback: number): number {
+	if (raw === undefined || raw.trim().length === 0) {
+		return name === TRACE_RETENTION_DAYS_ENV
+			? DEFAULT_TRACE_RETENTION_POLICY.maxAgeDays
+			: DEFAULT_TRACE_RETENTION_POLICY.maxBytes;
+	}
+	const value = Number(raw);
+	return requirePositiveRetentionNumber(value, name, fallback);
+}
+
+function requirePositiveRetentionNumber(value: number, name: string, minimum: number): number {
+	if (!Number.isSafeInteger(value) || value < minimum) {
+		throw new Error(`${name} must be an integer of at least ${minimum}`);
+	}
+	return value;
 }
 
 export class TraceSchemaVersionError extends Error {
@@ -494,8 +554,13 @@ function reconcileAbandonedRuns(db: DatabaseSync): void {
 
 export class TraceStore {
 	readonly db: DatabaseSync;
+	private readonly retention: TraceRetentionPolicy;
 
-	constructor(readonly path: string) {
+	constructor(
+		readonly path: string,
+		options: { retention?: Partial<TraceRetentionPolicy> } = {},
+	) {
+		this.retention = resolveTraceRetentionPolicy(options.retention);
 		mkdirSync(dirname(path), { recursive: true });
 		this.db = new (databaseSyncConstructor())(path);
 		applyConnectionPragmas(this.db);
@@ -521,6 +586,86 @@ export class TraceStore {
 			this.db.exec("ROLLBACK");
 			throw error;
 		}
+	}
+
+	/**
+	 * Remove whole terminal runs, including all of their dependent rows.
+	 *
+	 * Age pruning runs first. If the allocated database is still above the byte
+	 * limit, the oldest remaining terminal runs are removed until the live page
+	 * set fits or only queued/running runs remain. A live run is never a candidate.
+	 */
+	prune(policy: Partial<TraceRetentionPolicy> = this.retention, now = new Date().toISOString()): TracePruneResult {
+		const resolved = resolveTraceRetentionPolicy(policy);
+		const nowMs = Date.parse(now);
+		if (!Number.isFinite(nowMs)) throw new Error(`trace prune time is invalid: ${now}`);
+		const bytesBefore = traceDatabaseFootprintBytes(this.path);
+		let rowsRemoved = 0;
+		let runsRemoved = 0;
+		const removed = new Set<string>();
+		const cutoff = new Date(Math.max(0, nowMs - resolved.maxAgeDays * MILLISECONDS_PER_DAY)).toISOString();
+
+		const ageCandidates = this.db
+			.prepare(
+				"SELECT run_id FROM runs WHERE status IN ('success','fail') AND ended_at IS NOT NULL AND ended_at < ? ORDER BY ended_at, started_at, run_id",
+			)
+			.all(cutoff) as { run_id: string }[];
+		if (ageCandidates.length > 0) {
+			this.transaction(() => {
+				for (const candidate of ageCandidates) {
+					rowsRemoved += deleteTraceRun(this.db, candidate.run_id);
+					runsRemoved += 1;
+					removed.add(candidate.run_id);
+				}
+			});
+		}
+
+		let pages = tracePageStats(this.db);
+		if (pages.usedBytes > resolved.maxBytes) {
+			const sizeCandidates = this.db
+				.prepare(
+					"SELECT run_id FROM runs WHERE status IN ('success','fail') AND ended_at IS NOT NULL ORDER BY ended_at, started_at, run_id",
+				)
+				.all() as { run_id: string }[];
+			this.transaction(() => {
+				for (const candidate of sizeCandidates) {
+					if (pages.usedBytes <= resolved.maxBytes) break;
+					if (removed.has(candidate.run_id)) continue;
+					rowsRemoved += deleteTraceRun(this.db, candidate.run_id);
+					runsRemoved += 1;
+					removed.add(candidate.run_id);
+					pages = tracePageStats(this.db);
+				}
+			});
+		}
+
+		pages = tracePageStats(this.db);
+		const reclaimableFraction = pages.pageCount === 0 ? 0 : pages.freePages / pages.pageCount;
+		const sizeNeedsReclaim = pages.allocatedBytes > resolved.maxBytes && pages.freePages > 0;
+		const vacuumed =
+			rowsRemoved > 0 && pages.freePages > 0 && (reclaimableFraction >= VACUUM_RECLAIMABLE_FRACTION || sizeNeedsReclaim);
+		if (vacuumed) {
+			this.db.exec("VACUUM");
+			this.db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+		}
+
+		const protectedRuns = Number(
+			(
+				this.db.prepare("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued','running')").get() as {
+					count: number | bigint;
+				}
+			).count,
+		);
+		const bytesAfter = traceDatabaseFootprintBytes(this.path);
+		return {
+			runsRemoved,
+			rowsRemoved,
+			bytesBefore,
+			bytesAfter,
+			bytesRemoved: Math.max(0, bytesBefore - bytesAfter),
+			vacuumed,
+			protectedRuns,
+		};
 	}
 
 	upsertRun(input: DispatchEnqueuedPayload, at = new Date().toISOString()): void {
@@ -859,6 +1004,7 @@ export class TraceStore {
 				startedAt: at,
 			});
 		});
+		this.prune(this.retention, at);
 	}
 
 	/**
@@ -971,7 +1117,51 @@ export class TraceStore {
 				startedAt: input.at,
 			});
 		});
+		this.prune(this.retention, input.at);
 	}
+}
+
+interface TracePageStats {
+	pageCount: number;
+	freePages: number;
+	allocatedBytes: number;
+	usedBytes: number;
+}
+
+function tracePageStats(db: DatabaseSync): TracePageStats {
+	const pageSize = Number((db.prepare("PRAGMA page_size").get() as { page_size: number | bigint }).page_size);
+	const pageCount = Number((db.prepare("PRAGMA page_count").get() as { page_count: number | bigint }).page_count);
+	const freePages = Number(
+		(db.prepare("PRAGMA freelist_count").get() as { freelist_count: number | bigint }).freelist_count,
+	);
+	return {
+		pageCount,
+		freePages,
+		allocatedBytes: pageCount * pageSize,
+		usedBytes: Math.max(0, pageCount - freePages) * pageSize,
+	};
+}
+
+function deleteTraceRun(db: DatabaseSync, runId: string): number {
+	let rows = 0;
+	for (const table of ["events", "envelopes", "gate_results", "agent_sessions", "processes", "phases", "runs"]) {
+		const result = db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(runId);
+		rows += Number(result.changes);
+	}
+	return rows;
+}
+
+function traceDatabaseFootprintBytes(path: string): number {
+	let total = 0;
+	for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
+		try {
+			total += statSync(candidate).size;
+		} catch (error) {
+			const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+			if (code !== "ENOENT") throw error;
+		}
+	}
+	return total;
 }
 
 export class TraceReader {

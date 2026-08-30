@@ -47,6 +47,8 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader receives the existing low-motion update behavior. |
 | `CLIO_CODER_INSTANT_SHELL` | on | `0` disables the single-owner Stage 0 interactive shell for immediate rollback. Unset or `1` mounts one terminal/editor owner before service hydration; ACP, headless, ordinary non-TTY, and subcommand paths never mount it. An explicit `CLIO_CODER_INTERACTIVE=1` keeps its force-interactive non-TTY behavior. |
+| `CLIO_CODER_TRACE_RETENTION_DAYS` | 30 | Maximum age in days for terminal rows in the rebuildable SQLite trace mirror. The value is an integer of at least 1 (`src/domains/observability/trace-store.ts`). |
+| `CLIO_CODER_TRACE_MAX_BYTES` | 134217728 | Maximum allocated size for the SQLite trace mirror before the oldest terminal runs are pruned. The value is an integer of at least 1,048,576 (`src/domains/observability/trace-store.ts`). |
 
 ## Directory and install layout
 

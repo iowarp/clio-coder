@@ -4,12 +4,15 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { clioStatePath } from "../core/xdg.js";
 import {
+	DEFAULT_TRACE_RETENTION_POLICY,
+	resolveTraceRetentionPolicy,
 	TRACE_EVENT_POLL_LIMIT,
 	type TraceEventRow,
 	type TracePhaseRow,
 	type TraceProcessRow,
 	TraceReader,
 	type TraceRunRow,
+	TraceStore,
 	traceDatabasePath,
 } from "../domains/observability/trace-store.js";
 
@@ -18,11 +21,15 @@ const HELP = `Usage:
   clio-coder trace phases <runId> [--db PATH]
   clio-coder trace tail <runId> [--follow] [--db PATH]
   clio-coder trace procs <runId> [--db PATH]
+  clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
   clio-coder trace sql <SELECT query> [--db PATH]
   clio-coder trace ui [--db PATH] [--port N]        source checkout only
 
 The viewer ships with the repository, not the npm package, so from an installed
 Clio the subcommands above are the way in. They read the same database.
+Pruning keeps ${DEFAULT_TRACE_RETENTION_POLICY.maxAgeDays} days and at most ${DEFAULT_TRACE_RETENTION_POLICY.maxBytes} bytes by default. Set
+CLIO_CODER_TRACE_RETENTION_DAYS or CLIO_CODER_TRACE_MAX_BYTES to change the automatic
+policy; prune flags override those values for one command.
 `;
 
 interface ParsedTraceArgs {
@@ -34,6 +41,8 @@ interface ParsedTraceArgs {
 	limit: number;
 	port: number;
 	json: boolean;
+	maxAgeDays: number | undefined;
+	maxBytes: number | undefined;
 }
 
 function parseTraceArgs(args: string[]): ParsedTraceArgs {
@@ -44,11 +53,19 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 	let limit = 50;
 	let port = 0;
 	let json = false;
+	let maxAgeDays: number | undefined;
+	let maxBytes: number | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--follow") follow = true;
 		else if (arg === "--json") json = true;
-		else if (arg === "--db" || arg === "--limit" || arg === "--port") {
+		else if (
+			arg === "--db" ||
+			arg === "--limit" ||
+			arg === "--port" ||
+			arg === "--max-age-days" ||
+			arg === "--max-bytes"
+		) {
 			const value = args[index + 1];
 			if (value === undefined) throw new Error(`${arg} requires a value`);
 			index += 1;
@@ -56,20 +73,25 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 				db = resolve(value);
 				dbExplicit = true;
 			} else if (arg === "--limit") limit = parseInteger(value, "--limit", 1, 500);
-			else port = parseInteger(value, "--port", 0, 65_535);
+			else if (arg === "--port") port = parseInteger(value, "--port", 0, 65_535);
+			else if (arg === "--max-age-days") maxAgeDays = parseInteger(value, arg, 1, 36_500);
+			else maxBytes = parseInteger(value, arg, 1024 * 1024, Number.MAX_SAFE_INTEGER);
 		} else if (arg?.startsWith("--db=")) {
 			db = resolve(arg.slice(5));
 			dbExplicit = true;
 		} else if (arg?.startsWith("--limit=")) limit = parseInteger(arg.slice(8), "--limit", 1, 500);
 		else if (arg?.startsWith("--port=")) port = parseInteger(arg.slice(7), "--port", 0, 65_535);
+		else if (arg?.startsWith("--max-age-days=")) maxAgeDays = parseInteger(arg.slice(15), "--max-age-days", 1, 36_500);
+		else if (arg?.startsWith("--max-bytes="))
+			maxBytes = parseInteger(arg.slice(12), "--max-bytes", 1024 * 1024, Number.MAX_SAFE_INTEGER);
 		else if (arg?.startsWith("-")) throw new Error(`unknown trace flag: ${arg}`);
 		else if (arg !== undefined) positional.push(arg);
 	}
-	return { positional, db, dbExplicit, follow, limit, port, json };
+	return { positional, db, dbExplicit, follow, limit, port, json, maxAgeDays, maxBytes };
 }
 
 /** Every subcommand `trace` answers to. Anything else is a usage error. */
-const TRACE_COMMANDS = new Set(["runs", "phases", "tail", "procs", "sql", "ui"]);
+const TRACE_COMMANDS = new Set(["runs", "phases", "tail", "procs", "prune", "sql", "ui"]);
 
 /** The subcommands whose first positional is a run id. */
 const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
@@ -132,6 +154,7 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	// the operator typed is a different claim, so a --db that is not there stays
 	// an error and says which path it means.
 	if (!existsSync(parsed.db)) return missingDatabase(parsed);
+	if (command === "prune") return runTracePrune(parsed);
 
 	let reader: TraceReader;
 	try {
@@ -186,6 +209,42 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 		return 1;
 	} finally {
 		reader.close();
+	}
+}
+
+function runTracePrune(parsed: ParsedTraceArgs): number {
+	let policy: ReturnType<typeof resolveTraceRetentionPolicy>;
+	try {
+		policy = resolveTraceRetentionPolicy({
+			...(parsed.maxAgeDays === undefined ? {} : { maxAgeDays: parsed.maxAgeDays }),
+			...(parsed.maxBytes === undefined ? {} : { maxBytes: parsed.maxBytes }),
+		});
+	} catch (error) {
+		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+	let store: TraceStore;
+	try {
+		store = new TraceStore(parsed.db, { retention: policy });
+	} catch (error) {
+		process.stderr.write(`trace database: ${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+	try {
+		const result = store.prune(policy);
+		if (parsed.json) {
+			process.stdout.write(`${JSON.stringify({ policy, ...result }, null, 2)}\n`);
+		} else {
+			process.stdout.write(
+				`trace prune: removed ${result.runsRemoved.toLocaleString("en-US")} runs and ${result.rowsRemoved.toLocaleString("en-US")} rows; reclaimed ${result.bytesRemoved.toLocaleString("en-US")} bytes; VACUUM ${result.vacuumed ? "ran" : "not needed"}; protected ${result.protectedRuns.toLocaleString("en-US")} live runs\n`,
+			);
+		}
+		return 0;
+	} catch (error) {
+		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	} finally {
+		store.close();
 	}
 }
 

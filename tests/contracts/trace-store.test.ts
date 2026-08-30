@@ -8,6 +8,7 @@ import { after, describe, it } from "node:test";
 import type { DispatchEnqueuedPayload } from "../../src/core/bus-events.js";
 import {
 	createDispatchTraceMirror,
+	resolveTraceRetentionPolicy,
 	TRACE_SCHEMA_VERSION,
 	TraceReader,
 	TraceSchemaVersionError,
@@ -66,6 +67,17 @@ describe("durable trace store", () => {
 		} finally {
 			store.close();
 		}
+	});
+
+	it("resolves operator retention overrides without changing the defaults", () => {
+		deepStrictEqual(resolveTraceRetentionPolicy({}, {}), { maxAgeDays: 30, maxBytes: 128 * 1024 * 1024 });
+		deepStrictEqual(
+			resolveTraceRetentionPolicy(
+				{},
+				{ CLIO_CODER_TRACE_RETENTION_DAYS: "14", CLIO_CODER_TRACE_MAX_BYTES: String(64 * 1024 * 1024) },
+			),
+			{ maxAgeDays: 14, maxBytes: 64 * 1024 * 1024 },
+		);
 	});
 
 	it("refuses readers for unknown schema versions", () => {
@@ -317,6 +329,128 @@ describe("durable trace store", () => {
 			throws(() => reader.select("PRAGMA table_info(runs)"), /SELECT/);
 		} finally {
 			reader.close();
+		}
+	});
+
+	it("prunes terminal history while a run is in flight without removing any row the live run uses", () => {
+		const file = path("prune-live");
+		const store = new TraceStore(file);
+		try {
+			store.upsertRun(run("old-terminal"), "2026-01-01T00:00:00.000Z");
+			store.insertEvent({
+				eventId: "old-event",
+				runId: "old-terminal",
+				phaseId: "old-terminal",
+				type: "log",
+				name: "old",
+				startedAt: "2026-01-01T00:00:01.000Z",
+			});
+			store.db
+				.prepare("UPDATE runs SET status='success', ended_at='2026-01-01T00:00:02.000Z' WHERE run_id='old-terminal'")
+				.run();
+
+			store.upsertRun(run("live-run"), "2026-01-01T00:00:00.000Z");
+			store.db.prepare("UPDATE runs SET status='running' WHERE run_id='live-run'").run();
+			store.db.prepare("UPDATE phases SET status='running' WHERE run_id='live-run'").run();
+			store.insertEvent({
+				eventId: "live-event",
+				runId: "live-run",
+				phaseId: "live-run",
+				type: "log",
+				name: "still writing",
+				startedAt: "2026-01-01T00:00:01.000Z",
+			});
+
+			const result = store.prune({ maxAgeDays: 30, maxBytes: 128 * 1024 * 1024 }, "2026-03-01T00:00:00.000Z");
+			strictEqual(result.runsRemoved, 1);
+			strictEqual(result.rowsRemoved, 3, "the terminal run, phase, and event are removed together");
+			strictEqual(result.protectedRuns, 1);
+			strictEqual(store.db.prepare("SELECT 1 FROM runs WHERE run_id='old-terminal'").get(), undefined);
+			strictEqual(
+				(store.db.prepare("SELECT status FROM runs WHERE run_id='live-run'").get() as { status: string }).status,
+				"running",
+			);
+			strictEqual(
+				(store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE run_id='live-run'").get() as { count: number }).count,
+				1,
+			);
+		} finally {
+			store.close();
+		}
+	});
+
+	it("automatically applies the age policy when a later run finishes", () => {
+		const file = path("automatic-retention");
+		const store = new TraceStore(file, { retention: { maxAgeDays: 30, maxBytes: 128 * 1024 * 1024 } });
+		try {
+			store.upsertRun(run("old-terminal"), "2026-01-01T00:00:00.000Z");
+			store.db
+				.prepare("UPDATE runs SET status='success', ended_at='2026-01-01T00:00:02.000Z' WHERE run_id='old-terminal'")
+				.run();
+			store.recordSessionTurn({
+				kind: "start",
+				runId: "new-turn",
+				agent: "orchestrator",
+				target: "mini",
+				model: "model",
+				runtime: "llamacpp",
+				prompt: "hello",
+				at: "2026-03-01T00:00:00.000Z",
+			});
+			store.recordSessionTurn({
+				kind: "finish",
+				runId: "new-turn",
+				status: "success",
+				error: null,
+				usage: null,
+				at: "2026-03-01T00:00:01.000Z",
+			});
+			strictEqual(store.db.prepare("SELECT 1 FROM runs WHERE run_id='old-terminal'").get(), undefined);
+			strictEqual(
+				(store.db.prepare("SELECT status FROM runs WHERE run_id='new-turn'").get() as { status: string }).status,
+				"success",
+			);
+		} finally {
+			store.close();
+		}
+	});
+
+	it("vacuums after size pruning when deleted pages make reclamation worthwhile", () => {
+		const file = path("prune-size");
+		const store = new TraceStore(file);
+		try {
+			store.upsertRun(run("large-terminal"), "2026-01-01T00:00:00.000Z");
+			const payload = { output: "x".repeat(12 * 1024) };
+			for (let index = 0; index < 160; index += 1) {
+				store.insertEvent({
+					eventId: `large-${index}`,
+					runId: "large-terminal",
+					phaseId: "large-terminal",
+					type: "log",
+					name: `large ${index}`,
+					payload,
+					startedAt: "2026-01-01T00:00:01.000Z",
+				});
+			}
+			store.db
+				.prepare("UPDATE runs SET status='success', ended_at='2026-01-01T00:00:02.000Z' WHERE run_id='large-terminal'")
+				.run();
+			store.upsertRun(run("live-run"), "2026-02-01T00:00:00.000Z");
+			store.db.prepare("UPDATE runs SET status='running' WHERE run_id='live-run'").run();
+
+			const result = store.prune({ maxAgeDays: 36_500, maxBytes: 1024 * 1024 }, "2026-03-01T00:00:00.000Z");
+			strictEqual(result.runsRemoved, 1);
+			strictEqual(result.protectedRuns, 1);
+			strictEqual(result.vacuumed, true);
+			strictEqual(result.rowsRemoved >= 162, true);
+			strictEqual(result.bytesRemoved > 0, true);
+			strictEqual(result.bytesAfter < result.bytesBefore, true);
+			strictEqual(
+				(store.db.prepare("SELECT status FROM runs WHERE run_id='live-run'").get() as { status: string }).status,
+				"running",
+			);
+		} finally {
+			store.close();
 		}
 	});
 

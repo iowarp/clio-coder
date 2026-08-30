@@ -13,6 +13,35 @@
 
 `/view` opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. `Tab` or `Shift+Tab` switches between the artifact list and details. `Left` and `Right` jump to the previous or next non-empty category from either pane; `Up` and `Down` select artifacts in the list or scroll details in the content pane. Category jumps honor the active filter and wrap at the ends. `v` verifies a selected receipt. `o` shows the absolute backing path through the notice channel when the selected artifact has one; pathless artifacts produce a warning notice instead. In the list pane, `Esc` clears a non-empty filter before a second `Esc` closes the viewer.
 
+## Trace retention and state usage
+
+The SQLite trace mirror at `<state-dir>/trace.sqlite` is rebuildable and bounded. By default Clio retains terminal runs for 30 days and limits the allocated database to 128 MiB (134,217,728 bytes), whichever limit is reached first. The policy runs after each dispatch or interactive turn becomes terminal. It deletes a run as one unit across `runs`, `phases`, `events`, `envelopes`, `gate_results`, `agent_sessions`, and `processes`. A `queued` or `running` run is never a candidate, even when its start time is older than the age cutoff or its rows put the store over the byte limit.
+
+Two environment variables configure the automatic policy:
+
+| Variable | Default | Valid values |
+| --- | ---: | --- |
+| `CLIO_CODER_TRACE_RETENTION_DAYS` | `30` | An integer of at least 1. |
+| `CLIO_CODER_TRACE_MAX_BYTES` | `134217728` | An integer of at least 1,048,576. |
+
+An operator can apply the current policy immediately or supply one-command overrides:
+
+```bash
+clio-coder trace prune
+clio-coder trace prune --max-age-days 14 --max-bytes 67108864
+clio-coder trace prune --json
+```
+
+The command reports terminal runs removed, total rows removed across the seven run-owned tables, physical bytes reclaimed from `trace.sqlite` and its WAL sidecars, whether `VACUUM` ran, and how many live runs were protected. Age pruning uses a terminal run's `ended_at`. Size pruning removes the oldest terminal runs until the live database pages fit or no terminal candidate remains.
+
+Deleting SQLite rows creates reusable pages but does not normally reduce the file. Clio runs `VACUUM` when at least 20 percent of allocated pages are reclaimable, or whenever reclaiming deleted pages is necessary to enforce the 128 MiB bound. It then truncates the WAL. Smaller deletions remain available for SQLite to reuse and avoid rewriting the whole database on every completed run.
+
+`clio-coder doctor` includes a `state storage` row with the recursive byte total for the state directory and the largest top-level contributor. For example:
+
+```text
+OK   state storage          96.4 MiB (101,082,624 bytes); largest contributor trace.sqlite at 89.9 MiB (94,248,960 bytes)
+```
+
 ---
 
 ## The Evidence Spine End-to-End
