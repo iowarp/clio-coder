@@ -129,6 +129,45 @@ Deno.test("the observatory summarizes recorded facts without inventing telemetry
 	ok(!/memory|cpu|dependency map/iu.test(html), "the overview must not fabricate system telemetry");
 });
 
+Deno.test("reported terminal usage becomes a legible per-turn record and a visible-record comparison", () => {
+	const usage = { input: 1_024, output: 233, cacheRead: 800, cacheWrite: 17, reasoning: 91 };
+	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
+		timeline: [{
+			id: "turn-1:terminal",
+			kind: "outcome",
+			title: "Turn complete",
+			summary: "Clio finished this turn.",
+			detail: "end_turn",
+			status: "complete",
+			turnId: "turn-1",
+			origin: "live",
+			startedAt: "2026-08-18T12:00:00.000Z",
+			endedAt: "2026-08-18T12:00:01.000Z",
+			sequence: 1,
+			usage,
+			source: "reported-by-clio",
+		}],
+	});
+	const html = render(stateWith(workspace));
+
+	match(html, /Reported token record/u);
+	match(html, /Token fields reported by Clio for this turn/u);
+	match(html, /aria-label="1 turn report"/u);
+	match(html, /aria-label="Run and evidence details"/u);
+	match(html, /Prompt \+ context/u);
+	match(html, /Answer produced/u);
+	match(html, /Context reused/u);
+	match(html, /Context cached/u);
+	match(html, /Model reasoning/u);
+	match(html, /<ul class="token-ledger" aria-label="Token fields across visible terminal records">/u);
+	match(html, /<dl class="token-ledger__fact">/u);
+	match(html, /<code>cacheRead<\/code>/u);
+	match(html, /1,024/u);
+	match(html, /800/u);
+	match(html, /Workbench does not infer a price/u);
+	ok(!html.includes("$"), "per-turn token reporting must not fabricate a cost");
+});
+
 Deno.test("with no project open the rail offers a path field and the canvas explains the boundary", () => {
 	const html = render(stateWith(null));
 	match(html, /Project folder/u);

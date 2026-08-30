@@ -178,6 +178,9 @@ try {
 	const completedOutcome = page.getByRole("heading", { name: "Turn complete", exact: true });
 	await completedOutcome.waitFor();
 	equal(await page.title(), "Clio Workbench");
+	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
+	await page.locator(".token-ledger__row--input").getByText("5", { exact: true }).waitFor();
+	await page.getByText("Workbench does not infer a price.", { exact: false }).waitFor();
 	await completedOutcome.scrollIntoViewIfNeeded();
 	await page.screenshot({ path: new URL("complete.png", artifactDirectory).pathname });
 
@@ -186,6 +189,7 @@ try {
 	await page.getByText("connected", { exact: true }).waitFor();
 	await page.getByRole("heading", { level: 1, name: "atlas-field-study" }).waitFor();
 	await page.getByRole("heading", { name: "Turn complete", exact: true }).waitFor();
+	equal(await page.locator(".turn-usage").count(), 1);
 	equal(await page.locator("#permission-title").count(), 0);
 
 	// Stopping a parked turn is an operator cancellation, not a denial.
@@ -821,6 +825,7 @@ try {
 			scopedFileCreateMoveAndConfirmedDelete: true,
 			approvalTitleFlipped: true,
 			conversationSurvivedReload: true,
+			reportedUsageVisibleAndSurvivedReload: true,
 			stopNeverDeniedTheTool: true,
 			sessionRenamedResumedAndReplayed: true,
 			sessionDeleteConfirmedByWorkbench: true,
