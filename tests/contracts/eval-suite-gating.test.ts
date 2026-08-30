@@ -150,7 +150,7 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 		}
 	});
 
-	it("records a failed task outcome without failing the item", async () => {
+	it("uses a failed task grader as the one final failed outcome without blaming machinery", async () => {
 		const workspace = mkdtempSync(join(tmpdir(), "clio-eval-measure-"));
 		try {
 			const task = quietTask("unsolved", []);
@@ -160,11 +160,19 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 				clioEntry: join(workspace, "unused-entry.js"),
 			});
 
-			// The model did not solve it. The machinery behaved, so the item passes
-			// and the report carries both readings side by side.
+			// The model did not solve it. The final result and both reductions agree,
+			// while machinery remains healthy and the verdict names the grading rule.
 			strictEqual(artifact.results[0]?.metrics["task.solved"], false);
 			strictEqual(artifact.results[0]?.metrics["task.exitCode"], 7);
-			strictEqual(artifact.results[0]?.pass, true);
+			strictEqual(artifact.results[0]?.pass, false);
+			strictEqual(artifact.results[0]?.failureClass, "grader_failed");
+			strictEqual(artifact.results[0]?.verdict?.outcome, "fail");
+			strictEqual(artifact.results[0]?.verdict?.machinery, "ok");
+			strictEqual(artifact.results[0]?.verdict?.reason, "grader_failed");
+			strictEqual(artifact.aggregates?.[0]?.passed, 0);
+			strictEqual(artifact.aggregates?.[0]?.failed, 1);
+			strictEqual(artifact.summary.passed, 0);
+			strictEqual(artifact.summary.failed, 1);
 		} finally {
 			rmSync(workspace, { recursive: true, force: true });
 		}

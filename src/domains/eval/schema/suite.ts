@@ -103,9 +103,9 @@ export const CANONICAL_METRICS = [
 	"stream.messageUpdateCount",
 	"stream.usageDoubleCounted",
 	"stream.segmentUsageMatchesMessages",
-	// The task outcome, measured and never gated: whether the model solved the
-	// workload. Reported beside the invariants above so a report can say "the
-	// model failed and Clio behaved" instead of one number for both.
+	// The task outcome: whether the model solved the workload. Its exit code is
+	// recorded beside the machinery invariants so a failed final result can still
+	// say "the grader failed and Clio behaved" rather than conflating the two.
 	"task.exitCode",
 	"task.solved",
 ] as const;
@@ -183,11 +183,10 @@ export interface EvalRunnerV2 {
 export interface EvalVerifyV2 {
 	commands?: string[];
 	/**
-	 * Commands that measure the task outcome without gating on it. They run in
-	 * the workspace before the gating verifiers and record `task.exitCode` and
-	 * `task.solved`; a nonzero exit is data, never a failure. This is what keeps
-	 * "the model did not solve it" from being reported as "Clio broke", which
-	 * `commands` above cannot express because a failing verifier fails the item.
+	 * Commands that grade the task outcome. They run in the workspace before the
+	 * machinery verifiers and record `task.exitCode` and `task.solved`; a nonzero
+	 * exit fails the final result while the verdict keeps machinery `ok`. This is
+	 * what keeps "the model did not solve it" distinct from "Clio broke".
 	 */
 	measure?: string[];
 	assertions?: EvalMetricAssertion[];
