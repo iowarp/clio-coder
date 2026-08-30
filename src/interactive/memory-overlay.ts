@@ -1,5 +1,6 @@
 import {
 	describeTaskMemoryActivity,
+	formatTaskMemorySpend,
 	type MemoryProposalResult,
 	type MemoryRecord,
 	type TaskMemoryActivityEvent,
@@ -38,6 +39,12 @@ export function formatMemoryStatusLine(status: TaskMemoryOperatorStatus, content
 		theme.fg("muted", `last ${status.lastDecision ?? "none"}`),
 	];
 	if (status.stepInFlight) units.push(theme.fg("reason", "step running"));
+	// Lifetime cost of the background plane, beside the state of the current
+	// session. The tier spent 137,205 tokens over 14 days on the operator's own
+	// machine before any surface said so (#229), and a hit rate is the one figure
+	// that says whether that spend is buying anything.
+	const spend = status.spend === null || status.spend === undefined ? "" : formatTaskMemorySpend(status.spend);
+	if (spend.length > 0) units.push(theme.fg("dim", spend));
 	return fitUnits(theme, "", units, width);
 }
 
@@ -172,6 +179,7 @@ function memorySignature(status: TaskMemoryOperatorStatus, records: ReadonlyArra
 		String(status.size),
 		status.lastDecision ?? "none",
 		status.stepInFlight ? "running" : "idle",
+		`${status.spend?.llmSteps ?? 0}:${status.spend?.injections ?? 0}:${status.spend?.totalTokens ?? 0}`,
 	];
 	for (const record of records) parts.push(`r:${record.id}:${record.approved}:${record.rejectedAt ?? ""}`);
 	for (const entry of bankEntries(status.bank)) {

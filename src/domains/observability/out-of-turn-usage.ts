@@ -51,6 +51,27 @@ export const MAX_OUT_OF_TURN_USAGE_ROWS = 1000;
  */
 const BOUND_CHECK_INTERVAL = 64;
 
+/** Wall-clock facts about one out-of-turn call. */
+export interface OutOfTurnTiming {
+	/** Duration of the model call itself, as the caller measured it. */
+	durationMs: number;
+}
+
+/**
+ * Backend prefill facts for one out-of-turn call, in the shape brief #247
+ * established for assistant entries. A background memory step re-sends a whole
+ * trajectory to a server that has just been serving the chat prefix, so whether
+ * that prefill was cached is the difference between a cheap step and a step
+ * that re-prefills thousands of tokens on the operator's own machine.
+ */
+export interface OutOfTurnPromptCache {
+	promptTokens: number;
+	cachedTokens: number | null;
+	uncachedPrefillTokens: number | null;
+	promptMs: number;
+	source: string;
+}
+
 /** Provider-reported usage for one out-of-turn call. */
 export interface OutOfTurnUsage {
 	input: number;
@@ -76,6 +97,10 @@ export interface OutOfTurnUsageRow {
 	target: string;
 	attributedModelId: string;
 	usage: OutOfTurnUsage;
+	/** Present when the caller measured the call. */
+	timing?: OutOfTurnTiming;
+	/** Present when the serving backend reported prefill facts. */
+	promptCache?: OutOfTurnPromptCache;
 }
 
 export interface OutOfTurnUsageReadResult {
@@ -180,10 +205,13 @@ export function readOutOfTurnUsageRows(stateDir: string): OutOfTurnUsageReadResu
 function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	if (!isRecord(value)) return null;
 	const label = value.label;
-	if (label !== "side-question" && label !== "handoff" && label !== "prewarm") return null;
+	if (label !== "side-question" && label !== "handoff" && label !== "prewarm" && label !== "background-memory")
+		return null;
 	if (typeof value.timestamp !== "string" || value.timestamp.length === 0) return null;
 	if (!isRecord(value.usage)) return null;
 	const usage = value.usage;
+	const timing = asTiming(value.timing);
+	const promptCache = asPromptCache(value.promptCache);
 	return {
 		label,
 		sessionId: typeof value.sessionId === "string" ? value.sessionId : null,
@@ -204,6 +232,26 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 			costUsd: numberOr0(usage.costUsd),
 			costProvenance: asCostProvenance(usage.costProvenance),
 		},
+		...(timing === null ? {} : { timing }),
+		...(promptCache === null ? {} : { promptCache }),
+	};
+}
+
+function asTiming(value: unknown): OutOfTurnTiming | null {
+	if (!isRecord(value)) return null;
+	const durationMs = numberOr0(value.durationMs);
+	return durationMs === 0 ? null : { durationMs };
+}
+
+function asPromptCache(value: unknown): OutOfTurnPromptCache | null {
+	if (!isRecord(value)) return null;
+	if (typeof value.source !== "string" || value.source.length === 0) return null;
+	return {
+		promptTokens: numberOr0(value.promptTokens),
+		cachedTokens: typeof value.cachedTokens === "number" ? value.cachedTokens : null,
+		uncachedPrefillTokens: typeof value.uncachedPrefillTokens === "number" ? value.uncachedPrefillTokens : null,
+		promptMs: numberOr0(value.promptMs),
+		source: value.source,
 	};
 }
 

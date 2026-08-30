@@ -173,7 +173,7 @@ memory:
     everyNTools: 10
     windowSteps: 8
     maxTokens: 400
-    timeoutMs: 180000        # shipped operator default in src/core/defaults.ts; library fallback in task-memory-policy.ts is 20000 ms
+    timeoutMs: 30000         # shipped operator default in src/core/defaults.ts; the library fallback in task-memory-policy.ts is the same value
 
 workers:
   default:
@@ -664,7 +664,7 @@ Generic provider and transport errors are classified by transient retry rules, i
 | `memory.intervention.everyNTools` | `10` | integer ≥ 2 | next turn |
 | `memory.intervention.windowSteps` | `8` | integer ≥ 1 | next turn |
 | `memory.intervention.maxTokens` | `400` | integer ≥ 1 | next turn |
-| `memory.intervention.timeoutMs` | `180000` | integer ≥ 1 | next turn |
+| `memory.intervention.timeoutMs` | `30000` | integer ≥ 1 | next turn |
 
 ### Turn-end watchdog
 

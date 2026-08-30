@@ -37,7 +37,7 @@ describe("contracts/engine text completion", () => {
 			});
 
 			strictEqual(result.text, "<operations>[]</operations>\n<no_intervention/>");
-			deepStrictEqual(Object.keys(result).sort(), ["inputTokens", "outputTokens", "text"]);
+			deepStrictEqual(Object.keys(result).sort(), ["backend", "inputTokens", "outputTokens", "text", "usage"]);
 		} finally {
 			faux.unregister();
 		}

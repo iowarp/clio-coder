@@ -120,7 +120,7 @@ malformed response, or telemetry failure is silent and never blocks a tool.
 - `memory.intervention.everyNTools` (default `10`): Minimum completed-tool interval between background interventions.
 - `memory.intervention.windowSteps` (default `8`): Completed tool-trajectory window analyzed during background evaluation.
 - `memory.intervention.maxTokens` (default `400`): Bounds the rendered memory-bank and reminder context budget; the policy model output cap is a separate fixed `4,000`-token contract in `task-memory-policy.ts`, sized so that a model which reasons anyway still reaches its envelope.
-- `memory.intervention.timeoutMs` (default `180000`): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn; set it above the observed step time for your route or finished work is discarded as a timeout. Step latency on a small local route is long-tailed rather than tightly clustered, so size this off a high percentile and not off a median.
+- `memory.intervention.timeoutMs` (default `30000`): Wall-clock limit for one background memory-policy request. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and your dispatched workers queue against. The default is what a turn boundary can wait for rather than what a long-tailed route eventually answers in: on the reference route below, 23 of 60 steps ran past 30 seconds and 531 of the measured 1,666 seconds were spent beyond that mark. Raise it only if you have measured that your route's slow steps are the ones producing reminders, and read the trade in "Cost and the default decision" first.
 
 ## Trigger semantics
 
@@ -203,6 +203,88 @@ Thus `last` remains `injected` across such continuations until a later
 tool-bearing or explicitly triggered memory step produces a new outcome (e.g.,
 a healthy tool leading to `silent`).
 
+## Cost and the default decision
+
+The LLM tier costs real tokens, real seconds of model time, and a request slot on
+a server that is usually the same machine the operator's own turns run on. Every
+step is therefore accounted for the way a `/btw` side question is: one cost entry
+under the `background-memory` label, which `/cost` shows as its own `memory steps`
+row, and one durable row in `<stateDir>/usage/out-of-turn.jsonl` carrying the
+usage, the call's duration, and the backend's prefill facts, which
+`clio-coder usage report` folds after the process exits. `/memory` shows the
+lifetime figures folded from `steps.jsonl`: steps, tokens, model time, and the
+hit rate.
+
+### The measurement
+
+From one operator's `steps.jsonl`, 274 rows spanning 2026-08-14 to 2026-08-29 on
+a small local background route:
+
+| Figure | Value |
+| --- | --- |
+| Model-tier steps | 60 |
+| Tokens | 137,205 |
+| Model time | 1,666.6 s |
+| Step latency | median 18.7 s, p90 70.2 s, max 102.5 s |
+| Injections produced by the model tier | 6 |
+| Hit rate | 10.0 percent |
+| Cost per injection | 22,868 tokens and 278 s of model time |
+| Model-tier injections in the last 5 days | 0 of 4 steps |
+
+Four further injections in the same window came from the free rules tier, so the
+lifetime total of 10 injections is not the model tier's score. Rules-tier
+injections cost nothing.
+
+### The decision
+
+The default does not change, and it is a deliberate default rather than an
+unexamined one:
+
+- `memory.intervention.enabled` stays `true`. It runs the rules tier, which makes
+  no model calls, spends no tokens, and produced 4 of the 10 injections.
+- The LLM tier stays opt-in through `background.target` and `background.model`,
+  which is already the case: an unset background role never resolves a client.
+  A 10 percent hit rate at 22,868 tokens per injection does not earn a default-on
+  position, and it is not so poor that it earns removal from an operator who has
+  measured their own route and wants it.
+- The step deadline drops from 180 s to 30 s. This is the one behavioral change,
+  and it is a genuine trade: at 30 s, two of the six observed injections, at
+  53.6 s and 57.7 s, would have been cut, while 531 s of the 1,666 s spent would
+  not have been spent at all. The deadline is the bound on what one optional call
+  may hold a shared local server for, not a prediction of when a route answers.
+- A step that would run on the endpoint the chat target is streaming against is
+  skipped with reason `endpoint_busy`, and the skip is recorded. On a single-slot
+  llama.cpp router the alternative is queueing behind the operator's own decoding
+  or evicting the resident model, and neither is a cost an optional call may
+  impose.
+
+### What a background target costs on a shared local server
+
+If `background.target` names the same server as `orchestrator.target`, that
+server's slots are shared. On a llama.cpp router started with `--parallel 1`
+there is exactly one, and the memory step and the operator's turn contend for it.
+
+The consequence is worth stating plainly: a shared endpoint suppresses the model
+tier rather than merely delaying it. A step is started from the `turn_end` hook,
+which fires inside the streaming run at `agent_end`
+(`src/interactive/turn-runtime.ts`), while the chat loop still holds its
+foreground registration on that endpoint; the loop releases the hold afterwards,
+in the `finally` around the run (`src/interactive/chat-loop.ts`). Every boundary
+therefore finds the endpoint busy and records `dropped`/`endpoint_busy`. That is
+the intended trade: an optional call may not take the one slot the operator's own
+turn is using, and it may not make the server swap the resident model out. The
+`/memory` step list and `steps.jsonl` say so on every boundary, so the tier is
+visibly declining rather than quietly idle.
+
+The second mechanism is an `expected cold` stamp, for the case where a step did
+run on the chat endpoint. Its prompt is a trajectory rather than the chat prefix,
+so the next turn's prefill is expected to be cold; `/context` names
+`background_memory` as the reason instead of reporting an unexplained cold
+prefix.
+
+Pointing the background role at a second machine avoids both effects and is the
+arrangement the tier is designed for.
+
 ## Choosing a background model
 
 Memory reads a trajectory and writes a fixed envelope. It does not plan, and it
@@ -257,7 +339,7 @@ memory:
     everyNTools: 10
     windowSteps: 8
     maxTokens: 400
-    timeoutMs: 180000
+    timeoutMs: 30000
 ```
 
 With `background.target` and `background.model` unset, Clio stays in the
@@ -289,12 +371,12 @@ percentile of 79.9, and a 95th of 131.6. Capability is not the constraint;
 latency is, its spread is wide, and the detached step above is what makes the
 tier usable anyway.
 
-Size `timeoutMs` off that tail rather than off the median. The shipped 180000
-captures roughly the whole distribution on this route. A 20000 setting looks
-generous against an 18.6-second median and in practice discarded about half of
-all steps, since the request is aborted on timeout and its work is thrown
-away. A route whose steps mostly record `timeout` is a misconfigured deadline
-before it is a slow model.
+The deadline is a bound on what an optional call may hold that server for, not a
+figure sized to capture the tail. The shipped 30000 sits above the median and
+below the tail deliberately, and a step that exceeds it records `timeout` with
+its work discarded. A route whose steps mostly record `timeout` is a
+misconfigured deadline before it is a slow model, so read the ledger before
+raising it: `/memory` shows the hit rate the raise would be buying.
 
 The target ID is not hard-coded. Any configured orchestrator-eligible local
 target and wire model can fill the background role. Before enabling it, use the
@@ -315,6 +397,25 @@ change the background model's strict output grammar.
 For an immediate kill switch, set `memory.intervention.enabled` to `false` in
 `/settings`. Removing the background target instead returns to rules-only
 operation while leaving deterministic protection active.
+
+## Where what the tier writes ends up
+
+A bank entry lives and dies with its session. When a reminder actually reaches
+the operator, the entries it cited are also proposed into the durable store at
+`<dataDir>/memory/records.json`, unapproved, scoped to the repository the session
+is working in, with provenance naming the session and the source entry. That is
+the one automatic writer of that file; everything else about it is unchanged.
+`/memory` and `clio-coder memory list` show the proposal, and
+`clio-coder memory approve <id>` is still a separate operator action, so nothing
+the background plane produced reaches a system prompt without review. A step with
+no session, or one running outside a canonical repository, proposes nothing:
+global scope broadens applicability to every future session and is not a claim a
+background step may make on the operator's behalf.
+
+Rules-tier reminders are not proposed. Their entries are this middleware's own
+one-line records of a repeated tool failure, and filing each one as a durable
+lesson would fill the review queue with rows nobody asked for. They remain
+promotable by hand from `/memory`.
 
 ## What the LLM tier actually writes
 
@@ -392,11 +493,23 @@ keeps one previous generation as `steps.jsonl.1`. Every exact-schema record has:
 - `silent`, `injected`, `gated`, `timeout`, `malformed`, or `dropped` decision;
 - count of cited entries, input/output/total memory-model tokens, and latency.
 
-`dropped` is the one outcome that ran no step: the boundary triggered while an
-earlier step still held the single in-flight slot. It costs no tokens and no
-latency, its triggers survive to the next free boundary, and it does not replace
-the operator-visible last decision. Counting `dropped` rows against `llm` rows
-over a session is how a starved cadence becomes visible.
+The same steps are also billed. See "Cost and the default decision" for the
+`/cost` row, the durable out-of-turn usage row, and the lifetime figures `/memory`
+folds out of this file.
+
+`dropped` is the one outcome that ran no step. It has two causes, separated by
+the row's reason: `step_in_flight` means the boundary triggered while an earlier
+step still held the single in-flight slot, and `endpoint_busy` means the step
+would have called the endpoint the chat target was streaming against. Both cost
+no tokens and no latency, both leave their triggers pending for the next free
+boundary, and neither replaces the operator-visible last decision. Counting
+`dropped` rows against `llm` rows over a session is how a starved cadence becomes
+visible.
+
+A step that exceeds the deadline records `timeout`, never `silent`: reason
+`deadline` when the policy's own race fired first, and `timed_out` when the
+transport aborted at its deadline. Both are distinct from `client_error`, which
+is a route that refused rather than a route that was slow.
 
 The log contains no task, trajectory, bank, error, or reminder text. File creation,
 rotation, serialization, and injected sinks are all best effort; a read-only

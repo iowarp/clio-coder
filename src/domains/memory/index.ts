@@ -60,6 +60,11 @@ export {
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
 export {
+	type ProposeInjectedTaskMemoryInput,
+	type ProposeInjectedTaskMemoryResult,
+	proposeInjectedTaskMemory,
+} from "./task-bank-promotion.js";
+export {
 	type LegacyTaskMemoryHandoffSnapshot,
 	parseTaskMemoryHandoffSnapshot,
 	type ReviewedTaskMemoryHandoffSnapshot,
@@ -95,8 +100,17 @@ export {
 	type TaskMemoryPolicyInput,
 	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
+	type TaskMemoryStepUsage,
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
+export {
+	emptyTaskMemorySpendSummary,
+	foldTaskMemorySpend,
+	formatTaskMemorySpend,
+	readTaskMemorySpendSummary,
+	type TaskMemorySpendSummary,
+	taskMemoryStepsPath,
+} from "./task-memory-spend.js";
 export {
 	describeTaskMemoryActivity,
 	type TaskMemoryActivityEvent,

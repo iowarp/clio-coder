@@ -65,6 +65,7 @@ export const BusChannels = {
 	ContextWarning: "context.warning",
 	ContextPruned: "context.pruned",
 	ContextRecalled: "context.recalled",
+	MemoryStepCompleted: "memory.stepCompleted",
 	AgentStatusChanged: "agent.status.changed",
 	RunAborted: "run.aborted",
 	BudgetAlert: "budget.alert",
@@ -99,6 +100,18 @@ export interface RuntimeNoticePayload {
 	model: string;
 	message: string;
 	detail?: Record<string, number | string | boolean>;
+}
+
+/**
+ * One completed proactive-memory model step, published on
+ * {@link BusChannels.MemoryStepCompleted}. It carries the endpoint the step
+ * called and nothing about what the step decided: the only consumer is the
+ * turn context, which stamps an expected-cold reason when a step ran between
+ * turns on the endpoint the chat target streams against.
+ */
+export interface MemoryStepCompletedPayload {
+	endpointKey: string;
+	targetId: string;
 }
 
 /** A successful model load or eviction on one residency-managed endpoint. */
@@ -788,6 +801,7 @@ export type BusPayloadMap = {
 	[BusChannels.ContextWarning]: ContextWarningPayload;
 	[BusChannels.ContextPruned]: ContextPrunedPayload;
 	[BusChannels.ContextRecalled]: ContextRecalledPayload;
+	[BusChannels.MemoryStepCompleted]: MemoryStepCompletedPayload;
 	[BusChannels.AgentStatusChanged]: AgentStatusChangedPayload;
 	[BusChannels.RunAborted]: RunAbortedPayload;
 	[BusChannels.BudgetAlert]: BudgetAlertPayload;

@@ -1,5 +1,6 @@
 import type { TaskMemorySnapshot } from "./task-bank.js";
 import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
+import type { TaskMemorySpendSummary } from "./task-memory-spend.js";
 import type {
 	TaskMemoryTelemetryDecision,
 	TaskMemoryTelemetryTier,
@@ -35,6 +36,12 @@ export interface TaskMemoryOperatorStatus {
 	activity: ReadonlyArray<TaskMemoryActivityEvent>;
 	/** True while a detached background memory step is still running. */
 	stepInFlight: boolean;
+	/**
+	 * Lifetime llm-tier spend and hit rate folded from the telemetry ledger. Null
+	 * on a surface that does not read the ledger, which is every surface that
+	 * only needs the live bank.
+	 */
+	spend?: TaskMemorySpendSummary | null;
 }
 
 /**

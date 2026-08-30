@@ -552,7 +552,7 @@ function checkSettingsInventory(): void {
 	// that had diverged from its policy fallback and the two that read as a
 	// bare word rather than a literal.
 	const expectations: ReadonlyArray<readonly [string, string]> = [
-		["memory.intervention.timeoutMs", "`180000`"],
+		["memory.intervention.timeoutMs", "`30000`"],
 		["memory.intervention.everyNTools", "`10`"],
 		["guardrails.turnToolCallBudget", "`60`"],
 		["compaction.threshold", "`0.8`"],

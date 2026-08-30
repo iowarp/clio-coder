@@ -107,35 +107,37 @@ function addResponseModelIdObservation(counts: ResponseModelIdObservationCounts,
 
 /**
  * How the folded calls split between the session's own turns and the rounds
- * that were billed beside it. A `/btw` side question, a `/handoff` round, and a
- * session pre-warm are real spend and belong in the token and cost totals, but
- * none of them is a turn: they never entered the session. `turns` therefore
- * subtracts them from the folded row count, which is exactly what the `/cost`
- * overlay does.
+ * that were billed beside it. A `/btw` side question, a `/handoff` round, a
+ * session pre-warm, and a proactive-memory step are real spend and belong in
+ * the token and cost totals, but none of them is a turn: they never entered
+ * the session. `turns` therefore subtracts them from the folded row count,
+ * which is exactly what the `/cost` overlay does.
  */
 interface CallOrigins {
 	rows: number;
 	sideQuestions: number;
 	handoffs: number;
 	prewarms: number;
+	backgroundMemory: number;
 }
 
 function emptyCallOrigins(): CallOrigins {
-	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0 };
+	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0, backgroundMemory: 0 };
 }
 
 function turnsOf(origins: CallOrigins): number {
-	return origins.rows - origins.sideQuestions - origins.handoffs - origins.prewarms;
+	return origins.rows - origins.sideQuestions - origins.handoffs - origins.prewarms - origins.backgroundMemory;
 }
 
 function hasLabelledCall(origins: CallOrigins): boolean {
-	return origins.sideQuestions > 0 || origins.handoffs > 0 || origins.prewarms > 0;
+	return origins.sideQuestions > 0 || origins.handoffs > 0 || origins.prewarms > 0 || origins.backgroundMemory > 0;
 }
 
 function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
 	origins.rows += 1;
 	if (row.label === "side-question") origins.sideQuestions += 1;
 	else if (row.label === "prewarm") origins.prewarms += 1;
+	else if (row.label === "background-memory") origins.backgroundMemory += 1;
 	else origins.handoffs += 1;
 }
 
@@ -538,6 +540,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							sideQuestions: callOrigins.sideQuestions,
 							handoffs: callOrigins.handoffs,
 							prewarms: callOrigins.prewarms,
+							backgroundMemorySteps: callOrigins.backgroundMemory,
 						}
 					: {}),
 			});
@@ -622,6 +625,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			if (callOrigins.sideQuestions > 0) out(`  side questions in window: ${callOrigins.sideQuestions}`);
 			if (callOrigins.handoffs > 0) out(`  handoffs in window: ${callOrigins.handoffs}`);
 			if (callOrigins.prewarms > 0) out(`  pre-warms in window: ${callOrigins.prewarms}`);
+			if (callOrigins.backgroundMemory > 0) {
+				out(`  background memory steps in window: ${callOrigins.backgroundMemory}`);
+			}
 		}
 		out(`  provider-reported cost in window: $${usageTotals.costUsd.toFixed(4)}`);
 	}

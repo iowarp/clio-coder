@@ -355,6 +355,7 @@ describe("contracts/memory intervention rules tier", () => {
 			reminder: null,
 			inputTokens: 0,
 			outputTokens: 0,
+			usage: null,
 			effects: [],
 		});
 		strictEqual(registration.lastDecision(), "silent");

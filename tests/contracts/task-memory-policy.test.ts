@@ -153,6 +153,7 @@ describe("contracts/task memory prompted policy", () => {
 			reminder: null,
 			inputTokens: 17,
 			outputTokens: 9,
+			usage: null,
 		});
 		const snapshot = bank.snapshot();
 		strictEqual(snapshot.status?.id, "tm-s-3", "status was the first allocating operation");

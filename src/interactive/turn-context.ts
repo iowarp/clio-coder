@@ -12,6 +12,7 @@ import {
 	type ContextPrunedPayload,
 	type ContextRecalledPayload,
 	type ContextWarningPayload,
+	type MemoryStepCompletedPayload,
 	type ResidencyMutationPayload,
 } from "../core/bus-events.js";
 import {
@@ -33,6 +34,7 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import {
 	type ContextWindowDetails,
 	type ContextWindowSource,
+	canonicalEndpointKey,
 	type ProvidersContract,
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
@@ -138,7 +140,14 @@ export type ExpectedColdReason =
 	| "residency"
 	| "thinking_change"
 	| "tool_surface_change"
-	| "prompt_recompiled";
+	| "prompt_recompiled"
+	/**
+	 * A proactive-memory step ran between turns on the endpoint this session
+	 * streams against. Its prompt is a trajectory rather than the chat prefix, so
+	 * on a local server that keeps one prefix cache the next turn re-prefills
+	 * (#229).
+	 */
+	| "background_memory";
 
 export interface TurnContext {
 	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
@@ -306,6 +315,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const baseUrl = typeof model?.baseUrl === "string" ? model.baseUrl : null;
 			if (payload.targetKey !== residencyTargetKey(runtime?.runtimeId ?? "", baseUrl)) return;
 			noteColdReason("residency");
+		}) ?? null,
+		// A memory step on another endpoint disturbs nothing here, so the stamp is
+		// gated on the step having called the very server this session streams to.
+		deps.bus?.on(BusChannels.MemoryStepCompleted, (payload: MemoryStepCompletedPayload) => {
+			const target = state.runtime?.runtimeResolution.target;
+			if (target === undefined) return;
+			if (canonicalEndpointKey(target) !== payload.endpointKey) return;
+			noteColdReason("background_memory");
 		}) ?? null,
 		deps.bus?.on(BusChannels.ContextRecalled, (payload: ContextRecalledPayload) => {
 			middleware.fireCompactionHook("working_set_recall", payload.trigger);
