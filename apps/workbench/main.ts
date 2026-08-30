@@ -64,7 +64,11 @@ const encoder = new TextEncoder();
 const CSP = [
 	"default-src 'self'",
 	"script-src 'self'",
-	"style-src 'self'",
+	// Inline styles are allowed for Mermaid diagrams only: strict Mermaid output
+	// is DOMPurify-sanitized SVG whose theme lives in an embedded stylesheet, and
+	// no code path renders model-authored HTML. Scripts remain same-origin only,
+	// and img-src, font-src, and connect-src still block CSS-driven fetches.
+	"style-src 'self' 'unsafe-inline'",
 	"img-src 'self' data:",
 	"font-src 'self'",
 	"connect-src 'self' ws: wss:",

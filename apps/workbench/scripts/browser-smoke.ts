@@ -449,7 +449,10 @@ try {
 	await page.getByRole("button", { name: "Send" }).click();
 	await page.locator("#permission-title").waitFor();
 	equal(await page.title(), "● Approval needed — Clio Coder");
-	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
+	// The conversation folds the tool and its approval into one activity group
+	// that opens on its own while something needs attention.
+	await page.locator(".activity--warning[open] .activity-row--approval.is-waiting").waitFor();
+	await page.locator(".live-chip--waiting").getByText("Waiting for your approval").waitFor();
 	await page.screenshot({ path: new URL("permission.png", artifactDirectory).pathname });
 	const inProgressDraft = Array.from({ length: 24 }, (_, index) => `Draft line ${index + 1}`).join("\n");
 	await composer.fill(inProgressDraft);
@@ -459,26 +462,55 @@ try {
 		return textarea.scrollTop;
 	});
 	ok(draftScrollTop > 0);
-	// Both the banner and the anchored card offer the answer, so name which one.
+	// Both the banner and the anchored activity row offer the answer, so name which one.
 	equal(await page.getByRole("button", { name: "Allow once" }).count(), 2);
-	await page.locator(".approval-card").getByRole("button", { name: "Allow once" }).click();
-	const completedOutcome = page.getByRole("heading", { name: "Turn complete", exact: true });
+	await page.locator(".activity-row__approval").getByRole("button", { name: "Allow once" }).click();
+	const completedOutcome = page.locator(".turn-outcome__label", { hasText: "Turn complete" });
 	await completedOutcome.waitFor();
 	equal(await page.title(), "Clio Coder");
-	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
+	// The outcome line carries the exact reported token fields; the Observatory compares them.
+	await page.locator(".turn-outcome__fact", { hasText: "tokens 5 in · 8 out" }).waitFor();
 	await page.locator(".token-ledger__row--input").getByText("5", { exact: true }).waitFor();
 	await page.getByText("the GUI does not infer a price.", { exact: false }).waitFor();
+	await page.locator(".live-chip--done").waitFor();
 	equal(await composer.inputValue(), inProgressDraft);
 	ok(await composer.evaluate((element) => (element as HTMLTextAreaElement).scrollTop) > 0);
-	await completedOutcome.scrollIntoViewIfNeeded();
+	// The narrative is Markdown, and the tools it used stay folded behind one summary.
+	await page.locator(".markdown.is-complete").first().waitFor();
+	equal(await page.locator(".activity").count(), 1);
 	await page.screenshot({ path: new URL("complete.png", artifactDirectory).pathname });
+
+	// The Session Timeline keeps the card-by-card record, and switching views
+	// keeps the draft and the scroll positions of both surfaces.
+	const conversationScrollTop = await page.locator(".conversation__scroll").evaluate((region) => {
+		region.scrollTop = 0;
+		return region.scrollTop;
+	});
+	await page.getByRole("button", { name: "Timeline", exact: true }).click();
+	await page.locator(".evidence-timeline").waitFor();
+	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
+	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Turn complete", exact: true }).waitFor();
+	equal(await page.locator(".timeline-card").count(), 7);
+	equal(await composer.inputValue(), inProgressDraft);
+	await page.screenshot({ path: new URL("timeline.png", artifactDirectory).pathname });
+	await page.locator(".conversation__scroll").evaluate((region) => {
+		region.scrollTop = 120;
+	});
+	await page.getByRole("button", { name: "Conversation", exact: true }).click();
+	await page.locator(".chat").waitFor();
+	equal(await page.locator(".conversation__scroll").evaluate((region) => region.scrollTop), conversationScrollTop);
+	equal(await composer.inputValue(), inProgressDraft);
+	await page.getByRole("button", { name: "Timeline", exact: true }).click();
+	equal(await page.locator(".conversation__scroll").evaluate((region) => region.scrollTop), 120);
+	await page.getByRole("button", { name: "Conversation", exact: true }).click();
 
 	// A reload restores the conversation from host-held state.
 	await page.reload({ waitUntil: "networkidle" });
 	await page.getByText("connected", { exact: true }).waitFor();
 	await page.getByRole("heading", { level: 1, name: "atlas-field-study" }).waitFor();
-	await page.getByRole("heading", { name: "Turn complete", exact: true }).waitFor();
-	equal(await page.locator(".turn-usage").count(), 1);
+	await page.locator(".turn-outcome__label", { hasText: "Turn complete" }).waitFor();
+	equal(await page.locator(".turn-outcome__fact", { hasText: "tokens 5 in · 8 out" }).count(), 1);
 	equal(await page.locator("#permission-title").count(), 0);
 
 	// Stopping a parked turn is an operator cancellation, not a denial.
@@ -486,7 +518,7 @@ try {
 	await page.getByRole("button", { name: "Send" }).click();
 	await page.locator("#permission-title").waitFor();
 	await page.getByRole("button", { name: "Stop" }).click();
-	await page.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor();
+	await page.locator(".turn-outcome__label", { hasText: "Turn stopped" }).waitFor();
 	await page.getByText(/Clio Coder was not told no/u).first().waitFor();
 
 	const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
@@ -649,6 +681,12 @@ try {
 		await renamedRow.waitFor();
 
 		await renamedRow.getByRole("button", { name: "Resume" }).click();
+		// The conversation shows the replayed turns as earlier records first.
+		await resumePage.locator(".chat-turn.is-replay").first().waitFor();
+		equal(await resumePage.locator(".chat-turn.is-replay").count(), 2);
+		equal(await resumePage.locator(".chat-request__replay").count(), 2);
+		equal(await resumePage.locator(".chat-turn time").count(), 0, "replay renders without an invented time");
+		await resumePage.getByRole("button", { name: "Timeline", exact: true }).click();
 		await resumePage.getByRole("heading", { name: "Earlier request", exact: true }).first().waitFor();
 		const replayCards = resumePage.locator(".timeline-card--replay");
 		equal(await replayCards.count(), 6);
@@ -697,6 +735,9 @@ try {
 			document.querySelectorAll(".timeline-card:not(.timeline-card--replay)").length >= 3
 		);
 		ok(await resumePage.locator(".timeline-card--replay").count() >= 6);
+		await resumePage.getByRole("button", { name: "Conversation", exact: true }).click();
+		await resumePage.locator(".chat-turn.is-live, .chat-turn.is-settled:not(.is-replay)").first().waitFor();
+		equal(await resumePage.locator(".chat-turn.is-replay").count(), 2);
 		await resumePage.close();
 	} finally {
 		await resumeServer.close();
@@ -1046,13 +1087,13 @@ try {
 			ok(title.startsWith("bash: "), `approval ${call + 1} was titled ${title}`);
 			await loopPage.keyboard.press("Alt+a");
 			await loopPage.waitForFunction(
-				(settled) => document.querySelectorAll(".timeline-card--approval.is-complete").length >= settled,
+				(settled) => document.querySelectorAll(".activity-row--approval.is-complete").length >= settled,
 				call + 1,
 				{ timeout: 10_000 },
 			);
 		}
 		// Every one of those was answered by the keyboard, never by a click.
-		equal(await loopPage.locator(".timeline-card--approval.is-complete").count(), 16);
+		equal(await loopPage.locator(".activity-row--approval.is-complete").count(), 16);
 
 		// Gate: the card is impossible to miss in the state the operator was in.
 		// Scrolled back to the top of a long timeline and with the window blurred.
@@ -1066,7 +1107,7 @@ try {
 		await loopPage.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 		const discoverability = await loopPage.evaluate(() => {
 			const bannerElement = document.querySelector(".approval-banner");
-			const inlineCard = document.querySelector(".approval-card");
+			const inlineCard = document.querySelector(".activity-row__approval");
 			const viewportHeight = globalThis.innerHeight;
 			const bannerRect = bannerElement?.getBoundingClientRect();
 			const inlineRect = inlineCard?.getBoundingClientRect();
@@ -1103,9 +1144,15 @@ try {
 			firstElapsed,
 			{ timeout: 5_000 },
 		);
-		equal(await loopPage.locator(".timeline-card--narrative").count(), 0, "the fixture speaks no prose");
-		ok(await loopPage.locator(".timeline-card--loop").count() > 0);
+		equal(await loopPage.locator(".markdown").count(), 0, "the fixture speaks no prose");
+		ok(await loopPage.locator(".activity-row--loop").count() > 0);
+		await loopPage.locator(".activity-row--loop").first().getByText(/Reported by Clio Coder/u).waitFor();
+		// The same finding is a full card in the Session Timeline.
+		await loopPage.getByRole("button", { name: "Timeline", exact: true }).click();
 		await loopPage.locator(".timeline-card--loop").first().getByText(/Reported by Clio Coder/u).waitFor();
+		equal(await loopPage.locator(".timeline-card--approval.is-complete").count(), 16);
+		await loopPage.getByRole("button", { name: "Conversation", exact: true }).click();
+		await loopPage.locator(".activity-row--loop").first().waitFor();
 
 		// The escalated treatment arrives on its own, without another wire event.
 		await loopPage.locator(".approval-banner--escalated").waitFor({ timeout: 5_000 });
@@ -1163,13 +1210,13 @@ try {
 		await expiryPage.getByRole("button", { name: "Send" }).click();
 		await expiryPage.locator(".approval-banner").waitFor();
 		// Nobody answers. The card must park the turn, not deny the tool.
-		await expiryPage.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor({ timeout: 15_000 });
+		await expiryPage.locator(".turn-outcome__label", { hasText: "Turn stopped" }).waitFor({ timeout: 15_000 });
 		const stoppedSentence =
 			/An approval waited unanswered for the whole budget, so the GUI stopped the turn\. Clio Coder was not told no; send a new prompt to continue\./u;
-		await expiryPage.locator(".evidence-timeline").getByText(stoppedSentence).waitFor();
+		await expiryPage.locator(".turn-outcome__detail").getByText(stoppedSentence).waitFor();
 		// The same sentence reaches a screen reader through the live region.
 		equal(await expiryPage.locator('[aria-live="assertive"]').getByText(stoppedSentence).count(), 1);
-		await expiryPage.locator(".evidence-timeline").getByText(
+		await expiryPage.locator(".activity-row--approval").getByText(
 			/Nobody answered\. The turn was stopped; Clio Coder was not told no\./u,
 		).waitFor();
 		equal(await expiryPage.locator(".approval-banner").count(), 0);
@@ -1218,6 +1265,8 @@ try {
 			scopedFileAndFolderLifecycle: true,
 			approvalTitleFlipped: true,
 			conversationSurvivedReload: true,
+			conversationRendersMarkdownWithFoldedActivity: true,
+			sessionTimelineKeepsDraftAndScrollAcrossViews: true,
 			reportedUsageVisibleAndSurvivedReload: true,
 			stopNeverDeniedTheTool: true,
 			sessionRenamedResumedAndReplayed: true,
@@ -1277,6 +1326,7 @@ try {
 				"dispatch-compact.png",
 				"permission.png",
 				"complete.png",
+				"timeline.png",
 				"compact-project-drawer.png",
 				"compact-evidence-drawer.png",
 				"resumed-session.png",
