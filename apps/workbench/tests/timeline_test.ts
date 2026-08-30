@@ -76,11 +76,21 @@ function tool(
 	};
 }
 
-function terminal(turnId: string, outcome: "completed" | "canceled" | "failed"): TurnEventInput {
+function terminal(
+	turnId: string,
+	outcome: "completed" | "canceled" | "failed",
+	usage?: Readonly<{ input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>,
+): TurnEventInput {
 	return {
 		kind: "turn.terminal",
 		turnId,
-		payload: { outcome, code: `clio-${outcome}`, summary: `Turn ${outcome}.`, source: "reported-by-clio" },
+		payload: {
+			outcome,
+			code: `clio-${outcome}`,
+			summary: `Turn ${outcome}.`,
+			...(usage === undefined ? {} : { usage }),
+			source: "reported-by-clio",
+		},
 	};
 }
 
@@ -135,6 +145,25 @@ Deno.test("a live turn projects one card per entity with stable identifiers", ()
 	equal(state.activeTurn, null);
 	equal(state.ordinal, 5);
 	ok(state.timeline.every((item) => item.origin === "live"));
+});
+
+Deno.test("terminal usage survives the shared projection and restore path without being recomputed", () => {
+	const usage = { input: 1_024, output: 233, cacheRead: 800, cacheWrite: 17, reasoning: 91 };
+	const projected = fold([
+		{ event: started("turn-usage", "live", at(1)), now: at(1) },
+		{ event: terminal("turn-usage", "completed", usage), now: at(2) },
+	]);
+	const terminalItem = projected.timeline.at(-1);
+	equal(terminalItem?.kind, "outcome");
+	deepStrictEqual(terminalItem?.usage, usage);
+
+	const restored = restoreTurnProjection({
+		timeline: projected.timeline,
+		timelineTruncated: projected.timelineTruncated,
+		activeTurn: projected.activeTurn,
+		pendingPermission: projected.pendingPermission,
+	});
+	deepStrictEqual(restored.timeline.at(-1)?.usage, usage);
 });
 
 Deno.test("host and renderer projections of the same stream agree card for card", () => {

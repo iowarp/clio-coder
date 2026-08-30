@@ -406,6 +406,8 @@ export interface WireTimelineItem {
 	readonly startedAt: string | null;
 	readonly endedAt?: string;
 	readonly sequence?: number;
+	/** Exact terminal usage fields reported by Clio; present only on live outcome/failure cards. */
+	readonly usage?: WireUsage;
 	readonly source: WireEventSource;
 }
 
@@ -1268,13 +1270,14 @@ function validateWireTimelineItem(value: unknown, label: string): WireTimelineIt
 		value,
 		label,
 		["id", "kind", "title", "summary", "status", "turnId", "origin", "startedAt", "source"],
-		["detail", "sequence", "endedAt"],
+		["detail", "sequence", "endedAt", "usage"],
 	);
 	const detail = Object.hasOwn(record, "detail") ? expectPresentationText(record.detail, `${label}.detail`) : undefined;
 	const sequence = Object.hasOwn(record, "sequence")
 		? expectInteger(record.sequence, `${label}.sequence`, 1)
 		: undefined;
 	const endedAt = Object.hasOwn(record, "endedAt") ? expectTimestamp(record.endedAt, `${label}.endedAt`) : undefined;
+	const usage = Object.hasOwn(record, "usage") ? validateUsage(record.usage, `${label}.usage`) : undefined;
 	const kind = expectEnum(
 		record.kind,
 		`${label}.kind`,
@@ -1288,6 +1291,9 @@ function validateWireTimelineItem(value: unknown, label: string): WireTimelineIt
 	const origin = expectEnum(record.origin, `${label}.origin`, ["live", "replay"] as const);
 	const startedAt = record.startedAt === null ? null : expectTimestamp(record.startedAt, `${label}.startedAt`);
 	const source = validateEventSource(record.source, `${label}.source`);
+	if (usage !== undefined && kind !== "outcome" && kind !== "failure") {
+		invalid(`${label}.usage is valid only for a terminal outcome or failure`);
+	}
 	if (origin === "replay") {
 		if (startedAt !== null) invalid(`${label}.startedAt must be null for replay history`);
 		if (endedAt !== undefined) invalid(`${label}.endedAt must be omitted for replay history`);
@@ -1313,6 +1319,7 @@ function validateWireTimelineItem(value: unknown, label: string): WireTimelineIt
 		startedAt,
 		...(endedAt === undefined ? {} : { endedAt }),
 		...(sequence === undefined ? {} : { sequence }),
+		...(usage === undefined ? {} : { usage }),
 		source,
 	};
 }

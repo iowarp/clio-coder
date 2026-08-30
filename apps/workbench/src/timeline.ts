@@ -378,6 +378,7 @@ export function applyTurnEvent(state: TurnProjection, event: TurnEventInput, now
 				status: outcomeStatus(event.payload.outcome),
 				...base,
 				endedAt: now,
+				...(event.payload.usage === undefined ? {} : { usage: event.payload.usage }),
 				source: event.payload.source,
 			});
 		}

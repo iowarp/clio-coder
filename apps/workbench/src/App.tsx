@@ -13,6 +13,7 @@ import type {
 	WireTarget,
 	WireTimelineItem,
 	WireTreeNode,
+	WireUsage,
 } from "./protocol.ts";
 import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
 
@@ -225,6 +226,84 @@ function formatTimestamp(value: string): string {
 	return Number.isNaN(timestamp.getTime())
 		? "unavailable"
 		: timestamp.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+}
+
+const USAGE_FIELDS = [
+	{
+		key: "input",
+		label: "Prompt + context",
+		shortLabel: "Input",
+		description: "Text and context supplied to the model for the turn.",
+	},
+	{
+		key: "output",
+		label: "Answer produced",
+		shortLabel: "Output",
+		description: "Text produced by the model for the turn.",
+	},
+	{
+		key: "cacheRead",
+		label: "Context reused",
+		shortLabel: "Cache read",
+		description: "Previously cached context the provider says it reused.",
+	},
+	{
+		key: "cacheWrite",
+		label: "Context cached",
+		shortLabel: "Cache write",
+		description: "Context the provider says it added to a cache.",
+	},
+	{
+		key: "reasoning",
+		label: "Model reasoning",
+		shortLabel: "Reasoning",
+		description: "Reasoning tokens reported separately by the provider.",
+	},
+] as const satisfies ReadonlyArray<{
+	key: keyof WireUsage;
+	label: string;
+	shortLabel: string;
+	description: string;
+}>;
+
+function formatTokenCount(value: number | bigint): string {
+	return value.toLocaleString();
+}
+
+function aggregateVisibleUsage(timeline: readonly WireTimelineItem[]) {
+	const totals: Record<keyof WireUsage, bigint> = {
+		input: 0n,
+		output: 0n,
+		cacheRead: 0n,
+		cacheWrite: 0n,
+		reasoning: 0n,
+	};
+	let reports = 0;
+	for (const item of timeline) {
+		if (item.usage === undefined) continue;
+		reports += 1;
+		for (const field of USAGE_FIELDS) totals[field.key] += BigInt(item.usage[field.key]);
+	}
+	return { reports, totals } as const;
+}
+
+function usageBarWidth(value: bigint, maximum: bigint): string {
+	if (value === 0n || maximum === 0n) return "0%";
+	const tenthsOfPercent = (value * 1_000n) / maximum;
+	return `${Number(tenthsOfPercent) / 10}%`;
+}
+
+function TurnUsageRecord({ usage }: { usage: WireUsage }) {
+	return (
+		<dl className="turn-usage" aria-label="Token fields reported by Clio for this turn">
+			{USAGE_FIELDS.map((field) => (
+				<div key={field.key} title={field.description}>
+					<dt>{field.shortLabel}</dt>
+					<dd>{formatTokenCount(usage[field.key])}</dd>
+				</div>
+			))}
+		</dl>
+	);
 }
 
 function Glyph({ children }: { children: ReactNode }) {
@@ -757,6 +836,7 @@ function TimelineCard({ item, nowMs }: { item: WireTimelineItem; nowMs: number }
 			<h3>{item.title}</h3>
 			<p className="timeline-card__summary">{item.summary}</p>
 			{item.detail && <pre className="timeline-card__detail">{item.detail}</pre>}
+			{item.usage !== undefined && <TurnUsageRecord usage={item.usage} />}
 			<div className="timeline-card__status">
 				<StatusMark
 					tone={item.status === "failed"
@@ -952,6 +1032,12 @@ function EvidenceRail({
 	const toolCount = timeline.filter((item) => item.kind === "tool").length;
 	const outcomeCount = timeline.filter((item) => item.kind === "outcome").length;
 	const attentionCount = timeline.filter((item) => item.status === "failed" || item.status === "canceled").length;
+	const visibleUsage = aggregateVisibleUsage(timeline);
+	const hasTerminalRecord = timeline.some((item) => item.kind === "outcome" || item.kind === "failure");
+	const maximumUsageField = USAGE_FIELDS.reduce(
+		(maximum, field) => visibleUsage.totals[field.key] > maximum ? visibleUsage.totals[field.key] : maximum,
+		0n,
+	);
 	const startedMs = activeTurn === null ? Number.NaN : Date.parse(activeTurn.startedAt);
 	const activeSeconds = Number.isFinite(startedMs) ? Math.max(0, Math.floor((nowMs - startedMs) / 1_000)) : 0;
 	const unavailable = obscured || (isDrawer && !drawerOpen);
@@ -977,7 +1063,7 @@ function EvidenceRail({
 				)}
 			</header>
 
-			<div className="evidence-rail__scroll">
+			<div className="evidence-rail__scroll" tabIndex={0} role="region" aria-label="Run and evidence details">
 				<section className="observer-section" aria-labelledby="observer-now-title">
 					<div className="observer-section__heading">
 						<div>
@@ -1049,6 +1135,61 @@ function EvidenceRail({
 										<dd>{AUTONOMY_LABELS[open.clio.session.autonomy]}</dd>
 									</div>
 								</dl>
+							)}
+					</section>
+				)}
+
+				{open !== null && (
+					<section className="observer-section" aria-labelledby="observer-usage-title">
+						<div className="observer-section__heading">
+							<div>
+								<div className="eyebrow">MODEL WORK</div>
+								<h3 id="observer-usage-title">Reported token record</h3>
+							</div>
+							{visibleUsage.reports > 0 && (
+								<strong
+									className="observer-total"
+									aria-label={`${visibleUsage.reports} turn ${visibleUsage.reports === 1 ? "report" : "reports"}`}
+								>
+									{visibleUsage.reports}
+								</strong>
+							)}
+						</div>
+						{visibleUsage.reports === 0
+							? (
+								<p className="observer-note">
+									{hasTerminalRecord
+										? "Clio ended a visible turn without terminal token fields, so Workbench has no token record to graph."
+										: "Token fields appear here after Clio ends a turn and reports them."}
+								</p>
+							)
+							: (
+								<>
+									<ul className="token-ledger" aria-label="Token fields across visible terminal records">
+										{USAGE_FIELDS.map((field) => {
+											const value = visibleUsage.totals[field.key];
+											return (
+												<li className={`token-ledger__row token-ledger__row--${field.key}`} key={field.key}>
+													<dl className="token-ledger__fact">
+														<dt title={field.description}>
+															<span>{field.label}</span>
+															<code>{field.key}</code>
+														</dt>
+														<dd>{formatTokenCount(value)}</dd>
+													</dl>
+													<span className="token-ledger__track" aria-hidden="true">
+														<span style={{ width: usageBarWidth(value, maximumUsageField) }} />
+													</span>
+												</li>
+											);
+										})}
+									</ul>
+									<p className="observer-method-note">
+										Bars compare field counts across terminal reports in the visible record. Fields stay separate
+										because providers may account for cached or reasoning tokens differently; Workbench does not infer a
+										price.
+									</p>
+								</>
 							)}
 					</section>
 				)}
