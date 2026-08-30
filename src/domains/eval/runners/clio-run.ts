@@ -70,8 +70,11 @@ export async function runClioRunRunner(
 		artifacts: {
 			stdout: result.stdout,
 			stderr: result.stderr,
+			callLedger: JSON.stringify(result.ledgerEntries),
 			...(receipt === null ? {} : { receipt: JSON.stringify(receipt) }),
 		},
+		receipt,
+		ledgerEntries: result.ledgerEntries,
 	};
 }
 

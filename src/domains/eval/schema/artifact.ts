@@ -1,4 +1,7 @@
+import type { EvalScenarioAggregateV1 } from "../metrics/aggregate.js";
 import type { EvalClioProvenance, EvalEnvironmentProvenance } from "../types.js";
+import type { EvalServingConfigurationV1 } from "./serving.js";
+import type { EvalVerdictEnvelopeV1 } from "./verdict.js";
 
 export interface EvalTokenMetricsV4 {
 	input: number;
@@ -45,6 +48,8 @@ export interface EvalArtifactResultV4 extends EvalArtifactAssignmentReference {
 	failureClass: string | null;
 	metrics: Record<string, number | string | boolean | null>;
 	artifacts: Record<string, string | string[] | null>;
+	/** Additive Suite v2 adapter output. Current runners always populate it. */
+	verdict?: EvalVerdictEnvelopeV1;
 }
 
 /** The only current eval artifact format. Routing accepts this version only. */
@@ -62,7 +67,11 @@ export interface EvalArtifactV4 {
 		model: string | null;
 		thinking: string | null;
 	};
+	/** Exact serving facts used to decide whether two eval runs are comparable. */
+	servingConfiguration?: EvalServingConfigurationV1;
 	summary: EvalArtifactSummaryV4;
+	/** Scenario reductions over the versioned per-trial verdicts. */
+	aggregates?: EvalScenarioAggregateV1[];
 	results: EvalArtifactResultV4[];
 }
 

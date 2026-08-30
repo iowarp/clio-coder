@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
+import type { RunReceipt } from "../../dispatch/types.js";
+import type { SessionEntry } from "../../session/entries.js";
+import { createEvalCallLedgerFold } from "../metrics/call-ledger-stream.js";
 import {
 	addFleetLoopObservations,
 	createFleetLoopFold,
@@ -33,6 +36,10 @@ export interface EvalRunnerOutput {
 	wallTimeMs: number;
 	metrics: Record<string, number | string | boolean | null>;
 	artifacts: Record<string, string | string[] | null>;
+	/** Parsed sealed receipt when this runner exposes one. */
+	receipt?: RunReceipt | null;
+	/** Structured per-call facts folded before bounded stdout truncation. */
+	ledgerEntries?: SessionEntry[];
 }
 
 export interface ShellCommandResult {
@@ -46,6 +53,7 @@ export interface ShellCommandResult {
 	/** Wire-stream structural invariants folded live, for the same reason. */
 	streamInvariants: EvalStreamInvariants;
 	fleetLoops: EvalFleetLoopObservation;
+	ledgerEntries: SessionEntry[];
 	stderr: string;
 	wallTimeMs: number;
 	timedOut: boolean;
@@ -75,6 +83,7 @@ export async function runExternalCommandRunner(
 	let usage = UNMEASURED_TOKEN_USAGE;
 	let streamInvariants = EMPTY_STREAM_INVARIANTS;
 	let fleetLoops = EMPTY_FLEET_LOOP_OBSERVATION;
+	const ledgerEntries: SessionEntry[] = [];
 	for (const command of commands) {
 		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
 		stdout = appendLimited(stdout, result.stdout);
@@ -83,6 +92,7 @@ export async function runExternalCommandRunner(
 		usage = addTokenStreamUsage(usage, result.usage);
 		streamInvariants = addStreamInvariants(streamInvariants, result.streamInvariants);
 		fleetLoops = addFleetLoopObservations(fleetLoops, result.fleetLoops);
+		ledgerEntries.push(...result.ledgerEntries);
 		if (result.exitCode !== 0) {
 			return {
 				assignmentId: null,
@@ -99,6 +109,7 @@ export async function runExternalCommandRunner(
 					"verifier.exitCode": result.exitCode,
 				},
 				artifacts: {},
+				ledgerEntries,
 			};
 		}
 	}
@@ -117,6 +128,7 @@ export async function runExternalCommandRunner(
 			"verifier.exitCode": 0,
 		},
 		artifacts: {},
+		ledgerEntries,
 	};
 }
 
@@ -137,6 +149,7 @@ export function runShellCommand(
 		const usageFold = createTokenUsageFold();
 		const streamFold = createStreamInvariantFold();
 		const fleetLoopFold = createFleetLoopFold();
+		const callLedgerFold = createEvalCallLedgerFold();
 		let timedOut = false;
 		let settled = false;
 		const child = spawn(command, {
@@ -155,6 +168,7 @@ export function runShellCommand(
 			usageFold.push(chunk);
 			streamFold.push(chunk);
 			fleetLoopFold.push(chunk);
+			callLedgerFold.push(chunk);
 		});
 		child.stderr.on("data", (chunk: string) => {
 			stderr = appendLimited(stderr, chunk);
@@ -176,6 +190,7 @@ export function runShellCommand(
 				usage: usageFold.usage(),
 				streamInvariants: streamFold.invariants(),
 				fleetLoops: fleetLoopFold.observation(),
+				ledgerEntries: callLedgerFold.entries(),
 				stderr,
 				wallTimeMs: Math.round(performance.now() - started),
 				timedOut,

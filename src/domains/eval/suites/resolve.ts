@@ -3,6 +3,7 @@ import type { EvalSuiteTargetV2, EvalSuiteV2 } from "../schema/suite.js";
 export interface ResolveSuiteOptions {
 	target?: string;
 	model?: string;
+	trials?: number;
 }
 
 export function resolveSuiteForRun(suite: EvalSuiteV2, options: ResolveSuiteOptions): EvalSuiteV2 {
@@ -12,6 +13,7 @@ export function resolveSuiteForRun(suite: EvalSuiteV2, options: ResolveSuiteOpti
 		matrix: {
 			...suite.matrix,
 			targets,
+			...(options.trials === undefined ? {} : { repeats: options.trials }),
 		},
 	};
 }

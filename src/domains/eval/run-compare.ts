@@ -1,7 +1,27 @@
 import { subtractEvalHarnessMetrics } from "./harness-metrics.js";
+import type { EvalMetricSource } from "./schema/verdict.js";
 import type { EvalFailureClass, EvalHarnessMetrics, EvalRunArtifact, EvalRunRecord, EvalSummary } from "./types.js";
 
 export const EVAL_COMPARE_MATCHING_RULE = "taskId+repeatIndex";
+
+export class EvalTrackedMetricSourceMismatchError extends Error {
+	constructor(metric: string, baseline: ReadonlyArray<EvalMetricSource>, candidate: ReadonlyArray<EvalMetricSource>) {
+		super(
+			`tracked metric ${metric} cannot compare estimated and measured values (baseline=${baseline.join(",") || "none"}, candidate=${candidate.join(",") || "none"})`,
+		);
+		this.name = "EvalTrackedMetricSourceMismatchError";
+	}
+}
+
+/** Refuse a delta when exactly one side contains estimated observations. */
+export function assertComparableTrackedMetricSources(
+	metric: string,
+	baseline: ReadonlyArray<EvalMetricSource>,
+	candidate: ReadonlyArray<EvalMetricSource>,
+): void {
+	if (baseline.includes("estimated") === candidate.includes("estimated")) return;
+	throw new EvalTrackedMetricSourceMismatchError(metric, baseline, candidate);
+}
 
 export interface EvalCompareTotals {
 	passed: number;
