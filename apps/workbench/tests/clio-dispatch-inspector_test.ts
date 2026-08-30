@@ -8,7 +8,7 @@ import {
 const FIXTURE = new URL("./dispatch-inspect-child-fixture.ts", import.meta.url).pathname;
 
 Deno.test("the dispatch adapter invokes only fleet status and drops every raw identity", async () => {
-	const root = await Deno.makeTempDir({ prefix: "clio-gui-dispatch-inspect-" });
+	const root = await Deno.makeTempDir({ prefix: "clio-coder-gui-dispatch-inspect-" });
 	try {
 		const inspector = new ClioCliDispatchInspector({
 			executable: Deno.execPath(),

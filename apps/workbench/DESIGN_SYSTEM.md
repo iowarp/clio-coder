@@ -75,6 +75,9 @@ refreshed read-only aggregate, and never masquerade as a project view or a live 
 Configuration-adjacent inventories that support an existing decision, such as offline model capabilities, worker
 profiles, and agent bindings, belong inside the Settings instrument rather than becoming another top-level canvas. Keep
 large inventories locally searchable and scrollable so opening Settings does not enlarge or invalidate the live record.
+Installation recovery follows the same rule. A diagnostic sweep belongs in Settings, is always manually initiated, and
+shows only fixed categories and aggregate severity. Raw doctor findings, endpoint/native identities, and repair controls
+do not enter the renderer; a documented diagnostic side effect such as refreshing fleet eligibility must be stated.
 
 Below 1180 px the Observatory becomes a contained drawer. Below 790 px the Project atlas becomes a contained drawer as
 well. Both drawers must move focus into the panel, contain Tab, close with Escape or the scrim, restore focus to their

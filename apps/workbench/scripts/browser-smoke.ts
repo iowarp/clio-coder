@@ -16,6 +16,7 @@ import type { ClioLauncher } from "../clio-host.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
+import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
@@ -23,6 +24,7 @@ import {
 	catalogInspectionFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	recoveryInspectionFixture,
 	routingInspectionFixture,
 	usageInspectionFixture,
 } from "../tests/fixtures.ts";
@@ -138,10 +140,17 @@ try {
 	await browseDialog.getByText(/home directory cannot be opened/u).waitFor();
 	equal(await browseDialog.getByRole("button", { name: "Open this folder" }).isDisabled(), true);
 	await browseDialog.getByRole("button", { name: "code" }).click();
+	await page.waitForFunction(() =>
+		document.querySelector(".browse__path code")?.textContent?.endsWith("/code") === true
+	);
+	await browseDialog.getByRole("button", { name: "Up one folder" }).click();
+	await browseDialog.getByText(/home directory cannot be opened/u).waitFor();
+	await browseDialog.getByRole("button", { name: "code" }).click();
 	await browseDialog.getByRole("button", { name: "atlas-field-study" }).click();
 	await page.waitForFunction(() =>
 		document.querySelector(".browse__actions button:last-child")?.hasAttribute("disabled") === false
 	);
+	await page.screenshot({ path: new URL("browse-folder.png", artifactDirectory).pathname });
 	await browseDialog.getByRole("button", { name: "Open this folder" }).click();
 
 	await page.getByRole("heading", { level: 1, name: "atlas-field-study" }).waitFor();
@@ -150,7 +159,8 @@ try {
 	// A scoped file lifecycle keeps modal focus contained and restores it.
 	const scratchName = `browser-smoke-${crypto.randomUUID().slice(0, 8)}.tmp`;
 	const movedScratchName = scratchName.replace(".tmp", "-moved.tmp");
-	const fileToolbar = page.locator(".file-toolbar");
+	const filesSection = page.locator(".rail-section--files");
+	const fileToolbar = filesSection.locator(".file-toolbar");
 	const createFileButton = fileToolbar.getByRole("button", { name: "New file" });
 	await createFileButton.click();
 	let operationDialog = page.getByRole("dialog", { name: "Create empty file" });
@@ -162,6 +172,7 @@ try {
 	await createFileName.fill("   ");
 	equal(await createFileName.evaluate((input) => (input as HTMLInputElement).checkValidity()), false);
 	await createFileName.fill(scratchName);
+	await page.screenshot({ path: new URL("file-create.png", artifactDirectory).pathname });
 	await operationDialog.getByRole("button", { name: "Apply in project" }).click();
 	let scratchNode = page.locator(".file-node").filter({ hasText: scratchName });
 	await scratchNode.waitFor();
@@ -170,6 +181,7 @@ try {
 	await fileToolbar.getByRole("button", { name: "Rename" }).click();
 	operationDialog = page.getByRole("dialog", { name: "Rename or move" });
 	await operationDialog.getByLabel("Destination name").fill(movedScratchName);
+	await page.screenshot({ path: new URL("file-move.png", artifactDirectory).pathname });
 	await operationDialog.getByRole("button", { name: "Apply in project" }).click();
 	scratchNode = page.locator(".file-node").filter({ hasText: movedScratchName });
 	await scratchNode.waitFor();
@@ -180,8 +192,28 @@ try {
 	await operationDialog.getByRole("button", { name: "Inspect and prepare" }).click();
 	const deleteDialog = page.getByRole("dialog", { name: "Delete file" });
 	await deleteDialog.getByText(movedScratchName, { exact: true }).waitFor();
+	await page.screenshot({ path: new URL("file-delete.png", artifactDirectory).pathname });
 	await deleteDialog.getByRole("button", { name: "Delete exactly this item" }).click();
 	await scratchNode.waitFor({ state: "detached" });
+
+	const scratchFolderName = `browser-smoke-${crypto.randomUUID().slice(0, 8)}`;
+	await fileToolbar.getByRole("button", { name: "New folder" }).click();
+	operationDialog = page.getByRole("dialog", { name: "Create folder" });
+	await operationDialog.getByLabel("Name", { exact: true }).fill(scratchFolderName);
+	await page.screenshot({ path: new URL("folder-create.png", artifactDirectory).pathname });
+	await operationDialog.getByRole("button", { name: "Apply in project" }).click();
+	const scratchFolderNode = page.locator(".file-node").filter({ hasText: scratchFolderName });
+	await scratchFolderNode.waitFor();
+	await scratchFolderNode.click();
+	await fileToolbar.getByRole("button", { name: "Delete" }).click();
+	operationDialog = page.getByRole("dialog", { name: "Prepare confirmed delete" });
+	await operationDialog.getByRole("button", { name: "Inspect and prepare" }).click();
+	const deleteFolderDialog = page.getByRole("dialog", { name: "Delete empty folder" });
+	equal(await deleteFolderDialog.locator(".delete-confirmation__target code").innerText(), scratchFolderName);
+	await page.screenshot({ path: new URL("folder-delete.png", artifactDirectory).pathname });
+	await deleteFolderDialog.getByRole("button", { name: "Delete exactly this item" }).click();
+	await scratchFolderNode.waitFor({ state: "detached" });
+	await filesSection.getByRole("button", { name: "Refresh project tree" }).click();
 
 	const desktopRailGeometry = await page.locator("#project-rail").evaluate((rail) => ({
 		clientWidth: rail.clientWidth,
@@ -215,7 +247,7 @@ try {
 		})),
 		[],
 	);
-	await page.screenshot({ path: new URL("effective-clio.png", artifactDirectory).pathname, fullPage: true });
+	await page.screenshot({ path: new URL("effective-clio-coder.png", artifactDirectory).pathname, fullPage: true });
 	await effectiveMap.getByRole("button", { name: "Back to notebook" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
@@ -229,6 +261,8 @@ try {
 	const catalogSearch = catalog.getByRole("searchbox", { name: "Filter this collection" });
 	await catalogSearch.fill("no-such-capability");
 	await catalog.getByRole("heading", { name: "No matching resources" }).waitFor();
+	await catalog.getByRole("button", { name: "Clear catalog filter" }).click();
+	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
 	await catalogSearch.fill("citation-ready");
 	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
 	await catalogSearch.fill("");
@@ -238,8 +272,11 @@ try {
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "frontend-design" }).waitFor();
 	equal(await catalog.getByRole("tab", { name: /^Skills/u }).getAttribute("aria-selected"), "true");
+	await page.screenshot({ path: new URL("catalog-skills.png", artifactDirectory).pathname, fullPage: true });
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "experiment-protocol" }).waitFor();
+	equal(await catalog.getByRole("tab", { name: /^Library/u }).getAttribute("aria-selected"), "true");
+	await page.screenshot({ path: new URL("catalog-library.png", artifactDirectory).pathname, fullPage: true });
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "Clio Coder Lab Pack" }).waitFor();
 	await catalog.getByText("Project-scoped package", { exact: true }).waitFor();
@@ -607,6 +644,7 @@ try {
 		await renamedRow.getByRole("button", { name: "Delete" }).click();
 		const deleteSessionDialog = resumePage.getByRole("dialog", { name: "Delete this session" });
 		await deleteSessionDialog.getByText(/Neither the desktop app nor Clio Coder can bring them back/u).waitFor();
+		await resumePage.screenshot({ path: new URL("session-delete.png", artifactDirectory).pathname });
 		await deleteSessionDialog.getByRole("button", { name: "Keep session" }).click();
 		await renamedRow.waitFor();
 
@@ -760,6 +798,9 @@ try {
 		routingInspector: {
 			inspect: () => Promise.resolve(routingInspectionFixture()),
 		} satisfies ClioRoutingInspector,
+		recoveryInspector: {
+			inspect: (_cwd, projectContext) => Promise.resolve({ ...recoveryInspectionFixture(), projectContext }),
+		} satisfies ClioRecoveryInspector,
 		acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 	});
 	let settingsBlockingViolations: Array<{ id: string; impact: string | null | undefined; nodes: unknown[] }> = [];
@@ -779,19 +820,95 @@ try {
 		await settingsPage.getByRole("button", { name: "Settings", exact: true }).click();
 		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio Coder settings" });
 		await settingsDialog.waitFor();
+		await settingsPage.screenshot({ path: new URL("settings-options.png", artifactDirectory).pathname });
+		await settingsDialog.getByRole("button", { name: "Run diagnostics", exact: true }).click();
+		const recoveryRecord = settingsDialog.getByLabel("Clio Coder diagnostic summary");
+		await recoveryRecord.getByText("ATTENTION REQUIRED", { exact: true }).waitFor();
+		await recoveryRecord.getByText("2 reported failures", { exact: true }).waitFor();
+		await recoveryRecord.getByText("Targets & models", { exact: true }).waitFor();
+		await recoveryRecord.getByText("0/2 passed · 1 warn · 1 fail", { exact: true }).waitFor();
+		for (const forbidden of ["/home/", "http://", "private-lab", "ssh-private", "model-secret"]) {
+			equal(await recoveryRecord.getByText(forbidden, { exact: false }).count(), 0);
+		}
+		await settingsPage.screenshot({ path: new URL("settings-recovery.png", artifactDirectory).pathname });
+		await settingsDialog.locator(".recovery-boundary").scrollIntoViewIfNeeded();
+
+		const targetSetting = settingsDialog.getByLabel("Set orchestrator.target");
+		const modelSetting = settingsDialog.getByLabel("Set orchestrator.model");
+		const thinkingSetting = settingsDialog.getByLabel("Set orchestrator.thinkingLevel");
+		const autonomySetting = settingsDialog.getByLabel("Set autonomy");
+		deepEqual(await targetSetting.locator("option").allTextContents(), ["unset", "lmstudio", "offline-lab"]);
+		deepEqual(await modelSetting.locator("option").allTextContents(), [
+			"unset",
+			"qwen3.8-27b",
+			"qwen3.8-4b",
+		]);
+		deepEqual(await thinkingSetting.locator("option").allTextContents(), [
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+			"max",
+		]);
+		deepEqual(await autonomySetting.locator("option").allTextContents(), [
+			"read-only",
+			"suggest",
+			"auto-edit",
+			"full-auto",
+		]);
+		await targetSetting.selectOption("offline-lab");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.target"]')?.value === "offline-lab"
+		);
+		await settingsPage.waitForFunction(() =>
+			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set orchestrator.model"] option')].some(
+				(option) => option.value === "stub-tiny",
+			)
+		);
+		deepEqual(await modelSetting.locator("option").allTextContents(), ["unset", "stub-tiny"]);
+		await targetSetting.selectOption("lmstudio");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.target"]')?.value === "lmstudio"
+		);
+		await settingsPage.waitForFunction(() =>
+			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set orchestrator.model"] option')].some(
+				(option) => option.value === "qwen3.8-27b",
+			)
+		);
+		deepEqual(await modelSetting.locator("option").allTextContents(), ["unset", "qwen3.8-27b", "qwen3.8-4b"]);
+		await thinkingSetting.selectOption("high");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.thinkingLevel"]')?.value === "high"
+		);
+		await autonomySetting.selectOption("suggest");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set autonomy"]')?.value === "suggest"
+		);
+		await autonomySetting.selectOption("auto-edit");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set autonomy"]')?.value === "auto-edit"
+		);
+
 		const offlineRow = settingsDialog.locator(".target-row").filter({ hasText: "offline-lab" });
 		await offlineRow.getByText("not probed").waitFor();
 		await offlineRow.getByRole("button", { name: "Probe offline-lab" }).click();
 		await offlineRow.getByText("unhealthy").waitFor();
 		await offlineRow.getByText(/not-configured/u).waitFor();
-		// The target nobody probed keeps saying so.
-		await settingsDialog.locator(".target-row").filter({ hasText: "lmstudio" }).getByText("not probed").waitFor();
+		const onlineRow = settingsDialog.locator(".target-row").filter({ hasText: "lmstudio" });
+		await onlineRow.getByText("not probed").waitFor();
+		await onlineRow.getByRole("button", { name: "Probe lmstudio" }).click();
+		await onlineRow.getByText("healthy").waitFor();
+		await onlineRow.getByText(/12 ms/u).waitFor();
 
 		// A settings patch round-trips through Clio Coder and never through a local file.
-		await settingsDialog.getByLabel("Set orchestrator.model").selectOption("qwen3.8-4b");
+		await modelSetting.selectOption("qwen3.8-4b");
 		await settingsPage.waitForFunction(() =>
 			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.model"]')?.value === "qwen3.8-4b"
 		);
+		await offlineRow.scrollIntoViewIfNeeded();
+		await settingsPage.screenshot({ path: new URL("settings-targets.png", artifactDirectory).pathname });
 
 		// The deeper routing inventory uses Clio Coder's offline catalog and effective
 		// worker-profile listings; opening it never probes an endpoint.
@@ -803,6 +920,8 @@ try {
 			.getByText("deep-research", { exact: true }).waitFor();
 		await routingInventory.getByText("Missing profile", { exact: true }).waitFor();
 		const routingModelList = routingInventory.locator(".routing-model-list");
+		await routingInventory.getByRole("button", { name: "lmstudio", exact: true }).click();
+		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor();
 		const routingSearch = routingInventory.getByRole("searchbox", { name: "Filter models" });
 		await routingSearch.fill("4b");
 		await routingModelList.getByText("qwen3.8-4b", { exact: true }).waitFor();
@@ -824,7 +943,6 @@ try {
 				nodes: violation.nodes.map((node) => node.target),
 			}));
 		deepEqual(settingsBlockingViolations, []);
-		await settingsPage.screenshot({ path: new URL("settings-targets.png", artifactDirectory).pathname });
 		await settingsDialog.getByRole("button", { name: "Close" }).click();
 
 		// Binding a session first, because autonomy is a per-session override.
@@ -1097,15 +1215,17 @@ try {
 			clioChild: "tests/acp-child-fixture.ts --scenario=permission",
 			directoryBrowserRefusedHome: true,
 			realProjectOpenedByPath: true,
-			scopedFileCreateMoveAndConfirmedDelete: true,
+			scopedFileAndFolderLifecycle: true,
 			approvalTitleFlipped: true,
 			conversationSurvivedReload: true,
 			reportedUsageVisibleAndSurvivedReload: true,
 			stopNeverDeniedTheTool: true,
 			sessionRenamedResumedAndReplayed: true,
-			sessionDeleteConfirmedByGui: true,
+			sessionDeleteRequiresGuiConfirmation: true,
 			unavailableProjectExplainedAndRemovable: true,
-			targetProbedBeforeAnyHealthClaim: true,
+			bothTargetsProbedBeforeAnyHealthClaim: true,
+			recoveryUsesRedactedDoctorAndPathsAdapters: true,
+			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
 			desktopRailsCollapseAndRestoreFocus: true,
@@ -1138,8 +1258,16 @@ try {
 			browserErrors: browserErrors.length,
 			screenshots: [
 				"initial.png",
-				"effective-clio.png",
+				"browse-folder.png",
+				"file-create.png",
+				"file-move.png",
+				"file-delete.png",
+				"folder-create.png",
+				"folder-delete.png",
+				"effective-clio-coder.png",
 				"catalog.png",
+				"catalog-skills.png",
+				"catalog-library.png",
 				"catalog-extensions.png",
 				"catalog-verifiers.png",
 				"catalog-compact.png",
@@ -1151,8 +1279,12 @@ try {
 				"complete.png",
 				"compact-project-drawer.png",
 				"compact-evidence-drawer.png",
+				"resumed-session.png",
 				"recent-project-gone.png",
+				"session-delete.png",
+				"settings-options.png",
 				"settings-targets.png",
+				"settings-recovery.png",
 				"settings-routing.png",
 				"approval-banner.png",
 				"approval-unanswered.png",

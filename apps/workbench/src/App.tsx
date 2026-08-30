@@ -29,6 +29,8 @@ import type {
 	WireEventSource,
 	WirePendingPermission,
 	WireProjectSummary,
+	WireRecoveryInspection,
+	WireRecoverySectionId,
 	WireRoutingInspection,
 	WireRoutingModel,
 	WireSessionSummary,
@@ -72,6 +74,7 @@ export interface WorkbenchActions {
 	inspectUsage(projectId: string): void;
 	inspectRouting(projectId: string): void;
 	inspectDispatch(): void;
+	inspectRecovery(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
 	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
@@ -84,7 +87,7 @@ interface WorkbenchViewProps {
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
-type WorkspaceView = "notebook" | "effective-clio" | "catalog" | "usage" | "dispatch";
+type WorkspaceView = "notebook" | "effective-clio-coder" | "catalog" | "usage" | "dispatch";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -1308,11 +1311,11 @@ const EvidenceRail = memo(function EvidenceRail({
 						<button
 							type="button"
 							className="button button--quiet observer-map-button"
-							aria-pressed={workspaceView === "effective-clio"}
+							aria-pressed={workspaceView === "effective-clio-coder"}
 							onClick={onOpenConfigMap}
 						>
 							<span aria-hidden="true">⌘</span>
-							{workspaceView === "effective-clio" ? "Effective map open" : "Open Effective Clio Coder map"}
+							{workspaceView === "effective-clio-coder" ? "Effective map open" : "Open Effective Clio Coder map"}
 						</button>
 					</section>
 				)}
@@ -1691,7 +1694,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 		return (
 			<section
 				className="effective-map effective-map--empty"
-				aria-labelledby="effective-clio-title"
+				aria-labelledby="effective-clio-coder-title"
 				aria-busy={pending}
 			>
 				<div className="effective-map__empty-instrument" aria-hidden="true">
@@ -1701,7 +1704,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 				</div>
 				<div>
 					<div className="eyebrow">READ-ONLY CLIO CODER INSPECTION</div>
-					<h2 id="effective-clio-title">Build the map behind Clio Coder's behavior</h2>
+					<h2 id="effective-clio-coder-title">Build the map behind Clio Coder's behavior</h2>
 					<p>
 						The Clio Coder desktop app asks Clio Coder which settings, context, rules, hooks, extensions, resources,
 						safety, and memory surfaces are effective for this project. Raw values and paths outside the project stay on
@@ -1752,11 +1755,11 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 	const restartCount = inspection.entries.filter((entry) => entry.reloadClass === "restart").length;
 
 	return (
-		<section className="effective-map" aria-labelledby="effective-clio-title">
+		<section className="effective-map" aria-labelledby="effective-clio-coder-title">
 			<header className="effective-map__masthead">
 				<div>
 					<div className="eyebrow">EFFECTIVE CLIO CODER · REPORTED BY CLIO CODER</div>
-					<h2 id="effective-clio-title">Why Clio Coder behaves this way</h2>
+					<h2 id="effective-clio-coder-title">Why Clio Coder behaves this way</h2>
 					<p>
 						A bounded snapshot of the layers Clio Coder says it loaded, where they came from, and when a change takes
 						effect.
@@ -3269,7 +3272,7 @@ function ConversationCanvas({
 					<div className="eyebrow">
 						{workspaceView === "dispatch"
 							? "INSTALLATION-WIDE"
-							: workspaceView === "effective-clio"
+							: workspaceView === "effective-clio-coder"
 							? "EFFECTIVE CLIO CODER FOR"
 							: workspaceView === "catalog"
 							? "CAPABILITY ATLAS FOR"
@@ -3297,7 +3300,7 @@ function ConversationCanvas({
 					)}
 					{open && (
 						<nav className="conversation__view-switcher" aria-label="Clio Coder views">
-							{(["notebook", "effective-clio", "catalog", "usage", "dispatch"] as const).map((view) => (
+							{(["notebook", "effective-clio-coder", "catalog", "usage", "dispatch"] as const).map((view) => (
 								<button
 									type="button"
 									key={view}
@@ -3307,7 +3310,7 @@ function ConversationCanvas({
 								>
 									{view === "notebook"
 										? "Notebook"
-										: view === "effective-clio"
+										: view === "effective-clio-coder"
 										? "Effective Clio Coder"
 										: view === "catalog"
 										? "Catalog"
@@ -3360,7 +3363,7 @@ function ConversationCanvas({
 				className="conversation__scroll"
 				tabIndex={0}
 				role="region"
-				aria-label={workspaceView === "effective-clio"
+				aria-label={workspaceView === "effective-clio-coder"
 					? "Effective Clio Coder map"
 					: workspaceView === "catalog"
 					? "Clio Coder capability catalog"
@@ -3370,7 +3373,7 @@ function ConversationCanvas({
 					? "Installation-wide dispatch snapshot"
 					: "Conversation history"}
 			>
-				{open !== null && workspaceView === "effective-clio"
+				{open !== null && workspaceView === "effective-clio-coder"
 					? (
 						<EffectiveClioMap
 							inspection={open.configInspection}
@@ -3933,6 +3936,129 @@ export const RoutingInventory = memo(function RoutingInventory({
 	);
 });
 
+const RECOVERY_SECTION_PRESENTATION: Record<
+	WireRecoverySectionId,
+	{ readonly label: string; readonly description: string }
+> = {
+	runtime: { label: "Runtime", description: "Clio Coder, Node, platform, and engine readiness." },
+	storage: { label: "Local layout", description: "The four resolved configuration, data, state, and cache roots." },
+	configuration: { label: "Configuration", description: "Settings validity and credential-store posture." },
+	history: { label: "History stores", description: "State metadata, sessions, and cache telemetry availability." },
+	models: { label: "Targets & models", description: "Configured runtime fingerprints and model availability." },
+	interoperability: { label: "Interoperability", description: "Detected and configured external agent surfaces." },
+	fleet: { label: "Fleet preflight", description: "Configured node eligibility checks for the selected project." },
+	other: { label: "Other checks", description: "Additional checks introduced by this Clio Coder version." },
+};
+
+function RecoveryPanel({ inspection, pending, onInspect }: {
+	inspection: WireRecoveryInspection | null;
+	pending: boolean;
+	onInspect(): void;
+}) {
+	return (
+		<section className="settings__recovery" aria-labelledby="settings-recovery-title">
+			<div className="settings__section-heading">
+				<div>
+					<div className="eyebrow">INSTALLATION · REDACTED DIAGNOSTICS</div>
+					<h3 id="settings-recovery-title">Clio Coder recovery check</h3>
+				</div>
+				<p>Aggregate health from the machine-readable doctor and path interfaces; raw details remain on the host.</p>
+			</div>
+			<div className="recovery-actions">
+				<button type="button" className="button button--quiet" disabled={pending} onClick={onInspect}>
+					{pending ? "Running diagnostics…" : inspection === null ? "Run diagnostics" : "Run diagnostics again"}
+				</button>
+				{pending && <span role="status">Clio Coder is checking the installation. This can take up to one minute.</span>}
+			</div>
+			{inspection === null
+				? (
+					<p className="settings__note">
+						No diagnostic sweep has run in this desktop session. Nothing is inferred from a successful conversation.
+					</p>
+				)
+				: (
+					<div className="recovery-record" aria-label="Clio Coder diagnostic summary">
+						<div className={`recovery-verdict ${inspection.healthy ? "is-healthy" : "is-failed"}`}>
+							<div>
+								<span>{inspection.healthy ? "NO FAILURES" : "ATTENTION REQUIRED"}</span>
+								<strong>
+									{inspection.healthy
+										? inspection.summary.warnings === 0
+											? "All reported checks passed"
+											: `${inspection.summary.warnings} reported warning${inspection.summary.warnings === 1 ? "" : "s"}`
+										: `${inspection.summary.failures} reported failure${inspection.summary.failures === 1 ? "" : "s"}`}
+								</strong>
+							</div>
+							<small>
+								Inspected {formatTimestamp(inspection.inspectedAt)} ·{" "}
+								{inspection.projectContext ? "selected-project context" : "installation context"}
+							</small>
+						</div>
+
+						<dl className="recovery-summary">
+							<div>
+								<dt>Checks</dt>
+								<dd>{inspection.summary.checks}</dd>
+							</div>
+							<div>
+								<dt>Passed</dt>
+								<dd>{inspection.summary.passed}</dd>
+							</div>
+							<div>
+								<dt>Warnings</dt>
+								<dd>{inspection.summary.warnings}</dd>
+							</div>
+							<div>
+								<dt>Failures</dt>
+								<dd>{inspection.summary.failures}</dd>
+							</div>
+						</dl>
+
+						<div className="recovery-versions" aria-label="Diagnostic runtime facts">
+							<span>
+								Clio Coder <code>{inspection.versions.clioCoder ?? "not reported"}</code>
+							</span>
+							<span>
+								Node <code>{inspection.versions.node ?? "not reported"}</code>
+							</span>
+							<span>
+								Platform <code>{inspection.versions.platform ?? "not reported"}</code>
+							</span>
+							<span>
+								Resolved roots <code>{inspection.pathsResolved}/4</code>
+							</span>
+						</div>
+
+						<ul className="recovery-sections">
+							{inspection.sections.map((section) => {
+								const presentation = RECOVERY_SECTION_PRESENTATION[section.id];
+								const tone = section.failures > 0 ? "failed" : section.warnings > 0 ? "warning" : "healthy";
+								return (
+									<li className={`is-${tone}`} key={section.id}>
+										<div>
+											<strong>{presentation.label}</strong>
+											<p>{presentation.description}</p>
+										</div>
+										<span>
+											{section.passed}/{section.checks} passed
+											{section.warnings > 0 ? ` · ${section.warnings} warn` : ""}
+											{section.failures > 0 ? ` · ${section.failures} fail` : ""}
+										</span>
+									</li>
+								);
+							})}
+						</ul>
+					</div>
+				)}
+			<p className="recovery-boundary">
+				Names, native paths, endpoint URLs, session/model/node identifiers, commands, and raw diagnostics never enter
+				the browser. This check passes no <code>--fix</code>{" "}
+				flag and cannot edit settings, though Clio Coder's documented doctor sweep may refresh fleet eligibility facts.
+			</p>
+		</section>
+	);
+}
+
 function SettingsModal({ state, actions, dispatch, onClose }: {
 	state: AppState;
 	actions: WorkbenchActions;
@@ -4017,6 +4143,12 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 				{busy && <p className="settings__note">Settings change between turns. Clio Coder is working right now.</p>}
 
 				<ApprovalNotificationSetting enabled={state.desktopNotifications} onChange={onNotificationsChange} />
+
+				<RecoveryPanel
+					inspection={state.recoveryInspection}
+					pending={state.pendingRecoveryInspect !== null}
+					onInspect={actions.inspectRecovery}
+				/>
 
 				{open !== null && (
 					<section className="settings__targets" aria-labelledby="settings-targets-title">
@@ -4188,8 +4320,9 @@ function DeleteConfirmationModal({
 	onClose(): void;
 	actions: WorkbenchActions;
 }) {
+	const targetLabel = challenge.targetKind === "empty-directory" ? "empty folder" : "file";
 	return (
-		<Modal title={`Delete ${challenge.targetKind}`} eyebrow="ONE-USE CONFIRMATION" onClose={onClose}>
+		<Modal title={`Delete ${targetLabel}`} eyebrow="ONE-USE CONFIRMATION" onClose={onClose}>
 			<div className="delete-confirmation">
 				<div className="delete-confirmation__target">
 					<span>TARGET</span>
@@ -4489,7 +4622,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	}, []);
 
 	const openConfigMap = useCallback((): void => {
-		setWorkspaceView("effective-clio");
+		setWorkspaceView("effective-clio-coder");
 		setEvidenceDrawerOpen(false);
 	}, []);
 

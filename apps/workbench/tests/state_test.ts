@@ -13,6 +13,7 @@ import {
 	clioSnapshotFixture,
 	dispatchInspectionFixture,
 	FIXTURE_PROJECT_ID,
+	recoveryInspectionFixture,
 	routingInspectionFixture,
 	serverEventFixture,
 	usageInspectionFixture,
@@ -328,7 +329,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, and target events land correctly", () => {
+Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, recovery, and target events land correctly", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -431,6 +432,15 @@ Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, 
 	equal(state.dispatchInspection?.scope, "installation");
 	equal(state.dispatchInspection?.running.total, 5);
 	equal(state.pendingDispatchInspect, null);
+
+	state = appReducer(state, { type: "recovery.inspect.submitted", requestId: "request-recovery" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("recovery.state", { inspection: recoveryInspectionFixture() }, { sequence: 11 }),
+	});
+	equal(state.recoveryInspection?.scope, "installation");
+	equal(state.recoveryInspection?.summary.failures, 2);
+	equal(state.pendingRecoveryInspect, null);
 });
 
 Deno.test("a browse listing is held until it is dismissed", () => {
