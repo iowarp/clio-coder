@@ -56,6 +56,8 @@ export interface EvalVerdictEnvelopeV1 {
 	trialIndex: number;
 	outcome: EvalVerdictOutcome;
 	machinery: EvalVerdictMachinery;
+	/** Stable rule/class that made a failed outcome fail; null otherwise. */
+	reason: string | null;
 	trackedMetrics: EvalTrackedMetricsV1;
 	behavioral: null;
 	evidence: EvalVerdictEvidenceV1;
@@ -77,15 +79,28 @@ export function parseEvalVerdictEnvelopeV1(value: unknown, source = "verdict"): 
 		throw new Error(`${source}: infrastructure_failure cannot carry a pass outcome`);
 	}
 	if (record.behavioral !== null) throw new Error(`${source}.behavioral: expected null in verdict v1`);
+	const evidence = parseEvidence(record.evidence, `${source}.evidence`);
+	// Verdict v1 shipped before `reason` was added. Continue reading those
+	// artifacts, but normalize every legacy failure to an explicit reason so a
+	// consumer never has to reverse-engineer the rule from adjacent fields.
+	const reason =
+		record.reason === undefined
+			? legacyVerdictReason(outcome, machinery, evidence)
+			: readNullableNonEmptyString(record, source, "reason");
+	if (outcome === "fail" && reason === null) throw new Error(`${source}.reason: failed outcome requires a reason`);
+	if (outcome !== "fail" && reason !== null) {
+		throw new Error(`${source}.reason: only a failed outcome can carry a reason`);
+	}
 	return {
 		schema: EVAL_VERDICT_SCHEMA_V1,
 		scenarioId,
 		trialIndex,
 		outcome,
 		machinery,
+		reason,
 		trackedMetrics: parseTrackedMetrics(record.trackedMetrics, `${source}.trackedMetrics`),
 		behavioral: null,
-		evidence: parseEvidence(record.evidence, `${source}.evidence`),
+		evidence,
 	};
 }
 
@@ -136,6 +151,17 @@ function parseEvidence(value: unknown, source: string): EvalVerdictEvidenceV1 {
 		terminalReceiptDigest,
 		graderExitCode: graderExitCode as number | null,
 	};
+}
+
+function legacyVerdictReason(
+	outcome: EvalVerdictOutcome,
+	machinery: EvalVerdictMachinery,
+	evidence: EvalVerdictEvidenceV1,
+): string | null {
+	if (outcome !== "fail") return null;
+	if (machinery === "infrastructure_failure") return "infrastructure_failure";
+	if (evidence.graderExitCode !== null && evidence.graderExitCode !== 0) return "grader_failed";
+	return "outcome_failed";
 }
 
 function readSourcedNumber(value: unknown, source: string): EvalSourcedNumber {
@@ -194,6 +220,14 @@ function readNullableString(record: Record<string, unknown>, source: string, fie
 	const value = record[field];
 	if (value === null) return null;
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${source}.${field}: expected string or null`);
+	return value;
+}
+
+function readNullableNonEmptyString(record: Record<string, unknown>, source: string, field: string): string | null {
+	const value = readNullableString(record, source, field);
+	if (value !== null && value.trim().length === 0) {
+		throw new Error(`${source}.${field}: expected non-empty string or null`);
+	}
 	return value;
 }
 

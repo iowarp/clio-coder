@@ -1,8 +1,12 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cp } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
+import { loadEvalSuiteFile } from "../../src/domains/eval/suites/load.js";
+import { resolveSuiteForRun } from "../../src/domains/eval/suites/resolve.js";
+import { runEvalSuiteV2 } from "../../src/domains/eval/suites/run.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 describe("contracts/eval trials", { concurrency: false }, () => {
@@ -79,6 +83,87 @@ describe("contracts/eval trials", { concurrency: false }, () => {
 			strictEqual(new Set(workspaces).size, 3);
 			strictEqual(new Set(artifact.results.map((result) => result.artifacts.workspace)).size, 3);
 			strictEqual(existsSync(join(source, "trial-marker.txt")), false);
+		} finally {
+			scratch.cleanup();
+		}
+	});
+
+	it("prepares one trial at a time and cleans workspace and state directories when copy trial 2 throws", async () => {
+		const scratch = makeScratchHome("clio-eval-trial-cleanup-");
+		try {
+			const source = join(scratch.dir, "source");
+			const tempRoot = join(scratch.dir, "temp");
+			const runnerLog = join(scratch.dir, "completed-trials.txt");
+			mkdirSync(source, { recursive: true });
+			mkdirSync(tempRoot, { recursive: true });
+			writeFileSync(join(source, "fixture.txt"), "original\n", "utf8");
+			const runnerScript = `require('node:fs').appendFileSync(${JSON.stringify(runnerLog)},'ran\\n')`;
+			const suitePath = join(scratch.dir, "copy-failure.yaml");
+			writeFileSync(
+				suitePath,
+				[
+					"version: 2",
+					"suite:",
+					"  id: copy-failure-contract",
+					"  title: Copy failure contract",
+					"  visibility: local",
+					"matrix:",
+					"  targets:",
+					"    - id: local",
+					"  repeats: 1",
+					"tasks:",
+					"  - id: copy-failure",
+					"    tags: [contract]",
+					"    workspace:",
+					"      kind: local",
+					"      path: source",
+					"    runner:",
+					"      kind: external-command",
+					"      commands:",
+					`        - ${JSON.stringify(`${process.execPath} -e ${JSON.stringify(runnerScript)}`)}`,
+					"    verify: {}",
+					"    metrics:",
+					"      collect: []",
+					"    timeoutMs: 10000",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const loaded = await loadEvalSuiteFile(suitePath);
+			let copyAttempt = 0;
+			const artifact = await runEvalSuiteV2(
+				{ ...loaded, suite: resolveSuiteForRun(loaded.suite, { trials: 3 }) },
+				{
+					clioEntry: join(scratch.dir, "unused-entry.js"),
+					freshWorkspaces: true,
+					tempCopy: {
+						tempRoot,
+						copy: async (copySource, destination, options) => {
+							copyAttempt += 1;
+							if (copyAttempt === 2) {
+								strictEqual(readFileSync(runnerLog, "utf8"), "ran\n", "trial 1 ran before trial 2 copied");
+								throw Object.assign(new Error("fake copy ENOSPC"), { code: "ENOSPC" });
+							}
+							await cp(copySource, destination, options);
+						},
+					},
+				},
+			);
+
+			strictEqual(copyAttempt, 3);
+			deepStrictEqual(
+				artifact.results.map((result) => result.pass),
+				[true, false, true],
+			);
+			strictEqual(artifact.results[1]?.failureClass, "command_error");
+			strictEqual(artifact.summary.failed, 1);
+			strictEqual(readFileSync(runnerLog, "utf8"), "ran\nran\n");
+			deepStrictEqual(
+				readdirSync(tempRoot).filter(
+					(entry) => entry.startsWith("clio-eval-workspace-") || entry.startsWith("clio-eval-state-"),
+				),
+				[],
+			);
 		} finally {
 			scratch.cleanup();
 		}

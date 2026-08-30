@@ -8,7 +8,7 @@ import {
 
 type AdaptableSuiteResult = Pick<
 	EvalArtifactResultV4,
-	"assignmentId" | "terminalReceiptDigest" | "taskId" | "repeatIndex" | "pass" | "metrics"
+	"assignmentId" | "terminalReceiptDigest" | "taskId" | "repeatIndex" | "pass" | "failureClass" | "metrics"
 >;
 
 /** Adapt one Suite v2 matrix result into the versioned verdict carried by Artifact v4. */
@@ -16,16 +16,11 @@ export function adaptSuiteV2ResultToVerdictV1(
 	result: AdaptableSuiteResult,
 	trackedMetrics: EvalTrackedMetricsV1,
 ): EvalVerdictEnvelopeV1 {
-	const machinery = result.pass ? "ok" : "infrastructure_failure";
-	const measuredOutcome = result.metrics["task.solved"];
-	const outcome =
-		machinery === "infrastructure_failure"
-			? "fail"
-			: measuredOutcome === true
-				? "pass"
-				: measuredOutcome === false
-					? "fail"
-					: "unmeasured";
+	// The suite runner owns the one final pass decision. In particular, a
+	// declared grader failure changes `pass` without pretending the runner or
+	// its invariants broke; every other failed result is a machinery failure.
+	const machinery = result.pass || result.failureClass === "grader_failed" ? "ok" : "infrastructure_failure";
+	const outcome = result.pass ? "pass" : "fail";
 	const graderExitCode = result.metrics["task.exitCode"];
 	return parseEvalVerdictEnvelopeV1({
 		schema: EVAL_VERDICT_SCHEMA_V1,
@@ -33,6 +28,7 @@ export function adaptSuiteV2ResultToVerdictV1(
 		trialIndex: result.repeatIndex,
 		outcome,
 		machinery,
+		reason: result.pass ? null : (result.failureClass ?? "result_failed"),
 		trackedMetrics,
 		behavioral: null,
 		evidence: {

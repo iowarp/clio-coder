@@ -38,7 +38,7 @@ import { forbiddenPathHits } from "../verifiers/file-exists.js";
 import { collectPatchMetrics } from "../verifiers/patch.js";
 import { prepareGitWorkspace } from "../workspaces/git.js";
 import { type PreparedEvalWorkspace, prepareLocalWorkspace } from "../workspaces/local.js";
-import { prepareTempCopyWorkspace } from "../workspaces/temp-copy.js";
+import { type PrepareTempCopyWorkspaceOptions, prepareTempCopyWorkspace } from "../workspaces/temp-copy.js";
 import { expandEvalMatrix } from "./matrix.js";
 import { artifactMatrixIdentity } from "./resolve.js";
 
@@ -54,6 +54,8 @@ export interface RunEvalSuiteV2Options {
 	now?: () => Date;
 	/** Convert local workspaces into isolated copies for explicit trial runs. */
 	freshWorkspaces?: boolean;
+	/** Dependency/root seam for deterministic workspace lifecycle contracts. */
+	tempCopy?: PrepareTempCopyWorkspaceOptions;
 }
 
 interface CompletedMatrixItem {
@@ -87,6 +89,7 @@ export async function runEvalSuiteV2(
 			item.repeatIndex,
 			options.clioEntry,
 			options.freshWorkspaces === true,
+			options.tempCopy,
 		);
 		spentUsd += resultCostUsd(completed.result);
 		results.push(completed.result);
@@ -138,6 +141,7 @@ async function runMatrixItem(
 	repeatIndex: number,
 	clioEntry: string,
 	freshWorkspace: boolean,
+	tempCopy: PrepareTempCopyWorkspaceOptions | undefined,
 ): Promise<CompletedMatrixItem> {
 	let workspace: PreparedEvalWorkspace | null = null;
 	let receipt: EvalRunnerOutput["receipt"] = null;
@@ -146,9 +150,9 @@ async function runMatrixItem(
 	// state directory would mix sibling processes' runs and yesterday's sessions
 	// into the reading; pinning it here also means an item leaves nothing behind
 	// in the operator's own state.
-	const stateDir = await mkdtemp(resolve(tmpdir(), "clio-eval-state-"));
+	const stateDir = await mkdtemp(resolve(tempCopy?.tempRoot ?? tmpdir(), "clio-eval-state-"));
 	try {
-		workspace = await prepareWorkspace(loaded.baseDir, task, freshWorkspace);
+		workspace = await prepareWorkspace(loaded.baseDir, task, freshWorkspace, tempCopy);
 		const setup = await runCommandVerifiers(task.workspace.setup ?? [], workspace.dir, task.timeoutMs);
 		// A fixture that never came up measured nothing, so the item fails as a
 		// harness failure rather than reporting an invariant it never observed.
@@ -183,8 +187,15 @@ async function runMatrixItem(
 			...(await measureTaskOutcome(task, workspace.dir)),
 		};
 		const verifier = await runVerifiers(task, workspace.dir, metrics);
-		const pass = runner.exitCode === 0 && verifier.pass;
-		const failureClass = pass ? null : runner.exitCode !== 0 ? "runner_failed" : verifier.failureClass;
+		const graderFailed = metrics["task.solved"] === false;
+		const pass = runner.exitCode === 0 && verifier.pass && !graderFailed;
+		const failureClass = pass
+			? null
+			: runner.exitCode !== 0
+				? "runner_failed"
+				: !verifier.pass
+					? verifier.failureClass
+					: "grader_failed";
 		metrics["verifier.exitCode"] = verifier.exitCode;
 		metrics["result.pass"] = pass;
 		metrics["result.failureClass"] = failureClass;
@@ -253,8 +264,12 @@ async function runMatrixItem(
 			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
 		};
 	} finally {
-		await workspace?.cleanup();
-		await rm(stateDir, { recursive: true, force: true });
+		try {
+			await workspace?.cleanup();
+		} finally {
+			// A workspace cleanup error must not strand the suite-owned journal.
+			await rm(stateDir, { recursive: true, force: true });
+		}
 	}
 }
 
@@ -274,13 +289,14 @@ async function prepareWorkspace(
 	baseDir: string,
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	freshWorkspace: boolean,
+	tempCopy: PrepareTempCopyWorkspaceOptions | undefined,
 ): Promise<PreparedEvalWorkspace> {
 	if (task.workspace.kind === "local" && freshWorkspace) {
-		return prepareTempCopyWorkspace(baseDir, { ...task.workspace, kind: "temp-copy" });
+		return prepareTempCopyWorkspace(baseDir, { ...task.workspace, kind: "temp-copy" }, tempCopy);
 	}
 	if (task.workspace.kind === "local") return prepareLocalWorkspace(baseDir, task.workspace);
 	if (task.workspace.kind === "git") return prepareGitWorkspace(task.workspace);
-	return prepareTempCopyWorkspace(baseDir, task.workspace);
+	return prepareTempCopyWorkspace(baseDir, task.workspace, tempCopy);
 }
 
 async function runTaskRunner(
@@ -298,10 +314,10 @@ async function runTaskRunner(
 }
 
 /**
- * Run the task-outcome commands and report what they found. A nonzero exit is
- * recorded, never raised: whether the model solved the workload is a
- * measurement, and only the machinery's behavior is a gate. A task that
- * declares no measure commands reports nothing rather than a passing zero.
+ * Run the task-outcome grader and report what it found. A nonzero exit is
+ * recorded rather than thrown so the verdict can report a failed outcome with
+ * healthy machinery. A task that declares no measure commands reports nothing
+ * and leaves its final pass decision to the runner and gating verifiers.
  */
 async function measureTaskOutcome(
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],

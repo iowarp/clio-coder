@@ -20,6 +20,7 @@ function artifact(evalId: string, serverBuild: string, modelCalls: number, sourc
 		trialIndex: 0,
 		outcome: "pass",
 		machinery: "ok",
+		reason: null,
 		trackedMetrics,
 		behavioral: null,
 		evidence: { assignmentId: null, terminalReceiptDigest: null, graderExitCode: 0 },

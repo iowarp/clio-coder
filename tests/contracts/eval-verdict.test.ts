@@ -4,6 +4,7 @@ import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import { aggregateEvalVerdicts } from "../../src/domains/eval/metrics/aggregate.js";
 import { createEvalCallLedgerFold } from "../../src/domains/eval/metrics/call-ledger-stream.js";
 import { buildEvalTrackedMetrics, emptyEvalTrackedMetrics } from "../../src/domains/eval/metrics/tracked.js";
+import { adaptSuiteV2ResultToVerdictV1 } from "../../src/domains/eval/schema/adapter.js";
 import {
 	EVAL_VERDICT_SCHEMA_V1,
 	type EvalTrackedMetricsV1,
@@ -25,6 +26,7 @@ function envelope(
 		trialIndex,
 		outcome,
 		machinery,
+		reason: outcome === "fail" ? (machinery === "ok" ? "grader_failed" : "infrastructure_failure") : null,
 		trackedMetrics,
 		behavioral: null,
 		evidence: { assignmentId: null, terminalReceiptDigest: null, graderExitCode: null },
@@ -111,6 +113,37 @@ describe("contracts/eval verdict v1", () => {
 		strictEqual(parsed.ok, false);
 		if (parsed.ok) throw new Error("expected malformed verdict to fail");
 		strictEqual(parsed.error.includes("cannot carry a pass"), true);
+	});
+
+	it("takes the normalized grader result as its outcome and names a failed rule", () => {
+		const fixture = {
+			assignmentId: null,
+			terminalReceiptDigest: null,
+			taskId: "grader-fixture",
+			repeatIndex: 0,
+			target: { id: "local", model: null, thinking: null },
+			metrics: { "task.solved": true, "task.exitCode": 0 },
+			artifacts: {},
+		};
+		const passed = adaptSuiteV2ResultToVerdictV1(
+			{ ...fixture, pass: true, failureClass: null },
+			emptyEvalTrackedMetrics(),
+		);
+		strictEqual(passed.outcome, "pass");
+		strictEqual(passed.reason, null);
+
+		const failed = adaptSuiteV2ResultToVerdictV1(
+			{
+				...fixture,
+				pass: false,
+				failureClass: "grader_failed",
+				metrics: { "task.solved": false, "task.exitCode": 7 },
+			},
+			emptyEvalTrackedMetrics(),
+		);
+		strictEqual(failed.outcome, "fail");
+		strictEqual(failed.machinery, "ok");
+		strictEqual(failed.reason, "grader_failed");
 	});
 
 	it("builds every tracked metric from three structured calls and the receipt", () => {

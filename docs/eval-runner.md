@@ -106,7 +106,7 @@ tasks:
 | `matrix` | `targets[]`, `repeats` | Matrix of execution targets (specifying model and thinking flags) and the repetition count. |
 | `workspace` | `kind`, `path`, `url`, `commit`, `checkout`, `excludes` | Workspace strategy: `local` (run in-place), `git` (clone from URL), or `temp-copy` (isolated copy of a directory). |
 | `runner` | `kind`, `prompt`, `command`, `commands`, `args`, `timeoutMs` | Runner type: `clio-run` (starts Clio agent loop), `context-index` (runs indexer), `context-init` (initializes context), `external-command` (spawns subprocess). |
-| `verify` | `commands`, `assertions`, `forbidPaths` | Validation steps: shell commands, metric assertions (e.g. `op: lt` for max token counts), and files/directories that must not be created or modified (`forbidPaths`). |
+| `verify` | `commands`, `measure`, `assertions`, `forbidPaths` | Validation steps: shell commands, a task-outcome grader, metric assertions (e.g. `op: lt` for max token counts), and files/directories that must not be created or modified (`forbidPaths`). |
 | `metrics` | `collect` | List of metric names to compile for the evaluation runs. |
 
 ---
@@ -114,7 +114,7 @@ tasks:
 ## Workspace Kinds
 * **`local`**: Executes the task directly in the specified local path.
 * **`git`**: Clones the repository from `url`, checks out the specified `commit` or `checkout` ref, and runs there.
-* **`temp-copy`**: Copies the directory at `path` to a temporary workspace location before running. This prevents side-effects from polluting other task runs.
+* **`temp-copy`**: Copies the directory at `path` to a temporary workspace location immediately before the matrix item runs and removes it afterward. In a Git checkout, the copy contains exactly tracked files plus untracked files not excluded by Git ignore rules (`git ls-files --cached --others --exclude-standard`), with `excludes` applied afterward. Outside Git it retains the recursive directory copy. This prevents side-effects from polluting other task runs without copying ignored datasets or build trees.
 
 ---
 
@@ -214,6 +214,7 @@ Every result carries a strictly parsed `clio.eval.verdict.v1` envelope (`src/dom
   "trialIndex": 0,
   "outcome": "pass",
   "machinery": "ok",
+  "reason": null,
   "trackedMetrics": { "...": "see below" },
   "behavioral": null,
   "evidence": {
@@ -224,7 +225,7 @@ Every result carries a strictly parsed `clio.eval.verdict.v1` envelope (`src/dom
 }
 ```
 
-The envelope is fail-closed by construction. `outcome` is one of `pass`, `fail`, or `unmeasured`; `machinery` is `ok` or `infrastructure_failure`; `behavioral` must be exactly `null`, so a rubric or model-judge score has nowhere to hide until one is designed; and an envelope claiming both `infrastructure_failure` and `pass` is rejected at parse rather than recorded. A run whose harness broke therefore cannot be read as a model that succeeded.
+The envelope is fail-closed by construction. `outcome` is one of `pass`, `fail`, or `unmeasured`; `machinery` is `ok` or `infrastructure_failure`; `reason` is null for a pass or unmeasured outcome and names the rule or failure class for every failure; `behavioral` must be exactly `null`, so a rubric or model-judge score has nowhere to hide until one is designed; and an envelope claiming both `infrastructure_failure` and `pass` is rejected at parse rather than recorded. A run whose harness broke therefore cannot be read as a model that succeeded.
 
 ### `trackedMetrics`
 
@@ -252,7 +253,7 @@ A dispatched worker's receipt reports `sessionId: null` and writes no session ar
 
 ### `--trials N`
 
-`--trials N` overrides the suite's `matrix.repeats` and asks for an isolated workspace per matrix item. A `local` workspace is converted to a temporary copy for the run, so an explicit trial run never mutates the directory it was pointed at; `git` and `temp-copy` workspaces already produce a distinct preparation directory per item. The trial index rides through to each verdict's `trialIndex`.
+`--trials N` overrides the suite's `matrix.repeats` and asks for an isolated workspace per matrix item. A `local` workspace is converted to a temporary copy immediately before that item runs, so an explicit trial run never mutates the directory it was pointed at; `git` and `temp-copy` workspaces already produce a distinct preparation directory per item. Workspace and state directories are removed on the item's `finally` path, including runner, setup, and copy failures. The trial index rides through to each verdict's `trialIndex`.
 
 ### Serving-configuration provenance and drift refusal
 
@@ -272,5 +273,4 @@ candidate serving: ...
 
 ## Task Outcome Measurement (`verify.measure`)
 
-Task outcome commands declared under `verify.measure` evaluate whether the model solved the workload and record metrics (`task.solved`, `task.exitCode`). A non-zero exit from `verify.measure` is recorded as data and **never fails the evaluation item**. Task solution outcome is a measurement, while only machinery invariant behavior operates as a gate.
-
+Task outcome commands declared under `verify.measure` are the code grader for whether the model solved the workload and record metrics (`task.solved`, `task.exitCode`). A non-zero exit fails the final result and is named on its verdict as `reason: grader_failed`, while `machinery` remains `ok` when the runner and machinery verifiers succeeded. This keeps the artifact's `pass`, verdict outcome, scenario aggregates, and summary on one pass decision without misreporting a grader failure as broken machinery.
