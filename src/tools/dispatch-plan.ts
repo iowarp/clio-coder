@@ -236,15 +236,19 @@ function str(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-/** Keep terminal control bytes and line breaks out of approval artifacts. */
-function safeField(value: string): string {
+/** Keep terminal control bytes and line breaks out of approval artifacts without losing their identity. */
+function safeField(value: string, bindChangedValue = true): string {
 	let result = "";
 	for (const character of value) {
 		const code = character.codePointAt(0) ?? 0;
 		result += code < 32 || (code >= 127 && code <= 159) ? "?" : character;
-		if (result.length >= 256) return `${result.slice(0, 255)}…`;
+		if (result.length >= 256) {
+			result = `${result.slice(0, 255)}…`;
+			break;
+		}
 	}
-	return result;
+	if (!bindChangedValue || result === value) return result;
+	return `${result}{sha256=${createHash("sha256").update(value, "utf8").digest("hex")}}`;
 }
 
 function renderLegacyPathScope(task: DispatchPlanTaskView): string[] {
@@ -393,7 +397,7 @@ function renderPlanText(
 				? ""
 				: ` posture=${routing.posture} maxCostUsd=${routing.maxCostUsd ?? "none"} deadlineMs=${routing.deadlineMs ?? "none"} minimumQuality=${routing.minimumQuality ?? "none"} locality=${routing.locality}`;
 		lines.push(
-			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task=${JSON.stringify(safeField(task.task))}`,
+			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task_bytes=${Buffer.byteLength(task.task, "utf8")} task_sha256=${createHash("sha256").update(task.task, "utf8").digest("hex")} task_preview=${JSON.stringify(safeField(task.task, false))}`,
 		);
 		if (task.council !== undefined) {
 			lines.push(
@@ -420,25 +424,29 @@ function renderPlanText(
 		}
 		if (task.agentSelection !== null) {
 			lines.push(
-				`    agent-selection=auto baseline=${safeField(task.agentSelection.baselineAgentId)} authority=${task.agentSelection.approvedAuthorities.map(safeField).join(",")} basis=${task.agentSelection.authorityBasis}`,
+				`    agent-selection=auto baseline=${safeField(task.agentSelection.baselineAgentId)} authority=${task.agentSelection.approvedAuthorities.map((authority) => safeField(authority)).join(",")} basis=${task.agentSelection.authorityBasis}`,
 			);
 		}
 		if (task.stepId !== null) {
 			lines.push(
-				`    step=${safeField(task.stepId)} wave=${task.wave ?? "?"} role=${task.executionRole} dependencies=${task.dependencies.map(safeField).join(",") || "none"} result=${task.expectedResultContract ?? "none"} authority=${task.authorityGrant?.requested ?? "none"} basis=${task.authorityGrant?.basis ?? "none"}`,
+				`    step=${safeField(task.stepId)} wave=${task.wave ?? "?"} role=${task.executionRole} dependencies=${task.dependencies.map((dependency) => safeField(dependency)).join(",") || "none"} result=${task.expectedResultContract ?? "none"} authority=${task.authorityGrant?.requested ?? "none"} basis=${task.authorityGrant?.basis ?? "none"}`,
 			);
 			const agentReasons = task.agentDecision?.agentSelection.evaluations
 				.filter((evaluation) => evaluation.rejections.length > 0)
 				.slice(0, 8)
 				.map(
-					(evaluation) => `${safeField(evaluation.agentId)}:${evaluation.rejections.slice(0, 4).map(safeField).join(",")}`,
+					(evaluation) =>
+						`${safeField(evaluation.agentId)}:${evaluation.rejections
+							.slice(0, 4)
+							.map((rejection) => safeField(rejection))
+							.join(",")}`,
 				);
 			if (agentReasons !== undefined && agentReasons.length > 0)
 				lines.push(`    agent-exclusions=${agentReasons.join(";")}`);
 		}
 		if (task.briefing !== undefined) {
 			lines.push(
-				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing))}`,
+				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing, false))}`,
 			);
 		}
 		if (task.intent !== undefined) {

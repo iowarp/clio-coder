@@ -177,16 +177,38 @@ describe("resolved dispatch plan admission", () => {
 		strictEqual(plan.text.split("\n").length, 6, "embedded line breaks cannot forge plan rows");
 		match(
 			plan.text,
-			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged failover=none .* task="inspect\?the repo\?\[31m"/,
+			/agent=coder\?forged\{sha256=[0-9a-f]{64}\} target=primary\?\[2J\{sha256=[0-9a-f]{64}\} model=model\?suffix\{sha256=[0-9a-f]{64}\} node=blade\?forged\{sha256=[0-9a-f]{64}\} kind=ssh host=host\?forged\{sha256=[0-9a-f]{64}\} failover=none .* task_bytes=21 task_sha256=[0-9a-f]{64} task_preview="inspect\?the repo\?\[31m"/,
 		);
 	});
 
 	it("binds the reviewed task into the artifact text and hash", () => {
 		const first = describeDispatchPlan({ tasks: [{ agent: "scout", task: "map dispatch lifecycle" }] });
 		const second = describeDispatchPlan({ tasks: [{ agent: "scout", task: "map worker guardrails" }] });
-		match(first.text, /agent=scout .* task="map dispatch lifecycle"/);
+		match(first.text, /agent=scout .* task_bytes=22 task_sha256=[0-9a-f]{64} task_preview="map dispatch lifecycle"/);
 		strictEqual(first.tasks[0]?.task, "map dispatch lifecycle");
 		strictEqual(first.hash === second.hash, false, "changing only the approved task must change the plan hash");
+	});
+
+	it("binds the task tail that the readable preview truncates", () => {
+		const sharedPreview = "x".repeat(300);
+		const first = describeDispatchPlan({ tasks: [{ agent: "scout", task: `${sharedPreview}alpha` }] });
+		const second = describeDispatchPlan({ tasks: [{ agent: "scout", task: `${sharedPreview}bravo` }] });
+
+		match(first.text, /task_bytes=305 task_sha256=[0-9a-f]{64} task_preview="x{255}…"/u);
+		strictEqual(first.text.includes("alpha"), false, "the readable preview stays truncated before the changed tail");
+		strictEqual(second.text.includes("bravo"), false, "the readable preview stays truncated before the changed tail");
+		strictEqual(first.hash === second.hash, false, "changing only the unrendered task tail must change the plan hash");
+	});
+
+	it("binds the hidden tail of every other field that the safe renderer truncates", () => {
+		const sharedPreview = "m".repeat(300);
+		const first = describeDispatchPlan({ tasks: [{ task: "inspect", model: `${sharedPreview}alpha` }] });
+		const second = describeDispatchPlan({ tasks: [{ task: "inspect", model: `${sharedPreview}bravo` }] });
+
+		match(first.text, /model=m{255}…\{sha256=[0-9a-f]{64}\}/u);
+		strictEqual(first.text.includes("alpha"), false, "the readable model preview stays truncated");
+		strictEqual(second.text.includes("bravo"), false, "the readable model preview stays truncated");
+		strictEqual(first.hash === second.hash, false, "changing only another safe field's hidden tail must move the hash");
 	});
 
 	it("distinguishes fallback envelopes cryptographically in the plan hash", () => {
