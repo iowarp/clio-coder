@@ -61,6 +61,9 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"delegation",
 	"compaction",
 	"context",
+	// The pre-warm reads its setting when a trigger fires, and every trigger sits
+	// on a turn boundary, so a change takes effect before the next turn runs.
+	"prewarm",
 	"retry",
 ]);
 

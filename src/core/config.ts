@@ -1009,6 +1009,7 @@ const TOP_LEVEL_KEYS = [
 	"keybindings",
 	"compaction",
 	"context",
+	"prewarm",
 	"retry",
 	"guardrails",
 ] as const;
@@ -1590,6 +1591,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (v !== undefined) settings.context.workingSet.minEvictableTokens = v;
 					}
 				}
+			}
+		}
+	}
+
+	if ("prewarm" in raw) {
+		if (!isPlainObject(raw.prewarm)) {
+			issues.add("prewarm", `expected a map, got ${describe(raw.prewarm)}`);
+		} else {
+			issues.unknownKeys("prewarm", raw.prewarm, ["enabled"]);
+			if ("enabled" in raw.prewarm) {
+				const v = expectBoolean(issues, "prewarm.enabled", raw.prewarm.enabled);
+				if (v !== undefined) settings.prewarm.enabled = v;
 			}
 		}
 	}

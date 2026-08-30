@@ -30,6 +30,7 @@ import {
 import {
 	completeEngineSimple,
 	engineStream,
+	engineStreamSimple,
 	registerEngineBuiltins,
 	registerEngineFauxProvider,
 } from "./api-registry.js";
@@ -39,6 +40,14 @@ import type { EngineModel } from "./types.js";
 export { StringEnum };
 
 export const stream = engineStream;
+
+/**
+ * The dispatcher a turn runs on. `createEngineAgent` hands this to pi-agent-core
+ * as its `streamFn`, so a caller that needs a request byte-identical to the one
+ * the next turn would send (the session pre-warm) sends it through here rather
+ * than through `stream`, whose bare-call path has to guess a thinking level.
+ */
+export const streamSimple = engineStreamSimple;
 
 export interface EngineTextCompletionInput {
 	model: EngineModel;

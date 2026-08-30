@@ -42,6 +42,7 @@ function costRow(overrides: Partial<CostRow> = {}): CostRow {
 		apiCalls: 65,
 		sideQuestions: 0,
 		handoffs: 0,
+		prewarms: 0,
 		cost: costAggregateForAmount(1.5, "known"),
 		...overrides,
 	};

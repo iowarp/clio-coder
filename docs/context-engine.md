@@ -97,6 +97,20 @@ Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are deri
 
 The `/context` overlay closes the loop. When the last settled run came back `cold` and Clio had recorded a reason for it, the overlay adds a line naming that reason, for example `last cold turn: working-set eviction (expected)`, and reports the cache line without the warning token. A reused prompt shell with a cold backend and no recorded reason stays a warning: Clio kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.
 
+## Prompt pre-warm
+
+On a local server prefill is the cost. A fresh session's first turn prefills the whole compiled prompt plus the tool schemas before the model emits a token, and a resumed session's first turn prefills the entire replayed history. Both are paid after the operator presses Enter, and both are fully determined before they type anything. Since llama.cpp picks the slot with the longest common prefix and re-evaluates only the suffix, sending that prefix early leaves the processed KV where the real turn will land.
+
+Clio sends it at three moments: after the session prompt compiles at session start, after a resume rebuilds the message array, and after a compaction settles. The third is included because the next turn is known to be cold and the operator is usually reading the summary rather than typing.
+
+The payload is the request the next turn would send minus the operator's text: the same system prompt, the same tool schemas, the same replayed messages, the same thinking level, and the same `cache_prompt`, with one single-character user message appended so the chat template renders the prefix up to the user turn, and `max_tokens: 1`. It is built through the same `streamSimple` dispatcher `createEngineAgent` hands the engine as its `streamFn`, not a hand-assembled payload, because any byte that differs ahead of the user turn defeats the purpose.
+
+The pre-warm is refused rather than queued whenever it would compete with real work. It runs only on `local-native` targets, whatever `prewarm.enabled` says, because a cloud provider bills the request and caches on its own schedule. It never runs while a turn is in flight, while any dispatch is outstanding, on a worker, or in headless `run`. The dispatch guard is a stand-in: without per-endpoint capacity accounting the pre-warm cannot tell whether a worker already occupies the server it would warm, so it stands down for all worker traffic. The round already claims one endpoint slot for as long as its request is out and releases it in a `finally`, through the `registerEndpointSlot` seam the chat loop wires from the endpoint-capacity registry, so capacity counts a pre-warm the same way it counts the orchestrator's streaming turn.
+
+Pressing Enter lets go of an in-flight pre-warm at the keystroke, before the admission gate. Whether it also aborts the HTTP request is gated on what the backend does with a cancelled one, and the measured backend does nothing. On the operator's llama.cpp router (build `b226-2115b73d8`, Qwen3.8-27B, `--parallel 1`), aborting 1.5 s into a 47,620-token prefill did not cancel the server's work: the server finished prefilling, so the prefix did survive the abort and the next request read 47,596 of 47,620 tokens from cache with `prompt_ms 927`, but that request also waited 89.5 s of wall clock for the abandoned one to leave the single slot. Letting the pre-warm complete instead cost 89.3 s plus a 1.3 s turn, the same wall clock. The abort therefore frees no slot and saves no time on this backend; all it does is discard the usage and timings of prefill the server performed. So a submit detaches the round instead: Clio stops calling it the current pre-warm, never waits on it, withholds its `/context` line because it no longer describes the prefix the next turn will send, and still records what it cost. `ABORT_ROUND_ON_SUBMIT` in `src/interactive/turn-prewarm.ts` carries the measurement and flips the behavior for a backend that honors cancellation.
+
+Each round appends one `prewarm` custom ledger entry carrying its trigger, the backend prompt tokens, `timing`, and `promptCache`. The entry is never rendered and never becomes a model message, so it contributes zero tokens to the context estimate. `/context` shows `prewarmed: N tokens in X ms` until the next settled run answers the question it asked. `prewarm` is never an expected-cold reason: a pre-warm is the opposite of a disturbance. Its provider usage is real spend and is reported to `/cost` and `clio-coder usage report` under its own row, the way a `/btw` side question is.
+
 ## Settings
 
 The public settings use one compaction threshold plus a non-destructive working-set stage:
@@ -116,6 +130,9 @@ context:
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
+
+prewarm:
+  enabled: true
 ```
 
 `compaction.auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `compaction.model` optionally selects a dedicated summarization model, and `compaction.systemPrompt` optionally points at a prompt override file. `compaction.excludeLastTurns` only governs the temporary legacy mask path; working-set protection uses `context.workingSet.protectLastTurns`.

@@ -63,7 +63,12 @@ import {
 	reconcileSnapshot,
 	snapshotInputTokens,
 } from "../domains/session/context-accounting.js";
-import { buildContextLedger, type ContextLedger, type PromptCacheStats } from "../domains/session/context-ledger.js";
+import {
+	buildContextLedger,
+	type ContextLedger,
+	type PrewarmStats,
+	type PromptCacheStats,
+} from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import {
@@ -194,6 +199,12 @@ export interface TurnContext {
 	promptCachePayloadForAssistant(usage: Usage, backend?: BackendCompletionTimings): Record<string, unknown>;
 	/** Record the settled run's cache summary for /context. */
 	noteRunCacheSummary(messages: ReadonlyArray<AgentMessage>, runFirstCallVerdict: BackendCacheVerdict | null): void;
+	/**
+	 * Record one pre-warm for `/context`. It contributes no tokens to the context
+	 * estimate and is never an expected-cold reason: a pre-warm is the opposite
+	 * of a disturbance, it is the prefix the next turn wants already resident.
+	 */
+	notePrewarm(prewarm: PrewarmStats): void;
 	resetForSession(): void;
 	dispose(): void;
 }
@@ -223,6 +234,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// never imply provider cache reuse the backend did not report.
 	let lastPromptCache: PromptCacheStats | null = null;
 	let lastSystemPromptReused = false;
+	// The last pre-warm, shown by /context until the next settled run answers the
+	// question it was asked about: did the prefix the next turn needs get there
+	// before the operator did.
+	let lastPrewarm: PrewarmStats | null = null;
 	// The session system prompt, compiled once per session. Recompiles happen
 	// only on explicit events: the compile key (target, model, safety level,
 	// session id) changes, or a config hot-reload invalidates the cache. A
@@ -1160,6 +1175,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					compactionThreshold,
 					compactionAuto,
 					promptCache: lastPromptCache,
+					prewarm: lastPrewarm,
 				});
 			}
 
@@ -1192,6 +1208,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				measured,
 				lastCompaction: lastCompactionEvent,
 				promptCache: lastPromptCache,
+				prewarm: lastPrewarm,
 			});
 		},
 
@@ -1243,7 +1260,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return promptCache;
 		},
 
+		notePrewarm(prewarm: PrewarmStats): void {
+			lastPrewarm = prewarm;
+		},
+
 		noteRunCacheSummary(messages, runFirstCallVerdict): void {
+			// The settled run is the answer to the pre-warm's question, so the
+			// pre-warm line stops being the newest fact about the prefix here.
+			lastPrewarm = null;
 			const cacheSummary = sumRunUsage(messages);
 			if (cacheSummary.hadUsage) {
 				let lastBackend: BackendCompletionTimings | null = null;
@@ -1268,6 +1292,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		resetForSession(): void {
 			lastPromptCache = null;
+			lastPrewarm = null;
 			lastSystemPromptReused = false;
 			sessionPromptKey = null;
 			resumedPromptHashRead = false;

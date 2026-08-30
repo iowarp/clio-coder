@@ -99,10 +99,12 @@ import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../doma
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
+	canonicalEndpointKey,
 	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
 	ProvidersDomainModule,
 	refineRuntimeTargetWithModelHints,
+	registerForegroundStream,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 	resolveRuntimeTarget,
@@ -1569,6 +1571,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const chat = createChatLoop({
+		// The pre-warm holds one slot on its endpoint while it runs, so dispatch
+		// admission (#250) sees it exactly as it sees the orchestrator's own turn.
+		registerPrewarmEndpointSlot: (runtime) => {
+			const key = canonicalEndpointKey(runtime.runtimeResolution.target);
+			return key === null ? null : registerForegroundStream(key);
+		},
 		getSettings: getCurrentSettings,
 		providers,
 		middleware,
@@ -1628,6 +1636,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		toolRegistry,
 		hasAttachedDispatch: () => dispatchBackground.size() > 0,
+		// The pre-warm buys latency for a person about to type the next turn. A
+		// headless `run` submits its one prompt immediately and an unattended boot
+		// never submits at all, so neither has latency to buy; the ACP surface has
+		// an operator on the other end of the client and keeps it.
+		isLatencySurface: () => interactive || acpMode,
 	});
 
 	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
