@@ -355,7 +355,7 @@ describe("contracts/evidence canonical trust projection", () => {
 		strictEqual(reviewed.independentReview.state, "passed");
 	});
 
-	it("composes gate and completion inputs onto exact axes and stays byte-stable", async () => {
+	it("composes a gate while keeping completion receipt-derived and byte-stable", async () => {
 		const root = scratchDir();
 		const fixture = sealedFixture("equivalent-run", {
 			verification: { state: "unverified", basis: "no-validation-tool" },
@@ -372,38 +372,31 @@ describe("contracts/evidence canonical trust projection", () => {
 		const composed = first.trustStatus.runs[0]?.status;
 		if (composed === undefined) throw new Error("missing composed status");
 
-		// Literal expected axes. The gate decision and the completion row each
-		// reach exactly one axis; neither reaches validationGrounding.
+		// The authenticated gate reaches its review axis. The finish-contract
+		// audit row does not override the receipt-derived completion axis.
 		deepStrictEqual(axisStates(composed), {
 			artifactIntegrity: "verified",
 			validationGrounding: "absent",
 			independentReview: "passed",
 			contextProvenance: "recorded",
 			autonomyEnforcement: "enforced",
-			completionEvidence: "evidenced",
+			completionEvidence: "absent",
 		});
 		if (composed.independentReview.state !== "passed") throw new Error("expected an authenticated review");
 		deepStrictEqual(composed.independentReview.source, { kind: "gate_decision", id: gate.id });
-		if (composed.completionEvidence.state !== "evidenced") throw new Error("expected completion evidence");
-		deepStrictEqual(composed.completionEvidence.source, { kind: "finish_contract", id: "completion-157" });
-		deepStrictEqual(composed.completionEvidence.artifacts, [
-			{ kind: "finish_contract_evidence", id: "completion-157" },
-			{ kind: "session_entry", id: "turn-157" },
-		]);
 
-		// The axes neither input owns still equal the standalone inspection, and
-		// the two composed axes genuinely differ from it, so this assertion can
-		// distinguish real composition from delegation alone.
+		// Every axis except independent review equals standalone receipt
+		// inspection, including completion evidence despite the audit row.
 		for (const axis of [
 			"artifactIntegrity",
 			"validationGrounding",
 			"contextProvenance",
 			"autonomyEnforcement",
+			"completionEvidence",
 		] as const) {
 			deepStrictEqual(composed[axis], inspectedReceipt.status[axis], axis);
 		}
 		strictEqual(inspectedReceipt.status.independentReview.state, "absent");
-		strictEqual(inspectedReceipt.status.completionEvidence.state, "absent");
 
 		const context = first.trustStatus.runs[0]?.status.contextProvenance;
 		if (context?.state === "absent" || context === undefined) throw new Error("expected recorded context provenance");
@@ -515,7 +508,7 @@ describe("contracts/evidence canonical trust projection", () => {
 				auditRow: true,
 				integrity: "verified",
 				validationGrounding: "absent",
-				completionEvidence: "evidenced",
+				completionEvidence: "absent",
 				noValidationFinding: true,
 			},
 			{
@@ -531,7 +524,7 @@ describe("contracts/evidence canonical trust projection", () => {
 				auditRow: true,
 				integrity: "failed",
 				validationGrounding: "absent",
-				completionEvidence: "unknown",
+				completionEvidence: "absent",
 				noValidationFinding: true,
 			},
 		]);
@@ -630,16 +623,7 @@ describe("contracts/evidence canonical trust projection", () => {
 		const status = result.trustStatus.runs[0]?.status;
 		if (status === undefined) throw new Error("missing blank-identifier status");
 		strictEqual(result.overview.totals.auditRows, 1);
-		strictEqual(status.completionEvidence.state, "evidenced");
-		if (status.completionEvidence.state === "evidenced") {
-			deepStrictEqual(status.completionEvidence.source, {
-				kind: "finish_contract",
-				id: "blank-identifier-run:completion-contract",
-			});
-			deepStrictEqual(status.completionEvidence.artifacts, [
-				{ kind: "finish_contract_evidence", id: "blank-identifier-run:completion-contract" },
-			]);
-		}
+		deepStrictEqual(status.completionEvidence, { state: "absent", reason: "not_recorded" });
 		strictEqual(status.validationGrounding.state, "absent");
 		// Every declared bundle file is still written; one malformed row does not
 		// take the overview and findings down with it.

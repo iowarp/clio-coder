@@ -68,9 +68,9 @@ Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact 
 | `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
-| `trust-status.json` | Canonical per-run six-axis trust projections derived from authenticated receipts, gate decisions, grounded validation artifacts, and exact finish-contract audit rows. |
+| `trust-status.json` | Canonical per-run six-axis trust projections derived from authenticated receipts, gate decisions, and grounded validation artifacts. |
 | `protected-artifacts.json` | Protected artifact state/events. |
-| `findings.json` / `findings.md` | Structured and readable findings. |
+| `findings.json` / `findings.md` | Structured findings plus a readable report that begins with each linked run's canonical tier, fixed-order summary, and six axes. |
 
 ### Run attribution under concurrency
 
@@ -219,19 +219,20 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash | Context provenance is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with no content and no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is `invalid`. |
 | Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`. Correlated review maps to `not_independent`. Unauthenticated artifacts map to `unknown`; operator or full-auto confirmation alone is `not_applicable` to independent review. |
 | Receipt autonomy grade | `mediated`, `approximated`, and `bypassed` map to `enforced`, `approximated`, and `bypassed`. A dangerous-bypass flag always normalizes to `bypassed`; a missing historical block is `unknown`. |
-| Finish-contract assessment | `validation_evidence`, `unvalidated_mutation`, `explicit_limitation`, and `no_mutation` map to `evidenced`, `incomplete`, `limited`, and `not_applicable`. A run whose receipt was presented and rejected downgrades `evidenced` to `unknown`: the row still points at its own record, but a rejected receipt authenticates nothing about the run it names. |
-| Malformed audit row identifier | A blank or whitespace-only optional identifier is treated as absent. The row falls back to its derived correlation id or drops out of the trust projection; it never aborts the bundle. |
+| Finish-contract assessment | The assessment remains linked in `audit-linked.jsonl` and contributes its domain findings and tags. It does not override the receipt-derived `completionEvidence` axis on the evidence surface alone. |
+| Malformed audit row identifier | A blank or whitespace-only optional identifier remains linked as audit input and never aborts the bundle. It cannot affect the receipt-derived trust projection. |
 | Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
 
 Receipt inspection, worker output, monitor details, and evidence rebuilding all
 use the same authenticated receipt projection boundary. Evidence rebuilding
-then composes independently authenticated gate decisions and exact
-finish-contract records without changing receipt-owned axes. Findings such as
+then composes independently authenticated gate decisions without changing
+receipt-owned axes. Findings such as
 `no-validation`, `proxy-validation`, `external-approximation`,
 `external-bypass`, `independent-review`, `context-provenance`, and
-`completion-evidence` are selected from the canonical states, so every axis
-reaches `findings.md`, while their detailed domain artifacts remain in the
-receipt, gate, audit, and trace files.
+`completion-evidence` are selected from the canonical states. `findings.md`
+prints the tier, summary, and every axis before those diagnostic records, while
+their detailed domain artifacts remain in the receipt, gate, audit, and trace
+files.
 
 The canonical aggregate is an additive projection for downstream work. Receipt
 integrity remains version 18, evidence bundles remain version 1, gate decisions

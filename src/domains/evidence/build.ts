@@ -24,6 +24,7 @@ import {
 	type SessionEntry,
 } from "../session/index.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
+import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
@@ -159,7 +160,6 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		evidenceId,
 		runSources,
 		gateDecisions: gateDecisions.decisions,
-		auditRows: auditLinks.rows,
 		validationEvidence,
 	});
 	const findings = buildFindings(runSources, trustStatusRaw, sessionLinks, auditLinks, protectedArtifactsRaw);
@@ -630,7 +630,7 @@ async function writeEvidenceFiles(
 	await writeJson(join(directory, "trust-status.json"), trustStatus);
 	await writeJson(join(directory, "protected-artifacts.json"), protectedArtifacts);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
-	await writeFile(join(directory, "findings.md"), renderFindings(findings), "utf8");
+	await writeFile(join(directory, "findings.md"), renderEvidenceFindingsMarkdown(findings, trustStatus), "utf8");
 }
 
 function rawTraceRows(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceRawTraceRow[] {
@@ -1491,17 +1491,6 @@ function axisFindings(offset: number, source: EvidenceRunSource, status: Canonic
 		next("info", "completion-evidence", "run finished with an explicit limitation instead of validation evidence");
 	}
 	return out;
-}
-
-function renderFindings(findings: ReadonlyArray<EvidenceFinding>): string {
-	if (findings.length === 0) return "# Findings\n\nNo findings.\n";
-	const lines = ["# Findings", ""];
-	for (const item of findings) {
-		const run = item.runId === null ? "" : ` run=${item.runId}`;
-		lines.push(`- ${item.id} [${item.severity}] ${item.tag}${run}: ${item.message}`);
-	}
-	lines.push("");
-	return `${lines.join("\n")}\n`;
 }
 
 async function readRunLedger(stateDir: string): Promise<RunLedgerRows> {

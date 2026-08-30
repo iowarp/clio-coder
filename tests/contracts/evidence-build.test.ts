@@ -594,7 +594,7 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
-	it("records linked completion_contract validation_evidence as completion evidence only", async () => {
+	it("links completion_contract input without changing receipt-derived trust axes", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const { runId } = await sealRun();
 			const dataDir = join(scratch, "data");
@@ -621,7 +621,7 @@ describe("contracts/evidence-build", () => {
 			const result = await buildEvidence({ dataDir, stateDir, runId });
 
 			// The audit log is unauthenticated input. The run's own completion
-			// self-report establishes completion evidence and nothing else, so the
+			// self-report cannot override a receipt-derived trust axis, so the
 			// operator still gets the no-validation warning.
 			strictEqual(
 				result.findings.some((finding) => finding.tag === "no-validation"),
@@ -630,12 +630,7 @@ describe("contracts/evidence-build", () => {
 			strictEqual(result.overview.totals.auditRows, 1);
 			const status = result.trustStatus.runs[0]?.status;
 			deepStrictEqual(status?.validationGrounding, { state: "absent", reason: "not_observed" });
-			strictEqual(status?.completionEvidence.state, "evidenced");
-			if (status?.completionEvidence.state === "evidenced") {
-				deepStrictEqual(status.completionEvidence.authority, { kind: "clio", id: "finish-contract" });
-				strictEqual(status.completionEvidence.artifacts[0]?.kind, "finish_contract_evidence");
-				strictEqual(status.completionEvidence.artifacts[1]?.id, "turn-validated");
-			}
+			deepStrictEqual(status?.completionEvidence, { state: "absent", reason: "not_recorded" });
 		});
 	});
 

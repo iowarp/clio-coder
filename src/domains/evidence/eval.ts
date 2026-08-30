@@ -5,6 +5,7 @@ import { readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { redactArtifactForStorage } from "../eval/artifacts/redact.js";
 import type { EvalCommandResult, EvalRunArtifact, EvalRunRecord } from "../eval/index.js";
 import { loadEvalArtifact } from "../eval/index.js";
+import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { evidenceDirectory, findingsFile } from "./store.js";
@@ -95,7 +96,6 @@ export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Prom
 		evidenceId,
 		runSources: linkedRuns.runSources,
 		gateDecisions: gateDecisions.decisions,
-		auditRows: linkedRuns.auditRows,
 	});
 	await writeEvalEvidenceFiles(
 		directory,
@@ -258,7 +258,7 @@ async function writeEvalEvidenceFiles(
 	await writeJson(join(directory, "protected-artifacts.json"), emptyProtected);
 	await writeJson(join(directory, "eval-result.json"), redactedArtifact);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
-	await writeFile(join(directory, "findings.md"), renderFindings(findings), "utf8");
+	await writeFile(join(directory, "findings.md"), renderEvidenceFindingsMarkdown(findings, trustStatus), "utf8");
 }
 
 function rawEvalTraceRows(artifact: EvalRunArtifact): EvidenceEvalRawTraceRow[] {
@@ -355,16 +355,6 @@ function renderEvalTranscript(artifact: EvalRunArtifact, overview: EvidenceOverv
 				`  ${command.phase}[${command.index}] exit=${command.exitCode} timeout=${String(command.timedOut)} ${command.command}`,
 			);
 		}
-	}
-	lines.push("");
-	return `${lines.join("\n")}\n`;
-}
-
-function renderFindings(findings: ReadonlyArray<EvidenceFinding>): string {
-	if (findings.length === 0) return "No findings.\n";
-	const lines = ["# Findings", ""];
-	for (const finding of findings) {
-		lines.push(`- ${finding.id} [${finding.severity}] ${finding.tag}: ${finding.message}`);
 	}
 	lines.push("");
 	return `${lines.join("\n")}\n`;

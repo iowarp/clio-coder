@@ -1,9 +1,7 @@
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
-import type { FinishContractAssessment, FinishContractEvidenceKind } from "../safety/finish-contract.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import {
-	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
 	adaptGroundedEvidenceValidationStatus,
 	type CanonicalTrustStatus,
@@ -12,7 +10,7 @@ import {
 	isTrustStatusIdentifier,
 	type TrustArtifactReference,
 } from "./trust-status.js";
-import { EVIDENCE_VERSION, type EvidenceAuditLinkedRow, type EvidenceTrustStatusFile } from "./types.js";
+import { EVIDENCE_VERSION, type EvidenceTrustStatusFile } from "./types.js";
 
 export interface EvidenceRunTrustSource {
 	envelope: RunEnvelope;
@@ -23,15 +21,15 @@ export interface BuildEvidenceTrustStatusInput {
 	evidenceId: string;
 	runSources: ReadonlyArray<EvidenceRunTrustSource>;
 	gateDecisions: ReadonlyArray<GateDecisionArtifact>;
-	auditRows: ReadonlyArray<EvidenceAuditLinkedRow>;
 	validationEvidence?: ReadonlyMap<string, ReadonlyArray<TrustArtifactReference>>;
 }
 
 /**
  * Compose every evidence-linked trust axis at one pure boundary. Both the
  * run/session and eval builders call this function, so the same authenticated
- * receipt, gate decision, and exact finish-contract row cannot project
- * differently merely because it was bundled through a different entry point.
+ * receipt and gate decision cannot project differently merely because the
+ * receipt was bundled through a different entry point. Completion evidence
+ * stays receipt-derived so an audit row cannot change one surface alone.
  */
 export function buildEvidenceTrustStatusFile(input: BuildEvidenceTrustStatusInput): EvidenceTrustStatusFile {
 	return {
@@ -44,7 +42,6 @@ export function buildEvidenceTrustStatusFile(input: BuildEvidenceTrustStatusInpu
 				evidenceId: input.evidenceId,
 				source,
 				gateDecisions: input.gateDecisions,
-				auditRows: input.auditRows,
 				validationEvidence: input.validationEvidence?.get(source.envelope.id) ?? [],
 			}),
 		})),
@@ -55,22 +52,15 @@ interface ComposeEvidenceRunTrustInput {
 	evidenceId: string;
 	source: EvidenceRunTrustSource;
 	gateDecisions: ReadonlyArray<GateDecisionArtifact>;
-	auditRows: ReadonlyArray<EvidenceAuditLinkedRow>;
 	validationEvidence: ReadonlyArray<TrustArtifactReference>;
 }
 
 function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): CanonicalTrustStatus {
 	const inspection = inspectRunReceiptTrustStatus(input.source.receipt, input.source.envelope);
-	// A receipt that was presented and rejected authenticates nothing about the
-	// run it names. Its integrity failure stays on `artifactIntegrity`; no other
-	// axis may reach a trust-granting state on the strength of that run's own
-	// self-reports. A missing or unchecked receipt is not a rejection.
-	const receiptRejected = inspection.status.artifactIntegrity.state === "failed";
 	let status = inspection.status;
-	// Only independently observed executions ground validation. The
-	// completion-contract audit row is the run's own self-report: it feeds
-	// `completionEvidence` below and nothing else. The cross-axis rules this
-	// enforces are listed under "composition rules" in docs/evidence-and-memory.md.
+	// Only independently observed executions ground validation. A completion
+	// contract audit row is the run's own self-report and cannot override the
+	// receipt-derived completion axis on this surface alone.
 	const grounded = input.validationEvidence.filter((artifact) => isTrustStatusIdentifier(artifact.id));
 	if (
 		grounded.length > 0 &&
@@ -106,25 +96,6 @@ function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): Can
 			independentReview: adaptGateDecisionReviewStatus(gate, input.source.envelope.id, verification),
 		});
 	}
-
-	const finish = latestFinishContractForRun(input.auditRows, input.source.envelope.id);
-	if (finish !== null) {
-		const completion = adaptFinishContractCompletionStatus(finish.assessment, {
-			sourceId: finish.sourceId,
-			artifacts: finish.artifacts,
-		});
-		status = composeTrustStatus(status, {
-			completionEvidence:
-				receiptRejected && completion.state === "evidenced"
-					? {
-							state: "unknown",
-							source: { kind: "finish_contract", id: finish.sourceId },
-							authority: { kind: "clio", id: "finish-contract" },
-							artifacts: finish.artifacts,
-						}
-					: completion,
-		});
-	}
 	return status;
 }
 
@@ -141,81 +112,4 @@ function latestGateDecisionForRun(
 			)
 			.at(-1) ?? null
 	);
-}
-
-interface EvidenceFinishContractProjection {
-	sourceId: string;
-	assessment: FinishContractAssessment;
-	artifacts: TrustArtifactReference[];
-}
-
-function latestFinishContractForRun(
-	rows: ReadonlyArray<EvidenceAuditLinkedRow>,
-	runId: string,
-): EvidenceFinishContractProjection | null {
-	const candidates = rows
-		.filter((row) => row.auditKind === "completion_contract" && row.runId === runId && row.confidence === "exact")
-		.flatMap((row) => {
-			const assessment = finishContractAssessmentFromAudit(row.row);
-			if (assessment === null) return [];
-			const correlationId = readOptionalString(row.row.correlationId) ?? `${runId}:completion-contract`;
-			// A malformed row is dropped from the trust projection rather than
-			// thrown out of the whole forensic build. `readAuditRows` already
-			// reports the malformed line, so the bundle stays honest about it.
-			if (!isTrustStatusIdentifier(correlationId)) return [];
-			const turnId = readOptionalString(row.row.turnId);
-			const artifacts: TrustArtifactReference[] = [
-				{ kind: "finish_contract_evidence", id: correlationId },
-				...(turnId === null || !isTrustStatusIdentifier(turnId) ? [] : [{ kind: "session_entry" as const, id: turnId }]),
-			];
-			return [{ sourceId: correlationId, assessment, artifacts, timestamp: row.ts ?? "" }];
-		})
-		.sort(
-			(left, right) => compareStrings(left.timestamp, right.timestamp) || compareStrings(left.sourceId, right.sourceId),
-		);
-	const latest = candidates.at(-1);
-	return latest === undefined
-		? null
-		: { sourceId: latest.sourceId, assessment: latest.assessment, artifacts: latest.artifacts };
-}
-
-function finishContractAssessmentFromAudit(row: Record<string, unknown>): FinishContractAssessment | null {
-	const reason = readOptionalString(row.reason);
-	const decision = readOptionalString(row.decision);
-	const mutatedPaths = Array.isArray(row.mutatedPaths)
-		? row.mutatedPaths.filter((entry): entry is string => typeof entry === "string")
-		: [];
-	const turnId = readOptionalString(row.turnId);
-	const evidenceKinds = Array.isArray(row.evidenceKinds) ? row.evidenceKinds.filter(isFinishContractEvidenceKind) : [];
-	const evidence = evidenceKinds.map((kind) => ({
-		kind,
-		summary: "recorded by the finish contract",
-		...(turnId === null ? {} : { turnId }),
-	}));
-	if (decision === "ok" && reason === "no_mutation") {
-		return { kind: "ok", reason, evidence: [], mutatedPaths };
-	}
-	if (decision === "ok" && reason === "validation_evidence") {
-		return { kind: "ok", reason, evidence, mutatedPaths };
-	}
-	if (decision === "ok" && reason === "explicit_limitation") {
-		return { kind: "ok", reason, evidence: [], mutatedPaths };
-	}
-	if (decision === "engage" && reason === "unvalidated_mutation") {
-		return { kind: "engage", reason, message: "finish contract engaged", evidence: [], mutatedPaths };
-	}
-	return null;
-}
-
-function isFinishContractEvidenceKind(value: unknown): value is FinishContractEvidenceKind {
-	return value === "validation_command" || value === "protected_artifact" || value === "dispatch_receipt";
-}
-
-/**
- * A blank or whitespace-only optional field is absent, not an identifier. The
- * `??` fallbacks below depend on it, and an empty string would otherwise reach
- * `normalizeArtifactReference` and abort the entire bundle.
- */
-function readOptionalString(value: unknown): string | null {
-	return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
