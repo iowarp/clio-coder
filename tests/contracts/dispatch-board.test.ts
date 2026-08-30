@@ -587,6 +587,43 @@ describe("dispatch board operator lifecycle", () => {
 		}
 	});
 
+	it("warns on the live card when an opaque tool opens the write record", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			bus.emit(BusChannels.DispatchStarted, {
+				runId: "run-open-record",
+				agentId: "coder",
+				executionRole: "builder",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				requestOrigin: "user",
+				pid: 1,
+			} as never);
+			bus.emit(BusChannels.DispatchProgress, {
+				runId: "run-open-record",
+				agentId: "coder",
+				event: {
+					type: "clio_write_record_downgraded",
+					payload: { reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-9" },
+				},
+			});
+			const row = store.rows()[0];
+			deepStrictEqual(row?.writeRecordDowngrade, {
+				reason: "opaque_tool_succeeded",
+				tool: "bash",
+				toolCallId: "call-9",
+			});
+			const rendered = stripSgr(renderDispatchCard(row as DispatchBoardRow, 60).join("\n"));
+			match(rendered, /record\s+open: a successful 'bash' call/);
+			match(rendered, /paths its arguments do not name/);
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
 	it("overlays retry attempt and countdown from dispatch.snapshot and keeps it active", () => {
 		const bus = createSafeEventBus();
 		let retrying: DispatchSnapshot["retrying"] = [

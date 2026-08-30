@@ -26,6 +26,7 @@ import {
 	enforceWriteBoundary,
 	type WorkspaceSnapshot,
 	type WriteBoundaryAttribution,
+	type WriteBoundaryAttributionDowngrade,
 	type WriteBoundaryVerdict,
 	writeWriteBoundaryVerdict,
 } from "./write-boundary.js";
@@ -45,7 +46,7 @@ export interface WriteBoundaryEnforcerInput {
 	 * argument names. Absent entirely means the caller offers no record at all,
 	 * and every change outside the declaration is blamed on the window.
 	 */
-	recordedWritesFor?(stepId: string): ReadonlyArray<string> | null;
+	recordedWritesFor?(stepId: string): ReadonlyArray<string> | WriteBoundaryAttribution | null;
 	/** Called once per closed window with the sealed verdict and where it landed. */
 	onVerdict?(verdict: WriteBoundaryVerdict, path: string): void;
 }
@@ -91,16 +92,32 @@ export function createWriteBoundaryEnforcer(input: WriteBoundaryEnforcerInput): 
 		const recordedWritesFor = input.recordedWritesFor;
 		if (recordedWritesFor === undefined) return undefined;
 		const recorded = new Set<string>();
+		const downgrades: WriteBoundaryAttributionDowngrade[] = [];
 		let complete = true;
 		for (const stepId of stepIds) {
 			const observed = recordedWritesFor(stepId);
 			if (observed === null) {
 				complete = false;
+				downgrades.push({
+					reason: "write_record_unavailable",
+					tool: null,
+					toolCallId: null,
+					runId: null,
+					stepId,
+				});
 				continue;
 			}
-			for (const target of observed) recorded.add(target);
+			if (!("recorded" in observed)) {
+				for (const target of observed) recorded.add(target);
+				continue;
+			}
+			for (const target of observed.recorded) recorded.add(target);
+			if (!observed.complete) complete = false;
+			for (const downgrade of observed.downgrades ?? []) {
+				downgrades.push({ ...downgrade, stepId: downgrade.stepId ?? stepId });
+			}
 		}
-		return { recorded: [...recorded].sort(), complete };
+		return { recorded: [...recorded].sort(), complete, downgrades };
 	};
 	return {
 		begin(window, stepIds) {

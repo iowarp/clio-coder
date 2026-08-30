@@ -161,12 +161,15 @@ export {
 export type {
 	WorkspaceSnapshot,
 	WriteBoundaryAttribution,
+	WriteBoundaryAttributionDowngrade,
+	WriteBoundaryAttributionDowngradeReason,
 	WriteBoundaryStatus,
 	WriteBoundaryVerdict,
 } from "./write-boundary.js";
 export {
 	assertWriteBoundaryVisibleToGit,
 	captureWorkspaceSnapshot,
+	describeWriteBoundaryAttributionDowngrade,
 	diffWorkspace,
 	enforceWriteBoundary,
 	WRITE_BOUNDARY_VIOLATION_REASON,

@@ -6371,6 +6371,11 @@ describe("contracts/dispatch tool activity honesty", () => {
 			completionSink: completionRows,
 			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
 		});
+		const writeRecordNotices: unknown[] = [];
+		context.bus.on(BusChannels.DispatchProgress, (payload) => {
+			const event = payload.event as { type?: unknown; payload?: unknown };
+			if (event.type === "clio_write_record_downgraded") writeRecordNotices.push(event.payload);
+		});
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		const originalRigor = process.env.CLIO_CODER_RIGOR;
 		process.env.CLIO_CODER_RIGOR = "high";
@@ -6429,6 +6434,20 @@ describe("contracts/dispatch tool activity honesty", () => {
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.exitCode, 0);
 			deepStrictEqual(receipt.verification, { state: "verified", basis: "validation-tool" });
+			deepStrictEqual(writeRecordNotices, [{ reason: "opaque_tool_succeeded", tool: "verify", toolCallId: "test-1" }]);
+			const writeAttribution = bundle.contract.observedRunWriteAttribution?.(handle.runId);
+			strictEqual(writeAttribution?.complete, false);
+			match(writeAttribution?.recorded[0] ?? "", /\/src\/app\.ts$/);
+			deepStrictEqual(writeAttribution?.downgrades, [
+				{
+					reason: "opaque_tool_succeeded",
+					tool: "verify",
+					toolCallId: "test-1",
+					runId: handle.runId,
+					stepId: null,
+				},
+			]);
+			strictEqual(bundle.contract.observedRunWrites?.(handle.runId), null);
 		} finally {
 			if (originalRigor === undefined) delete process.env.CLIO_CODER_RIGOR;
 			else process.env.CLIO_CODER_RIGOR = originalRigor;

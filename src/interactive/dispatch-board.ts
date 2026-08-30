@@ -24,6 +24,7 @@ import {
 	type RunStatus,
 	runKindSupportsLiveSteering,
 } from "../domains/dispatch/types.js";
+import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import {
 	summarizeTrustStatus,
 	type TrustSummaryProjection,
@@ -86,6 +87,12 @@ export interface DispatchRetryPresentation {
 export interface DispatchSteerAcknowledgement {
 	receivedAtMs: number;
 	chars: number;
+}
+
+export interface DispatchWriteRecordDowngrade {
+	reason: "opaque_tool_succeeded";
+	tool: string;
+	toolCallId: string;
 }
 
 export interface DispatchBoardRow {
@@ -158,6 +165,8 @@ export interface DispatchBoardRow {
 	retry?: DispatchRetryPresentation;
 	/** Most recent worker delivery acknowledgement for an operator steer. */
 	steerAcknowledgement?: DispatchSteerAcknowledgement;
+	/** First successful opaque call that opened this run's write record. */
+	writeRecordDowngrade?: DispatchWriteRecordDowngrade;
 	/**
 	 * Where this run sits in a fleet plan: the wave the step was scheduled in
 	 * and the step id it executes. Present only for runs a fleet plan
@@ -763,6 +772,16 @@ export function renderDispatchCard(
 				[theme.fg("success", `${GLYPH.ok} steer received`), theme.fg("muted", `${row.steerAcknowledgement.chars} chars`)],
 				contentWidth,
 			),
+		);
+	}
+	if (row.writeRecordDowngrade) {
+		const warning = describeWriteBoundaryAttributionDowngrade({
+			...row.writeRecordDowngrade,
+			runId: row.runId,
+			stepId: row.phase?.stepId ?? null,
+		});
+		bodyLines.push(
+			...wrapTextWithAnsi(`${cardKvKey(theme, "record")}${theme.fg("warning", `open: ${warning}`)}`, contentWidth),
 		);
 	}
 	// The proof row is present only when the observability projection knows an
@@ -1414,6 +1433,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		recentTools: progress.recentActions.map((action) => action.tool),
 		...(retry ? { retry: { ...retry } } : {}),
 		...(entry.steerAcknowledgement ? { steerAcknowledgement: { ...entry.steerAcknowledgement } } : {}),
+		...(entry.writeRecordDowngrade ? { writeRecordDowngrade: { ...entry.writeRecordDowngrade } } : {}),
 	};
 }
 
@@ -1542,6 +1562,7 @@ export function createDispatchBoardStore(
 			progress: previous?.progress ?? createWorkerProgressFold(),
 			...(previous?.retry ? { retry: { ...previous.retry } } : {}),
 			...(previous?.steerAcknowledgement ? { steerAcknowledgement: { ...previous.steerAcknowledgement } } : {}),
+			...(previous?.writeRecordDowngrade ? { writeRecordDowngrade: { ...previous.writeRecordDowngrade } } : {}),
 		};
 		entries.set(runId, entry);
 		pruneEntries(entries, (evicted) => fleetPhases.delete(evicted));
@@ -1689,6 +1710,20 @@ export function createDispatchBoardStore(
 					assistantEvent.type === "toolcall_delta";
 				if (hasDelta && entry.ttftMs === null && entry.startedAtClockMs !== null) {
 					entry.ttftMs = Math.round(performance.now() - entry.startedAtClockMs);
+				}
+			}
+			if (type === "clio_write_record_downgraded") {
+				const rawPayload = (workerEvent as { payload?: unknown }).payload;
+				const payload =
+					typeof rawPayload === "object" && rawPayload !== null ? (rawPayload as Record<string, unknown>) : null;
+				const tool = payload === null ? undefined : parseNonEmptyString(payload.tool);
+				const toolCallId = payload === null ? undefined : parseNonEmptyString(payload.toolCallId);
+				if (payload?.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined) {
+					entry.writeRecordDowngrade = {
+						reason: "opaque_tool_succeeded",
+						tool: sanitizeCallTargetText(tool),
+						toolCallId: sanitizeCallTargetText(toolCallId),
+					};
 				}
 			}
 			// The one fold that reads worker prose and tool activity. Everything the

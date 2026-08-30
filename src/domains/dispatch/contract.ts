@@ -13,6 +13,7 @@ import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
+import type { WriteBoundaryAttribution } from "./write-boundary.js";
 
 export interface DispatchRequest extends JobSpec {
 	/** Coordinator-owned result contract override for a fleet plan step. */
@@ -267,6 +268,13 @@ export interface DispatchContract {
 	 * than an inference from the checkout.
 	 */
 	observedRunWrites?(runId: string): ReadonlyArray<string> | null;
+
+	/**
+	 * Full write-record witness, including durable downgrade causes. New callers
+	 * use this surface; observedRunWrites remains as the closed-list compatibility
+	 * view for integrations that only know paths or null.
+	 */
+	observedRunWriteAttribution?(runId: string): WriteBoundaryAttribution | null;
 
 	/** In-memory logical assignment state and complete finalized-attempt history. */
 	readonly assignments?: {
