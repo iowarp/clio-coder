@@ -212,6 +212,7 @@ export interface DispatchContract {
 			topology: ReservationTopology;
 			tasks: ReadonlyArray<{ memberId: string; wave: number; resolution: DispatchPlanTaskResolution }>;
 		}): DispatchReservationRecord;
+		release(ownerId: string): DispatchReservationRecord | null;
 		rollback(ownerId: string): DispatchReservationRecord | null;
 		rollbackUnconsumed(ownerId: string): DispatchReservationRecord | null;
 		get(ownerId: string): DispatchReservationRecord | null;

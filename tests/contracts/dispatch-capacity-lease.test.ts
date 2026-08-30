@@ -80,7 +80,7 @@ describe("durable dispatch capacity leases", () => {
 				ok(error instanceof Error);
 				strictEqual(
 					error.message,
-					"dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (2/2 slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server",
+					"dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (2/2 slots): 2 active leases hold the slots; collect in-flight runs or point workers at a second server",
 				);
 				return true;
 			},
@@ -95,7 +95,7 @@ describe("durable dispatch capacity leases", () => {
 			acquireCapacityLease({ assignmentId: "one-free-slot", nodeId: "local", endpointKey, limits: shared });
 			throws(
 				() => acquireCapacityLease({ assignmentId: "no-second-slot", nodeId: "local", endpointKey, limits: shared }),
-				/capacity reached \(2\/2 slots\)/,
+				/capacity reached \(2\/2 slots\).*1 active lease and 1 foreground stream hold the slots/u,
 			);
 		} finally {
 			release();
@@ -125,7 +125,7 @@ describe("durable dispatch capacity leases", () => {
 					endpointKey,
 					limits: { global: 4, nodes: { local: 4 }, endpoints: { [endpointKey]: 2 } },
 				}),
-			/capacity reached \(2\/2 slots\)/,
+			/capacity reached \(2\/2 slots\).*2 held reservations hold the slots/u,
 		);
 	});
 	it("concurrent processes racing one slot produce exactly one lease", async () => {

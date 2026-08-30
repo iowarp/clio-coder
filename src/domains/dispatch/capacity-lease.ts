@@ -236,6 +236,33 @@ function heldReservationUsage(values: ReadonlyArray<unknown>): {
 	}
 	return { global, nodes, endpoints };
 }
+
+export interface EndpointCapacityHolders {
+	leases: number;
+	reservations: number;
+	foregroundStreams: number;
+}
+
+/** Name the endpoint-capacity addends that are actually nonzero. */
+export function describeEndpointCapacityHolders(holders: EndpointCapacityHolders): string {
+	const parts: string[] = [];
+	const add = (count: number, singular: string, plural: string): void => {
+		if (count > 0) parts.push(`${count} ${count === 1 ? singular : plural}`);
+	};
+	add(holders.leases, "active lease", "active leases");
+	add(holders.reservations, "held reservation", "held reservations");
+	add(holders.foregroundStreams, "foreground stream", "foreground streams");
+	if (parts.length === 0) return "no active lease, held reservation, or foreground stream currently holds a slot";
+	const named =
+		parts.length === 1
+			? parts[0]
+			: parts.length === 2
+				? `${parts[0]} and ${parts[1]}`
+				: `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
+	const total = holders.leases + holders.reservations + holders.foregroundStreams;
+	return `${named} ${total === 1 ? "holds" : "hold"} ${total === 1 ? "the slot" : "the slots"}`;
+}
+
 function assertCapacity(
 	file: CapacityStateFile,
 	nodeId: string,
@@ -264,14 +291,15 @@ function assertCapacity(
 		if (endpointLimit !== undefined) {
 			if (endpointLimit < 1)
 				throw new Error(`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity unavailable`);
-			const foreground = foregroundStreamUsage()[endpointKey] ?? 0;
-			const used =
-				file.leases.filter((lease) => lease.endpointKey === endpointKey).length +
-				(held.endpoints[endpointKey] ?? 0) +
-				foreground;
+			const holders: EndpointCapacityHolders = {
+				leases: file.leases.filter((lease) => lease.endpointKey === endpointKey).length,
+				reservations: held.endpoints[endpointKey] ?? 0,
+				foregroundStreams: foregroundStreamUsage()[endpointKey] ?? 0,
+			};
+			const used = holders.leases + holders.reservations + holders.foregroundStreams;
 			if (used >= endpointLimit)
 				throw new Error(
-					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server`,
+					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}; collect in-flight runs or point workers at a second server`,
 				);
 		}
 	}
@@ -410,15 +438,27 @@ export function capacityLeaseUsage(options?: { nowMs?: number; probe?: LeaseOwne
 	global: number;
 	nodes: Readonly<Record<string, number>>;
 	endpoints: Readonly<Record<string, number>>;
+	endpointHolders: Readonly<Record<string, EndpointCapacityHolders>>;
 } {
 	const leases = listCapacityLeases(options);
 	const nodes: Record<string, number> = {};
-	const endpoints: Record<string, number> = { ...foregroundStreamUsage() };
+	const foreground = foregroundStreamUsage();
+	const endpoints: Record<string, number> = { ...foreground };
+	const endpointHolders: Record<string, EndpointCapacityHolders> = Object.fromEntries(
+		Object.entries(foreground).map(([endpointKey, foregroundStreams]) => [
+			endpointKey,
+			{ leases: 0, reservations: 0, foregroundStreams },
+		]),
+	);
 	for (const lease of leases) {
 		nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
-		if (lease.endpointKey !== undefined) endpoints[lease.endpointKey] = (endpoints[lease.endpointKey] ?? 0) + 1;
+		if (lease.endpointKey !== undefined) {
+			endpoints[lease.endpointKey] = (endpoints[lease.endpointKey] ?? 0) + 1;
+			const holders = endpointHolders[lease.endpointKey] ?? { leases: 0, reservations: 0, foregroundStreams: 0 };
+			endpointHolders[lease.endpointKey] = { ...holders, leases: holders.leases + 1 };
+		}
 	}
-	return { global: leases.length, nodes, endpoints };
+	return { global: leases.length, nodes, endpoints, endpointHolders };
 }
 
 /**

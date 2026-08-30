@@ -724,7 +724,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			cancel: (assignmentId) => dispatch.abort(assignmentId),
 			release: (ownerId) => {
 				if (ownerId === NO_WORKER_RESERVATION) return;
-				dispatch.reservations?.rollbackUnconsumed(ownerId);
+				dispatch.reservations?.release(ownerId);
 			},
 			releaseUnconsumed: (ownerId) => {
 				if (ownerId === NO_WORKER_RESERVATION) return;
