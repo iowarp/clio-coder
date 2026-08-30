@@ -98,7 +98,8 @@ try {
 	equal(await page.title(), "Clio Workbench");
 	await page.getByText("connected", { exact: true }).waitFor();
 	equal(await page.getByRole("main").count(), 1);
-	equal(await page.getByRole("complementary").count(), 1);
+	equal(await page.getByRole("complementary").count(), 2);
+	equal(await page.getByRole("complementary", { name: "Run and evidence overview" }).count(), 1);
 	equal(await page.getByRole("textbox", { name: "Prompt for Clio" }).count(), 1);
 	equal(await page.getByText("No project open", { exact: true }).count(), 1);
 	await page.screenshot({ path: new URL("initial.png", artifactDirectory).pathname });
@@ -261,6 +262,26 @@ try {
 	await page.keyboard.press("Escape");
 	await page.waitForFunction(() => document.querySelector("#project-rail")?.hasAttribute("inert") === true);
 	equal(await openProjects.evaluate((element) => element === document.activeElement), true);
+	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), false);
+
+	// The evidence overview uses the same contained, reversible drawer behavior.
+	const openEvidence = page.getByRole("button", { name: "Open run and evidence overview" });
+	await openEvidence.click();
+	await page.locator("#evidence-rail.is-open").waitFor();
+	await page.waitForFunction(() =>
+		document.activeElement?.textContent?.includes("Close run and evidence overview") === true
+	);
+	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), true);
+	equal(await page.locator("#project-rail").evaluate((element) => element.hasAttribute("inert")), true);
+	equal(await page.locator(".status-bar").evaluate((element) => element.hasAttribute("inert")), true);
+	for (let index = 0; index < 8; index += 1) {
+		await page.keyboard.press("Tab");
+		equal(await page.locator("#evidence-rail").evaluate((rail) => rail.contains(document.activeElement)), true);
+	}
+	await page.screenshot({ path: new URL("compact-evidence-drawer.png", artifactDirectory).pathname });
+	await page.keyboard.press("Escape");
+	await page.waitForFunction(() => document.querySelector("#evidence-rail")?.hasAttribute("inert") === true);
+	equal(await openEvidence.evaluate((element) => element === document.activeElement), true);
 	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), false);
 
 	await page.emulateMedia({ forcedColors: "active" });
@@ -826,6 +847,7 @@ try {
 				"permission.png",
 				"complete.png",
 				"compact-project-drawer.png",
+				"compact-evidence-drawer.png",
 				"recent-project-gone.png",
 				"settings-targets.png",
 				"approval-banner.png",
