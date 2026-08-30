@@ -6,6 +6,8 @@ import {
 	useEffect,
 	useId,
 	useImperativeHandle,
+	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -41,7 +43,12 @@ import type {
 	WireUsage,
 	WireUsageInspection,
 } from "./protocol.ts";
+import { groupTurns, SOURCE_LABELS } from "./chat.ts";
+import { ChatTranscript, JumpToLatest, useFollowLatest } from "./Chat.tsx";
+import { formatDuration, formatTimestamp } from "./format.ts";
 import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
+
+export { formatDuration, formatTimestamp } from "./format.ts";
 
 export interface WorkbenchActions {
 	browseProjects(path?: string): void;
@@ -84,10 +91,12 @@ interface WorkbenchViewProps {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
 	actions: WorkbenchActions;
+	/** The view shown before the operator switches; tests use it to render the Session Timeline directly. */
+	initialView?: WorkspaceView;
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
-type WorkspaceView = "notebook" | "effective-clio-coder" | "catalog" | "usage" | "dispatch";
+type WorkspaceView = "conversation" | "timeline" | "effective-clio-coder" | "catalog" | "usage" | "dispatch";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -143,12 +152,6 @@ function useNow(active: boolean): number {
 	return now;
 }
 
-export function formatDuration(seconds: number): string {
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
-}
-
 const PHASE_PRESENTATION: Record<WireClioPhase, { label: string; tone: string }> = {
 	starting: { label: "Starting Clio Coder", tone: "info" },
 	unbound: { label: "No session", tone: "info" },
@@ -158,13 +161,6 @@ const PHASE_PRESENTATION: Record<WireClioPhase, { label: string; tone: string }>
 	cancelling: { label: "Stopping", tone: "warning" },
 	failed: { label: "Failed", tone: "error" },
 	closed: { label: "Closed", tone: "info" },
-};
-
-const SOURCE_LABELS: Record<WireEventSource, string> = {
-	"reported-by-clio": "Reported by Clio Coder",
-	"observed-on-acp": "Observed on ACP",
-	"observed-by-workbench": "Observed by desktop",
-	"replayed-from-clio": "Replayed from Clio Coder",
 };
 
 const SOURCE_GUIDANCE: Record<WireEventSource, { label: string; description: string }> = {
@@ -289,13 +285,6 @@ const SETTING_SOURCE_LABELS: Record<WireConfigSettingSource, string> = {
 	"project.local": "Project local",
 	cli: "Command line",
 };
-
-function formatTimestamp(value: string): string {
-	const timestamp = new Date(value);
-	return Number.isNaN(timestamp.getTime())
-		? "unavailable"
-		: timestamp.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-}
 
 const USAGE_FIELDS = [
 	{
@@ -1126,6 +1115,7 @@ interface EvidenceRailProps {
 	onOpenCatalog(): void;
 	onOpenUsage(): void;
 	onOpenDispatch(): void;
+	onOpenTimeline(): void;
 	obscured: boolean;
 }
 
@@ -1142,6 +1132,7 @@ const EvidenceRail = memo(function EvidenceRail({
 	onOpenCatalog,
 	onOpenUsage,
 	onOpenDispatch,
+	onOpenTimeline,
 	obscured,
 }: EvidenceRailProps) {
 	const open = state.open;
@@ -1551,6 +1542,17 @@ const EvidenceRail = memo(function EvidenceRail({
 								)}
 							</>
 						)}
+					{open !== null && (
+						<button
+							type="button"
+							className="button button--quiet observer-map-button"
+							aria-pressed={workspaceView === "timeline"}
+							onClick={onOpenTimeline}
+						>
+							<span aria-hidden="true">≣</span>
+							{workspaceView === "timeline" ? "Session Timeline open" : "Open Session Timeline"}
+						</button>
+					)}
 				</section>
 
 				<section className="observer-section" aria-labelledby="observer-sources-title">
@@ -1643,6 +1645,8 @@ function sameEvidenceRailProps(previous: EvidenceRailProps, next: EvidenceRailPr
 		previous.onOpenConfigMap === next.onOpenConfigMap &&
 		previous.onOpenCatalog === next.onOpenCatalog &&
 		previous.onOpenUsage === next.onOpenUsage &&
+		previous.onOpenDispatch === next.onOpenDispatch &&
+		previous.onOpenTimeline === next.onOpenTimeline &&
 		previous.obscured === next.obscured;
 }
 
@@ -1715,7 +1719,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 					<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 						{pending ? "Inspecting with Clio Coder…" : "Inspect Effective Clio Coder"}
 					</button>
-					<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+					<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 				</div>
 				<p className="effective-map__boundary">
 					This command is read-only and runs independently of the live ACP control lane.
@@ -1768,7 +1772,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 				<div className="effective-map__masthead-actions">
 					<span>{pending ? "Refreshing inspection…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
 					<div>
-						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 							Refresh map
 						</button>
@@ -2271,7 +2275,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 					<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 						{pending ? "Reading Clio Coder catalogs…" : "Inspect Clio Coder catalogs"}
 					</button>
-					<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+					<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 				</div>
 				<p className="catalog__boundary">
 					Bodies, hashes, diagnostics, native paths, requirement URLs, and arbitrary command output never reach this
@@ -2388,7 +2392,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 				<div className="catalog__masthead-actions">
 					<span>{pending ? "Refreshing catalogs…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
 					<div>
-						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 							Refresh catalogs
 						</button>
@@ -2597,7 +2601,7 @@ function UsageEmptyState({ pending, onRefresh, onBack }: {
 				<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 					{pending ? "Reading project history…" : "Inspect 30-day usage"}
 				</button>
-				<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+				<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 			</div>
 			<p className="usage-notebook__boundary">
 				Raw prompts, suggestions, shell shapes, session and run identifiers, native paths, global memory, evidence tags,
@@ -2650,7 +2654,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 				<div className="usage-notebook__masthead-actions">
 					<span>{pending ? "Refreshing history…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
 					<div>
-						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 							Refresh record
 						</button>
@@ -2934,7 +2938,7 @@ function DispatchEmptyState({ pending, onRefresh, onBack }: {
 				<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 					{pending ? "Reading dispatch ledger…" : "Inspect dispatch status"}
 				</button>
-				<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+				<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 			</div>
 			<p className="dispatch-ledger__boundary">
 				This is global installation state, not a fact about the selected project and not a live event stream.
@@ -2974,7 +2978,7 @@ export const DispatchLedger = memo(function DispatchLedger({
 				<div className="dispatch-ledger__masthead-actions">
 					<span>{pending ? "Refreshing snapshot…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
 					<div>
-						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to conversation</button>
 						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
 							Refresh snapshot
 						</button>
@@ -3097,6 +3101,8 @@ interface PromptEditorProps {
 	occupied: boolean;
 	pendingTurnStart: boolean;
 	actions: WorkbenchActions;
+	/** Called after a prompt is sent, so the transcript can follow the new turn. */
+	onSend?: () => void;
 }
 
 /**
@@ -3106,7 +3112,7 @@ interface PromptEditorProps {
  * independently at the display cadence.
  */
 const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor(
-	{ projectId, activeTurnId, occupied, pendingTurnStart, actions },
+	{ projectId, activeTurnId, occupied, pendingTurnStart, actions, onSend },
 	ref,
 ) {
 	const [prompt, setPrompt] = useState("");
@@ -3126,6 +3132,7 @@ const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(func
 		if (!canSubmit || projectId === null) return;
 		actions.startTurn(projectId, value);
 		setPrompt("");
+		onSend?.();
 	}
 
 	function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -3189,7 +3196,7 @@ function ConversationCanvas({
 	onInspectorToggle,
 	workspaceView,
 	onWorkspaceViewChange,
-	onNotebookOpen,
+	onConversationOpen,
 	onRefreshConfig,
 	onRefreshCatalog,
 	onRefreshUsage,
@@ -3209,7 +3216,7 @@ function ConversationCanvas({
 	onInspectorToggle(): void;
 	workspaceView: WorkspaceView;
 	onWorkspaceViewChange(view: WorkspaceView): void;
-	onNotebookOpen(): void;
+	onConversationOpen(): void;
 	onRefreshConfig(): void;
 	onRefreshCatalog(): void;
 	onRefreshUsage(): void;
@@ -3232,15 +3239,83 @@ function ConversationCanvas({
 		? 0
 		: Math.max(0, Math.floor((nowMs - Date.parse(pendingPermission.requestedAt)) / 1_000));
 	const permissionEscalated = pendingPermission !== null && nowMs >= Date.parse(pendingPermission.escalateAt);
+	const projectId = open?.project.id ?? null;
+	const activeTurnId = activeTurn?.turnId ?? null;
+	const permissionId = pendingPermission?.permissionId ?? null;
+	const timeline = projection?.timeline ?? null;
+	// Settled turns keep their identity across frames, so only the streaming turn re-renders.
+	const previousTurns = useRef(groupTurns([]));
+	const turns = useMemo(() => {
+		const next = groupTurns(timeline ?? [], previousTurns.current);
+		previousTurns.current = next;
+		return next;
+	}, [timeline]);
+	const transcriptView = workspaceView === "conversation" || workspaceView === "timeline";
+	// The conversation anchors the approval on its activity row; when the host
+	// has no such row yet, the standalone card still offers the decision.
+	const approvalAnchored = pendingPermission !== null &&
+		(timeline ?? []).some((item) =>
+			item.kind === "approval" && item.status === "waiting" && item.id.endsWith(`:${pendingPermission.permissionId}`)
+		);
+	const scrollRegion = useRef<HTMLDivElement>(null);
+	const scrollMemory = useRef(new Map<WorkspaceView, number>());
+	const follow = useFollowLatest(scrollRegion, transcriptView, timeline);
+	const jumpToLatest = follow.jumpToLatest;
+	const followingRef = useRef(follow.following);
+	followingRef.current = follow.following;
 
-	function resolvePending(decision: "allow-once" | "reject"): void {
-		if (open === null || pendingPermission === null || activeTurn === null) return;
-		actions.resolvePermission(open.project.id, activeTurn.turnId, pendingPermission.permissionId, decision);
-	}
+	// Each view remembers where the operator left it; a transcript view that was
+	// following the latest output keeps following after the switch.
+	useLayoutEffect(() => {
+		const element = scrollRegion.current;
+		if (element === null) return;
+		const remembered = scrollMemory.current.get(workspaceView);
+		element.scrollTop = transcriptView && followingRef.current ? element.scrollHeight : remembered ?? 0;
+	}, [workspaceView, transcriptView]);
+
+	const changeView = useCallback((view: WorkspaceView): void => {
+		const element = scrollRegion.current;
+		if (element !== null) scrollMemory.current.set(workspaceView, element.scrollTop);
+		onWorkspaceViewChange(view);
+	}, [onWorkspaceViewChange, workspaceView]);
+
+	const resolvePending = useCallback((decision: "allow-once" | "reject"): void => {
+		if (projectId === null || permissionId === null || activeTurnId === null) return;
+		actions.resolvePermission(projectId, activeTurnId, permissionId, decision);
+	}, [actions, projectId, activeTurnId, permissionId]);
+
+	const onSend = useCallback((): void => {
+		jumpToLatest();
+	}, [jumpToLatest]);
 
 	function startFromExample(example: string): void {
 		promptEditor.current?.useExample(example);
 	}
+
+	const emptyTranscript = turns.length === 0
+		? (
+			<div className="timeline-empty">
+				<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
+				<div>
+					<div className="eyebrow">NEW RESEARCH THREAD</div>
+					<h2>What would you like to understand or change?</h2>
+					<p>Start in your own words, or use one of these as a starting point.</p>
+				</div>
+				<div className="starter-prompts" aria-label="Example prompts">
+					{STARTER_PROMPTS.map((example) => (
+						<button
+							type="button"
+							key={example}
+							onClick={() => startFromExample(example)}
+						>
+							<span aria-hidden="true">↗</span>
+							{example}
+						</button>
+					))}
+				</div>
+			</div>
+		)
+		: null;
 
 	return (
 		<main
@@ -3278,6 +3353,8 @@ function ConversationCanvas({
 							? "CAPABILITY ATLAS FOR"
 							: workspaceView === "usage"
 							? "USAGE RECORD FOR"
+							: workspaceView === "timeline"
+							? "SESSION TIMELINE FOR"
 							: "ACTIVE PROJECT"}
 					</div>
 					<h1>
@@ -3300,16 +3377,20 @@ function ConversationCanvas({
 					)}
 					{open && (
 						<nav className="conversation__view-switcher" aria-label="Clio Coder views">
-							{(["notebook", "effective-clio-coder", "catalog", "usage", "dispatch"] as const).map((view) => (
+							{(["conversation", "timeline", "effective-clio-coder", "catalog", "usage", "dispatch"] as const).map((
+								view,
+							) => (
 								<button
 									type="button"
 									key={view}
 									className="button button--quiet"
 									aria-current={workspaceView === view ? "page" : undefined}
-									onClick={() => onWorkspaceViewChange(view)}
+									onClick={() => changeView(view)}
 								>
-									{view === "notebook"
-										? "Notebook"
+									{view === "conversation"
+										? "Conversation"
+										: view === "timeline"
+										? "Timeline"
 										: view === "effective-clio-coder"
 										? "Effective Clio Coder"
 										: view === "catalog"
@@ -3361,6 +3442,7 @@ function ConversationCanvas({
 			{/* Focusable so a keyboard user can scroll the conversation without a pointer. */}
 			<div
 				className="conversation__scroll"
+				ref={scrollRegion}
 				tabIndex={0}
 				role="region"
 				aria-label={workspaceView === "effective-clio-coder"
@@ -3371,15 +3453,47 @@ function ConversationCanvas({
 					? "Thirty-day project usage record"
 					: workspaceView === "dispatch"
 					? "Installation-wide dispatch snapshot"
+					: workspaceView === "timeline"
+					? "Session timeline"
 					: "Conversation history"}
 			>
-				{open !== null && workspaceView === "effective-clio-coder"
+				{open !== null && workspaceView === "conversation"
+					? (
+						<div className="conversation__content">
+							{open.clio.lastFailure && (
+								<section className="conversation__failure" role="status">
+									<div className="eyebrow">CLIO CODER REPORTED A FAILURE</div>
+									<p>{open.clio.lastFailure.summary}</p>
+									<code>{open.clio.lastFailure.code}</code>
+								</section>
+							)}
+							<ChatTranscript
+								turns={turns}
+								phase={open.clio.phase}
+								pendingPermission={activeTurn === null ? null : pendingPermission}
+								nowMs={nowMs}
+								onResolve={resolvePending}
+								truncated={projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true}
+							>
+								{emptyTranscript}
+								{pendingPermission !== null && activeTurn !== null && !approvalAnchored && (
+									<PermissionCard
+										permission={pendingPermission}
+										escalated={permissionEscalated}
+										elapsed={permissionWait}
+										onResolve={resolvePending}
+									/>
+								)}
+							</ChatTranscript>
+						</div>
+					)
+					: open !== null && workspaceView === "effective-clio-coder"
 					? (
 						<EffectiveClioMap
 							inspection={open.configInspection}
 							pending={state.pendingConfigInspect !== null}
 							onRefresh={onRefreshConfig}
-							onBack={onNotebookOpen}
+							onBack={onConversationOpen}
 						/>
 					)
 					: open !== null && workspaceView === "catalog"
@@ -3388,7 +3502,7 @@ function ConversationCanvas({
 							inspection={open.catalogInspection}
 							pending={state.pendingCatalogInspect !== null}
 							onRefresh={onRefreshCatalog}
-							onBack={onNotebookOpen}
+							onBack={onConversationOpen}
 						/>
 					)
 					: open !== null && workspaceView === "usage"
@@ -3397,7 +3511,7 @@ function ConversationCanvas({
 							inspection={open.usageInspection}
 							pending={state.pendingUsageInspect !== null}
 							onRefresh={onRefreshUsage}
-							onBack={onNotebookOpen}
+							onBack={onConversationOpen}
 						/>
 					)
 					: workspaceView === "dispatch"
@@ -3406,13 +3520,13 @@ function ConversationCanvas({
 							inspection={state.dispatchInspection}
 							pending={state.pendingDispatchInspect !== null}
 							onRefresh={onRefreshDispatch}
-							onBack={onNotebookOpen}
+							onBack={onConversationOpen}
 						/>
 					)
 					: open === null
 					? <FirstRunGuide state={state} onBrowse={() => actions.browseProjects()} />
 					: (
-						<>
+						<div className="conversation__content">
 							{open.clio.lastFailure && (
 								<section className="conversation__failure" role="status">
 									<div className="eyebrow">CLIO CODER REPORTED A FAILURE</div>
@@ -3426,32 +3540,9 @@ function ConversationCanvas({
 							<section
 								className="evidence-timeline"
 								aria-label="Request, work, approval, and outcome timeline"
-								aria-live="polite"
 							>
-								{projection === null || projection.timeline.length === 0
-									? (
-										<div className="timeline-empty">
-											<div className="timeline-empty__reticle" aria-hidden="true">◎</div>
-											<div>
-												<div className="eyebrow">NEW RESEARCH THREAD</div>
-												<h2>What would you like to understand or change?</h2>
-												<p>Start in your own words, or use one of these as a starting point.</p>
-											</div>
-											<div className="starter-prompts" aria-label="Example prompts">
-												{STARTER_PROMPTS.map((example) => (
-													<button
-														type="button"
-														key={example}
-														onClick={() => startFromExample(example)}
-													>
-														<span aria-hidden="true">↗</span>
-														{example}
-													</button>
-												))}
-											</div>
-										</div>
-									)
-									: projection.timeline.map((item) => (
+								{emptyTranscript ??
+									(projection?.timeline ?? []).map((item) => (
 										<TimelineCard item={item} nowMs={item.status === "active" ? nowMs : 0} key={item.id} />
 									))}
 							</section>
@@ -3463,16 +3554,21 @@ function ConversationCanvas({
 									onResolve={resolvePending}
 								/>
 							)}
-						</>
+						</div>
 					)}
 			</div>
+			{transcriptView && open !== null && (
+				<div className="jump-anchor">
+					<JumpToLatest follow={follow} />
+				</div>
+			)}
 
 			<div className={`composer${activeTurn !== null ? " composer--active" : ""}`}>
 				<div className="composer__mode">
 					<span className="composer__mode-label">
 						{open === null ? "START" : clioOccupied ? "RUNNING" : "MESSAGE"}
 					</span>
-					<span className="composer__status" role="status">
+					<span className="composer__status" role="status" aria-live="polite">
 						{activeTurn
 							? `${formatDuration(elapsed)} · ${activeTurn.toolCalls} tool calls${
 								activeTurn.lastToolTitle === null ? "" : ` · ${activeTurn.lastToolTitle}`
@@ -3489,6 +3585,7 @@ function ConversationCanvas({
 					occupied={clioOccupied}
 					pendingTurnStart={state.pendingTurnStart !== null}
 					actions={actions}
+					onSend={onSend}
 				/>
 			</div>
 		</main>
@@ -4492,7 +4589,7 @@ function sameBottomStatusProps(previous: BottomStatusProps, next: BottomStatusPr
 		previous.approvalEscalated === next.approvalEscalated;
 }
 
-export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) {
+export function WorkbenchView({ state, dispatch, actions, initialView = "conversation" }: WorkbenchViewProps) {
 	const open = state.open;
 	const leftRailIsDrawer = useMediaQuery("(max-width: 790px)");
 	const evidenceRailIsDrawer = useMediaQuery("(max-width: 1180px)");
@@ -4502,7 +4599,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
 	const [projectRailCollapsed, setProjectRailCollapsed] = useState(false);
 	const [evidenceRailCollapsed, setEvidenceRailCollapsed] = useState(false);
-	const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("notebook");
+	const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(initialView);
 	const automaticallyInspectedProject = useRef<string | null>(null);
 	const previousLeftDrawerOpen = useRef(state.leftDrawerOpen);
 	const previousEvidenceDrawerOpen = useRef(evidenceDrawerOpen);
@@ -4527,7 +4624,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		setSelectedNode(null);
 		setSessionToDelete(null);
 		setEvidenceDrawerOpen(false);
-		setWorkspaceView("notebook");
+		setWorkspaceView("conversation");
 	}, [open?.project.id]);
 
 	useEffect(() => {
@@ -4617,8 +4714,13 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		state.pendingDispatchInspect,
 	]);
 
-	const openNotebook = useCallback((): void => {
-		setWorkspaceView("notebook");
+	const openConversation = useCallback((): void => {
+		setWorkspaceView("conversation");
+	}, []);
+
+	const openTimeline = useCallback((): void => {
+		setWorkspaceView("timeline");
+		setEvidenceDrawerOpen(false);
 	}, []);
 
 	const openConfigMap = useCallback((): void => {
@@ -4778,7 +4880,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onInspectorToggle={toggleEvidenceRail}
 				workspaceView={workspaceView}
 				onWorkspaceViewChange={changeWorkspaceView}
-				onNotebookOpen={openNotebook}
+				onConversationOpen={openConversation}
 				onRefreshConfig={refreshConfig}
 				onRefreshCatalog={refreshCatalog}
 				onRefreshUsage={refreshUsage}
@@ -4797,6 +4899,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onOpenCatalog={openCatalog}
 				onOpenUsage={openUsage}
 				onOpenDispatch={openDispatch}
+				onOpenTimeline={openTimeline}
 				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus

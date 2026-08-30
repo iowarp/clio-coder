@@ -332,6 +332,28 @@ function streamWorkloadPaceMs(): number {
 	return parsed;
 }
 
+/** Splits Markdown at blank lines outside fenced code, keeping the separators with the preceding block. */
+function streamWorkloadBlocks(markdown: string): string[] {
+	const blocks: string[] = [];
+	let current = "";
+	let fence: string | null = null;
+	for (const line of markdown.split("\n")) {
+		const opening = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
+		if (opening !== null) {
+			const run = opening[1] ?? "";
+			if (fence === null) fence = run;
+			else if (run.startsWith(fence[0] ?? "`") && run.length >= fence.length) fence = null;
+		}
+		current += `${line}\n`;
+		if (fence === null && line.trim().length === 0 && current.trim().length > 0) {
+			blocks.push(current);
+			current = "";
+		}
+	}
+	if (current.length > 0) blocks.push(current);
+	return blocks;
+}
+
 /** Deterministic Markdown covering every construct the renderer must handle, including hostile input. */
 export function streamWorkloadMarkdown(): string {
 	const lines: string[] = [];
@@ -1483,11 +1505,9 @@ async function run(): Promise<void> {
 		const paceMs = streamWorkloadPaceMs();
 		const chunkChars = 5;
 		const chunksPerTick = 4;
-		const characters = Array.from(streamWorkloadMarkdown());
-		const chunks: string[] = [];
-		for (let index = 0; index < characters.length; index += chunkChars) {
-			chunks.push(characters.slice(index, index + chunkChars).join(""));
-		}
+		// Tool calls and reasoning land only between Markdown blocks, as a real
+		// agent finishes a content block before it calls a tool.
+		const blocks = streamWorkloadBlocks(streamWorkloadMarkdown());
 		let toolOrdinal = 0;
 		const startTool = async (): Promise<void> => {
 			toolOrdinal += 1;
@@ -1531,21 +1551,33 @@ async function run(): Promise<void> {
 			sessionUpdate: "agent_thought_chunk",
 			content: { type: "text", text: "Planning the audit: read the notes, run the checks, then summarize. " },
 		}));
-		for (let index = 0; index < chunks.length; index += 1) {
+		let chunkIndex = 0;
+		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
 			if (turn.cancelled || turn.settled) return;
-			if (index % 64 === 0) await startTool();
-			else if (index % 64 === 32) await finishTool();
-			if (index === Math.floor(chunks.length / 2)) {
+			if (blockIndex > 0 && blockIndex % 3 === 0) {
+				const burst = 1 + (blockIndex % 4);
+				for (let call = 0; call < burst; call += 1) {
+					await startTool();
+					if (paceMs > 0) await delay(paceMs);
+					await finishTool();
+				}
+			}
+			if (blockIndex === Math.floor(blocks.length / 2)) {
 				await emit(updateMessage(turn.sessionId, {
 					sessionUpdate: "agent_thought_chunk",
 					content: { type: "text", text: "Halfway. The remaining sections describe the results. " },
 				}));
 			}
-			await emit(updateMessage(turn.sessionId, {
-				sessionUpdate: "agent_message_chunk",
-				content: { type: "text", text: chunks[index] ?? "" },
-			}));
-			if (paceMs > 0 && index % chunksPerTick === chunksPerTick - 1) await delay(paceMs);
+			const characters = Array.from(blocks[blockIndex] ?? "");
+			for (let index = 0; index < characters.length; index += chunkChars) {
+				if (turn.cancelled || turn.settled) return;
+				await emit(updateMessage(turn.sessionId, {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: characters.slice(index, index + chunkChars).join("") },
+				}));
+				chunkIndex += 1;
+				if (paceMs > 0 && chunkIndex % chunksPerTick === 0) await delay(paceMs);
+			}
 		}
 		await finishTool();
 		if (turn.cancelled || turn.settled) return;

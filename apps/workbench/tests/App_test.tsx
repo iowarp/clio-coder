@@ -62,6 +62,13 @@ function render(state: AppState): string {
 	return renderToStaticMarkup(<WorkbenchView state={state} dispatch={() => undefined} actions={inertActions} />);
 }
 
+/** The Session Timeline view: the same record as the conversation, card by card. */
+function renderTimeline(state: AppState): string {
+	return renderToStaticMarkup(
+		<WorkbenchView state={state} dispatch={() => undefined} actions={inertActions} initialView="timeline" />,
+	);
+}
+
 function stateWith(workspace: WireProjectWorkspace | null): AppState {
 	const bootstrap = bootstrapFixture(
 		workspace === null ? { openProjectId: null, workspace: null } : { workspace },
@@ -92,8 +99,14 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	match(html, /<main class="conversation" id="conversation">/u);
 	match(html, /aria-label="Projects, files, and sessions"/u);
 	match(html, /aria-label="Run and evidence overview"/u);
-	match(html, /aria-label="Request, work, approval, and outcome timeline"/u);
+	match(html, /aria-label="Conversation with Clio Coder"/u);
 	match(html, /aria-label="Clio Coder status"/u);
+	match(html, /aria-current="page">Conversation</u);
+	match(html, />Timeline</u);
+	match(
+		renderTimeline(stateWith(workspace)),
+		/aria-label="Request, work, approval, and outcome timeline"/u,
+	);
 	match(html, /class="brand-lockup__name">Clio Coder</u);
 	match(html, /aria-live="assertive"/u);
 	match(html, /aria-live="polite"/u);
@@ -313,7 +326,10 @@ Deno.test("reported terminal usage becomes a legible per-turn record and a visib
 			source: "reported-by-clio",
 		}],
 	});
-	const html = render(stateWith(workspace));
+	const conversation = render(stateWith(workspace));
+	match(conversation, /tokens 1,024 in · 233 out/u);
+	match(conversation, /title="input 1024 · output 233 · cache read 800 · cache write 17 · reasoning 91"/u);
+	const html = renderTimeline(stateWith(workspace));
 
 	match(html, /Reported token record/u);
 	match(html, /Token fields reported by Clio Coder for this turn/u);
@@ -451,7 +467,13 @@ Deno.test("truncated replay says so without claiming Clio Coder lost the context
 		}],
 		timelineTruncated: true,
 	});
-	const html = render(stateWith(workspace));
+	const conversation = render(stateWith(workspace));
+	match(conversation, /earlier turns are not shown; Clio Coder still has the full context/iu);
+	match(conversation, /chat-turn is-settled is-replay/u);
+	match(conversation, /class="chat-request__replay">earlier record</u);
+	ok(!conversation.includes("chat-response"), "a replayed request with no answer shows no response header");
+	ok(!conversation.includes("<time"), "replay history must render without an invented time");
+	const html = renderTimeline(stateWith(workspace));
 	match(html, /earlier turns are not shown; Clio Coder still has the full context/iu);
 	match(html, /timeline-card--replay/u);
 	match(html, /is-replayed/u);
@@ -554,7 +576,10 @@ Deno.test("a resumed session with truncated replay says so without claiming lost
 		}],
 		timelineTruncated: false,
 	});
-	const html = render(stateWith(workspace));
+	const conversation = render(stateWith(workspace));
+	match(conversation, /Earlier turns are not shown; Clio Coder still has the full context\./u);
+	ok(!conversation.includes("<time"), "resumed replay history must render without an invented time");
+	const html = renderTimeline(stateWith(workspace));
 	match(html, /Earlier turns are not shown; Clio Coder still has the full context\./u);
 	match(html, /timeline-card--replay/u);
 	match(html, /Replayed from Clio Coder/u);
@@ -909,7 +934,12 @@ Deno.test("a tool call that has been open past thirty seconds says so", () => {
 			},
 		],
 	});
-	const html = render(stateWith(workspace));
+	const conversation = render(stateWith(workspace));
+	match(conversation, /2 tools running/u);
+	match(conversation, /activity-row activity-row--tool is-active/u);
+	match(conversation, /· 45s/u);
+	match(conversation, /live-chip--acting/u);
+	const html = renderTimeline(stateWith(workspace));
 	equal((html.match(/still running · /gu) ?? []).length, 1);
 	match(html, /still running · 45s/u);
 	match(html, /timeline-card--long/u);
