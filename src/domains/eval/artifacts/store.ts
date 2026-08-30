@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { assertSafeId } from "../../../core/safe-id.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { EvalArtifactV4, EvalTokenAccountingV4 } from "../schema/artifact.js";
+import { parseEvalServingConfigurationV1 } from "../schema/serving.js";
+import { parseEvalVerdictEnvelopeV1 } from "../schema/verdict.js";
 import { evalRoot } from "../store.js";
 import { redactArtifactForStorage } from "./redact.js";
 
@@ -45,6 +47,14 @@ export function parseEvalArtifactV4(value: unknown, source: string): EvalArtifac
 	const summary = asRecord(value.summary, `${source}.summary`);
 	const matrix = asRecord(value.matrix, `${source}.matrix`);
 	const suite = asRecord(value.suite, `${source}.suite`);
+	const servingConfiguration =
+		value.servingConfiguration === undefined
+			? undefined
+			: parseEvalServingConfigurationV1(value.servingConfiguration, `${source}.servingConfiguration`);
+	const aggregates =
+		value.aggregates === undefined
+			? undefined
+			: (readArray(value, source, "aggregates") as NonNullable<EvalArtifactV4["aggregates"]>);
 	return {
 		version: 4,
 		evalId: readString(value, source, "evalId"),
@@ -63,6 +73,7 @@ export function parseEvalArtifactV4(value: unknown, source: string): EvalArtifac
 			model: readNullableString(matrix, `${source}.matrix`, "model"),
 			thinking: readNullableString(matrix, `${source}.matrix`, "thinking"),
 		},
+		...(servingConfiguration === undefined ? {} : { servingConfiguration }),
 		summary: {
 			runs: readNumber(summary, `${source}.summary`, "runs"),
 			passed: readNumber(summary, `${source}.summary`, "passed"),
@@ -71,6 +82,7 @@ export function parseEvalArtifactV4(value: unknown, source: string): EvalArtifac
 			tokens: parseTokenAccounting(summary.tokens, `${source}.summary.tokens`),
 			wallTimeMs: readNumber(summary, `${source}.summary`, "wallTimeMs"),
 		},
+		...(aggregates === undefined ? {} : { aggregates }),
 		results: readArray(value, source, "results").map((entry, index) => parseResult(entry, `${source}.results[${index}]`)),
 	};
 }
@@ -108,6 +120,8 @@ function parseTokenAccounting(value: unknown, source: string): EvalTokenAccounti
 function parseResult(value: unknown, source: string): EvalArtifactV4["results"][number] {
 	const record = asRecord(value, source);
 	const target = asRecord(record.target, `${source}.target`);
+	const verdict =
+		record.verdict === undefined ? undefined : parseEvalVerdictEnvelopeV1(record.verdict, `${source}.verdict`);
 	return {
 		assignmentId: readNullableString(record, source, "assignmentId"),
 		terminalReceiptDigest: readNullableDigest(record, source, "terminalReceiptDigest"),
@@ -122,6 +136,7 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 		failureClass: readNullableString(record, source, "failureClass"),
 		metrics: asRecord(record.metrics, `${source}.metrics`) as Record<string, number | string | boolean | null>,
 		artifacts: asRecord(record.artifacts, `${source}.artifacts`) as Record<string, string | string[] | null>,
+		...(verdict === undefined ? {} : { verdict }),
 	};
 }
 

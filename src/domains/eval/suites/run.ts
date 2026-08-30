@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
+import { aggregateEvalVerdicts } from "../metrics/aggregate.js";
 import { collectContextMetrics } from "../metrics/context.js";
 import { fleetLoopReceiptAgreement } from "../metrics/fleet-loop-stream.js";
 import {
@@ -15,12 +16,21 @@ import {
 import { wallTimeMetric } from "../metrics/latency.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
-import { evalClioProvenance, evalEnvironmentProvenance } from "../provenance.js";
+import { buildEvalTrackedMetrics, emptyEvalTrackedMetrics, readEvalLedgerSnapshot } from "../metrics/tracked.js";
+import {
+	type EvalServingObservation,
+	evalClioProvenance,
+	evalEnvironmentProvenance,
+	evalServingConfiguration,
+	evalServingObservationFrom,
+} from "../provenance.js";
 import { runClioRunRunner } from "../runners/clio-run.js";
 import { runContextIndexRunner } from "../runners/context-index.js";
 import { runContextInitRunner } from "../runners/context-init.js";
 import { type EvalRunnerOutput, runExternalCommandRunner } from "../runners/external-command.js";
+import { adaptSuiteV2ResultToVerdictV1 } from "../schema/adapter.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../schema/artifact.js";
+import type { EvalServingConfigurationV1 } from "../schema/serving.js";
 import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
 import { createEvalId } from "../store.js";
 import { runCommandVerifiers } from "../verifiers/command.js";
@@ -42,6 +52,13 @@ class EvalWorkspaceSetupError extends Error {
 export interface RunEvalSuiteV2Options {
 	clioEntry: string;
 	now?: () => Date;
+	/** Convert local workspaces into isolated copies for explicit trial runs. */
+	freshWorkspaces?: boolean;
+}
+
+interface CompletedMatrixItem {
+	result: EvalArtifactResultV4;
+	serving: EvalServingObservation;
 }
 
 export async function runEvalSuiteV2(
@@ -52,6 +69,7 @@ export async function runEvalSuiteV2(
 	const started = now();
 	const evalId = createEvalId(started, loaded.hash);
 	const results: EvalArtifactResultV4[] = [];
+	const servingObservations: EvalServingObservation[] = [];
 	const maxCostUsd = loaded.suite.matrix.maxCostUsd;
 	let spentUsd = 0;
 	for (const item of expandEvalMatrix(loaded.suite)) {
@@ -62,11 +80,20 @@ export async function runEvalSuiteV2(
 			results.push(budgetExhaustedResult(item.task.id, item.target, item.repeatIndex, spentUsd, maxCostUsd));
 			continue;
 		}
-		const result = await runMatrixItem(loaded, item.task, item.target, item.repeatIndex, options.clioEntry);
-		spentUsd += resultCostUsd(result);
-		results.push(result);
+		const completed = await runMatrixItem(
+			loaded,
+			item.task,
+			item.target,
+			item.repeatIndex,
+			options.clioEntry,
+			options.freshWorkspaces === true,
+		);
+		spentUsd += resultCostUsd(completed.result);
+		results.push(completed.result);
+		servingObservations.push(completed.serving);
 	}
-	return buildArtifact(loaded, evalId, results, options.clioEntry);
+	const serving = await evalServingConfiguration(loaded.suite.matrix.targets, servingObservations);
+	return buildArtifact(loaded, evalId, results, options.clioEntry, serving);
 }
 
 /** Known receipt cost of one finished matrix item; unpriced runs count zero. */
@@ -82,7 +109,7 @@ function budgetExhaustedResult(
 	spentUsd: number,
 	maxCostUsd: number,
 ): EvalArtifactResultV4 {
-	return {
+	const result: EvalArtifactResultV4 = {
 		assignmentId: null,
 		terminalReceiptDigest: null,
 		taskId,
@@ -100,6 +127,8 @@ function budgetExhaustedResult(
 			error: `matrix cost budget exhausted: spent $${spentUsd.toFixed(4)} of max $${maxCostUsd.toFixed(4)} before this item`,
 		},
 	};
+	result.verdict = adaptSuiteV2ResultToVerdictV1(result, emptyEvalTrackedMetrics());
+	return result;
 }
 
 async function runMatrixItem(
@@ -108,15 +137,18 @@ async function runMatrixItem(
 	target: EvalSuiteTargetV2,
 	repeatIndex: number,
 	clioEntry: string,
-): Promise<EvalArtifactResultV4> {
+	freshWorkspace: boolean,
+): Promise<CompletedMatrixItem> {
 	let workspace: PreparedEvalWorkspace | null = null;
+	let receipt: EvalRunnerOutput["receipt"] = null;
+	let runnerWallTimeMs = 0;
 	// One matrix item, one Clio journal. An item measures Clio, and a shared
 	// state directory would mix sibling processes' runs and yesterday's sessions
 	// into the reading; pinning it here also means an item leaves nothing behind
 	// in the operator's own state.
 	const stateDir = await mkdtemp(resolve(tmpdir(), "clio-eval-state-"));
 	try {
-		workspace = await prepareWorkspace(loaded.baseDir, task);
+		workspace = await prepareWorkspace(loaded.baseDir, task, freshWorkspace);
 		const setup = await runCommandVerifiers(task.workspace.setup ?? [], workspace.dir, task.timeoutMs);
 		// A fixture that never came up measured nothing, so the item fails as a
 		// harness failure rather than reporting an invariant it never observed.
@@ -125,6 +157,8 @@ async function runMatrixItem(
 			CLIO_CODER_STATE_DIR: stateDir,
 			CLIO_CODER_ENTRY: clioEntry,
 		});
+		receipt = runner.receipt ?? null;
+		runnerWallTimeMs = runner.wallTimeMs;
 		const patch = collectPatchMetrics(workspace.dir);
 		const receiptExitCode = runner.exitCode;
 		// Read after the runner returned and before the journal is removed: what
@@ -154,7 +188,7 @@ async function runMatrixItem(
 		metrics["verifier.exitCode"] = verifier.exitCode;
 		metrics["result.pass"] = pass;
 		metrics["result.failureClass"] = failureClass;
-		return {
+		const result: EvalArtifactResultV4 = {
 			assignmentId: runner.assignmentId,
 			terminalReceiptDigest: runner.terminalReceiptDigest,
 			taskId: task.id,
@@ -165,13 +199,28 @@ async function runMatrixItem(
 			metrics,
 			artifacts: {
 				...runner.artifacts,
+				workspace: workspace.dir,
 				...(verifier.stdout.length > 0 ? { verifierStdout: verifier.stdout } : {}),
 				...(verifier.stderr.length > 0 ? { verifierStderr: verifier.stderr } : {}),
 			},
 		};
+		const snapshot = await readEvalLedgerSnapshot(stateDir);
+		const ledgerEntries = [...snapshot.entries, ...(runner.ledgerEntries ?? [])];
+		result.verdict = adaptSuiteV2ResultToVerdictV1(
+			result,
+			buildEvalTrackedMetrics({
+				ledgerEntries,
+				receipt: receipt ?? null,
+				fallbackWallClockMs: runner.wallTimeMs,
+			}),
+		);
+		return {
+			result,
+			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
+		};
 	} catch (error) {
 		const failureClass = error instanceof EvalWorkspaceSetupError ? "setup_failed" : "command_error";
-		return {
+		const result: EvalArtifactResultV4 = {
 			assignmentId: null,
 			terminalReceiptDigest: null,
 			taskId: task.id,
@@ -185,7 +234,23 @@ async function runMatrixItem(
 				"verifier.exitCode": 1,
 				"latency.wallMs": 0,
 			},
-			artifacts: { error: error instanceof Error ? error.message : String(error) },
+			artifacts: {
+				error: error instanceof Error ? error.message : String(error),
+				...(workspace === null ? {} : { workspace: workspace.dir }),
+			},
+		};
+		const snapshot = await readEvalLedgerSnapshot(stateDir);
+		result.verdict = adaptSuiteV2ResultToVerdictV1(
+			result,
+			buildEvalTrackedMetrics({
+				ledgerEntries: snapshot.entries,
+				receipt: receipt ?? null,
+				fallbackWallClockMs: runnerWallTimeMs,
+			}),
+		);
+		return {
+			result,
+			serving: evalServingObservationFrom(target, receipt ?? null, snapshot.compiledPromptHashes),
 		};
 	} finally {
 		await workspace?.cleanup();
@@ -208,7 +273,11 @@ function invariantMetrics(stateDir: string, runnerExitCode: number): Record<stri
 async function prepareWorkspace(
 	baseDir: string,
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
+	freshWorkspace: boolean,
 ): Promise<PreparedEvalWorkspace> {
+	if (task.workspace.kind === "local" && freshWorkspace) {
+		return prepareTempCopyWorkspace(baseDir, { ...task.workspace, kind: "temp-copy" });
+	}
 	if (task.workspace.kind === "local") return prepareLocalWorkspace(baseDir, task.workspace);
 	if (task.workspace.kind === "git") return prepareGitWorkspace(task.workspace);
 	return prepareTempCopyWorkspace(baseDir, task.workspace);
@@ -293,6 +362,7 @@ function buildArtifact(
 	evalId: string,
 	results: EvalArtifactResultV4[],
 	clioEntry: string,
+	servingConfiguration: EvalServingConfigurationV1,
 ): EvalArtifactV4 {
 	const passed = results.filter((result) => result.pass).length;
 	return {
@@ -302,6 +372,7 @@ function buildArtifact(
 		clio: evalClioProvenance({ entry: clioEntry }),
 		environment: evalEnvironmentProvenance(),
 		matrix: artifactMatrixIdentity(loaded.suite.matrix.targets),
+		servingConfiguration,
 		summary: {
 			runs: results.length,
 			passed,
@@ -310,6 +381,9 @@ function buildArtifact(
 			tokens: tokenAccountingFrom(results),
 			wallTimeMs: results.reduce((sum, result) => sum + wallTimeMetric(result.metrics), 0),
 		},
+		aggregates: aggregateEvalVerdicts(
+			results.flatMap((result) => (result.verdict === undefined ? [] : [result.verdict])),
+		),
 		results,
 	};
 }

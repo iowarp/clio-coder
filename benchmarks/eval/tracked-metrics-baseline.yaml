@@ -1,0 +1,229 @@
+version: 2
+suite:
+  id: tracked-metrics-baseline
+  title: Tracked metrics baseline
+  visibility: sprint
+  description: Ten small repository edits that require reading the implementation and two related consumers before a code grader checks behavior.
+  provenance:
+    issue: 252
+    charter: 13_demystifying_evals.md
+matrix:
+  targets:
+    - id: mini
+      model: qwen3.8-27b-dense
+      thinking: off
+  repeats: 1
+tasks:
+  - id: latency-nonnegative
+    tags: &baseline_tags
+      - tracked-metrics
+      - multi-file
+      - small-edit
+    workspace: &repo_workspace
+      kind: temp-copy
+      path: ../..
+      excludes:
+        - .git
+        - .superpowers
+        - node_modules
+        - dist
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/domains/eval/metrics/latency.ts, src/domains/eval/suites/run.ts, and
+        src/domains/eval/compare/compare.ts. Then make one focused edit only in
+        src/domains/eval/metrics/latency.ts so wallTimeMetric treats negative finite values as zero
+        while preserving nonnegative finite values. Do not edit tests or benchmarks. Validate with
+        node benchmarks/eval/tracked-metrics-grader.mjs latency-nonnegative.
+    verify:
+      measure:
+        - &grader_latency >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs latency-nonnegative
+    metrics: &baseline_metrics
+      collect:
+        - task.solved
+    timeoutMs: &task_timeout 180000
+
+  - id: safe-id-controls
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/core/safe-id.ts, src/domains/eval/artifacts/store.ts, and
+        src/domains/evidence/store.ts. Then make one focused edit only in src/core/safe-id.ts so
+        assertSafeId rejects every ASCII control character from U+0000 through U+001F and U+007F.
+        Preserve existing valid identifiers and InvalidIdError. Do not edit tests or benchmarks.
+        Validate with node benchmarks/eval/tracked-metrics-grader.mjs safe-id-controls.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs safe-id-controls
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: shell-quote-nul
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/core/shell-quote.ts, src/domains/eval/runners/clio-run.ts, and
+        src/domains/dispatch/fleet-preflight.ts. Then make one focused edit only in
+        src/core/shell-quote.ts so shellQuote throws when its value contains a NUL byte and retains
+        its existing POSIX quoting behavior otherwise. Do not edit tests or benchmarks. Validate
+        with node benchmarks/eval/tracked-metrics-grader.mjs shell-quote-nul.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs shell-quote-nul
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: junit-apostrophe
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/domains/eval/reports/junit.ts, src/domains/eval/schema/artifact.ts, and
+        src/cli/eval.ts. Then make one focused edit only in src/domains/eval/reports/junit.ts so the
+        XML escaping helper also emits &apos; for apostrophes in suite names, task ids, and failure
+        classes. Preserve the existing escapes. Do not edit tests or benchmarks. Validate with node
+        benchmarks/eval/tracked-metrics-grader.mjs junit-apostrophe.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs junit-apostrophe
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: markdown-pipe
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/domains/eval/reports/markdown.ts, src/domains/eval/schema/artifact.ts, and
+        src/cli/eval.ts. Then make one focused edit only in src/domains/eval/reports/markdown.ts so
+        dynamic table cells escape vertical bars with a backslash. Cover task ids, target ids,
+        model ids, and failure classes without changing static headings. Do not edit tests or
+        benchmarks. Validate with node benchmarks/eval/tracked-metrics-grader.mjs markdown-pipe.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs markdown-pipe
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: suite-override-trim
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/domains/eval/suites/resolve.ts, src/domains/eval/suites/matrix.ts, and
+        src/cli/eval.ts. Then make one focused edit only in src/domains/eval/suites/resolve.ts so
+        target and model overrides are trimmed before target selection and storage. Preserve behavior
+        when an override is absent. Do not edit tests or benchmarks. Validate with node
+        benchmarks/eval/tracked-metrics-grader.mjs suite-override-trim.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs suite-override-trim
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: truncate-marker-budget
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/tools/truncate-utf8.ts, src/tools/result-shaping.ts, and src/tools/read.ts. Then make
+        one focused edit only in src/tools/truncate-utf8.ts so maxBytes bounds the complete returned
+        UTF-8 string including the marker. Preserve whole UTF-8 characters and the unchanged fast
+        path. Do not edit tests or benchmarks. Validate with node
+        benchmarks/eval/tracked-metrics-grader.mjs truncate-marker-budget.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs truncate-marker-budget
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: response-count-validation
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/core/response-model-id.ts, src/interactive/chat-loop-messages.ts, and
+        src/cli/usage.ts. Then make one focused edit only in src/core/response-model-id.ts so
+        addResponseModelIdObservationCount ignores a calls value unless it is a nonnegative integer.
+        Preserve accumulation for valid counts. Do not edit tests or benchmarks. Validate with node
+        benchmarks/eval/tracked-metrics-grader.mjs response-count-validation.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs response-count-validation
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: relative-future
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/interactive/format-time.ts, src/interactive/welcome-dashboard.ts, and
+        tests/contracts/format-time.test.ts. Then make one focused edit only in
+        src/interactive/format-time.ts so relative renders future instants at least five seconds away
+        with the same coarse units prefixed by "in", while nearer instants remain "just now".
+        Preserve past-time behavior. Do not edit tests or benchmarks. Validate with node
+        benchmarks/eval/tracked-metrics-grader.mjs relative-future.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs relative-future
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout
+
+  - id: acp-unicode-boundary
+    tags: *baseline_tags
+    workspace: *repo_workspace
+    runner:
+      kind: clio-run
+      agent: coder
+      prompt: >-
+        Read src/engine/acp/errors.ts, src/engine/acp/server.ts, and src/engine/acp/transport.ts. Then
+        make one focused edit only in src/engine/acp/errors.ts so acpErrorMessage never splits a
+        Unicode surrogate pair at its truncation boundary and still stays within
+        ACP_MAX_ERROR_MESSAGE_CHARS UTF-16 units including the ellipsis. Preserve whitespace
+        collapsing and short messages. Do not edit tests or benchmarks. Validate with node
+        benchmarks/eval/tracked-metrics-grader.mjs acp-unicode-boundary.
+    verify:
+      measure:
+        - >-
+          echo "133b7ef6bc1cdb002e02d2f7e1840b00dfdc7a4c335b7ccc835ef0820c27d823  benchmarks/eval/tracked-metrics-grader.mjs"
+          | sha256sum --check --status && node benchmarks/eval/tracked-metrics-grader.mjs acp-unicode-boundary
+    metrics: *baseline_metrics
+    timeoutMs: *task_timeout

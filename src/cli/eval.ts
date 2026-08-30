@@ -22,10 +22,10 @@ const HELP = `clio-coder eval <command>
 
 Commands:
   clio-coder eval validate --suite <suite.yaml>
-  clio-coder eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
-  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
+	  clio-coder eval run --suite <suite.yaml> [--trials <n>] [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
+	  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
   clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
-  clio-coder eval compare <baselineEvalId> <candidateEvalId>
+	  clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--allow-config-drift]
   clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 `;
 
@@ -37,6 +37,7 @@ interface ParsedEvalArgs {
 	suite?: string;
 	taskFile?: string;
 	repeat: number;
+	trials?: number;
 	target?: string;
 	model?: string;
 	out?: string;
@@ -44,13 +45,21 @@ interface ParsedEvalArgs {
 	evalId?: string;
 	format: EvalReportFormat;
 	compareIds: string[];
+	metric?: string;
+	allowConfigDrift: boolean;
 	baseline?: string;
 	thresholds?: string;
 	help: boolean;
 }
 
 function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
-	const parsed: ParsedEvalArgs = { repeat: 1, compareIds: [], format: "text", help: false };
+	const parsed: ParsedEvalArgs = {
+		repeat: 1,
+		compareIds: [],
+		format: "text",
+		allowConfigDrift: false,
+		help: false,
+	};
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === undefined) continue;
@@ -110,6 +119,11 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 				index += 1;
 				continue;
 			}
+			if (arg === "--trials") {
+				parsed.trials = positiveInteger(requiredValue(args, index, "--trials"), "--trials");
+				index += 1;
+				continue;
+			}
 			throw new Error(`unknown eval run argument: ${arg}`);
 		}
 		if (parsed.command === "report") {
@@ -125,6 +139,15 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			throw new Error(`unexpected eval report argument: ${arg}`);
 		}
 		if (parsed.command === "compare") {
+			if (arg === "--metric") {
+				parsed.metric = requiredValue(args, index, "--metric");
+				index += 1;
+				continue;
+			}
+			if (arg === "--allow-config-drift") {
+				parsed.allowConfigDrift = true;
+				continue;
+			}
 			if (!arg.startsWith("-")) {
 				parsed.compareIds.push(arg);
 				continue;
@@ -202,15 +225,21 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		const loaded =
 			parsed.suite !== undefined
 				? await loadEvalSuiteFile(parsed.suite)
-				: await loadV1TaskFileAsSuite(parsed.taskFile ?? "", parsed.repeat);
+				: await loadV1TaskFileAsSuite(parsed.taskFile ?? "", parsed.trials ?? parsed.repeat);
 		const resolveOptions: { target?: string; model?: string } = {};
 		if (parsed.target !== undefined) resolveOptions.target = parsed.target;
 		if (parsed.model !== undefined) resolveOptions.model = parsed.model;
-		const suite = resolveSuiteForRun(loaded.suite, resolveOptions);
+		const suite = resolveSuiteForRun(loaded.suite, {
+			...resolveOptions,
+			...(parsed.trials ? { trials: parsed.trials } : {}),
+		});
 		// Runner commands execute with cwd inside prepared eval workspaces, so a
 		// relative --clio-coder-entry must be pinned to the invoking directory here.
 		const clioEntry = resolve(parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js");
-		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
+		const artifact = await runEvalSuiteV2(
+			{ ...loaded, suite },
+			{ clioEntry, freshWorkspaces: parsed.trials !== undefined },
+		);
 		const artifactPath = await writeEvalArtifactV4(clioDataDir(), artifact, parsed.out);
 		process.stdout.write(`${renderEvalTextReportV4(artifact)}artifact: ${artifactPath}\n`);
 		// A suite that declares thresholds is gated by them here, on the artifact
@@ -246,7 +275,14 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 		const dataDir = clioDataDir();
 		const baseline = await loadEvalArtifactV4(dataDir, baselineEvalId);
 		const candidate = await loadEvalArtifactV4(dataDir, candidateEvalId);
-		process.stdout.write(renderEvalComparisonV4(compareEvalArtifactsV4(baseline, candidate)));
+		process.stdout.write(
+			renderEvalComparisonV4(
+				compareEvalArtifactsV4(baseline, candidate, {
+					allowConfigDrift: parsed.allowConfigDrift,
+					...(parsed.metric === undefined ? {} : { metric: parsed.metric }),
+				}),
+			),
+		);
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
