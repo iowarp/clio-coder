@@ -291,6 +291,18 @@ function setWindowDetails(
 	Object.assign(runtime.runtimeResolution.contextWindowDetails, details);
 }
 
+/** A settled call's usage, enough for `promptCachePayloadForAssistant` to read. */
+function usageOf(input: number) {
+	return {
+		input,
+		output: 10,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: input + 10,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
 describe("contracts/prompt manifest bump on a resumed 0.3.8 session (#249)", () => {
 	it("writes one promptRecompiled entry carrying the previous and the new hash", async () => {
 		const harness: ScenarioHarness = await createScenarioHarness({
@@ -372,6 +384,124 @@ describe("contracts/prompt manifest bump on a resumed 0.3.8 session (#249)", () 
 		}
 	});
 
+	/**
+	 * The same criterion over an in-process `/resume`. Manifest provenance
+	 * follows the session: the entry session B writes must name the hash B's own
+	 * manifest last recorded, not the hash this process happens to be holding
+	 * from session A. A chain that starts from a hash appearing nowhere in B is
+	 * unreadable, and it is the one thing #249's record exists to make readable.
+	 */
+	it("names the incoming session's own last recorded hash after an in-process resume", async () => {
+		const harness: ScenarioHarness = await createScenarioHarness({
+			prefix: "prefix-layout-resume",
+			prompts: compilingPrompts(),
+		});
+		try {
+			const sessionA = harness.session.current();
+			ok(sessionA);
+			setWindowDetails(harness.runtime, {
+				effectiveContextWindow: LOADED_WINDOW,
+				loadedContextWindow: LOADED_WINDOW,
+				contextWindowSource: "loaded",
+			});
+			const aPrompt = await harness.context.ensureSessionPrompt(harness.runtime);
+			ok(aPrompt);
+			harness.context.logPromptCompileIfPending();
+			strictEqual(readPromptCompileRecords(sessionA).length, 1);
+
+			// Session B was written by an earlier process and has a manifest of its
+			// own. Its window differs from A's, so B's compile is genuinely a new
+			// prompt and an entry is written rather than skipped.
+			const sessionB = harness.session.create({ cwd: harness.cwd, model: MODEL, target: "mini" });
+			const bRecordedHash = "d".repeat(64);
+			appendPromptCompileRecord(sessionB, {
+				version: PROMPT_MANIFEST_VERSION,
+				at: "2026-08-22T00:00:00.000Z",
+				previousHash: null,
+				systemPromptHash: bRecordedHash,
+				tokenEstimate: 4096,
+				thinkingLevel: "off",
+				contextWindow: PROBED_WINDOW,
+				contextWindowSource: "probe",
+				projectPreload: null,
+				sections: [],
+				fragments: [],
+			} as never);
+
+			harness.context.resetForSession();
+			setWindowDetails(harness.runtime, {
+				effectiveContextWindow: PROBED_WINDOW,
+				loadedContextWindow: null,
+				contextWindowSource: "probe",
+			});
+			const bPrompt = await harness.context.ensureSessionPrompt(harness.runtime);
+			ok(bPrompt);
+			ok(bPrompt.systemPrompt.includes(`Context window: ${PROBED_WINDOW}`));
+			harness.context.logPromptCompileIfPending();
+
+			const recompiled = promptRecompiledEntries(harness.entries());
+			strictEqual(recompiled.length, 1, "one entry in B's ledger");
+			const data = recompiled[0];
+			ok(data);
+			strictEqual(data.previousHash, bRecordedHash, "B's own last recorded hash, read from B's manifest");
+			strictEqual(data.hash, bPrompt.systemPromptHash);
+			strictEqual(
+				data.previousHash === aPrompt.systemPromptHash,
+				false,
+				"never the abandoned session's hash: it appears nowhere in B",
+			);
+
+			const bRecords = readPromptCompileRecords(sessionB);
+			strictEqual(bRecords.length, 2, "B's manifest chains onto its own last record");
+			strictEqual(bRecords[1]?.previousHash, bRecordedHash);
+			strictEqual(readPromptCompileRecords(sessionA).length, 1, "A's manifest is untouched by the switch");
+		} finally {
+			await harness.dispose();
+		}
+	});
+
+	/**
+	 * The cold-reason half of the same switch. Once provenance follows the
+	 * session, the manifest usually has nothing to report on a resume: B's last
+	 * recorded hash is what B compiles now. The backend's slot still holds A's
+	 * prefix, so the reason is stamped from the switch itself.
+	 */
+	it("stamps the first turn after an in-process switch expected-cold even when nothing recompiles", async () => {
+		const harness: ScenarioHarness = await createScenarioHarness({
+			prefix: "prefix-layout-resume-cold",
+			prompts: compilingPrompts(),
+		});
+		try {
+			setWindowDetails(harness.runtime, {
+				effectiveContextWindow: LOADED_WINDOW,
+				loadedContextWindow: LOADED_WINDOW,
+				contextWindowSource: "loaded",
+			});
+			// A fresh process's first compile is not expected-cold: there is no
+			// prefix in the slot for it to have displaced.
+			ok(await harness.context.ensureSessionPrompt(harness.runtime));
+			harness.context.logPromptCompileIfPending();
+			harness.context.consumeExpectedColdReasons(harness.runtime.runtimeId);
+			strictEqual(harness.context.promptCachePayloadForAssistant(usageOf(1_000)).expectedColdReasons, undefined);
+
+			harness.session.create({ cwd: harness.cwd, model: MODEL, target: "mini" });
+			harness.context.resetForSession();
+			// Same window, same inputs: B compiles the identical text, so no entry
+			// and no hash movement. The turn is cold all the same.
+			const bPrompt = await harness.context.ensureSessionPrompt(harness.runtime);
+			ok(bPrompt);
+			harness.context.logPromptCompileIfPending();
+			strictEqual(promptRecompiledEntries(harness.entries()).length, 0, "nothing recompiled in B");
+
+			harness.context.consumeExpectedColdReasons(harness.runtime.runtimeId);
+			deepStrictEqual(harness.context.promptCachePayloadForAssistant(usageOf(1_000)).expectedColdReasons, [
+				"prompt_recompiled",
+			]);
+		} finally {
+			await harness.dispose();
+		}
+	});
+
 	it("states the session's loaded window, not the probe, in the Runtime block", async () => {
 		const harness: ScenarioHarness = await createScenarioHarness({
 			prefix: "prefix-layout-window",
@@ -433,7 +563,7 @@ describe("contracts/prompt manifest bump on a resumed 0.3.8 session (#249)", () 
 		}
 	});
 
-	it("records a probe as a probe, and prefers a known loaded window over one", async () => {
+	it("records a probe as a probe, and follows the resolution when a loaded window lands", async () => {
 		const harness: ScenarioHarness = await createScenarioHarness({
 			prefix: "prefix-layout-probe",
 			prompts: compilingPrompts(),
@@ -455,12 +585,15 @@ describe("contracts/prompt manifest bump on a resumed 0.3.8 session (#249)", () 
 			harness.context.logPromptCompileIfPending();
 			strictEqual(readPromptCompileRecords(meta)[0]?.contextWindowSource, "probe");
 
-			// Discovery then reports the open window while the probe figure is still
-			// in the details. The loaded value outranks it.
+			// Discovery then reports the open window. The ranking happens in
+			// `resolveContextWindowDetails`, which tests the loaded figure before
+			// the probed one, so the details the turn reads already carry the
+			// loaded window as `effectiveContextWindow` and `"loaded"` as the
+			// source; the compile follows them rather than re-ranking.
 			setWindowDetails(harness.runtime, {
-				effectiveContextWindow: PROBED_WINDOW,
+				effectiveContextWindow: LOADED_WINDOW,
 				loadedContextWindow: LOADED_WINDOW,
-				contextWindowSource: "probe",
+				contextWindowSource: "loaded",
 			});
 			harness.context.invalidateSessionPromptCache();
 			const loaded = await harness.context.ensureSessionPrompt(harness.runtime);
