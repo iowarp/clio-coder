@@ -92,6 +92,7 @@
 		"//": "below here: a real model target, chosen with --target <id>; costs money and/or GPU time, never run in CI",
 		"live:smoke": "node --import tsx benchmarks/internal/live-smoke.ts",
 		"live:fleet-dispatch": "node --import tsx benchmarks/internal/live-fleet-dispatch.ts",
+		"live:release-residue": "node --import tsx tests/live/release-residue.ts",
 		"live:tui": "node --import tsx benchmarks/internal/pty-drive.ts",
 		"live:home": "node --import tsx benchmarks/internal/live-home.ts"
 	},
