@@ -17,6 +17,10 @@ function renderMarkdown(source: string, complete = true): string {
 	return renderToStaticMarkup(<MarkdownContent source={source} complete={complete} />);
 }
 
+// JSX string attributes collapse a literal newline to a space, so multi-line sources are expressions.
+const TWO_LINES = "const a = 1;\nconst b = 2;";
+const FLOWCHART = "flowchart LR\n  A --> B";
+
 Deno.test("links are live only for http, https, and mailto", () => {
 	equal(safeHref("https://example.org/a?b=1#c"), "https://example.org/a?b=1#c");
 	equal(safeHref("http://example.org"), "http://example.org/");
@@ -182,7 +186,7 @@ Deno.test("hostile Markdown never becomes markup, a live unsafe link, or a fetch
 Deno.test("fenced code renders a label, a copy control, a line count, and plain text for unknown languages", () => {
 	const known = renderToStaticMarkup(
 		<CodeBlock
-			code={"const a = 1;\nconst b = 2;"}
+			code={TWO_LINES}
 			info="ts"
 			settled
 		/>,
@@ -213,7 +217,7 @@ Deno.test("code with markup-like content stays escaped inside the block", () => 
 Deno.test("Mermaid blocks wait for settled source, bound size, and show the source with the failure", () => {
 	const pending = renderToStaticMarkup(
 		<MermaidBlock
-			source={"flowchart LR\n  A --> B"}
+			source={FLOWCHART}
 			settled={false}
 		/>,
 	);
@@ -223,7 +227,7 @@ Deno.test("Mermaid blocks wait for settled source, bound size, and show the sour
 
 	const rendering = renderToStaticMarkup(
 		<MermaidBlock
-			source={"flowchart LR\n  A --> B"}
+			source={FLOWCHART}
 			settled
 		/>,
 	);
