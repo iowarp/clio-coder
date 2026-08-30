@@ -172,6 +172,11 @@ function sealedEnvelopeFor(runId: string): RunEnvelope | null {
  * whole orchestrator downtime, which is not a measurement of anything. The
  * last heartbeat is the honest bound; a row that never heartbeat has only its
  * own start, which reads as a zero-length run rather than an invented one.
+ *
+ * A restart has no shared monotonic origin with the process that owned the
+ * worker, so recovery never estimates heartbeat age. It first adjudicates the
+ * host-scoped pid and uses the persisted wall-clock heartbeat only as this
+ * display/evidence bound after that process is known to be gone.
  */
 function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } {
 	let closed = 0;

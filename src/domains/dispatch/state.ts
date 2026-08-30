@@ -107,6 +107,10 @@ export async function writeFleetRun(record: FleetRunRecord): Promise<void> {
 	await atomicWrite(fleetRunPath(record.id), `${JSON.stringify(record, null, 2)}\n`);
 }
 
+// `RunEnvelope.heartbeatAt` deliberately persists only the absolute wall-clock
+// anchor used for operator display and crash recovery. The monotonic heartbeat
+// stamp belongs to the live transport in this process; serializing it would
+// give a restarted process a number from an origin it cannot share.
 function readRuns(): RunEnvelope[] {
 	const path = runsPath();
 	if (!existsSync(path)) return [];

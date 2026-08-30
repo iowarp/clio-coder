@@ -12,6 +12,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
+import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -169,7 +170,14 @@ import {
 } from "./failure-classification.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
-import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
+import {
+	classifyHeartbeat,
+	DEFAULT_HEARTBEAT_SPEC,
+	type HeartbeatSpec,
+	type HeartbeatStamp,
+	type HeartbeatStatus,
+	heartbeatMonotonicAt,
+} from "./heartbeat.js";
 import { hostVerificationRejection, runHostVerification } from "./host-verification.js";
 import { renderDispatchIntentRequirements } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
@@ -341,7 +349,7 @@ interface ActiveRun {
 	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
 	stallTimeoutMs: number | null;
 	lineage: RunLineage;
-	heartbeatAt: { current: number } | null;
+	heartbeatAt: HeartbeatStamp | null;
 	heartbeatStatus: HeartbeatStatus;
 	meter: RunTokenMeter;
 	pricing: EffectivePricing["rates"];
@@ -377,6 +385,8 @@ export interface DispatchBundleOptions {
 	heartbeatIntervalMs?: number;
 	resilienceCooldownMs?: number;
 	now?: () => number;
+	/** Monotonic clock for heartbeat age and ACP event-inactivity spans. */
+	monotonicNow?: () => number;
 	/** Immutable per-attempt session settings view; falls back to the shared snapshot. */
 	getSettings?: () => EffectiveSettings;
 	/** Live hard-block state cloned into each mediated worker spec. */
@@ -2401,6 +2411,7 @@ export function createDispatchBundle(
 		return DEFAULT_RESILIENCE_COOLDOWN_MS;
 	};
 	const now = options?.now ?? (() => Date.now());
+	const monotonicNow = options?.monotonicNow ?? (() => performance.now());
 	// Durable evidence owner used by shadow observation and active readiness.
 	const routeObserver: RouteObserver = options?.routeObserver ?? createRouteObserver({});
 
@@ -3060,8 +3071,8 @@ export function createDispatchBundle(
 		}
 	}
 
-	function heartbeatIso(heartbeatMs: number): string {
-		return new Date(heartbeatMs).toISOString();
+	function heartbeatIso(heartbeat: HeartbeatStamp): string {
+		return new Date(heartbeat.current).toISOString();
 	}
 
 	function heartbeatRunStatus(status: HeartbeatStatus): RunStatus {
@@ -3082,7 +3093,7 @@ export function createDispatchBundle(
 			event: {
 				type: "heartbeat_status",
 				status,
-				heartbeatAt: run.heartbeatAt ? heartbeatIso(run.heartbeatAt.current) : null,
+				heartbeatAt: run.heartbeatAt ? heartbeatIso(run.heartbeatAt) : null,
 			},
 		});
 	}
@@ -3100,16 +3111,16 @@ export function createDispatchBundle(
 	 */
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
-		const tickNow = now();
+		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
 			if (run.aborted || run.stallKilled || !run.heartbeatAt) continue;
-			const heartbeatMs = run.heartbeatAt.current;
-			if (!Number.isFinite(heartbeatMs)) continue;
+			const heartbeatMonotonic = heartbeatMonotonicAt(run.heartbeatAt);
+			if (!Number.isFinite(heartbeatMonotonic) || !Number.isFinite(run.heartbeatAt.current)) continue;
 			if (run.runtimeKind === "acp-delegation") {
-				ledger.update(run.runId, { heartbeatAt: heartbeatIso(heartbeatMs) });
+				ledger.update(run.runId, { heartbeatAt: heartbeatIso(run.heartbeatAt) });
 				const stallMs = run.stallTimeoutMs;
 				if (stallMs === null || stallMs <= 0) continue;
-				if (tickNow - heartbeatMs <= stallMs) continue;
+				if (tickMonotonic - heartbeatMonotonic <= stallMs) continue;
 				run.stallKilled = true;
 				run.heartbeatStatus = "dead";
 				emitHeartbeatStatus(run, "dead");
@@ -3120,10 +3131,10 @@ export function createDispatchBundle(
 				}
 				continue;
 			}
-			const status = classifyHeartbeat(heartbeatMs, tickNow, heartbeatSpec);
+			const status = classifyHeartbeat(heartbeatMonotonic, tickMonotonic, heartbeatSpec);
 			const patch: Partial<RunEnvelope> = {
 				status: heartbeatRunStatus(status),
-				heartbeatAt: heartbeatIso(heartbeatMs),
+				heartbeatAt: heartbeatIso(run.heartbeatAt),
 			};
 			ledger.update(run.runId, patch);
 			// Node staleness display feeds off the freshest worker heartbeat.
@@ -3569,6 +3580,8 @@ export function createDispatchBundle(
 				safety,
 				autonomy: lifecycle.autonomy,
 				clientVersion: readClioVersion(),
+				now,
+				monotonicNow,
 			});
 		} catch (error) {
 			leaseSlot.release();
@@ -3757,7 +3770,7 @@ export function createDispatchBundle(
 			ledgerRef.update(envelope.id, {
 				status: "running",
 				pid: acp.pid,
-				heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
+				heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				lineage,
 				identity,
 				node: LOCAL_RUN_NODE,
@@ -4154,7 +4167,7 @@ export function createDispatchBundle(
 					cacheReadTokenCount: receiptDraft.cacheReadTokenCount ?? 0,
 					cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount ?? 0,
 					reasoningTokenCount: receiptDraft.reasoningTokenCount ?? 0,
-					heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
+					heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				};
 				ledgerRef.update(envelope.id, ledgerPatch);
 				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
@@ -4439,6 +4452,8 @@ export function createDispatchBundle(
 		try {
 			worker = (placement?.spawn ?? spawnWorker)(spec, {
 				cwd: lifecycle.cwd,
+				now,
+				monotonicNow,
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
 			});
 		} catch (error) {
@@ -4801,7 +4816,7 @@ export function createDispatchBundle(
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
-				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
+				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt) } : {}),
 			});
 			observer?.onAdmitted({
 				runId: envelope.id,
@@ -5394,7 +5409,7 @@ export function createDispatchBundle(
 					...(receiptDraft.cacheWriteTokenCount !== undefined
 						? { cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount }
 						: {}),
-					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt.current) } : {}),
+					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt) } : {}),
 				};
 				if (receiptDraft.reasoningTokenCount !== undefined) {
 					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
@@ -6217,19 +6232,21 @@ export function createDispatchBundle(
 	 */
 	function snapshot(): DispatchSnapshot {
 		const tickNow = now();
+		const tickMonotonic = monotonicNow();
 		const running: DispatchSnapshot["running"] = [];
 		const totals = { ...finalizedTotals };
 		const costAmounts = [...finalizedCosts];
 		for (const run of active.values()) {
 			let heartbeat: "alive" | "stale" | "dead" | "n/a" = "n/a";
-			if (run.heartbeatAt && Number.isFinite(run.heartbeatAt.current)) {
+			if (run.heartbeatAt && Number.isFinite(heartbeatMonotonicAt(run.heartbeatAt))) {
+				const heartbeatMonotonic = heartbeatMonotonicAt(run.heartbeatAt);
 				if (run.runtimeKind === "acp-delegation") {
 					const stallMs = run.stallTimeoutMs;
 					if (stallMs !== null && stallMs > 0) {
-						heartbeat = tickNow - run.heartbeatAt.current > stallMs ? "dead" : "alive";
+						heartbeat = tickMonotonic - heartbeatMonotonic > stallMs ? "dead" : "alive";
 					}
 				} else {
-					heartbeat = classifyHeartbeat(run.heartbeatAt.current, tickNow, heartbeatSpec);
+					heartbeat = classifyHeartbeat(heartbeatMonotonic, tickMonotonic, heartbeatSpec);
 				}
 			}
 			const meter = run.meter;

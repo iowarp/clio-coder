@@ -207,21 +207,18 @@ describe("ssh worker transport channel contract", () => {
 	}
 
 	it("spawns, writes the spec, streams events, and filters the announce", async () => {
-		// The heartbeat stamp is a wall-clock instant, so asserting it advanced by
-		// reading the wall clock either side of the drain asks the host not to
-		// resync in between. It does resync, and the later stamp then reads as
-		// older than the earlier read even though every delivery path stamped.
-		// The injected clock is stepped instead, at the one point that separates
-		// the two stamping paths: the announce stamps the heartbeat before this
-		// callback runs, so a stamp at or past `afterAnnounce` can only have been
-		// taken by an event crossing the bulk lane.
-		const clock = createTestClock();
+		// The wall clock supplies one durable anchor while the independently
+		// steppable monotonic clock proves the bulk lane advanced the span after
+		// announce. No later wall-clock read participates in that assertion.
+		const wallClock = createTestClock();
+		const monotonicClock = createTestClock(0);
 		let afterAnnounce = 0;
 		const worker = transport("ok").spawn(TEST_SPEC, {
 			cwd: "/shared/projects/app",
-			now: clock.now,
+			now: wallClock.now,
+			monotonicNow: monotonicClock.now,
 			onAnnounce: () => {
-				afterAnnounce = clock.advance(1_000);
+				afterAnnounce = monotonicClock.advance(1_000);
 			},
 		});
 		const events = await drain(worker.events);
@@ -229,7 +226,12 @@ describe("ssh worker transport channel contract", () => {
 		strictEqual(result.exitCode, 0);
 		deepStrictEqual(eventTypes(events), ["message_end"]);
 		ok(afterAnnounce > 0, "the peer announced, so the heartbeat check is not vacuous");
-		ok(worker.heartbeatAt.current >= afterAnnounce, "events bump the heartbeat");
+		ok((worker.heartbeatAt.monotonic ?? 0) >= afterAnnounce, "events bump the monotonic heartbeat");
+		strictEqual(
+			worker.heartbeatAt.current,
+			wallClock.now() + (worker.heartbeatAt.monotonic ?? 0),
+			"the persisted instant is the wall anchor plus the monotonic span",
+		);
 		const argvLines = readFileSync(fake.argvLog, "utf8").trim().split("\n");
 		const argv = JSON.parse(argvLines[argvLines.length - 1] ?? "[]") as string[];
 		ok(argv.includes("-T"));

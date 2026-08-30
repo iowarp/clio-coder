@@ -26,10 +26,12 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { withClioAgentEnvironment } from "../../core/agent-environment.js";
 import { enableClioCompileCache, workerCompileCacheEnvironment } from "../../core/compile-cache.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
+import type { HeartbeatStamp } from "./heartbeat.js";
 import {
 	type AgentLedgerBody,
 	type ApprovedWorkerIdentity,
@@ -71,7 +73,7 @@ export interface SpawnedWorker {
 	promise: Promise<SpawnedWorkerResult>;
 	events: AsyncIterableIterator<unknown>;
 	abort(): void;
-	heartbeatAt: { current: number };
+	heartbeatAt: HeartbeatStamp;
 	/**
 	 * Write one JSON line to the worker's open stdin (the same line protocol
 	 * that carried the spec). Returns false when the worker has exited, its
@@ -134,15 +136,14 @@ export interface WorkerProcessOptions {
 	/** How long bulk output may precede the announce before the peer is refused. */
 	attestationGraceMs?: number;
 	/**
-	 * Clock behind the heartbeat stamp, defaulting to `Date.now`. The stamp stays
-	 * a wall-clock instant in production because the ledger, the receipt, and the
-	 * evidence record all serialize it as ISO-8601 for an operator to read. That
-	 * leaves a test with no honest way to assert the stamp advanced: comparing
-	 * two wall-clock reads taken either side of an interval orders them backward
-	 * on any host that resyncs its clock in between. A test injects the steppable
-	 * clock from tests/harness/clock.ts here and asserts on that instead.
+	 * Wall clock behind the heartbeat anchor, defaulting to `Date.now`. The
+	 * anchor stays a wall-clock instant because the ledger and evidence record
+	 * serialize the derived heartbeat as ISO-8601 for an operator to read. This
+	 * clock is read once; later heartbeat instants add a monotonic span to it.
 	 */
 	now?: () => number;
+	/** Monotonic clock used for heartbeat spans, defaulting to `performance.now`. */
+	monotonicNow?: () => number;
 }
 
 /**
@@ -192,6 +193,7 @@ export function spawnWorkerProcess(
 	const shutdownGraceMs = opts?.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
 	const attestationGraceMs = opts?.attestationGraceMs ?? DEFAULT_ATTESTATION_GRACE_MS;
 	const now = opts?.now ?? Date.now;
+	const monotonicNow = opts?.monotonicNow ?? (() => performance.now());
 	const approved = opts?.approvedIdentity ?? approvedIdentityForSpec(spec);
 
 	const child: ChildProcess = spawn(command, [...args], {
@@ -204,7 +206,19 @@ export function spawnWorkerProcess(
 	});
 	const pid = child.pid ?? null;
 
-	const heartbeatAt = { current: now() };
+	// One wall anchor plus a monotonic span keeps the persisted/display instant
+	// readable without ever asking a later wall-clock read how much time passed.
+	const heartbeatWallAnchor = now();
+	const heartbeatMonotonicAnchor = monotonicNow();
+	const heartbeatAt: HeartbeatStamp = {
+		current: heartbeatWallAnchor,
+		monotonic: heartbeatMonotonicAnchor,
+	};
+	const stampHeartbeat = (): void => {
+		const stamp = monotonicNow();
+		heartbeatAt.monotonic = stamp;
+		heartbeatAt.current = heartbeatWallAnchor + (stamp - heartbeatMonotonicAnchor);
+	};
 
 	const queue = createBoundedEventQueue();
 	const waiters: Array<(r: IteratorResult<unknown>) => void> = [];
@@ -233,7 +247,7 @@ export function spawnWorkerProcess(
 	}
 
 	function push(value: unknown): void {
-		heartbeatAt.current = now();
+		stampHeartbeat();
 		const w = waiters.shift();
 		if (w) {
 			w({ value, done: false });
@@ -378,7 +392,7 @@ export function spawnWorkerProcess(
 			if (!announceAccepted) failAttestation(`Invalid worker attestation: ${frame.reason}`);
 			return;
 		}
-		heartbeatAt.current = now();
+		stampHeartbeat();
 		if (frame.value.kind === "announce") {
 			if (announceAccepted || announceFailed) return;
 			const verdict = verifyWorkerAttestation(frame.value.attestation, approved);

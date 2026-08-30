@@ -68,6 +68,7 @@ import { agentAudiencePresentation, agentDisplayLabel } from "../../src/interact
 import { GLYPH } from "../../src/interactive/theme/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
+import { createTestClock } from "../harness/clock.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/worker-attestation.js";
 
@@ -4319,6 +4320,55 @@ rl.once("line", (line) => {
 				["stalled", "failed"],
 			);
 			strictEqual(assignment?.status, "failed");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("keeps a live worker through a 60s wall-clock step and still reaps it by monotonic age", async () => {
+		const context = stubContext();
+		const wallClock = createTestClock();
+		const monotonicClock = createTestClock(0);
+		const wallAnchor = wallClock.now();
+		const heartbeatAt = { current: wallAnchor, monotonic: monotonicClock.now() };
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let abortCalled = false;
+		const bundle = makeDispatchBundle(context, {
+			now: wallClock.now,
+			monotonicNow: monotonicClock.now,
+			heartbeatSpec: { windowMs: 5, graceMs: 5 },
+			heartbeatIntervalMs: 5,
+			spawnWorker: () => ({
+				pid: 7002,
+				promise: exit.promise,
+				events: finalEvents(),
+				heartbeatAt,
+				abort: () => {
+					abortCalled = true;
+					exit.resolve({ exitCode: 1, signal: "SIGKILL" });
+				},
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "stay alive" });
+
+			wallClock.advance(60_000);
+			heartbeatAt.monotonic = monotonicClock.advance(1);
+			heartbeatAt.current = wallAnchor + heartbeatAt.monotonic;
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			strictEqual(abortCalled, false, "a forward wall-clock step does not reap a live worker");
+			strictEqual(bundle.contract.snapshot().running[0]?.heartbeat, "alive");
+
+			wallClock.advance(-120_000);
+			monotonicClock.advance(11);
+			await waitFor(() => abortCalled, "a backward wall-clock step made a stale worker look fresh");
+			await handle.finalPromise;
+			strictEqual(
+				bundle.contract.getRun(handle.runId)?.heartbeatAt,
+				new Date(wallAnchor + 1).toISOString(),
+				"durable evidence keeps the absolute wall anchor plus the last monotonic span",
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
