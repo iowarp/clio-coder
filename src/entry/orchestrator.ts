@@ -63,9 +63,13 @@ import {
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
 	loadMemoryRecordsSync,
+	proposeInjectedTaskMemory,
+	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
+	type TaskMemoryEntry,
 	type TaskMemoryModelClient,
+	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
 	taskMemoryTracePath,
@@ -92,7 +96,7 @@ import { createTaskBoardReminderRegistration } from "../domains/middleware/task-
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import { ObservabilityDomainModule, recordBackgroundMemoryStep } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
@@ -101,7 +105,9 @@ import {
 	applyModelCapabilityPatch,
 	canonicalEndpointKey,
 	firstRuntimeResolutionError,
+	foregroundStreamUsage,
 	isOrchestratorEligibleRuntime,
+	normalizeCostProvenance,
 	ProvidersDomainModule,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
@@ -161,7 +167,7 @@ import {
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
-import { openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
+import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
 import type { EngineModel } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
@@ -312,11 +318,25 @@ export async function resolveApiKeyForTarget(
 	return resolved.apiKey;
 }
 
+/**
+ * The background memory role, resolved to the endpoint it would call.
+ *
+ * The endpoint key is what lets the middleware decline a step that would land
+ * on the same inference scheduler the chat target is streaming against (#229,
+ * #250), and it is the same key dispatch admission counts slots on.
+ */
+interface BackgroundMemoryRoute {
+	client: TaskMemoryModelClient;
+	targetId: string;
+	wireModelId: string;
+	endpointKey: string | null;
+}
+
 function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 	timeoutMs: number,
-): TaskMemoryModelClient | null {
+): BackgroundMemoryRoute | null {
 	const targetId = settings.background.target?.trim();
 	const wireModelId = settings.background.model?.trim();
 	if (!targetId || !wireModelId) return null;
@@ -345,24 +365,53 @@ function createBackgroundMemoryModelClient(
 	const model = resolved.target.runtime.synthesizeModel(resolved.target.target, resolved.target.wireModelId, kbHit);
 	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
 	applyModelCapabilityPatch(model, refined.capabilities);
+	const costProvenance = normalizeCostProvenance(refined.costProvenance);
 	return {
-		async complete(request) {
-			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
-				? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
-				: LOCAL_API_KEY_FALLBACK;
-			return completeEngineText({
-				model,
-				systemPrompt: request.systemPrompt,
-				userPrompt: request.userPrompt,
-				maxTokens: request.maxTokens,
-				// Always off, never the operator's chat thinking level. A model that
-				// reasons anyway still works: `completeEngineText` keeps only text
-				// blocks, and the memory output budget leaves room for the preamble.
-				thinkingLevel: "off",
-				signal: request.signal,
-				timeoutMs,
-				...(apiKey === undefined ? {} : { apiKey }),
-			});
+		targetId,
+		wireModelId: refined.wireModelId,
+		endpointKey: canonicalEndpointKey(refined.target),
+		client: {
+			async complete(request) {
+				const apiKey = targetRequiresAuth(refined.target, refined.runtime)
+					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
+					: LOCAL_API_KEY_FALLBACK;
+				const startedAt = Date.now();
+				const completion = await completeEngineText({
+					model,
+					systemPrompt: request.systemPrompt,
+					userPrompt: request.userPrompt,
+					maxTokens: request.maxTokens,
+					// Always off, never the operator's chat thinking level. A model that
+					// reasons anyway still works: `completeEngineText` keeps only text
+					// blocks, and the memory output budget leaves room for the preamble.
+					thinkingLevel: "off",
+					signal: request.signal,
+					timeoutMs,
+					...(apiKey === undefined ? {} : { apiKey }),
+				});
+				// The step is billed here whatever the policy later decides about the
+				// answer. A model that read a trajectory and chose silence spent the
+				// same prefill as one that produced a reminder.
+				return {
+					text: completion.text,
+					inputTokens: completion.inputTokens,
+					outputTokens: completion.outputTokens,
+					usage: {
+						targetId,
+						attributedModelId: refined.wireModelId,
+						input: completion.usage.input,
+						output: completion.usage.output,
+						cacheRead: completion.usage.cacheRead,
+						cacheWrite: completion.usage.cacheWrite,
+						reasoning: completion.usage.reasoning,
+						totalTokens: completion.usage.totalTokens,
+						costUsd: completion.usage.costUsd,
+						costProvenance,
+						durationMs: Date.now() - startedAt,
+						backend: completion.backend,
+					},
+				};
+			},
 		},
 	};
 }
@@ -1081,6 +1130,55 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// telemetry row says which silence happened; this says what the model wrote.
 	const memoryTracePath = taskMemoryTracePath();
 	const memoryTrace = memoryTracePath === null ? null : createTaskMemoryTrace(memoryTracePath);
+	// The route the last resolved memory client would call, kept so the endpoint
+	// check and the cost row read the same resolution the step itself used.
+	let backgroundMemoryRoute: BackgroundMemoryRoute | null = null;
+	/**
+	 * Account for one background memory step exactly as a `/btw` side question is
+	 * accounted for: the in-process cost tracker under its own label so `/cost`
+	 * shows it while the session lives, and one durable out-of-turn row so
+	 * `clio-coder usage report` can still see it afterwards.
+	 *
+	 * The step publishes its endpoint too. A step that ran on the chat target's
+	 * own endpoint moved that server's cache, so the next turn's `/context`
+	 * warning names it instead of reporting an unexplained cold prefix.
+	 */
+	const recordBackgroundMemoryUsage = (usage: TaskMemoryStepUsage): void => {
+		const meta = session?.current() ?? null;
+		try {
+			recordBackgroundMemoryStep({
+				usage,
+				stateDir: clioStateDir(),
+				sessionId: meta?.id ?? null,
+				// The identity the session ledger is filed under, so `usage report
+				// --repo` selects these rows with the same hash it selects ledgers with.
+				repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
+				...(observability === undefined ? {} : { observability }),
+			});
+		} catch {
+			// Accounting is bookkeeping. Its failure never reaches the memory step.
+		}
+		const endpointKey = backgroundMemoryRoute?.endpointKey ?? null;
+		if (endpointKey !== null) bus.emit(BusChannels.MemoryStepCompleted, { endpointKey, targetId: usage.targetId });
+	};
+	const proposeInjectedMemoryEntries = (entries: ReadonlyArray<TaskMemoryEntry>): void => {
+		const meta = session?.current() ?? null;
+		void proposeInjectedTaskMemory(clioDataDir(), {
+			sessionId: meta?.id ?? null,
+			cwd: meta?.cwd || process.cwd(),
+			entries,
+		})
+			.then((result) => {
+				for (const error of result.errors) {
+					process.stderr.write(`[clio:memory] proposed record not written for ${error}\n`);
+				}
+			})
+			.catch((error: unknown) => {
+				process.stderr.write(
+					`[clio:memory] proposed records not written: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			});
+	};
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
 		telemetry: createTaskMemoryTelemetrySink(),
@@ -1095,10 +1193,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getModelClient: () => {
 			const settings = effectiveSettingsForDispatch?.();
-			return settings === undefined
-				? null
-				: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs);
+			backgroundMemoryRoute =
+				settings === undefined
+					? null
+					: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs);
+			return backgroundMemoryRoute?.client ?? null;
 		},
+		// A single-slot local server serves one request at a time, so a memory step
+		// started while the operator's turn is streaming either waits behind it or
+		// makes the server swap the resident model out to answer. The chat loop
+		// registers its stream on the endpoint it streams against, so the two are
+		// compared by the same canonical key dispatch admission counts slots on.
+		backgroundEndpointBusy: () => {
+			const endpointKey = backgroundMemoryRoute?.endpointKey ?? null;
+			if (endpointKey === null) return false;
+			return (foregroundStreamUsage()[endpointKey] ?? 0) > 0;
+		},
+		onStepUsage: (usage) => recordBackgroundMemoryUsage(usage),
+		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 	});
 	middleware.registerHook(memoryIntervention);
 	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
@@ -1904,6 +2016,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				bank,
 				activity: memoryIntervention.recentActivity(),
 				stepInFlight: memoryIntervention.stepInFlight(),
+				// Folded from the telemetry ledger, which is durable across sessions,
+				// so `/memory` answers what the tier has cost since it was turned on
+				// rather than what it cost since this process started.
+				spend: readTaskMemorySpendSummary(clioStateDir()),
 			};
 		},
 		getTaskMemorySeedOffer,

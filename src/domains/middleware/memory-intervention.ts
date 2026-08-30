@@ -4,7 +4,7 @@ import {
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
-import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank } from "../memory/task-bank.js";
+import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "../memory/task-bank.js";
 import {
 	runTaskMemoryPolicy,
 	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
@@ -12,6 +12,7 @@ import {
 	type TaskMemoryModelClient,
 	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
+	type TaskMemoryStepUsage,
 	type TaskMemoryTrajectoryStep,
 } from "../memory/task-memory-policy.js";
 import type { TaskMemoryActivityEvent } from "../memory/task-memory-status.js";
@@ -75,6 +76,25 @@ export interface MemoryInterventionDeps {
 	everyNTools?: number;
 	/** Lazily resolves the explicitly configured background role. Null means rules-only. */
 	getModelClient?: () => TaskMemoryModelClient | null;
+	/**
+	 * True when the background target's inference endpoint is already serving the
+	 * chat target's stream. A memory step then either queues behind the operator's
+	 * own turn on a single-slot server or makes the server evict the resident
+	 * model to serve it, so the boundary is skipped and the skip is recorded.
+	 */
+	backgroundEndpointBusy?: () => boolean;
+	/**
+	 * Provider-reported spend for one completed model step. The composition root
+	 * routes it to the cost ledger; the middleware never prices anything.
+	 */
+	onStepUsage?: (usage: TaskMemoryStepUsage) => void;
+	/**
+	 * Bank entries an llm-tier reminder cited when it reached the operator. The
+	 * composition root proposes them into the durable memory store, which is what
+	 * connects the session bank to the records `/memory` and `clio-coder memory`
+	 * read. Best effort and content-bearing, exactly like `onEnvelope`.
+	 */
+	onInjectedEntries?: (entries: ReadonlyArray<TaskMemoryEntry>) => void;
 	/** Live next-turn settings view; individual fields above remain test-friendly fallbacks. */
 	getSettings?: () => Readonly<MemoryInterventionSettings>;
 	/** Best-effort content-free telemetry; sink failures never affect intervention. */
@@ -348,6 +368,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			reminder: null,
 			inputTokens: 0,
 			outputTokens: 0,
+			usage: null,
 			effects: NO_EFFECTS,
 		});
 		const live = settings();
@@ -361,10 +382,20 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		let tier: TaskMemoryTelemetryTier = "rules";
 		promptedStepTier = tier;
 		let promptedResult: TaskMemoryPolicyResult;
+		// A boundary that never reached the model is a skipped boundary rather than
+		// a policy decision, and `dropped` is the telemetry outcome for exactly
+		// that. The returned decision stays `silent`, since no reminder was
+		// produced and the policy vocabulary has no value for a step that never ran.
+		let telemetryDecision: TaskMemoryTelemetryDecision | null = null;
 		try {
 			const client = deps.getModelClient?.() ?? null;
 			if (client === null) {
 				promptedResult = silent("no_client");
+			} else if (deps.backgroundEndpointBusy?.() === true) {
+				tier = "llm";
+				promptedStepTier = tier;
+				promptedResult = silent("endpoint_busy");
+				telemetryDecision = "dropped";
 			} else {
 				tier = "llm";
 				promptedStepTier = tier;
@@ -396,10 +427,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			});
 		}
 		lastDecision = promptedResult.decision;
+		if (promptedResult.usage !== null) {
+			try {
+				deps.onStepUsage?.(promptedResult.usage);
+			} catch {
+				// Accounting is bookkeeping. A failing sink never changes memory behavior.
+			}
+		}
+		if (promptedResult.decision === "injected") reportInjectedEntries(promptedResult.reminder);
 		emitTelemetry(
 			triggers,
 			tier,
-			promptedResult.decision,
+			telemetryDecision ?? promptedResult.decision,
 			promptedResult.reason,
 			citedEntryCount(promptedResult.reminder),
 			promptedResult.inputTokens,
@@ -462,10 +501,35 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (activity.length > MEMORY_INTERVENTION_ACTIVITY_LIMIT) activity.length = MEMORY_INTERVENTION_ACTIVITY_LIMIT;
 	}
 
-	function citedEntryCount(message: string | null): number {
-		if (message === null) return 0;
+	function citedEntries(message: string | null): TaskMemoryEntry[] {
+		if (message === null) return [];
 		const snapshot = deps.bank.snapshot();
-		return [...snapshot.knowledge, ...snapshot.procedural].filter((entry) => message.includes(`[${entry.id}]`)).length;
+		return [...snapshot.knowledge, ...snapshot.procedural].filter((entry) => message.includes(`[${entry.id}]`));
+	}
+
+	function citedEntryCount(message: string | null): number {
+		return citedEntries(message).length;
+	}
+
+	/**
+	 * Hand the cited entries to the durable store.
+	 *
+	 * Only the model tier reports here. A rules-tier reminder cites an entry this
+	 * middleware wrote itself out of one repeated tool failure, and proposing
+	 * every one of those as a durable lesson would fill the operator's review
+	 * queue with rows nobody asked for. The model tier's entries are the ones the
+	 * background plane produced, which is what #229 asks to be reviewable.
+	 */
+	function reportInjectedEntries(reminder: string | null): void {
+		if (deps.onInjectedEntries === undefined) return;
+		const entries = citedEntries(reminder);
+		if (entries.length === 0) return;
+		try {
+			deps.onInjectedEntries(entries);
+		} catch {
+			// A failing store is the composition root's problem to report, never a
+			// reason to fail the step that produced the reminder.
+		}
 	}
 
 	function observeBeforeTool(input: MiddlewareHookInput): void {

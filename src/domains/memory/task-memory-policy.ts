@@ -1,8 +1,10 @@
+import type { BackendCompletionTimings } from "../../core/cache-telemetry.js";
 import type { ToolResultDigestProvenance } from "../../tools/result-disposition.js";
 import {
 	buildMemoryInterventionUserPrompt,
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
 } from "../prompts/memory-intervention.js";
+import type { CostProvenance } from "../providers/index.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS, type TaskMemoryBank, type TaskMemoryRenderableClass } from "./task-bank.js";
 
 export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
@@ -12,13 +14,10 @@ export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
  * directly.
  *
  * This must equal the settings default in `src/core/defaults.ts`; a contract
- * test pins the pair. It read 20000 while the shipped default was 180000, and
- * 20000 is the value measured to have produced 256 timeouts against a route
- * whose completions have a 15s median and an 81s tail. Two numbers for one
- * setting means any path that misses the settings object silently gets the one
- * known to be wrong.
+ * test pins the pair. Two numbers for one setting means any path that misses
+ * the settings object silently gets the one nobody chose.
  */
-export const TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS = 180_000;
+export const TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS = 30_000;
 /**
  * The envelope itself needs a few hundred tokens. The rest is headroom for a
  * model that reasons despite thinking being requested off: measured preambles on
@@ -45,10 +44,39 @@ export interface TaskMemoryModelRequest {
 	signal: AbortSignal;
 }
 
+/**
+ * What one memory step cost, as the client that made the call observed it.
+ *
+ * The policy never prices anything itself; it carries this from the client to
+ * the composition root, which is the only layer that knows about the cost
+ * ledger. Without it a memory step was billed by a provider and recorded
+ * nowhere an operator could read: 137,205 tokens over 14 days appeared in no
+ * `/cost` row and in no usage report (#229).
+ */
+export interface TaskMemoryStepUsage {
+	/** Target the step ran against, used as the cost row's provider id. */
+	targetId: string;
+	attributedModelId: string;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	reasoning: number;
+	totalTokens: number;
+	costUsd: number;
+	costProvenance: CostProvenance;
+	/** Wall time of the model call itself, measured by the client. */
+	durationMs: number;
+	/** Backend prefill facts when the serving runtime reported them (#247). */
+	backend: BackendCompletionTimings | null;
+}
+
 export interface TaskMemoryModelResponse {
 	text: string;
 	inputTokens?: number;
 	outputTokens?: number;
+	/** Provider-reported spend for this call. Absent on clients that report none. */
+	usage?: TaskMemoryStepUsage;
 }
 
 export interface TaskMemoryModelClient {
@@ -87,6 +115,21 @@ export type TaskMemoryPolicyReason =
 	| "all_operations_invalid"
 	/** The request did not answer inside the policy timeout. */
 	| "deadline"
+	/**
+	 * The transport hit its own deadline first and threw. Separated from
+	 * `client_error` because a route that answers too slowly and a route that
+	 * refuses the connection call for opposite responses, and separated from
+	 * `deadline` because it says the abort came from the request rather than
+	 * from the policy's race.
+	 */
+	| "timed_out"
+	/**
+	 * The step would have run on the endpoint the chat target is streaming
+	 * against, so it never started. A single-slot local server queues the memory
+	 * call behind the operator's own turn, or evicts the resident model to serve
+	 * it; neither is a cost a background step may impose.
+	 */
+	| "endpoint_busy"
 	/** The model client threw: unreachable route, auth failure, malformed request. */
 	| "client_error"
 	/** No background role is configured, so the llm tier never ran. */
@@ -146,6 +189,8 @@ export interface TaskMemoryPolicyResult {
 	reminder: string | null;
 	inputTokens: number;
 	outputTokens: number;
+	/** Provider-reported spend, when the client reported any. Null on every path that made no call. */
+	usage: TaskMemoryStepUsage | null;
 }
 
 type TaskMemoryOperation =
@@ -208,6 +253,7 @@ export async function runTaskMemoryPolicy(
 	let userPrompt = "";
 	let rawResponse = "";
 	let clientError: string | null = null;
+	let stepUsage: TaskMemoryStepUsage | null = null;
 	// Every exit reports through here so the trace sees the same envelope the
 	// telemetry row summarizes, including the paths that used to throw away both.
 	const settle = (
@@ -223,6 +269,7 @@ export async function runTaskMemoryPolicy(
 			reminder: parts.reminder ?? null,
 			inputTokens: parts.inputTokens ?? 0,
 			outputTokens: parts.outputTokens ?? 0,
+			usage: stepUsage,
 		};
 		try {
 			input.onEnvelope?.({
@@ -263,9 +310,10 @@ export async function runTaskMemoryPolicy(
 			return settle("timeout", "deadline");
 		}
 		rawResponse = typeof response.text === "string" ? response.text : "";
+		stepUsage = response.usage ?? null;
 		const usage = {
-			inputTokens: nonNegativeInteger(response.inputTokens),
-			outputTokens: nonNegativeInteger(response.outputTokens),
+			inputTokens: nonNegativeInteger(response.inputTokens ?? stepUsage?.input),
+			outputTokens: nonNegativeInteger(response.outputTokens ?? stepUsage?.output),
 		};
 		const read = readPolicyStep(rawResponse);
 		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
@@ -293,6 +341,11 @@ export async function runTaskMemoryPolicy(
 		return settle("injected", "intervened", { ...counts, reminder });
 	} catch (error) {
 		clientError = errorMessage(error);
+		// A transport that aborted at its own deadline spent the whole budget and
+		// produced nothing. Reporting it as silence made a step that held a local
+		// server for its full timeout indistinguishable from a model that read the
+		// trajectory and decided there was nothing to say (#229).
+		if (isTimeoutError(error)) return settle("timeout", "timed_out");
 		return settle("silent", "client_error");
 	} finally {
 		if (timer !== undefined) clearTimeout(timer);
@@ -596,6 +649,22 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 
 function nonNegativeInteger(value: number | undefined): number {
 	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+/**
+ * Whether a client failure was the deadline rather than the route.
+ *
+ * The engine surfaces an aborted or timed-out completion as a plain `Error`
+ * carrying the provider's message, so the name and the text are all there is to
+ * read. Both spellings appear: pi-ai raises `AbortError` when the policy's own
+ * signal fires, and the completion wrapper raises `model completion aborted`
+ * when its `timeoutMs` fires first.
+ */
+function isTimeoutError(error: unknown): boolean {
+	const name = error instanceof Error ? error.name : "";
+	if (name === "AbortError" || name === "TimeoutError") return true;
+	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+	return /\b(abort(ed)?|timed out|timeout)\b/iu.test(message);
 }
 
 function errorMessage(error: unknown): string {

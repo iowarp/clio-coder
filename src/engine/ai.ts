@@ -27,6 +27,7 @@ import {
 	type ToolCall,
 	type Usage,
 } from "@earendil-works/pi-ai";
+import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import {
 	completeEngineSimple,
 	engineStream,
@@ -64,6 +65,21 @@ export interface EngineTextCompletionResult {
 	text: string;
 	inputTokens: number;
 	outputTokens: number;
+	/**
+	 * The provider's full usage record for the call, so a caller that has to
+	 * account for the spend does not have to re-derive it from two token counts.
+	 */
+	usage: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		reasoning: number;
+		totalTokens: number;
+		costUsd: number;
+	};
+	/** Backend prefill and prediction facts when the serving runtime reported them. */
+	backend: BackendCompletionTimings | null;
 }
 
 /** Run one tool-free completion while keeping pi message types at the engine boundary. */
@@ -92,6 +108,16 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			.join(""),
 		inputTokens: response.usage.input,
 		outputTokens: response.usage.output,
+		usage: {
+			input: response.usage.input,
+			output: response.usage.output,
+			cacheRead: response.usage.cacheRead,
+			cacheWrite: response.usage.cacheWrite,
+			reasoning: response.usage.reasoning ?? 0,
+			totalTokens: response.usage.totalTokens,
+			costUsd: response.usage.cost.total,
+		},
+		backend: response.backendTimings ?? null,
 	};
 }
 

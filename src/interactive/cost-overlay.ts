@@ -44,6 +44,8 @@ export interface CostRow {
 	handoffs: number;
 	/** Calls in this row that were session pre-warms rather than turns. */
 	prewarms: number;
+	/** Calls in this row that were proactive-memory steps on the background target. */
+	backgroundMemory: number;
 	cost: CostAggregate;
 }
 
@@ -76,6 +78,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			if (entry.label === "side-question") existing.row.sideQuestions += 1;
 			if (entry.label === "handoff") existing.row.handoffs += 1;
 			if (entry.label === "prewarm") existing.row.prewarms += 1;
+			if (entry.label === "background-memory") existing.row.backgroundMemory += 1;
 			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
 			addResponseModelIdObservationCounts(
 				existing.responseModelIdObservationCounts,
@@ -99,6 +102,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				sideQuestions: entry.label === "side-question" ? 1 : 0,
 				handoffs: entry.label === "handoff" ? 1 : 0,
 				prewarms: entry.label === "prewarm" ? 1 : 0,
+				backgroundMemory: entry.label === "background-memory" ? 1 : 0,
 			},
 			requestedModelIds: new Set(entry.requestedModelIds),
 			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
@@ -138,6 +142,7 @@ function sumRows(
 			sideQuestions: acc.sideQuestions + row.sideQuestions,
 			handoffs: acc.handoffs + row.handoffs,
 			prewarms: acc.prewarms + row.prewarms,
+			backgroundMemory: acc.backgroundMemory + row.backgroundMemory,
 		}),
 		{
 			runs: 0,
@@ -151,6 +156,7 @@ function sumRows(
 			sideQuestions: 0,
 			handoffs: 0,
 			prewarms: 0,
+			backgroundMemory: 0,
 		},
 	);
 }
@@ -221,11 +227,15 @@ function summaryBlock(
 				]
 			: [];
 	return kvBlock([
-		["turns", formatTokens(totals.runs - totals.sideQuestions - totals.handoffs - totals.prewarms)],
+		[
+			"turns",
+			formatTokens(totals.runs - totals.sideQuestions - totals.handoffs - totals.prewarms - totals.backgroundMemory),
+		],
 		["model calls", formatTokens(totals.apiCalls)],
 		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
 		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
 		...(totals.prewarms > 0 ? [["pre-warms", formatTokens(totals.prewarms)] as const] : []),
+		...(totals.backgroundMemory > 0 ? [["memory steps", formatTokens(totals.backgroundMemory)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
@@ -245,11 +255,12 @@ function modelBlock(row: CostRow): string[] {
 	return kvBlock([
 		["requested model ids", row.requestedModelIds.join(", ")],
 		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
-		["turns", formatTokens(row.runs - row.sideQuestions - row.handoffs - row.prewarms)],
+		["turns", formatTokens(row.runs - row.sideQuestions - row.handoffs - row.prewarms - row.backgroundMemory)],
 		["model calls", formatTokens(row.apiCalls)],
 		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
 		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
 		...(row.prewarms > 0 ? [["pre-warms", formatTokens(row.prewarms)] as const] : []),
+		...(row.backgroundMemory > 0 ? [["memory steps", formatTokens(row.backgroundMemory)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],

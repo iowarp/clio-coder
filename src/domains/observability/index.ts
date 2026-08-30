@@ -16,6 +16,13 @@ export function createObservabilityDomainModule(options: ObservabilityBundleOpti
 
 export type { AccountabilitySummary } from "./accountability.js";
 export { readAccountabilitySummary, summarizeEvidenceIndex } from "./accountability.js";
+export {
+	type BackgroundMemoryStepUsage,
+	type BackgroundMemoryUsageSink,
+	backgroundMemoryUsageRow,
+	type RecordBackgroundMemoryStepInput,
+	recordBackgroundMemoryStep,
+} from "./background-memory-usage.js";
 export type {
 	ObservabilityContract,
 	ObservabilityNotice,

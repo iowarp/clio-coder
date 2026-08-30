@@ -220,6 +220,8 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"unparseable",
 	"all_operations_invalid",
 	"deadline",
+	"timed_out",
+	"endpoint_busy",
 	"client_error",
 	"no_client",
 	"no_consumer",
