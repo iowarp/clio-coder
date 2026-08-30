@@ -13,9 +13,11 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { formatTargetTable, type TargetTableRow } from "../../src/cli/targets.js";
+import { terminalColumns } from "../../src/cli/text-layout.js";
 
 /** Every size in the release width matrix that a plain-stdout surface can see. */
 const WIDTHS = [80, 100, 120, 160, 220];
+const DEGRADED_REASON = "default model 'qwen3.8-27b-zbook' is not advertised by the target";
 
 /** Ids, urls, and model names at the lengths real targets carry them. */
 const ROWS: ReadonlyArray<TargetTableRow> = [
@@ -53,6 +55,44 @@ describe("contracts/targets table layout", () => {
 			);
 			for (const row of table.rows) {
 				ok(row.length <= width, `width ${width} produced a ${row.length}-column row: ${JSON.stringify(row)}`);
+			}
+			for (const details of table.details) {
+				for (const detail of details) {
+					ok(detail.length <= width, `width ${width} produced a ${detail.length}-column detail: ${JSON.stringify(detail)}`);
+				}
+			}
+		}
+	});
+
+	it("prints the full degraded reason below plain and gateway rows at 80 and 120 columns", () => {
+		const degradedRows: ReadonlyArray<TargetTableRow> = [
+			{
+				...(ROWS[0] as TargetTableRow),
+				id: "zbook",
+				model: "qwen3.8-27b-zbook",
+				health: "degraded",
+				notes: `${DEGRADED_REASON} ctx 262144 resident: qwen3.8-27b`,
+				diagnostic: DEGRADED_REASON,
+			},
+			{
+				...(ROWS[0] as TargetTableRow),
+				id: "dynamo",
+				model: "qwen3.8-27b-dynamo",
+				health: "degraded",
+				notes: `${DEGRADED_REASON} gateway ctx 262144 resident: qwen3.8-27b`,
+				diagnostic: DEGRADED_REASON,
+			},
+		];
+		for (const columns of ["80", "120"]) {
+			const width = terminalColumns({}, { COLUMNS: columns });
+			const table = formatTargetTable(degradedRows, width);
+			for (const [index, details] of table.details.entries()) {
+				ok(details.length > 0, `width ${width} dropped the detail for ${degradedRows[index]?.id}`);
+				strictEqual(
+					details.join(" ").trim(),
+					`reason: ${DEGRADED_REASON}`,
+					`width ${width} did not preserve the full reason for ${degradedRows[index]?.id}`,
+				);
 			}
 		}
 	});

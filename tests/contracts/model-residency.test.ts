@@ -270,16 +270,31 @@ describe("contracts/model residency: targets --probe", () => {
 		const reason = `default model '${PLACEHOLDER}' is not advertised by the target`;
 		const degraded = targetTableRow(
 			providers,
-			status({ health: { status: "degraded", lastCheckAt: null, lastError: reason, latencyMs: 12 } }),
+			status({
+				target: {
+					id: "studio",
+					runtime: "lmstudio",
+					url: "http://127.0.0.1:1",
+					defaultModel: PLACEHOLDER,
+					gateway: true,
+				},
+				capabilities: { ...EMPTY_CAPABILITIES, contextWindow: 262_144 },
+				health: { status: "degraded", lastCheckAt: null, lastError: reason, latencyMs: 12 },
+			}),
 		);
 		strictEqual(degraded.model, PLACEHOLDER);
 		strictEqual(degraded.health, "degraded");
-		ok(degraded.notes.includes(reason), degraded.notes);
+		strictEqual(degraded.diagnostic, reason);
+		strictEqual(degraded.notes.indexOf(reason), 0, degraded.notes);
+		ok(degraded.notes.indexOf("gateway") > degraded.notes.indexOf(reason), degraded.notes);
+		ok(degraded.notes.indexOf("ctx 262144") > degraded.notes.indexOf(reason), degraded.notes);
 		ok(degraded.notes.includes(`resident: ${ADVERTISED.loadedInstance}`), degraded.notes);
+		ok(degraded.notes.indexOf("resident:") > degraded.notes.indexOf(reason), degraded.notes);
 
 		const healthy = targetTableRow(providers, status({}));
 		strictEqual(healthy.health, "healthy");
-		ok(!healthy.notes.includes("not advertised"), healthy.notes);
+		strictEqual(healthy.notes, `resident: ${ADVERTISED.loadedInstance}`);
+		strictEqual(healthy.diagnostic, undefined);
 	});
 });
 

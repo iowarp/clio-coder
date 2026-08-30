@@ -25,7 +25,7 @@ import type { CapabilityFlags } from "../domains/providers/types/capability-flag
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
 import { printError, printOk } from "./shared.js";
-import { column, terminalColumns, truncate } from "./text-layout.js";
+import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
 
 const HEADER: ReadonlyArray<string> = ["id", "tier", "runtime", "auth", "url", "model", "health", "caps", "notes"];
 type ProviderOutputTier = RuntimeTier | "unknown";
@@ -806,9 +806,11 @@ export interface TargetTableRow {
 	health: string;
 	caps: string;
 	notes: string;
+	/** Full degraded-health reason, kept separately so a narrow table can repeat it below the row. */
+	diagnostic?: string;
 }
 
-type TargetTableColumn = keyof TargetTableRow;
+type TargetTableColumn = Exclude<keyof TargetTableRow, "diagnostic">;
 type TargetTableWidths = Record<TargetTableColumn, number>;
 
 const TABLE_COLUMNS: ReadonlyArray<TargetTableColumn> = [
@@ -919,18 +921,33 @@ export function formatTargetTable(
 	rows: ReadonlyArray<TargetTableRow>,
 	width: number,
 	paintHealth: (cell: string, row: TargetTableRow) => string = (cell) => cell,
-): { header: string; rows: ReadonlyArray<string> } {
+): { header: string; rows: ReadonlyArray<string>; details: ReadonlyArray<ReadonlyArray<string>> } {
 	const widths = tableWidths(rows, width);
 	const line = (cells: ReadonlyArray<string>): string => cells.join(" ".repeat(TABLE_GAP)).trimEnd();
+	const formatted = rows.map((row) => {
+		const cells = TABLE_COLUMNS.map((key) => column(row[key], widths[key]));
+		const plain = line(cells);
+		const rendered =
+			plain.length > width
+				? truncate(plain, width)
+				: line(cells.map((cell, index) => (TABLE_COLUMNS[index] === "health" ? paintHealth(cell, row) : cell)));
+		const diagnosticFits = !row.diagnostic || (plain.length <= width && widths.notes >= row.diagnostic.length);
+		const details = diagnosticFits ? [] : targetDiagnosticDetails(row.diagnostic ?? "", width);
+		return { rendered, details };
+	});
 	return {
 		header: truncate(line(TABLE_COLUMNS.map((key, index) => column(HEADER[index] ?? key, widths[key]))), width),
-		rows: rows.map((row) => {
-			const cells = TABLE_COLUMNS.map((key) => column(row[key], widths[key]));
-			const plain = line(cells);
-			if (plain.length > width) return truncate(plain, width);
-			return line(cells.map((cell, index) => (TABLE_COLUMNS[index] === "health" ? paintHealth(cell, row) : cell)));
-		}),
+		rows: formatted.map(({ rendered }) => rendered),
+		details: formatted.map(({ details }) => details),
 	};
+}
+
+/** Indented diagnostic text that retains every word when the table row cannot. */
+function targetDiagnosticDetails(diagnostic: string, width: number): string[] {
+	const indent = 2;
+	return wrapPlain(`reason: ${diagnostic}`, Math.max(8, width - indent), indent).map((line, index) =>
+		index === 0 ? `${" ".repeat(indent)}${line}` : line,
+	);
 }
 
 function renderTable(providers: ProvidersContract, entries: ReadonlyArray<TargetStatus>): void {
@@ -951,10 +968,12 @@ function renderTable(providers: ProvidersContract, entries: ReadonlyArray<Target
 			process.stdout.write(`${chalk.bold(table.header)}\n`);
 		}
 		process.stdout.write(`${table.rows[index] ?? ""}\n`);
+		for (const detail of table.details[index] ?? []) process.stdout.write(`${detail}\n`);
 	}
 }
 
 export function targetTableRow(providers: ProvidersContract, status: TargetStatus): TargetTableRow {
+	const diagnostic = degradedHealthDiagnostic(status);
 	return {
 		id: status.target.id,
 		tier: statusTier(status),
@@ -965,6 +984,7 @@ export function targetTableRow(providers: ProvidersContract, status: TargetStatu
 		health: status.health.status,
 		caps: capabilityBadges(status.capabilities),
 		notes: formatNotes(status),
+		...(diagnostic ? { diagnostic } : {}),
 	};
 }
 
@@ -1047,6 +1067,10 @@ export function formatContextWindow(
 
 export function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
+	const diagnostic = degradedHealthDiagnostic(status);
+	// The health diagnosis leads because gateway, context, and residency facts
+	// are supplementary once the target says it cannot serve its default model.
+	if (diagnostic) parts.push(diagnostic);
 	const endpoint = endpointCapacityForStatus(status);
 	if (endpoint) parts.push(`slots ${endpoint.limit}`);
 	if (status.target.gateway) parts.push("gateway");
@@ -1054,13 +1078,14 @@ export function formatNotes(status: TargetStatus): string {
 	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
 	if (status.capabilities.contextWindow > 0) parts.push(formatContextWindow(status));
 	if (!status.available && status.reason) parts.push(status.reason);
-	// A reachable target that cannot serve its own default is degraded, and the
-	// row has to say why or the model column reads as a model that works.
-	if (status.health.status === "degraded" && status.health.lastError) parts.push(status.health.lastError);
 	const residency = residentModelsSummary(status.discoveredModelStates);
 	if (residency) parts.push(residency);
 	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
 	return parts.join(" ");
+}
+
+function degradedHealthDiagnostic(status: TargetStatus): string | null {
+	return status.health.status === "degraded" && status.health.lastError ? status.health.lastError : null;
 }
 
 function statusTier(status: TargetStatus): ProviderOutputTier {
