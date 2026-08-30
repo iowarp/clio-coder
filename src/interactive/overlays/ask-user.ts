@@ -129,6 +129,14 @@ interface QuestionState {
 	customAnswer: string;
 	inputValue: string;
 	answer: string;
+	/**
+	 * The operator's typed text exactly as submitted, empty when they typed
+	 * nothing. `answer` is the one-line rendering of the whole decision and gets
+	 * trimmed and joined; this is the record of what they actually typed, and
+	 * losing it is what made an interview re-ask for the same figures three times
+	 * (issue #228).
+	 */
+	rawValue: string;
 	focusedValue?: string;
 }
 
@@ -154,6 +162,7 @@ function createQuestionState(question: AskUserQuestion): QuestionState {
 		customAnswer: "",
 		inputValue: "",
 		answer: "",
+		rawValue: "",
 	};
 }
 
@@ -205,12 +214,18 @@ function optionIndexFromValue(value: string): number | null {
 	return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
-function answerText(question: AskUserQuestion, selected: ReadonlySet<number>, customAnswer: string): string {
-	const parts: string[] = [];
+/** The labels the operator chose, in list order. */
+function selectedOptionLabels(question: AskUserQuestion, selected: ReadonlySet<number>): string[] {
+	const labels: string[] = [];
 	for (const index of [...selected].sort((a, b) => a - b)) {
 		const label = question.options?.[index]?.label;
-		if (label) parts.push(label);
+		if (label) labels.push(label);
 	}
+	return labels;
+}
+
+function answerText(question: AskUserQuestion, selected: ReadonlySet<number>, customAnswer: string): string {
+	const parts = selectedOptionLabels(question, selected);
 	const custom = customAnswer.trim();
 	if (custom.length > 0) parts.push(custom);
 	return parts.join("; ");
@@ -346,6 +361,10 @@ class AskUserOverlayView implements Component {
 		}
 		if (question.multi_select === true && (matchesKey(data, "enter") || data === "\n")) {
 			this.commitMultiSelectOrOpenOther(state);
+			return;
+		}
+		if (this.isAddTextKey(data)) {
+			this.chooseFocusedAndOpenText(question, state);
 			return;
 		}
 		this.list?.handleInput(data);
@@ -502,24 +521,22 @@ class AskUserOverlayView implements Component {
 		// The classified action label distinguishes recording an answer from
 		// granting authority. Esc keeps the product's one word for the way out,
 		// since it closes the prompt and the interview together.
+		// `t` is on every select footer because the operator cannot tell from a
+		// label whether the option needs a figure attached until they read it.
+		const addText: HintEntry = { key: "t", verb: "add text", short: "text" };
 		if (question.multi_select === true) {
 			return this.questions.length > 1
 				? this.withScrollHint([
 						{ key: "Left/Right", verb: "question" },
 						{ key: "Space", verb: "toggle" },
+						addText,
 						{ key: "Enter", verb: recordAnswer },
 					])
-				: this.withScrollHint([
-						{ key: "Space", verb: "toggle" },
-						{ key: "Enter", verb: recordAnswer },
-					]);
+				: this.withScrollHint([{ key: "Space", verb: "toggle" }, addText, { key: "Enter", verb: recordAnswer }]);
 		}
 		return this.questions.length > 1
-			? this.withScrollHint([
-					{ key: "Left/Right", verb: "question" },
-					{ key: "Enter", verb: recordAnswer },
-				])
-			: this.withScrollHint([{ key: "Enter", verb: recordAnswer }]);
+			? this.withScrollHint([{ key: "Left/Right", verb: "question" }, addText, { key: "Enter", verb: recordAnswer }])
+			: this.withScrollHint([addText, { key: "Enter", verb: recordAnswer }]);
 	}
 
 	private renderDecisionContext(width: number): string[] {
@@ -642,6 +659,34 @@ class AskUserOverlayView implements Component {
 
 	private isTextModeNextKey(data: string): boolean {
 		return this.questions.length > 1 && (matchesKey(data, "alt+right") || matchesKey(data, "ctrl+right"));
+	}
+
+	/**
+	 * The key that adds typed text to the option under the cursor.
+	 *
+	 * Choosing an option used to be the whole answer, so a model that offered
+	 * "Exact number - I'll type it" gave the operator a label and nowhere to put
+	 * the number; the interview then spent two of its four rounds asking for the
+	 * figures again (issue #228). The list itself only reads the arrows, Enter,
+	 * and Esc, so a letter is free here.
+	 */
+	private isAddTextKey(data: string): boolean {
+		return matchesKey(data, "t");
+	}
+
+	/**
+	 * Take the focused option and open the text field for it, without committing.
+	 * Submitting the text records the label and the text together.
+	 */
+	private chooseFocusedAndOpenText(question: AskUserQuestion, state: QuestionState): void {
+		const current = this.list?.getSelectedItem();
+		const optionIndex = current && current.value !== "other" ? optionIndexFromValue(current.value) : null;
+		if (optionIndex !== null) {
+			if (question.multi_select === true) state.selected.add(optionIndex);
+			else state.selected = new Set<number>([optionIndex]);
+			state.focusedValue = `option:${optionIndex}`;
+		}
+		this.openTextInput(state.selected.size > 0 ? "Add your answer to the chosen option" : "Other answer");
 	}
 
 	/**
@@ -829,14 +874,20 @@ class AskUserOverlayView implements Component {
 				return;
 			}
 			state.inputValue = answer;
+			// Verbatim, before any joining or trimming the display line does. The
+			// typed text is the answer; the one-line `answer` is a rendering of it.
+			state.rawValue = value;
 			if (questionHasOptions(question) && question.multi_select === true) {
 				state.customAnswer = answer;
 				this.commitCurrentAnswer();
-			} else {
-				state.customAnswer = questionHasOptions(question) ? answer : "";
-				state.answer = answer;
-				this.finishIfCompleteOrAdvance();
+				return;
 			}
+			state.customAnswer = questionHasOptions(question) ? answer : "";
+			// The chosen labels and the typed text compose, so a question answered
+			// with an option that says "I will type it" keeps both. With nothing
+			// selected, which is the implicit Other path, this is the text alone.
+			state.answer = questionHasOptions(question) ? answerText(question, state.selected, state.customAnswer) : answer;
+			this.finishIfCompleteOrAdvance();
 		};
 		activeInput.onEscape = () => this.cancel();
 		this.input = activeInput;
@@ -866,7 +917,14 @@ class AskUserOverlayView implements Component {
 				return;
 			}
 			state.selected = new Set<number>([optionIndex]);
-			state.answer = question.options?.[optionIndex]?.label ?? item.label;
+			// Choosing a plain option is a label-only answer, so the typed text
+			// clears with the choice: it was given for a label the operator has
+			// just moved off, and the composed answer runs through the same
+			// `answerText` every other path uses.
+			state.customAnswer = "";
+			state.rawValue = "";
+			state.inputValue = "";
+			state.answer = answerText(question, state.selected, state.customAnswer) || item.label;
 			state.focusedValue = item.value;
 			this.status = "";
 			this.finishIfCompleteOrAdvance();
@@ -992,12 +1050,26 @@ class AskUserOverlayView implements Component {
 		return this.states.length > 0 && this.states.every((state) => state.answer.trim().length > 0);
 	}
 
+	/**
+	 * What the round captured, as three separable facts per question: the one-line
+	 * answer, the labels chosen, and the text typed. A reader tells a label-only
+	 * answer from a label-plus-value one by whether `value` is there, which the
+	 * joined string alone could never say.
+	 */
 	private answers(): AskUserResult["answers"] {
 		const answers: AskUserResult["answers"] = [];
 		for (let index = 0; index < this.questions.length; index += 1) {
 			const question = this.questions[index];
-			const answer = this.states[index]?.answer.trim();
-			if (question && answer && answer.length > 0) answers.push({ question: question.question, answer });
+			const state = this.states[index];
+			const answer = state?.answer.trim();
+			if (!question || !state || !answer || answer.length === 0) continue;
+			const options = selectedOptionLabels(question, state.selected);
+			answers.push({
+				question: question.question,
+				answer,
+				...(options.length > 0 ? { options } : {}),
+				...(state.rawValue.length > 0 ? { value: state.rawValue } : {}),
+			});
 		}
 		return answers;
 	}
