@@ -81,6 +81,7 @@ export {
 	MEMORY_INTERVENTION_REGISTRATION_ID,
 	type MemoryInterventionDeps,
 } from "./memory-intervention.js";
+export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
 export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 export type {
 	MiddlewareDiagnostic,

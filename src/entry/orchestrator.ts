@@ -8,6 +8,7 @@ import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
+import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails } from "../core/guardrails.js";
@@ -92,6 +93,7 @@ import {
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
 import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
+import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
@@ -336,6 +338,7 @@ function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 	timeoutMs: number,
+	bus: Pick<SafeEventBus, "emit"> | null,
 ): BackgroundMemoryRoute | null {
 	const targetId = settings.background.target?.trim();
 	const wireModelId = settings.background.model?.trim();
@@ -366,12 +369,16 @@ function createBackgroundMemoryModelClient(
 	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
 	applyModelCapabilityPatch(model, refined.capabilities);
 	const costProvenance = normalizeCostProvenance(refined.costProvenance);
+	const endpointKey = canonicalEndpointKey(refined.target);
 	return {
 		targetId,
 		wireModelId: refined.wireModelId,
-		endpointKey: canonicalEndpointKey(refined.target),
+		endpointKey,
 		client: {
-			async complete(request) {
+			// Wrapped so the endpoint this step disturbs is published from the layer
+			// that knows a request left the process. A timed-out step still moved the
+			// server's prefix cache; the usage sink never sees it.
+			complete: announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async (request) => {
 				const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 					: LOCAL_API_KEY_FALLBACK;
@@ -411,7 +418,7 @@ function createBackgroundMemoryModelClient(
 						backend: completion.backend,
 					},
 				};
-			},
+			}),
 		},
 	};
 }
@@ -1139,9 +1146,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * shows it while the session lives, and one durable out-of-turn row so
 	 * `clio-coder usage report` can still see it afterwards.
 	 *
-	 * The step publishes its endpoint too. A step that ran on the chat target's
-	 * own endpoint moved that server's cache, so the next turn's `/context`
-	 * warning names it instead of reporting an unexplained cold prefix.
+	 * Accounting only. The endpoint the step disturbed is published by the client
+	 * wrapper (`announceMemoryStepEndpoint`), which sees the timed-out and thrown
+	 * steps this sink never hears about because their usage stays null.
 	 */
 	const recordBackgroundMemoryUsage = (usage: TaskMemoryStepUsage): void => {
 		const meta = session?.current() ?? null;
@@ -1158,8 +1165,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		} catch {
 			// Accounting is bookkeeping. Its failure never reaches the memory step.
 		}
-		const endpointKey = backgroundMemoryRoute?.endpointKey ?? null;
-		if (endpointKey !== null) bus.emit(BusChannels.MemoryStepCompleted, { endpointKey, targetId: usage.targetId });
 	};
 	const proposeInjectedMemoryEntries = (entries: ReadonlyArray<TaskMemoryEntry>): void => {
 		const meta = session?.current() ?? null;
@@ -1196,7 +1201,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			backgroundMemoryRoute =
 				settings === undefined
 					? null
-					: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs);
+					: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs, bus);
 			return backgroundMemoryRoute?.client ?? null;
 		},
 		// A single-slot local server serves one request at a time, so a memory step
