@@ -22,13 +22,23 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 					lines.push(`**Argument Hint:** \`${template.argumentHint}\``);
 				}
 				lines.push(`**Source:** ${template.sourceInfo.source ?? template.sourceInfo.scope}`);
+				if (template.unavailable !== undefined) {
+					lines.push(`**Unavailable:** ${template.unavailable}`);
+				}
 				if (!template.trusted) {
 					lines.push("**Untrusted:** set `skills.trustProjectCompatRoots` before this template will expand.");
 				}
 				return lines;
 			},
 		};
-		const marker = template.trusted ? undefined : clioTheme().fg("warning", "untrusted");
+		// A template that loaded in a refusing state is listed, because the
+		// operator's command does exist; the marker is what says it will not run.
+		const marker =
+			template.unavailable !== undefined
+				? clioTheme().fg("error", "unavailable")
+				: template.trusted
+					? undefined
+					: clioTheme().fg("warning", "untrusted");
 		if (marker) item.meta = template.argumentHint ? `${template.argumentHint} · ${marker}` : marker;
 		else if (template.argumentHint) item.meta = template.argumentHint;
 		return item;

@@ -27,6 +27,14 @@ export interface PromptTemplate {
 	sourceInfo: ResourceSourceInfo;
 	/** False for a project compatibility root until the operator opts in; such a template refuses to expand. */
 	trusted: boolean;
+	/**
+	 * Why this template cannot be expanded, when a load-time failure left it
+	 * with no usable body. It is loaded anyway, so the namespaced command is
+	 * recognized and invoking it reports this reason instead of "not a command"
+	 * (issue #245). `content` is empty on such a template and nothing may send
+	 * it to a model.
+	 */
+	unavailable?: string;
 	argumentHint?: string;
 }
 
@@ -154,24 +162,28 @@ function contained(root: string, candidate: string): boolean {
 	return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
-/** Resolve only existing paths contained by the declaring extension package. */
-function resolveExtensionReferences(
-	body: string,
-	root: PromptTemplateRoot,
-	filePath: string,
-	diagnostics: ResourceDiagnostic[],
-): string | null {
-	if (root.rootPath === undefined || !body.includes(EXTENSION_ROOT_TOKEN)) return body;
+/**
+ * The outcome of a step that may leave the template with no usable body.
+ * `reason` is the one sentence that becomes both the diagnostic the `/prompts`
+ * overlay renders and the refusal the operator gets when they invoke the
+ * command, so the two can never disagree.
+ */
+type BodyResolution = { body: string } | { reason: string };
+
+/**
+ * Resolve only existing paths contained by the declaring extension package.
+ *
+ * The safety half is unchanged: a missing or escaping reference never expands
+ * and never reads outside the package. What changed is what the caller does
+ * with the failure, which used to be dropping the template entirely.
+ */
+function resolveExtensionReferences(body: string, root: PromptTemplateRoot): BodyResolution {
+	if (root.rootPath === undefined || !body.includes(EXTENSION_ROOT_TOKEN)) return { body };
 	let canonicalRoot: string;
 	try {
 		canonicalRoot = realpathSync(root.rootPath);
 	} catch (error) {
-		diagnostics.push({
-			type: "warning",
-			message: `extension root could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
-			path: filePath,
-		});
-		return null;
+		return { reason: `extension root could not be resolved: ${error instanceof Error ? error.message : String(error)}` };
 	}
 	let invalid: string | null = null;
 	const resolved = body.replace(EXTENSION_ROOT_REFERENCE, (reference, suffix: string | undefined) => {
@@ -185,14 +197,44 @@ function resolveExtensionReferences(
 		return candidate;
 	});
 	if (invalid !== null) {
-		diagnostics.push({
-			type: "warning",
-			message: `prompt template has an unresolved or escaping extension reference: ${invalid}`,
-			path: filePath,
-		});
-		return null;
+		return { reason: `prompt template has an unresolved or escaping extension reference: ${invalid}` };
 	}
-	return resolved;
+	return { body: resolved };
+}
+
+/**
+ * A template that exists and cannot run.
+ *
+ * Dropping it made the operator's namespaced command answer "not a command",
+ * so an extension author's single bad `${extensionRoot}` path read to their
+ * users as "the prompt was never installed" (issue #245). The template is
+ * loaded with an empty body and the reason attached instead, which is the same
+ * shape an untrusted project template already had, so the existing refusal
+ * path carries it to the operator with no new machinery.
+ */
+function unavailableTemplate(
+	name: string,
+	filePath: string,
+	root: PromptTemplateRoot,
+	reason: string,
+	diagnostics: ResourceDiagnostic[],
+	description?: string,
+): ResourceCandidate<PromptTemplate> {
+	diagnostics.push({ type: "warning", message: reason, path: filePath });
+	const sourceInfo: ResourceSourceInfo = sourceInfoForRoot(root, filePath);
+	return {
+		name,
+		value: {
+			name,
+			description: description ?? "Prompt template (unavailable)",
+			content: "",
+			filePath,
+			sourceInfo,
+			trusted: root.trusted !== false,
+			unavailable: `${reason} (${filePath})`,
+		},
+		source: sourceInfo,
+	};
 }
 
 function loadPromptFile(
@@ -202,15 +244,9 @@ function loadPromptFile(
 ): ResourceCandidate<PromptTemplate> | null {
 	const ext = path.extname(filePath).toLowerCase();
 	if (ext !== ".md") return null;
-	let raw: string;
-	try {
-		raw = readFileSync(filePath, "utf8");
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		diagnostics.push({ type: "warning", message: `prompt template could not be read: ${reason}`, path: filePath });
-		return null;
-	}
 
+	// The name comes before the read, so a file that exists but cannot be read
+	// still has a command the operator can invoke and be told why.
 	const relativePath = path.relative(root.path, filePath);
 	if (
 		relativePath === "" ||
@@ -218,21 +254,35 @@ function loadPromptFile(
 		relativePath.startsWith(`..${path.sep}`) ||
 		path.isAbsolute(relativePath)
 	) {
+		// The one failure that stays a drop: the path is outside the discovery
+		// root, so there is no name here to offer a command under.
 		diagnostics.push({ type: "warning", message: "prompt template escaped its discovery root", path: filePath });
 		return null;
 	}
 	const name = relativePath.slice(0, -ext.length).split(path.sep).join(":");
 	if (name.trim().length === 0) return null;
+
+	let raw: string;
+	try {
+		raw = readFileSync(filePath, "utf8");
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		return unavailableTemplate(name, filePath, root, `prompt template could not be read: ${reason}`, diagnostics);
+	}
+
 	const { frontmatter, body } = splitOptionalFrontmatter(raw, filePath, diagnostics);
-	const resolvedBody = resolveExtensionReferences(body, root, filePath, diagnostics);
-	if (resolvedBody === null) return null;
-	const description = stringField(frontmatter, "description") ?? fallbackDescription(resolvedBody);
+	const declaredDescription = stringField(frontmatter, "description");
+	const resolution = resolveExtensionReferences(body, root);
+	if ("reason" in resolution) {
+		return unavailableTemplate(name, filePath, root, resolution.reason, diagnostics, declaredDescription ?? undefined);
+	}
+	const description = declaredDescription ?? fallbackDescription(resolution.body);
 	const argumentHint = stringField(frontmatter, "argument-hint") ?? stringField(frontmatter, "argumentHint");
 	const sourceInfo: ResourceSourceInfo = sourceInfoForRoot(root, filePath);
 	const template: PromptTemplate = {
 		name,
 		description,
-		content: resolvedBody.trim(),
+		content: resolution.body.trim(),
 		filePath,
 		sourceInfo,
 		trusted: root.trusted !== false,
@@ -330,6 +380,18 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 	if (!command) return { expanded: false, text: input, args: [], diagnostics: templates.diagnostics };
 	const template = templates.items.find((entry) => entry.name === command.name);
 	if (!template) return { expanded: false, text: input, args: [], diagnostics: templates.diagnostics };
+	// A load-time failure refuses before anything else, and before the trust
+	// check, because there is no body here to be trusted or untrusted.
+	if (template.unavailable !== undefined) {
+		const message = `prompt template /${template.name} cannot run: ${template.unavailable}`;
+		return {
+			expanded: false,
+			text: input,
+			args: [],
+			diagnostics: templates.diagnostics,
+			refusal: { template, message },
+		};
+	}
 	if (!template.trusted) {
 		const message = `prompt template ${template.name} comes from an untrusted project root; set skills.trustProjectCompatRoots to use it`;
 		return {
