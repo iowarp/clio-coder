@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -234,5 +234,134 @@ describe("contracts/slash prompt templates", () => {
 
 		deepStrictEqual(opened, ["help"]);
 		strictEqual(submitted.length, 0);
+	});
+});
+
+/**
+ * A template with one bad `${extensionRoot}` path was dropped from the list
+ * entirely, so the operator's namespaced command answered "not a command" with
+ * a pointer to `/help`. The correct diagnosis existed, one overlay away in
+ * `/prompts`, and nothing connected the failure to it: an extension author's
+ * single wrong path read to their users as "the prompt was never installed"
+ * (issue #245).
+ *
+ * The safety half does not move. A missing or escaping reference still never
+ * expands and never reads outside the package. What changed is that the
+ * template loads in a refusing state, so the command is recognized and says
+ * why it cannot run.
+ */
+describe("contracts/slash prompt templates: a template that cannot load", () => {
+	/** An installed extension package with one prompt root and one template body. */
+	function extensionWith(body: string): { list: PromptTemplateList; promptPath: string; packageRoot: string } {
+		const packageRoot = scratchDir();
+		const promptsRoot = join(packageRoot, "prompts");
+		writePrompt(promptsRoot, join("wtfp", "plan-section.md"), body);
+		writePrompt(packageRoot, join("core", "templates", "project.md"), "# Project template\n");
+		const list = loadPromptTemplates({
+			roots: [{ path: promptsRoot, rootPath: packageRoot, scope: "user", source: "wtfp", trusted: true }],
+		});
+		return { list, promptPath: join(promptsRoot, "wtfp", "plan-section.md"), packageRoot };
+	}
+
+	it("recognizes the command and names the file and the offending reference", () => {
+		const { list, promptPath } = extensionWith(
+			`Read @\${extensionRoot}/core/templates/definitely-missing.md and plan $ARGUMENTS.\n`,
+		);
+		const { submitted, notices, ctx } = harness(list);
+
+		ok(
+			list.items.some((entry) => entry.name === "wtfp:plan-section"),
+			"the template is loaded, not dropped, so the command exists",
+		);
+
+		const result = dispatchSlashCommand(parseSlashCommand("/wtfp:plan-section significance"), ctx);
+
+		strictEqual(result, "rejected");
+		strictEqual(submitted.length, 0, "nothing reaches the model");
+		strictEqual(notices.length, 1, notices.join(" | "));
+		ok(!notices[0]?.includes("is not a command"), `the template exists; it refused: ${notices[0]}`);
+		ok(notices[0]?.includes("/wtfp:plan-section"), notices[0]);
+		ok(
+			notices[0]?.includes(`\${extensionRoot}/core/templates/definitely-missing.md`),
+			`the offending reference is named: ${notices[0]}`,
+		);
+		ok(notices[0]?.includes(promptPath), `and so is the template file: ${notices[0]}`);
+	});
+
+	it("still never expands or reads a reference that escapes the package", () => {
+		const outside = scratchDir();
+		const sentinel = join(outside, "outside.md");
+		writeFileSync(sentinel, "SENTINEL-OUTSIDE-THE-PACKAGE\n", "utf8");
+		const { list } = extensionWith(`Read @\${extensionRoot}/../outside.md and plan $ARGUMENTS.\n`);
+		const { submitted, notices, ctx } = harness(list);
+		const template = list.items.find((entry) => entry.name === "wtfp:plan-section");
+
+		dispatchSlashCommand(parseSlashCommand("/wtfp:plan-section significance"), ctx);
+
+		strictEqual(template?.content, "", "a refusing template carries no body at all");
+		strictEqual(submitted.length, 0);
+		ok(notices[0]?.includes(`\${extensionRoot}/../outside.md`), notices.join(" | "));
+		ok(!notices.join(" ").includes("SENTINEL-OUTSIDE-THE-PACKAGE"), "the escaping path is never read");
+		strictEqual(readFileSync(sentinel, "utf8"), "SENTINEL-OUTSIDE-THE-PACKAGE\n", "and never touched");
+	});
+
+	/** Not only the reference case: any load-time reason gets the same treatment. */
+	it("refuses with its own reason when the template file cannot be read", () => {
+		const packageRoot = scratchDir();
+		const promptsRoot = join(packageRoot, "prompts");
+		const file = join(promptsRoot, "wtfp", "plan-section.md");
+		writePrompt(promptsRoot, join("wtfp", "plan-section.md"), "Plan $ARGUMENTS.\n");
+		chmodSync(file, 0o000);
+		try {
+			const list = loadPromptTemplates({
+				roots: [{ path: promptsRoot, rootPath: packageRoot, scope: "user", source: "wtfp", trusted: true }],
+			});
+			const template = list.items.find((entry) => entry.name === "wtfp:plan-section");
+			if (template?.unavailable === undefined) return; // running as root; the read succeeds
+			const { submitted, notices, ctx } = harness(list);
+
+			dispatchSlashCommand(parseSlashCommand("/wtfp:plan-section"), ctx);
+
+			strictEqual(submitted.length, 0);
+			ok(!notices[0]?.includes("is not a command"), notices.join(" | "));
+			ok(notices[0]?.includes("could not be read"), notices.join(" | "));
+			ok(notices[0]?.includes(file), notices.join(" | "));
+		} finally {
+			chmodSync(file, 0o644);
+		}
+	});
+
+	it("keeps the diagnostic the /prompts overlay renders, with the same words", () => {
+		const { list, promptPath } = extensionWith(`Read @\${extensionRoot}/core/templates/missing.md.\n`);
+		const diagnostic = list.diagnostics.find((entry) => entry.path === promptPath);
+		const template = list.items.find((entry) => entry.name === "wtfp:plan-section");
+
+		ok(diagnostic !== undefined, "the overlay's diagnostic is still produced");
+		ok(
+			template?.unavailable?.startsWith(diagnostic.message),
+			`the refusal is the diagnostic plus the file: ${template?.unavailable}`,
+		);
+		ok(template?.unavailable?.includes(promptPath), template?.unavailable);
+	});
+
+	it("leaves a reference that resolves inside the package expanding as before", () => {
+		const { list, packageRoot } = extensionWith(
+			`Read @\${extensionRoot}/core/templates/project.md and plan $ARGUMENTS.\n`,
+		);
+		const { submitted, notices, ctx } = harness(list);
+		const template = list.items.find((entry) => entry.name === "wtfp:plan-section");
+
+		strictEqual(template?.unavailable, undefined);
+		dispatchSlashCommand(parseSlashCommand("/wtfp:plan-section significance"), ctx);
+
+		deepStrictEqual(notices, []);
+		// The dispatcher hands the raw line to the submit path, which is where the
+		// expansion happens; assert both halves rather than conflating them.
+		deepStrictEqual(submitted, ["/wtfp:plan-section significance"]);
+		const expansion = expandPromptTemplateInput("/wtfp:plan-section significance", list);
+		strictEqual(expansion.expanded, true);
+		if (!expansion.expanded) throw new Error("expected the template to expand");
+		ok(expansion.text.includes(join(packageRoot, "core", "templates", "project.md")), expansion.text);
+		ok(expansion.text.includes("plan significance"), expansion.text);
 	});
 });
