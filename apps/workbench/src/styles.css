@@ -3336,7 +3336,8 @@ kbd {
 }
 
 .settings__targets,
-.settings__notifications {
+.settings__notifications,
+.settings__routing {
 	padding: 15px 0 0;
 	border-top: 1px solid var(--hairline);
 }
@@ -3367,6 +3368,343 @@ kbd {
 
 .target-row__identity strong {
 	font-size: 0.86rem;
+}
+
+.settings__routing {
+	display: grid;
+	gap: 14px;
+	scroll-margin-block-start: 72px;
+	contain: layout paint;
+}
+
+.settings__routing-heading {
+	align-items: start;
+}
+
+.routing-inventory__empty,
+.routing-inventory__summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 13px 14px;
+	border: 1px solid var(--hairline);
+	background: rgb(255 255 255 / 1.5%);
+}
+
+.routing-inventory__empty p {
+	color: var(--muted);
+	font-size: 0.72rem;
+}
+
+.routing-inventory__summary dl {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(92px, 1fr));
+	min-width: min(560px, 100%);
+	margin: 0;
+}
+
+.routing-inventory__summary dl > div {
+	padding: 5px 10px;
+	border-left: 1px solid var(--hairline);
+}
+
+.routing-inventory__summary dl > div:first-child {
+	border-left: 0;
+}
+
+.routing-inventory__summary dt,
+.routing-model-card dt {
+	color: var(--dim);
+	font-size: 0.58rem;
+}
+
+.routing-inventory__summary dd {
+	margin-top: 3px;
+	color: var(--paper-strong);
+	font-family: var(--font-editorial);
+	font-size: 1.1rem;
+}
+
+.routing-models,
+.routing-workforce > section {
+	display: grid;
+	gap: 10px;
+	min-width: 0;
+	padding: 13px;
+	border: 1px solid var(--hairline);
+	background: rgb(8 13 18 / 42%);
+}
+
+.routing-subhead {
+	display: flex;
+	align-items: start;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.routing-subhead h4 {
+	color: var(--paper-strong);
+	font-family: var(--font-editorial);
+	font-size: 0.98rem;
+	font-variation-settings: "opsz" 20, "wght" 560;
+}
+
+.routing-subhead p,
+.routing-subhead small,
+.routing-bound-note,
+.routing-boundary {
+	color: var(--dim);
+	font-size: 0.66rem;
+	line-height: 1.45;
+}
+
+.routing-models__controls {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(190px, 0.36fr);
+	gap: 9px;
+}
+
+.routing-target-tabs {
+	display: flex;
+	min-width: 0;
+	overflow-x: auto;
+	border-bottom: 1px solid var(--hairline);
+	scrollbar-width: thin;
+}
+
+.routing-target-tabs button {
+	flex: 0 0 auto;
+	padding: 7px 10px;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	color: var(--muted);
+	font: 0.66rem var(--font-mono);
+	cursor: pointer;
+}
+
+.routing-target-tabs button[aria-pressed="true"] {
+	border-bottom-color: var(--accent);
+	color: var(--accent);
+}
+
+.routing-model-search {
+	display: grid;
+	gap: 4px;
+}
+
+.routing-model-search span {
+	color: var(--dim);
+	font: 0.58rem var(--font-mono);
+}
+
+.routing-model-search input {
+	min-height: 34px;
+	font-size: 0.7rem;
+}
+
+.routing-model-list,
+.routing-profile-list,
+.routing-binding-list {
+	display: grid;
+	gap: 7px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.routing-model-list {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	max-height: min(460px, 46vh);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
+}
+
+.routing-model-card {
+	display: grid;
+	align-content: start;
+	gap: 9px;
+	min-width: 0;
+	padding: 10px;
+	border: 1px solid var(--hairline);
+	background: rgb(255 255 255 / 1.5%);
+	contain: content;
+}
+
+.routing-model-card > header {
+	display: flex;
+	align-items: start;
+	justify-content: space-between;
+	gap: 8px;
+	min-width: 0;
+}
+
+.routing-model-card > header > div {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.routing-model-card > header code {
+	overflow: hidden;
+	color: var(--paper-strong);
+	font-size: 0.7rem;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.routing-model-card > header small {
+	color: var(--dim);
+	font-size: 0.58rem;
+}
+
+.routing-signal {
+	flex: 0 0 auto;
+	padding: 2px 5px;
+	border: 1px solid var(--hairline-strong);
+	color: var(--dim);
+	font: 0.45rem var(--font-mono);
+	text-transform: uppercase;
+}
+
+.routing-signal--loaded {
+	border-color: rgb(70 229 208 / 30%);
+	color: var(--accent);
+}
+
+.routing-signal--loading {
+	border-color: rgb(244 193 82 / 28%);
+	color: var(--warning);
+}
+
+.routing-signal--unloaded {
+	color: var(--muted);
+}
+
+.routing-model-card dl {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	margin: 0;
+	border: 1px solid var(--hairline);
+}
+
+.routing-model-card dl > div {
+	padding: 6px 7px;
+	border-left: 1px solid var(--hairline);
+}
+
+.routing-model-card dl > div:first-child {
+	border-left: 0;
+}
+
+.routing-model-card dd {
+	margin-top: 3px;
+	color: var(--paper);
+	font: 0.62rem var(--font-mono);
+}
+
+.routing-capabilities {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.routing-capabilities > span {
+	padding: 2px 5px;
+	border: 1px solid rgb(70 229 208 / 18%);
+	color: var(--accent);
+	font: 0.55rem var(--font-mono);
+}
+
+.routing-capabilities > .routing-capabilities__empty {
+	border-color: var(--hairline);
+	color: var(--dim);
+}
+
+.routing-collection-state {
+	padding: 12px;
+	border: 1px dashed var(--hairline);
+	color: var(--muted);
+	font-size: 0.68rem;
+}
+
+.routing-collection-state.is-failed {
+	border-color: rgb(255 92 102 / 26%);
+	color: var(--error);
+}
+
+.routing-workforce {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.routing-profile-list li,
+.routing-binding-list li {
+	display: grid;
+	gap: 4px;
+	min-width: 0;
+	padding: 8px 9px;
+	border: 1px solid var(--hairline);
+	background: rgb(255 255 255 / 1.5%);
+}
+
+.routing-profile-list header,
+.routing-binding-list li {
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+}
+
+.routing-profile-list header {
+	display: grid;
+	gap: 8px;
+}
+
+.routing-profile-list strong,
+.routing-binding-list strong {
+	color: var(--paper-strong);
+	font-size: 0.7rem;
+}
+
+.routing-profile-list header span,
+.routing-binding-list li > span {
+	color: var(--muted);
+	font: 0.54rem var(--font-mono);
+}
+
+.routing-profile-list code,
+.routing-binding-list code {
+	overflow: hidden;
+	color: var(--accent);
+	font-size: 0.6rem;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.routing-profile-list small {
+	color: var(--dim);
+	font-size: 0.58rem;
+}
+
+.routing-binding-list li > div {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.routing-binding-list li.is-unresolved {
+	border-color: rgb(244 193 82 / 25%);
+}
+
+.routing-binding-list li.is-unresolved > span {
+	color: var(--warning);
+}
+
+.routing-boundary {
+	padding-left: 9px;
+	border-left: 2px solid var(--accent-deep);
 }
 
 /* --- Effective Clio field map ------------------------------------------- */
@@ -5801,6 +6139,29 @@ kbd {
 
 	.target-list {
 		grid-template-columns: 1fr;
+	}
+
+	.routing-inventory__empty,
+	.routing-inventory__summary,
+	.routing-subhead {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.routing-inventory__summary dl,
+	.routing-models__controls,
+	.routing-model-list,
+	.routing-workforce {
+		grid-template-columns: 1fr;
+	}
+
+	.routing-inventory__summary dl > div {
+		border-top: 1px solid var(--hairline);
+		border-left: 0;
+	}
+
+	.routing-inventory__summary dl > div:first-child {
+		border-top: 0;
 	}
 }
 

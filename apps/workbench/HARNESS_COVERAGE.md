@@ -34,8 +34,8 @@ The limiting boundary is Clio's public ACP surface, not React:
 - Standard/proposed ACP operations cover initialize, new/load/close session, prompt, cancel, and mediated permission.
 - Clio extensions cover session list/label/delete, session autonomy, safe settings get/patch, and target list/probe.
 - Bounded host adapters cover fixed `config inspect --json`, `agents --json`, `skills list --json`,
-  `library list --json`, and project-filtered `usage report --json` reads without exposing their raw command output to
-  the renderer.
+  `library list --json`, offline model inventory, worker-profile and agent-binding listings, and project-filtered
+  `usage report --json` reads without exposing their raw command output to the renderer.
 - Terminal metadata carries the five exact token fields `input`, `output`, `cacheRead`, `cacheWrite`, and `reasoning`.
 - The opt-in `clio-coder/event` stream currently exposes only `safety.loopBlocked`.
 - The in-process harness bus has 41 canonical channels, including dispatch, context, capacity, cost, safety, config,
@@ -48,20 +48,21 @@ inspection.
 
 ## Current Workbench protocol footprint
 
-Workbench protocol v3 currently validates 27 client commands:
+Workbench protocol v3 currently validates 28 client commands:
 
 `project.browse`, `project.open`, `project.select`, `project.forget`, `fs.refresh`, `fs.create-file`,
 `fs.create-folder`, `fs.move`, `fs.delete.prepare`, `fs.delete.confirm`, `session.new`, `session.load`, `session.close`,
 `session.list`, `session.label`, `session.delete`, `turn.start`, `turn.cancel`, `permission.resolve`, `settings.get`,
-`settings.patch`, `targets.list`, `targets.probe`, `autonomy.set`, `config.inspect`, `catalog.inspect`, and
-`usage.inspect`.
+`settings.patch`, `targets.list`, `targets.probe`, `autonomy.set`, `config.inspect`, `catalog.inspect`, `usage.inspect`,
+and `routing.inspect`.
 
-It validates 25 server event kinds:
+It validates 26 server event kinds:
 
 `connection.ready`, `project.browse.listing`, `project.opened`, `project.forgotten`, `project.snapshot`, `fs.changed`,
 `fs.delete.challenge`, `clio.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
-`config.state`, `catalog.state`, `usage.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`, `turn.loop`,
-`turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `protocol.error`, and `command.error`.
+`config.state`, `catalog.state`, `usage.state`, `routing.state`, `turn.started`, `turn.text`, `turn.thought`,
+`turn.tool`, `turn.loop`, `turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `protocol.error`,
+and `command.error`.
 
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
 “render JSON” escape hatch.
@@ -78,6 +79,7 @@ That closed set is an asset. New harness areas should enter as small typed DTO f
 | Session route                              | Bound target/model and next-turn target/model are distinguished                                                                                          | **Wired**                                                                              | ACP session metadata plus safe settings extension.                                                                                                                                                                                                  |
 | Working freedom                            | Bound-session autonomy and next-session default are distinguished; per-session change is explicit                                                        | **Wired**                                                                              | ACP session autonomy plus safe settings extension.                                                                                                                                                                                                  |
 | Configured targets                         | List, model ids, selected target, explicit probe result/latency/time                                                                                     | **Partial**                                                                            | ACP target list/probe is real. Add/convert/remove/rename, capabilities, auth detail, fleet profiles, and richer model discovery are absent.                                                                                                         |
+| Offline models and worker routing          | Searchable model capability/limit/residency inventory plus worker profiles and agent bindings                                                            | **Wired** for read-only inventory; **Partial** for the wider domain                    | Fixed reads run in parallel: `models --json --offline`, `targets profile list --json`, and `targets profile bindings --json`. Offline residency is not health; authoring, auth, live routing decisions, and activation events remain absent.        |
 | Permissions                                | One-use allow/reject, expiry, cancellation semantics, locations, persistent banner, keyboard path                                                        | **Partial**                                                                            | Standard ACP permission is wired. Policy rule, action class, posture, rejection hints, worker escalation provenance, and “why” need a sanitized upstream DTO.                                                                                       |
 | Loop safety                                | Repeated-call count, per-turn block budget, disposition, interruption                                                                                    | **Wired**                                                                              | The sole current `clio-coder/event` kind, `safety.loopBlocked`.                                                                                                                                                                                     |
 | Other safety                               | Tool-call soft/hard budgets, policy classifications/blocks/allows, run-abort source, budget alert                                                        | **Upstream boundary**                                                                  | Typed bus facts exist but are not exposed over ACP.                                                                                                                                                                                                 |
@@ -114,8 +116,8 @@ forgotten; it is routed to a later bounded surface or an upstream interface requ
 | `acp`                           | One stdio agent process pinned to a cwd                                                                                                                                  | Core transport; wired.                                                                                              |
 | `run`                           | target/model/thinking/autonomy, sampler controls, context/KV controls, JSON modes, steering, resume, agent/profile/runtime/tool profile, capability requirements, skills | Later reproducible Run Lab. Interactive work remains the notebook.                                                  |
 | `configure`                     | Runtime/URL/model/capability setup and default routing                                                                                                                   | Setup surface; needs typed secret-safe host operations.                                                             |
-| `targets`                       | list/probe/add/use/fleet/profile list/set/remove/rename/bind/unbind/bindings, convert, remove, rename                                                                    | List/probe and next-turn routing wired; authoring/profiles absent.                                                  |
-| `models`                        | List/search models for configured targets                                                                                                                                | Model picker is partial; global discovery/search absent.                                                            |
+| `targets`                       | list/probe/add/use/fleet/profile list/set/remove/rename/bind/unbind/bindings, convert, remove, rename                                                                    | List/probe, next-turn routing, profile inventory, and agent bindings wired; authoring remains absent.               |
+| `models`                        | List/search models for configured targets                                                                                                                                | Offline bounded inventory is wired; online/global discovery and authoring remain absent.                            |
 | `auth`                          | list/status/login/logout by target/runtime                                                                                                                               | Setup/security surface; upstream typed operation preferred.                                                         |
 | `config inspect`                | Effective customization graph, JSON                                                                                                                                      | Next read-only provenance surface.                                                                                  |
 | `doctor`, `paths`               | Diagnose/fix; resolve directories with JSON                                                                                                                              | Recovery surface.                                                                                                   |
@@ -149,15 +151,15 @@ rest are editable merely because their YAML keys are known.
 | -------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `version`                        | Hidden                                         | Schema metadata, diagnostics only.                                                                                                                    |
 | `autonomy`                       | **Wired**                                      | Plain-language default for the next session; bound-session autonomy stays separate.                                                                   |
-| `targets`                        | **Partial**                                    | Read/probe/select exists. Full descriptors, capabilities, URLs, secrets, authoring, conversion, and removal need typed host operations.               |
+| `targets`                        | **Partial**                                    | Read/probe/select plus offline model capabilities exist. URLs, secrets, authoring, conversion, and removal need typed host operations.                |
 | `runtimePlugins`                 | None                                           | Extensions/runtime setup; restart-required and supply-chain sensitive.                                                                                |
 | `orchestrator`                   | **Wired**                                      | Target/model/thinking with next-turn timing.                                                                                                          |
 | `background`                     | None                                           | Memory-maintenance route; needs safe ACP settings and cost explanation.                                                                               |
 | `memory.intervention`            | None                                           | Enabled/cadence/window/max tokens/timeout; pair with observed memory steps, not controls alone.                                                       |
 | `watchdog`                       | None                                           | Enabled/target/cadence. Harness documentation says ACP runs do not fire it, so a Workbench switch would currently be dead.                            |
-| `workers`                        | None                                           | Default/profile/roster/bindings/retries/permission escalation/resilience; Fleet surface plus typed events.                                            |
+| `workers`                        | Read-only profile and agent-binding inventory  | Defaults, roster, editing, retries, permission escalation, and resilience need safe settings plus typed events.                                       |
 | `fleet.nodes`                    | None                                           | SSH node identity, capacity, labels, residency; secret/path handling and preflight required.                                                          |
-| `routing`                        | None                                           | Activated roles/postures and exact agent-role pairs; show shadow vs active decisions when events exist.                                               |
+| `routing`                        | Read-only configured routes                    | Activated roles/postures and live decisions remain absent; show shadow vs active decisions only when typed events exist.                              |
 | `scope`                          | None                                           | Model-cycle scope; typed setting and model catalog required.                                                                                          |
 | `modelSelector`                  | None                                           | Favorites/recent limit; useful in the graphical picker after safe settings expand.                                                                    |
 | `budget`                         | None                                           | Session USD ceiling and concurrency. Needs live cost provenance and restart timing before controls.                                                   |
@@ -209,17 +211,21 @@ payloads across ACP.
    Skills, installed Extensions, and Library resources into independently fallible, bounded collections with search,
    provenance, trust, precedence, and budget facts. The Verifiers tab deliberately remains an interface-boundary
    explanation until Clio publishes a typed listing; Workbench does not scrape its formatted authoring preview.
-4. **Historical evidence and economics — Usage partially implemented.** A fixed project-filtered JSONL adapter now
+4. **Offline model and worker routing inventory — implemented.** Settings can explicitly inspect bounded model
+   capabilities, token limits, reported residency, worker profiles, and agent bindings. The three fixed JSON reads run
+   in parallel and fail independently. Workbench does not probe endpoints, expose provider configuration, or treat
+   cached/offline facts as health; authoring and live routing still require typed operations and events.
+5. **Historical evidence and economics — Usage partially implemented.** A fixed project-filtered JSONL adapter now
    powers the 30-day Usage record and discards the upstream report's global or raw rows. Evidence has no JSON listing,
    eval report lacks typed discovery, trace runs are global and carry raw requests, and fleet status has no project
    selector; those boundaries remain visible in the GUI rather than being scraped around. Never pass arbitrary CLI
    output to the browser.
-5. **Expand the ACP event extension upstream.** Prioritize context activity/warning/pruned/recalled, tool budget, safety
+6. **Expand the ACP event extension upstream.** Prioritize context activity/warning/pruned/recalled, tool budget, safety
    block, agent status, runtime notice, dispatch lifecycle, budget alert, and config-reload classification. Version and
    sanitize each DTO; do not expose raw `unknown` worker events or full settings snapshots.
-6. **Expand safe settings upstream.** Add typed get/patch groups with allowed values, effective source, apply timing,
+7. **Expand safe settings upstream.** Add typed get/patch groups with allowed values, effective source, apply timing,
    capability flags, and secret redaction. Build graphical forms only after each group is real.
-7. **Consequential operations.** Target authoring/auth, fleet run/drain/resume, memory approval, resource installation,
+8. **Consequential operations.** Target authoring/auth, fleet run/drain/resume, memory approval, resource installation,
    verifier authoring, share import, doctor fix, and reset require preview, scope, confirmation, progress, terminal
    result, and recovery semantics before they enter the GUI.
 
@@ -233,7 +239,8 @@ Two workstreams cannot be completed honestly inside `apps/workbench` alone:
    renderer must never receive credentials, raw environment values, arbitrary native paths, or unvalidated bus payloads.
 
 Until those boundaries exist, Workbench can continue making substantial progress through the public read-only JSON
-interfaces. Config, catalog, and Usage inspection now run through a separate serialized request lane alongside ACP: slow
-reads cannot block turn cancellation or permission resolution, late results from a previously selected project are
-discarded, and the four catalog reads execute in parallel while failing independently. Host integration tests cover that
-isolation. Future command adapters should retain the same fixed-argv, bounded-output, typed-projection discipline.
+interfaces. Config, catalog, Usage, and routing inspection now run through a separate serialized request lane alongside
+ACP: slow reads cannot block turn cancellation or permission resolution, late results from a previously selected project
+are discarded, and each multi-read inspector executes its fixed commands in parallel while failing independently. Host
+integration tests cover that isolation. Future command adapters should retain the same fixed-argv, bounded-output,
+typed-projection discipline.

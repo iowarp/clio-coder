@@ -43,6 +43,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"config.inspect",
 	"catalog.inspect",
 	"usage.inspect",
+	"routing.inspect",
 	"targets.list",
 	"targets.probe",
 	"autonomy.set",
@@ -224,6 +225,10 @@ export interface UsageInspectPayload {
 	readonly projectId: string;
 }
 
+export interface RoutingInspectPayload {
+	readonly projectId: string;
+}
+
 export interface TargetsListPayload {
 	readonly projectId: string;
 }
@@ -263,6 +268,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "config.inspect": ConfigInspectPayload;
 	readonly "catalog.inspect": CatalogInspectPayload;
 	readonly "usage.inspect": UsageInspectPayload;
+	readonly "routing.inspect": RoutingInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
 	readonly "autonomy.set": AutonomySetPayload;
@@ -293,6 +299,7 @@ export const SERVER_EVENT_KINDS = [
 	"config.state",
 	"catalog.state",
 	"usage.state",
+	"routing.state",
 	"targets.state",
 	"targets.probed",
 	"turn.started",
@@ -790,6 +797,78 @@ export interface WireUsageInspection {
 	readonly opportunities: readonly WireUsageOpportunityCount[];
 }
 
+export const ROUTING_AVAILABILITY = ["available", "failed"] as const;
+export type WireRoutingAvailability = (typeof ROUTING_AVAILABILITY)[number];
+export const ROUTING_MODEL_CAPABILITIES = [
+	"chat",
+	"tools",
+	"reasoning",
+	"vision",
+	"embeddings",
+	"rerank",
+	"fim",
+] as const;
+export type WireRoutingModelCapability = (typeof ROUTING_MODEL_CAPABILITIES)[number];
+export const ROUTING_MODEL_RESIDENCIES = ["loaded", "loading", "unloaded", "unknown", "not-reported"] as const;
+export type WireRoutingModelResidency = (typeof ROUTING_MODEL_RESIDENCIES)[number];
+export const MAX_WIRE_ROUTING_MODELS = 256;
+export const MAX_WIRE_ROUTING_PROFILES = 64;
+export const MAX_WIRE_ROUTING_BINDINGS = 128;
+
+/** Offline model facts projected from Clio's own catalog and cached discovery. */
+export interface WireRoutingModel {
+	readonly targetId: string;
+	readonly runtimeId: string;
+	readonly modelId: string;
+	readonly capabilities: readonly WireRoutingModelCapability[];
+	readonly contextWindow: number;
+	readonly maxOutputTokens: number;
+	readonly residency: WireRoutingModelResidency;
+}
+
+export interface WireRoutingProfile {
+	readonly name: string;
+	readonly target: string | null;
+	readonly runtime: string | null;
+	readonly model: string | null;
+	readonly thinkingLevel: WireThinkingLevel;
+}
+
+export interface WireRoutingBinding {
+	readonly agentId: string;
+	readonly profile: string;
+	readonly target: string | null;
+	readonly model: string | null;
+	readonly resolved: boolean;
+}
+
+export interface WireRoutingModelCollection {
+	readonly availability: WireRoutingAvailability;
+	readonly items: readonly WireRoutingModel[];
+	readonly truncated: boolean;
+	/** Clio's explicit `(no models)` rows, normalized without presenting the sentinel as a model id. */
+	readonly emptyTargetCount: number;
+}
+
+export interface WireRoutingProfileCollection {
+	readonly availability: WireRoutingAvailability;
+	readonly items: readonly WireRoutingProfile[];
+	readonly truncated: boolean;
+}
+
+export interface WireRoutingBindingCollection {
+	readonly availability: WireRoutingAvailability;
+	readonly items: readonly WireRoutingBinding[];
+	readonly truncated: boolean;
+}
+
+export interface WireRoutingInspection {
+	readonly inspectedAt: string;
+	readonly models: WireRoutingModelCollection;
+	readonly profiles: WireRoutingProfileCollection;
+	readonly bindings: WireRoutingBindingCollection;
+}
+
 export interface WireTarget {
 	readonly id: string;
 	readonly runtime: string;
@@ -821,6 +900,7 @@ export interface WireProjectWorkspace {
 	readonly configInspection: WireConfigInspection | null;
 	readonly catalogInspection: WireCatalogInspection | null;
 	readonly usageInspection: WireUsageInspection | null;
+	readonly routingInspection: WireRoutingInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -878,6 +958,10 @@ export interface CatalogStatePayload {
 
 export interface UsageStatePayload {
 	readonly inspection: WireUsageInspection;
+}
+
+export interface RoutingStatePayload {
+	readonly inspection: WireRoutingInspection;
 }
 
 export interface TargetsStatePayload {
@@ -985,6 +1069,7 @@ export interface ServerEventPayloadByKind {
 	readonly "config.state": ConfigStatePayload;
 	readonly "catalog.state": CatalogStatePayload;
 	readonly "usage.state": UsageStatePayload;
+	readonly "routing.state": RoutingStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
@@ -1279,6 +1364,7 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 		case "config.inspect":
 		case "catalog.inspect":
 		case "usage.inspect":
+		case "routing.inspect":
 		case "targets.list": {
 			const record = expectExactKeys(value, label, ["projectId"]);
 			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
@@ -2310,6 +2396,157 @@ function validateUsageInspection(value: unknown, label: string): WireUsageInspec
 	};
 }
 
+function expectRoutingNumber(value: unknown, label: string): number {
+	const parsed = expectInteger(value, label);
+	if (parsed > 10_000_000_000) invalid(`${label} exceeds the routing inventory bound`);
+	return parsed;
+}
+
+const ROUTING_LOCATION_PREFIX =
+	/^(?:(?:https?|file|ftp|ssh):|[a-z][a-z0-9+.-]*:\/\/|~?[\\/]|\.{1,2}[\\/]|[a-z]:[\\/])/iu;
+
+function expectRoutingIdentifier(value: unknown, label: string, maximumBytes: number): string {
+	const text = expectPresentationText(value, label, maximumBytes);
+	if (ROUTING_LOCATION_PREFIX.test(text) || text.includes("\\")) {
+		invalid(`${label} cannot contain a URL or native path`);
+	}
+	return text;
+}
+
+function expectNullableRoutingIdentifier(value: unknown, label: string, maximumBytes: number): string | null {
+	if (value === null) return null;
+	return expectRoutingIdentifier(value, label, maximumBytes);
+}
+
+function validateRoutingModel(value: unknown, label: string): WireRoutingModel {
+	const record = expectExactKeys(value, label, [
+		"targetId",
+		"runtimeId",
+		"modelId",
+		"capabilities",
+		"contextWindow",
+		"maxOutputTokens",
+		"residency",
+	]);
+	const capabilities = expectArray(
+		record.capabilities,
+		`${label}.capabilities`,
+		ROUTING_MODEL_CAPABILITIES.length,
+		(entry, entryLabel) => expectEnum(entry, entryLabel, ROUTING_MODEL_CAPABILITIES),
+	);
+	if (new Set(capabilities).size !== capabilities.length) invalid(`${label}.capabilities contains duplicate values`);
+	return {
+		targetId: expectRoutingIdentifier(record.targetId, `${label}.targetId`, 128),
+		runtimeId: expectRoutingIdentifier(record.runtimeId, `${label}.runtimeId`, 128),
+		modelId: expectRoutingIdentifier(record.modelId, `${label}.modelId`, 256),
+		capabilities,
+		contextWindow: expectRoutingNumber(record.contextWindow, `${label}.contextWindow`),
+		maxOutputTokens: expectRoutingNumber(record.maxOutputTokens, `${label}.maxOutputTokens`),
+		residency: expectEnum(record.residency, `${label}.residency`, ROUTING_MODEL_RESIDENCIES),
+	};
+}
+
+function validateRoutingProfile(value: unknown, label: string): WireRoutingProfile {
+	const record = expectExactKeys(value, label, ["name", "target", "runtime", "model", "thinkingLevel"]);
+	return {
+		name: expectRoutingIdentifier(record.name, `${label}.name`, 128),
+		target: expectNullableRoutingIdentifier(record.target, `${label}.target`, 128),
+		runtime: expectNullableRoutingIdentifier(record.runtime, `${label}.runtime`, 128),
+		model: expectNullableRoutingIdentifier(record.model, `${label}.model`, 256),
+		thinkingLevel: expectEnum(record.thinkingLevel, `${label}.thinkingLevel`, THINKING_LEVELS),
+	};
+}
+
+function validateRoutingBinding(value: unknown, label: string): WireRoutingBinding {
+	const record = expectExactKeys(value, label, ["agentId", "profile", "target", "model", "resolved"]);
+	const target = expectNullableRoutingIdentifier(record.target, `${label}.target`, 128);
+	const model = expectNullableRoutingIdentifier(record.model, `${label}.model`, 256);
+	const resolved = expectBoolean(record.resolved, `${label}.resolved`);
+	if (!resolved && (target !== null || model !== null)) invalid(`${label} unresolved binding cannot name a route`);
+	return {
+		agentId: expectRoutingIdentifier(record.agentId, `${label}.agentId`, 128),
+		profile: expectRoutingIdentifier(record.profile, `${label}.profile`, 128),
+		target,
+		model,
+		resolved,
+	};
+}
+
+function uniqueRoutingRows<T>(items: readonly T[], label: string, key: (item: T) => string): readonly T[] {
+	if (new Set(items.map(key)).size !== items.length) invalid(`${label} contains duplicate rows`);
+	return items;
+}
+
+function validateRoutingInspection(value: unknown, label: string): WireRoutingInspection {
+	const record = expectExactKeys(value, label, ["inspectedAt", "models", "profiles", "bindings"]);
+	const modelsRecord = expectExactKeys(record.models, `${label}.models`, [
+		"availability",
+		"items",
+		"truncated",
+		"emptyTargetCount",
+	]);
+	const profilesRecord = expectExactKeys(record.profiles, `${label}.profiles`, [
+		"availability",
+		"items",
+		"truncated",
+	]);
+	const bindingsRecord = expectExactKeys(record.bindings, `${label}.bindings`, [
+		"availability",
+		"items",
+		"truncated",
+	]);
+	const modelsAvailability = expectEnum(
+		modelsRecord.availability,
+		`${label}.models.availability`,
+		ROUTING_AVAILABILITY,
+	);
+	const profilesAvailability = expectEnum(
+		profilesRecord.availability,
+		`${label}.profiles.availability`,
+		ROUTING_AVAILABILITY,
+	);
+	const bindingsAvailability = expectEnum(
+		bindingsRecord.availability,
+		`${label}.bindings.availability`,
+		ROUTING_AVAILABILITY,
+	);
+	const models = uniqueRoutingRows(
+		expectArray(modelsRecord.items, `${label}.models.items`, MAX_WIRE_ROUTING_MODELS, validateRoutingModel),
+		`${label}.models.items`,
+		(item) => `${item.targetId}\u001f${item.modelId}`,
+	);
+	const profiles = uniqueRoutingRows(
+		expectArray(profilesRecord.items, `${label}.profiles.items`, MAX_WIRE_ROUTING_PROFILES, validateRoutingProfile),
+		`${label}.profiles.items`,
+		(item) => item.name,
+	);
+	const bindings = uniqueRoutingRows(
+		expectArray(bindingsRecord.items, `${label}.bindings.items`, MAX_WIRE_ROUTING_BINDINGS, validateRoutingBinding),
+		`${label}.bindings.items`,
+		(item) => item.agentId,
+	);
+	const modelsTruncated = expectBoolean(modelsRecord.truncated, `${label}.models.truncated`);
+	const profilesTruncated = expectBoolean(profilesRecord.truncated, `${label}.profiles.truncated`);
+	const bindingsTruncated = expectBoolean(bindingsRecord.truncated, `${label}.bindings.truncated`);
+	const emptyTargetCount = expectInteger(modelsRecord.emptyTargetCount, `${label}.models.emptyTargetCount`);
+	if (emptyTargetCount > 64) invalid(`${label}.models.emptyTargetCount exceeds the target bound`);
+	if (modelsAvailability === "failed" && (models.length > 0 || modelsTruncated || emptyTargetCount > 0)) {
+		invalid(`${label}.models cannot carry results when its adapter failed`);
+	}
+	if (profilesAvailability === "failed" && (profiles.length > 0 || profilesTruncated)) {
+		invalid(`${label}.profiles cannot carry results when its adapter failed`);
+	}
+	if (bindingsAvailability === "failed" && (bindings.length > 0 || bindingsTruncated)) {
+		invalid(`${label}.bindings cannot carry results when its adapter failed`);
+	}
+	return {
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		models: { availability: modelsAvailability, items: models, truncated: modelsTruncated, emptyTargetCount },
+		profiles: { availability: profilesAvailability, items: profiles, truncated: profilesTruncated },
+		bindings: { availability: bindingsAvailability, items: bindings, truncated: bindingsTruncated },
+	};
+}
+
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
 	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
@@ -2357,6 +2594,7 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		"configInspection",
 		"catalogInspection",
 		"usageInspection",
+		"routingInspection",
 		"targets",
 		"targetsTruncated",
 		"processGeneration",
@@ -2393,6 +2631,9 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		usageInspection: record.usageInspection === null
 			? null
 			: validateUsageInspection(record.usageInspection, `${label}.usageInspection`),
+		routingInspection: record.routingInspection === null
+			? null
+			: validateRoutingInspection(record.routingInspection, `${label}.routingInspection`),
 		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
 		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
 		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
@@ -2492,6 +2733,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "usage.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return { inspection: validateUsageInspection(record.inspection, `${label}.inspection`) };
+		}
+		case "routing.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return { inspection: validateRoutingInspection(record.inspection, `${label}.inspection`) };
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -2711,6 +2956,7 @@ const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"config.state",
 	"catalog.state",
 	"usage.state",
+	"routing.state",
 	"targets.state",
 	"targets.probed",
 ]);

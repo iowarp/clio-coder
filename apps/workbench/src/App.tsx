@@ -28,6 +28,8 @@ import type {
 	WireEventSource,
 	WirePendingPermission,
 	WireProjectSummary,
+	WireRoutingInspection,
+	WireRoutingModel,
 	WireSessionSummary,
 	WireSettingsPatch,
 	WireTarget,
@@ -67,6 +69,7 @@ export interface WorkbenchActions {
 	inspectConfig(projectId: string): void;
 	inspectCatalog(projectId: string): void;
 	inspectUsage(projectId: string): void;
+	inspectRouting(projectId: string): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
 	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
@@ -3423,6 +3426,246 @@ function ApprovalNotificationSetting(
 	);
 }
 
+function routingCapabilityLabel(value: WireRoutingModel["capabilities"][number]): string {
+	if (value === "fim") return "FIM";
+	return catalogLabel(value);
+}
+
+function RoutingModelCard({ model }: { model: WireRoutingModel }) {
+	return (
+		<li className="routing-model-card">
+			<header>
+				<div>
+					<code title={model.modelId}>{model.modelId}</code>
+					<small>{model.runtimeId}</small>
+				</div>
+				<span className={`routing-signal routing-signal--${model.residency}`}>
+					{model.residency === "not-reported" ? "Not reported" : catalogLabel(model.residency)}
+				</span>
+			</header>
+			<dl>
+				<div>
+					<dt>Context window</dt>
+					<dd>{model.contextWindow === 0 ? "Not reported" : formatTokenCount(model.contextWindow)}</dd>
+				</div>
+				<div>
+					<dt>Maximum output</dt>
+					<dd>{model.maxOutputTokens === 0 ? "Not reported" : formatTokenCount(model.maxOutputTokens)}</dd>
+				</div>
+			</dl>
+			<div className="routing-capabilities" aria-label="Reported model capabilities">
+				{model.capabilities.length === 0
+					? <span className="routing-capabilities__empty">No capabilities reported</span>
+					: model.capabilities.map((capability) => <span key={capability}>{routingCapabilityLabel(capability)}</span>)}
+			</div>
+		</li>
+	);
+}
+
+export const RoutingInventory = memo(function RoutingInventory({
+	projectId,
+	inspection,
+	pending,
+	onRefresh,
+}: {
+	projectId: string;
+	inspection: WireRoutingInspection | null;
+	pending: boolean;
+	onRefresh(projectId: string): void;
+}) {
+	const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
+	const [query, setQuery] = useState("");
+	const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("en-US"));
+	const targets = inspection === null
+		? []
+		: [...new Set(inspection.models.items.map((model) => model.targetId))].sort((left, right) =>
+			left.localeCompare(right, "en-US")
+		);
+	const activeTarget = selectedTarget !== null && targets.includes(selectedTarget)
+		? selectedTarget
+		: targets[0] ?? null;
+	const visibleModels = inspection === null || activeTarget === null
+		? []
+		: inspection.models.items.filter((model) =>
+			model.targetId === activeTarget && (
+				deferredQuery.length === 0 ||
+				[model.modelId, model.runtimeId, model.residency, ...model.capabilities].some((value) =>
+					value.toLocaleLowerCase("en-US").includes(deferredQuery)
+				)
+			)
+		);
+	const refresh = useCallback(() => onRefresh(projectId), [onRefresh, projectId]);
+
+	return (
+		<section className="settings__routing" aria-labelledby="settings-routing-title" aria-busy={pending}>
+			<div className="settings__section-heading settings__routing-heading">
+				<div>
+					<div className="eyebrow">MODELS · WORKER ROUTING</div>
+					<h3 id="settings-routing-title">What Clio can route work to</h3>
+				</div>
+				<p>
+					Offline model facts and effective worker profiles from Clio—no endpoint probe, package mutation, or local
+					configuration rewrite.
+				</p>
+			</div>
+
+			{inspection === null
+				? (
+					<div className="routing-inventory__empty">
+						<p>Read Clio's cached/configured model catalog and agent-profile bindings for this project.</p>
+						<button type="button" className="button button--quiet" onClick={refresh} disabled={pending}>
+							{pending ? "Inspecting models and routes…" : "Inspect models and routes"}
+						</button>
+					</div>
+				)
+				: (
+					<>
+						<div className="routing-inventory__summary">
+							<dl>
+								<div>
+									<dt>Targets with models</dt>
+									<dd>{targets.length}</dd>
+								</div>
+								<div>
+									<dt>Offline model rows</dt>
+									<dd>{inspection.models.items.length}</dd>
+								</div>
+								<div>
+									<dt>Worker profiles</dt>
+									<dd>{inspection.profiles.items.length}</dd>
+								</div>
+								<div>
+									<dt>Agent bindings</dt>
+									<dd>{inspection.bindings.items.length}</dd>
+								</div>
+							</dl>
+							<button type="button" className="button button--quiet" onClick={refresh} disabled={pending}>
+								{pending ? "Refreshing…" : "Refresh inventory"}
+							</button>
+						</div>
+
+						<section className="routing-models" aria-labelledby="routing-models-title">
+							<div className="routing-subhead">
+								<div>
+									<h4 id="routing-models-title">Offline model capabilities</h4>
+									<p>Limits and residency are Clio's cached or configured facts; they are not a health claim.</p>
+								</div>
+								{inspection.models.emptyTargetCount > 0 && (
+									<small>{inspection.models.emptyTargetCount} target reported no model candidates</small>
+								)}
+							</div>
+							{inspection.models.availability === "failed"
+								? <p className="routing-collection-state is-failed">Clio's offline model listing could not be read.</p>
+								: targets.length === 0
+								? <p className="routing-collection-state">Clio reported no offline model candidates.</p>
+								: (
+									<>
+										<div className="routing-models__controls">
+											<div className="routing-target-tabs" role="group" aria-label="Model targets">
+												{targets.map((target) => (
+													<button
+														type="button"
+														aria-pressed={activeTarget === target}
+														onClick={() => {
+															setSelectedTarget(target);
+															setQuery("");
+														}}
+														key={target}
+													>
+														{target}
+													</button>
+												))}
+											</div>
+											<label className="routing-model-search">
+												<span>Filter models</span>
+												<input
+													type="search"
+													value={query}
+													onChange={(event) => setQuery(event.target.value)}
+													placeholder="Model id or capability"
+												/>
+											</label>
+										</div>
+										{visibleModels.length === 0
+											? <p className="routing-collection-state">No models match this filter.</p>
+											: (
+												<ul className="routing-model-list">
+													{visibleModels.map((model) => (
+														<RoutingModelCard model={model} key={`${model.targetId}:${model.modelId}`} />
+													))}
+												</ul>
+											)}
+									</>
+								)}
+							{inspection.models.truncated && (
+								<p className="routing-bound-note">The offline model inventory reached Workbench's row bound.</p>
+							)}
+						</section>
+
+						<div className="routing-workforce">
+							<section aria-labelledby="routing-profiles-title">
+								<div className="routing-subhead">
+									<div>
+										<h4 id="routing-profiles-title">Worker profiles</h4>
+										<p>Named routes available to delegated work.</p>
+									</div>
+								</div>
+								{inspection.profiles.availability === "failed"
+									? <p className="routing-collection-state is-failed">Worker profiles could not be read.</p>
+									: inspection.profiles.items.length === 0
+									? <p className="routing-collection-state">No worker profiles are configured.</p>
+									: (
+										<ul className="routing-profile-list">
+											{inspection.profiles.items.map((profile) => (
+												<li key={profile.name}>
+													<header>
+														<strong>{profile.name}</strong>
+														<span>{catalogLabel(profile.thinkingLevel)} thinking</span>
+													</header>
+													<code>{profile.target ?? "Clio default target"} · {profile.model ?? "default model"}</code>
+													<small>{profile.runtime ?? "Runtime resolved when used"}</small>
+												</li>
+											))}
+										</ul>
+									)}
+							</section>
+							<section aria-labelledby="routing-bindings-title">
+								<div className="routing-subhead">
+									<div>
+										<h4 id="routing-bindings-title">Agent bindings</h4>
+										<p>Which recipes request a named worker profile.</p>
+									</div>
+								</div>
+								{inspection.bindings.availability === "failed"
+									? <p className="routing-collection-state is-failed">Agent bindings could not be read.</p>
+									: inspection.bindings.items.length === 0
+									? <p className="routing-collection-state">No agents are bound to worker profiles.</p>
+									: (
+										<ul className="routing-binding-list">
+											{inspection.bindings.items.map((binding) => (
+												<li className={binding.resolved ? "is-resolved" : "is-unresolved"} key={binding.agentId}>
+													<div>
+														<strong>{binding.agentId}</strong>
+														<code>{binding.profile}</code>
+													</div>
+													<span>{binding.resolved ? "Resolved" : "Missing profile"}</span>
+												</li>
+											))}
+										</ul>
+									)}
+							</section>
+						</div>
+
+						<p className="routing-boundary">
+							Model and route identifiers already belong to Clio's public routing surface. Provider URLs, credentials,
+							environment, native paths, and raw warnings remain on the host.
+						</p>
+					</>
+				)}
+		</section>
+	);
+});
+
 function SettingsModal({ state, actions, dispatch, onClose }: {
 	state: AppState;
 	actions: WorkbenchActions;
@@ -3547,6 +3790,14 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 							<p className="settings__note">A target's health is shown only after you probe it.</p>
 						)}
 					</section>
+				)}
+				{open !== null && (
+					<RoutingInventory
+						projectId={open.project.id}
+						inspection={open.routingInspection}
+						pending={state.pendingRoutingInspect !== null}
+						onRefresh={actions.inspectRouting}
+					/>
 				)}
 				<p className="settings__note">{state.securityNote}</p>
 			</div>

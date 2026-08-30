@@ -194,6 +194,10 @@ function App() {
 				const requestId = send("usage.inspect", { projectId });
 				if (requestId !== null) dispatch({ type: "usage.inspect.submitted", requestId });
 			},
+			inspectRouting(projectId) {
+				const requestId = send("routing.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "routing.inspect.submitted", requestId });
+			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
 			},

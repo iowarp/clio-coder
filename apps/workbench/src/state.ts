@@ -19,6 +19,7 @@ import {
 	type WireProjectPath,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
+	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireSettingsState,
 	type WireTarget,
@@ -48,6 +49,7 @@ export interface OpenWorkspaceState {
 	readonly configInspection: WireConfigInspection | null;
 	readonly catalogInspection: WireCatalogInspection | null;
 	readonly usageInspection: WireUsageInspection | null;
+	readonly routingInspection: WireRoutingInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -103,6 +105,8 @@ export interface AppState {
 	readonly pendingCatalogInspect: string | null;
 	/** Request id of the one serialized project usage inspection. */
 	readonly pendingUsageInspect: string | null;
+	/** Request id of the one serialized offline model and worker-routing inspection. */
+	readonly pendingRoutingInspect: string | null;
 	/**
 	 * The recent project a `project.select` is waiting on. A refusal for this
 	 * exact request is the only evidence the renderer has that a remembered folder
@@ -126,6 +130,7 @@ export type AppAction =
 	| { readonly type: "config.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "catalog.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "usage.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "routing.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "project.select.submitted"; readonly requestId: string; readonly projectId: string }
 	| { readonly type: "host.events"; readonly events: readonly ServerEvent[] }
 	| { readonly type: "host.event"; readonly event: ServerEvent };
@@ -152,6 +157,7 @@ export const initialAppState: AppState = {
 	pendingConfigInspect: null,
 	pendingCatalogInspect: null,
 	pendingUsageInspect: null,
+	pendingRoutingInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
 };
@@ -349,6 +355,7 @@ export function workspaceFromWire(workspace: WireProjectWorkspace): OpenWorkspac
 		configInspection: workspace.configInspection,
 		catalogInspection: workspace.catalogInspection,
 		usageInspection: workspace.usageInspection,
+		routingInspection: workspace.routingInspection,
 		targets: workspace.targets,
 		targetsTruncated: workspace.targetsTruncated,
 		processGeneration: workspace.processGeneration,
@@ -390,6 +397,8 @@ function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string):
 			return { ...open, catalogInspection: event.payload.inspection };
 		case "usage.state":
 			return { ...open, usageInspection: event.payload.inspection };
+		case "routing.state":
+			return { ...open, routingInspection: event.payload.inspection };
 		case "targets.state":
 			return { ...open, targets: event.payload.targets, targetsTruncated: event.payload.truncated };
 		case "targets.probed": {
@@ -450,6 +459,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				pendingConfigInspect: null,
 				pendingCatalogInspect: null,
 				pendingUsageInspect: null,
+				pendingRoutingInspect: null,
 				announcement: open === null
 					? "Clio Workbench is ready. Open a project folder to begin."
 					: `${open.project.displayName} is open`,
@@ -494,6 +504,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingCatalogInspect: action.requestId };
 		case "usage.inspect.submitted":
 			return { ...state, pendingUsageInspect: action.requestId };
+		case "routing.inspect.submitted":
+			return { ...state, pendingRoutingInspect: action.requestId };
 		case "project.select.submitted":
 			return { ...state, pendingProjectSelect: { requestId: action.requestId, projectId: action.projectId } };
 		case "host.events": {
@@ -525,6 +537,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingConfigInspect: null,
 						pendingCatalogInspect: null,
 						pendingUsageInspect: null,
+						pendingRoutingInspect: null,
 					};
 				case "command.error": {
 					const pendingSelect = state.pendingProjectSelect;
@@ -556,6 +569,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 							event.payload.requestId === undefined || event.payload.requestId === state.pendingUsageInspect
 								? null
 								: state.pendingUsageInspect,
+						pendingRoutingInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingRoutingInspect
+								? null
+								: state.pendingRoutingInspect,
 						pendingProjectSelect: answersSelect ? null : pendingSelect,
 					};
 				}
@@ -578,6 +595,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingConfigInspect: null,
 						pendingCatalogInspect: null,
 						pendingUsageInspect: null,
+						pendingRoutingInspect: null,
 						recent: state.recent.some((entry) => entry.id === open.project.id)
 							? state.recent.map((entry) => entry.id === open.project.id ? open.project : entry)
 							: [open.project, ...state.recent],
@@ -594,6 +612,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingConfigInspect: event.projectId === state.open?.project.id ? null : state.pendingConfigInspect,
 						pendingCatalogInspect: event.projectId === state.open?.project.id ? null : state.pendingCatalogInspect,
 						pendingUsageInspect: event.projectId === state.open?.project.id ? null : state.pendingUsageInspect,
+						pendingRoutingInspect: event.projectId === state.open?.project.id ? null : state.pendingRoutingInspect,
 						recent: state.recent.filter((entry) => entry.id !== event.projectId),
 						pendingProjectSelect: state.pendingProjectSelect?.projectId === event.projectId
 							? null
@@ -610,6 +629,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingConfigInspect: event.kind === "config.state" ? null : state.pendingConfigInspect,
 						pendingCatalogInspect: event.kind === "catalog.state" ? null : state.pendingCatalogInspect,
 						pendingUsageInspect: event.kind === "usage.state" ? null : state.pendingUsageInspect,
+						pendingRoutingInspect: event.kind === "routing.state" ? null : state.pendingRoutingInspect,
 						announcement: announcementFor(event) ?? state.announcement,
 					};
 				}

@@ -12,6 +12,7 @@ import {
 	catalogInspectionFixture,
 	clioSnapshotFixture,
 	FIXTURE_PROJECT_ID,
+	routingInspectionFixture,
 	serverEventFixture,
 	usageInspectionFixture,
 	workspaceFixture,
@@ -283,6 +284,17 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		}, { sequence: 5 }),
 	});
 	equal(state.pendingUsageInspect, null);
+
+	state = appReducer(state, { type: "routing.inspect.submitted", requestId: "request-routing" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio could not inspect routing.",
+			requestId: "request-routing",
+		}, { sequence: 6 }),
+	});
+	equal(state.pendingRoutingInspect, null);
 });
 
 Deno.test("a protocol error fails the connection", () => {
@@ -315,7 +327,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, configuration, catalog, usage, and target events land on the open workspace", () => {
+Deno.test("session, settings, configuration, catalog, usage, routing, and target events land on the workspace", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -400,6 +412,15 @@ Deno.test("session, settings, configuration, catalog, usage, and target events l
 	equal(state.open?.usageInspection?.totals?.totalTokens, 13_922_000);
 	equal(state.open?.usageInspection?.stores.sessions, "available");
 	equal(state.pendingUsageInspect, null);
+
+	state = appReducer(state, { type: "routing.inspect.submitted", requestId: "request-routing" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("routing.state", { inspection: routingInspectionFixture() }, { sequence: 9 }),
+	});
+	equal(state.open?.routingInspection?.models.items[0]?.modelId, "qwen3.8-27b");
+	equal(state.open?.routingInspection?.bindings.items[1]?.resolved, false);
+	equal(state.pendingRoutingInspect, null);
 });
 
 Deno.test("a browse listing is held until it is dismissed", () => {
