@@ -1,6 +1,7 @@
 import type { EvalScenarioAggregateV1 } from "../metrics/aggregate.js";
 import type { EvalClioProvenance, EvalEnvironmentProvenance } from "../types.js";
 import type { EvalBehaviorVerdictV1 } from "./behavioral.js";
+import type { EvalBehaviorMetricsV1 } from "./behavioral-metrics.js";
 import type { EvalServingConfigurationV1 } from "./serving.js";
 import type { EvalVerdictEnvelopeV1 } from "./verdict.js";
 
@@ -53,6 +54,8 @@ export interface EvalArtifactResultV4 extends EvalArtifactAssignmentReference {
 	verdict?: EvalVerdictEnvelopeV1;
 	/** Optional sibling document that references the unchanged verdict v1 identity. */
 	behavioral?: EvalBehaviorVerdictV1;
+	/** Additive, typed multi-metric projection for behavioral comparison. */
+	behavioralMetrics?: EvalBehaviorMetricsV1;
 }
 
 /** The only current eval artifact format. Routing accepts this version only. */

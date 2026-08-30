@@ -271,7 +271,10 @@ function readThresholds(
 		issues.push({ path, message: "expected object" });
 		return undefined;
 	}
-	return { fail: readAssertions(value.fail, `${path}.fail`, issues) };
+	return {
+		fail: readAssertions(value.fail, `${path}.fail`, issues),
+		informational: readAssertions(value.informational, `${path}.informational`, issues),
+	};
 }
 
 function readAssertions(value: unknown, path: string, issues: EvalValidationIssue[]): EvalMetricAssertion[] {

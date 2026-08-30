@@ -251,6 +251,11 @@ describe("contracts/eval verdict v1", () => {
 		strictEqual(aggregate?.passPowK, 0);
 		strictEqual(aggregate?.trackedMetrics.modelCalls.mean, 5);
 		strictEqual(aggregate?.trackedMetrics.modelCalls.p90, 9);
+		strictEqual(aggregate?.trackedMetrics.modelCalls.min, 1);
+		strictEqual(aggregate?.trackedMetrics.modelCalls.max, 9);
+		strictEqual(aggregate?.trackedMetrics.modelCalls.measured, 3);
+		strictEqual(aggregate?.trackedMetrics.modelCalls.unmeasured, 0);
+		strictEqual(aggregate?.trackedMetrics.modelCalls.variance, 32 / 3);
 		deepStrictEqual(aggregate?.trackedMetrics.modelCalls.sources, ["ledger"]);
 	});
 });

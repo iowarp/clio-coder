@@ -5,11 +5,38 @@ import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite
 
 export function loadThresholds(path: string): EvalSuiteThresholdsV2 {
 	const parsed = parseYaml(readFileSync(path, "utf8")) as unknown;
-	if (isRecord(parsed) && Array.isArray(parsed.fail)) return { fail: parsed.fail as EvalMetricAssertion[] };
-	if (isRecord(parsed) && isRecord(parsed.thresholds) && Array.isArray(parsed.thresholds.fail)) {
-		return { fail: parsed.thresholds.fail as EvalMetricAssertion[] };
+	const root = isRecord(parsed) && isRecord(parsed.thresholds) ? parsed.thresholds : parsed;
+	if (isRecord(root) && (Array.isArray(root.fail) || Array.isArray(root.informational))) {
+		return {
+			fail: parseAssertions(root.fail, `${path}.fail`),
+			informational: parseAssertions(root.informational, `${path}.informational`),
+		};
 	}
 	throw new Error(`invalid thresholds file: ${path}`);
+}
+
+function parseAssertions(value: unknown, source: string): EvalMetricAssertion[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) throw new Error(`${source}: expected array`);
+	return value.map((entry, index) => {
+		if (!isRecord(entry)) throw new Error(`${source}[${index}]: expected object`);
+		if (typeof entry.metric !== "string" || entry.metric.length === 0) {
+			throw new Error(`${source}[${index}].metric: expected non-empty string`);
+		}
+		if (!isOp(entry.op)) throw new Error(`${source}[${index}].op: expected lt, lte, gt, gte, eq, or neq`);
+		if (!isScalar(entry.value)) throw new Error(`${source}[${index}].value: expected scalar`);
+		return { metric: entry.metric, op: entry.op, value: entry.value };
+	});
+}
+
+function isOp(value: unknown): value is EvalMetricAssertion["op"] {
+	return value === "lt" || value === "lte" || value === "gt" || value === "gte" || value === "eq" || value === "neq";
+}
+
+function isScalar(value: unknown): value is number | string | boolean {
+	return (
+		(typeof value === "number" && Number.isFinite(value)) || typeof value === "string" || typeof value === "boolean"
+	);
 }
 
 export interface EvalAssertionResolution {

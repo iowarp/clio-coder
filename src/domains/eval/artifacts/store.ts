@@ -4,6 +4,7 @@ import { assertSafeId } from "../../../core/safe-id.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { EvalArtifactV4, EvalTokenAccountingV4 } from "../schema/artifact.js";
 import { assertEvalBehaviorReferencesVerdictV1, parseEvalBehaviorVerdictV1 } from "../schema/behavioral.js";
+import { parseEvalBehaviorMetricsV1 } from "../schema/behavioral-metrics.js";
 import { parseEvalServingConfigurationV1 } from "../schema/serving.js";
 import { parseEvalVerdictEnvelopeV1 } from "../schema/verdict.js";
 import { evalRoot } from "../store.js";
@@ -125,11 +126,27 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 		record.verdict === undefined ? undefined : parseEvalVerdictEnvelopeV1(record.verdict, `${source}.verdict`);
 	const behavioral =
 		record.behavioral === undefined ? undefined : parseEvalBehaviorVerdictV1(record.behavioral, `${source}.behavioral`);
+	const behavioralMetrics =
+		record.behavioralMetrics === undefined
+			? undefined
+			: parseEvalBehaviorMetricsV1(record.behavioralMetrics, `${source}.behavioralMetrics`);
 	if (behavioral !== undefined && verdict === undefined) {
 		throw new Error(`${source}.behavioral: sibling document requires a verdict`);
 	}
 	if (behavioral !== undefined && verdict !== undefined) {
 		assertEvalBehaviorReferencesVerdictV1(behavioral, verdict, `${source}.behavioral`);
+	}
+	if (behavioralMetrics !== undefined) {
+		if (behavioral === undefined) throw new Error(`${source}.behavioralMetrics: requires a behavioral verdict`);
+		if (behavioralMetrics.scenarioId !== readString(record, source, "taskId")) {
+			throw new Error(`${source}.behavioralMetrics.scenarioId: conflicts with result taskId`);
+		}
+		if (
+			behavioralMetrics.target.id !== readString(target, `${source}.target`, "id") ||
+			behavioralMetrics.target.model !== readNullableString(target, `${source}.target`, "model")
+		) {
+			throw new Error(`${source}.behavioralMetrics.target: conflicts with result target`);
+		}
 	}
 	return {
 		assignmentId: readNullableString(record, source, "assignmentId"),
@@ -147,6 +164,7 @@ function parseResult(value: unknown, source: string): EvalArtifactV4["results"][
 		artifacts: asRecord(record.artifacts, `${source}.artifacts`) as Record<string, string | string[] | null>,
 		...(verdict === undefined ? {} : { verdict }),
 		...(behavioral === undefined ? {} : { behavioral }),
+		...(behavioralMetrics === undefined ? {} : { behavioralMetrics }),
 	};
 }
 

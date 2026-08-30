@@ -30,6 +30,7 @@ import { runContextInitRunner } from "../runners/context-init.js";
 import { type EvalRunnerOutput, runExternalCommandRunner } from "../runners/external-command.js";
 import { adaptSuiteV2ResultToBehaviorV1, adaptSuiteV2ResultToVerdictV1 } from "../schema/adapter.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../schema/artifact.js";
+import { buildEvalBehaviorMetricsV1 } from "../schema/behavioral-metrics.js";
 import type { EvalServingConfigurationV1 } from "../schema/serving.js";
 import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
 import { createEvalId } from "../store.js";
@@ -281,6 +282,7 @@ async function runMatrixItem(
 function attachBehavioralResult(result: EvalArtifactResultV4, task: LoadedEvalSuiteV2["suite"]["tasks"][number]): void {
 	if (task.behavioral === undefined || result.verdict === undefined) return;
 	result.behavioral = adaptSuiteV2ResultToBehaviorV1(result, result.verdict, task.behavioral);
+	result.behavioralMetrics = buildEvalBehaviorMetricsV1(result, task.behavioral.execution.subject.role);
 }
 
 /** Journal-derived invariants for one finished item, read from its isolated state directory. */
