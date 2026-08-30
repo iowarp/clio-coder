@@ -980,8 +980,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// lands as a user message before the next model turn.
 						// alt+enter (queueFollowUp) keeps the after-this-run intent.
 						if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
-						if (mode === "end-of-turn") queues.queueFollowUp(trimmed);
-						else queues.steer(trimmed);
+						// The queue carries the submitted bytes, not the trimmed copy the
+						// guard above reads: a steer is a model-facing turn and the
+						// payload contract applies to it too (issue #244).
+						if (mode === "end-of-turn") queues.queueFollowUp(text);
+						else queues.steer(text);
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");

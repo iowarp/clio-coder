@@ -280,8 +280,16 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 		appendQueuedUserTurn(message: AgentMessage): void {
 			if (message?.role !== "user") return;
-			const text = extractUserText(message).trim();
-			if (text.length === 0) return;
+			// Byte-exact. Trimming here wrote a second, shortened row that the
+			// assistant then parented to, so the model's parent turn disagreed with
+			// the expansion the operator actually submitted: `/raw   bar` produced a
+			// correct 5-byte row and a 3-byte one, and the 3-byte one won (issue
+			// #244). Only the emptiness test reads the trimmed form, and the
+			// echo/mirror lookups match on the same bytes the engine was given, so a
+			// payload with edge whitespace is recognized as the echo it is instead
+			// of being persisted a second time.
+			const text = extractUserText(message);
+			if (text.trim().length === 0) return;
 			if (deps.consumePersistedEcho(text)) return;
 			deps.removeQueuedMirrorEntry(text);
 			if (!deps.session) return;
