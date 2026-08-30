@@ -2706,6 +2706,21 @@ export function createDispatchBundle(
 
 	type RetryScheduleResult = { scheduled: true } | { scheduled: false; settlementDetail?: string };
 
+	/** A reserved plan member owns its retry chain independently of the shared fleet root assignment. */
+	function retryChainIsLive(run: ActiveRun): boolean {
+		if (run.aborted) return false;
+		const reservation = run.req.reservation;
+		if (reservation === undefined) return assignments.get(run.lineage.rootRunId)?.status === "running";
+		try {
+			const record = getDispatchReservation(reservation.ownerId);
+			const member = record?.members.find((entry) => entry.memberId === reservation.memberId);
+			return record?.status === "active" && member !== undefined && member.status !== "released";
+		} catch (error) {
+			reportDispatchDiagnostic(`read retry liveness for reservation member ${reservation.memberId}`, error);
+			return false;
+		}
+	}
+
 	function maybeScheduleRetry(
 		run: ActiveRun,
 		outcome: RunOutcome,
@@ -2715,7 +2730,7 @@ export function createDispatchBundle(
 	): RetryScheduleResult {
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
-		if (assignments.get(rootRunId)?.status !== "running") return { scheduled: false };
+		if (!retryChainIsLive(run)) return { scheduled: false };
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
 			retryBackoff.delete(rootRunId);
 			return { scheduled: false };
@@ -2862,7 +2877,7 @@ export function createDispatchBundle(
 		reason = "retry",
 		decision: RetryDecision = decideRetry("internal", run.lineage.attempt, assignmentPolicyFor(run.req).maxRetries),
 	): Promise<void> {
-		if (draining || assignments.get(run.lineage.rootRunId)?.status !== "running") return;
+		if (draining || !retryChainIsLive(run)) return;
 		const excludesNode = decision.excludedRouteParts.includes("node");
 		// Record the failed node so placement can choose an eligible survivor.
 		const rerouteHops =
