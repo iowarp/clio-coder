@@ -15,8 +15,9 @@ import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioLauncher } from "../clio-host.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
+import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
-import { catalogInspectionFixture, configInspectionFixture } from "../tests/fixtures.ts";
+import { catalogInspectionFixture, configInspectionFixture, usageInspectionFixture } from "../tests/fixtures.ts";
 
 interface SmokeOptions {
 	readonly chrome: string;
@@ -80,6 +81,9 @@ const running = await startWorkbenchServer({
 	catalogInspector: {
 		inspect: () => Promise.resolve(catalogInspectionFixture()),
 	} satisfies ClioCatalogInspector,
+	usageInspector: {
+		inspect: () => Promise.resolve(usageInspectionFixture()),
+	} satisfies ClioUsageInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -259,6 +263,50 @@ try {
 	await page.screenshot({ path: new URL("catalog-compact.png", artifactDirectory).pathname, fullPage: true });
 	await page.setViewportSize({ width: 1600, height: 1100 });
 	await catalog.getByRole("button", { name: "Back to notebook" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// Historical usage is a project-filtered, bounded snapshot. Global audit,
+	// evidence, memory, raw prompts, ids, paths, and opportunity bodies never
+	// enter the browser frame.
+	await page.getByRole("button", { name: "Usage", exact: true }).click();
+	const usageRecord = page.getByRole("region", { name: "Thirty-day project usage record" });
+	await usageRecord.getByRole("heading", { name: "Thirty days of work in this project" }).waitFor();
+	await usageRecord.getByText("13,922,000", { exact: true }).first().waitFor();
+	await usageRecord.getByText("$4.125", { exact: true }).first().waitFor();
+	await usageRecord.getByText("qwen3.8-27b", { exact: true }).waitFor();
+	await usageRecord.getByText("frontend-design", { exact: true }).waitFor();
+	await usageRecord.getByText("researcher", { exact: true }).waitFor();
+	await usageRecord.getByText("Typed outcomes, not command shapes", { exact: true }).waitFor();
+	equal(await usageRecord.getByText("/home/", { exact: false }).count(), 0);
+	equal(await usageRecord.getByText("session-alpha", { exact: false }).count(), 0);
+	equal(await usageRecord.getByText("rawSuggestions", { exact: false }).count(), 0);
+	const usageAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const usageBlockingViolations = usageAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		usageBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("usage.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactUsageGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+		regionScrollWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.scrollWidth ?? 0,
+		regionClientWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.clientWidth ?? 0,
+	}));
+	ok(compactUsageGeometry.documentWidth <= compactUsageGeometry.viewportWidth);
+	ok(compactUsageGeometry.regionScrollWidth <= compactUsageGeometry.regionClientWidth + 1);
+	await page.screenshot({ path: new URL("usage-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await usageRecord.getByRole("button", { name: "Back to notebook" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// Desktop rails collapse independently, reclaim their full grid tracks, and
@@ -980,6 +1028,8 @@ try {
 			effectiveClioMapUsesTheBoundedReadOnlyAdapter: true,
 			catalogUsesBoundedReadOnlyAdapters: true,
 			compactCatalogHasNoPageOverflow: true,
+			usageUsesTheProjectFilteredBoundedAdapter: true,
+			compactUsageHasNoPageOverflow: true,
 			approvalBannerVisibleWhenScrolledAwayAndBlurred: true,
 			approvalAnsweredByKeyboardChord: true,
 			escalatedWithoutAnotherWireEvent: true,
@@ -992,6 +1042,7 @@ try {
 			desktopRailHasNoHorizontalOverflow: true,
 			seriousOrCriticalAccessibilityViolations: configMapBlockingViolations.length + blockingViolations.length +
 				catalogBlockingViolations.length +
+				usageBlockingViolations.length +
 				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
@@ -1002,6 +1053,8 @@ try {
 				"catalog.png",
 				"catalog-verifiers.png",
 				"catalog-compact.png",
+				"usage.png",
+				"usage-compact.png",
 				"permission.png",
 				"complete.png",
 				"compact-project-drawer.png",

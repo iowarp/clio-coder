@@ -42,6 +42,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"settings.patch",
 	"config.inspect",
 	"catalog.inspect",
+	"usage.inspect",
 	"targets.list",
 	"targets.probe",
 	"autonomy.set",
@@ -219,6 +220,10 @@ export interface CatalogInspectPayload {
 	readonly projectId: string;
 }
 
+export interface UsageInspectPayload {
+	readonly projectId: string;
+}
+
 export interface TargetsListPayload {
 	readonly projectId: string;
 }
@@ -257,6 +262,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "settings.patch": SettingsPatchPayload;
 	readonly "config.inspect": ConfigInspectPayload;
 	readonly "catalog.inspect": CatalogInspectPayload;
+	readonly "usage.inspect": UsageInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
 	readonly "autonomy.set": AutonomySetPayload;
@@ -286,6 +292,7 @@ export const SERVER_EVENT_KINDS = [
 	"settings.state",
 	"config.state",
 	"catalog.state",
+	"usage.state",
 	"targets.state",
 	"targets.probed",
 	"turn.started",
@@ -671,6 +678,91 @@ export interface WireCatalogInspection {
 	readonly verifiers: Readonly<{ availability: "typed-interface-required" }>;
 }
 
+export const USAGE_STORE_STATES = ["available", "missing"] as const;
+export type WireUsageStoreState = (typeof USAGE_STORE_STATES)[number];
+export const USAGE_OPPORTUNITY_KINDS = ["workflow-distiller", "recipe"] as const;
+export type WireUsageOpportunityKind = (typeof USAGE_OPPORTUNITY_KINDS)[number];
+export const MAX_WIRE_USAGE_MODELS = 32;
+export const MAX_WIRE_USAGE_TOOLS = 16;
+export const MAX_WIRE_USAGE_SKILLS = 64;
+export const MAX_WIRE_USAGE_RECIPES = 64;
+
+/** Exact aggregate fields reported by Clio's project-filtered usage reader. */
+export interface WireHistoricalUsageTotals {
+	readonly apiCalls: number;
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly reasoning: number;
+	readonly totalTokens: number;
+	readonly costUsd: number;
+	readonly turns: number | null;
+	readonly sideQuestions: number;
+	readonly handoffs: number;
+}
+
+export interface WireUsageModel {
+	readonly provider: string;
+	readonly model: string;
+	readonly apiCalls: number;
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly reasoning: number;
+	readonly totalTokens: number;
+	readonly costUsd: number;
+}
+
+export interface WireUsageTool {
+	readonly name: string;
+	readonly calls: number;
+	readonly successful: number;
+	readonly errors: number;
+	readonly blocked: number;
+}
+
+export interface WireUsageSkill {
+	readonly name: string;
+	readonly activations: number;
+	readonly observedInWindow: boolean;
+}
+
+export interface WireUsageRecipe {
+	readonly agentId: string;
+	readonly runs: number;
+}
+
+export interface WireUsageOpportunityCount {
+	readonly kind: WireUsageOpportunityKind;
+	readonly count: number;
+}
+
+export interface WireUsageInspection {
+	readonly inspectedAt: string;
+	readonly schema: "experimental";
+	readonly windowDays: 30;
+	readonly windowFrom: string;
+	readonly windowTo: string;
+	readonly stores: Readonly<{
+		sessions: WireUsageStoreState;
+		dispatchReceipts: WireUsageStoreState;
+	}>;
+	readonly sessionCount: number | null;
+	readonly dispatchRunCount: number | null;
+	readonly totals: WireHistoricalUsageTotals | null;
+	readonly models: readonly WireUsageModel[];
+	readonly modelsTruncated: boolean;
+	readonly tools: readonly WireUsageTool[];
+	readonly toolsTruncated: boolean;
+	readonly skills: readonly WireUsageSkill[];
+	readonly skillsTruncated: boolean;
+	readonly recipes: readonly WireUsageRecipe[];
+	readonly recipesTruncated: boolean;
+	readonly opportunities: readonly WireUsageOpportunityCount[];
+}
+
 export interface WireTarget {
 	readonly id: string;
 	readonly runtime: string;
@@ -701,6 +793,7 @@ export interface WireProjectWorkspace {
 	readonly settings: WireSettingsState | null;
 	readonly configInspection: WireConfigInspection | null;
 	readonly catalogInspection: WireCatalogInspection | null;
+	readonly usageInspection: WireUsageInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -754,6 +847,10 @@ export interface ConfigStatePayload {
 
 export interface CatalogStatePayload {
 	readonly inspection: WireCatalogInspection;
+}
+
+export interface UsageStatePayload {
+	readonly inspection: WireUsageInspection;
 }
 
 export interface TargetsStatePayload {
@@ -860,6 +957,7 @@ export interface ServerEventPayloadByKind {
 	readonly "settings.state": SettingsStatePayload;
 	readonly "config.state": ConfigStatePayload;
 	readonly "catalog.state": CatalogStatePayload;
+	readonly "usage.state": UsageStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
@@ -1153,6 +1251,7 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 		case "settings.get":
 		case "config.inspect":
 		case "catalog.inspect":
+		case "usage.inspect":
 		case "targets.list": {
 			const record = expectExactKeys(value, label, ["projectId"]);
 			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
@@ -1913,6 +2012,219 @@ function validateCatalogInspection(value: unknown, label: string): WireCatalogIn
 	};
 }
 
+function expectUsageCost(value: unknown, label: string): number {
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000_000) {
+		return invalid(`${label} must be a finite non-negative cost within the usage bound`);
+	}
+	return value;
+}
+
+function expectUsageCount(value: unknown, label: string): number {
+	if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > 1_000_000_000_000_000) {
+		return invalid(`${label} must be a non-negative safe integer within the usage bound`);
+	}
+	return value as number;
+}
+
+function validateHistoricalUsageTotals(value: unknown, label: string): WireHistoricalUsageTotals {
+	const record = expectExactKeys(value, label, [
+		"apiCalls",
+		"input",
+		"output",
+		"cacheRead",
+		"cacheWrite",
+		"reasoning",
+		"totalTokens",
+		"costUsd",
+		"turns",
+		"sideQuestions",
+		"handoffs",
+	]);
+	return {
+		apiCalls: expectUsageCount(record.apiCalls, `${label}.apiCalls`),
+		input: expectUsageCount(record.input, `${label}.input`),
+		output: expectUsageCount(record.output, `${label}.output`),
+		cacheRead: expectUsageCount(record.cacheRead, `${label}.cacheRead`),
+		cacheWrite: expectUsageCount(record.cacheWrite, `${label}.cacheWrite`),
+		reasoning: expectUsageCount(record.reasoning, `${label}.reasoning`),
+		totalTokens: expectUsageCount(record.totalTokens, `${label}.totalTokens`),
+		costUsd: expectUsageCost(record.costUsd, `${label}.costUsd`),
+		turns: record.turns === null ? null : expectUsageCount(record.turns, `${label}.turns`),
+		sideQuestions: expectUsageCount(record.sideQuestions, `${label}.sideQuestions`),
+		handoffs: expectUsageCount(record.handoffs, `${label}.handoffs`),
+	};
+}
+
+function validateUsageModel(value: unknown, label: string): WireUsageModel {
+	const record = expectExactKeys(value, label, [
+		"provider",
+		"model",
+		"apiCalls",
+		"input",
+		"output",
+		"cacheRead",
+		"cacheWrite",
+		"reasoning",
+		"totalTokens",
+		"costUsd",
+	]);
+	return {
+		provider: expectPresentationText(record.provider, `${label}.provider`, 128),
+		model: expectPresentationText(record.model, `${label}.model`, 256),
+		apiCalls: expectUsageCount(record.apiCalls, `${label}.apiCalls`),
+		input: expectUsageCount(record.input, `${label}.input`),
+		output: expectUsageCount(record.output, `${label}.output`),
+		cacheRead: expectUsageCount(record.cacheRead, `${label}.cacheRead`),
+		cacheWrite: expectUsageCount(record.cacheWrite, `${label}.cacheWrite`),
+		reasoning: expectUsageCount(record.reasoning, `${label}.reasoning`),
+		totalTokens: expectUsageCount(record.totalTokens, `${label}.totalTokens`),
+		costUsd: expectUsageCost(record.costUsd, `${label}.costUsd`),
+	};
+}
+
+function validateUsageTool(value: unknown, label: string): WireUsageTool {
+	const record = expectExactKeys(value, label, ["name", "calls", "successful", "errors", "blocked"]);
+	return {
+		name: expectPresentationText(record.name, `${label}.name`, 128),
+		calls: expectUsageCount(record.calls, `${label}.calls`),
+		successful: expectUsageCount(record.successful, `${label}.successful`),
+		errors: expectUsageCount(record.errors, `${label}.errors`),
+		blocked: expectUsageCount(record.blocked, `${label}.blocked`),
+	};
+}
+
+function validateUsageSkill(value: unknown, label: string): WireUsageSkill {
+	const record = expectExactKeys(value, label, ["name", "activations", "observedInWindow"]);
+	const activations = expectUsageCount(record.activations, `${label}.activations`);
+	const observedInWindow = expectBoolean(record.observedInWindow, `${label}.observedInWindow`);
+	if (observedInWindow !== (activations > 0)) invalid(`${label} observation state contradicts its activation count`);
+	return {
+		name: expectPresentationText(record.name, `${label}.name`, 128),
+		activations,
+		observedInWindow,
+	};
+}
+
+function validateUsageRecipe(value: unknown, label: string): WireUsageRecipe {
+	const record = expectExactKeys(value, label, ["agentId", "runs"]);
+	return {
+		agentId: expectPresentationText(record.agentId, `${label}.agentId`, 128),
+		runs: expectUsageCount(record.runs, `${label}.runs`),
+	};
+}
+
+function validateUsageOpportunity(value: unknown, label: string): WireUsageOpportunityCount {
+	const record = expectExactKeys(value, label, ["kind", "count"]);
+	return {
+		kind: expectEnum(record.kind, `${label}.kind`, USAGE_OPPORTUNITY_KINDS),
+		count: expectUsageCount(record.count, `${label}.count`),
+	};
+}
+
+function uniqueUsageRows<T>(items: readonly T[], label: string, key: (item: T) => string): readonly T[] {
+	if (new Set(items.map(key)).size !== items.length) invalid(`${label} contains duplicate rows`);
+	return items;
+}
+
+function validateUsageInspection(value: unknown, label: string): WireUsageInspection {
+	const record = expectExactKeys(value, label, [
+		"inspectedAt",
+		"schema",
+		"windowDays",
+		"windowFrom",
+		"windowTo",
+		"stores",
+		"sessionCount",
+		"dispatchRunCount",
+		"totals",
+		"models",
+		"modelsTruncated",
+		"tools",
+		"toolsTruncated",
+		"skills",
+		"skillsTruncated",
+		"recipes",
+		"recipesTruncated",
+		"opportunities",
+	]);
+	if (record.schema !== "experimental") invalid(`${label}.schema must be experimental`);
+	if (record.windowDays !== 30) invalid(`${label}.windowDays must be 30`);
+	const windowFrom = expectTimestamp(record.windowFrom, `${label}.windowFrom`);
+	const windowTo = expectTimestamp(record.windowTo, `${label}.windowTo`);
+	if (Date.parse(windowFrom) > Date.parse(windowTo)) invalid(`${label} window is reversed`);
+	const storesRecord = expectExactKeys(record.stores, `${label}.stores`, ["sessions", "dispatchReceipts"]);
+	const stores = {
+		sessions: expectEnum(storesRecord.sessions, `${label}.stores.sessions`, USAGE_STORE_STATES),
+		dispatchReceipts: expectEnum(
+			storesRecord.dispatchReceipts,
+			`${label}.stores.dispatchReceipts`,
+			USAGE_STORE_STATES,
+		),
+	};
+	const sessionCount = record.sessionCount === null
+		? null
+		: expectUsageCount(record.sessionCount, `${label}.sessionCount`);
+	const dispatchRunCount = record.dispatchRunCount === null
+		? null
+		: expectUsageCount(record.dispatchRunCount, `${label}.dispatchRunCount`);
+	if ((stores.sessions === "missing") !== (sessionCount === null)) {
+		invalid(`${label}.sessionCount contradicts the session store state`);
+	}
+	if ((stores.dispatchReceipts === "missing") !== (dispatchRunCount === null)) {
+		invalid(`${label}.dispatchRunCount contradicts the receipt store state`);
+	}
+	const models = uniqueUsageRows(
+		expectArray(record.models, `${label}.models`, MAX_WIRE_USAGE_MODELS, validateUsageModel),
+		`${label}.models`,
+		(item) => `${item.provider}\u001f${item.model}`,
+	);
+	const tools = uniqueUsageRows(
+		expectArray(record.tools, `${label}.tools`, MAX_WIRE_USAGE_TOOLS, validateUsageTool),
+		`${label}.tools`,
+		(item) => item.name,
+	);
+	const skills = uniqueUsageRows(
+		expectArray(record.skills, `${label}.skills`, MAX_WIRE_USAGE_SKILLS, validateUsageSkill),
+		`${label}.skills`,
+		(item) => item.name,
+	);
+	const recipes = uniqueUsageRows(
+		expectArray(record.recipes, `${label}.recipes`, MAX_WIRE_USAGE_RECIPES, validateUsageRecipe),
+		`${label}.recipes`,
+		(item) => item.agentId,
+	);
+	const opportunities = uniqueUsageRows(
+		expectArray(
+			record.opportunities,
+			`${label}.opportunities`,
+			USAGE_OPPORTUNITY_KINDS.length,
+			validateUsageOpportunity,
+		),
+		`${label}.opportunities`,
+		(item) => item.kind,
+	);
+	return {
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		schema: "experimental",
+		windowDays: 30,
+		windowFrom,
+		windowTo,
+		stores,
+		sessionCount,
+		dispatchRunCount,
+		totals: record.totals === null ? null : validateHistoricalUsageTotals(record.totals, `${label}.totals`),
+		models,
+		modelsTruncated: expectBoolean(record.modelsTruncated, `${label}.modelsTruncated`),
+		tools,
+		toolsTruncated: expectBoolean(record.toolsTruncated, `${label}.toolsTruncated`),
+		skills,
+		skillsTruncated: expectBoolean(record.skillsTruncated, `${label}.skillsTruncated`),
+		recipes,
+		recipesTruncated: expectBoolean(record.recipesTruncated, `${label}.recipesTruncated`),
+		opportunities,
+	};
+}
+
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
 	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
@@ -1959,6 +2271,7 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		"settings",
 		"configInspection",
 		"catalogInspection",
+		"usageInspection",
 		"targets",
 		"targetsTruncated",
 		"processGeneration",
@@ -1992,6 +2305,9 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		catalogInspection: record.catalogInspection === null
 			? null
 			: validateCatalogInspection(record.catalogInspection, `${label}.catalogInspection`),
+		usageInspection: record.usageInspection === null
+			? null
+			: validateUsageInspection(record.usageInspection, `${label}.usageInspection`),
 		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
 		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
 		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
@@ -2087,6 +2403,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "catalog.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return { inspection: validateCatalogInspection(record.inspection, `${label}.inspection`) };
+		}
+		case "usage.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return { inspection: validateUsageInspection(record.inspection, `${label}.inspection`) };
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -2305,6 +2625,7 @@ const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"settings.state",
 	"config.state",
 	"catalog.state",
+	"usage.state",
 	"targets.state",
 	"targets.probed",
 ]);

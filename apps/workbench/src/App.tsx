@@ -33,6 +33,7 @@ import type {
 	WireTimelineItem,
 	WireTreeNode,
 	WireUsage,
+	WireUsageInspection,
 } from "./protocol.ts";
 import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
 
@@ -64,6 +65,7 @@ export interface WorkbenchActions {
 	patchSettings(projectId: string, patch: WireSettingsPatch): void;
 	inspectConfig(projectId: string): void;
 	inspectCatalog(projectId: string): void;
+	inspectUsage(projectId: string): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
 	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
@@ -76,7 +78,7 @@ interface WorkbenchViewProps {
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
-type WorkspaceView = "notebook" | "effective-clio" | "catalog";
+type WorkspaceView = "notebook" | "effective-clio" | "catalog" | "usage";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -1105,6 +1107,7 @@ interface EvidenceRailProps {
 	workspaceView: WorkspaceView;
 	onOpenConfigMap(): void;
 	onOpenCatalog(): void;
+	onOpenUsage(): void;
 	obscured: boolean;
 }
 
@@ -1119,6 +1122,7 @@ const EvidenceRail = memo(function EvidenceRail({
 	workspaceView,
 	onOpenConfigMap,
 	onOpenCatalog,
+	onOpenUsage,
 	obscured,
 }: EvidenceRailProps) {
 	const open = state.open;
@@ -1140,6 +1144,7 @@ const EvidenceRail = memo(function EvidenceRail({
 	);
 	const configInspection = open?.configInspection ?? null;
 	const catalogInspection = open?.catalogInspection ?? null;
+	const usageInspection = open?.usageInspection ?? null;
 	const configContextTokens = configInspection?.entries.reduce(
 		(total, entry) => total + (entry.contextCostTokens ?? 0),
 		0,
@@ -1340,6 +1345,52 @@ const EvidenceRail = memo(function EvidenceRail({
 				)}
 
 				{open !== null && (
+					<section className="observer-section observer-section--history" aria-labelledby="observer-history-title">
+						<div className="eyebrow">PROJECT HISTORY</div>
+						<h3 id="observer-history-title">What Clio recorded across sessions</h3>
+						{usageInspection === null
+							? (
+								<p className="observer-note">
+									{state.pendingUsageInspect === null
+										? "Open the read-only Usage record for a project-filtered 30-day view."
+										: "Clio is reading the bounded project usage record."}
+								</p>
+							)
+							: (
+								<dl className="effective-summary">
+									<div>
+										<dt>Tokens</dt>
+										<dd>
+											{usageInspection.totals === null ? "—" : formatTokenCount(usageInspection.totals.totalTokens)}
+										</dd>
+									</div>
+									<div>
+										<dt>Sessions</dt>
+										<dd>{usageInspection.sessionCount ?? "—"}</dd>
+									</div>
+									<div>
+										<dt>Models</dt>
+										<dd>{usageInspection.models.length}</dd>
+									</div>
+									<div>
+										<dt>Recipes</dt>
+										<dd>{usageInspection.recipes.length}</dd>
+									</div>
+								</dl>
+							)}
+						<button
+							type="button"
+							className="button button--quiet observer-map-button"
+							aria-pressed={workspaceView === "usage"}
+							onClick={onOpenUsage}
+						>
+							<span aria-hidden="true">◷</span>
+							{workspaceView === "usage" ? "Usage record open" : "Open 30-day Usage record"}
+						</button>
+					</section>
+				)}
+
+				{open !== null && (
 					<section className="observer-section" aria-labelledby="observer-usage-title">
 						<div className="observer-section__heading">
 							<div>
@@ -1513,11 +1564,13 @@ function sameEvidenceRailProps(previous: EvidenceRailProps, next: EvidenceRailPr
 		previousOpen.projection.timelineTruncated === nextOpen.projection.timelineTruncated &&
 		sameEvidenceTimeline(previousOpen.projection.timeline, nextOpen.projection.timeline) &&
 		previousOpen.configInspection === nextOpen.configInspection &&
-		previousOpen.catalogInspection === nextOpen.catalogInspection
+		previousOpen.catalogInspection === nextOpen.catalogInspection &&
+		previousOpen.usageInspection === nextOpen.usageInspection
 	);
 	return sameOpen &&
 		previous.state.pendingConfigInspect === next.state.pendingConfigInspect &&
 		previous.state.pendingCatalogInspect === next.state.pendingCatalogInspect &&
+		previous.state.pendingUsageInspect === next.state.pendingUsageInspect &&
 		previous.nowMs === next.nowMs &&
 		previous.isDrawer === next.isDrawer &&
 		previous.drawerOpen === next.drawerOpen &&
@@ -1527,6 +1580,7 @@ function sameEvidenceRailProps(previous: EvidenceRailProps, next: EvidenceRailPr
 		previous.workspaceView === next.workspaceView &&
 		previous.onOpenConfigMap === next.onOpenConfigMap &&
 		previous.onOpenCatalog === next.onOpenCatalog &&
+		previous.onOpenUsage === next.onOpenUsage &&
 		previous.obscured === next.obscured;
 }
 
@@ -2353,6 +2407,365 @@ export const ClioCatalog = memo(function ClioCatalog({
 	);
 });
 
+const usageCurrency = new Intl.NumberFormat(undefined, {
+	style: "currency",
+	currency: "USD",
+	// Cost is already a Clio-reported number. Preserve its useful precision
+	// instead of rounding it to a Workbench-selected accounting increment.
+	maximumSignificantDigits: 15,
+});
+
+function formatUsageCost(value: number): string {
+	return usageCurrency.format(value);
+}
+
+function usageFieldWidth(value: number, maximum: number): string {
+	if (value === 0 || maximum === 0) return "0%";
+	return `${Math.max(1.5, Math.min(100, (value / maximum) * 100))}%`;
+}
+
+function usageStoreLabel(value: "available" | "missing"): string {
+	return value === "available" ? "Store read" : "Store missing";
+}
+
+function UsageEmptyState({ pending, onRefresh, onBack }: {
+	pending: boolean;
+	onRefresh(): void;
+	onBack(): void;
+}) {
+	return (
+		<section
+			className="usage-notebook usage-notebook--empty"
+			aria-labelledby="usage-notebook-title"
+			aria-busy={pending}
+		>
+			<div className="usage-notebook__empty-dial" aria-hidden="true">
+				<span>30</span>
+				<small>DAYS</small>
+			</div>
+			<div>
+				<div className="eyebrow">PROJECT HISTORY · READ ONLY</div>
+				<h2 id="usage-notebook-title">Read the work Clio has recorded here</h2>
+				<p>
+					This record asks Clio for project-filtered sessions, dispatch receipts, model usage, tools, skills, recipes,
+					and safe opportunity counts across a fixed 30-day window.
+				</p>
+			</div>
+			<div className="usage-notebook__empty-actions">
+				<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+					{pending ? "Reading project history…" : "Inspect 30-day usage"}
+				</button>
+				<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+			</div>
+			<p className="usage-notebook__boundary">
+				Raw prompts, suggestions, shell shapes, session and run identifiers, native paths, global memory, evidence tags,
+				and diagnostics stay on the host.
+			</p>
+		</section>
+	);
+}
+
+export const UsageNotebook = memo(function UsageNotebook({
+	inspection,
+	pending,
+	onRefresh,
+	onBack,
+}: {
+	inspection: WireUsageInspection | null;
+	pending: boolean;
+	onRefresh(): void;
+	onBack(): void;
+}) {
+	if (inspection === null) {
+		return <UsageEmptyState pending={pending} onRefresh={onRefresh} onBack={onBack} />;
+	}
+
+	const totals = inspection.totals;
+	const maximumUsageField = totals === null
+		? 0
+		: USAGE_FIELDS.reduce((maximum, field) => Math.max(maximum, totals[field.key]), 0);
+	const maximumModelTokens = inspection.models.reduce(
+		(maximum, model) => Math.max(maximum, model.totalTokens),
+		0,
+	);
+	const activatedSkills = inspection.skills.filter((skill) => skill.observedInWindow);
+	const dormantSkills = inspection.skills.length - activatedSkills.length;
+	const totalOpportunityCount = inspection.opportunities.reduce((total, item) => total + item.count, 0);
+	const storesComplete = inspection.stores.sessions === "available" &&
+		inspection.stores.dispatchReceipts === "available";
+
+	return (
+		<section className="usage-notebook" aria-labelledby="usage-notebook-title" aria-busy={pending}>
+			<header className="usage-notebook__masthead">
+				<div>
+					<div className="eyebrow">CLIO USAGE RECORD · EXPERIMENTAL SCHEMA</div>
+					<h2 id="usage-notebook-title">Thirty days of work in this project</h2>
+					<p>
+						{formatTimestamp(inspection.windowFrom)} through {formatTimestamp(inspection.windowTo)}{" "}
+						· figures are reported by Clio, not inferred from the visible conversation.
+					</p>
+				</div>
+				<div className="usage-notebook__masthead-actions">
+					<span>{pending ? "Refreshing history…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
+					<div>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+							Refresh record
+						</button>
+					</div>
+				</div>
+			</header>
+
+			<dl className="usage-notebook__summary" aria-label="Thirty-day project usage summary">
+				<div>
+					<dt>Total tokens</dt>
+					<dd>{totals === null ? "—" : formatTokenCount(totals.totalTokens)}</dd>
+					<dd className="usage-notebook__summary-note">
+						{totals === null ? "No token aggregate reported" : `${totals.apiCalls.toLocaleString()} API calls`}
+					</dd>
+				</div>
+				<div>
+					<dt>Clio-reported cost</dt>
+					<dd>{totals === null ? "—" : formatUsageCost(totals.costUsd)}</dd>
+					<dd className="usage-notebook__summary-note">Recorded cost, never a Workbench estimate</dd>
+				</div>
+				<div className={inspection.stores.sessions === "missing" ? "is-missing" : undefined}>
+					<dt>Sessions</dt>
+					<dd>{inspection.sessionCount === null ? "—" : inspection.sessionCount.toLocaleString()}</dd>
+					<dd className="usage-notebook__summary-note">{usageStoreLabel(inspection.stores.sessions)}</dd>
+				</div>
+				<div className={inspection.stores.dispatchReceipts === "missing" ? "is-missing" : undefined}>
+					<dt>Dispatch runs</dt>
+					<dd>{inspection.dispatchRunCount === null ? "—" : inspection.dispatchRunCount.toLocaleString()}</dd>
+					<dd className="usage-notebook__summary-note">{usageStoreLabel(inspection.stores.dispatchReceipts)}</dd>
+				</div>
+			</dl>
+
+			{!storesComplete && (
+				<p className="usage-notebook__store-note" role="note">
+					A dash means Clio could not find that local history store. It does not mean zero activity.
+				</p>
+			)}
+
+			<div className="usage-notebook__grid">
+				<section className="usage-record usage-record--tokens" aria-labelledby="usage-token-title">
+					<header className="usage-record__heading">
+						<div>
+							<div className="eyebrow">TOKEN COMPOSITION</div>
+							<h3 id="usage-token-title">Provider fields kept separate</h3>
+						</div>
+						<strong>{totals === null ? "NO REPORT" : `${totals.apiCalls.toLocaleString()} CALLS`}</strong>
+					</header>
+					{totals === null
+						? (
+							<p className="usage-record__empty">
+								Clio reported no token aggregate for this window. Store availability and resource observations remain
+								visible independently.
+							</p>
+						)
+						: (
+							<>
+								<ul className="usage-token-ledger">
+									{USAGE_FIELDS.map((field) => (
+										<li key={field.key} className={`usage-token-ledger__row is-${field.key}`}>
+											<div>
+												<span>{field.label}</span>
+												<strong>{formatTokenCount(totals[field.key])}</strong>
+											</div>
+											<span className="usage-token-ledger__track" aria-hidden="true">
+												<span style={{ width: usageFieldWidth(totals[field.key], maximumUsageField) }} />
+											</span>
+										</li>
+									))}
+								</ul>
+								<dl className="usage-origin-ledger" aria-label="Clio usage origins">
+									<div>
+										<dt>Turns</dt>
+										<dd>{totals.turns === null ? "not split" : totals.turns.toLocaleString()}</dd>
+									</div>
+									<div>
+										<dt>Side questions</dt>
+										<dd>{totals.sideQuestions.toLocaleString()}</dd>
+									</div>
+									<div>
+										<dt>Handoffs</dt>
+										<dd>{totals.handoffs.toLocaleString()}</dd>
+									</div>
+								</dl>
+							</>
+						)}
+					<p className="usage-record__method">
+						Bars compare token fields with one another; they are not additive percentages. Provider accounting can
+						overlap cache and reasoning fields.
+					</p>
+				</section>
+
+				<section className="usage-record usage-record--models" aria-labelledby="usage-model-title">
+					<header className="usage-record__heading">
+						<div>
+							<div className="eyebrow">MODEL ATTRIBUTION</div>
+							<h3 id="usage-model-title">Models that did the work</h3>
+						</div>
+						<strong>{inspection.models.length.toLocaleString()} MODELS</strong>
+					</header>
+					{inspection.models.length === 0
+						? <p className="usage-record__empty">No project-filtered model rows were reported in this window.</p>
+						: (
+							<ol className="usage-model-ledger">
+								{inspection.models.map((model) => (
+									<li key={`${model.provider}:${model.model}`}>
+										<div className="usage-model-ledger__identity">
+											<span>{model.provider}</span>
+											<strong>{model.model}</strong>
+										</div>
+										<div className="usage-model-ledger__measure">
+											<span>{model.totalTokens.toLocaleString()} tokens</span>
+											<span>{formatUsageCost(model.costUsd)} · {model.apiCalls.toLocaleString()} calls</span>
+										</div>
+										<span className="usage-model-ledger__track" aria-hidden="true">
+											<span style={{ width: usageFieldWidth(model.totalTokens, maximumModelTokens) }} />
+										</span>
+									</li>
+								))}
+							</ol>
+						)}
+					{inspection.modelsTruncated && <p className="usage-record__bounded">Model rows reached the display bound.</p>}
+				</section>
+
+				<section className="usage-record usage-record--tools" aria-labelledby="usage-tool-title">
+					<header className="usage-record__heading">
+						<div>
+							<div className="eyebrow">TOOL OBSERVATIONS</div>
+							<h3 id="usage-tool-title">Typed outcomes, not command shapes</h3>
+						</div>
+						<strong>{inspection.tools.length.toLocaleString()} TOOLS</strong>
+					</header>
+					{inspection.tools.length === 0
+						? <p className="usage-record__empty">No project-filtered top-tool rows were reported.</p>
+						: (
+							<div className="usage-tool-table" role="table" aria-label="Project tool outcomes">
+								<div role="row" className="usage-tool-table__header">
+									<span role="columnheader">Tool</span>
+									<span role="columnheader">Calls</span>
+									<span role="columnheader">OK</span>
+									<span role="columnheader">Errors</span>
+									<span role="columnheader">Blocked</span>
+								</div>
+								{inspection.tools.map((tool) => (
+									<div role="row" key={tool.name}>
+										<strong role="cell">{tool.name}</strong>
+										<span role="cell">{tool.calls.toLocaleString()}</span>
+										<span role="cell">{tool.successful.toLocaleString()}</span>
+										<span role="cell">{tool.errors.toLocaleString()}</span>
+										<span role="cell">{tool.blocked.toLocaleString()}</span>
+									</div>
+								))}
+							</div>
+						)}
+					{inspection.toolsTruncated && <p className="usage-record__bounded">Tool rows reached the display bound.</p>}
+				</section>
+
+				<section className="usage-record usage-record--practice" aria-labelledby="usage-practice-title">
+					<header className="usage-record__heading">
+						<div>
+							<div className="eyebrow">WORKING PRACTICE</div>
+							<h3 id="usage-practice-title">Skills, recipes &amp; reusable patterns</h3>
+						</div>
+						<strong>{totalOpportunityCount.toLocaleString()} SIGNALS</strong>
+					</header>
+					<div className="usage-practice-grid">
+						<section aria-labelledby="usage-skills-title">
+							<div className="usage-practice-grid__heading">
+								<h4 id="usage-skills-title">Skill activation</h4>
+								<span>{activatedSkills.length} active · {dormantSkills} unobserved</span>
+							</div>
+							{inspection.skills.length === 0
+								? <p className="usage-record__empty">No skill inventory was reported.</p>
+								: (
+									<ul className="usage-skill-ledger">
+										{inspection.skills.map((skill) => (
+											<li key={skill.name} className={skill.observedInWindow ? "is-active" : "is-dormant"}>
+												<span>{skill.name}</span>
+												<strong>{skill.observedInWindow ? skill.activations.toLocaleString() : "not observed"}</strong>
+											</li>
+										))}
+									</ul>
+								)}
+						</section>
+						<section aria-labelledby="usage-recipes-title">
+							<div className="usage-practice-grid__heading">
+								<h4 id="usage-recipes-title">Agent recipes</h4>
+								<span>{inspection.recipes.length} observed</span>
+							</div>
+							{inspection.recipes.length === 0
+								? <p className="usage-record__empty">No recipe runs were reported.</p>
+								: (
+									<ul className="usage-recipe-ledger">
+										{inspection.recipes.map((recipe) => (
+											<li key={recipe.agentId}>
+												<span>{recipe.agentId}</span>
+												<strong>{recipe.runs.toLocaleString()} runs</strong>
+											</li>
+										))}
+									</ul>
+								)}
+							<div className="usage-opportunity-ledger">
+								{inspection.opportunities.map((opportunity) => (
+									<div key={opportunity.kind}>
+										<span>{opportunity.kind === "workflow-distiller" ? "Workflow patterns" : "Recipe candidates"}</span>
+										<strong>{opportunity.count.toLocaleString()}</strong>
+									</div>
+								))}
+							</div>
+						</section>
+					</div>
+					{(inspection.skillsTruncated || inspection.recipesTruncated) && (
+						<p className="usage-record__bounded">One or more practice inventories reached the display bound.</p>
+					)}
+				</section>
+			</div>
+
+			<section className="usage-boundaries" aria-labelledby="usage-boundaries-title">
+				<div>
+					<div className="eyebrow">NEXT TYPED BRIDGES</div>
+					<h3 id="usage-boundaries-title">Historical surfaces still waiting on safe project contracts</h3>
+					<p>
+						Workbench exposes a boundary instead of scraping formatted output or leaking global records into this
+						project.
+					</p>
+				</div>
+				<ul>
+					<li>
+						<strong>Evidence</strong>
+						<span>No JSON listing; formatted rows stay host-side.</span>
+					</li>
+					<li>
+						<strong>Evaluations</strong>
+						<span>JSON exists only after an eval ID is already known.</span>
+					</li>
+					<li>
+						<strong>Traces</strong>
+						<span>The run listing is global and carries raw requests.</span>
+					</li>
+					<li>
+						<strong>Fleet</strong>
+						<span>Status is global and has no project selector.</span>
+					</li>
+				</ul>
+			</section>
+
+			<footer className="usage-notebook__method">
+				<strong>Projection boundary</strong>
+				<p>
+					Only aggregates whose Clio implementation applies the trusted project root are retained. Global audit,
+					failure-tag, memory, and evidence rows are discarded; opportunity suggestions are reduced to counts. This is a
+					cached read-only snapshot and refreshes only when requested.
+				</p>
+			</footer>
+		</section>
+	);
+});
+
 interface PromptEditorHandle {
 	useExample(prompt: string): void;
 }
@@ -2458,6 +2871,7 @@ function ConversationCanvas({
 	onNotebookOpen,
 	onRefreshConfig,
 	onRefreshCatalog,
+	onRefreshUsage,
 }: {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
@@ -2476,6 +2890,7 @@ function ConversationCanvas({
 	onNotebookOpen(): void;
 	onRefreshConfig(): void;
 	onRefreshCatalog(): void;
+	onRefreshUsage(): void;
 }) {
 	const open = state.open;
 	const promptEditor = useRef<PromptEditorHandle>(null);
@@ -2536,6 +2951,8 @@ function ConversationCanvas({
 							? "EFFECTIVE CLIO FOR"
 							: workspaceView === "catalog"
 							? "CAPABILITY ATLAS FOR"
+							: workspaceView === "usage"
+							? "USAGE RECORD FOR"
 							: "ACTIVE PROJECT"}
 					</div>
 					<h1>{open === null ? "No project open" : open.project.displayName}</h1>
@@ -2550,7 +2967,7 @@ function ConversationCanvas({
 					)}
 					{open && (
 						<nav className="conversation__view-switcher" aria-label="Project views">
-							{(["notebook", "effective-clio", "catalog"] as const).map((view) => (
+							{(["notebook", "effective-clio", "catalog", "usage"] as const).map((view) => (
 								<button
 									type="button"
 									key={view}
@@ -2558,7 +2975,13 @@ function ConversationCanvas({
 									aria-current={workspaceView === view ? "page" : undefined}
 									onClick={() => onWorkspaceViewChange(view)}
 								>
-									{view === "notebook" ? "Notebook" : view === "effective-clio" ? "Effective Clio" : "Catalog"}
+									{view === "notebook"
+										? "Notebook"
+										: view === "effective-clio"
+										? "Effective Clio"
+										: view === "catalog"
+										? "Catalog"
+										: "Usage"}
 								</button>
 							))}
 						</nav>
@@ -2609,6 +3032,8 @@ function ConversationCanvas({
 					? "Effective Clio map"
 					: workspaceView === "catalog"
 					? "Clio capability catalog"
+					: workspaceView === "usage"
+					? "Thirty-day project usage record"
 					: "Conversation history"}
 			>
 				{open !== null && workspaceView === "effective-clio"
@@ -2626,6 +3051,15 @@ function ConversationCanvas({
 							inspection={open.catalogInspection}
 							pending={state.pendingCatalogInspect !== null}
 							onRefresh={onRefreshCatalog}
+							onBack={onNotebookOpen}
+						/>
+					)
+					: open !== null && workspaceView === "usage"
+					? (
+						<UsageNotebook
+							inspection={open.usageInspection}
+							pending={state.pendingUsageInspect !== null}
+							onRefresh={onRefreshUsage}
 							onBack={onNotebookOpen}
 						/>
 					)
@@ -3436,7 +3870,17 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		if (
 			view === "catalog" && open !== null && open.catalogInspection === null && state.pendingCatalogInspect === null
 		) actions.inspectCatalog(open.project.id);
-	}, [actions, open?.project.id, open?.catalogInspection, state.pendingCatalogInspect]);
+		if (
+			view === "usage" && open !== null && open.usageInspection === null && state.pendingUsageInspect === null
+		) actions.inspectUsage(open.project.id);
+	}, [
+		actions,
+		open?.project.id,
+		open?.catalogInspection,
+		open?.usageInspection,
+		state.pendingCatalogInspect,
+		state.pendingUsageInspect,
+	]);
 
 	const openNotebook = useCallback((): void => {
 		setWorkspaceView("notebook");
@@ -3452,12 +3896,21 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		setEvidenceDrawerOpen(false);
 	}, [changeWorkspaceView]);
 
+	const openUsage = useCallback((): void => {
+		changeWorkspaceView("usage");
+		setEvidenceDrawerOpen(false);
+	}, [changeWorkspaceView]);
+
 	const refreshConfig = useCallback((): void => {
 		if (open !== null) actions.inspectConfig(open.project.id);
 	}, [actions, open?.project.id]);
 
 	const refreshCatalog = useCallback((): void => {
 		if (open !== null) actions.inspectCatalog(open.project.id);
+	}, [actions, open?.project.id]);
+
+	const refreshUsage = useCallback((): void => {
+		if (open !== null) actions.inspectUsage(open.project.id);
 	}, [actions, open?.project.id]);
 
 	useEffect(() => {
@@ -3584,6 +4037,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onNotebookOpen={openNotebook}
 				onRefreshConfig={refreshConfig}
 				onRefreshCatalog={refreshCatalog}
+				onRefreshUsage={refreshUsage}
 			/>
 			<EvidenceRail
 				state={state}
@@ -3596,6 +4050,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				workspaceView={workspaceView}
 				onOpenConfigMap={openConfigMap}
 				onOpenCatalog={openCatalog}
+				onOpenUsage={openUsage}
 				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus

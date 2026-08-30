@@ -10,6 +10,7 @@ import {
 	type WireSessionSummary,
 	type WireTimelineItem,
 	type WireTreeNode,
+	type WireUsageInspection,
 } from "../src/protocol.ts";
 import type { WireBootstrap } from "../src/state.ts";
 
@@ -139,6 +140,58 @@ export function catalogInspectionFixture(): WireCatalogInspection {
 	};
 }
 
+export function usageInspectionFixture(): WireUsageInspection {
+	return {
+		inspectedAt: "2026-08-29T14:00:00.000Z",
+		schema: "experimental",
+		windowDays: 30,
+		windowFrom: "2026-07-30T13:00:00.000Z",
+		windowTo: "2026-08-29T13:00:00.000Z",
+		stores: { sessions: "available", dispatchReceipts: "available" },
+		sessionCount: 3,
+		dispatchRunCount: 2,
+		totals: {
+			apiCalls: 42,
+			input: 8_500_000,
+			output: 1_200_000,
+			cacheRead: 3_400_000,
+			cacheWrite: 22_000,
+			reasoning: 800_000,
+			totalTokens: 13_922_000,
+			costUsd: 4.125,
+			turns: 38,
+			sideQuestions: 3,
+			handoffs: 1,
+		},
+		models: [{
+			provider: "lmstudio",
+			model: "qwen3.8-27b",
+			apiCalls: 42,
+			input: 8_500_000,
+			output: 1_200_000,
+			cacheRead: 3_400_000,
+			cacheWrite: 22_000,
+			reasoning: 800_000,
+			totalTokens: 13_922_000,
+			costUsd: 4.125,
+		}],
+		modelsTruncated: false,
+		tools: [{ name: "read", calls: 17, successful: 16, errors: 1, blocked: 0 }],
+		toolsTruncated: false,
+		skills: [
+			{ name: "frontend-design", activations: 5, observedInWindow: true },
+			{ name: "experiment-protocol", activations: 0, observedInWindow: false },
+		],
+		skillsTruncated: false,
+		recipes: [{ agentId: "researcher", runs: 4 }],
+		recipesTruncated: false,
+		opportunities: [
+			{ kind: "workflow-distiller", count: 1 },
+			{ kind: "recipe", count: 1 },
+		],
+	};
+}
+
 export function clioSnapshotFixture(
 	phase: WireClioSnapshot["phase"] = "idle",
 	overrides: Partial<WireClioSnapshot> = {},
@@ -218,6 +271,7 @@ export function workspaceFixture(
 		settings: null,
 		configInspection: null,
 		catalogInspection: null,
+		usageInspection: null,
 		targets: null,
 		targetsTruncated: false,
 		processGeneration: "generation-alpha-0001",
@@ -271,6 +325,7 @@ const PROJECT_EVENT_KINDS = new Set<ServerEventKind>([
 	"settings.state",
 	"config.state",
 	"catalog.state",
+	"usage.state",
 	"targets.state",
 	"targets.probed",
 ]);

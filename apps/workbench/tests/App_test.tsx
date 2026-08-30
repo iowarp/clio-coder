@@ -1,6 +1,6 @@
 import { equal, match, ok } from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ClioCatalog, EffectiveClioMap, type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
+import { ClioCatalog, EffectiveClioMap, UsageNotebook, type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
 import { appReducer, type AppState, initialAppState, parseBootstrapPayload } from "../src/state.ts";
 import {
 	bootstrapFixture,
@@ -10,6 +10,7 @@ import {
 	FIXTURE_PROJECT_ID,
 	serverEventFixture,
 	sessionSummaryFixture,
+	usageInspectionFixture,
 	workspaceFixture,
 } from "./fixtures.ts";
 import type { WireProjectWorkspace } from "../src/protocol.ts";
@@ -37,6 +38,7 @@ const inertActions: WorkbenchActions = {
 	patchSettings() {},
 	inspectConfig() {},
 	inspectCatalog() {},
+	inspectUsage() {},
 	listTargets() {},
 	probeTarget() {},
 	setAutonomy() {},
@@ -142,6 +144,33 @@ Deno.test("the capability atlas renders bounded inventory facts and names the ve
 	ok(!html.includes("sourcePath"));
 	ok(!html.includes("sourceUrl"));
 	ok(!/https?:\/\//u.test(html));
+	ok(!html.includes("/home/"));
+});
+
+Deno.test("the Usage record renders exact project aggregates and its honest upstream boundaries", () => {
+	const html = renderToStaticMarkup(
+		<UsageNotebook
+			inspection={usageInspectionFixture()}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+
+	match(html, /Thirty days of work in this project/u);
+	match(html, /13,922,000/u);
+	match(html, /\$4\.125/u);
+	match(html, /qwen3\.8-27b/u);
+	match(html, /frontend-design/u);
+	match(html, /researcher/u);
+	match(html, /Typed outcomes, not command shapes/u);
+	match(html, /Evidence/u);
+	match(html, /Evaluations/u);
+	match(html, /Traces/u);
+	match(html, /Fleet/u);
+	match(html, /suggestions are reduced to counts/u);
+	ok(!html.includes("rawSuggestions"));
+	ok(!html.includes("session-alpha"));
 	ok(!html.includes("/home/"));
 });
 

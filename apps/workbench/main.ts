@@ -1,6 +1,7 @@
 import { extname } from "node:path";
 import { type ClioCatalogInspector, ClioCliCatalogInspector } from "./clio-catalog-inspector.ts";
 import { ClioCliConfigInspector, ClioConfigInspectError, type ClioConfigInspector } from "./clio-config-inspector.ts";
+import { ClioCliUsageInspector, ClioUsageInspectError, type ClioUsageInspector } from "./clio-usage-inspector.ts";
 import {
 	type ClioLauncher,
 	ClioProjectHost,
@@ -30,6 +31,7 @@ import {
 	type WireProjectSummary,
 	type WireProjectWorkspace,
 	type WireTreeNode,
+	type WireUsageInspection,
 } from "./src/protocol.ts";
 import { applyTurnEvent, emptyTurnProjection, type TurnEventInput, type TurnProjection } from "./src/timeline.ts";
 import { type RecentProject, WorkbenchState, WorkbenchStateError } from "./workbench-state.ts";
@@ -108,6 +110,8 @@ export interface WorkbenchServerOptions {
 	configInspector?: ClioConfigInspector;
 	/** Overrides the fixed read-only Clio resource-catalog adapter (tests). */
 	catalogInspector?: ClioCatalogInspector;
+	/** Overrides the fixed project-scoped Clio usage adapter (tests). */
+	usageInspector?: ClioUsageInspector;
 	/** Overrides the Workbench state directory (tests). */
 	stateDir?: string;
 	/** Overrides `$HOME` for the guards and browser (tests). */
@@ -229,6 +233,7 @@ interface OpenProject {
 	deleteChallenge: WireDeleteChallenge | null;
 	configInspection: WireConfigInspection | null;
 	catalogInspection: WireCatalogInspection | null;
+	usageInspection: WireUsageInspection | null;
 }
 
 type EventContext = { projectId?: string; processGeneration?: string; sessionId?: string; turnId?: string };
@@ -241,6 +246,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #launcher: ClioLauncher;
 	readonly #configInspector: ClioConfigInspector;
 	readonly #catalogInspector: ClioCatalogInspector;
+	readonly #usageInspector: ClioUsageInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
@@ -267,6 +273,7 @@ class WorkbenchRuntime implements HostSink {
 				| "clioLauncher"
 				| "configInspector"
 				| "catalogInspector"
+				| "usageInspector"
 				| "permissionEscalateMs"
 				| "permissionBudgetMs"
 				| "promptTimeoutMs"
@@ -283,6 +290,9 @@ class WorkbenchRuntime implements HostSink {
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#catalogInspector = options.catalogInspector ?? new ClioCliCatalogInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#usageInspector = options.usageInspector ?? new ClioCliUsageInspector({
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
@@ -317,7 +327,7 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration and catalog inspections ask Clio for read-only JSON, redact it on the host, and never write Clio state.`,
+				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, and project usage inspections ask Clio for read-only typed data, redact it on the host, and never write Clio state.`,
 			securityNote: SECURITY_NOTE,
 		};
 	}
@@ -366,6 +376,7 @@ class WorkbenchRuntime implements HostSink {
 			settings: open.host.settings,
 			configInspection: open.configInspection,
 			catalogInspection: open.catalogInspection,
+			usageInspection: open.usageInspection,
 			targets: open.host.targets,
 			targetsTruncated: open.host.targetsTruncated,
 			processGeneration: open.host.generation,
@@ -479,6 +490,9 @@ class WorkbenchRuntime implements HostSink {
 		if (command.kind === "catalog.inspect") {
 			return this.#serializeRead(() => this.#dispatchCatalogInspect(session, command));
 		}
+		if (command.kind === "usage.inspect") {
+			return this.#serializeRead(() => this.#dispatchUsageInspect(session, command));
+		}
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
 
@@ -529,6 +543,29 @@ class WorkbenchRuntime implements HostSink {
 			if (this.#closed || this.#open !== open) return;
 			open.catalogInspection = inspection;
 			this.#broadcast("catalog.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
+	}
+
+	async #dispatchUsageInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"usage.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#usageInspector.inspect(open.project.identity.canonicalPath);
+			// Read adapters may outlive a project switch; late results are discarded
+			// instead of being attached to whichever project is open now.
+			if (this.#closed || this.#open !== open) return;
+			open.usageInspection = inspection;
+			this.#broadcast("usage.state", { projectId: open.project.id }, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send(
@@ -771,6 +808,7 @@ class WorkbenchRuntime implements HostSink {
 			deleteChallenge: null,
 			configInspection: null,
 			catalogInspection: null,
+			usageInspection: null,
 		};
 		this.#open = open;
 		try {
@@ -917,6 +955,7 @@ class WorkbenchRuntime implements HostSink {
 		if (error instanceof WorkbenchStateError) return { code: error.code, message: error.message };
 		if (error instanceof HostError) return { code: error.code, message: error.message };
 		if (error instanceof ClioConfigInspectError) return { code: error.code, message: error.message };
+		if (error instanceof ClioUsageInspectError) return { code: error.code, message: error.message };
 		if (!this.#quiet) console.error("Workbench command failed", error);
 		return { code: "internal", message: "The local command could not be completed." };
 	}
@@ -1041,6 +1080,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		...(options.clioLauncher === undefined ? {} : { clioLauncher: options.clioLauncher }),
 		...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
 		...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
+		...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),

@@ -13,6 +13,7 @@ import {
 	clioSnapshotFixture,
 	FIXTURE_PROJECT_ID,
 	serverEventFixture,
+	usageInspectionFixture,
 	workspaceFixture,
 } from "./fixtures.ts";
 
@@ -271,6 +272,17 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		}, { sequence: 4 }),
 	});
 	equal(state.pendingCatalogInspect, null);
+
+	state = appReducer(state, { type: "usage.inspect.submitted", requestId: "request-usage" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio could not inspect project usage.",
+			requestId: "request-usage",
+		}, { sequence: 5 }),
+	});
+	equal(state.pendingUsageInspect, null);
 });
 
 Deno.test("a protocol error fails the connection", () => {
@@ -303,7 +315,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, configuration, catalog, and target events land on the open workspace", () => {
+Deno.test("session, settings, configuration, catalog, usage, and target events land on the open workspace", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -379,6 +391,15 @@ Deno.test("session, settings, configuration, catalog, and target events land on 
 	equal(state.open?.catalogInspection?.agents.items[0]?.id, "researcher");
 	equal(state.open?.catalogInspection?.verifiers.availability, "typed-interface-required");
 	equal(state.pendingCatalogInspect, null);
+
+	state = appReducer(state, { type: "usage.inspect.submitted", requestId: "request-usage" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("usage.state", { inspection: usageInspectionFixture() }, { sequence: 8 }),
+	});
+	equal(state.open?.usageInspection?.totals?.totalTokens, 13_922_000);
+	equal(state.open?.usageInspection?.stores.sessions, "available");
+	equal(state.pendingUsageInspect, null);
 });
 
 Deno.test("a browse listing is held until it is dismissed", () => {
