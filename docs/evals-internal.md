@@ -19,6 +19,48 @@ data directory. Product eval artifacts and external benchmark campaigns are
 separate: public benchmark adapters live under `benchmarks/community/` and do
 not use the eval runner.
 
+## Running a private suite as a measurement
+
+A private suite is usually run to answer whether a harness change moved
+something, which makes it a measurement rather than a pass or fail. Three
+mechanics matter for that, all documented in full in
+[eval-runner.md](eval-runner.md#the-verdict-envelope).
+
+Run repeated trials with `--trials N` rather than by editing `matrix.repeats`.
+The flag overrides the suite's repeat count and asks for an isolated workspace
+per matrix item, so a `local` workspace is copied for the run instead of being
+mutated across trials. Each result's verdict carries its `trialIndex`, and the
+artifact's `aggregates` reduce them per scenario: `k`, `passAtK` (any trial
+passed), `passPowK` (every trial passed), and a mean and nearest-rank p90 for
+every tracked metric. A single trial produces a `k: 1` aggregate whose mean and
+p90 are the same observed value, which is a fact to state in a report rather
+than a distribution to reason about.
+
+Read the tracked metrics with their sources attached. A private suite on a
+local target is measuring prefill economics as much as correctness, so
+`uncachedPrefillTokens`, `cacheReadTokens`, `ttftMsFirstCall`, and the
+`expectedColdReasons` histogram are the interesting columns, and each one says
+whether it came from the ledger, from the receipt, or was `estimated`. A metric
+marked `estimated` on one side of a comparison and measured on the other is
+refused rather than differenced.
+
+Record the serving configuration or the comparison is not one. The artifact
+captures `targetId`, `runtimeId`, `modelId`, `serverBuild`, `total_slots`,
+`thinkingLevel`, and `compiledPromptHash`, read from the server after the matrix
+has run while it is still awake. `eval compare` refuses two artifacts whose
+configurations differ unless `--allow-config-drift` is passed, and prints both
+either way. Treat that refusal as the useful behavior it is: a private suite
+compared across a server restart that changed a flag, a quantization, or the
+thinking level is measuring the server, not the change under test.
+
+Two things this envelope deliberately does not carry. `behavioral` is fixed at
+`null`, so a private suite has nowhere to record a rubric score or a model
+judge's verdict; that stays out of the schema until one is designed rather than
+being smuggled in as a number. And a run whose harness broke records
+`machinery: "infrastructure_failure"`, which the parser refuses to pair with a
+`pass`, so a private suite cannot report a passing rate that includes runs
+nothing measured.
+
 ## Context Regression Seed
 
 ```yaml

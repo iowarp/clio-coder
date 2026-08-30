@@ -72,7 +72,13 @@ export interface CapacityLease {
 
 The orchestrator's active model stream is registered in memory against the same endpoint key, so its own turn consumes one endpoint slot before a worker is admitted. This foreground count is not written to `dispatch-admission.json`; process exit releases it. Durable leases and held reservation members carry `endpointKey`, and held members count their peak per wave for the endpoint just as they do for a node.
 
-Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Endpoint saturation is refused with the endpoint label, the active and total slot count, and the next move rather than creating an endpoint-specific request queue.
+Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Endpoint saturation is refused rather than queued, because an endpoint-specific request queue would hold a dispatch open behind a stream whose length nobody knows. The refusal names the endpoint, both slot counts, why one slot is already gone, and the two moves that actually free capacity:
+
+```text
+dispatch: admission denied: endpoint '192.168.86.141:8080' capacity reached (1/1 slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server
+```
+
+That is the exact text on all three paths that can refuse for this reason: lease acquisition (`src/domains/dispatch/capacity-lease.ts`), the admission gate (`src/domains/dispatch/admission.ts`), and reservation preflight (`src/domains/dispatch/reservation-store.ts`). The `1/1` above is the common local case rather than an example: a llama.cpp router started with `--parallel 1` discovers one slot, so any dispatch raised while the orchestrator is streaming is refused before a worker process starts.
 
 ### Constants & Operational Bounds
 

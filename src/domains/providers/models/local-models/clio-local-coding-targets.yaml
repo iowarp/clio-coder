@@ -16,6 +16,30 @@
 # models curated for Clio's local coding workflows and leaves cloud GPT models
 # to pi-ai's native OpenAI and openai-codex catalogs.
 #
+# Serving configuration is a quality variable, not a constant. Context length,
+# KV quantization, batch and ubatch size, speculative decoding, and the server's
+# own sampler defaults all move what a model does, so a quirk measured under one
+# configuration is not a property of the weights. Every family entry whose
+# quirks came from a measurement rather than from the model card carries a
+# `measuredUnder` block naming the hardware class, the runtime and its build
+# string, and the llama.cpp flags the measurement ran under. Fields that could
+# not be established from git history or the release-test reports under
+# docs/release-notes/ read `unknown` rather than a plausible guess. A
+# `measuredUnder` block is provenance for a reader; nothing in the engine
+# consumes it (`extractLocalModelQuirks` narrows only kvCache, sampling, and
+# thinking).
+#
+# `llamaCpp.parallel` is the recommended `--parallel` value for starting the
+# server, and families that carry one also carry a `parallelSlots` note. It is
+# not what dispatch admission counts. Endpoint capacity resolves a target's
+# request-slot limit in this order: an explicit `maxConcurrentRequests` on the
+# target, then `parallelSlots` discovered from the server (llama.cpp reads
+# `total_slots` from `/props`, falling back to the selected worker's
+# `/props?model=<id>` and then to its `--parallel` argv), then one slot for any
+# other local-native runtime. vLLM and SGLang stay unbounded without an explicit
+# override. The catalog value therefore says what to start the server with; the
+# server's own answer is what Clio admits against.
+#
 # Thinking semantics for these local families: the chain-of-thought is emitted
 # by the model's chat template (Qwen-style <think> blocks, Gemma 4 thinking
 # template, Nemotron reasoning template). LM Studio's OpenAI-compatible HTTP
@@ -89,6 +113,18 @@
     contextWindow: 262144
     maxTokens: 65536
   quirks:
+    measuredUnder:
+      hardware: "32 GiB class GPU; the exact card was not recorded"
+      runtime: llamacpp
+      build: unknown
+      llamaCpp: "ctx 262144, --parallel 4, --batch-size 2048, --ubatch-size 512, KV q8_0/q8_0 (the block below); no argv was recorded"
+      date: unknown
+      source: unknown
+      note: |
+        Only the VRAM-headroom figure in the 32gb tier reads as measured. It
+        entered the catalog with the initial local-model set and no commit,
+        report, or server argv records where it was taken, so everything but
+        the recommended serving profile is unknown.
     sampling:
       thinking:
         temperature: 0.5
@@ -111,6 +147,7 @@
       cacheTypeK: q8_0
       cacheTypeV: q8_0
       parallel: 4
+      parallelSlots: "Start the server with --parallel 4. Clio discovers total_slots 4 from /props and admits four concurrent requests on this endpoint, one of which the orchestrator's own turn holds while it streams. Add --kv-unified, or the 262144-token context is divided four ways."
       batchSize: 2048
       ubatchSize: 512
     thinking:
@@ -174,6 +211,7 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 4
+      parallelSlots: "Start the server with --parallel 4, and add --kv-unified unless each of the four slots is meant to get 204800 tokens rather than the whole 819200. Clio admits four concurrent requests on this endpoint once /props reports total_slots 4."
     thinking:
       mechanism: budget-tokens
       budgetByLevel:
@@ -267,6 +305,19 @@
     contextWindow: 262144
     maxTokens: 65536
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: lmstudio
+      build: "unknown; the host was the operator's `dynamo` LM Studio machine, whose bundled build string was not recorded on this date"
+      llamaCpp: "unknown; the measurement went through LM Studio's OpenAI-compatible port, which does not expose the underlying server argv"
+      date: "2026-08-08"
+      source: "commit b3db3b82 (fix(providers): thinking off reaches the wire for models that reason by default)"
+      note: |
+        The always-on classification is the measured part. That session found
+        Ornith reasoning by default with no thinking field set, in the same
+        family of behavior as qwopus3.6-35b-a3b-coder. The recommended
+        llama.cpp serving profile below is the model card's, not that
+        measurement's, and no argv from the measuring host survives.
     kvCache:
       kQuant: q8_0
       vQuant: q8_0
@@ -295,6 +346,7 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 1
+      parallelSlots: "Start the server with --parallel 1 so one agent gets the whole 262144-token context. Clio discovers total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised while the orchestrator is streaming is refused with the endpoint denial rather than queued; point workers at a second server, or raise --parallel and re-probe."
       batchSize: 2048
       ubatchSize: 512
     thinking:
@@ -326,6 +378,20 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: "lmstudio and its OpenAI-compatible port"
+      build: unknown
+      llamaCpp: "unknown; this family carries no llamaCpp block and the parity check ran over LM Studio's HTTP surface"
+      date: unknown
+      source: unknown
+      note: |
+        The measured claim is the openaiCompat parity line: tool calls, a
+        reasoning_content field, and completion_tokens_details.reasoning_tokens
+        were all observed on the wire. It entered the catalog with the initial
+        local-model set, so the host, the LM Studio version, and the loaded
+        quantization are all unrecorded. The sampler and the 32gb VRAM
+        arithmetic come from the official Qwen card rather than a run.
     sampling:
       thinking:
         temperature: 0.6
@@ -380,6 +446,28 @@
     contextWindow: 262144
     maxTokens: 131072
   quirks:
+    measuredUnder:
+      hardware: "AMD Radeon AI PRO R9700, gfx1201, 32 GB, ROCm 7.2.0"
+      runtime: llamacpp
+      build: b226-2115b73d8
+      model: "Qwen3.8-27B IQ4_NL, mmproj F16"
+      llamaCpp: >-
+        --ctx-size 262144 --parallel 1 --kv-unified --cache-type-k q8_0
+        --cache-type-v q8_0 --flash-attn true --batch-size 2048 --ubatch-size 512
+        --spec-type draft-mtp --spec-draft-n-max 4 --n-gpu-layers-draft 99
+        --swa-checkpoints 64 --checkpoint-min-step 1024 --jinja --reasoning on
+        --reasoning-effort high --temperature 1.0 --top-k 20 --top-p 0.95
+        --min-p 0.0 --presence-penalty 0.0 --repeat-penalty 1.0
+      date: "2026-08-29"
+      source: docs/release-notes/v0.3.9-local-economics.md
+      alsoMeasuredOn: "LM Studio 2.29.0 (OpenAI-compatible HTTP port), host build string llama.cpp-win-x86_64-nvidia-cuda12-avx2"
+      note: |
+        The server above is deliberately not the 24gb-rocm tier below: it runs
+        ctx=262144 and parallel=1 where that tier recommends ctx=131072 and
+        parallel=2. The reasoning_effort vocabulary and the enable_thinking
+        control were established earlier, on 2026-08-18, from a llama.cpp host
+        and an LM Studio host whose build strings were not recorded; treat those
+        two findings as unknown-build.
     kvCache:
       kQuant: q8_0
       vQuant: q8_0
@@ -415,6 +503,7 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 2
+      parallelSlots: "Start the server with --parallel 2 to serve the orchestrator and one worker at once. Clio then discovers total_slots from /props and admits two concurrent requests against this endpoint; a server started with --parallel 1 discovers one slot, and a dispatch during the orchestrator's own turn is refused rather than queued."
       batchSize: 1024
       ubatchSize: 256
       mmproj: true
@@ -443,7 +532,26 @@
         and is a separate mechanism from the template's enable_thinking flag;
         both were verified independently on llama.cpp and on LM Studio's HTTP
         port.
-    serving: "Qwen3.8-27B (unsloth/Qwen3.8-27B-GGUF), hybrid qwen3_5 architecture: 3 linear-attention (Gated DeltaNet) layers per 1 full-attention layer, so only 16 of 64 layers hold a conventional KV cache. Native ctx 262144, extensible to 1M via YaRN (out of scope for the hardware classes above; leave rope at default). Tool calls use an XML <tool_call><function=...> form in the stock template; llama.cpp's qwen3_coder parser converts this to standard tool_calls JSON, verified live on ROCm, CUDA, and Vulkan backends. Only messages[0] may be a system message and only system/user/assistant/tool roles are accepted; a second system message or a developer role raises a template error."
+
+        Thinking off is verified for this family, and no floor is imposed on
+        it. JetBrains report that Qwen3.8 without reasoning gets stuck in a
+        loop repeating the same tool call indefinitely under Junie. Clio's
+        shipped default is orchestrator.thinkingLevel: off, which on llama.cpp
+        sends chat_template_kwargs.enable_thinking:false and on LM Studio's
+        OpenAI-compatible port sends reasoning_effort:"none". Clio 0.3.8 ran
+        that configuration on both runtimes (llama.cpp build b226-2115b73d8 on
+        ROCm, LM Studio 2.29.0) through the v0.3.9 local-inference campaign on
+        2026-08-29 and 2026-08-30: an interactive build-and-resume session, a
+        three-worker fleet step, and a ten-task eval suite totalling 116 model
+        calls, none of which repeated a tool call into a loop. The catalog
+        therefore imposes no thinking floor and coerces no level for this
+        family. If a future build or quantization regresses into the loop
+        JetBrains describe, the guards that catch it are Clio's own, not a
+        catalog setting: the tool-prose-loop detector
+        (src/interactive/tool-prose-loop.ts), which is armed on the
+        local-native tier, and the stalled-turn middleware
+        (src/domains/middleware/stalled-turn.ts).
+    serving: "Qwen3.8-27B (unsloth/Qwen3.8-27B-GGUF), hybrid qwen3_5 architecture: 3 linear-attention (Gated DeltaNet) layers per 1 full-attention layer, so only 16 of 64 layers hold a conventional KV cache. Native ctx 262144, extensible to 1M via YaRN (out of scope for the hardware classes above; leave rope at default). Tool calls use an XML <tool_call><function=...> form in the stock template; llama.cpp's qwen3_coder parser converts this to standard tool_calls JSON, verified live on ROCm, CUDA, and Vulkan backends. Only messages[0] may be a system message and only system/user/assistant/tool roles are accepted; a second system message or a developer role raises a template error. The recurrent layers set the prefix-cache economics: llama.cpp cannot roll gated-deltanet state back to an arbitrary token, so a divergence anywhere inside a cached prefix re-prefills from the last context checkpoint rather than from the changed byte. Checkpoints are written at the end of each processed prompt and only when at least --checkpoint-min-step tokens separate them, so the server's checkpoint count and --checkpoint-min-step are a quality variable on this family and not a tuning detail: measured on the configuration recorded in measuredUnder, one changed line inside an earlier turn of a four-turn conversation cost cache_n 9 and 17.9 s at the build defaults (32 checkpoints, min step 8192) and cache_n 7570 and 10.9 s at 64 checkpoints and min step 1024. A single prefill writes one checkpoint at its end, so a 16.7K-token prompt re-sent with one changed line re-prefills from zero (18.4 s) under both settings, while changing only the final user message re-prefills the last ubatch (prompt_n 517, 1.4 s). Serving this family with --parallel greater than 1 divides --ctx-size across slots unless --kv-unified is set."
 
 - family: gemma-4-31b-it-nvfp4-turbo
   matchPatterns:
@@ -467,6 +575,21 @@
     contextWindow: 122880
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: "lmstudio and its OpenAI-compatible port"
+      build: unknown
+      llamaCpp: "unknown; this family carries no llamaCpp block, and the channel-marker leakage was observed through LM Studio's stream"
+      date: unknown
+      source: unknown
+      note: |
+        Two claims here are observations rather than card values: the
+        channel-marker leakage in leakageNote, and the instruct temperature
+        pinned at 0.7 because NVFP4 quantization corrupts tool-call JSON under
+        the card's 1.0. Neither records the host, the LM Studio version, or the
+        exact NVFP4 build it was seen on. The KV-budget arithmetic in the
+        gpuTiers and the serving note is derived from the official Google
+        Gemma 4 31B card.
     kvCache:
       kQuant: q8_0
       vQuant: q8_0
@@ -567,6 +690,7 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 1
+      parallelSlots: "Start the server with --parallel 1 so one agent gets the whole 262144-token context. Clio discovers total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised during the orchestrator's turn is refused rather than queued."
       batchSize: 1024
       ubatchSize: 256
       mmproj: true
@@ -621,6 +745,19 @@
         minP: 0.0
         maxTokens: 32768
     chatTemplate: "gemma-channel"
+    measuredUnder:
+      hardware: unknown
+      runtime: "lmstudio and its OpenAI-compatible port"
+      build: unknown
+      llamaCpp: "unknown; this family carries no llamaCpp block"
+      date: unknown
+      source: unknown
+      note: |
+        The measured claims are the empty thought region the model emits when
+        the '<|think|>' token is absent from the system prompt, and the absence
+        of reasoning_content from the openai-compat reasoning probe. Both
+        entered the catalog with the initial local-model set, with no host, LM
+        Studio version, or quantization recorded.
     thinkingControl: |
       Jackrong's distilled gemma-4 31B uses the same channel-marker template.
       Thinking mode is gated by the literal '<|think|>' token in the system
@@ -661,6 +798,18 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: "lmstudio and its OpenAI-compatible port"
+      build: unknown
+      llamaCpp: "unknown; this family carries no llamaCpp block"
+      date: unknown
+      source: unknown
+      note: |
+        The measured claim is the openaiCompat tool-call extraction parity and
+        the reasoning_content field surfacing. It entered the catalog with the
+        initial local-model set and records no host, LM Studio version, or
+        quantization. The sampler comes from the model card.
     sampling:
       thinking:
         temperature: 0.6
@@ -732,6 +881,26 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: "lmstudio and its OpenAI-compatible port for the reasoning findings; an unrecorded llama.cpp host for the presence-penalty finding"
+      build: "unknown for both dates; the operator's `dynamo` host is a Windows LM Studio machine whose bundled build string was first recorded on 2026-08-29 as llama.cpp-win-x86_64-nvidia-cuda12-avx2, which is three weeks after the reasoning measurement and cannot be backdated to it"
+      llamaCpp: "unknown; the reasoning measurement went through LM Studio's HTTP port, which does not expose the underlying server argv, and no argv survives for the dispatch that produced the presence-penalty value"
+      date: "2026-08-08 (reasoning_effort and enable_thinking), 2026-07-06 (presence penalty)"
+      source: "commits b3db3b82 and f7d76bf4"
+      note: |
+        Three numbers here are measurements. On 2026-08-08 on `dynamo` this
+        model spent 98 of 103 completion tokens reasoning on "what is 17+25"
+        with no thinking field set; chat_template_kwargs enable_thinking was
+        inert, re-checked with unique prompts to rule out prompt-cache hits;
+        and reasoning_effort "none" took the same prompt to 0. The same session
+        recorded a wiki planning dispatch over a 1007-file repository going
+        from 89,501 reasoning tokens, 47 tool calls and exit 1 at 459 s to 0
+        reasoning tokens, 8 tool calls and exit 0 at 218 s. On 2026-07-06 a
+        live dispatch measured presence_penalty 1.5: without it a coder worker
+        repeated one code_nav call into the loop-guard abort on 3 of 3 runs,
+        and with it the same task passed 3 of 3. Neither commit records the
+        hardware or the server configuration, so both stay unknown.
     sampling:
       instruct:
         temperature: 0.2
@@ -757,6 +926,7 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 1
+      parallelSlots: "Start the server with --parallel 1 so one agent gets the whole 262144-token context. Clio discovers total_slots 1 and admits one request at a time on this endpoint. This family is often the workers.default model on a router that also serves the orchestrator, and a one-slot router refuses the worker batch rather than queueing it; a second server or an explicit maxConcurrentRequests on the target is the remedy."
       batchSize: 2048
       ubatchSize: 512
       mmproj: true
@@ -801,6 +971,20 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: unknown
+      build: unknown
+      llamaCpp: unknown
+      date: unknown
+      source: "commit b3db3b82, which states the exclusion directly"
+      note: |
+        Nothing in this entry was measured on this model. The reasoning:false
+        pin and the presence penalty are both carried over from the 35B-A3B
+        Coder-MTP design; the commit that reclassified the 35B on live evidence
+        says in as many words that the 27B and 9B Coder variants keep their
+        "never" pin because nothing has measured them. Read the reasoning class
+        as an untested inheritance until someone runs this model.
     sampling:
       instruct:
         temperature: 0.2
@@ -841,6 +1025,19 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: unknown
+      build: unknown
+      llamaCpp: unknown
+      date: unknown
+      source: "commit b3db3b82, which states the exclusion directly"
+      note: |
+        Nothing in this entry was measured on this model. The reasoning:false
+        pin is carried over from the Coder-MTP design; the commit that
+        reclassified the 35B-A3B on live evidence says in as many words that
+        the 27B and 9B Coder variants keep their "never" pin because nothing
+        has measured them.
     sampling:
       instruct:
         temperature: 0.2
@@ -936,6 +1133,21 @@
     contextWindow: 1048576
     maxTokens: 65536
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: "llamacpp; the anthropicCompat probe ran against a llama.cpp target's /v1/messages and /v1/models"
+      build: unknown
+      llamaCpp: "unknown; the recommended profile below was not recorded as the profile the probe ran under"
+      date: unknown
+      source: unknown
+      note: |
+        The measured claim is the anthropicCompat line: /v1/messages returned
+        404 on the llama.cpp target profile in use while /v1/models and the
+        OpenAI-compatible chat surface both worked. That is a fact about one
+        server's mounted routes, so it is exactly the kind of finding a
+        different build or launch configuration can invalidate, and no build or
+        argv was recorded with it. Everything else in this entry comes from the
+        NVIDIA card.
     sampling:
       instruct:
         temperature: 0.3
@@ -956,6 +1168,7 @@
       flashAttn: true
       nGpuLayers: 99
       parallel: 4
+      parallelSlots: "Start the server with --parallel 4, and add --kv-unified unless each of the four slots is meant to get 262144 tokens rather than the whole 1048576. Clio admits four concurrent requests on this endpoint once /props reports total_slots 4."
       chatTemplateKwargs:
         enable_thinking: false
     thinking:
@@ -990,6 +1203,19 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: unknown
+      runtime: lmstudio
+      build: unknown
+      llamaCpp: "unknown; this family carries no llamaCpp block"
+      date: unknown
+      source: unknown
+      note: |
+        The only measured claim is the lmstudio line, that the model loads and
+        runs usably under the Qwen-style preset. It entered the catalog with
+        the initial local-model set and records no host, LM Studio version, or
+        quantization. The sampler and the thinking budgets follow the Qwen3.5
+        family defaults rather than a run on this distillation.
     sampling:
       thinking:
         temperature: 0.6
@@ -1041,6 +1267,22 @@
     contextWindow: 262144
     maxTokens: 32768
   quirks:
+    measuredUnder:
+      hardware: "unknown; the host was the operator's `dynamo` LM Studio machine"
+      runtime: "lmstudio, SDK 1.5.0 and its OpenAI-compatible port"
+      build: "unknown; LM Studio's bundled llama.cpp build string was not recorded on this date"
+      llamaCpp: "unknown; the measurement went through LM Studio, which does not expose the underlying server argv"
+      date: "2026-08-11"
+      source: "commit fbaa0492 (fix: make thinking off reach the model on LM Studio routes)"
+      note: |
+        The always-on classification is measured, and it is measured against
+        every control that could have disproved it. Baseline 56 reasoning
+        tokens; reasoning_effort none 120; reasoning_effort minimal 243;
+        chat_template_kwargs.enable_thinking false 45; both together 44. No
+        spelling silences it, and the budget-tokens mechanism the entry
+        previously claimed never reached the wire on either LM Studio or
+        llama.cpp. The gpuTiers 16gb line is a role assignment rather than a
+        VRAM measurement.
     sampling:
       instruct:
         temperature: 0.2
