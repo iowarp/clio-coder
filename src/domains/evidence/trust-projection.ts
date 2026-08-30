@@ -184,9 +184,9 @@ export function formatTrustSummary(status: CanonicalTrustStatus): string {
 	].join("; ");
 }
 
-/** The body under its versioned label, for surfaces that print one line per run. */
+/** The tier and body under one versioned label for receipt-facing surfaces. */
 export function formatTrustSummaryLine(status: CanonicalTrustStatus): string {
-	return `trust v${TRUST_SUMMARY_VERSION}: ${formatTrustSummary(status)}`;
+	return `trust v${TRUST_SUMMARY_VERSION}: ${trustVerdict(status)}; ${formatTrustSummary(status)}`;
 }
 
 /**

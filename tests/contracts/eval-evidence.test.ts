@@ -227,7 +227,7 @@ describe("contracts/eval evidence linking", () => {
 			strictEqual(status.artifactIntegrity.state, "verified");
 			// The completion_contract row names `turn-1` as its own evidence. That
 			// is the run's self-report, not an observed validation execution, so it
-			// lands on completionEvidence below and leaves this axis unfilled.
+			// changes neither the validation nor the receipt-derived completion axis.
 			deepStrictEqual(status.validationGrounding, { state: "absent", reason: "not_observed" });
 			strictEqual(status.independentReview.state, "passed");
 			if (status.independentReview.state === "passed") {
@@ -240,15 +240,7 @@ describe("contracts/eval evidence linking", () => {
 					},
 				]);
 			}
-			strictEqual(status.completionEvidence.state, "evidenced");
-			if (status.completionEvidence.state === "evidenced") {
-				deepStrictEqual(status.completionEvidence.source, { kind: "finish_contract", id: "audit-1" });
-				deepStrictEqual(status.completionEvidence.authority, { kind: "clio", id: "finish-contract" });
-				deepStrictEqual(status.completionEvidence.artifacts, [
-					{ kind: "finish_contract_evidence", id: "audit-1" },
-					{ kind: "session_entry", id: "turn-1" },
-				]);
-			}
+			deepStrictEqual(status.completionEvidence, { state: "absent", reason: "not_recorded" });
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

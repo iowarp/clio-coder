@@ -600,6 +600,24 @@ function progressAnswerLines(
 	return body.map((row, index) => `${index === 0 ? cardKvKey(theme, "answer") : " ".repeat(gutter)}${row}`);
 }
 
+/** Keep the canonical tier and every summary clause visible by wrapping the value under its card key. */
+function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: number): string[] {
+	const gutter = CARD_KV_KEY_WIDTH + 1;
+	const valueWidth = Math.max(1, contentWidth - gutter);
+	const trust =
+		row.trust === undefined
+			? theme.fg("dim", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
+			: theme.fg(
+					trustVerdictToken(row.trust.verdict),
+					`${trustVerdictGlyph(row.trust.verdict)} ${row.trust.verdict}; ${row.trust.text}`,
+				);
+	const host =
+		row.hostVerification === undefined ? "" : ` · ${theme.fg("muted", `host checks ${row.hostVerification}`)}`;
+	return wrapTextWithAnsi(`${trust}${host}`, valueWidth).map(
+		(line, index) => `${index === 0 ? cardKvKey(theme, "trust") : " ".repeat(gutter)}${line}`,
+	);
+}
+
 export function renderDispatchCard(
 	row: DispatchBoardRow,
 	width: number,
@@ -668,15 +686,6 @@ export function renderDispatchCard(
 		`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
 		`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
 	];
-	// The trust line is the canonical projection, styled by its verdict tier;
-	// a host check is folded into that projection as validation grounding, so
-	// it is named as a secondary fact and never as independent verification.
-	const trustUnits = [
-		row.trust === undefined
-			? theme.fg("dim", isTerminalStatus(row.status) ? "trust: receipt not read back" : "trust: not sealed yet")
-			: theme.fg(trustVerdictToken(row.trust.verdict), `${trustVerdictGlyph(row.trust.verdict)} ${row.trust.text}`),
-		...(row.hostVerification !== undefined ? [theme.fg("muted", `host checks ${row.hostVerification}`)] : []),
-	];
 	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
@@ -695,7 +704,7 @@ export function renderDispatchCard(
 			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
 			: []),
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
-		cardUnitsLine(theme, "trust", trustUnits, contentWidth),
+		...trustCardLines(theme, row, contentWidth),
 		...(row.budget !== undefined
 			? [
 					truncateToWidth(

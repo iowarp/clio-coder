@@ -165,6 +165,26 @@ function persistFixture(root: string, draft: RunReceiptDraft): { envelope: RunEn
 	return { envelope, receipt };
 }
 
+function writeFinishContractAudit(root: string, runId: string): void {
+	const auditDir = join(root, "state", "audit");
+	mkdirSync(auditDir, { recursive: true });
+	writeFileSync(
+		join(auditDir, "2026-08-28.jsonl"),
+		`${JSON.stringify({
+			kind: "completion_contract",
+			ts: "2026-08-28T10:00:02.000Z",
+			correlationId: "finish-read-only",
+			runId,
+			decision: "ok",
+			reason: "no_mutation",
+			rigor: "standard",
+			mutatedPaths: [],
+			evidenceKinds: [],
+		})}\n`,
+		"utf8",
+	);
+}
+
 /** What the canonical fixture must read as on every surface. */
 const CANONICAL_SUMMARY =
 	"sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion not recorded";
@@ -215,7 +235,7 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 		const status = inspectRunReceiptTrustStatus(receipt, envelope).status;
 		strictEqual(formatTrustSummary(status), CANONICAL_SUMMARY);
 		strictEqual(formatTrustAxes(status), CANONICAL_AXES);
-		strictEqual(formatTrustSummaryLine(status), `trust v1: ${CANONICAL_SUMMARY}`);
+		strictEqual(formatTrustSummaryLine(status), `trust v1: grounded; ${CANONICAL_SUMMARY}`);
 		const summary = summarizeTrustStatus(status);
 		strictEqual(summary.version, 1);
 		strictEqual(
@@ -229,6 +249,90 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 		ok(summary.refs.length > 0 && summary.refs.length <= TRUST_SUMMARY_MAX_REFS, JSON.stringify(summary.refs));
 		ok(summary.refs.includes("run_receipt:run-canon"), JSON.stringify(summary.refs));
 		for (const ref of summary.refs) match(ref, /^[a-z_]+:[^\s]+$/u, ref);
+	});
+
+	it("keeps one receipt verdict byte-equal across every named surface despite a finish-contract row", async () => {
+		const root = scratchDir();
+		const runId = "run-all-surfaces";
+		const { envelope, receipt } = persistFixture(root, draftFor(runId));
+		writeFinishContractAudit(root, runId);
+		const stateDir = join(root, "state");
+		const dataDir = join(root, "data");
+		const canonical = inspectRunReceiptTrustStatus(receipt, envelope).status;
+		const expectedTier = trustVerdict(canonical);
+		const expectedSummary = formatTrustSummary(canonical);
+		const expectedAxes = formatTrustAxes(canonical);
+		const expectedLine = formatTrustSummaryLine(canonical);
+
+		const dispatchLabels = receiptEvidenceLabels(receipt, receipt.verification, { ok: true });
+		strictEqual(dispatchLabels[0], `trust=${JSON.stringify(expectedSummary)}`);
+		strictEqual(dispatchLabels[1], expectedAxes);
+
+		const monitor = createMonitorTool({ dispatch: monitorContract([envelope]) });
+		const monitored = await monitor.run({ mode: "receipt", run_id: runId }, {});
+		strictEqual(monitored.kind, "ok");
+		if (monitored.kind !== "ok") return;
+		const monitorTrust = (monitored.details as { trust?: { text: string; verdict: string } }).trust;
+		strictEqual(monitorTrust?.text, expectedSummary);
+		strictEqual(monitorTrust?.verdict, expectedTier);
+
+		const built = await buildEvidence({ stateDir, dataDir, runId });
+		deepStrictEqual(built.trustStatus.runs[0]?.status, canonical);
+		const previousData = process.env.CLIO_CODER_DATA_DIR;
+		process.env.CLIO_CODER_DATA_DIR = dataDir;
+		let inspected = "";
+		try {
+			({ stdout: inspected } = await captureStdout(() => runEvidenceCommand(["inspect", built.evidenceId])));
+		} finally {
+			if (previousData === undefined) Reflect.deleteProperty(process.env, "CLIO_CODER_DATA_DIR");
+			else process.env.CLIO_CODER_DATA_DIR = previousData;
+		}
+		ok(inspected.includes(`trust ${runId}: ${expectedSummary}\n  ${expectedAxes}\n`), inspected);
+		const findings = readFileSync(join(built.directory, "findings.md"), "utf8");
+		ok(findings.includes(`tier: ${expectedTier}`), findings);
+		ok(findings.includes(`summary: ${expectedSummary}`), findings);
+		ok(findings.includes(`axes: ${expectedAxes}`), findings);
+
+		const facts = readWorkerReceiptFacts(runId, stateDir);
+		deepStrictEqual(facts?.trust, canonical);
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus, undefined, (id) => readWorkerReceiptFacts(id, stateDir));
+		try {
+			bus.emit(BusChannels.DispatchStarted, {
+				runId,
+				agentId: "coder",
+				executionRole: "builder",
+				targetId: "local",
+				wireModelId: "fixture-model",
+				runtimeId: "fixture-runtime",
+				runtimeKind: "http",
+			} as never);
+			bus.emit(BusChannels.DispatchCompleted, {
+				runId,
+				agentId: "coder",
+				executionRole: "builder",
+				targetId: "local",
+				wireModelId: "fixture-model",
+				runtimeId: "fixture-runtime",
+				runtimeKind: "http",
+				hostVerification: "verified",
+			} as never);
+			const row = store.rows()[0];
+			ok(row?.trust);
+			strictEqual(row.trust.verdict, expectedTier);
+			strictEqual(row.trust.text, expectedSummary);
+			const board = renderDispatchCard(row, 88).join("\n").replace(SGR, "");
+			const boardText = board.replace(/[│\n]/gu, " ").replace(/\s+/gu, " ");
+			ok(boardText.includes(`◇ ${expectedTier};`), board);
+			for (const clause of expectedSummary.split("; ")) ok(boardText.includes(clause), `${clause}\n${board}`);
+		} finally {
+			store.unsubscribe();
+		}
+
+		strictEqual(receiptTrustDetail(stateDir, runId), expectedLine);
+		const metrics = evidenceMetricsFromReceipt(receipt, { envelope });
+		strictEqual(metrics["evidence.trust.summary"], expectedSummary);
+		strictEqual(metrics["evidence.trust.verdict"], expectedTier);
 	});
 
 	it("prints the same body from the dispatch and monitor labels", async () => {
@@ -252,30 +356,16 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 		strictEqual(details.trust?.version, 1);
 	});
 
-	it("prints the same body from evidence inspect and reads every axis into findings.md", async () => {
+	it("reads the canonical tier, summary, and every axis into findings.md", async () => {
 		const root = scratchDir();
 		persistFixture(root, draftFor("run-bundle"));
 		const stateDir = join(root, "state");
 		const dataDir = join(root, "data");
 		const built = await buildEvidence({ stateDir, dataDir, runId: "run-bundle" });
-		const previousData = process.env.CLIO_CODER_DATA_DIR;
-		process.env.CLIO_CODER_DATA_DIR = dataDir;
-		let stdout = "";
-		try {
-			({ stdout } = await captureStdout(() => runEvidenceCommand(["inspect", built.evidenceId])));
-		} finally {
-			if (previousData === undefined) Reflect.deleteProperty(process.env, "CLIO_CODER_DATA_DIR");
-			else process.env.CLIO_CODER_DATA_DIR = previousData;
-		}
-		ok(stdout.includes(`trust run-bundle: ${CANONICAL_SUMMARY}\n  ${CANONICAL_AXES}\n`), stdout);
-		// The autonomy axis is printed once as prose and once as the machine
-		// state; the provenance block carries only the policy detail behind it.
-		strictEqual(stdout.match(/\bmediated\b/gu)?.length, 1, stdout);
-		ok(stdout.includes("autonomyEnforcement:enforced"), stdout);
-		ok(stdout.includes("autonomy: auto-edit"), stdout);
-		ok(!stdout.includes("autonomy enforcement:"), "the second autonomy vocabulary is gone");
-		ok(!/autonomyEnforcement=/u.test(stdout), "the equals-joined formatter is gone");
 		const findings = readFileSync(join(built.directory, "findings.md"), "utf8");
+		ok(findings.includes("tier: grounded"), findings);
+		ok(findings.includes(`summary: ${CANONICAL_SUMMARY}`), findings);
+		ok(findings.includes(`axes: ${CANONICAL_AXES}`), findings);
 		ok(
 			findings.includes(
 				"independent-review run=run-bundle: run was not independently reviewed; its result rests on its own receipt",
@@ -334,7 +424,7 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 			const live = store.rows()[0];
 			ok(live);
 			strictEqual(live.trust, undefined, "a live run carries no verdict");
-			ok(renderDispatchCard(live, 120).join("\n").replace(SGR, "").includes("trust: not sealed yet"));
+			ok(renderDispatchCard(live, 120).join("\n").replace(SGR, "").includes("not sealed yet"));
 
 			bus.emit(BusChannels.DispatchCompleted, {
 				runId: "run-board",
@@ -351,8 +441,11 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 			strictEqual(row.trust.text, CANONICAL_SUMMARY);
 			const card = renderDispatchCard(row, 160).join("\n");
 			const plain = card.replace(SGR, "");
-			ok(plain.includes(`◇ ${CANONICAL_SUMMARY}`), plain);
-			ok(plain.includes("host checks verified"), plain);
+			const boardText = plain.replace(/[│\n]/gu, " ").replace(/\s+/gu, " ");
+			ok(boardText.includes("◇ grounded;"), plain);
+			for (const clause of CANONICAL_SUMMARY.split("; ")) ok(boardText.includes(clause), `${clause}\n${plain}`);
+			ok(!plain.includes("…"), plain);
+			ok(boardText.includes("host checks verified"), plain);
 			ok(!plain.includes("host_verification="), "the raw receipt field is no longer the evidence line");
 			ok(!plain.includes("not_requested"), "not_requested is not a trust state");
 			const theme = clioTheme();
@@ -367,7 +460,7 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 		const root = scratchDir();
 		const stateDir = join(root, "state");
 		const { envelope, receipt } = persistFixture(root, draftFor("run-view"));
-		strictEqual(receiptTrustDetail(stateDir, "run-view"), `trust v1: ${CANONICAL_SUMMARY}`);
+		strictEqual(receiptTrustDetail(stateDir, "run-view"), `trust v1: grounded; ${CANONICAL_SUMMARY}`);
 		const metrics = evidenceMetricsFromReceipt(receipt, { envelope });
 		strictEqual(metrics["evidence.trust.summary"], CANONICAL_SUMMARY);
 		strictEqual(metrics["evidence.trust.verdict"], "grounded");

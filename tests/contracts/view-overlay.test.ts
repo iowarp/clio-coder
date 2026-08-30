@@ -12,6 +12,7 @@ import { sortViewArtifacts, type ViewArtifact } from "../../src/interactive/view
 import {
 	artifactsInCategoryOrder,
 	buildArtifactHeader,
+	buildArtifactHeaderLines,
 	filterViewArtifacts,
 	groupedViewRows,
 	initialViewSelection,
@@ -433,6 +434,23 @@ describe("contracts/view-overlay", () => {
 		const narrow = stripAnsi(buildArtifactHeader(item, { status: "ok", detail: "integrity verified" }, 32));
 		ok(narrow.includes("…"), `narrow headers should truncate with an ellipsis: ${narrow}`);
 		ok(!narrow.includes("..."), "narrow headers should not use three-dot truncation");
+	});
+
+	it("wraps a receipt trust verdict without dropping its tier or summary tail", () => {
+		const item = artifact({
+			id: "run-trust",
+			category: "receipt",
+			title: "receipt",
+			timestamp: Date.UTC(2026, 5, 11, 12, 0, 5),
+		});
+		const detail =
+			"trust v1: grounded; sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion not recorded";
+		const lines = buildArtifactHeaderLines(item, { status: "ok", detail }, 48);
+		const verification = lines.slice(1).map(stripAnsi).join(" ").replace(/\s+/gu, " ").trim();
+		strictEqual(verification, `${GLYPH.ok} verify ok ${detail}`);
+		ok(lines.length > 2, lines.map(stripAnsi).join("\n"));
+		ok(!verification.includes("…"), verification);
+		for (const line of lines) strictEqual(visibleWidth(line), 48, stripAnsi(line));
 	});
 
 	it("renders loading content with an ellipsis", async () => {

@@ -7,6 +7,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
@@ -359,6 +360,30 @@ export function buildArtifactHeader(
 	return padAnsi(parts.join("  "), width, ELLIPSIS);
 }
 
+/** Put verification on wrapped rows so a canonical receipt verdict is never reduced to a prefix. */
+export function buildArtifactHeaderLines(
+	artifact: ViewArtifact | undefined,
+	verification: ViewVerificationState | undefined,
+	width: number,
+): string[] {
+	const metadata = buildArtifactHeader(artifact, undefined, width);
+	const verify = verificationText(verification);
+	if (artifact === undefined || verify.length === 0) return [metadata];
+	const theme = clioTheme();
+	const token =
+		verification?.status === "ok"
+			? "success"
+			: verification?.status === "fail"
+				? "error"
+				: verification?.status === "retired"
+					? "warning"
+					: "info";
+	return [
+		metadata,
+		...wrapTextWithAnsi(theme.fg(token, verify), Math.max(1, width)).map((line) => padAnsi(line, width, ELLIPSIS)),
+	];
+}
+
 export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
 	// One pane at a time means Tab is how the other one is reached, so the
 	// narrow footer states it. The generic elider drops middle entries, and Tab
@@ -569,8 +594,8 @@ export class ViewOverlayView implements Component {
 		this.ensureContentLoaded(artifact);
 		this.lastContentWidth = width;
 		const verification = artifact ? this.verifications.get(artifactKey(artifact)) : undefined;
-		const header = buildArtifactHeader(artifact, verification, width);
-		const bodyHeight = Math.max(0, height - 1);
+		const header = buildArtifactHeaderLines(artifact, verification, width);
+		const bodyHeight = Math.max(0, height - header.length);
 		this.lastContentBodyHeight = Math.max(1, bodyHeight);
 		const body = this.renderedContentLines(width);
 		const maxOffset = Math.max(0, body.length - Math.max(1, bodyHeight));
@@ -578,7 +603,7 @@ export class ViewOverlayView implements Component {
 		const visible = body
 			.slice(this.contentScrollOffset, this.contentScrollOffset + bodyHeight)
 			.map((line) => padAnsi(line, width, ELLIPSIS));
-		const lines = [header, ...visible];
+		const lines = [...header, ...visible];
 		return this.fixedLines(lines, width, height);
 	}
 
