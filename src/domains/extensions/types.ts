@@ -36,6 +36,8 @@ export interface InstalledExtension {
 	rootPath: string;
 	manifestPath: string;
 	enabled: boolean;
+	/** Whether this package admits the running Clio version. */
+	compatible: boolean;
 	effective: boolean;
 	resources: ExtensionManifestResources;
 	overriddenBy?: ExtensionScope;

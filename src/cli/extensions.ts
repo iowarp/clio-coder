@@ -91,6 +91,7 @@ function resourceSummary(extension: InstalledExtension): string {
 }
 
 function stateLabel(extension: InstalledExtension): string {
+	if (!extension.compatible) return "incompatible";
 	if (!extension.enabled) return "disabled";
 	if (!extension.effective) return `shadowed:${extension.overriddenBy ?? "higher"}`;
 	return "active";
@@ -143,7 +144,10 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 		case "list": {
 			const items = listInstalledExtensions(process.cwd(), { ...scopeOptions, all: parsed.all });
 			if (parsed.json) process.stdout.write(`${JSON.stringify({ extensions: items }, null, 2)}\n`);
-			else printList(items);
+			else {
+				printList(items);
+				for (const item of items) printDiagnostics(item.diagnostics);
+			}
 			return 0;
 		}
 		case "discover": {

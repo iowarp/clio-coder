@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, r
 import path from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
+import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
 import type {
 	ExtensionInstallOptions,
@@ -63,6 +64,8 @@ function installedFromRoot(root: string, scope: ExtensionScope, state: Extension
 	const candidate = loadManifestFromRoot(root);
 	const manifest = candidate.manifest;
 	if (!manifest || !candidate.manifestPath) return null;
+	const clioRange = manifest.compatibility?.clio;
+	const compatible = clioRange === undefined || evaluateClioCompatibility(clioRange).satisfied;
 	return {
 		id: manifest.id,
 		name: manifest.name,
@@ -72,6 +75,7 @@ function installedFromRoot(root: string, scope: ExtensionScope, state: Extension
 		rootPath: root,
 		manifestPath: candidate.manifestPath,
 		enabled: !state.disabled.includes(manifest.id),
+		compatible,
 		effective: false,
 		resources: manifest.resources,
 		diagnostics: candidate.diagnostics,
@@ -102,13 +106,18 @@ export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionL
 		byId.set(entry.id, list);
 	}
 	for (const group of byId.values()) {
-		const winner = [...group].sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope)).at(-1);
+		const winner = group
+			.filter((entry) => entry.compatible)
+			.sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope))
+			.at(-1);
 		for (const entry of group) {
 			entry.effective = entry === winner;
-			if (!entry.effective && winner) entry.overriddenBy = winner.scope;
+			if (entry.compatible && !entry.effective && winner) entry.overriddenBy = winner.scope;
 		}
 	}
-	const all = options.all === true ? entries : entries.filter((entry) => entry.effective);
+	// Incompatible packages remain visible by default so the load refusal and
+	// its version diagnostic cannot disappear with the resources it suppresses.
+	const all = options.all === true ? entries : entries.filter((entry) => entry.effective || !entry.compatible);
 	return all.sort((a, b) => {
 		const id = a.id.localeCompare(b.id);
 		if (id !== 0) return id;
