@@ -37,13 +37,20 @@ const READY = /ctx /;
  * both settle on their first round. A worker that failed its contract would
  * still be shareable, but it would spend two repair rounds getting there.
  *
- * It is deliberately short, and the PTY below is deliberately wide. The pending
- * user turn echoes a shared note as `  [label] <body> · preparing` without
- * folding a body token wider than the terminal, and pi-tui kills the process on
- * an overlong rendered line. That overflow is a real defect on this path, it is
- * not this test's subject, and it is recorded in the #224 report.
+ * It is deliberately short and the PTY below is deliberately wide, so the wedge
+ * case stays about the keyboard and nothing else.
  */
 const RESEARCH_REPORT = '{"source":"local","findings":[{"claim":"up","evidence":"pty"}]}';
+
+/**
+ * The answer the narrow case shares. The pending user turn echoes a worker note
+ * as `  <body> · preparing`, so this 70-character body spends
+ * 2 + 70 + 12 = 84 cells of an 80-column terminal, and JSON gives the fold
+ * nowhere to break. That row used to be emitted at its full length and pi-tui's
+ * `doRender` threw on it, which killed the process outright rather than wedging
+ * it (#257).
+ */
+const WIDE_RESEARCH_REPORT = '{"source":"local","findings":[{"claim":"up","evidence":"eighty-col"}]}';
 
 /** A project recipe whose postcondition the fixture reply already satisfies. */
 const PROBE_RECIPE = [
@@ -311,6 +318,71 @@ describe("input after /share through a real PTY", {
 			const traceTypes = readTrace(scratch.tracePath).map((record) => record.type);
 			throw new Error(
 				`${error instanceof Error ? error.message : String(error)}; requests=${fixture.requests.length}; trace=${JSON.stringify(traceTypes.slice(-40))}; output=${JSON.stringify(stripAnsi(session.output).slice(-1200))}`,
+				{ cause: error },
+			);
+		} finally {
+			if (!session.exited) {
+				session.resumeOutput();
+				await session.killAndWaitForExit();
+			}
+			scratch.cleanup();
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("survives sharing a spaceless body into an 80-column terminal", async () => {
+		const fixture = await startOpenAICompatFixture(WIDE_RESEARCH_REPORT);
+		const scratch = makeScratch(fixture.url);
+		const session = await openPty(
+			process.execPath,
+			[join(REPO_ROOT, "dist", "cli", "index.js"), "--no-context-files", "--no-skills"],
+			{ cols: 80, rows: 30, cwd: scratch.dir, env: scratch.env },
+		);
+		try {
+			await session.waitForOutput((output) => READY.test(stripAnsi(output)), 30_000);
+
+			session.write("/run probe report on the input pipeline\r");
+			await session.waitForOutput((output) => stripAnsi(output).includes("contract pass"), 30_000);
+			const workerRunId = await waitForSealedRunId(scratch, "probe");
+
+			await submitAndProveInputStillFlows(session, scratch, `/share ${workerRunId}`, "narrow share");
+			await session.waitForOutput((output) => stripAnsi(output).includes("shared by the operator"), 20_000);
+			ok(!session.exited, `the note was painted and the TUI is still up; tail: ${stripAnsi(session.output).slice(-400)}`);
+
+			// The row is on screen; the keyboard still reaches the editor past it.
+			const beforeFinal = highestInputSeq(scratch.tracePath);
+			const marker = "narrow-share-input";
+			session.write(marker);
+			await session.waitForOutput((output) => stripAnsi(output).includes(marker), 20_000);
+			const finalIngress = await waitForTrace(
+				scratch.tracePath,
+				(records) =>
+					records.find(
+						(record) => record.type === "input_ingress" && record.inputSeq > beforeFinal && record.action === "editor",
+					),
+				"editor ingress after the narrow share",
+			);
+			ok(finalIngress.type === "input_ingress");
+			await waitForTrace(
+				scratch.tracePath,
+				(records) =>
+					records.find(
+						(record): record is RenderTraceFrameRecord =>
+							record.type === "frame" && record.inputHighWater >= finalIngress.inputSeq && record.commits.length > 0,
+					),
+				"committed frame after the narrow share",
+			);
+
+			session.write(CTRL_C);
+			await new Promise<void>((resolve) => setTimeout(resolve, 75));
+			session.write(CTRL_C);
+			await session.waitForOutput((output) => stripAnsi(output).includes("Ctrl+C again to quit"), 10_000);
+			session.write(CTRL_C);
+			const exit = await session.waitForExit(15_000);
+			strictEqual(exit.exitCode, 0, `clean PTY exit; output tail: ${stripAnsi(session.output).slice(-400)}`);
+		} catch (error) {
+			throw new Error(
+				`${error instanceof Error ? error.message : String(error)}; output=${JSON.stringify(stripAnsi(session.output).slice(-1200))}`,
 				{ cause: error },
 			);
 		} finally {

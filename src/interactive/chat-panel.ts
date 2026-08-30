@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { OutputVerbosity } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
-import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { type Component, Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import { toolPresentationPolicy } from "../tools/presentation.js";
 import { toolResultPresentationPolicy } from "../tools/result-disposition.js";
@@ -694,8 +694,13 @@ const USER_PREFIX = `${TEAL}${USER_GLYPH}${RESET} `;
  * had no entry for it (issue #251).
  */
 const USER_PREFIX_PENDING = `${DIM}${USER_GLYPH}${RESET} `;
-const USER_PENDING_TAIL = `${DIM} · preparing${RESET}`;
-const USER_REFUSED_TAIL = `${DIM} · not sent${RESET}`;
+/**
+ * The uncommitted-row tails, stored as plain text so their width can be spent
+ * against the row's budget before the dim codes go on. Both begin with the
+ * separating space they carry when they ride on the end of a body line.
+ */
+const USER_PENDING_TAIL = " · preparing";
+const USER_REFUSED_TAIL = " · not sent";
 const PROSE_GUTTER = "  ";
 const PROSE_GUTTER_WIDTH = 2;
 
@@ -707,6 +712,30 @@ const PROSE_GUTTER_WIDTH = 2;
  */
 function hangProseLines(lines: string[], firstPrefix?: string): string[] {
 	return lines.map((line, index) => `${index === 0 && firstPrefix !== undefined ? firstPrefix : PROSE_GUTTER}${line}`);
+}
+
+/**
+ * Put an uncommitted row's status tail on the row without letting it push a
+ * line past the terminal. The tail used to be concatenated onto the last
+ * rendered line unconditionally, so a body that had already folded near the
+ * content width came out up to 12 cells past the terminal, and pi-tui's
+ * `doRender` throws on an overlong line and kills the process. A `/share` of
+ * a worker answer is the ordinary way to hit that: a `research-report` body is
+ * JSON with no space to fold at, so an 80-column pane died on any shared body
+ * over 58 columns (#257).
+ *
+ * The tail rides on the last body line when that line has room for it, and
+ * drops to its own hanging row when it does not, so it stays whole either way
+ * rather than breaking between `·` and the word.
+ */
+function appendUserRowTail(rendered: string[], tail: string, width: number): void {
+	const last = rendered.length - 1;
+	const lastLine = rendered[last];
+	if (lastLine !== undefined && visibleWidth(lastLine) + tail.length <= width) {
+		rendered[last] = `${lastLine}${DIM}${tail}${RESET}`;
+		return;
+	}
+	rendered.push(`${PROSE_GUTTER}${dimLine(tail.trimStart(), Math.max(1, width - PROSE_GUTTER_WIDTH))}`);
 }
 
 /**
@@ -988,11 +1017,8 @@ function renderEntryLines(
 		const status = entry.status?.() ?? "committed";
 		const rendered = hangProseLines(lines, status === "committed" ? USER_PREFIX : USER_PREFIX_PENDING);
 		if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
-		if (status !== "committed") {
-			const tail = status === "pending" ? USER_PENDING_TAIL : USER_REFUSED_TAIL;
-			const last = rendered.length - 1;
-			if (rendered[last] !== undefined) rendered[last] = `${rendered[last]}${tail}`;
-		}
+		if (status !== "committed")
+			appendUserRowTail(rendered, status === "pending" ? USER_PENDING_TAIL : USER_REFUSED_TAIL, width);
 		return rendered;
 	}
 	if (entry.role === "retryStatus") {
