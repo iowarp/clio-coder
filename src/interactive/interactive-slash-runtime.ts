@@ -253,7 +253,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			let rowStatus: UserTurnStatus = "pending";
 			if (!willQueue) deps.chatPanel.appendUser(sub.text, () => rowStatus);
 			deps.requestRender();
-			deps.beforeSemanticSubmit?.();
 			let acknowledgeAdmission = (): void => {};
 			const admitted = new Promise<void>((resolve) => {
 				acknowledgeAdmission = resolve;
@@ -263,6 +262,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
 				...(awaitAdmission && willQueue ? { steering: "end-of-turn" as const } : {}),
+				...(!willQueue
+					? {
+							onPreparationVisible: async () => {
+								deps.beforeSemanticSubmit?.();
+								await deps.settleVisibleFrame?.("submit-preparing");
+							},
+						}
+					: {}),
 				onAdmitted: () => {
 					rowStatus = "committed";
 					deps.requestRender();

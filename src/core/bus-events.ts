@@ -157,7 +157,7 @@ export type DispatchScopeNoticePayload =
 	  };
 
 export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "context-wiki" | "compaction";
-export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "done";
+export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "compact" | "done";
 export type ContextActivityStatus = "started" | "running" | "completed" | "failed";
 
 /** Structured progress for context operations. Interactive renders this as a live context island. */

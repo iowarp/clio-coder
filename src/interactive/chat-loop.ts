@@ -196,6 +196,13 @@ export interface ChatSubmitOptions {
 	 */
 	steering?: SteeringMode;
 	/**
+	 * Commits the presentation of a consumed prompt after preparation opens and
+	 * before admission work can make the turn durable. Interactive uses this to
+	 * guarantee that even a fast probe or prompt compile paints one pending
+	 * frame instead of opening and closing entirely between renderer ticks.
+	 */
+	onPreparationVisible?: () => Promise<void>;
+	/**
 	 * Fires once this submit owns the live turn (`isStreaming()` is true) and
 	 * the next queued submit may use streaming queue routing. Stage 0 replay
 	 * awaits it; the loop's own admission gate releases on it.
@@ -1582,15 +1589,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			leftPreparation = true;
 			leavePreparation();
 		};
-		const start = (): Promise<void> =>
-			submitTracked(text, {
-				...options,
+		const start = async (): Promise<void> => {
+			const { onPreparationVisible, ...submitOptions } = options;
+			try {
+				await onPreparationVisible?.();
+			} catch {
+				// A presentation observer cannot refuse a turn after the editor has
+				// consumed it. The ordinary render path can recover on its next tick.
+			}
+			return submitTracked(text, {
+				...submitOptions,
 				onAdmitted: () => {
 					releaseTicket();
 					leaveOnce();
 					options.onAdmitted?.();
 				},
 			}).finally(releaseTicket);
+		};
 		const run = previous ? previous.then(start) : start();
 		return run.finally(leaveOnce);
 	};

@@ -604,7 +604,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const emitCompactionActivity = (status: ContextActivityStatus, message: string): void => {
 		deps.bus?.emit(BusChannels.ContextActivity, {
 			kind: "compaction",
-			phase: "done",
+			phase: status === "completed" ? "done" : "compact",
 			status,
 			message,
 			at: Date.now(),
