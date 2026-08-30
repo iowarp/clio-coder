@@ -18,7 +18,7 @@ export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, Clio
 	project: "muted",
 	messages: "accent",
 	pending: "accentDeep",
-	reserve: "dim",
+	reserve: "frame",
 	free: "frame",
 	streaming: "accent",
 };

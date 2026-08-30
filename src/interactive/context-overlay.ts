@@ -77,7 +77,7 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	const tokens = formatTokens(group.tokens);
 	const percent = formatContextPercent(group.percent);
 	const right = `${tokens.padStart(9)}  ${percent.padStart(6)}`;
-	const labelToken: ClioToken = group.category === "free" || group.category === "reserve" ? "dim" : "muted";
+	const labelToken: ClioToken = group.category === "reserve" ? "frame" : group.category === "free" ? "dim" : "muted";
 	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - 2);
 	const labelText = group.label.length > leftWidth ? group.label.slice(0, leftWidth) : group.label.padEnd(leftWidth);
 	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("muted", right)}`;
@@ -116,6 +116,8 @@ function coldReasonLabel(reason: string): string {
 			return "tool-surface change";
 		case "prompt_recompiled":
 			return "prompt recompile";
+		case "background_memory":
+			return "background memory step";
 		default:
 			return reason;
 	}

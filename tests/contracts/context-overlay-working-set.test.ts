@@ -12,7 +12,13 @@ const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 
 function ledger() {
-	return buildContextLedger({ provider: "mock", model: "model-a", contextWindow: 4000, messageTokens: 1200 });
+	return buildContextLedger({
+		provider: "mock",
+		model: "model-a",
+		contextWindow: 4000,
+		messageTokens: 1200,
+		compactionAuto: true,
+	});
 }
 
 function view(): WorkingSetView {
@@ -88,10 +94,17 @@ describe("context overlay working-set section", () => {
 	});
 
 	it("evicted tokens are one line after the legend, not a meter category", () => {
-		const lines = renderContextLedgerLines(ledger(), 68, view()).map(strip);
-		const legendIndex = lines.findIndex((line) => line.includes("Free space"));
+		const rendered = renderContextLedgerLines(ledger(), 68, view());
+		const lines = rendered.map(strip);
+		const freeIndex = lines.findIndex((line) => line.includes("Free space"));
+		const reserveIndex = lines.findIndex((line) => line.includes("Autocompact reserve"));
 		const evictedIndex = lines.findIndex((line) => line.includes("evicted (outside window)"));
-		ok(legendIndex >= 0 && evictedIndex === legendIndex + 1, lines.join("\n"));
+		ok(freeIndex >= 0 && reserveIndex === freeIndex + 1 && evictedIndex === reserveIndex + 1, lines.join("\n"));
+		const frame = clioTheme().fgSequence("frame");
+		if (frame.length > 0) {
+			const reserveLine = rendered[reserveIndex] ?? "";
+			strictEqual(reserveLine.split(frame).length - 1, 2, "the reserve swatch and label must both use frame styling");
+		}
 		strictEqual(
 			ledger().meter.some((group) => group.label.toLowerCase().includes("evicted")),
 			false,
@@ -206,6 +219,7 @@ describe("context overlay working-set section", () => {
 			["thinking_change", "thinking-level change"],
 			["tool_surface_change", "tool-surface change"],
 			["prompt_recompiled", "prompt recompile"],
+			["background_memory", "background memory step"],
 		] as const;
 		for (const [reason, label] of cases) {
 			const withReason = buildContextLedger({

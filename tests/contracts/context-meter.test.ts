@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
+	CONTEXT_CATEGORY_TOKEN,
 	contextCategoryGlyph,
 	contextCategorySwatch,
 	renderContextMeterBar,
@@ -22,6 +23,8 @@ function ledgerWithReserve() {
 		model: "model-a",
 		contextWindow: 1000,
 		messageTokens: 850,
+		pendingTokens: 1,
+		streamingTokens: 1,
 		compactionAuto: true,
 		compactionThreshold: 0.9,
 	});
@@ -39,20 +42,32 @@ describe("context meter reserve glyph", () => {
 		strictEqual(reserve, "▒");
 	});
 
-	it("renders reserve cells between fill and free in the bar, glyph-distinct without color", () => {
+	it("renders reserve cells after free at the far end of the bar", () => {
 		const ledger = ledgerWithReserve();
 		ok(ledger.reserveTokens > 0, "fixture must produce a reserve");
+		strictEqual(ledger.meter.map((group) => group.category).join(","), "messages,pending,streaming,free,reserve");
 		const bar = strip(renderContextMeterBar(ledger, 20, theme));
-		ok(/^▰+▒+▱+$/.test(bar), `bar should read filled, then reserve, then free, got "${bar}"`);
+		ok(/^▰+▱+▒+$/.test(bar), `bar should read filled, then free, then reserve, got "${bar}"`);
 	});
 
-	it("renders reserve cells in the overlay grid with the same glyph", () => {
-		const ledger = ledgerWithReserve();
-		const grid = renderContextMeterGrid(ledger, 20, 2, theme).map(strip).join("");
-		ok(grid.includes("▒"), `grid should carry reserve cells, got "${grid}"`);
+	it("borrows overlay cells from free space while keeping reserve last", () => {
+		const ledger = buildContextLedger({
+			provider: "mock",
+			model: "model-a",
+			contextWindow: 1000,
+			messageTokens: 500,
+			pendingTokens: 1,
+			streamingTokens: 1,
+			compactionAuto: true,
+			compactionThreshold: 0.9,
+		});
+		const grid = renderContextMeterGrid(ledger, 10, 1, theme).map(strip).join("");
+		strictEqual(grid, "▰▰▰▰▰▰▰▱▱▒");
 	});
 
 	it("keeps legend swatches aligned with the meter glyphs", () => {
+		strictEqual(CONTEXT_CATEGORY_TOKEN.reserve, "frame");
+		strictEqual(CONTEXT_CATEGORY_TOKEN.free, "frame");
 		strictEqual(strip(contextCategorySwatch("messages", theme)), "▰");
 		strictEqual(strip(contextCategorySwatch("reserve", theme)), "▒");
 		strictEqual(strip(contextCategorySwatch("free", theme)), "▱");
