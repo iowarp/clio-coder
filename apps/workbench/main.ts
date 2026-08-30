@@ -2,6 +2,7 @@ import { extname } from "node:path";
 import { type ClioCatalogInspector, ClioCliCatalogInspector } from "./clio-catalog-inspector.ts";
 import { ClioCliConfigInspector, ClioConfigInspectError, type ClioConfigInspector } from "./clio-config-inspector.ts";
 import { ClioCliUsageInspector, ClioUsageInspectError, type ClioUsageInspector } from "./clio-usage-inspector.ts";
+import { ClioCliRoutingInspector, type ClioRoutingInspector } from "./clio-routing-inspector.ts";
 import {
 	type ClioLauncher,
 	ClioProjectHost,
@@ -30,6 +31,7 @@ import {
 	type WireDeleteChallenge,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
+	type WireRoutingInspection,
 	type WireTreeNode,
 	type WireUsageInspection,
 } from "./src/protocol.ts";
@@ -112,6 +114,8 @@ export interface WorkbenchServerOptions {
 	catalogInspector?: ClioCatalogInspector;
 	/** Overrides the fixed project-scoped Clio usage adapter (tests). */
 	usageInspector?: ClioUsageInspector;
+	/** Overrides the fixed offline model and worker-routing adapter (tests). */
+	routingInspector?: ClioRoutingInspector;
 	/** Overrides the Workbench state directory (tests). */
 	stateDir?: string;
 	/** Overrides `$HOME` for the guards and browser (tests). */
@@ -234,6 +238,7 @@ interface OpenProject {
 	configInspection: WireConfigInspection | null;
 	catalogInspection: WireCatalogInspection | null;
 	usageInspection: WireUsageInspection | null;
+	routingInspection: WireRoutingInspection | null;
 }
 
 type EventContext = { projectId?: string; processGeneration?: string; sessionId?: string; turnId?: string };
@@ -247,6 +252,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #configInspector: ClioConfigInspector;
 	readonly #catalogInspector: ClioCatalogInspector;
 	readonly #usageInspector: ClioUsageInspector;
+	readonly #routingInspector: ClioRoutingInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
 	readonly #distRoot: URL;
@@ -274,6 +280,7 @@ class WorkbenchRuntime implements HostSink {
 				| "configInspector"
 				| "catalogInspector"
 				| "usageInspector"
+				| "routingInspector"
 				| "permissionEscalateMs"
 				| "permissionBudgetMs"
 				| "promptTimeoutMs"
@@ -293,6 +300,9 @@ class WorkbenchRuntime implements HostSink {
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#usageInspector = options.usageInspector ?? new ClioCliUsageInspector({
+			log: options.quiet ? () => undefined : (message) => console.error(message),
+		});
+		this.#routingInspector = options.routingInspector ?? new ClioCliRoutingInspector({
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
@@ -327,7 +337,7 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, and project usage inspections ask Clio for read-only typed data, redact it on the host, and never write Clio state.`,
+				`Workbench keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, and offline routing inspections ask Clio for typed data, redact it on the host, and never change Clio configuration.`,
 			securityNote: SECURITY_NOTE,
 		};
 	}
@@ -377,6 +387,7 @@ class WorkbenchRuntime implements HostSink {
 			configInspection: open.configInspection,
 			catalogInspection: open.catalogInspection,
 			usageInspection: open.usageInspection,
+			routingInspection: open.routingInspection,
 			targets: open.host.targets,
 			targetsTruncated: open.host.targetsTruncated,
 			processGeneration: open.host.generation,
@@ -493,6 +504,9 @@ class WorkbenchRuntime implements HostSink {
 		if (command.kind === "usage.inspect") {
 			return this.#serializeRead(() => this.#dispatchUsageInspect(session, command));
 		}
+		if (command.kind === "routing.inspect") {
+			return this.#serializeRead(() => this.#dispatchRoutingInspect(session, command));
+		}
 		return this.#serialize(() => this.#dispatchCommand(session, command));
 	}
 
@@ -566,6 +580,29 @@ class WorkbenchRuntime implements HostSink {
 			if (this.#closed || this.#open !== open) return;
 			open.usageInspection = inspection;
 			this.#broadcast("usage.state", { projectId: open.project.id }, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send(
+				"command.error",
+				{ projectId: command.payload.projectId },
+				{ ...mapped, requestId: command.requestId },
+			);
+		}
+	}
+
+	async #dispatchRoutingInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"routing.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			const open = this.#requireOpen(command.payload.projectId);
+			const inspection = await this.#routingInspector.inspect(open.project.identity.canonicalPath);
+			// The routing listing is a cached project snapshot. A late result cannot
+			// attach to a project selected while the read was in flight.
+			if (this.#closed || this.#open !== open) return;
+			open.routingInspection = inspection;
+			this.#broadcast("routing.state", { projectId: open.project.id }, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send(
@@ -809,6 +846,7 @@ class WorkbenchRuntime implements HostSink {
 			configInspection: null,
 			catalogInspection: null,
 			usageInspection: null,
+			routingInspection: null,
 		};
 		this.#open = open;
 		try {
@@ -1081,6 +1119,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
 		...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
 		...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
+		...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
 		...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }),

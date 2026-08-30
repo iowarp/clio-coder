@@ -16,8 +16,14 @@ import type { ClioLauncher } from "../clio-host.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
+import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
-import { catalogInspectionFixture, configInspectionFixture, usageInspectionFixture } from "../tests/fixtures.ts";
+import {
+	catalogInspectionFixture,
+	configInspectionFixture,
+	routingInspectionFixture,
+	usageInspectionFixture,
+} from "../tests/fixtures.ts";
 
 interface SmokeOptions {
 	readonly chrome: string;
@@ -84,6 +90,9 @@ const running = await startWorkbenchServer({
 	usageInspector: {
 		inspect: () => Promise.resolve(usageInspectionFixture()),
 	} satisfies ClioUsageInspector,
+	routingInspector: {
+		inspect: () => Promise.resolve(routingInspectionFixture()),
+	} satisfies ClioRoutingInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -701,6 +710,9 @@ try {
 		stateDir: join(settingsScratch, "state"),
 		homePath: settingsHome,
 		clioLauncher: fixtureLauncher("settings"),
+		routingInspector: {
+			inspect: () => Promise.resolve(routingInspectionFixture()),
+		} satisfies ClioRoutingInspector,
 		acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 	});
 	let settingsBlockingViolations: Array<{ id: string; impact: string | null | undefined; nodes: unknown[] }> = [];
@@ -733,6 +745,26 @@ try {
 		await settingsPage.waitForFunction(() =>
 			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.model"]')?.value === "qwen3.8-4b"
 		);
+
+		// The deeper routing inventory uses Clio's offline catalog and effective
+		// worker-profile listings; opening it never probes an endpoint.
+		await settingsDialog.getByRole("button", { name: "Inspect models and routes" }).click();
+		const routingInventory = settingsDialog.locator(".settings__routing");
+		await routingInventory.getByRole("heading", { name: "Offline model capabilities" }).waitFor();
+		await routingInventory.getByText("262,144", { exact: true }).waitFor();
+		await routingInventory.getByRole("region", { name: "Worker profiles" })
+			.getByText("deep-research", { exact: true }).waitFor();
+		await routingInventory.getByText("Missing profile", { exact: true }).waitFor();
+		const routingModelList = routingInventory.locator(".routing-model-list");
+		const routingSearch = routingInventory.getByRole("searchbox", { name: "Filter models" });
+		await routingSearch.fill("4b");
+		await routingModelList.getByText("qwen3.8-4b", { exact: true }).waitFor();
+		equal(await routingModelList.getByText("qwen3.8-27b", { exact: true }).count(), 0);
+		await routingSearch.fill("");
+		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor();
+		equal(await routingInventory.getByText("/home/", { exact: false }).count(), 0);
+		equal(await routingInventory.getByText("https://", { exact: false }).count(), 0);
+		await settingsPage.screenshot({ path: new URL("settings-routing.png", artifactDirectory).pathname });
 
 		const settingsAccessibility = await new AxeBuilder({ page: settingsPage })
 			.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -1033,6 +1065,7 @@ try {
 			streamUpdatesPreservedTheDraftAndItsScrollPosition: true,
 			effectiveClioMapUsesTheBoundedReadOnlyAdapter: true,
 			catalogUsesBoundedReadOnlyAdapters: true,
+			routingInventoryUsesOfflineBoundedAdapters: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,
@@ -1068,6 +1101,7 @@ try {
 				"compact-evidence-drawer.png",
 				"recent-project-gone.png",
 				"settings-targets.png",
+				"settings-routing.png",
 				"approval-banner.png",
 				"approval-unanswered.png",
 			],

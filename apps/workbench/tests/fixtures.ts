@@ -7,6 +7,7 @@ import {
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireProjectWorkspace,
+	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireTimelineItem,
 	type WireTreeNode,
@@ -157,6 +158,68 @@ export function catalogInspectionFixture(): WireCatalogInspection {
 	};
 }
 
+export function routingInspectionFixture(): WireRoutingInspection {
+	return {
+		inspectedAt: "2026-08-29T15:00:00.000Z",
+		models: {
+			availability: "available",
+			items: [
+				{
+					targetId: "lmstudio",
+					runtimeId: "openai-compatible",
+					modelId: "qwen3.8-27b",
+					capabilities: ["chat", "tools", "reasoning"],
+					contextWindow: 262_144,
+					maxOutputTokens: 32_768,
+					residency: "loaded",
+				},
+				{
+					targetId: "lmstudio",
+					runtimeId: "openai-compatible",
+					modelId: "qwen3.8-4b",
+					capabilities: ["chat", "tools"],
+					contextWindow: 131_072,
+					maxOutputTokens: 16_384,
+					residency: "unloaded",
+				},
+			],
+			truncated: false,
+			emptyTargetCount: 1,
+		},
+		profiles: {
+			availability: "available",
+			items: [{
+				name: "deep-research",
+				target: "lmstudio",
+				runtime: "openai-compatible",
+				model: "qwen3.8-27b",
+				thinkingLevel: "high",
+			}],
+			truncated: false,
+		},
+		bindings: {
+			availability: "available",
+			items: [
+				{
+					agentId: "researcher",
+					profile: "deep-research",
+					target: "lmstudio",
+					model: "qwen3.8-27b",
+					resolved: true,
+				},
+				{
+					agentId: "critic",
+					profile: "missing-profile",
+					target: null,
+					model: null,
+					resolved: false,
+				},
+			],
+			truncated: false,
+		},
+	};
+}
+
 export function usageInspectionFixture(): WireUsageInspection {
 	return {
 		inspectedAt: "2026-08-29T14:00:00.000Z",
@@ -289,6 +352,7 @@ export function workspaceFixture(
 		configInspection: null,
 		catalogInspection: null,
 		usageInspection: null,
+		routingInspection: null,
 		targets: null,
 		targetsTruncated: false,
 		processGeneration: "generation-alpha-0001",
@@ -343,6 +407,7 @@ const PROJECT_EVENT_KINDS = new Set<ServerEventKind>([
 	"config.state",
 	"catalog.state",
 	"usage.state",
+	"routing.state",
 	"targets.state",
 	"targets.probed",
 ]);

@@ -1,6 +1,13 @@
 import { equal, match, ok } from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ClioCatalog, EffectiveClioMap, UsageNotebook, type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
+import {
+	ClioCatalog,
+	EffectiveClioMap,
+	RoutingInventory,
+	UsageNotebook,
+	type WorkbenchActions,
+	WorkbenchView,
+} from "../src/App.tsx";
 import { appReducer, type AppState, initialAppState, parseBootstrapPayload } from "../src/state.ts";
 import {
 	bootstrapFixture,
@@ -8,6 +15,7 @@ import {
 	clioSnapshotFixture,
 	configInspectionFixture,
 	FIXTURE_PROJECT_ID,
+	routingInspectionFixture,
 	serverEventFixture,
 	sessionSummaryFixture,
 	usageInspectionFixture,
@@ -39,6 +47,7 @@ const inertActions: WorkbenchActions = {
 	inspectConfig() {},
 	inspectCatalog() {},
 	inspectUsage() {},
+	inspectRouting() {},
 	listTargets() {},
 	probeTarget() {},
 	setAutonomy() {},
@@ -175,6 +184,31 @@ Deno.test("the Usage record renders exact project aggregates and its honest upst
 	match(html, /suggestions are reduced to counts/u);
 	ok(!html.includes("rawSuggestions"));
 	ok(!html.includes("session-alpha"));
+	ok(!html.includes("/home/"));
+});
+
+Deno.test("the routing inventory renders offline model limits and explicit agent-profile resolution", () => {
+	const html = renderToStaticMarkup(
+		<RoutingInventory
+			projectId={FIXTURE_PROJECT_ID}
+			inspection={routingInspectionFixture()}
+			pending={false}
+			onRefresh={() => undefined}
+		/>,
+	);
+
+	match(html, /What Clio can route work to/u);
+	match(html, /qwen3\.8-27b/u);
+	match(html, /262,144/u);
+	match(html, /32,768/u);
+	match(html, /Reasoning/u);
+	match(html, /deep-research/u);
+	match(html, /researcher/u);
+	match(html, /Missing profile/u);
+	match(html, /no endpoint probe/u);
+	match(html, /Provider URLs, credentials, environment, native paths, and raw warnings remain on the host/u);
+	ok(!html.includes("baseUrl"));
+	ok(!html.includes("credentialPath"));
 	ok(!html.includes("/home/"));
 });
 

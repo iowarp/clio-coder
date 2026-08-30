@@ -6,6 +6,7 @@ import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
+import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import {
 	defaultClioLauncher,
 	MAX_WEBSOCKET_OUTBOUND_BYTES,
@@ -20,9 +21,10 @@ import {
 	type ServerEvent,
 	type WireCatalogInspection,
 	type WireConfigInspection,
+	type WireRoutingInspection,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
-import { catalogInspectionFixture, usageInspectionFixture } from "./fixtures.ts";
+import { catalogInspectionFixture, routingInspectionFixture, usageInspectionFixture } from "./fixtures.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -91,6 +93,7 @@ interface FixtureOptions {
 	readonly configInspector?: ClioConfigInspector;
 	readonly catalogInspector?: ClioCatalogInspector;
 	readonly usageInspector?: ClioUsageInspector;
+	readonly routingInspector?: ClioRoutingInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
@@ -130,6 +133,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
 			...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
 			...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
+			...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -793,6 +797,41 @@ Deno.test("project usage inspection uses the trusted root, broadcasts the bounde
 			workspace: { usageInspection: WireUsageInspection };
 		};
 		deepStrictEqual(bootstrap.workspace.usageInspection, usageInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("routing inspection uses the trusted root, broadcasts the bounded snapshot, and caches it", async () => {
+	let inspectedRoot: string | null = null;
+	const routingInspector: ClioRoutingInspector = {
+		inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			return Promise.resolve(routingInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ routingInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.routingInspection, null);
+
+		await sendCommand(socket, "request-routing", "routing.inspect", { projectId });
+		const routing = (await collectThrough(socket, "routing.state")).at(-1);
+		ok(routing?.kind === "routing.state");
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+		deepStrictEqual(routing.payload.inspection, routingInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { routingInspection: WireRoutingInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.routingInspection, routingInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

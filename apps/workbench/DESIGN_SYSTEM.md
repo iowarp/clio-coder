@@ -29,6 +29,8 @@ legible record. A supplementary Observatory summarizes that same record without 
 - Resource inventories enter the browser only through bounded projections. Skill bodies, hashes, native locations,
   extension roots and manifests, source URLs, requirements, and raw diagnostics stay host-side; a formatted CLI table is
   not a typed fact source.
+- Offline model and worker-routing inventories follow the same rule. Provider URLs, credentials, environment, and raw
+  warnings stay host-side, and cached residency is never presented as endpoint health.
 
 ## Information architecture
 
@@ -50,6 +52,10 @@ atlas—including installed extension precedence—and the 30-day Usage record. 
 bounded workspace, not a second application shell or an invitation to add global navigation. They retain a direct path
 back to the notebook and expose unavailable interfaces honestly. Historical views must distinguish a missing store from
 zero activity and must not mix global records into a project canvas merely because an upstream report contains both.
+
+Configuration-adjacent inventories that support an existing decision, such as offline model capabilities, worker
+profiles, and agent bindings, belong inside the Settings instrument rather than becoming another top-level canvas. Keep
+large inventories locally searchable and scrollable so opening Settings does not enlarge or invalidate the live record.
 
 Below 1180 px the Observatory becomes a contained drawer. Below 790 px the Project atlas becomes a contained drawer as
 well. Both drawers must move focus into the panel, contain Tab, close with Escape or the scrim, restore focus to their
