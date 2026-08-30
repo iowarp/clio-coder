@@ -1,4 +1,4 @@
-import { RESPONSE_SCHEMA_RUNTIME_ID } from "../core/response-schema.js";
+import { RESPONSE_SCHEMA_RUNTIME_ID, type ResponseSchemaDialect } from "../core/response-schema.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { EngineModel } from "./types.js";
 
@@ -213,6 +213,34 @@ function patchLlamaCppResponseSchemaPayload(
 			// the newer json_schema discriminator while still returning HTTP 200.
 			type: "json_object",
 			schema: responseSchema,
+		},
+	};
+}
+
+/**
+ * Apply a JSON-schema response constraint in the dialect the runtime takes.
+ *
+ * Unlike the worker patcher above, this one is for a seam that treats native
+ * enforcement as an optimization: the caller looks the dialect up first and
+ * simply does not call this when there is none, so an unconstrained request
+ * still goes out and the prompt-level instruction carries it (issue #223).
+ * Returns undefined when the payload is not an object, which leaves it alone.
+ */
+export function patchResponseSchemaPayloadForDialect(
+	payload: unknown,
+	dialect: ResponseSchemaDialect,
+	responseSchema: Record<string, unknown>,
+	schemaName: string,
+): unknown | undefined {
+	if (!isRecord(payload)) return undefined;
+	if (dialect === "llamacpp-json-object") {
+		return { ...payload, response_format: { type: "json_object", schema: responseSchema } };
+	}
+	return {
+		...payload,
+		response_format: {
+			type: "json_schema",
+			json_schema: { name: schemaName, strict: true, schema: responseSchema },
 		},
 	};
 }

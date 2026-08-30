@@ -11,10 +11,44 @@ export const RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES = 64 * 1024;
  * `schema` key, and returns HTTP 200 with unconstrained JSON, so widening this
  * to the api family would convert a clean refusal into a silent
  * non-enforcement. lmstudio declares `structuredOutputs: "json-schema"`
- * truthfully and is still excluded here, because Clio has no dialect for its
- * transport. Widen this only together with a dialect for the runtime added.
+ * truthfully and is still excluded here, because the worker seam has no
+ * dialect for its transport. Widen this only together with a dialect for the
+ * runtime added; {@link responseSchemaDialectFor} is where the out-of-turn
+ * seam did exactly that (issue #223).
  */
 export const RESPONSE_SCHEMA_RUNTIME_ID = "llamacpp";
+
+/** The runtime that takes the standard OpenAI `json_schema` response format. */
+export const OPENAI_SCHEMA_RUNTIME_ID = "lmstudio";
+
+/**
+ * How a runtime spells a JSON-schema response constraint on the wire.
+ *
+ * `llamacpp-json-object` is llama-server's own `response_format: { type:
+ * "json_object", schema }`, which it compiles into a sampler grammar.
+ * `openai-json-schema` is the standard `response_format: { type:
+ * "json_schema", json_schema: { name, strict, schema } }` that LM Studio
+ * implements.
+ */
+export type ResponseSchemaDialect = "llamacpp-json-object" | "openai-json-schema";
+
+/**
+ * The dialect this runtime takes, or null when Clio has none for it and the
+ * request has to go unconstrained.
+ *
+ * Deliberately a name check, for the reason {@link RESPONSE_SCHEMA_RUNTIME_ID}
+ * gives: a generic OpenAI-compatible gateway answers HTTP 200 to a spelling it
+ * does not implement and returns unconstrained JSON, so a capability flag would
+ * turn a known non-enforcement into a silent one. This is the out-of-turn
+ * seam's table; the worker seam keeps the narrower
+ * {@link runtimeSpeaksResponseSchemaDialect} check, because a worker that
+ * cannot enforce a contract must refuse admission rather than degrade.
+ */
+export function responseSchemaDialectFor(runtimeId: string): ResponseSchemaDialect | null {
+	if (runtimeId === RESPONSE_SCHEMA_RUNTIME_ID) return "llamacpp-json-object";
+	if (runtimeId === OPENAI_SCHEMA_RUNTIME_ID) return "openai-json-schema";
+	return null;
+}
 
 /** Whether this runtime speaks the dialect above. Transport shape, not capability. */
 export function runtimeSpeaksResponseSchemaDialect(runtime: { id: string; kind: string; apiFamily: string }): boolean {

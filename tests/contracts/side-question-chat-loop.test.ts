@@ -444,3 +444,85 @@ describe("contracts//btw at the chat loop", () => {
 		loop.dispose();
 	});
 });
+
+/**
+ * The extraction round embedded the schema in prose and bound nothing on the
+ * wire, and a refused parse ended `/handoff` outright. The loop now hands the
+ * round the resolved runtime id, so the seam can look up that runtime's own
+ * spelling of a JSON-schema constraint, and passes a bounded repair through
+ * the same out-of-turn accounting (issue #223).
+ */
+describe("contracts//handoff extraction at the chat loop", () => {
+	interface HandoffCall {
+		goal: string;
+		runtimeId?: string;
+		repair?: { complaint: string; previous: string };
+	}
+
+	function handoffLoop(answers: ReadonlyArray<string>): {
+		loop: ReturnType<typeof createChatLoop>;
+		calls: HandoffCall[];
+		rows: OutOfTurnUsageRow[];
+	} {
+		const session = createSessionSpy();
+		const observability = createObservabilitySpy();
+		const calls: HandoffCall[] = [];
+		const rows: OutOfTurnUsageRow[] = [];
+		const loop = createChatLoop({
+			getSettings: settings,
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: session.contract,
+			observability: observability.contract,
+			createAgent: createFakeAgentFactory(
+				async () => {
+					throw new Error("no turn may run in a handoff contract");
+				},
+				{ agent: null },
+			),
+			runHandoffRound: async (input: HandoffCall) => {
+				const index = calls.length;
+				calls.push({
+					goal: input.goal,
+					...(input.runtimeId !== undefined ? { runtimeId: input.runtimeId } : {}),
+					...(input.repair ? { repair: input.repair } : {}),
+				});
+				return {
+					text: answers[Math.min(index, answers.length - 1)] ?? "",
+					usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 15, costUsd: 0 },
+					aborted: false,
+				};
+			},
+			recordOutOfTurnUsageRow: (row: OutOfTurnUsageRow) => rows.push(row),
+		} as never);
+		loop.resetForSession(null, SEEDED_HISTORY);
+		return { loop, calls, rows };
+	}
+
+	it("hands the round the resolved runtime id so the schema can be bound on the wire", async () => {
+		const { loop, calls } = handoffLoop(['{"decisions":[],"facts":[],"files":[],"commands":[],"openQuestions":[]}']);
+
+		const outcome = await loop.extractHandoff("finish the lease work");
+
+		strictEqual(outcome.status, "answered");
+		strictEqual(calls.length, 1);
+		strictEqual(calls[0]?.runtimeId, "fake-runtime", "the round learns which dialect, if any, this runtime takes");
+	});
+
+	it("bills a repair round through the same out-of-turn usage store", async () => {
+		const { loop, calls, rows } = handoffLoop(["prose, not an object"]);
+
+		await loop.extractHandoff("finish the lease work");
+		await loop.extractHandoff("finish the lease work", {
+			repair: { complaint: "the extraction round returned no JSON object", previous: "prose, not an object" },
+		});
+
+		strictEqual(calls.length, 2);
+		strictEqual(calls[1]?.repair?.complaint, "the extraction round returned no JSON object");
+		strictEqual(rows.length, 2, "both rounds are recorded, not just the first");
+		ok(
+			rows.every((row) => (row as { label?: string }).label === "handoff"),
+			`both rows are handoff rounds: ${JSON.stringify(rows)}`,
+		);
+	});
+});

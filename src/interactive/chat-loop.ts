@@ -63,7 +63,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
-import { runHandoffRound } from "./handoff-round.js";
+import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
@@ -245,6 +245,15 @@ export interface SideQuestionOptions {
 	onDelta?: (partialText: string) => void;
 }
 
+export interface HandoffRoundOptions extends SideQuestionOptions {
+	/**
+	 * Run the second and last extraction round, quoting the parser's complaint
+	 * and what the first round returned. Both rounds bill through the same
+	 * out-of-turn usage store (issue #223).
+	 */
+	repair?: HandoffRepairInput;
+}
+
 /**
  * How a `/btw` round ended. `refused` is a round that never started (a turn was
  * in flight, or no orchestrator target is configured); `failed` is a round that
@@ -324,7 +333,7 @@ export interface ChatLoop {
 	 * caller; this method only owns the provider call. Refused outright while a
 	 * turn is in flight rather than queued.
 	 */
-	extractHandoff(goal: string, options?: SideQuestionOptions): Promise<SideQuestionOutcome>;
+	extractHandoff(goal: string, options?: HandoffRoundOptions): Promise<SideQuestionOutcome>;
 	/**
 	 * Drop or replace the chat-loop's in-memory state after a session switch
 	 * (/resume, /fork, /new). `leafTurnId` is the id the next user turn
@@ -1449,7 +1458,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
 		},
 
-		async extractHandoff(goal: string, options: SideQuestionOptions = {}): Promise<SideQuestionOutcome> {
+		async extractHandoff(goal: string, options: HandoffRoundOptions = {}): Promise<SideQuestionOutcome> {
 			const text = goal.trim();
 			if (text.length === 0) {
 				return { status: "refused", reason: "a handoff needs a goal" };
@@ -1470,8 +1479,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// Read-only, exactly as the side-question round treats it.
 						messages: prepared.runtime.agent.state.messages,
 						goal: text,
+						// The runtime id is what decides whether the schema can be bound
+						// on the wire rather than only stated in the prompt.
+						runtimeId: prepared.runtime.runtimeResolution.runtime.id,
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 						...(options.signal ? { signal: options.signal } : {}),
+						...(options.repair ? { repair: options.repair } : {}),
 					}),
 				);
 			} catch (err) {
