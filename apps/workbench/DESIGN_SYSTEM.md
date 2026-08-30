@@ -50,23 +50,72 @@ persisted keys, bundle identifiers, and internal implementation type names—rem
 The desktop shell has three complementary regions and one status strip:
 
 1. **Project atlas** — projects, bounded files, and resumable conversations.
-2. **Evidence notebook** — the human request, visible work, approval decisions, narrative, and outcome along a single
-   evidence spine, followed by the composer.
+2. **Conversation** — the primary center surface. Each turn is the operator's request, then Clio Coder's response as
+   readable prose with its tool work folded into one compact activity line per stretch, its reported reasoning behind a
+   disclosure, and a one-line outcome footer. The composer follows.
 3. **Observatory** — a compact view of current state, Clio Coder-attributed routing, recorded-event counts, and
    provenance.
 4. **Status strip** — connection, bound-session facts, next-turn differences, next-session differences, autonomy, and
    current operation.
 
+The **Session Timeline** is the forensic record behind the Conversation: the same protocol items as one card each along
+the evidence spine, with provenance, exact keys, and the five token fields. It is a view switch on the same scroll
+region, not a second shell. Both views project the same `timeline` array; neither invents an item the other lacks.
+
+### Conversation rules
+
+- One turn groups every item that shares a `turnId`. The request is a right-aligned editorial block with a teal rule;
+  the response is unboxed prose under a `CLIO CODER` eyebrow with a live chip (glyph, label, detail, elapsed) while the
+  turn runs; there is no card inside a card.
+- Tool, approval, and loop items between two stretches of prose collapse into one `<details>` activity group whose
+  summary counts states ("4 tools completed", "1 tool running · 2 done", "Approval needed"). The group opens on its own
+  while attention is needed and stays as the operator left it afterwards. The inline approval row carries the same Allow
+  once/Reject decision as the banner; the banner remains for discoverability when the row is scrolled away.
+- Agent identity is always Clio Coder. Protocol v3 carries no sub-agent or delegation fact, so the surface never names
+  another agent and reports "which agent is active" as unavailable rather than inferring it.
+- Settled turns are memoized by turn object identity and skip re-rendering entirely; only the live turn re-renders on
+  the clock, phase, or permission change. Chat turns use `contain: layout style`, not `content-visibility: auto`,
+  because the latter collapses scroll height for a frame when it toggles and the follow rule would misread that as the
+  end.
+
+### Markdown, code, and diagrams
+
+- Narrative renders through a GFM lexer to React elements; the renderer never sets `innerHTML` from model text. Raw HTML
+  tokens render as visible text, images render as `[image: alt]`, and only `http`, `https`, and `mailto` links are live
+  (relative and other schemes render as inert marked spans). Entities are decoded, not interpreted.
+- While streaming, only the tail after the last settled block boundary (a blank line outside a fence) is re-lexed per
+  frame; settled blocks keep their token identity. Completion re-lexes once with the same element shape, so settled
+  blocks stay mounted.
+- Code is highlighted with Prism grammars loaded on demand, only for settled blocks near the viewport and at most 60,000
+  characters; the output is a token tree, never HTML. Unknown languages render plain with their label.
+- Mermaid runs with `securityLevel: "strict"`, `htmlLabels: false`, bounded input (16 KiB, 400 lines, 400 edges), and
+  the SVG passes DOMPurify's SVG profile with `foreignObject`, `a`, `image`, `script`, animation elements, and
+  `href`/`on*` attributes forbidden. Diagrams render only when the turn has settled and the block is near the viewport,
+  one at a time with a macrotask between them, because layout is one synchronous main-thread task. A failed diagram
+  shows its source and the parser's message.
+- The page CSP allows inline styles (`style-src 'self' 'unsafe-inline'`) solely because strict Mermaid output carries
+  its theme in an embedded stylesheet and inline attributes. Scripts stay same-origin; `img-src`, `font-src`, and
+  `connect-src` still block CSS-driven fetches. No other code path renders model-authored markup.
+
+### Follow-latest rule
+
+The transcript follows new output while the operator is at the end. A scroll event counts as the operator's only when it
+moves above the last programmatic position or when the view was already not following, so growth between a programmatic
+pin and its scroll event never reads as scroll-away. Scrolling back to the end resumes following. Each view remembers
+its own offset and follow state, and restoring one never counts as a scroll. The jump pill above the composer reads
+"Jump to latest", or "New activity below" in orange when timeline items arrived while scrolled away; lazy highlight or
+diagram growth never claims new activity.
+
 On desktop, the Project atlas and Observatory must collapse independently. Collapsing either rail removes its layout
 track immediately and restores focus predictably when reopened; it must not cause a full-shell animated reflow while
 text is streaming.
 
-The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio Coder, the
-Capability atlas—including installed extension precedence—and the 30-day Usage record. These are alternate views of the
-same bounded workspace, not a second application shell or an invitation to add global navigation. They retain a direct
-path back to the notebook and expose unavailable interfaces honestly. Historical views must distinguish a missing store
-from zero activity and must not mix global records into a project canvas merely because an upstream report contains
-both.
+The center surface may switch in place to the Session Timeline and to project-scoped analytical canvases such as
+Effective Clio Coder, the Capability atlas—including installed extension precedence—and the 30-day Usage record. These
+are alternate views of the same bounded workspace, not a second application shell or an invitation to add global
+navigation. They retain a direct path back to the conversation and expose unavailable interfaces honestly. Historical
+views must distinguish a missing store from zero activity and must not mix global records into a project canvas merely
+because an upstream report contains both.
 
 The Dispatch snapshot is the narrow exception: it is explicitly installation-wide because Clio Coder's public fleet
 status has no project selector. It must announce that scope in the header, summary, and method note, remain a manually
@@ -144,8 +193,10 @@ Color is always supplementary. Text, labels, shape, or pattern must carry the sa
 - Prefer native scrolling with stable gutters and local layout/paint containment on long text surfaces. Do not force
   smooth scrolling, continuously measure geometry, or place backdrop filters and other expensive effects over moving
   text.
-- Memoize settled evidence cards. Only the active card may receive a ticking duration, and high-frequency state must not
-  invalidate the rails, composer, or completed history.
+- Memoize settled evidence cards and settled conversation turns. Only the active card or turn may receive a ticking
+  duration, and high-frequency state must not invalidate the rails, composer, or completed history.
+- Measured numbers live in `PERFORMANCE.md` with the exact workload; do not restate them here or claim a display rate
+  that was not measured.
 - Treat 120 Hz and higher displays as a first-class target: preserve input responsiveness and coalesce work to paints;
   never add artificial timers merely to make streaming appear animated.
 
