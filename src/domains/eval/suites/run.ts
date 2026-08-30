@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
@@ -162,6 +162,8 @@ async function runMatrixItem(
 			CLIO_CODER_STATE_DIR: stateDir,
 			CLIO_CODER_ENTRY: clioEntry,
 		});
+		const runnerStdoutFile = resolve(stateDir, "eval-runner-output.jsonl");
+		await writeFile(runnerStdoutFile, runner.stdout, "utf8");
 		receipt = runner.receipt ?? null;
 		runnerWallTimeMs = runner.wallTimeMs;
 		const patch = collectPatchMetrics(workspace.dir);
@@ -185,7 +187,7 @@ async function runMatrixItem(
 			"patch.testFilesModified": patch.testFilesModified,
 			"result.pass": runner.exitCode === 0,
 			"result.failureClass": runner.exitCode === 0 ? null : "runner_failed",
-			...(await measureTaskOutcome(task, workspace.dir)),
+			...(await measureTaskOutcome(task, workspace.dir, { CLIO_EVAL_RUNNER_STDOUT_FILE: runnerStdoutFile })),
 		};
 		const verifier = await runVerifiers(task, workspace.dir, metrics);
 		const graderFailed = metrics["task.solved"] === false;
@@ -318,7 +320,7 @@ async function runTaskRunner(
 	if (task.runner.kind === "context-index") return runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target, env);
 	if (task.runner.kind === "context-init")
 		return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
-	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
+	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env, task.metrics.readObservation);
 }
 
 /**
@@ -330,11 +332,35 @@ async function runTaskRunner(
 async function measureTaskOutcome(
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	cwd: string,
+	env?: NodeJS.ProcessEnv,
 ): Promise<Record<string, number | boolean>> {
 	const commands = task.verify.measure ?? [];
 	if (commands.length === 0) return {};
-	const result = await runCommandVerifiers(commands, cwd, task.timeoutMs);
-	return { "task.exitCode": result.exitCode, "task.solved": result.exitCode === 0 };
+	const result = await runCommandVerifiers(commands, cwd, task.timeoutMs, env);
+	return {
+		"task.exitCode": result.exitCode,
+		"task.solved": result.exitCode === 0,
+		...graderBehaviorMetrics(result.stdout),
+	};
+}
+
+function graderBehaviorMetrics(stdout: string): Record<string, number | boolean> {
+	const metrics: Record<string, number | boolean> = {};
+	for (const line of stdout.split(/\r?\n/u)) {
+		if (line.trim().length === 0) continue;
+		let value: unknown;
+		try {
+			value = JSON.parse(line) as unknown;
+		} catch {
+			continue;
+		}
+		if (!isRecord(value) || value.schema !== "clio.eval.measure.v1" || !isRecord(value.metrics)) continue;
+		for (const [key, metric] of Object.entries(value.metrics)) {
+			if (key !== "claims.unsupported" && key !== "completion.reported") continue;
+			if (typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric))) metrics[key] = metric;
+		}
+	}
+	return metrics;
 }
 
 async function runVerifiers(
@@ -414,4 +440,8 @@ function buildArtifact(
 
 function assertionMessage(assertion: EvalMetricAssertion, actual: number | string | boolean | null): string {
 	return `assertion failed: ${assertion.metric} ${assertion.op} ${String(assertion.value)} (actual ${JSON.stringify(actual)})`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

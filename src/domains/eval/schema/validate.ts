@@ -195,6 +195,10 @@ function readRunner(
 	}
 	const prompt = optionalString(value, "prompt");
 	const agent = optionalString(value, "agent");
+	const autonomy = optionalString(value, "autonomy");
+	if (autonomy !== undefined && !["read-only", "suggest", "auto-edit", "full-auto"].includes(autonomy)) {
+		issues.push({ path: `${path}.autonomy`, message: "expected read-only, suggest, auto-edit, or full-auto" });
+	}
 	if (agent !== undefined && kind !== "clio-run") {
 		issues.push({ path: `${path}.agent`, message: "agent is only valid on the clio-run runner" });
 	}
@@ -202,6 +206,7 @@ function readRunner(
 	return {
 		kind: kind as EvalRunnerKind,
 		...(prompt === undefined ? {} : { prompt }),
+		...(autonomy === undefined ? {} : { autonomy: autonomy as NonNullable<EvalSuiteTaskV2["runner"]["autonomy"]> }),
 		...(agent === undefined ? {} : { agent }),
 		...(command === undefined ? {} : { command }),
 		commands: readOptionalStringArray(value, "commands", `${path}.commands`, issues),
@@ -238,7 +243,22 @@ function readMetrics(
 		issues.push({ path, message: "expected object" });
 		return { collect: [] };
 	}
-	return { collect: readOptionalStringArray(value, "collect", `${path}.collect`, issues) };
+	const observation = value.readObservation;
+	let readObservation: EvalSuiteV2["tasks"][number]["metrics"]["readObservation"];
+	if (observation !== undefined) {
+		if (!isRecord(observation)) {
+			issues.push({ path: `${path}.readObservation`, message: "expected object" });
+		} else {
+			readObservation = {
+				allowedPaths: readOptionalStringArray(observation, "allowedPaths", `${path}.readObservation.allowedPaths`, issues),
+				decoyPaths: readOptionalStringArray(observation, "decoyPaths", `${path}.readObservation.decoyPaths`, issues),
+			};
+		}
+	}
+	return {
+		collect: readOptionalStringArray(value, "collect", `${path}.collect`, issues),
+		...(readObservation === undefined ? {} : { readObservation }),
+	};
 }
 
 function readThresholds(

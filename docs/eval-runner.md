@@ -238,6 +238,48 @@ Expected and forbidden rules contain typed predicates over facts sourced from `t
 
 Suite execution adapts scalar run metrics into these observable facts at the Suite v2 to Artifact v4 boundary. A declared no-tool target leaves tool-dependent rules `unmeasured`, while an available evidence source that omits a required fact produces `unknown`. Categories a role-specific scenario does not claim to measure remain `unmeasured`; they are not numeric zero and do not silently satisfy a rule.
 
+### Public built-in behavioral corpus
+
+The repository ships corpus `public-built-in-behavior` version `1.0.0` under
+`benchmarks/eval/`. It contains no private prompts, endpoints, credentials, or
+mutable external dataset:
+
+- `behavioral-machinery.yaml` provides one positive and one adversarial
+  machinery-only check for each of the 13 shipped built-in worker recipes. Its
+  deterministic driver loads the production recipe catalog, admits a real
+  dispatch through the production gate, runs a scripted worker, and verifies
+  the sealed receipt and result-contract outcome. The 26 scenarios require no
+  model; they do not infer behavior by grepping recipe frontmatter.
+- `behavioral-model.yaml` provides four isolated main-agent scenarios on the
+  `mini` target: a focused edit, adversarial scope control, required
+  delegation, and recovery after Bash is denied. Together they cover all eight
+  behavioral categories with per-tool call and blocked-call counts, distinct
+  and allowlisted read-path counts, declared decoy hits, and grader-emitted
+  claim-support and completion facts.
+- `behavioral-model-negative-control.yaml` intentionally reads a declared
+  decoy. A healthy run solves its literal task while recording
+  `behavioral_failure` with violated exploration and safety labels, proving
+  that the rules can reject observed model behavior rather than merely restate
+  aggregate success counters.
+
+Build once, then run either focused suite from the repository root:
+
+```sh
+node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-model.yaml --target mini --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-model-negative-control.yaml --target mini --clio-coder-entry dist/cli/index.js
+```
+
+The machinery tasks use the repository read-only and create only private
+scratch state under `TMPDIR`; model tasks use a fresh `temp-copy` workspace and
+remove it after the matrix item settles. The machinery suite is the fast
+admission, worker, and receipt contract. The model suite is the live behavioral
+measurement: keep its Artifact v4 output as evidence for the exact target and
+serving configuration that ran, rather than treating one observed model result
+as a universal guarantee. Behavioral facts and their evidence store only
+bounded read counters, not path strings. As with other eval runs, the artifact's
+bounded diagnostic stdout may retain the underlying tool event stream.
+
 ### `trackedMetrics`
 
 Eleven numbers plus a reason histogram, each carrying the source it came from. `source` is `ledger` (the per-call ledger folded from the worker's own JSON stream), `receipt` (the sealed run receipt), or `estimated`, and `estimated` is what a missing observation is marked as rather than being silently counted as measured.

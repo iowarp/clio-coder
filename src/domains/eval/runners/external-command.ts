@@ -299,9 +299,11 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 			toolName,
 			...(toolName === "dispatch" && isRecord(event.args)
 				? { args: event.args }
-				: toolName === "code_nav" && isRecord(event.args)
-					? { args: { mode: event.args.mode } }
-					: {}),
+				: toolName === "read" && isRecord(event.args)
+					? { args: boundedReadArgs(event.args) }
+					: toolName === "code_nav" && isRecord(event.args)
+						? { args: { mode: event.args.mode } }
+						: {}),
 		};
 	}
 	if (type === "tool_execution_end") {
@@ -326,6 +328,14 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 			...(stringField(event.payload, "outcome") !== undefined ? { outcome: stringField(event.payload, "outcome") } : {}),
 		},
 	};
+}
+
+function boundedReadArgs(args: Record<string, unknown>): Record<string, string> {
+	for (const field of ["path", "filePath", "file_path"]) {
+		const value = args[field];
+		if (typeof value === "string" && value.length > 0) return { [field]: value.slice(0, 4_096) };
+	}
+	return {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

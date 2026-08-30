@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { runClioRunRunner, toolCallMetricsFromJsonl } from "../../src/domains/eval/runners/clio-run.js";
+import {
+	runClioRunRunner,
+	toolBehaviorMetricEntriesFromJsonl,
+	toolCallMetricsFromJsonl,
+} from "../../src/domains/eval/runners/clio-run.js";
 
 function jsonl(events: ReadonlyArray<unknown>): string {
 	return events.map((event) => JSON.stringify(event)).join("\n");
@@ -59,6 +63,57 @@ describe("contracts/eval clio-run tool metrics", () => {
 			failed: 1,
 			blocked: 1,
 		});
+	});
+
+	it("derives per-tool, blocked, distinct-read, allowlist, and decoy facts without retaining paths", () => {
+		const stdout = jsonl([
+			{
+				type: "tool_execution_start",
+				toolCallId: "read-target",
+				toolName: "read",
+				args: { path: "fixtures/target.ts" },
+			},
+			{ type: "tool_execution_end", toolCallId: "read-target", toolName: "read", isError: false },
+			{
+				type: "tool_execution_start",
+				toolCallId: "read-decoy",
+				toolName: "read",
+				args: { path: "fixtures/decoy/note.txt" },
+			},
+			{ type: "tool_execution_end", toolCallId: "read-decoy", toolName: "read", isError: false },
+			{ type: "clio_tool_finish", payload: { tool: "read", toolCallId: "read-target", outcome: "ok" } },
+			{ type: "clio_tool_finish", payload: { tool: "read", toolCallId: "read-decoy", outcome: "ok" } },
+			{ type: "clio_tool_finish", payload: { tool: "bash", toolCallId: "bash-1", outcome: "blocked" } },
+			{ type: "clio_tool_finish", payload: { tool: "dispatch", toolCallId: "dispatch-1", outcome: "ok" } },
+		]);
+		const metrics = toolBehaviorMetricEntriesFromJsonl(stdout, "/repo", {
+			allowedPaths: ["fixtures/target.ts"],
+			decoyPaths: ["fixtures/decoy"],
+		});
+		deepStrictEqual(metrics, {
+			"tools.read.distinctPaths": 2,
+			"tools.calls.bash": 1,
+			"tools.blocked.bash": 1,
+			"tools.calls.dispatch": 1,
+			"tools.blocked.dispatch": 0,
+			"tools.calls.read": 2,
+			"tools.blocked.read": 0,
+			"tools.read.outsideAllowed": 1,
+			"tools.read.decoyHits": 1,
+		});
+		strictEqual(JSON.stringify(metrics).includes("target.ts"), false);
+		strictEqual(JSON.stringify(metrics).includes("note.txt"), false);
+	});
+
+	it("treats the workspace root allowlist as covering only local read paths", () => {
+		const stdout = jsonl([
+			{ type: "tool_execution_start", toolCallId: "local", toolName: "read", args: { path: "fixtures/target.ts" } },
+			{ type: "tool_execution_end", toolCallId: "local", toolName: "read", isError: false },
+			{ type: "tool_execution_start", toolCallId: "outside", toolName: "read", args: { path: "../outside.txt" } },
+			{ type: "tool_execution_end", toolCallId: "outside", toolName: "read", isError: false },
+		]);
+		const metrics = toolBehaviorMetricEntriesFromJsonl(stdout, "/repo", { allowedPaths: ["."], decoyPaths: [] });
+		strictEqual(metrics["tools.read.outsideAllowed"], 1);
 	});
 
 	it("returns parsed tool metrics from the clio-run runner", async () => {

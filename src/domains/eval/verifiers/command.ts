@@ -12,12 +12,13 @@ export async function runCommandVerifiers(
 	commands: ReadonlyArray<string>,
 	cwd: string,
 	timeoutMs: number,
+	env?: NodeJS.ProcessEnv,
 ): Promise<CommandVerifierResult> {
 	let stdout = "";
 	let stderr = "";
 	let wallTimeMs = 0;
 	for (const command of commands) {
-		const result = await runShellCommand(command, cwd, timeoutMs);
+		const result = await runShellCommand(command, cwd, timeoutMs, env);
 		stdout += result.stdout;
 		stderr += result.stderr;
 		wallTimeMs += result.wallTimeMs;
