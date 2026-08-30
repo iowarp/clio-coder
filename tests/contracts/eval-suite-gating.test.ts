@@ -1,9 +1,10 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { evaluateGate } from "../../src/domains/eval/compare/gates.js";
+import { loadThresholds } from "../../src/domains/eval/compare/thresholds.js";
 import type { EvalArtifactResultV4, EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteTaskV2, LoadedEvalSuiteV2 } from "../../src/domains/eval/schema/suite.js";
 import { runEvalSuiteV2 } from "../../src/domains/eval/suites/run.js";
@@ -124,6 +125,47 @@ describe("contracts/eval suite gating", { concurrency: false }, () => {
 		strictEqual(gate.failures.length, 1);
 		strictEqual(gate.failures[0]?.unresolved, true);
 		strictEqual(gate.failures[0]?.taskId, "silent");
+	});
+
+	it("reports informational budgets without changing a hard-gate pass", () => {
+		const gate = evaluateGate(artifactWith([intact("costly", 0)]), {
+			fail: [],
+			informational: [
+				{ metric: "summary.wallTimeMs", op: "gte", value: 0 },
+				{ metric: "cost.usd", op: "gt", value: 1 },
+			],
+		});
+
+		strictEqual(gate.pass, true);
+		strictEqual(gate.failures.length, 0);
+		strictEqual(gate.informational.length, 2);
+		strictEqual(gate.informational[0]?.unresolved, false);
+		strictEqual(gate.informational[1]?.unresolved, true);
+	});
+
+	it("loads hard thresholds and informational budgets into separate lists", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-eval-thresholds-"));
+		try {
+			const path = join(root, "thresholds.yaml");
+			writeFileSync(
+				path,
+				[
+					"fail:",
+					"  - metric: task.solved",
+					"    op: eq",
+					"    value: false",
+					"informational:",
+					"  - metric: cost.usd",
+					"    op: gt",
+					"    value: 1",
+				].join("\n"),
+			);
+			const loaded = loadThresholds(path);
+			strictEqual(loaded.fail[0]?.metric, "task.solved");
+			strictEqual(loaded.informational?.[0]?.metric, "cost.usd");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("fails the gate closed when the matrix produced no runs to read", () => {

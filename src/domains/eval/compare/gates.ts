@@ -15,6 +15,7 @@ export interface EvalGateFailure {
 export interface EvalGateResult {
 	pass: boolean;
 	failures: EvalGateFailure[];
+	informational: EvalGateFailure[];
 }
 
 /**
@@ -30,21 +31,30 @@ export interface EvalGateResult {
  * collapsing the matrix into a single aggregate nobody can act on.
  */
 export function evaluateGate(artifact: EvalArtifactV4, thresholds: EvalSuiteThresholdsV2): EvalGateResult {
-	const failures: EvalGateFailure[] = [];
-	for (const assertion of thresholds.fail) {
+	const failures = evaluateAssertions(artifact, thresholds.fail);
+	const informational = evaluateAssertions(artifact, thresholds.informational ?? []);
+	return { pass: failures.length === 0, failures, informational };
+}
+
+function evaluateAssertions(
+	artifact: EvalArtifactV4,
+	assertions: ReadonlyArray<EvalMetricAssertion>,
+): EvalGateFailure[] {
+	const findings: EvalGateFailure[] = [];
+	for (const assertion of assertions) {
 		const whole = resolveMetricAssertion(assertion, {}, artifact);
 		if (!whole.unresolved) {
-			if (whole.holds) failures.push({ assertion, actual: whole.actual, unresolved: false });
+			if (whole.holds) findings.push({ assertion, actual: whole.actual, unresolved: false });
 			continue;
 		}
 		if (artifact.results.length === 0) {
-			failures.push({ assertion, actual: null, unresolved: true });
+			findings.push({ assertion, actual: null, unresolved: true });
 			continue;
 		}
 		for (const result of artifact.results) {
 			const perRun = resolveMetricAssertion(assertion, result.metrics);
 			if (!perRun.unresolved && !perRun.holds) continue;
-			failures.push({
+			findings.push({
 				assertion,
 				actual: perRun.actual,
 				unresolved: perRun.unresolved,
@@ -53,7 +63,7 @@ export function evaluateGate(artifact: EvalArtifactV4, thresholds: EvalSuiteThre
 			});
 		}
 	}
-	return { pass: failures.length === 0, failures };
+	return findings;
 }
 
 /** One operator-facing line per gate failure, naming the run when there is one. */
@@ -63,4 +73,12 @@ export function renderGateFailure(failure: EvalGateFailure): string {
 	return failure.unresolved
 		? `  ${metric}${run}: unresolved metric (fail closed)\n`
 		: `  ${metric} ${op} ${JSON.stringify(value)}${run}: actual ${JSON.stringify(failure.actual)}\n`;
+}
+
+export function renderInformationalBudget(finding: EvalGateFailure): string {
+	const run = finding.taskId === undefined ? "" : ` [${finding.taskId}#${finding.repeatIndex ?? 0}]`;
+	const { metric, op, value } = finding.assertion;
+	return finding.unresolved
+		? `  ${metric}${run}: unmeasured informational budget\n`
+		: `  ${metric} ${op} ${JSON.stringify(value)}${run}: actual ${JSON.stringify(finding.actual)}\n`;
 }

@@ -57,6 +57,21 @@ whether it came from the ledger, from the receipt, or was `estimated`. A metric
 marked `estimated` on one side of a comparison and measured on the other is
 refused rather than differenced.
 
+Behavioral suites add a second projection beside those tracked performance
+metrics. Compare it per scenario, role, and target/model envelope rather than
+reducing unlike roles into one pass rate. Correctness and safety are hard
+regression gates; tool efficiency, unnecessary exploration, delegation
+quality, unsupported claims, tokens, latency, and receipt cost remain separate
+families with their own measured coverage and repeat variance. A missing value
+is null and makes that row incomparable, never zero.
+
+Put release-blocking assertions under `thresholds.fail` and non-blocking spend
+or latency budgets under `thresholds.informational`. Informational findings are
+printed in every gate run but do not change its exit status. Do not put a cost
+budget in the hard list to compensate for weak correctness, and do not turn a
+correctness rule into an informational budget; the comparison gate evaluates
+correctness and safety before either kind of operator-authored threshold.
+
 Record the serving configuration or the comparison is not one. The artifact
 captures `targetId`, `runtimeId`, `modelId`, `serverBuild`, `total_slots`,
 `thinkingLevel`, and `compiledPromptHash`, read from the server after the matrix

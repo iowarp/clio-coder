@@ -6,8 +6,15 @@ import {
 } from "../schema/verdict.js";
 
 export interface EvalMetricDistributionV1 {
+	observations: number;
+	measured: number;
+	unmeasured: number;
 	mean: number | null;
+	min: number | null;
+	max: number | null;
 	p90: number | null;
+	variance: number | null;
+	standardDeviation: number | null;
 	sources: EvalMetricSource[];
 }
 
@@ -86,12 +93,34 @@ function distribution(
 ): EvalMetricDistributionV1 {
 	const values = metrics.flatMap((metric) => (metric.value === null ? [] : [metric.value]));
 	const sources = [...new Set(metrics.map((metric) => metric.source))].sort(compareSources);
-	if (values.length === 0) return { mean: null, p90: null, sources };
+	if (values.length === 0) {
+		return {
+			observations: metrics.length,
+			measured: 0,
+			unmeasured: metrics.length,
+			mean: null,
+			min: null,
+			max: null,
+			p90: null,
+			variance: null,
+			standardDeviation: null,
+			sources,
+		};
+	}
 	const ordered = [...values].sort((left, right) => left - right);
 	const p90Index = Math.max(0, Math.ceil(ordered.length * 0.9) - 1);
+	const mean = ordered.reduce((sum, value) => sum + value, 0) / ordered.length;
+	const variance = ordered.reduce((sum, value) => sum + (value - mean) ** 2, 0) / ordered.length;
 	return {
-		mean: ordered.reduce((sum, value) => sum + value, 0) / ordered.length,
+		observations: metrics.length,
+		measured: values.length,
+		unmeasured: metrics.length - values.length,
+		mean,
+		min: ordered[0] ?? null,
+		max: ordered.at(-1) ?? null,
 		p90: ordered[p90Index] ?? null,
+		variance,
+		standardDeviation: Math.sqrt(variance),
 		sources,
 	};
 }

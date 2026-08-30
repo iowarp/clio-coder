@@ -219,6 +219,21 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 			const compare = await runCli(["eval", "compare", passEvalId, failEvalId], { env: scratch.env });
 			strictEqual(compare.code, 0, `stderr=${compare.stderr}`);
 			ok(compare.stdout.includes("baseline"));
+			const compareJson = await runCli(["eval", "compare", passEvalId, failEvalId, "--format", "json"], {
+				env: scratch.env,
+			});
+			strictEqual(compareJson.code, 0, `stderr=${compareJson.stderr}`);
+			strictEqual((JSON.parse(compareJson.stdout) as { hardGate?: { pass?: unknown } }).hardGate?.pass, true);
+			const compareMarkdown = await runCli(["eval", "compare", passEvalId, failEvalId, "--format", "md"], {
+				env: scratch.env,
+			});
+			strictEqual(compareMarkdown.code, 0, `stderr=${compareMarkdown.stderr}`);
+			ok(compareMarkdown.stdout.startsWith("# Eval comparison"));
+			const compareJunit = await runCli(["eval", "compare", passEvalId, failEvalId, "--format", "junit"], {
+				env: scratch.env,
+			});
+			strictEqual(compareJunit.code, 0, `stderr=${compareJunit.stderr}`);
+			ok(compareJunit.stdout.includes('<testsuite name="eval-comparison"'));
 
 			const gatePass = await runCli(["eval", "gate", passEvalId, "--baseline", passEvalId], { env: scratch.env });
 			strictEqual(gatePass.code, 0, `stderr=${gatePass.stderr}`);
@@ -270,6 +285,19 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 			);
 			strictEqual(gateThresholdPass.code, 0, `stderr=${gateThresholdPass.stderr}`);
 			strictEqual(gateThresholdPass.stdout, "gate: pass\n");
+
+			const informationalThresholds = join(scratch.dir, "informational-thresholds.yaml");
+			writeFileSync(
+				informationalThresholds,
+				"fail: []\ninformational:\n  - metric: summary.wallTimeMs\n    op: gte\n    value: 0\n",
+			);
+			const informationalGate = await runCli(
+				["eval", "gate", passEvalId, "--baseline", passEvalId, "--thresholds", informationalThresholds],
+				{ env: scratch.env },
+			);
+			strictEqual(informationalGate.code, 0, `stderr=${informationalGate.stderr}`);
+			ok(informationalGate.stdout.includes("informational budgets: 1 notice"));
+			ok(informationalGate.stdout.endsWith("gate: pass\n"));
 		} finally {
 			scratch.cleanup();
 		}

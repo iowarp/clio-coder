@@ -7,6 +7,13 @@ import {
 	sameEvalServingConfiguration,
 } from "../schema/serving.js";
 import { EVAL_TRACKED_METRIC_NAMES } from "../schema/verdict.js";
+import {
+	classifyChange,
+	compareEvalBehaviorMetricsV1,
+	type EvalBehaviorHardGateV1,
+	type EvalBehaviorMetricComparisonV1,
+	type EvalMetricChangeV1,
+} from "./behavioral.js";
 
 export interface EvalCompareV4Options {
 	metric?: string;
@@ -20,6 +27,9 @@ export interface EvalTrackedMetricComparisonV1 {
 	candidate: EvalMetricDistributionV1;
 	meanDelta: number | null;
 	p90Delta: number | null;
+	varianceDelta: number | null;
+	change: EvalMetricChangeV1;
+	varianceChange: EvalMetricChangeV1;
 }
 
 export interface EvalCompareV4Summary {
@@ -33,6 +43,8 @@ export interface EvalCompareV4Summary {
 	tokenDelta: number | null;
 	wallTimeDelta: number;
 	trackedMetrics: EvalTrackedMetricComparisonV1[];
+	behavioralMetrics: EvalBehaviorMetricComparisonV1[];
+	hardGate: EvalBehaviorHardGateV1;
 }
 
 export class EvalServingConfigurationDriftError extends Error {
@@ -66,6 +78,16 @@ export function compareEvalArtifactsV4(
 	if (configDrift && options.allowConfigDrift !== true) {
 		throw new EvalServingConfigurationDriftError(baselineServing, candidateServing);
 	}
+	const behavioral = compareEvalBehaviorMetricsV1(baseline, candidate);
+	const trackedMetrics = compareTrackedMetrics(baseline, candidate, options.metric);
+	const normalizedFilter = normalizeMetricFilter(options.metric);
+	const behavioralMetrics =
+		normalizedFilter === undefined
+			? behavioral.comparisons
+			: behavioral.comparisons.filter((row) => row.metric === normalizedFilter || row.family === normalizedFilter);
+	if (options.metric !== undefined && trackedMetrics.length === 0 && behavioralMetrics.length === 0) {
+		throw new Error(`eval metric not found: ${options.metric}`);
+	}
 	return {
 		baselineEvalId: baseline.evalId,
 		candidateEvalId: candidate.evalId,
@@ -75,16 +97,22 @@ export function compareEvalArtifactsV4(
 		passRateDelta: candidate.summary.passRate - baseline.summary.passRate,
 		tokenDelta: baselineTokens.measured && candidateTokens.measured ? candidateTokens.total - baselineTokens.total : null,
 		wallTimeDelta: candidate.summary.wallTimeMs - baseline.summary.wallTimeMs,
-		trackedMetrics: compareTrackedMetrics(baseline, candidate, options.metric),
+		trackedMetrics,
+		behavioralMetrics,
+		hardGate: behavioral.hardGate,
 	};
 }
 
 export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
+	const hardFailures = summary.hardGate.failures.map(
+		(failure) =>
+			`  hard failure: ${failure.scenarioId} ${failure.role} ${failure.target.id}/${failure.target.model ?? "none"} ${failure.metric} ${failure.change}`,
+	);
 	const tracked = summary.trackedMetrics.flatMap((row, index) => [
 		...(index === 0
 			? [
 					"tracked metrics:",
-					"scenario metric baseline_mean baseline_p90 candidate_mean candidate_p90 mean_delta p90_delta sources",
+					"scenario metric baseline_mean baseline_p90 baseline_variance candidate_mean candidate_p90 candidate_variance mean_delta p90_delta variance_delta change variance_change sources",
 				]
 			: []),
 		[
@@ -92,11 +120,44 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 			row.metric,
 			formatMetric(row.baseline.mean),
 			formatMetric(row.baseline.p90),
+			formatMetric(row.baseline.variance ?? null),
 			formatMetric(row.candidate.mean),
 			formatMetric(row.candidate.p90),
+			formatMetric(row.candidate.variance ?? null),
 			formatSignedMetric(row.meanDelta),
 			formatSignedMetric(row.p90Delta),
+			formatSignedMetric(row.varianceDelta),
+			row.change,
+			row.varianceChange,
 			`${row.baseline.sources.join("+") || "none"}->${row.candidate.sources.join("+") || "none"}`,
+		].join(" "),
+	]);
+	const behavioral = summary.behavioralMetrics.flatMap((row, index) => [
+		...(index === 0
+			? [
+					"behavioral metrics:",
+					"scenario role target model family metric baseline_mean baseline_variance baseline_coverage candidate_mean candidate_variance candidate_coverage mean_delta variance_delta change variance_change gate source",
+				]
+			: []),
+		[
+			row.scenarioId,
+			row.role,
+			row.target.id,
+			row.target.model ?? "none",
+			row.family,
+			row.metric,
+			formatMetric(row.baseline.mean),
+			formatMetric(row.baseline.variance),
+			`${row.baseline.measured}/${row.baseline.observations}`,
+			formatMetric(row.candidate.mean),
+			formatMetric(row.candidate.variance),
+			`${row.candidate.measured}/${row.candidate.observations}`,
+			formatSignedMetric(row.meanDelta),
+			formatSignedMetric(row.varianceDelta),
+			row.change,
+			row.varianceChange,
+			row.hardGate ? "hard" : "informational",
+			row.baseline.source,
 		].join(" "),
 	]);
 	return [
@@ -108,7 +169,10 @@ export function renderEvalComparisonV4(summary: EvalCompareV4Summary): string {
 		`pass-rate delta: ${(summary.passRateDelta * 100).toFixed(2)}%`,
 		`token delta: ${summary.tokenDelta === null ? "unmeasured" : summary.tokenDelta}`,
 		`wall-time delta ms: ${summary.wallTimeDelta}`,
+		`behavioral hard gate: ${summary.hardGate.pass ? "pass" : `fail (${summary.hardGate.failures.length})`}`,
+		...hardFailures,
 		...tracked,
+		...behavioral,
 		"",
 	].join("\n");
 }
@@ -153,19 +217,15 @@ function compareTrackedMetrics(
 		for (const reason of [...reasons].sort((left, right) => left.localeCompare(right))) {
 			const metric = `expectedColdReasons.${reason}`;
 			if (filter !== undefined && filter !== metric && filter !== "expectedColdReasons") continue;
-			const absent: EvalMetricDistributionV1 = { mean: 0, p90: 0, sources: ["ledger"] };
 			rows.push(
 				metricComparison(
 					scenarioId,
 					metric,
-					baselineAggregate.trackedMetrics.expectedColdReasons[reason] ?? absent,
-					candidateAggregate.trackedMetrics.expectedColdReasons[reason] ?? absent,
+					baselineAggregate.trackedMetrics.expectedColdReasons[reason] ?? zeroDistribution(baselineAggregate.k),
+					candidateAggregate.trackedMetrics.expectedColdReasons[reason] ?? zeroDistribution(candidateAggregate.k),
 				),
 			);
 		}
-	}
-	if (metricFilter !== undefined && rows.length === 0) {
-		throw new Error(`tracked metric not found: ${metricFilter}`);
 	}
 	return rows;
 }
@@ -177,6 +237,7 @@ function metricComparison(
 	candidate: EvalMetricDistributionV1,
 ): EvalTrackedMetricComparisonV1 {
 	assertComparableTrackedMetricSources(`${scenarioId}.${metric}`, baseline.sources, candidate.sources);
+	const direction = trackedMetricDirection(metric);
 	return {
 		scenarioId,
 		metric,
@@ -184,6 +245,9 @@ function metricComparison(
 		candidate,
 		meanDelta: subtractNullable(candidate.mean, baseline.mean),
 		p90Delta: subtractNullable(candidate.p90, baseline.p90),
+		varianceDelta: subtractNullable(candidate.variance ?? null, baseline.variance ?? null),
+		change: classifyChange(baseline.mean, candidate.mean, direction),
+		varianceChange: classifyChange(baseline.variance ?? null, candidate.variance ?? null, "lower"),
 	};
 }
 
@@ -205,7 +269,27 @@ function normalizeMetricFilter(metric: string | undefined): string | undefined {
 	if (metric === undefined) return undefined;
 	const trimmed = metric.trim();
 	if (trimmed.startsWith("trackedMetrics.")) return trimmed.slice("trackedMetrics.".length);
+	if (trimmed.startsWith("behavioralMetrics.")) return trimmed.slice("behavioralMetrics.".length);
 	return trimmed;
+}
+
+function trackedMetricDirection(metric: string): "higher" | "lower" {
+	return metric === "cacheReadTokens" ? "higher" : "lower";
+}
+
+function zeroDistribution(observations: number): EvalMetricDistributionV1 {
+	return {
+		observations,
+		measured: observations,
+		unmeasured: 0,
+		mean: 0,
+		min: 0,
+		max: 0,
+		p90: 0,
+		variance: 0,
+		standardDeviation: 0,
+		sources: ["ledger"],
+	};
 }
 
 function subtractNullable(left: number | null, right: number | null): number | null {

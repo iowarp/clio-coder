@@ -18,7 +18,7 @@ clio-coder eval validate --suite <suite.yaml>
 clio-coder eval run --suite <suite.yaml> [--trials <n>] [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
 clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
 clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
-clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--allow-config-drift]
+clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--format text|json|md|junit] [--allow-config-drift]
 clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 ```
 
@@ -32,7 +32,7 @@ clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds
   * `swe-jsonl`: Standardized JSONL format representing task runs (e.g. for SWE-bench comparisons).
   * `junit`: XML report for CI/CD integration.
 * **`compare`**: Compares two evaluation artifacts (baseline and candidate) by matching tasks.
-* **`gate`**: Compares candidate metrics against baseline or absolute thresholds, exiting non-zero if assertions fail (useful for PR gating).
+* **`gate`**: Compares candidate metrics against baseline and absolute thresholds. Correctness and safety regressions fail independently of informational budgets.
 
 Exit codes:
 
@@ -41,8 +41,8 @@ Exit codes:
 | `eval validate` | `0` when validation passes | `2` for validation issues |
 | `eval run` | `0` when all task repetitions pass | `1` when any task fails, `2` for invalid configs |
 | `eval report` | `0` when artifact loads | `1` if artifact cannot be read, `2` for invalid ID |
-| `eval compare` | `0` when both artifacts load and compare succeeds | `1` if artifacts cannot be read, `2` for invalid ID |
-| `eval gate` | `0` when all threshold assertions pass | `1` if assertions fail, `2` for config/invalid ID errors |
+| `eval compare` | `0` when both artifacts compare and the behavioral hard gate passes | `1` for a hard regression or unreadable artifact, `2` for invalid ID |
+| `eval gate` | `0` when correctness, safety, and hard threshold assertions pass | `1` for any hard failure, `2` for config/invalid ID errors |
 
 ---
 
@@ -302,7 +302,79 @@ A dispatched worker's receipt reports `sessionId: null` and writes no session ar
 
 ### Scenario aggregates
 
-`aggregates` groups verdicts by `scenarioId`, sets `k` to the trial count, and records `passAtK` (any trial passed) and `passPowK` (every trial passed) alongside a mean and a nearest-rank p90 for each numeric metric, with the set of sources observed for it. At `k: 1` the mean and p90 are the same observed value.
+`aggregates` groups verdicts by `scenarioId`, sets `k` to the trial count, and records `passAtK` (any trial passed) and `passPowK` (every trial passed). Each tracked numeric metric reports observation, measured, and unmeasured counts, mean, min, max, nearest-rank p90, population variance, standard deviation, and the set of sources observed. A metric with no observation keeps every numeric statistic `null`; it never becomes zero. At `k: 1`, variance and standard deviation are zero only when the value was actually measured.
+
+### Behavioral multi-metric results
+
+A result with a `clio.eval.behavior.v1` verdict also carries the additive
+`clio.eval.behavior.metrics.v1` projection. The projection binds the scenario
+to its role and target/model envelope and records one `number | null`
+observation for each closed metric. The source travels beside every value:
+
+| Family | Metric | Direction | Gate | Source |
+|---|---|---|---|---|
+| correctness | `correctness.taskSolved` | higher | hard | grader |
+| safety | `safety.violations` | lower | hard | behavioral label |
+| behavior | `behavior.labelViolations` | lower | informational | behavioral labels |
+| efficiency | `efficiency.toolCalls` | lower | informational | terminal tool events |
+| exploration | `exploration.unnecessaryReads` | lower | informational | read observation counters |
+| delegation | `delegation.quality` | higher | informational | behavioral label |
+| claims | `claims.unsupported` | lower | informational | grader |
+| tokens | `tokens.total` | lower | informational | runner usage stream |
+| latency | `latency.wallMs` | lower | informational | monotonic runner clock |
+| cost | `cost.usd` | lower | informational | sealed receipt |
+
+Label metrics are numeric projections only when the category is `satisfied` or
+`violated`; `unknown` and `unmeasured` remain null. A missing grader, token
+stream, receipt, read observation, or category label likewise remains null.
+The projection therefore records observation coverage without claiming that
+silence was success, safety, or zero cost.
+
+### Behavioral comparisons and variance
+
+`eval compare` reduces the behavioral projection independently for every
+scenario, role, target id, and model id. Each row contains the baseline and
+candidate distributions, coverage, mean delta, variance delta, and two closed
+classifications: `improved`, `regressed`, `unchanged`, or `incomparable` for the
+mean and for variability. Lower variance is the improvement direction for the
+variability classification.
+
+Correctness and safety rows are hard. A measured regression fails the hard
+gate even when pass rate, tokens, latency, or cost improved. Losing a
+correctness or safety measurement that existed in the baseline is also a hard
+failure; a category explicitly unmeasured on both sides stays incomparable but
+does not invent a regression. Other families remain visible informational
+tradeoffs. `--metric` accepts either a behavioral metric or family as well as a
+tracked metric, but filtering displayed rows never filters the hard-gate
+decision.
+
+Comparison output supports `text`, `json`, `md`, and `junit`. All four carry
+the same hard-gate result and closed classifications. JUnit failures represent
+only hard behavioral failures; an informational efficiency or cost regression
+is emitted as testcase output rather than a failed testcase.
+
+### Hard thresholds and informational budgets
+
+Suite and external threshold files keep two separate assertion lists:
+
+```yaml
+thresholds:
+  fail:
+    - metric: task.solved
+      op: eq
+      value: false
+  informational:
+    - metric: cost.usd
+      op: gt
+      value: 0.25
+```
+
+`fail` is the backwards-compatible hard list. A firing or unresolved hard
+assertion makes `eval run` or `eval gate` exit nonzero. `informational` uses the
+same typed predicates and reports every firing budget or missing measurement,
+but never changes the exit status. `eval gate` additionally evaluates the
+baseline-to-candidate correctness and safety hard gate, so a cheaper candidate
+cannot offset a task or safety regression.
 
 ### `--trials N`
 
@@ -320,7 +392,7 @@ baseline serving: target=mini runtime=llamacpp model=... server_build=b226-2115b
 candidate serving: ...
 ```
 
-`--allow-config-drift` proceeds and labels the comparison `config drift: allowed`. There is a second refusal that has no override: a metric whose baseline distribution contains an `estimated` observation and whose candidate does not, or the reverse, raises `EvalTrackedMetricSourceMismatchError` rather than printing a delta, because subtracting a measurement from an estimate produces a number that looks like evidence and is not. `--metric <name>` filters the tracked-metric rows, accepts `expectedColdReasons` or a specific `expectedColdReasons.<reason>`, and errors when the name matches nothing.
+`--allow-config-drift` proceeds and labels the comparison `config drift: allowed`. There is a second refusal that has no override: a metric whose baseline distribution contains an `estimated` observation and whose candidate does not, or the reverse, raises `EvalTrackedMetricSourceMismatchError` rather than printing a delta, because subtracting a measurement from an estimate produces a number that looks like evidence and is not. `--metric <name>` filters tracked or behavioral rows, accepts `expectedColdReasons`, a specific `expectedColdReasons.<reason>`, a behavioral family, or a behavioral metric, and errors when the name matches nothing.
 
 ---
 

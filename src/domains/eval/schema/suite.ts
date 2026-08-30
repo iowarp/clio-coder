@@ -235,6 +235,8 @@ export interface EvalSuiteTaskV2 {
 
 export interface EvalSuiteThresholdsV2 {
 	fail: EvalMetricAssertion[];
+	/** Budget notices are reported but never change the command exit status. */
+	informational?: EvalMetricAssertion[];
 }
 
 export interface EvalSuiteV2 {

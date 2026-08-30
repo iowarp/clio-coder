@@ -2,10 +2,10 @@ import { resolve } from "node:path";
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir } from "../core/xdg.js";
 import { loadEvalArtifactV4, writeEvalArtifactV4 } from "../domains/eval/artifacts/store.js";
-import { compareEvalArtifactsV4, renderEvalComparisonV4 } from "../domains/eval/compare/compare.js";
-import { evaluateGate, renderGateFailure } from "../domains/eval/compare/gates.js";
+import { compareEvalArtifactsV4 } from "../domains/eval/compare/compare.js";
+import { evaluateGate, renderGateFailure, renderInformationalBudget } from "../domains/eval/compare/gates.js";
 import { loadThresholds } from "../domains/eval/compare/thresholds.js";
-
+import { type EvalComparisonReportFormat, renderEvalComparisonReportV1 } from "../domains/eval/reports/comparison.js";
 import { renderEvalJsonReportV4 } from "../domains/eval/reports/json.js";
 import { renderEvalJunitReportV4 } from "../domains/eval/reports/junit.js";
 import { renderEvalMarkdownReportV4 } from "../domains/eval/reports/markdown.js";
@@ -25,7 +25,7 @@ Commands:
 	  clio-coder eval run --suite <suite.yaml> [--trials <n>] [--target <id>] [--model <id>] [--out <path>] [--clio-coder-entry <path>]
 	  clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-coder-entry <path>]
   clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
-	  clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--allow-config-drift]
+	  clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--format text|json|md|junit] [--allow-config-drift]
   clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 `;
 
@@ -139,6 +139,11 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			throw new Error(`unexpected eval report argument: ${arg}`);
 		}
 		if (parsed.command === "compare") {
+			if (arg === "--format") {
+				parsed.format = comparisonFormat(requiredValue(args, index, "--format"));
+				index += 1;
+				continue;
+			}
 			if (arg === "--metric") {
 				parsed.metric = requiredValue(args, index, "--metric");
 				index += 1;
@@ -250,6 +255,10 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 			process.stdout.write(`gate: fail (${gate.failures.length} threshold failure)\n`);
 			for (const failure of gate.failures) process.stdout.write(renderGateFailure(failure));
 		}
+		if (gate !== null && gate.informational.length > 0) {
+			process.stdout.write(`informational budgets: ${gate.informational.length} notice\n`);
+			for (const finding of gate.informational) process.stdout.write(renderInformationalBudget(finding));
+		}
 		return artifact.summary.failed === 0 && (gate === null || gate.pass) ? 0 : 1;
 	} catch (error) {
 		return handleEvalLoadError(error, 1);
@@ -275,15 +284,12 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 		const dataDir = clioDataDir();
 		const baseline = await loadEvalArtifactV4(dataDir, baselineEvalId);
 		const candidate = await loadEvalArtifactV4(dataDir, candidateEvalId);
-		process.stdout.write(
-			renderEvalComparisonV4(
-				compareEvalArtifactsV4(baseline, candidate, {
-					allowConfigDrift: parsed.allowConfigDrift,
-					...(parsed.metric === undefined ? {} : { metric: parsed.metric }),
-				}),
-			),
-		);
-		return 0;
+		const summary = compareEvalArtifactsV4(baseline, candidate, {
+			allowConfigDrift: parsed.allowConfigDrift,
+			...(parsed.metric === undefined ? {} : { metric: parsed.metric }),
+		});
+		process.stdout.write(renderEvalComparisonReportV1(summary, parsed.format as EvalComparisonReportFormat));
+		return summary.hardGate.pass ? 0 : 1;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return error instanceof InvalidIdError ? 2 : 1;
@@ -294,18 +300,29 @@ async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
 		const candidate = await loadEvalArtifactV4(dataDir, parsed.evalId ?? "");
-		await loadEvalArtifactV4(dataDir, parsed.baseline ?? "");
+		const baseline = await loadEvalArtifactV4(dataDir, parsed.baseline ?? "");
 		const thresholds =
 			parsed.thresholds === undefined
-				? { fail: [{ metric: "result.pass", op: "eq" as const, value: false }] }
+				? { fail: [{ metric: "result.pass", op: "eq" as const, value: false }], informational: [] }
 				: loadThresholds(parsed.thresholds);
 		const gate = evaluateGate(candidate, thresholds);
-		if (gate.pass) {
+		const comparison = compareEvalArtifactsV4(baseline, candidate);
+		if (gate.informational.length > 0) {
+			process.stdout.write(`informational budgets: ${gate.informational.length} notice\n`);
+			for (const finding of gate.informational) process.stdout.write(renderInformationalBudget(finding));
+		}
+		if (gate.pass && comparison.hardGate.pass) {
 			process.stdout.write("gate: pass\n");
 			return 0;
 		}
-		process.stdout.write(`gate: fail (${gate.failures.length} threshold failure)\n`);
+		const failureCount = gate.failures.length + comparison.hardGate.failures.length;
+		process.stdout.write(`gate: fail (${failureCount} hard failure)\n`);
 		for (const failure of gate.failures) process.stdout.write(renderGateFailure(failure));
+		for (const failure of comparison.hardGate.failures) {
+			process.stdout.write(
+				`  ${failure.metric} [${failure.scenarioId}:${failure.role}:${failure.target.id}/${failure.target.model ?? "none"}]: ${failure.change} (hard behavioral gate)\n`,
+			);
+		}
 		return 1;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
@@ -348,4 +365,9 @@ function positiveInteger(value: string, flag: string): number {
 function reportFormat(value: string): EvalReportFormat {
 	if (value === "text" || value === "json" || value === "md" || value === "swe-jsonl" || value === "junit") return value;
 	throw new Error("--format must be text, json, md, swe-jsonl, or junit");
+}
+
+function comparisonFormat(value: string): EvalComparisonReportFormat {
+	if (value === "text" || value === "json" || value === "md" || value === "junit") return value;
+	throw new Error("eval compare --format must be text, json, md, or junit");
 }
