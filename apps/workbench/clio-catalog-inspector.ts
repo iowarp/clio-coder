@@ -1,0 +1,358 @@
+/**
+ * Bounded adapters for Clio's public read-only resource catalogs.
+ *
+ * The upstream JSON shapes contain fields that must not become browser data:
+ * skill bodies and hashes, native user paths, arbitrary diagnostics, and source
+ * URLs. This module projects only the small inventory needed by the graphical
+ * catalog. Each command fails independently so one damaged catalog cannot hide
+ * the others.
+ */
+
+import { resolve } from "node:path";
+import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
+import {
+	CATALOG_AGENT_AUDIENCES,
+	CATALOG_AGENT_CAPABILITIES,
+	CATALOG_AGENT_CATEGORIES,
+	CATALOG_AGENT_LATENCIES,
+	CATALOG_AGENT_SOURCES,
+	CATALOG_AUDIT_STATES,
+	CATALOG_CONTEXT_TIERS,
+	CATALOG_LIBRARY_KINDS,
+	CATALOG_LIBRARY_ORIGINS,
+	CATALOG_RESOURCE_SCOPES,
+	CATALOG_SKILL_SOURCES,
+	MAX_WIRE_CATALOG_AGENTS,
+	MAX_WIRE_CATALOG_LABELS,
+	MAX_WIRE_CATALOG_LIBRARY_ENTRIES,
+	MAX_WIRE_CATALOG_SKILLS,
+	type WireCatalogAgent,
+	type WireCatalogAgentCollection,
+	type WireCatalogInspection,
+	type WireCatalogLibraryCollection,
+	type WireCatalogLibraryEntry,
+	type WireCatalogSkill,
+	type WireCatalogSkillCollection,
+} from "./src/protocol.ts";
+
+export const DEFAULT_CATALOG_INSPECT_TIMEOUT_MS = 12_000;
+export const MAX_CATALOG_INSPECT_STDOUT_BYTES = 2 * 1024 * 1024;
+export const MAX_CATALOG_INSPECT_STDERR_BYTES = 64 * 1024;
+const MAX_RAW_CATALOG_ITEMS = 2_048;
+const MAX_CATALOG_NUMBER = 1_000_000;
+const encoder = new TextEncoder();
+
+export interface ClioCatalogInspector {
+	inspect(trustedRoot: string): Promise<WireCatalogInspection>;
+}
+
+export interface ClioCliCatalogInspectorOptions {
+	readonly executable?: string;
+	/** Test/development prefix only. Browser commands can never influence argv. */
+	readonly prefixArgs?: readonly string[];
+	readonly timeoutMs?: number;
+	readonly maximumStdoutBytes?: number;
+	readonly maximumStderrBytes?: number;
+	readonly now?: () => number;
+	readonly log?: (message: string) => void;
+}
+
+export class ClioCatalogProjectionError extends Error {
+	override readonly name = "ClioCatalogProjectionError";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+function isOneOf<const T extends readonly string[]>(value: unknown, choices: T): value is T[number] {
+	return typeof value === "string" && choices.includes(value as T[number]);
+}
+
+function integer(value: unknown): number | null {
+	return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_CATALOG_NUMBER
+		? value as number
+		: null;
+}
+
+function exactText(value: unknown, maximumBytes: number): string | null {
+	if (typeof value !== "string" || value.length === 0 || value.trim() !== value) return null;
+	if (encoder.encode(value).byteLength > maximumBytes) return null;
+	for (const character of value) {
+		const code = character.codePointAt(0) ?? 0;
+		if (code <= 0x1f || code === 0x7f) return null;
+	}
+	return value;
+}
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+	if (encoder.encode(value).byteLength <= maximumBytes) return value;
+	const marker = "…";
+	const markerBytes = encoder.encode(marker).byteLength;
+	let output = "";
+	let bytes = 0;
+	for (const character of value) {
+		const characterBytes = encoder.encode(character).byteLength;
+		if (bytes + characterBytes + markerBytes > maximumBytes) break;
+		output += character;
+		bytes += characterBytes;
+	}
+	return `${output.trimEnd()}${marker}`;
+}
+
+function description(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const normalized = value.replaceAll(/[\u0000-\u001f\u007f\s]+/gu, " ").trim();
+	if (normalized.length === 0) return null;
+	return truncateUtf8(normalized, 512);
+}
+
+function labels(value: unknown): readonly string[] | null {
+	// The wire type has no per-agent label truncation marker, so reject an
+	// over-wide row rather than silently presenting an incomplete binding list.
+	if (!Array.isArray(value) || value.length > MAX_WIRE_CATALOG_LABELS) return null;
+	const projected: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of value) {
+		const label = exactText(entry, 64);
+		if (label === null) return null;
+		if (seen.has(label)) continue;
+		seen.add(label);
+		projected.push(label);
+	}
+	return projected;
+}
+
+function projectAgent(value: unknown): WireCatalogAgent | null {
+	if (!isRecord(value) || !isRecord(value.budget) || !isRecord(value.resultContract)) return null;
+	const id = exactText(value.id, 128);
+	const name = exactText(value.name, 128);
+	const summary = description(value.description);
+	const version = integer(value.version);
+	const tags = labels(value.tags);
+	const skills = labels(value.skills);
+	const tools = labels(value.tools);
+	const toolCalls = integer(value.budget.toolCalls);
+	const readReserve = integer(value.budget.readReserve);
+	const resultKind = exactText(value.resultContract.kind, 128);
+	if (
+		id === null || name === null || summary === null || version === null || tags === null || skills === null ||
+		tools === null || toolCalls === null || readReserve === null || resultKind === null ||
+		typeof value.budget.synthesis !== "boolean" || !isOneOf(value.source, CATALOG_AGENT_SOURCES) ||
+		!isOneOf(value.audience, CATALOG_AGENT_AUDIENCES) || !isOneOf(value.category, CATALOG_AGENT_CATEGORIES) ||
+		!isOneOf(value.capabilityClass, CATALOG_AGENT_CAPABILITIES) ||
+		!isOneOf(value.latencyClass, CATALOG_AGENT_LATENCIES) ||
+		!isOneOf(value.projectContextTier, CATALOG_CONTEXT_TIERS)
+	) return null;
+	let maximumToolCalls: number | null = null;
+	let maximumReadReserve: number | null = null;
+	if (value.budget.maximum !== undefined) {
+		if (!isRecord(value.budget.maximum)) return null;
+		maximumToolCalls = integer(value.budget.maximum.toolCalls);
+		maximumReadReserve = integer(value.budget.maximum.readReserve);
+		if (maximumToolCalls === null || maximumReadReserve === null) return null;
+	}
+	return {
+		id,
+		name,
+		description: summary,
+		version,
+		source: value.source,
+		audience: value.audience,
+		category: value.category,
+		capability: value.capabilityClass,
+		latency: value.latencyClass,
+		contextTier: value.projectContextTier,
+		tags,
+		skills,
+		tools,
+		resultKind,
+		budget: {
+			toolCalls,
+			readReserve,
+			synthesis: value.budget.synthesis,
+			maximumToolCalls,
+			maximumReadReserve,
+		},
+	};
+}
+
+function uniqueBy<T>(items: readonly T[], key: (item: T) => string): readonly T[] {
+	const unique = new Map<string, T>();
+	for (const item of items) {
+		const itemKey = key(item);
+		if (!unique.has(itemKey)) unique.set(itemKey, item);
+	}
+	return [...unique.values()];
+}
+
+export function projectAgentCatalog(value: unknown): WireCatalogAgentCollection {
+	if (!Array.isArray(value) || value.length > MAX_RAW_CATALOG_ITEMS) {
+		throw new ClioCatalogProjectionError("Clio returned an invalid agent catalog.");
+	}
+	const candidates = value.map(projectAgent).filter((entry): entry is WireCatalogAgent => entry !== null);
+	const projected = uniqueBy(candidates, (entry) => entry.id);
+	const items = projected.slice(0, MAX_WIRE_CATALOG_AGENTS);
+	return {
+		availability: "available",
+		items,
+		truncated: candidates.length !== value.length || projected.length !== candidates.length ||
+			projected.length > items.length,
+		issueCount: 0,
+	};
+}
+
+function diagnosticCount(value: unknown): number | null {
+	return Array.isArray(value) && value.length <= MAX_CATALOG_NUMBER ? value.length : null;
+}
+
+function projectSkill(value: unknown): WireCatalogSkill | null {
+	if (!isRecord(value)) return null;
+	const name = exactText(value.name, 128);
+	const summary = description(value.description);
+	const precedence = integer(value.precedence);
+	const issueCount = diagnosticCount(value.diagnostics);
+	if (
+		name === null || summary === null || precedence === null || issueCount === null ||
+		!isOneOf(value.scope, CATALOG_RESOURCE_SCOPES) || !isOneOf(value.source, CATALOG_SKILL_SOURCES) ||
+		typeof value.trusted !== "boolean" || typeof value.disableModelInvocation !== "boolean"
+	) return null;
+	return {
+		name,
+		description: summary,
+		scope: value.scope,
+		source: value.source,
+		trusted: value.trusted,
+		precedence,
+		modelInvocable: !value.disableModelInvocation,
+		issueCount,
+	};
+}
+
+export function projectSkillCatalog(value: unknown): WireCatalogSkillCollection {
+	if (!isRecord(value) || !Array.isArray(value.skills) || value.skills.length > MAX_RAW_CATALOG_ITEMS) {
+		throw new ClioCatalogProjectionError("Clio returned an invalid skill catalog.");
+	}
+	const issues = diagnosticCount(value.diagnostics);
+	if (issues === null) throw new ClioCatalogProjectionError("Clio returned invalid skill catalog diagnostics.");
+	const candidates = value.skills.map(projectSkill).filter((entry): entry is WireCatalogSkill => entry !== null);
+	const projected = uniqueBy(candidates, (entry) => entry.name);
+	const items = projected.slice(0, MAX_WIRE_CATALOG_SKILLS);
+	return {
+		availability: "available",
+		items,
+		truncated: candidates.length !== value.skills.length || projected.length !== candidates.length ||
+			projected.length > items.length,
+		issueCount: issues,
+	};
+}
+
+function projectLibraryEntry(value: unknown): WireCatalogLibraryEntry | null {
+	if (!isRecord(value)) return null;
+	const name = exactText(value.name, 128);
+	const summary = description(value.description);
+	const version = value.version === undefined ? null : exactText(value.version, 64);
+	const category = value.category === undefined ? null : exactText(value.category, 64);
+	const audit = value.audit === undefined ? "not-reported" : value.audit;
+	if (
+		name === null || summary === null || (value.version !== undefined && version === null) ||
+		(value.category !== undefined && category === null) || !isOneOf(value.kind, CATALOG_LIBRARY_KINDS) ||
+		!isOneOf(value.origin, CATALOG_LIBRARY_ORIGINS) || !isOneOf(audit, CATALOG_AUDIT_STATES)
+	) return null;
+	return {
+		kind: value.kind,
+		name,
+		description: summary,
+		version,
+		category,
+		origin: value.origin,
+		audit,
+	};
+}
+
+export function projectLibraryCatalog(value: unknown): WireCatalogLibraryCollection {
+	if (!isRecord(value) || !Array.isArray(value.entries) || value.entries.length > MAX_RAW_CATALOG_ITEMS) {
+		throw new ClioCatalogProjectionError("Clio returned an invalid library catalog.");
+	}
+	const issues = diagnosticCount(value.diagnostics);
+	if (issues === null) throw new ClioCatalogProjectionError("Clio returned invalid library catalog diagnostics.");
+	const candidates = value.entries.map(projectLibraryEntry).filter((
+		entry,
+	): entry is WireCatalogLibraryEntry => entry !== null);
+	const projected = uniqueBy(candidates, (entry) => `${entry.kind}:${entry.name}`);
+	const items = projected.slice(0, MAX_WIRE_CATALOG_LIBRARY_ENTRIES);
+	return {
+		availability: "available",
+		items,
+		truncated: candidates.length !== value.entries.length || projected.length !== candidates.length ||
+			projected.length > items.length,
+		issueCount: issues,
+	};
+}
+
+interface FailedCatalogCollection {
+	readonly availability: "failed";
+	readonly items: readonly never[];
+	readonly truncated: false;
+	readonly issueCount: 0;
+}
+
+function failedCollection(): FailedCatalogCollection {
+	return { availability: "failed", items: [], truncated: false, issueCount: 0 };
+}
+
+function failureCode(error: unknown): string {
+	if (error instanceof ClioReadCommandError) return error.code;
+	if (error instanceof ClioCatalogProjectionError) return "invalid-shape";
+	return "internal";
+}
+
+export class ClioCliCatalogInspector implements ClioCatalogInspector {
+	readonly #runner: ClioReadCommandRunner;
+	readonly #now: () => number;
+	readonly #log: (message: string) => void;
+
+	constructor(options: ClioCliCatalogInspectorOptions = {}) {
+		this.#runner = new ClioReadCommandRunner({
+			executable: options.executable,
+			prefixArgs: options.prefixArgs,
+			timeoutMs: options.timeoutMs ?? DEFAULT_CATALOG_INSPECT_TIMEOUT_MS,
+			maximumStdoutBytes: options.maximumStdoutBytes ?? MAX_CATALOG_INSPECT_STDOUT_BYTES,
+			maximumStderrBytes: options.maximumStderrBytes ?? MAX_CATALOG_INSPECT_STDERR_BYTES,
+		});
+		this.#now = options.now ?? Date.now;
+		this.#log = options.log ?? (() => undefined);
+	}
+
+	async #collection<T>(
+		root: string,
+		label: string,
+		args: readonly string[],
+		project: (value: unknown) => T,
+	): Promise<T | ReturnType<typeof failedCollection>> {
+		try {
+			return project(await this.#runner.runJson(root, args));
+		} catch (error) {
+			this.#log(`Clio ${label} catalog inspection failed (${failureCode(error)}).`);
+			return failedCollection();
+		}
+	}
+
+	async inspect(trustedRoot: string): Promise<WireCatalogInspection> {
+		const root = resolve(trustedRoot);
+		const [agents, skills, library] = await Promise.all([
+			this.#collection(root, "agent", ["agents", "--json"], projectAgentCatalog),
+			this.#collection(root, "skill", ["skills", "list", "--json"], projectSkillCatalog),
+			this.#collection(root, "library", ["library", "list", "--json"], projectLibraryCatalog),
+		]);
+		return {
+			inspectedAt: new Date(this.#now()).toISOString(),
+			agents,
+			skills,
+			library,
+			verifiers: { availability: "typed-interface-required" },
+		};
+	}
+}

@@ -41,6 +41,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"settings.get",
 	"settings.patch",
 	"config.inspect",
+	"catalog.inspect",
 	"targets.list",
 	"targets.probe",
 	"autonomy.set",
@@ -214,6 +215,10 @@ export interface ConfigInspectPayload {
 	readonly projectId: string;
 }
 
+export interface CatalogInspectPayload {
+	readonly projectId: string;
+}
+
 export interface TargetsListPayload {
 	readonly projectId: string;
 }
@@ -251,6 +256,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "settings.get": SettingsGetPayload;
 	readonly "settings.patch": SettingsPatchPayload;
 	readonly "config.inspect": ConfigInspectPayload;
+	readonly "catalog.inspect": CatalogInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
 	readonly "autonomy.set": AutonomySetPayload;
@@ -279,6 +285,7 @@ export const SERVER_EVENT_KINDS = [
 	"session.list",
 	"settings.state",
 	"config.state",
+	"catalog.state",
 	"targets.state",
 	"targets.probed",
 	"turn.started",
@@ -530,6 +537,140 @@ export interface WireConfigInspection {
 	readonly issuesTruncated: boolean;
 }
 
+export const CATALOG_AVAILABILITY = ["available", "failed"] as const;
+export type WireCatalogAvailability = (typeof CATALOG_AVAILABILITY)[number];
+export const CATALOG_AGENT_SOURCES = ["builtin", "extension", "user", "project", "custom"] as const;
+export type WireCatalogAgentSource = (typeof CATALOG_AGENT_SOURCES)[number];
+export const CATALOG_AGENT_AUDIENCES = ["base", "shadow", "custom", "internal"] as const;
+export type WireCatalogAgentAudience = (typeof CATALOG_AGENT_AUDIENCES)[number];
+export const CATALOG_AGENT_CATEGORIES = [
+	"explore",
+	"plan",
+	"research",
+	"implement",
+	"quality",
+	"science",
+	"evolution",
+	"operations",
+	"internal",
+] as const;
+export type WireCatalogAgentCategory = (typeof CATALOG_AGENT_CATEGORIES)[number];
+export const CATALOG_AGENT_CAPABILITIES = [
+	"read-only",
+	"artifact-write",
+	"workspace-edit",
+	"verification",
+	"orchestration",
+	"internal",
+] as const;
+export type WireCatalogAgentCapability = (typeof CATALOG_AGENT_CAPABILITIES)[number];
+export const CATALOG_AGENT_LATENCIES = ["fast", "balanced", "deep"] as const;
+export type WireCatalogAgentLatency = (typeof CATALOG_AGENT_LATENCIES)[number];
+export const CATALOG_CONTEXT_TIERS = ["none", "bounded"] as const;
+export type WireCatalogContextTier = (typeof CATALOG_CONTEXT_TIERS)[number];
+export const CATALOG_RESOURCE_SCOPES = ["package", "user", "project", "cli"] as const;
+export type WireCatalogResourceScope = (typeof CATALOG_RESOURCE_SCOPES)[number];
+export const CATALOG_SKILL_SOURCES = [
+	"clio",
+	"agents",
+	"claude",
+	"codex",
+	"copilot",
+	"opencode",
+	"extension",
+	"path",
+	"cli",
+] as const;
+export type WireCatalogSkillSource = (typeof CATALOG_SKILL_SOURCES)[number];
+export const CATALOG_LIBRARY_KINDS = ["skill", "agent", "prompt", "fleet"] as const;
+export type WireCatalogLibraryKind = (typeof CATALOG_LIBRARY_KINDS)[number];
+export const CATALOG_LIBRARY_ORIGINS = ["catalog", "index"] as const;
+export type WireCatalogLibraryOrigin = (typeof CATALOG_LIBRARY_ORIGINS)[number];
+export const CATALOG_AUDIT_STATES = ["pass", "warn", "fail", "unknown", "not-reported"] as const;
+export type WireCatalogAuditState = (typeof CATALOG_AUDIT_STATES)[number];
+
+export const MAX_WIRE_CATALOG_AGENTS = 64;
+export const MAX_WIRE_CATALOG_SKILLS = 64;
+export const MAX_WIRE_CATALOG_LIBRARY_ENTRIES = 64;
+export const MAX_WIRE_CATALOG_LABELS = 32;
+
+export interface WireCatalogAgentBudget {
+	readonly toolCalls: number;
+	readonly readReserve: number;
+	readonly synthesis: boolean;
+	readonly maximumToolCalls: number | null;
+	readonly maximumReadReserve: number | null;
+}
+
+export interface WireCatalogAgent {
+	readonly id: string;
+	readonly name: string;
+	readonly description: string;
+	readonly version: number;
+	readonly source: WireCatalogAgentSource;
+	readonly audience: WireCatalogAgentAudience;
+	readonly category: WireCatalogAgentCategory;
+	readonly capability: WireCatalogAgentCapability;
+	readonly latency: WireCatalogAgentLatency;
+	readonly contextTier: WireCatalogContextTier;
+	readonly tags: readonly string[];
+	readonly skills: readonly string[];
+	readonly tools: readonly string[];
+	readonly resultKind: string;
+	readonly budget: WireCatalogAgentBudget;
+}
+
+export interface WireCatalogSkill {
+	readonly name: string;
+	readonly description: string;
+	readonly scope: WireCatalogResourceScope;
+	readonly source: WireCatalogSkillSource;
+	readonly trusted: boolean;
+	readonly precedence: number;
+	readonly modelInvocable: boolean;
+	readonly issueCount: number;
+}
+
+export interface WireCatalogLibraryEntry {
+	readonly kind: WireCatalogLibraryKind;
+	readonly name: string;
+	readonly description: string;
+	readonly version: string | null;
+	readonly category: string | null;
+	readonly origin: WireCatalogLibraryOrigin;
+	readonly audit: WireCatalogAuditState;
+}
+
+export interface WireCatalogAgentCollection {
+	readonly availability: WireCatalogAvailability;
+	readonly items: readonly WireCatalogAgent[];
+	readonly truncated: boolean;
+	readonly issueCount: number;
+}
+
+export interface WireCatalogSkillCollection {
+	readonly availability: WireCatalogAvailability;
+	readonly items: readonly WireCatalogSkill[];
+	readonly truncated: boolean;
+	readonly issueCount: number;
+}
+
+export interface WireCatalogLibraryCollection {
+	readonly availability: WireCatalogAvailability;
+	readonly items: readonly WireCatalogLibraryEntry[];
+	readonly truncated: boolean;
+	readonly issueCount: number;
+}
+
+export interface WireCatalogInspection {
+	readonly inspectedAt: string;
+	readonly agents: WireCatalogAgentCollection;
+	readonly skills: WireCatalogSkillCollection;
+	readonly library: WireCatalogLibraryCollection;
+	/** Clio currently offers no typed verifier listing; Workbench never scrapes its table. */
+	readonly verifiers: Readonly<{ availability: "typed-interface-required" }>;
+}
+
 export interface WireTarget {
 	readonly id: string;
 	readonly runtime: string;
@@ -559,6 +700,7 @@ export interface WireProjectWorkspace {
 	readonly deleteChallenge: WireDeleteChallenge | null;
 	readonly settings: WireSettingsState | null;
 	readonly configInspection: WireConfigInspection | null;
+	readonly catalogInspection: WireCatalogInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -608,6 +750,10 @@ export interface SettingsStatePayload {
 
 export interface ConfigStatePayload {
 	readonly inspection: WireConfigInspection;
+}
+
+export interface CatalogStatePayload {
+	readonly inspection: WireCatalogInspection;
 }
 
 export interface TargetsStatePayload {
@@ -713,6 +859,7 @@ export interface ServerEventPayloadByKind {
 	readonly "session.list": SessionListPayload_;
 	readonly "settings.state": SettingsStatePayload;
 	readonly "config.state": ConfigStatePayload;
+	readonly "catalog.state": CatalogStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
@@ -1005,6 +1152,7 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 		case "session.list":
 		case "settings.get":
 		case "config.inspect":
+		case "catalog.inspect":
 		case "targets.list": {
 			const record = expectExactKeys(value, label, ["projectId"]);
 			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
@@ -1600,6 +1748,171 @@ function validateConfigInspection(value: unknown, label: string): WireConfigInsp
 	};
 }
 
+function expectCatalogCount(value: unknown, label: string): number {
+	const count = expectInteger(value, label);
+	if (count > 1_000_000) invalid(`${label} exceeds the catalog numeric bound`);
+	return count;
+}
+
+function validateCatalogLabels(value: unknown, label: string): readonly string[] {
+	return expectArray(
+		value,
+		label,
+		MAX_WIRE_CATALOG_LABELS,
+		(entry, entryLabel) => expectPresentationText(entry, entryLabel, 64),
+	);
+}
+
+function validateCatalogAgentBudget(value: unknown, label: string): WireCatalogAgentBudget {
+	const record = expectExactKeys(value, label, [
+		"toolCalls",
+		"readReserve",
+		"synthesis",
+		"maximumToolCalls",
+		"maximumReadReserve",
+	]);
+	return {
+		toolCalls: expectCatalogCount(record.toolCalls, `${label}.toolCalls`),
+		readReserve: expectCatalogCount(record.readReserve, `${label}.readReserve`),
+		synthesis: expectBoolean(record.synthesis, `${label}.synthesis`),
+		maximumToolCalls: record.maximumToolCalls === null
+			? null
+			: expectCatalogCount(record.maximumToolCalls, `${label}.maximumToolCalls`),
+		maximumReadReserve: record.maximumReadReserve === null
+			? null
+			: expectCatalogCount(record.maximumReadReserve, `${label}.maximumReadReserve`),
+	};
+}
+
+function validateCatalogAgent(value: unknown, label: string): WireCatalogAgent {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"name",
+		"description",
+		"version",
+		"source",
+		"audience",
+		"category",
+		"capability",
+		"latency",
+		"contextTier",
+		"tags",
+		"skills",
+		"tools",
+		"resultKind",
+		"budget",
+	]);
+	return {
+		id: expectPresentationText(record.id, `${label}.id`, 128),
+		name: expectPresentationText(record.name, `${label}.name`, 128),
+		description: expectPresentationText(record.description, `${label}.description`, 512),
+		version: expectCatalogCount(record.version, `${label}.version`),
+		source: expectEnum(record.source, `${label}.source`, CATALOG_AGENT_SOURCES),
+		audience: expectEnum(record.audience, `${label}.audience`, CATALOG_AGENT_AUDIENCES),
+		category: expectEnum(record.category, `${label}.category`, CATALOG_AGENT_CATEGORIES),
+		capability: expectEnum(record.capability, `${label}.capability`, CATALOG_AGENT_CAPABILITIES),
+		latency: expectEnum(record.latency, `${label}.latency`, CATALOG_AGENT_LATENCIES),
+		contextTier: expectEnum(record.contextTier, `${label}.contextTier`, CATALOG_CONTEXT_TIERS),
+		tags: validateCatalogLabels(record.tags, `${label}.tags`),
+		skills: validateCatalogLabels(record.skills, `${label}.skills`),
+		tools: validateCatalogLabels(record.tools, `${label}.tools`),
+		resultKind: expectPresentationText(record.resultKind, `${label}.resultKind`, 128),
+		budget: validateCatalogAgentBudget(record.budget, `${label}.budget`),
+	};
+}
+
+function validateCatalogSkill(value: unknown, label: string): WireCatalogSkill {
+	const record = expectExactKeys(value, label, [
+		"name",
+		"description",
+		"scope",
+		"source",
+		"trusted",
+		"precedence",
+		"modelInvocable",
+		"issueCount",
+	]);
+	return {
+		name: expectPresentationText(record.name, `${label}.name`, 128),
+		description: expectPresentationText(record.description, `${label}.description`, 512),
+		scope: expectEnum(record.scope, `${label}.scope`, CATALOG_RESOURCE_SCOPES),
+		source: expectEnum(record.source, `${label}.source`, CATALOG_SKILL_SOURCES),
+		trusted: expectBoolean(record.trusted, `${label}.trusted`),
+		precedence: expectCatalogCount(record.precedence, `${label}.precedence`),
+		modelInvocable: expectBoolean(record.modelInvocable, `${label}.modelInvocable`),
+		issueCount: expectCatalogCount(record.issueCount, `${label}.issueCount`),
+	};
+}
+
+function validateCatalogLibraryEntry(value: unknown, label: string): WireCatalogLibraryEntry {
+	const record = expectExactKeys(value, label, [
+		"kind",
+		"name",
+		"description",
+		"version",
+		"category",
+		"origin",
+		"audit",
+	]);
+	return {
+		kind: expectEnum(record.kind, `${label}.kind`, CATALOG_LIBRARY_KINDS),
+		name: expectPresentationText(record.name, `${label}.name`, 128),
+		description: expectPresentationText(record.description, `${label}.description`, 512),
+		version: expectNullablePresentationText(record.version, `${label}.version`, 64),
+		category: expectNullablePresentationText(record.category, `${label}.category`, 64),
+		origin: expectEnum(record.origin, `${label}.origin`, CATALOG_LIBRARY_ORIGINS),
+		audit: expectEnum(record.audit, `${label}.audit`, CATALOG_AUDIT_STATES),
+	};
+}
+
+function validateCatalogCollection<T>(
+	value: unknown,
+	label: string,
+	maximum: number,
+	validateItem: (entry: unknown, label: string) => T,
+): { availability: WireCatalogAvailability; items: readonly T[]; truncated: boolean; issueCount: number } {
+	const record = expectExactKeys(value, label, ["availability", "items", "truncated", "issueCount"]);
+	const availability = expectEnum(record.availability, `${label}.availability`, CATALOG_AVAILABILITY);
+	const items = expectArray(record.items, `${label}.items`, maximum, validateItem);
+	if (availability === "failed" && items.length > 0) invalid(`${label} cannot carry items when its adapter failed`);
+	return {
+		availability,
+		items,
+		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+		issueCount: expectCatalogCount(record.issueCount, `${label}.issueCount`),
+	};
+}
+
+function validateCatalogInspection(value: unknown, label: string): WireCatalogInspection {
+	const record = expectExactKeys(value, label, ["inspectedAt", "agents", "skills", "library", "verifiers"]);
+	const verifiers = expectExactKeys(record.verifiers, `${label}.verifiers`, ["availability"]);
+	if (verifiers.availability !== "typed-interface-required") {
+		invalid(`${label}.verifiers.availability must be typed-interface-required`);
+	}
+	return {
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		agents: validateCatalogCollection(
+			record.agents,
+			`${label}.agents`,
+			MAX_WIRE_CATALOG_AGENTS,
+			validateCatalogAgent,
+		),
+		skills: validateCatalogCollection(
+			record.skills,
+			`${label}.skills`,
+			MAX_WIRE_CATALOG_SKILLS,
+			validateCatalogSkill,
+		),
+		library: validateCatalogCollection(
+			record.library,
+			`${label}.library`,
+			MAX_WIRE_CATALOG_LIBRARY_ENTRIES,
+			validateCatalogLibraryEntry,
+		),
+		verifiers: { availability: "typed-interface-required" },
+	};
+}
+
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
 	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
@@ -1645,6 +1958,7 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		"deleteChallenge",
 		"settings",
 		"configInspection",
+		"catalogInspection",
 		"targets",
 		"targetsTruncated",
 		"processGeneration",
@@ -1675,6 +1989,9 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		configInspection: record.configInspection === null
 			? null
 			: validateConfigInspection(record.configInspection, `${label}.configInspection`),
+		catalogInspection: record.catalogInspection === null
+			? null
+			: validateCatalogInspection(record.catalogInspection, `${label}.catalogInspection`),
 		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
 		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
 		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
@@ -1766,6 +2083,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "config.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return { inspection: validateConfigInspection(record.inspection, `${label}.inspection`) };
+		}
+		case "catalog.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return { inspection: validateCatalogInspection(record.inspection, `${label}.inspection`) };
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -1983,6 +2304,7 @@ const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"session.list",
 	"settings.state",
 	"config.state",
+	"catalog.state",
 	"targets.state",
 	"targets.probed",
 ]);

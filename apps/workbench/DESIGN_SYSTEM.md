@@ -26,6 +26,8 @@ legible record. A supplementary Observatory summarizes that same record without 
   not become presentation data.
 - Workbench may simplify vocabulary, but it must retain access to the exact underlying Clio key or fact where that is
   useful for auditability.
+- Resource inventories enter the browser only through bounded projections. Skill bodies, hashes, native locations,
+  source URLs, requirements, and raw diagnostics stay host-side; a formatted CLI table is not a typed fact source.
 
 ## Information architecture
 
@@ -41,6 +43,10 @@ The desktop shell has three complementary regions and one status strip:
 On desktop, the Project atlas and Observatory must collapse independently. Collapsing either rail removes its layout
 track immediately and restores focus predictably when reopened; it must not cause a full-shell animated reflow while
 text is streaming.
+
+The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio and the Capability
+atlas. These are alternate views of the same bounded workspace, not a second application shell or an invitation to add
+global navigation. They retain a direct path back to the notebook and expose unavailable interfaces honestly.
 
 Below 1180 px the Observatory becomes a contained drawer. Below 790 px the Project atlas becomes a contained drawer as
 well. Both drawers must move focus into the panel, contain Tab, close with Escape or the scrim, restore focus to their

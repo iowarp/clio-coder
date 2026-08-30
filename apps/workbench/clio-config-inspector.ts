@@ -7,6 +7,7 @@
  */
 
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
 import {
 	CONFIG_SETTING_SOURCES,
 	CUSTOMIZATION_CATEGORIES,
@@ -60,8 +61,6 @@ export class ClioConfigInspectError extends Error {
 		super(message);
 	}
 }
-
-class OutputLimitError extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -356,161 +355,60 @@ export function projectConfigInspection(
 	};
 }
 
-async function readBounded(stream: ReadableStream<Uint8Array>, maximumBytes: number): Promise<Uint8Array> {
-	const reader = stream.getReader();
-	const chunks: Uint8Array[] = [];
-	let length = 0;
-	try {
-		for (;;) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			length += value.byteLength;
-			if (length > maximumBytes) throw new OutputLimitError();
-			chunks.push(value);
-		}
-	} finally {
-		reader.releaseLock();
-	}
-	const output = new Uint8Array(length);
-	let offset = 0;
-	for (const chunk of chunks) {
-		output.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return output;
-}
-
-function positiveBound(value: number, label: string, maximum: number): number {
-	if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
-		throw new TypeError(`${label} must be a positive safe integer no greater than ${maximum}.`);
-	}
-	return value;
-}
-
 export class ClioCliConfigInspector implements ClioConfigInspector {
-	readonly #executable: string;
-	readonly #prefixArgs: readonly string[];
-	readonly #timeoutMs: number;
-	readonly #maximumStdoutBytes: number;
-	readonly #maximumStderrBytes: number;
+	readonly #runner: ClioReadCommandRunner;
 	readonly #now: () => number;
 	readonly #log: (message: string) => void;
 
 	constructor(options: ClioCliConfigInspectorOptions = {}) {
-		this.#executable = options.executable ?? "clio-coder";
-		this.#prefixArgs = [...(options.prefixArgs ?? [])];
-		this.#timeoutMs = positiveBound(options.timeoutMs ?? DEFAULT_CONFIG_INSPECT_TIMEOUT_MS, "timeoutMs", 60_000);
-		this.#maximumStdoutBytes = positiveBound(
-			options.maximumStdoutBytes ?? MAX_CONFIG_INSPECT_STDOUT_BYTES,
-			"maximumStdoutBytes",
-			4 * 1024 * 1024,
-		);
-		this.#maximumStderrBytes = positiveBound(
-			options.maximumStderrBytes ?? MAX_CONFIG_INSPECT_STDERR_BYTES,
-			"maximumStderrBytes",
-			256 * 1024,
-		);
+		this.#runner = new ClioReadCommandRunner({
+			executable: options.executable,
+			prefixArgs: options.prefixArgs,
+			timeoutMs: options.timeoutMs ?? DEFAULT_CONFIG_INSPECT_TIMEOUT_MS,
+			maximumStdoutBytes: options.maximumStdoutBytes ?? MAX_CONFIG_INSPECT_STDOUT_BYTES,
+			maximumStderrBytes: options.maximumStderrBytes ?? MAX_CONFIG_INSPECT_STDERR_BYTES,
+		});
 		this.#now = options.now ?? Date.now;
 		this.#log = options.log ?? (() => undefined);
 	}
 
 	async inspect(trustedRoot: string): Promise<WireConfigInspection> {
 		const root = resolve(trustedRoot);
-		let child: Deno.ChildProcess;
+		let parsed: unknown;
 		try {
-			child = new Deno.Command(this.#executable, {
-				args: [...this.#prefixArgs, "config", "inspect", "--json"],
-				cwd: root,
-				stdin: "null",
-				stdout: "piped",
-				stderr: "piped",
-			}).spawn();
-		} catch {
-			throw new ClioConfigInspectError("not-ready", "Workbench could not start Clio's configuration inspector.");
-		}
-
-		let timedOut = false;
-		let stopping = false;
-		let hardStop: ReturnType<typeof setTimeout> | null = null;
-		const stop = () => {
-			if (stopping) return;
-			stopping = true;
-			try {
-				child.kill("SIGTERM");
-			} catch {
-				// The command may already have exited.
+			parsed = await this.#runner.runJson(root, ["config", "inspect", "--json"]);
+		} catch (error) {
+			if (!(error instanceof ClioReadCommandError)) throw error;
+			if (error.code === "spawn") {
+				throw new ClioConfigInspectError("not-ready", "Workbench could not start Clio's configuration inspector.");
 			}
-			hardStop = setTimeout(() => {
-				try {
-					child.kill("SIGKILL");
-				} catch {
-					// The command may already have exited.
-				}
-			}, 300);
-		};
-		const timeout = setTimeout(() => {
-			timedOut = true;
-			stop();
-		}, this.#timeoutMs);
-		const stdout = readBounded(child.stdout, this.#maximumStdoutBytes).catch((error) => {
-			stop();
-			throw error;
-		});
-		const stderr = readBounded(child.stderr, this.#maximumStderrBytes).catch((error) => {
-			stop();
-			throw error;
-		});
-		const [statusResult, stdoutResult, stderrResult] = await Promise.allSettled([child.status, stdout, stderr]);
-		clearTimeout(timeout);
-		if (hardStop !== null) clearTimeout(hardStop);
-
-		if (timedOut) {
-			throw new ClioConfigInspectError("not-ready", "Clio's configuration inspection did not finish in time.");
-		}
-		if (stdoutResult.status === "rejected" || stderrResult.status === "rejected") {
-			const exceeded = (stdoutResult.status === "rejected" && stdoutResult.reason instanceof OutputLimitError) ||
-				(stderrResult.status === "rejected" && stderrResult.reason instanceof OutputLimitError);
-			if (exceeded) {
+			if (error.code === "timeout") {
+				throw new ClioConfigInspectError("not-ready", "Clio's configuration inspection did not finish in time.");
+			}
+			if (error.code === "byte-limit") {
 				throw new ClioConfigInspectError(
 					"internal",
 					"Clio's configuration inspection exceeded Workbench's byte bound.",
 				);
 			}
+			if (error.code === "exit") {
+				const unsupported = /(?:unknown|unsupported).{0,32}(?:command|config)|config.{0,32}(?:unknown|unsupported)/iu
+					.test(error.diagnostic);
+				this.#log(`Clio configuration inspector exited with code ${error.exitCode ?? "unknown"}.`);
+				throw new ClioConfigInspectError(
+					unsupported ? "unsupported" : "not-ready",
+					unsupported
+						? "This Clio version does not provide configuration inspection."
+						: "Clio could not inspect the effective configuration for this project.",
+				);
+			}
+			if (error.code === "encoding") {
+				throw new ClioConfigInspectError("internal", "Clio returned non-text configuration inspection output.");
+			}
+			if (error.code === "json") {
+				throw new ClioConfigInspectError("internal", "Clio returned invalid configuration inspection JSON.");
+			}
 			throw new ClioConfigInspectError("internal", "Workbench could not read Clio's configuration inspection.");
-		}
-		if (statusResult.status === "rejected") {
-			throw new ClioConfigInspectError("internal", "Workbench could not observe Clio's configuration inspector.");
-		}
-		const decoder = new TextDecoder("utf-8", { fatal: true });
-		let stderrText = "";
-		try {
-			stderrText = decoder.decode(stderrResult.value);
-		} catch {
-			// An invalid diagnostic stays host-side and is treated as a generic failure.
-		}
-		if (!statusResult.value.success) {
-			const unsupported = /(?:unknown|unsupported).{0,32}(?:command|config)|config.{0,32}(?:unknown|unsupported)/iu
-				.test(stderrText);
-			this.#log(`Clio configuration inspector exited with code ${statusResult.value.code}.`);
-			throw new ClioConfigInspectError(
-				unsupported ? "unsupported" : "not-ready",
-				unsupported
-					? "This Clio version does not provide configuration inspection."
-					: "Clio could not inspect the effective configuration for this project.",
-			);
-		}
-
-		let text: string;
-		try {
-			text = decoder.decode(stdoutResult.value);
-		} catch {
-			throw new ClioConfigInspectError("internal", "Clio returned non-text configuration inspection output.");
-		}
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(text);
-		} catch {
-			throw new ClioConfigInspectError("internal", "Clio returned invalid configuration inspection JSON.");
 		}
 		return projectConfigInspection(parsed, root, new Date(this.#now()).toISOString());
 	}

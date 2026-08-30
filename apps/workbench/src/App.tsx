@@ -1,8 +1,22 @@
-import { forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
+import {
+	forwardRef,
+	memo,
+	useCallback,
+	useDeferredValue,
+	useEffect,
+	useId,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from "react";
 import type { Dispatch, FormEvent, KeyboardEvent, ReactNode } from "react";
 import { AUTONOMY_LEVELS, THINKING_LEVELS } from "./protocol.ts";
 import type {
 	WireAutonomyLevel,
+	WireCatalogAgent,
+	WireCatalogInspection,
+	WireCatalogLibraryEntry,
+	WireCatalogSkill,
 	WireClioPhase,
 	WireConfigInspection,
 	WireConfigSettingSource,
@@ -49,6 +63,7 @@ export interface WorkbenchActions {
 	getSettings(projectId: string): void;
 	patchSettings(projectId: string, patch: WireSettingsPatch): void;
 	inspectConfig(projectId: string): void;
+	inspectCatalog(projectId: string): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
 	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
@@ -61,7 +76,7 @@ interface WorkbenchViewProps {
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
-type WorkspaceView = "notebook" | "effective-clio";
+type WorkspaceView = "notebook" | "effective-clio" | "catalog";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -103,21 +118,6 @@ function useMediaQuery(query: string): boolean {
 		return () => media.removeEventListener("change", update);
 	}, [query]);
 	return matches;
-}
-
-/** Ticks once a second while a turn runs so the operator sees work progressing. */
-function useElapsedSeconds(startedAt: string | null): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		if (startedAt === null) return;
-		setNow(Date.now());
-		const timer = setInterval(() => setNow(Date.now()), 1_000);
-		return () => clearInterval(timer);
-	}, [startedAt]);
-	if (startedAt === null) return 0;
-	const started = Date.parse(startedAt);
-	if (Number.isNaN(started)) return 0;
-	return Math.max(0, Math.floor((now - started) / 1_000));
 }
 
 /** A single shared clock so many cards can show elapsed time without many timers. */
@@ -653,19 +653,7 @@ function SessionDeleteModal({ session, projectId, actions, onClose }: {
 	);
 }
 
-function ProjectRail({
-	state,
-	dispatch,
-	actions,
-	selectedNode,
-	onSelectNode,
-	onFileDialog,
-	onDeleteSession,
-	isDrawer,
-	desktopCollapsed,
-	onDesktopCollapse,
-	obscured,
-}: {
+interface ProjectRailProps {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
 	actions: WorkbenchActions;
@@ -677,7 +665,21 @@ function ProjectRail({
 	desktopCollapsed: boolean;
 	onDesktopCollapse(): void;
 	obscured: boolean;
-}) {
+}
+
+const ProjectRail = memo(function ProjectRail({
+	state,
+	dispatch,
+	actions,
+	selectedNode,
+	onSelectNode,
+	onFileDialog,
+	onDeleteSession,
+	isDrawer,
+	desktopCollapsed,
+	onDesktopCollapse,
+	obscured,
+}: ProjectRailProps) {
 	const open = state.open;
 	// Only a live turn locks project switching; having no project open must never
 	// disable the control that opens one.
@@ -869,6 +871,33 @@ function ProjectRail({
 			)}
 		</aside>
 	);
+}, sameProjectRailProps);
+
+function sameProjectRailProps(previous: ProjectRailProps, next: ProjectRailProps): boolean {
+	const previousOpen = previous.state.open;
+	const nextOpen = next.state.open;
+	const sameOpen = previousOpen === nextOpen || (
+		previousOpen !== null && nextOpen !== null &&
+		previousOpen.project === nextOpen.project &&
+		previousOpen.tree === nextOpen.tree &&
+		previousOpen.treeTruncated === nextOpen.treeTruncated &&
+		previousOpen.sessions === nextOpen.sessions &&
+		previousOpen.sessionsTruncated === nextOpen.sessionsTruncated &&
+		previousOpen.clio === nextOpen.clio
+	);
+	return sameOpen &&
+		previous.state.recent === next.state.recent &&
+		previous.state.leftDrawerOpen === next.state.leftDrawerOpen &&
+		previous.dispatch === next.dispatch &&
+		previous.actions === next.actions &&
+		previous.selectedNode === next.selectedNode &&
+		previous.onSelectNode === next.onSelectNode &&
+		previous.onFileDialog === next.onFileDialog &&
+		previous.onDeleteSession === next.onDeleteSession &&
+		previous.isDrawer === next.isDrawer &&
+		previous.desktopCollapsed === next.desktopCollapsed &&
+		previous.onDesktopCollapse === next.onDesktopCollapse &&
+		previous.obscured === next.obscured;
 }
 
 /** A tool that has been open this long is worth saying so about, in seconds. */
@@ -1065,18 +1094,7 @@ const STARTER_PROMPTS = [
 	"Help me plan a careful change without editing anything yet.",
 ] as const;
 
-function EvidenceRail({
-	state,
-	nowMs,
-	isDrawer,
-	drawerOpen,
-	onClose,
-	desktopCollapsed,
-	onDesktopCollapse,
-	workspaceView,
-	onOpenConfigMap,
-	obscured,
-}: {
+interface EvidenceRailProps {
 	state: AppState;
 	nowMs: number;
 	isDrawer: boolean;
@@ -1086,8 +1104,23 @@ function EvidenceRail({
 	onDesktopCollapse(): void;
 	workspaceView: WorkspaceView;
 	onOpenConfigMap(): void;
+	onOpenCatalog(): void;
 	obscured: boolean;
-}) {
+}
+
+const EvidenceRail = memo(function EvidenceRail({
+	state,
+	nowMs,
+	isDrawer,
+	drawerOpen,
+	onClose,
+	desktopCollapsed,
+	onDesktopCollapse,
+	workspaceView,
+	onOpenConfigMap,
+	onOpenCatalog,
+	obscured,
+}: EvidenceRailProps) {
 	const open = state.open;
 	const timeline = open?.projection.timeline ?? [];
 	const activeTurn = open?.projection.activeTurn ?? null;
@@ -1106,6 +1139,7 @@ function EvidenceRail({
 		0n,
 	);
 	const configInspection = open?.configInspection ?? null;
+	const catalogInspection = open?.catalogInspection ?? null;
 	const configContextTokens = configInspection?.entries.reduce(
 		(total, entry) => total + (entry.contextCostTokens ?? 0),
 		0,
@@ -1262,6 +1296,50 @@ function EvidenceRail({
 				)}
 
 				{open !== null && (
+					<section className="observer-section observer-section--catalog" aria-labelledby="observer-catalog-title">
+						<div className="eyebrow">DISCOVERED CAPABILITY</div>
+						<h3 id="observer-catalog-title">What Clio can bring to the work</h3>
+						{catalogInspection === null
+							? (
+								<p className="observer-note">
+									{state.pendingCatalogInspect === null
+										? "Open the read-only atlas to inspect agents, installed skills, and library resources."
+										: "Clio is reading its typed resource catalogs."}
+								</p>
+							)
+							: (
+								<dl className="effective-summary">
+									<div>
+										<dt>Agents</dt>
+										<dd>{catalogInspection.agents.items.length}</dd>
+									</div>
+									<div>
+										<dt>Skills</dt>
+										<dd>{catalogInspection.skills.items.length}</dd>
+									</div>
+									<div>
+										<dt>Library</dt>
+										<dd>{catalogInspection.library.items.length}</dd>
+									</div>
+									<div>
+										<dt>Typed gaps</dt>
+										<dd>1</dd>
+									</div>
+								</dl>
+							)}
+						<button
+							type="button"
+							className="button button--quiet observer-map-button"
+							aria-pressed={workspaceView === "catalog"}
+							onClick={onOpenCatalog}
+						>
+							<span aria-hidden="true">⌗</span>
+							{workspaceView === "catalog" ? "Capability atlas open" : "Open capability atlas"}
+						</button>
+					</section>
+				)}
+
+				{open !== null && (
 					<section className="observer-section" aria-labelledby="observer-usage-title">
 						<div className="observer-section__heading">
 							<div>
@@ -1388,6 +1466,68 @@ function EvidenceRail({
 			</div>
 		</aside>
 	);
+}, sameEvidenceRailProps);
+
+function sameUsage(previous: WireUsage | undefined, next: WireUsage | undefined): boolean {
+	return previous === next || (
+		previous !== undefined && next !== undefined &&
+		previous.input === next.input &&
+		previous.output === next.output &&
+		previous.cacheRead === next.cacheRead &&
+		previous.cacheWrite === next.cacheWrite &&
+		previous.reasoning === next.reasoning
+	);
+}
+
+/** The Observatory does not render streamed prose, so prose-only deltas must not reconcile the rail. */
+function sameEvidenceTimeline(
+	previous: readonly WireTimelineItem[],
+	next: readonly WireTimelineItem[],
+): boolean {
+	if (previous === next) return true;
+	if (previous.length !== next.length) return false;
+	for (let index = 0; index < previous.length; index += 1) {
+		const before = previous[index];
+		const after = next[index];
+		if (before === after) continue;
+		if (
+			before === undefined || after === undefined ||
+			before.id !== after.id ||
+			before.kind !== after.kind ||
+			before.title !== after.title ||
+			before.status !== after.status ||
+			before.source !== after.source ||
+			!sameUsage(before.usage, after.usage)
+		) return false;
+	}
+	return true;
+}
+
+function sameEvidenceRailProps(previous: EvidenceRailProps, next: EvidenceRailProps): boolean {
+	const previousOpen = previous.state.open;
+	const nextOpen = next.state.open;
+	const sameOpen = previousOpen === nextOpen || (
+		previousOpen !== null && nextOpen !== null &&
+		previousOpen.clio === nextOpen.clio &&
+		previousOpen.projection.activeTurn === nextOpen.projection.activeTurn &&
+		previousOpen.projection.timelineTruncated === nextOpen.projection.timelineTruncated &&
+		sameEvidenceTimeline(previousOpen.projection.timeline, nextOpen.projection.timeline) &&
+		previousOpen.configInspection === nextOpen.configInspection &&
+		previousOpen.catalogInspection === nextOpen.catalogInspection
+	);
+	return sameOpen &&
+		previous.state.pendingConfigInspect === next.state.pendingConfigInspect &&
+		previous.state.pendingCatalogInspect === next.state.pendingCatalogInspect &&
+		previous.nowMs === next.nowMs &&
+		previous.isDrawer === next.isDrawer &&
+		previous.drawerOpen === next.drawerOpen &&
+		previous.onClose === next.onClose &&
+		previous.desktopCollapsed === next.desktopCollapsed &&
+		previous.onDesktopCollapse === next.onDesktopCollapse &&
+		previous.workspaceView === next.workspaceView &&
+		previous.onOpenConfigMap === next.onOpenConfigMap &&
+		previous.onOpenCatalog === next.onOpenCatalog &&
+		previous.obscured === next.obscured;
 }
 
 function settingFamily(key: string): string {
@@ -1749,6 +1889,470 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 	);
 });
 
+type CatalogTab = "agents" | "skills" | "library" | "verifiers";
+
+const CATALOG_TABS: ReadonlyArray<{ id: CatalogTab; label: string; note: string }> = [
+	{ id: "agents", label: "Agents", note: "Discovered recipes" },
+	{ id: "skills", label: "Skills", note: "Installed workflows" },
+	{ id: "library", label: "Library", note: "Available resources" },
+	{ id: "verifiers", label: "Verifiers", note: "Project checks" },
+];
+
+function catalogLabel(value: string): string {
+	return value.replaceAll("-", " ").replaceAll(".", " · ").replace(
+		/^./u,
+		(letter) => letter.toLocaleUpperCase("en-US"),
+	);
+}
+
+function includesCatalogQuery(query: string, values: readonly string[]): boolean {
+	if (query.length === 0) return true;
+	return values.some((value) => value.toLocaleLowerCase("en-US").includes(query));
+}
+
+function AgentCatalogCard({ agent }: { agent: WireCatalogAgent }) {
+	const maximum = agent.budget.maximumToolCalls === null
+		? `${agent.budget.toolCalls}`
+		: `${agent.budget.toolCalls}–${agent.budget.maximumToolCalls}`;
+	return (
+		<article className="catalog-card catalog-card--agent">
+			<header className="catalog-card__header">
+				<div>
+					<div className="eyebrow">{catalogLabel(agent.category)} · {catalogLabel(agent.source)}</div>
+					<h3>{agent.name}</h3>
+					<code>{agent.id}</code>
+				</div>
+				<span className={`catalog-card__signal catalog-card__signal--${agent.latency}`}>
+					{catalogLabel(agent.latency)}
+				</span>
+			</header>
+			<p className="catalog-card__description">{agent.description}</p>
+			<dl className="catalog-card__facts">
+				<div>
+					<dt>Capability</dt>
+					<dd>{catalogLabel(agent.capability)}</dd>
+				</div>
+				<div>
+					<dt>Project context</dt>
+					<dd>{catalogLabel(agent.contextTier)}</dd>
+				</div>
+				<div>
+					<dt>Tool-call budget</dt>
+					<dd>{maximum}</dd>
+				</div>
+				<div>
+					<dt>Read reserve</dt>
+					<dd>{agent.budget.readReserve}</dd>
+				</div>
+			</dl>
+			{agent.skills.length > 0 && (
+				<div className="catalog-card__binding">
+					<strong>Bound skills</strong>
+					<div className="catalog-chips">
+						{agent.skills.map((skill) => <span key={skill}>{skill}</span>)}
+					</div>
+				</div>
+			)}
+			<details className="catalog-card__details">
+				<summary>{agent.tools.length} declared tool surface{agent.tools.length === 1 ? "" : "s"}</summary>
+				<div className="catalog-chips catalog-chips--tools">
+					{agent.tools.map((tool) => <span key={tool}>{tool}</span>)}
+				</div>
+			</details>
+			<footer className="catalog-card__footer">
+				<span>Result contract</span>
+				<code>{agent.resultKind}</code>
+				<span>{agent.budget.synthesis ? "Text synthesis at boundary" : "Stops at boundary"}</span>
+			</footer>
+		</article>
+	);
+}
+
+function SkillCatalogCard({ skill }: { skill: WireCatalogSkill }) {
+	return (
+		<article className="catalog-card catalog-card--skill">
+			<header className="catalog-card__header">
+				<div>
+					<div className="eyebrow">{catalogLabel(skill.scope)} · {catalogLabel(skill.source)}</div>
+					<h3>{skill.name}</h3>
+				</div>
+				<span className={`catalog-card__signal ${skill.trusted ? "is-trusted" : "is-untrusted"}`}>
+					{skill.trusted ? "Trusted" : "Not trusted"}
+				</span>
+			</header>
+			<p className="catalog-card__description">{skill.description}</p>
+			<dl className="catalog-card__facts catalog-card__facts--three">
+				<div>
+					<dt>Precedence</dt>
+					<dd>{skill.precedence}</dd>
+				</div>
+				<div>
+					<dt>Model invocation</dt>
+					<dd>{skill.modelInvocable ? "Allowed" : "Operator only"}</dd>
+				</div>
+				<div>
+					<dt>Reported issues</dt>
+					<dd>{skill.issueCount}</dd>
+				</div>
+			</dl>
+			<footer className="catalog-card__footer">
+				<span>Installed inventory only</span>
+				<span>Body and native location remain host-side</span>
+			</footer>
+		</article>
+	);
+}
+
+function LibraryCatalogCard({ entry }: { entry: WireCatalogLibraryEntry }) {
+	return (
+		<article className="catalog-card catalog-card--library">
+			<header className="catalog-card__header">
+				<div>
+					<div className="eyebrow">{catalogLabel(entry.kind)} · {catalogLabel(entry.origin)}</div>
+					<h3>{entry.name}</h3>
+				</div>
+				<span className={`catalog-card__signal catalog-card__signal--audit-${entry.audit}`}>
+					Audit {catalogLabel(entry.audit)}
+				</span>
+			</header>
+			<p className="catalog-card__description">{entry.description}</p>
+			<dl className="catalog-card__facts catalog-card__facts--three">
+				<div>
+					<dt>Version</dt>
+					<dd>{entry.version ?? "Not reported"}</dd>
+				</div>
+				<div>
+					<dt>Category</dt>
+					<dd>{entry.category === null ? "Uncategorized" : catalogLabel(entry.category)}</dd>
+				</div>
+				<div>
+					<dt>Resource kind</dt>
+					<dd>{catalogLabel(entry.kind)}</dd>
+				</div>
+			</dl>
+			<footer className="catalog-card__footer">
+				<span>Available resource</span>
+				<span>Installation review is not exposed in this read-only surface</span>
+			</footer>
+		</article>
+	);
+}
+
+function CatalogCollectionFailure({ label, onRefresh }: { label: string; onRefresh(): void }) {
+	return (
+		<div className="catalog-state catalog-state--failed" role="status">
+			<div className="catalog-state__instrument" aria-hidden="true">×</div>
+			<div>
+				<h3>{label} could not be read</h3>
+				<p>
+					The other collections remain usable. Clio's raw diagnostic stayed on the Workbench host rather than crossing
+					into this page.
+				</p>
+			</div>
+			<button type="button" className="button button--quiet" onClick={onRefresh}>Retry all catalogs</button>
+		</div>
+	);
+}
+
+function CatalogEmptyCollection({ label, query }: { label: string; query: string }) {
+	return (
+		<div className="catalog-state">
+			<div className="catalog-state__instrument" aria-hidden="true">0</div>
+			<div>
+				<h3>{query.length > 0 ? "No matching resources" : `No ${label} reported`}</h3>
+				<p>
+					{query.length > 0
+						? "Try a broader name, description, category, capability, or provenance term."
+						: "This is an explicit empty result from the corresponding Clio listing, not a guessed absence."}
+				</p>
+			</div>
+		</div>
+	);
+}
+
+export const ClioCatalog = memo(function ClioCatalog({
+	inspection,
+	pending,
+	onRefresh,
+	onBack,
+}: {
+	inspection: WireCatalogInspection | null;
+	pending: boolean;
+	onRefresh(): void;
+	onBack(): void;
+}) {
+	const [tab, setTab] = useState<CatalogTab>("agents");
+	const [query, setQuery] = useState("");
+	const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("en-US"));
+
+	if (inspection === null) {
+		return (
+			<section className="catalog catalog--empty" aria-labelledby="clio-catalog-title" aria-busy={pending}>
+				<div className="catalog__empty-index" aria-hidden="true">
+					<span>A</span>
+					<span>S</span>
+					<span>L</span>
+					<span>V</span>
+				</div>
+				<div>
+					<div className="eyebrow">READ-ONLY RESOURCE DISCOVERY</div>
+					<h2 id="clio-catalog-title">Map the capabilities Clio can actually see</h2>
+					<p>
+						Inspect discovered agents, installed skills, and available library resources through their public JSON
+						interfaces. Verifiers remain explicitly unavailable until Clio offers a typed listing.
+					</p>
+				</div>
+				<div className="catalog__empty-actions">
+					<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+						{pending ? "Reading Clio catalogs…" : "Inspect Clio catalogs"}
+					</button>
+					<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+				</div>
+				<p className="catalog__boundary">
+					Bodies, hashes, diagnostics, native paths, requirement URLs, and arbitrary command output never reach this
+					view.
+				</p>
+			</section>
+		);
+	}
+
+	const agents = inspection.agents.items.filter((agent) =>
+		includesCatalogQuery(deferredQuery, [
+			agent.id,
+			agent.name,
+			agent.description,
+			agent.source,
+			agent.category,
+			agent.capability,
+			agent.latency,
+			...agent.tags,
+			...agent.skills,
+			...agent.tools,
+		])
+	);
+	const skills = inspection.skills.items.filter((skill) =>
+		includesCatalogQuery(deferredQuery, [skill.name, skill.description, skill.scope, skill.source])
+	);
+	const library = inspection.library.items.filter((entry) =>
+		includesCatalogQuery(deferredQuery, [
+			entry.kind,
+			entry.name,
+			entry.description,
+			entry.version ?? "",
+			entry.category ?? "",
+			entry.origin,
+			entry.audit,
+		])
+	);
+	const activeCount = tab === "agents"
+		? agents.length
+		: tab === "skills"
+		? skills.length
+		: tab === "library"
+		? library.length
+		: 0;
+	const activeAvailability = tab === "agents"
+		? inspection.agents.availability
+		: tab === "skills"
+		? inspection.skills.availability
+		: tab === "library"
+		? inspection.library.availability
+		: "available";
+	const activeTruncated = tab === "agents"
+		? inspection.agents.truncated
+		: tab === "skills"
+		? inspection.skills.truncated
+		: tab === "library"
+		? inspection.library.truncated
+		: false;
+	function selectTab(nextTab: CatalogTab): void {
+		setTab(nextTab);
+		setQuery("");
+	}
+	function moveTab(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
+		let nextIndex: number;
+		switch (event.key) {
+			case "ArrowLeft":
+				nextIndex = (index - 1 + CATALOG_TABS.length) % CATALOG_TABS.length;
+				break;
+			case "ArrowRight":
+				nextIndex = (index + 1) % CATALOG_TABS.length;
+				break;
+			case "Home":
+				nextIndex = 0;
+				break;
+			case "End":
+				nextIndex = CATALOG_TABS.length - 1;
+				break;
+			default:
+				return;
+		}
+		event.preventDefault();
+		const nextTab = CATALOG_TABS[nextIndex];
+		if (!nextTab) return;
+		selectTab(nextTab.id);
+		event.currentTarget.ownerDocument.getElementById(`catalog-tab-${nextTab.id}`)?.focus();
+	}
+
+	return (
+		<section className="catalog" aria-labelledby="clio-catalog-title" aria-busy={pending}>
+			<header className="catalog__masthead">
+				<div>
+					<div className="eyebrow">CLIO CAPABILITY ATLAS · REPORTED BY CLIO</div>
+					<h2 id="clio-catalog-title">Agents, skills &amp; resource library</h2>
+					<p>A searchable inventory of what this project can discover—not a fictional control plane.</p>
+				</div>
+				<div className="catalog__masthead-actions">
+					<span>{pending ? "Refreshing catalogs…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
+					<div>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+							Refresh catalogs
+						</button>
+					</div>
+				</div>
+			</header>
+
+			<dl className="catalog__summary" aria-label="Clio catalog inspection summary">
+				<div>
+					<dt>Agent recipes</dt>
+					<dd>{inspection.agents.availability === "available" ? inspection.agents.items.length : "—"}</dd>
+					<dd className="catalog__summary-note">{catalogLabel(inspection.agents.availability)}</dd>
+				</div>
+				<div>
+					<dt>Installed skills</dt>
+					<dd>{inspection.skills.availability === "available" ? inspection.skills.items.length : "—"}</dd>
+					<dd className="catalog__summary-note">
+						{inspection.skills.issueCount} reported loader {inspection.skills.issueCount === 1 ? "issue" : "issues"}
+					</dd>
+				</div>
+				<div>
+					<dt>Library resources</dt>
+					<dd>{inspection.library.availability === "available" ? inspection.library.items.length : "—"}</dd>
+					<dd className="catalog__summary-note">{catalogLabel(inspection.library.availability)}</dd>
+				</div>
+				<div>
+					<dt>Verifier listing</dt>
+					<dd>—</dd>
+					<dd className="catalog__summary-note">Typed interface required</dd>
+				</div>
+			</dl>
+
+			<div className="catalog__workbench">
+				<div className="catalog__tabs" role="tablist" aria-label="Catalog collections">
+					{CATALOG_TABS.map((item, index) => (
+						<button
+							type="button"
+							role="tab"
+							id={`catalog-tab-${item.id}`}
+							aria-controls="catalog-panel"
+							aria-selected={tab === item.id}
+							tabIndex={tab === item.id ? 0 : -1}
+							key={item.id}
+							onClick={() => selectTab(item.id)}
+							onKeyDown={(event) => moveTab(event, index)}
+						>
+							<span>{item.label}</span>
+							<small>{item.note}</small>
+						</button>
+					))}
+				</div>
+				<div className="catalog__query">
+					<label htmlFor="catalog-search">Filter this collection</label>
+					<div>
+						<span aria-hidden="true">⌕</span>
+						<input
+							id="catalog-search"
+							type="search"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder={`Search ${
+								CATALOG_TABS.find((item) => item.id === tab)?.label.toLocaleLowerCase("en-US") ?? "catalog"
+							}`}
+							disabled={tab === "verifiers" || activeAvailability === "failed"}
+						/>
+						{query.length > 0 && (
+							<button type="button" onClick={() => setQuery("")} aria-label="Clear catalog filter">×</button>
+						)}
+					</div>
+					<small>
+						{tab === "verifiers"
+							? "No typed rows to search"
+							: activeAvailability === "failed"
+							? "This collection is unavailable"
+							: `${activeCount} visible ${activeCount === 1 ? "record" : "records"}`}
+					</small>
+				</div>
+			</div>
+
+			<section
+				className="catalog__panel"
+				id="catalog-panel"
+				role="tabpanel"
+				aria-labelledby={`catalog-tab-${tab}`}
+			>
+				{tab === "verifiers"
+					? (
+						<div className="catalog-verifier-boundary">
+							<div className="catalog-verifier-boundary__track" aria-hidden="true">
+								<span>DISCOVER</span>
+								<i />
+								<span>TYPE</span>
+								<i />
+								<span>RENDER</span>
+							</div>
+							<div>
+								<div className="eyebrow">HONEST UPSTREAM BOUNDARY</div>
+								<h3>Verifier discovery is real, but it is not machine-readable yet</h3>
+								<p>
+									Clio exposes <code>clio-coder verifiers discover</code>{" "}
+									as a formatted authoring preview. Workbench will not scrape that table or pretend its argv, cwd,
+									timeout, tags, and authority are typed facts.
+								</p>
+								<p>
+									Once Clio publishes a JSON listing, this tab can become a real checks catalog with preview and
+									confirmation states for mutations.
+								</p>
+							</div>
+						</div>
+					)
+					: activeAvailability === "failed"
+					? (
+						<CatalogCollectionFailure
+							label={CATALOG_TABS.find((item) => item.id === tab)?.label ?? "Catalog"}
+							onRefresh={onRefresh}
+						/>
+					)
+					: activeCount === 0
+					? <CatalogEmptyCollection label={tab} query={deferredQuery} />
+					: (
+						<div className={`catalog-grid catalog-grid--${tab}`}>
+							{tab === "agents" && agents.map((agent) => <AgentCatalogCard agent={agent} key={agent.id} />)}
+							{tab === "skills" && skills.map((skill) => <SkillCatalogCard skill={skill} key={skill.name} />)}
+							{tab === "library" &&
+								library.map((entry) => <LibraryCatalogCard entry={entry} key={`${entry.kind}:${entry.name}`} />)}
+						</div>
+					)}
+				{activeTruncated && tab !== "verifiers" && (
+					<p className="catalog__truncated" role="note">
+						This collection was bounded by Workbench. Refreshing cannot reveal omitted rows until the catalog is
+						narrowed.
+					</p>
+				)}
+			</section>
+
+			<footer className="catalog__method">
+				<strong>Read-only boundary</strong>
+				<p>
+					Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side. This atlas can
+					explain discovered capability. It cannot run an agent directly, activate a skill, or install a library
+					resource because those operations need explicit Clio contracts, review, progress, and terminal outcomes.
+				</p>
+			</footer>
+		</section>
+	);
+});
+
 interface PromptEditorHandle {
 	useExample(prompt: string): void;
 }
@@ -1853,6 +2457,7 @@ function ConversationCanvas({
 	onWorkspaceViewChange,
 	onNotebookOpen,
 	onRefreshConfig,
+	onRefreshCatalog,
 }: {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
@@ -1870,13 +2475,17 @@ function ConversationCanvas({
 	onWorkspaceViewChange(view: WorkspaceView): void;
 	onNotebookOpen(): void;
 	onRefreshConfig(): void;
+	onRefreshCatalog(): void;
 }) {
 	const open = state.open;
 	const promptEditor = useRef<PromptEditorHandle>(null);
 	const projection = open?.projection ?? null;
 	const activeTurn = projection?.activeTurn ?? null;
 	const pendingPermission = projection?.pendingPermission ?? null;
-	const elapsed = useElapsedSeconds(activeTurn?.startedAt ?? null);
+	const activeTurnStartedMs = activeTurn === null ? Number.NaN : Date.parse(activeTurn.startedAt);
+	const elapsed = Number.isFinite(activeTurnStartedMs)
+		? Math.max(0, Math.floor((nowMs - activeTurnStartedMs) / 1_000))
+		: 0;
 	const busy = isPromptBlocked(open);
 	const clioOccupied = open !== null && busy;
 	const projectControlVisible = projectRailIsDrawer || projectRailCollapsed;
@@ -1922,7 +2531,13 @@ function ConversationCanvas({
 					</button>
 				</div>
 				<div className="conversation__identity">
-					<div className="eyebrow">{workspaceView === "effective-clio" ? "EFFECTIVE CLIO FOR" : "ACTIVE PROJECT"}</div>
+					<div className="eyebrow">
+						{workspaceView === "effective-clio"
+							? "EFFECTIVE CLIO FOR"
+							: workspaceView === "catalog"
+							? "CAPABILITY ATLAS FOR"
+							: "ACTIVE PROJECT"}
+					</div>
 					<h1>{open === null ? "No project open" : open.project.displayName}</h1>
 					{open && <p className="conversation__root">{open.project.rootPath}</p>}
 				</div>
@@ -1934,14 +2549,19 @@ function ConversationCanvas({
 						/>
 					)}
 					{open && (
-						<button
-							type="button"
-							className="button button--quiet"
-							aria-pressed={workspaceView === "effective-clio"}
-							onClick={() => onWorkspaceViewChange(workspaceView === "effective-clio" ? "notebook" : "effective-clio")}
-						>
-							{workspaceView === "effective-clio" ? "Notebook" : "Effective Clio"}
-						</button>
+						<nav className="conversation__view-switcher" aria-label="Project views">
+							{(["notebook", "effective-clio", "catalog"] as const).map((view) => (
+								<button
+									type="button"
+									key={view}
+									className="button button--quiet"
+									aria-current={workspaceView === view ? "page" : undefined}
+									onClick={() => onWorkspaceViewChange(view)}
+								>
+									{view === "notebook" ? "Notebook" : view === "effective-clio" ? "Effective Clio" : "Catalog"}
+								</button>
+							))}
+						</nav>
 					)}
 					<button
 						type="button"
@@ -1985,7 +2605,11 @@ function ConversationCanvas({
 				className="conversation__scroll"
 				tabIndex={0}
 				role="region"
-				aria-label={workspaceView === "effective-clio" ? "Effective Clio map" : "Conversation history"}
+				aria-label={workspaceView === "effective-clio"
+					? "Effective Clio map"
+					: workspaceView === "catalog"
+					? "Clio capability catalog"
+					: "Conversation history"}
 			>
 				{open !== null && workspaceView === "effective-clio"
 					? (
@@ -1993,6 +2617,15 @@ function ConversationCanvas({
 							inspection={open.configInspection}
 							pending={state.pendingConfigInspect !== null}
 							onRefresh={onRefreshConfig}
+							onBack={onNotebookOpen}
+						/>
+					)
+					: open !== null && workspaceView === "catalog"
+					? (
+						<ClioCatalog
+							inspection={open.catalogInspection}
+							pending={state.pendingCatalogInspect !== null}
+							onRefresh={onRefreshCatalog}
 							onBack={onNotebookOpen}
 						/>
 					)
@@ -2560,109 +3193,139 @@ function DeleteConfirmationModal({
 	);
 }
 
-function BottomStatus({ state, actions, obscured, approvalEscalated }: {
+interface BottomStatusProps {
 	state: AppState;
 	actions: WorkbenchActions;
+	nowMs: number;
 	obscured: boolean;
 	approvalEscalated: boolean;
-}) {
-	const open = state.open;
-	const session = open?.clio.session ?? null;
-	const activeTurn = open?.projection.activeTurn ?? null;
-	const elapsed = useElapsedSeconds(activeTurn?.startedAt ?? null);
-	const phase = open?.clio.phase ?? "closed";
-	const operation = open === null
-		? "no project"
-		: phase === "awaiting-approval"
-		? "awaiting approval"
-		: phase === "cancelling"
-		? "stopping"
-		: activeTurn
-		? `running ${formatDuration(elapsed)}`
-		: "idle";
-	const autonomyEditable = open !== null && session !== null && open.clio.capabilities?.autonomy === true &&
-		!isPromptBlocked(open);
-	// Settings describe what Clio would bind next, which is a different fact from
-	// what the bound session is running on. Only show it when the two disagree.
-	//
-	// The two facts reach the bound session on different schedules and must never
-	// share a label. Clio reads target and model routing at prompt time, so a
-	// patch to either lands on this session's next turn. Autonomy is pinned at
-	// session/new for the life of the process, so a patched global autonomy
-	// reaches only the next session and the bound one moves through
-	// clio-coder/session/autonomy instead.
-	const nextTarget = open?.settings?.settings["orchestrator.target"] ?? null;
-	const nextModel = open?.settings?.settings["orchestrator.model"] ?? null;
-	const nextTurnDiffers = open?.settings != null && session !== null &&
-		(nextTarget !== session.target || nextModel !== session.model);
-	const settingsAutonomy = open?.settings?.settings["autonomy"] ?? null;
-	const nextSessionAutonomy = settingsAutonomy !== null && isAutonomyLevel(settingsAutonomy) ? settingsAutonomy : null;
-	const nextSessionDiffers = session !== null && nextSessionAutonomy !== null &&
-		nextSessionAutonomy !== session.autonomy;
-	return (
-		<footer
-			className="status-bar"
-			aria-label="Workbench status"
-			aria-hidden={obscured ? true : undefined}
-			inert={obscured}
-		>
-			<div className="status-bar__connection">
-				<StatusMark tone={state.connection === "connected" ? "success" : "error"} label={state.connection} />
-				<span>{state.mode} host · 127.0.0.1 · token bound</span>
-			</div>
-			<div className="status-bar__project">
-				<span>Project</span>
-				<strong>{open === null ? "none" : open.project.displayName}</strong>
-			</div>
-			<div className="status-bar__session">
-				<span>Session bound to</span>
-				<strong>
-					{session === null ? "no session" : `${session.target ?? "unselected"} · ${session.model ?? "unselected"}`}
-				</strong>
-			</div>
-			{nextTurnDiffers && (
-				<div className="status-bar__next-turn">
-					<span>Next turn</span>
-					<strong>{`${nextTarget ?? "unselected"} · ${nextModel ?? "unselected"}`}</strong>
-				</div>
-			)}
-			{nextSessionDiffers && nextSessionAutonomy !== null && (
-				<div className="status-bar__next-session">
-					<span>Next session</span>
-					<strong>{`${AUTONOMY_LABELS[nextSessionAutonomy]} autonomy`}</strong>
-				</div>
-			)}
-			<div className="status-bar__autonomy">
-				<span>Autonomy</span>
-				{session === null ? <strong>unbound</strong> : (
-					<>
-						<select
-							aria-label="Session autonomy"
-							value={session.autonomy}
-							disabled={!autonomyEditable}
-							onChange={(event) =>
-								open && actions.setAutonomy(open.project.id, event.target.value as WireAutonomyLevel)}
-						>
-							{(Object.keys(AUTONOMY_LABELS) as WireAutonomyLevel[]).map((level) => (
-								<option value={level} key={level}>{AUTONOMY_LABELS[level]}</option>
-							))}
-						</select>
-						<small>
-							{session.autonomySource === "session" ? "set for this session" : "inherited from settings"}
-						</small>
-					</>
-				)}
-			</div>
-			<div
-				className={`status-bar__operation${activeTurn !== null ? " is-active" : ""}${
-					approvalEscalated ? " is-escalated" : ""
-				}`}
+}
+
+const BottomStatus = memo(
+	function BottomStatus({ state, actions, nowMs, obscured, approvalEscalated }: BottomStatusProps) {
+		const open = state.open;
+		const session = open?.clio.session ?? null;
+		const activeTurn = open?.projection.activeTurn ?? null;
+		const activeTurnStartedMs = activeTurn === null ? Number.NaN : Date.parse(activeTurn.startedAt);
+		const elapsed = Number.isFinite(activeTurnStartedMs)
+			? Math.max(0, Math.floor((nowMs - activeTurnStartedMs) / 1_000))
+			: 0;
+		const phase = open?.clio.phase ?? "closed";
+		const operation = open === null
+			? "no project"
+			: phase === "awaiting-approval"
+			? "awaiting approval"
+			: phase === "cancelling"
+			? "stopping"
+			: activeTurn
+			? `running ${formatDuration(elapsed)}`
+			: "idle";
+		const autonomyEditable = open !== null && session !== null && open.clio.capabilities?.autonomy === true &&
+			!isPromptBlocked(open);
+		// Settings describe what Clio would bind next, which is a different fact from
+		// what the bound session is running on. Only show it when the two disagree.
+		//
+		// The two facts reach the bound session on different schedules and must never
+		// share a label. Clio reads target and model routing at prompt time, so a
+		// patch to either lands on this session's next turn. Autonomy is pinned at
+		// session/new for the life of the process, so a patched global autonomy
+		// reaches only the next session and the bound one moves through
+		// clio-coder/session/autonomy instead.
+		const nextTarget = open?.settings?.settings["orchestrator.target"] ?? null;
+		const nextModel = open?.settings?.settings["orchestrator.model"] ?? null;
+		const nextTurnDiffers = open?.settings != null && session !== null &&
+			(nextTarget !== session.target || nextModel !== session.model);
+		const settingsAutonomy = open?.settings?.settings["autonomy"] ?? null;
+		const nextSessionAutonomy = settingsAutonomy !== null && isAutonomyLevel(settingsAutonomy)
+			? settingsAutonomy
+			: null;
+		const nextSessionDiffers = session !== null && nextSessionAutonomy !== null &&
+			nextSessionAutonomy !== session.autonomy;
+		return (
+			<footer
+				className="status-bar"
+				aria-label="Workbench status"
+				aria-hidden={obscured ? true : undefined}
+				inert={obscured}
 			>
-				<span>Operation</span>
-				<strong>{approvalEscalated ? `${operation} · escalated` : operation}</strong>
-			</div>
-		</footer>
+				<div className="status-bar__connection">
+					<StatusMark tone={state.connection === "connected" ? "success" : "error"} label={state.connection} />
+					<span>{state.mode} host · 127.0.0.1 · token bound</span>
+				</div>
+				<div className="status-bar__project">
+					<span>Project</span>
+					<strong>{open === null ? "none" : open.project.displayName}</strong>
+				</div>
+				<div className="status-bar__session">
+					<span>Session bound to</span>
+					<strong>
+						{session === null ? "no session" : `${session.target ?? "unselected"} · ${session.model ?? "unselected"}`}
+					</strong>
+				</div>
+				{nextTurnDiffers && (
+					<div className="status-bar__next-turn">
+						<span>Next turn</span>
+						<strong>{`${nextTarget ?? "unselected"} · ${nextModel ?? "unselected"}`}</strong>
+					</div>
+				)}
+				{nextSessionDiffers && nextSessionAutonomy !== null && (
+					<div className="status-bar__next-session">
+						<span>Next session</span>
+						<strong>{`${AUTONOMY_LABELS[nextSessionAutonomy]} autonomy`}</strong>
+					</div>
+				)}
+				<div className="status-bar__autonomy">
+					<span>Autonomy</span>
+					{session === null ? <strong>unbound</strong> : (
+						<>
+							<select
+								aria-label="Session autonomy"
+								value={session.autonomy}
+								disabled={!autonomyEditable}
+								onChange={(event) =>
+									open && actions.setAutonomy(open.project.id, event.target.value as WireAutonomyLevel)}
+							>
+								{(Object.keys(AUTONOMY_LABELS) as WireAutonomyLevel[]).map((level) => (
+									<option value={level} key={level}>{AUTONOMY_LABELS[level]}</option>
+								))}
+							</select>
+							<small>
+								{session.autonomySource === "session" ? "set for this session" : "inherited from settings"}
+							</small>
+						</>
+					)}
+				</div>
+				<div
+					className={`status-bar__operation${activeTurn !== null ? " is-active" : ""}${
+						approvalEscalated ? " is-escalated" : ""
+					}`}
+				>
+					<span>Operation</span>
+					<strong>{approvalEscalated ? `${operation} · escalated` : operation}</strong>
+				</div>
+			</footer>
+		);
+	},
+	sameBottomStatusProps,
+);
+
+function sameBottomStatusProps(previous: BottomStatusProps, next: BottomStatusProps): boolean {
+	const previousOpen = previous.state.open;
+	const nextOpen = next.state.open;
+	const sameOpen = previousOpen === nextOpen || (
+		previousOpen !== null && nextOpen !== null &&
+		previousOpen.project === nextOpen.project &&
+		previousOpen.clio === nextOpen.clio &&
+		previousOpen.settings === nextOpen.settings &&
+		previousOpen.projection.activeTurn === nextOpen.projection.activeTurn
 	);
+	return sameOpen &&
+		previous.state.connection === next.state.connection &&
+		previous.state.mode === next.state.mode &&
+		previous.actions === next.actions &&
+		previous.nowMs === next.nowMs &&
+		previous.obscured === next.obscured &&
+		previous.approvalEscalated === next.approvalEscalated;
 }
 
 export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) {
@@ -2738,37 +3401,42 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		previousEvidenceDrawerOpen.current = evidenceDrawerOpen;
 	}, [evidenceDrawerOpen, evidenceRailIsDrawer]);
 
-	function collapseProjectRail(): void {
+	const collapseProjectRail = useCallback((): void => {
 		setProjectRailCollapsed(true);
 		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".rail-control--project button")?.focus());
-	}
+	}, []);
 
-	function toggleProjectRail(): void {
+	const toggleProjectRail = useCallback((): void => {
 		if (leftRailIsDrawer) {
 			dispatch({ type: "drawer.left", open: !state.leftDrawerOpen });
 			return;
 		}
 		setProjectRailCollapsed(false);
 		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".left-rail__close")?.focus());
-	}
+	}, [dispatch, leftRailIsDrawer, state.leftDrawerOpen]);
 
-	function collapseEvidenceRail(): void {
+	const collapseEvidenceRail = useCallback((): void => {
 		setEvidenceRailCollapsed(true);
 		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".rail-control--evidence button")?.focus());
-	}
+	}, []);
 
-	function toggleEvidenceRail(): void {
+	const toggleEvidenceRail = useCallback((): void => {
 		if (evidenceRailIsDrawer) {
 			setEvidenceDrawerOpen((current) => !current);
 			return;
 		}
 		setEvidenceRailCollapsed(false);
 		requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".evidence-rail__close")?.focus());
-	}
+	}, [evidenceRailIsDrawer]);
+
+	const closeEvidenceDrawer = useCallback((): void => setEvidenceDrawerOpen(false), []);
 
 	const changeWorkspaceView = useCallback((view: WorkspaceView): void => {
 		setWorkspaceView(view);
-	}, []);
+		if (
+			view === "catalog" && open !== null && open.catalogInspection === null && state.pendingCatalogInspect === null
+		) actions.inspectCatalog(open.project.id);
+	}, [actions, open?.project.id, open?.catalogInspection, state.pendingCatalogInspect]);
 
 	const openNotebook = useCallback((): void => {
 		setWorkspaceView("notebook");
@@ -2779,8 +3447,17 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		setEvidenceDrawerOpen(false);
 	}, []);
 
+	const openCatalog = useCallback((): void => {
+		changeWorkspaceView("catalog");
+		setEvidenceDrawerOpen(false);
+	}, [changeWorkspaceView]);
+
 	const refreshConfig = useCallback((): void => {
 		if (open !== null) actions.inspectConfig(open.project.id);
+	}, [actions, open?.project.id]);
+
+	const refreshCatalog = useCallback((): void => {
+		if (open !== null) actions.inspectCatalog(open.project.id);
 	}, [actions, open?.project.id]);
 
 	useEffect(() => {
@@ -2906,22 +3583,25 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onWorkspaceViewChange={changeWorkspaceView}
 				onNotebookOpen={openNotebook}
 				onRefreshConfig={refreshConfig}
+				onRefreshCatalog={refreshCatalog}
 			/>
 			<EvidenceRail
 				state={state}
 				nowMs={nowMs}
 				isDrawer={evidenceRailIsDrawer}
 				drawerOpen={evidenceDrawerOpen}
-				onClose={() => setEvidenceDrawerOpen(false)}
+				onClose={closeEvidenceDrawer}
 				desktopCollapsed={evidenceRailCollapsed}
 				onDesktopCollapse={collapseEvidenceRail}
 				workspaceView={workspaceView}
 				onOpenConfigMap={openConfigMap}
+				onOpenCatalog={openCatalog}
 				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus
 				state={state}
 				actions={actions}
+				nowMs={nowMs}
 				obscured={backgroundObscured}
 				approvalEscalated={approvalEscalated}
 			/>

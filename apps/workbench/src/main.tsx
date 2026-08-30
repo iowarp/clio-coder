@@ -186,6 +186,10 @@ function App() {
 				const requestId = send("config.inspect", { projectId });
 				if (requestId !== null) dispatch({ type: "config.inspect.submitted", requestId });
 			},
+			inspectCatalog(projectId) {
+				const requestId = send("catalog.inspect", { projectId });
+				if (requestId !== null) dispatch({ type: "catalog.inspect.submitted", requestId });
+			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
 			},
