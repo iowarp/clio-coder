@@ -17,6 +17,7 @@ import {
 	setProtectedModelsProvider,
 	setResidencyNoticeSink,
 } from "../../src/engine/apis/residency.js";
+import { withResidencyLock } from "../../src/engine/apis/residency-lock.js";
 
 const GIB = 1024 ** 3;
 
@@ -656,5 +657,30 @@ describe("contracts/model residency role protection", () => {
 			["spare", "operator-model"],
 			"an unprotected resident is swapped before a configured one",
 		);
+	});
+});
+
+/**
+ * `residencyTargetKey`'s first overload promises a `string` for a residency
+ * runtime and a `string` base URL, and every caller stores the result in
+ * `ResidencyAdapter.targetKey`, which is also typed `string`. The
+ * canonicalization underneath can still answer null: `canonicalEndpointUrl`
+ * refuses anything that is not http/https, and a target url is not validated
+ * for a scheme anywhere. Before #250 the key was `${runtimeId}|${baseUrl}`,
+ * which was total, so a target spelled without a scheme reconciled residency
+ * unlocked instead of throwing.
+ */
+describe("contracts/residency target key is total for a configured base url", () => {
+	it("keeps a key for a base url the canonical endpoint form refuses", () => {
+		strictEqual(residencyTargetKey("llamacpp", "http://mini:8080/v1"), "http://mini:8080");
+		strictEqual(residencyTargetKey("llamacpp", "mini:8080"), "mini:8080");
+		strictEqual(residencyTargetKey("lmstudio", "localhost:1234"), "localhost:1234");
+		strictEqual(residencyTargetKey("not-a-residency-runtime", "http://mini:8080"), null);
+		strictEqual(residencyTargetKey("llamacpp", undefined), null);
+	});
+
+	it("locks on that key instead of throwing on it", async () => {
+		const key = residencyTargetKey("llamacpp", "mini:8080");
+		strictEqual(await withResidencyLock(key, async () => "reconciled"), "reconciled");
 	});
 });

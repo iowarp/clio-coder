@@ -744,6 +744,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	/**
+	 * Run one out-of-turn round while holding a slot on the endpoint it streams
+	 * to, exactly as the turn and the pre-warm do. A `/btw` or `/handoff` round
+	 * is a full request against the same inference scheduler, so endpoint
+	 * capacity (#250) has to count it for as long as it is out, and the
+	 * background-memory tier has to read that endpoint as busy (#229).
+	 */
+	const withEndpointSlot = async <T>(runtime: AgentRuntime, round: () => Promise<T>): Promise<T> => {
+		const endpointKey = canonicalEndpointKey(runtime.runtimeResolution.target);
+		const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+		try {
+			return await round();
+		} finally {
+			release();
+		}
+	};
+
 	const writeOutOfTurnUsageRow =
 		deps.recordOutOfTurnUsageRow ?? ((row: OutOfTurnUsageRow): void => appendOutOfTurnUsageRow(clioStateDir(), row));
 
@@ -1329,16 +1346,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			let result: SideQuestionResult;
 			try {
-				result = await sideQuestionRound({
-					model: prepared.runtime.agent.state.model,
-					// Read-only: runSideQuestion copies before appending its own
-					// message, so the live agent's history is untouched.
-					messages: prepared.runtime.agent.state.messages,
-					question: text,
-					...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
-					...(options.signal ? { signal: options.signal } : {}),
-					...(options.onDelta ? { onDelta: options.onDelta } : {}),
-				});
+				result = await withEndpointSlot(prepared.runtime, () =>
+					sideQuestionRound({
+						model: prepared.runtime.agent.state.model,
+						// Read-only: runSideQuestion copies before appending its own
+						// message, so the live agent's history is untouched.
+						messages: prepared.runtime.agent.state.messages,
+						question: text,
+						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+						...(options.signal ? { signal: options.signal } : {}),
+						...(options.onDelta ? { onDelta: options.onDelta } : {}),
+					}),
+				);
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
@@ -1361,14 +1380,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			let result: SideQuestionResult;
 			try {
-				result = await handoffRound({
-					model: prepared.runtime.agent.state.model,
-					// Read-only, exactly as the side-question round treats it.
-					messages: prepared.runtime.agent.state.messages,
-					goal: text,
-					...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
-					...(options.signal ? { signal: options.signal } : {}),
-				});
+				result = await withEndpointSlot(prepared.runtime, () =>
+					handoffRound({
+						model: prepared.runtime.agent.state.model,
+						// Read-only, exactly as the side-question round treats it.
+						messages: prepared.runtime.agent.state.messages,
+						goal: text,
+						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+						...(options.signal ? { signal: options.signal } : {}),
+					}),
+				);
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
