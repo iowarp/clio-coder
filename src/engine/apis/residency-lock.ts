@@ -12,12 +12,14 @@
 import { join } from "node:path";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStatePath } from "../../core/xdg.js";
+import { canonicalEndpointKey } from "../../domains/providers/endpoint-capacity.js";
 
 /** Total time one process waits for another's mutation before proceeding unlocked. */
 const LOCK_WAIT_MS = 120_000;
 
 function lockTargetFor(targetKey: string): string {
-	return join(clioStatePath(), "residency-locks", targetKey.replace(/[^a-zA-Z0-9._-]+/g, "_"));
+	const key = canonicalEndpointKey(targetKey) ?? targetKey;
+	return join(clioStatePath(), "residency-locks", key.replace(/[^a-zA-Z0-9._-]+/g, "_"));
 }
 
 /** Run `fn` while holding the per-target residency lock. */

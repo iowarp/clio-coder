@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { endpointLabel } from "../providers/endpoint-capacity.js";
 import {
 	acquireCapacityLease,
 	activeCapacityDrainUnsafe,
@@ -19,9 +20,10 @@ export type ReservationMemberStatus = "held" | "consumed" | "released";
 export type ReservationStatus = "active" | "released" | "rolled_back" | "expired";
 
 /**
- * A reservation holds three scarce things and nothing else: a global
- * concurrency slot, a per-node slot, and a budget upper bound. Node identity
- * matters only because slots are per-node. Agent, target, model, and runtime
+ * A reservation holds four scarce things and nothing else: a global
+ * concurrency slot, a per-node slot, an inference-endpoint slot, and a budget
+ * upper bound. Node and endpoint identity matter only because slots bind on
+ * those dimensions. Agent, target, model, and runtime
  * identity are route identity, which the failover envelope owns
  * (`assertRouteWithinApprovedEnvelope`); pinning them here made a
  * plan-approved dispatch unable to fail over at all.
@@ -30,6 +32,7 @@ export interface ReservationPlanTask {
 	memberId: string;
 	wave: number;
 	nodeId: string;
+	endpointKey?: string;
 	costUpperBoundUsd: number;
 }
 
@@ -54,16 +57,22 @@ export interface DispatchReservationRecord {
 export interface ReservationCapacitySnapshot {
 	global: { active: number; limit: number };
 	nodes: Readonly<Record<string, { active: number; limit: number }>>;
+	endpoints: Readonly<Record<string, { active: number; limit: number }>>;
 	budget: { currentUsd: number; ceilingUsd: number };
 }
 
 export interface ReservationAllocation {
 	globalSlots: number;
 	nodeSlots: Readonly<Record<string, number>>;
+	endpointSlots: Readonly<Record<string, number>>;
 	budgetUsd: number;
 }
 
 export type ReservationPlanResult = { ok: true; allocation: ReservationAllocation } | { ok: false; reason: string };
+
+function endpointCapacityDenial(endpointKey: string, limit: number): string {
+	return `dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${limit}/${limit} slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server`;
+}
 
 function copyRecord(record: DispatchReservationRecord): DispatchReservationRecord {
 	return { ...record, members: record.members.map((member) => ({ ...member })) };
@@ -96,6 +105,7 @@ function validRecord(value: unknown): value is DispatchReservationRecord {
 				typeof member.memberId === "string" &&
 				Number.isInteger(member.wave) &&
 				typeof member.nodeId === "string" &&
+				(member.endpointKey === undefined || typeof member.endpointKey === "string") &&
 				typeof member.costUpperBoundUsd === "number" &&
 				Number.isFinite(member.costUpperBoundUsd) &&
 				member.costUpperBoundUsd >= 0 &&
@@ -145,9 +155,13 @@ function reservationAllocation(tasks: ReadonlyArray<ReservationPlanTask>): Reser
 		),
 	);
 	const nodeSlots = peakBy(tasks.map((task) => ({ wave: task.wave, key: task.nodeId })));
+	const endpointSlots = peakBy(
+		tasks.flatMap((task) => (task.endpointKey === undefined ? [] : [{ wave: task.wave, key: task.endpointKey }])),
+	);
 	return {
 		globalSlots,
 		nodeSlots,
+		endpointSlots,
 		budgetUsd: tasks.reduce((sum, task) => sum + task.costUpperBoundUsd, 0),
 	};
 }
@@ -191,6 +205,18 @@ function allocateReservation(
 			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${used + slots}/${node.limit})` };
 		}
 	}
+	for (const [endpointKey, slots] of Object.entries(requested.endpointSlots)) {
+		const endpoint = capacity.endpoints[endpointKey];
+		if (!endpoint || !Number.isFinite(endpoint.limit)) continue;
+		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.endpointSlots[endpointKey] ?? 0), 0);
+		const used = endpoint.active + heldSlots;
+		if (used + slots > endpoint.limit) {
+			return {
+				ok: false,
+				reason: endpointCapacityDenial(endpointKey, endpoint.limit),
+			};
+		}
+	}
 	const existingBudget = activeRecords.reduce((sum, record) => sum + outstandingBudget(record), 0);
 	const projected = capacity.budget.currentUsd + existingBudget + requested.budgetUsd;
 	if (projected >= capacity.budget.ceilingUsd) {
@@ -225,7 +251,9 @@ export function createDispatchReservation(input: {
 		if (!planned.ok) {
 			replaceReservations(state, records);
 			writeCapacityStateUnsafe(state);
-			throw new Error(`dispatch: reservation denied: ${planned.reason}`);
+			throw new Error(
+				planned.reason.startsWith("dispatch:") ? planned.reason : `dispatch: reservation denied: ${planned.reason}`,
+			);
 		}
 		const createdAt = new Date(nowMs).toISOString();
 		const record: DispatchReservationRecord = {
@@ -250,6 +278,7 @@ export function transferDispatchReservationToLease(input: {
 	memberId: string;
 	assignmentId: string;
 	nodeId: string;
+	endpointKey?: string;
 	limits: CapacityLimits;
 	nowMs?: number;
 	ttlMs?: number;
@@ -258,6 +287,7 @@ export function transferDispatchReservationToLease(input: {
 	return acquireCapacityLease({
 		assignmentId: input.assignmentId,
 		nodeId: input.nodeId,
+		...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
 		limits: input.limits,
 		nowMs,
 		...(input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
@@ -290,6 +320,7 @@ export function rebindDispatchReservationMember(input: {
 	ownerId: string;
 	memberId: string;
 	nodeId: string;
+	endpointKey?: string;
 	costUpperBoundUsd: number;
 	capacity: ReservationCapacitySnapshot;
 	nowMs?: number;
@@ -304,11 +335,32 @@ export function rebindDispatchReservationMember(input: {
 		if (member.status === "released") {
 			throw new Error(`dispatch: reservation member '${input.memberId}' was already released`);
 		}
-		if (member.nodeId === input.nodeId && member.costUpperBoundUsd === input.costUpperBoundUsd) {
+		if (
+			member.nodeId === input.nodeId &&
+			member.endpointKey === input.endpointKey &&
+			member.costUpperBoundUsd === input.costUpperBoundUsd
+		) {
 			return copyRecord(record);
 		}
-
 		const others = records.filter((entry) => entry.status === "active" && entry.ownerId !== input.ownerId);
+		if (member.endpointKey !== input.endpointKey && input.endpointKey !== undefined) {
+			const endpointKey = input.endpointKey;
+			const endpoint = input.capacity.endpoints[endpointKey];
+			if (endpoint !== undefined && Number.isFinite(endpoint.limit)) {
+				const siblingSlots = record.members.filter(
+					(entry) => entry !== member && entry.status !== "released" && entry.endpointKey === endpointKey,
+				).length;
+				const otherHeld = others.reduce(
+					(sum, entry) => sum + (reservationAllocation(outstandingTasks(entry)).endpointSlots[endpointKey] ?? 0),
+					0,
+				);
+				const used = endpoint.active + otherHeld + siblingSlots;
+				if (used + 1 > endpoint.limit) {
+					throw new Error(endpointCapacityDenial(endpointKey, endpoint.limit));
+				}
+			}
+		}
+
 		if (member.nodeId !== input.nodeId) {
 			const node = input.capacity.nodes[input.nodeId];
 			if (node !== undefined && Number.isFinite(node.limit)) {
@@ -342,6 +394,8 @@ export function rebindDispatchReservationMember(input: {
 		}
 
 		member.nodeId = input.nodeId;
+		if (input.endpointKey === undefined) delete member.endpointKey;
+		else member.endpointKey = input.endpointKey;
 		member.costUpperBoundUsd = Math.max(0, input.costUpperBoundUsd);
 		writeStore(records);
 		return copyRecord(record);
@@ -488,14 +542,21 @@ export function reservedBudgetUsd(): number {
 		.reduce((sum, record) => sum + outstandingBudget(record), 0);
 }
 
-export function reservedCapacity(): { globalSlots: number; nodeSlots: Readonly<Record<string, number>> } {
+export function reservedCapacity(): {
+	globalSlots: number;
+	nodeSlots: Readonly<Record<string, number>>;
+	endpointSlots: Readonly<Record<string, number>>;
+} {
 	let globalSlots = 0;
 	const nodeSlots: Record<string, number> = {};
+	const endpointSlots: Record<string, number> = {};
 	for (const record of readStore().filter((entry) => entry.status === "active")) {
 		const allocation = reservationAllocation(outstandingTasks(record));
 		globalSlots += allocation.globalSlots;
 		for (const [nodeId, count] of Object.entries(allocation.nodeSlots))
 			nodeSlots[nodeId] = (nodeSlots[nodeId] ?? 0) + count;
+		for (const [endpointKey, count] of Object.entries(allocation.endpointSlots))
+			endpointSlots[endpointKey] = (endpointSlots[endpointKey] ?? 0) + count;
 	}
-	return { globalSlots, nodeSlots };
+	return { globalSlots, nodeSlots, endpointSlots };
 }

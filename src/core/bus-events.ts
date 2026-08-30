@@ -516,6 +516,8 @@ export interface DispatchRunIdentity {
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
+	/** Canonical inference scheduler and its resolved request-slot bound. */
+	endpoint?: { key: string; label: string; limit: number } | undefined;
 	/** Admitted invocation budget provenance for native workers. */
 	budget?: RunToolBudgetEnvelope | undefined;
 	/** Fleet node id the run was placed on; absent renders as the local node. */

@@ -15,6 +15,7 @@ import { resolveContextWindowDetails } from "../../src/domains/providers/runtime
 import {
 	llamaCppRequestContextWindow,
 	parseLlamaCppServerFlags,
+	probeLlamaCppProps,
 	probeOpenAIModelCatalog,
 } from "../../src/domains/providers/runtimes/common/probe-helpers.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
@@ -118,7 +119,14 @@ describe("contracts/llama.cpp per-slot context window", () => {
 					response.end(JSON.stringify({ status: "ok" }));
 					return;
 				}
-				if (url.startsWith("/props")) {
+				if (url.startsWith("/props?model=")) {
+					response.writeHead(200, { "content-type": "application/json" });
+					response.end(
+						JSON.stringify({ total_slots: 2, default_generation_settings: { n_ctx: 196608 }, build_info: "b9999" }),
+					);
+					return;
+				}
+				if (url === "/props") {
 					response.writeHead(200, { "content-type": "application/json" });
 					response.end(JSON.stringify({ default_generation_settings: { n_ctx: 0 }, build_info: "b9999" }));
 					return;
@@ -144,6 +152,7 @@ describe("contracts/llama.cpp per-slot context window", () => {
 			const result = await llamacppRuntime.probe(target, ctx);
 			ok(result.ok, result.error);
 			strictEqual(result.discoveredCapabilities?.contextWindow, 196608, "the selected model's window is one slot");
+			strictEqual(result.discoveredCapabilities?.parallelSlots, 2, "worker props wins over the argv fallback");
 			strictEqual(result.capabilityModelId, "ornith1.5-35b-moe");
 			strictEqual(result.modelCapabilities?.["ornith1.5-35b-moe"]?.contextWindow, 196608, "the catalog row too");
 			strictEqual(result.modelCapabilities?.["ornith1.5-9b-dense"]?.contextWindow, 262144, "--kv-unified is undivided");
@@ -161,6 +170,11 @@ describe("contracts/llama.cpp per-slot context window", () => {
 			const note = result.notes?.find((entry) => entry.includes("196,608 (786,432 / 4 slots)"));
 			ok(note, `the probe note names the division: ${JSON.stringify(result.notes)}`);
 			ok(note.includes("--parallel"), note);
+		});
+
+		it("enriches slots only when the props fixture reports total_slots", async () => {
+			strictEqual((await probeLlamaCppProps(base, ctx, "ornith1.5-35b-moe")).discoveredCapabilities?.parallelSlots, 2);
+			strictEqual((await probeLlamaCppProps(base, ctx)).discoveredCapabilities?.parallelSlots, undefined);
 		});
 
 		it("the shared catalog probe attaches the split without claiming residency", async () => {

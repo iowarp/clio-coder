@@ -379,14 +379,14 @@ describe("contracts/model residency reconciler", () => {
 			mutations.map(({ at: _at, ...mutation }) => mutation),
 			[
 				{
-					targetKey: "llamacpp|http://mini:8080",
+					targetKey: "http://mini:8080",
 					targetId: "mini",
 					runtimeId: "llamacpp",
 					model: "old-model",
 					operation: "evict",
 				},
 				{
-					targetKey: "llamacpp|http://mini:8080",
+					targetKey: "http://mini:8080",
 					targetId: "mini",
 					runtimeId: "llamacpp",
 					model: "new-model",

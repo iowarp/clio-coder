@@ -84,6 +84,8 @@ function capabilities(model: LmStudioModelInfo, instance?: LmStudioLoadedInstanc
 		out.reasoning = model.reasoningOptions.some((option) => option !== "off");
 	const contextWindow = loadedContextLength(instance) ?? model.maxContextLength;
 	if (contextWindow !== undefined) out.contextWindow = contextWindow;
+	const parallel = instance?.config.parallel;
+	if (typeof parallel === "number" && Number.isInteger(parallel) && parallel > 0) out.parallelSlots = parallel;
 	return out;
 }
 
@@ -144,6 +146,7 @@ function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): P
 	const selected = resolveModel(models, configuredModel(target));
 	const result: ProbeResult = {
 		ok: true,
+		discoveredCapabilities: { parallelSlots: 1 },
 		models: ids,
 		modelCapabilities,
 		modelStates,
@@ -161,7 +164,7 @@ function probeFromCatalog(catalog: LmStudioCatalog, target: TargetDescriptor): P
 	};
 	if (catalog.latencyMs !== undefined) result.latencyMs = catalog.latencyMs;
 	if (selected) {
-		result.discoveredCapabilities = capabilities(selected.model, selected.instance);
+		result.discoveredCapabilities = { parallelSlots: 1, ...capabilities(selected.model, selected.instance) };
 		result.capabilityModelId = configuredModel(target) ?? selected.model.key;
 	}
 	const loaded = models.flatMap((model) =>

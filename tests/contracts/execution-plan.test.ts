@@ -82,6 +82,32 @@ describe("execution plan", () => {
 	});
 	it("maxWorkers deterministically splits a wide dependency level into waves", () =>
 		deepStrictEqual(executionPlanWaves([step("a"), step("b"), step("c")], 2), [["a", "b"], ["c"]]));
+	it("an endpoint bound independently sizes a wide worker wave", () => {
+		const endpoint = { key: "http://mini:8080", limit: 2 };
+		deepStrictEqual(
+			executionPlanWaves(
+				[
+					{ ...step("a"), endpoint },
+					{ ...step("b"), endpoint },
+					{ ...step("c"), endpoint },
+				],
+				4,
+			),
+			[["a", "b"], ["c"]],
+		);
+		const foregroundEndpoint = { ...endpoint, foregroundHeld: 1 };
+		deepStrictEqual(
+			executionPlanWaves(
+				[
+					{ ...step("a"), endpoint: foregroundEndpoint },
+					{ ...step("b"), endpoint: foregroundEndpoint },
+					{ ...step("c"), endpoint: foregroundEndpoint },
+				],
+				4,
+			),
+			[["a"], ["b"], ["c"]],
+		);
+	});
 	it("whole-plan preflight fails before any spawn when a late step is impossible", async () => {
 		const fake = adapter();
 		await rejects(() => executePlan(plan([step("a"), { ...step("late"), agentId: "impossible" }]), fake), /impossible/);

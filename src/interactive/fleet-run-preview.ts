@@ -26,7 +26,11 @@ import {
 	validateFleetGraph,
 } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
-import type { ExecutionPlan, ExecutionPlanStep } from "../domains/dispatch/execution-plan.js";
+import {
+	bindExecutionPlanEndpoints,
+	type ExecutionPlan,
+	type ExecutionPlanStep,
+} from "../domains/dispatch/execution-plan.js";
 import {
 	type AgentRoleFactsResolver,
 	requestExecutionRole,
@@ -40,6 +44,7 @@ export interface FleetRunPreviewRoute {
 	targetId: string;
 	wireModelId: string;
 	nodeId: string;
+	endpoint?: { key: string; label: string; limit: number; foregroundHeld?: number };
 }
 
 export interface FleetRunPreviewStep {
@@ -207,6 +212,40 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		diagnostics.push(describeError(error));
 		return fail();
 	}
+	const routes = new Map<string, FleetRunPreviewRoute>();
+	if (input.resolveRoute !== undefined) {
+		for (const step of plan.steps) {
+			if (step.kind === "code") continue;
+			try {
+				const route = input.resolveRoute({
+					stepId: step.id,
+					agentId: step.agentId,
+					task: step.task,
+					scope: step.scope,
+					...(step.target !== undefined ? { target: step.target } : {}),
+					...(step.profile !== undefined ? { profile: step.profile } : {}),
+				});
+				if (route !== null) routes.set(step.id, route);
+			} catch (error) {
+				diagnostics.push(`step '${step.id}' route preflight failed: ${describeError(error)}`);
+			}
+		}
+		plan = bindExecutionPlanEndpoints(
+			plan,
+			Object.fromEntries(
+				[...routes].map(([stepId, route]) => [
+					stepId,
+					route.endpoint === undefined
+						? undefined
+						: {
+								key: route.endpoint.key,
+								limit: route.endpoint.limit,
+								...(route.endpoint.foregroundHeld !== undefined ? { foregroundHeld: route.endpoint.foregroundHeld } : {}),
+							},
+				]),
+			),
+		);
+	}
 
 	// A declared boundary is verified against the checkout, so the checkout has
 	// to be one this can read. Refused here, before any dispatch, rather than
@@ -261,20 +300,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					},
 				];
 			}
-			let route: FleetRunPreviewRoute | null = null;
-			try {
-				route =
-					input.resolveRoute?.({
-						stepId: step.id,
-						agentId: step.agentId,
-						task: step.task,
-						scope: step.scope,
-						...(step.target !== undefined ? { target: step.target } : {}),
-						...(step.profile !== undefined ? { profile: step.profile } : {}),
-					}) ?? null;
-			} catch (error) {
-				diagnostics.push(`step '${step.id}' route preflight failed: ${describeError(error)}`);
-			}
+			const route = routes.get(step.id) ?? null;
 			return [
 				{
 					...base,

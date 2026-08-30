@@ -28,6 +28,8 @@ export interface CapabilityFlags {
 	fim: boolean;
 	contextWindow: number;
 	maxTokens: number;
+	/** Request slots reported by the endpoint probe. This is deployment capacity, not a model trait. */
+	parallelSlots?: number;
 }
 
 export const EMPTY_CAPABILITIES: CapabilityFlags = {

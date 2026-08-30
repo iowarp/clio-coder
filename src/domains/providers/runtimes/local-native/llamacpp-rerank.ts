@@ -60,7 +60,7 @@ const llamacppRerankRuntime: RuntimeDescriptor = {
 		if (!(probeResponse.status === 200 || probeResponse.status === 202)) {
 			return { ok: false, error: `/reranking not available: HTTP ${probeResponse.status}` };
 		}
-		const props = await probeLlamaCppProps(base, ctx);
+		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
 		const result: ProbeResult = { ok: true };
 		if (health.latencyMs !== undefined) result.latencyMs = health.latencyMs;
 		if (props.discoveredCapabilities) result.discoveredCapabilities = props.discoveredCapabilities;

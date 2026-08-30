@@ -93,6 +93,8 @@ export interface DispatchPlanTaskResolution {
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
+	/** Canonical inference scheduler identity and its independent request-slot bound. */
+	endpoint?: { key: string; label: string; limit: number };
 	node: RunNodeIdentity;
 	/** Effective thinking control for this route; null when the runtime has none. */
 	thinkingLevel: string | null;

@@ -36,7 +36,7 @@ import {
 	type ObservabilityNotice,
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
-import type { CostProvenance } from "../domains/providers/index.js";
+import { type CostProvenance, foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
@@ -97,6 +97,8 @@ export interface DispatchBoardRow {
 	runtimeId: string;
 	targetId: string;
 	wireModelId: string;
+	/** Canonical inference scheduler and its independent request-slot bound. */
+	endpoint?: { key: string; label: string; limit: number };
 	/** Sanitized, one-line summary of the task assigned to this run. */
 	taskSummary?: string;
 	/** Immutable budget admission provenance for this run. */
@@ -602,7 +604,7 @@ export function renderDispatchCard(
 	row: DispatchBoardRow,
 	width: number,
 	evidence?: RunEvidencePresentation,
-	options: { selected?: boolean; expanded?: boolean } = {},
+	options: { selected?: boolean; expanded?: boolean; endpointActive?: number } = {},
 ): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(0, width - 4);
@@ -653,6 +655,9 @@ export function renderDispatchCard(
 	const statusUnits = [
 		statusStr,
 		theme.fg("muted", `node ${row.node ?? "local"}`),
+		...(row.endpoint !== undefined
+			? [theme.fg("info", `slots ${options.endpointActive ?? 0}/${row.endpoint.limit} ${row.endpoint.label}`)]
+			: []),
 		...(row.gate !== undefined ? [theme.fg("info", `gate ${row.gate.role} c${row.gate.cycle}`)] : []),
 		...(row.rerouteCount !== undefined && row.rerouteCount > 0
 			? [theme.fg("warning", `rerouted x${row.rerouteCount}`)]
@@ -969,6 +974,16 @@ export function formatDispatchBoardLines(
 		});
 	}
 
+	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };
+	for (const row of rows) {
+		if (
+			row.endpoint !== undefined &&
+			(row.status === "running" || row.status === "stale" || row.status === "enqueued" || row.status === "cancelling")
+		) {
+			endpointActive[row.endpoint.key] = (endpointActive[row.endpoint.key] ?? 0) + 1;
+		}
+	}
+
 	// A council is one question asked of several members, so its rows render as
 	// one card holding the whole group rather than as unrelated neighbours.
 	const cards = dispatchBoardItems(rows, selectedRunId).map((item) =>
@@ -977,6 +992,7 @@ export function formatDispatchBoardLines(
 			: renderDispatchCard(item.row, width, deriveRunEvidenceState(observability, item.row.runId), {
 					selected: item.row.runId === selectedRunId,
 					expanded: detailExpanded && item.row.runId === selectedRunId,
+					...(item.row.endpoint !== undefined ? { endpointActive: endpointActive[item.row.endpoint.key] ?? 0 } : {}),
 				}),
 	);
 	const body: string[] = [];
@@ -1153,6 +1169,15 @@ function parseGateBadge(value: unknown): { role: string; cycle: number } | undef
 	if (typeof record.role !== "string" || record.role.length === 0) return undefined;
 	const cycle = parsePositiveInt(record.cycle) ?? 1;
 	return { role: record.role, cycle };
+}
+
+function parseEndpointCapacity(value: unknown): DispatchBoardRow["endpoint"] | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as { key?: unknown; label?: unknown; limit?: unknown };
+	const key = parseNonEmptyString(record.key);
+	const label = parseNonEmptyString(record.label);
+	const limit = parsePositiveInt(record.limit);
+	return key === undefined || label === undefined || limit === undefined ? undefined : { key, label, limit };
 }
 
 function parseCouncilBadge(value: unknown): DispatchBoardRow["council"] | undefined {
@@ -1351,6 +1376,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		runtimeId: entry.runtimeId,
 		targetId: entry.targetId,
 		wireModelId: entry.wireModelId,
+		...(entry.endpoint !== undefined ? { endpoint: { ...entry.endpoint } } : {}),
 		...(entry.taskSummary !== undefined ? { taskSummary: entry.taskSummary } : {}),
 		...(entry.budget !== undefined ? { budget: entry.budget } : {}),
 		status: retry ? "retrying" : entry.status,
@@ -1461,6 +1487,7 @@ export function createDispatchBoardStore(
 		const agentAudience = parseAgentAudience(raw.agentAudience, previous?.agentAudience);
 		const requestOrigin = parseRequestOrigin(raw.requestOrigin, previous?.requestOrigin);
 		const node = parseNonEmptyString(raw.node) ?? previous?.node;
+		const endpoint = parseEndpointCapacity(raw.endpoint) ?? previous?.endpoint;
 		const gate = parseGateBadge(raw.gate) ?? previous?.gate;
 		const council = parseCouncilBadge(raw.council) ?? previous?.council;
 		const rerouteCount = parsePositiveInt(raw.rerouteCount) ?? previous?.rerouteCount;
@@ -1477,6 +1504,7 @@ export function createDispatchBoardStore(
 			runtimeId: parseText(raw.runtimeId, previous?.runtimeId ?? "-"),
 			targetId: parseText(raw.targetId, previous?.targetId ?? "-"),
 			wireModelId: parseText(raw.wireModelId, previous?.wireModelId ?? "-"),
+			...(endpoint !== undefined ? { endpoint } : {}),
 			...(taskSummary !== undefined ? { taskSummary } : {}),
 			...(budget !== undefined ? { budget } : {}),
 			status,

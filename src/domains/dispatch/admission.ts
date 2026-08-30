@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import { createAdmissionQueue } from "./admission-queue.js";
@@ -41,6 +42,7 @@ export interface CapacityAdmissionController {
 	admit(input: {
 		assignmentId: string;
 		nodeId: string;
+		endpointKey?: string;
 		deadlineAt: number;
 		priority?: number;
 		planId?: string;
@@ -105,13 +107,25 @@ const PUMP_MAX_MS = 500;
 function describeAdmissionFailure(input: {
 	state: "canceled" | "timed_out";
 	nodeId: string;
+	endpointKey?: string;
 	waitedMs: number;
 	overdueAtQueueMs: number;
 	queueDepth: number;
 	limits: CapacityLimits;
-	usage: { global: number; nodes: Readonly<Record<string, number>> };
+	usage: {
+		global: number;
+		nodes: Readonly<Record<string, number>>;
+		endpoints: Readonly<Record<string, number>>;
+	};
 }): string {
 	if (input.state === "canceled") return "dispatch: admission canceled before a capacity slot opened";
+	if (input.endpointKey !== undefined) {
+		const endpointLimit = input.limits.endpoints[input.endpointKey];
+		const endpointActive = input.usage.endpoints[input.endpointKey] ?? 0;
+		if (endpointLimit !== undefined && endpointActive >= endpointLimit) {
+			return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity reached (${endpointActive}/${endpointLimit} slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server`;
+		}
+	}
 	const nodeLimit = input.limits.nodes[input.nodeId];
 	const nodeActive = input.usage.nodes[input.nodeId] ?? 0;
 	const where =
@@ -142,7 +156,11 @@ function describeAdmissionFailure(input: {
 export function createCapacityAdmissionController(options: {
 	limits: () => CapacityLimits;
 	/** Live lease counts for the timeout message; defaults to the durable state file. */
-	usage?: () => { global: number; nodes: Readonly<Record<string, number>> };
+	usage?: () => {
+		global: number;
+		nodes: Readonly<Record<string, number>>;
+		endpoints: Readonly<Record<string, number>>;
+	};
 	now?: () => number;
 	maxQueueSize?: number;
 	queueCeilingMs?: number;
@@ -175,7 +193,14 @@ export function createCapacityAdmissionController(options: {
 					admittedLease = request.value();
 					return true;
 				} catch (error) {
-					// Capacity is a wait, not a failure. Anything else fails the request.
+					// Endpoint saturation is a named refusal because waiting would keep a
+					// model request queued behind the same inference scheduler. Existing
+					// node and global admission retain their bounded wait behavior.
+					if (error instanceof Error && /endpoint '.*' capacity reached/u.test(error.message)) {
+						queue.fail(request.requestId, error);
+						return false;
+					}
+					// Node and global capacity can wait. Anything else fails the request.
 					if (error instanceof Error && /capacity reached/.test(error.message)) return false;
 					queue.fail(request.requestId, error instanceof Error ? error : new Error(String(error)));
 					return false;
@@ -229,12 +254,14 @@ export function createCapacityAdmissionController(options: {
 									memberId: input.reservation.memberId,
 									assignmentId: input.assignmentId,
 									nodeId: input.nodeId,
+									...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
 									limits: options.limits(),
 									nowMs: now(),
 								})
 							: acquireCapacityLease({
 									assignmentId: input.assignmentId,
 									nodeId: input.nodeId,
+									...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
 									limits: options.limits(),
 									nowMs: now(),
 								}),
@@ -246,6 +273,7 @@ export function createCapacityAdmissionController(options: {
 						describeAdmissionFailure({
 							state: outcome.state,
 							nodeId: input.nodeId,
+							...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
 							waitedMs: now() - queuedAt,
 							overdueAtQueueMs: queuedAt - input.deadlineAt,
 							queueDepth: queue.size(),

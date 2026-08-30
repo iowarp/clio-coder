@@ -13,7 +13,7 @@ try {
 	const lease = acquireCapacityLease({
 		assignmentId,
 		nodeId: "local",
-		limits: { global: 1, nodes: { local: 1 } },
+		limits: { global: 1, nodes: { local: 1 }, endpoints: {} },
 		ttlMs: 60_000,
 	});
 	process.send?.({ ok: true, leaseId: lease.leaseId });

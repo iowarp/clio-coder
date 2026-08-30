@@ -27,6 +27,16 @@ export {
 export { AGENT_ROLE_TOOLS_REQUIRED_REASON, mergeCapabilities, supportsAgentRoleTools } from "./capabilities.js";
 export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
+export {
+	canonicalEndpointKey,
+	type EndpointCapacity,
+	type EndpointCapacitySource,
+	endpointCapacitiesForStatuses,
+	endpointCapacityForStatus,
+	endpointLabel,
+	foregroundStreamUsage,
+	registerForegroundStream,
+} from "./endpoint-capacity.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";

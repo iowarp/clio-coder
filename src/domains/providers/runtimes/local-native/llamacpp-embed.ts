@@ -101,7 +101,7 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		if (!probeResponse.ok) {
 			return { ok: false, error: `/embedding not available: HTTP ${probeResponse.status}` };
 		}
-		const props = await probeLlamaCppProps(base, ctx);
+		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
 		const result: ProbeResult = { ok: true };
 		if (health.latencyMs !== undefined) result.latencyMs = health.latencyMs;
 		if (props.discoveredCapabilities) result.discoveredCapabilities = props.discoveredCapabilities;

@@ -112,6 +112,25 @@ describe("contracts/config", () => {
 		strictEqual(settings.skills.trustProjectCompatRoots, false);
 	});
 
+	it("validates an explicit positive integer request-slot override on a target", () => {
+		const valid = validateSettings({
+			targets: [{ id: "mini", runtime: "llamacpp", url: "http://mini:8080", maxConcurrentRequests: 2 }],
+		});
+		deepStrictEqual(valid.issues, []);
+		strictEqual(valid.settings.targets[0]?.maxConcurrentRequests, 2);
+
+		for (const value of [0, -1, 1.5]) {
+			const invalid = validateSettings({
+				targets: [{ id: "mini", runtime: "llamacpp", url: "http://mini:8080", maxConcurrentRequests: value }],
+			});
+			strictEqual(
+				invalid.issues.some((issue) => issue.path === "targets[0].maxConcurrentRequests"),
+				true,
+			);
+			strictEqual(invalid.settings.targets[0]?.maxConcurrentRequests, undefined);
+		}
+	});
+
 	it("validates every LM Studio load and request setting strictly", () => {
 		const valid = validateSettings({
 			targets: [
