@@ -9,7 +9,7 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder agents [--json] [--all]
 
-List user-facing agent specs from built-in, user, and project recipes.
+List user-facing agent specs from built-in, extension, user, and project recipes.
 
 Flags:
   --json   emit specs as JSON instead of the formatted table

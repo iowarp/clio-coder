@@ -4,7 +4,7 @@ import { printError } from "./shared.js";
 const HELP = `clio-coder config inspect [--json]
 
 Print the effective-customization graph: what settings, context files, rules,
-skills, prompts, agents, extensions, safety, memory, hooks, and the operator
+skills, prompts, agents, fleets, extensions, safety, memory, hooks, and the operator
 profile loaded, from where, with what precedence, trust, reload class, and
 context cost. Read-only; nothing is created.
 
