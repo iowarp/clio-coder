@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { evaluateClioCompatibility } from "./compatibility.js";
 import type {
 	ClioExtensionManifest,
 	ExtensionCandidate,
@@ -166,9 +167,32 @@ export function parseExtensionManifest(
 	const resources = normalizeResources(value.resources);
 	const tools = stringArray(value.tools);
 	const settings = stringArray(value.settings);
-	const compatibility = isRecord(value.compatibility)
-		? { ...(trimString(value.compatibility.clio) ? { clio: trimString(value.compatibility.clio) as string } : {}) }
-		: undefined;
+	let compatibility: ClioExtensionManifest["compatibility"];
+	if (value.compatibility !== undefined) {
+		if (!isRecord(value.compatibility)) {
+			diagnostics.push({ type: "error", message: "compatibility must be an object", path: manifestPath });
+		} else if ("clio" in value.compatibility) {
+			const range = trimString(value.compatibility.clio);
+			if (range === undefined) {
+				diagnostics.push({
+					type: "error",
+					message: "compatibility.clio must be a non-empty semver range",
+					path: manifestPath,
+				});
+			} else {
+				const evaluation = evaluateClioCompatibility(range);
+				if (!evaluation.rangeValid) {
+					diagnostics.push({
+						type: "error",
+						message: `extension ${id ?? "<unknown>"} declares malformed compatibility.clio range '${range}'`,
+						path: manifestPath,
+					});
+				} else {
+					compatibility = { clio: range };
+				}
+			}
+		}
+	}
 	if (!id || !name || !version || !description || diagnostics.some((diag) => diag.type === "error")) {
 		return { diagnostics };
 	}
@@ -183,6 +207,17 @@ export function parseExtensionManifest(
 	if (tools) manifest.tools = tools;
 	if (settings) manifest.settings = settings;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
+	const clioRange = manifest.compatibility?.clio;
+	if (clioRange !== undefined) {
+		const evaluation = evaluateClioCompatibility(clioRange);
+		if (!evaluation.satisfied) {
+			diagnostics.push({
+				type: "error",
+				message: `extension ${manifest.id} requires Clio '${clioRange}', but running Clio version is '${evaluation.runningVersion}'`,
+				path: manifestPath,
+			});
+		}
+	}
 	return { manifest, diagnostics };
 }
 

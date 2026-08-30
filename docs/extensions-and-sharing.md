@@ -197,6 +197,8 @@ Required fields are `manifestVersion: 1`, `id`, `version`, and `description`. `n
 
 IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.
 
+`compatibility.clio` is optional. When present, it must be a valid SemVer range such as `>=0.3.8`, `^0.3.8`, or `0.3.x`. Installation refuses a package whose range excludes the running Clio version and names the extension, its declared range, and that running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio version change stays visible in `extensions list` with its diagnostic but contributes no resources. An incompatible project package does not hide a compatible user package with the same ID. A manifest without `compatibility.clio` keeps the existing unrestricted behavior.
+
 ---
 
 ## Extension CLI
