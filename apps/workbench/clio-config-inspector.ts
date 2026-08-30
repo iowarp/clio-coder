@@ -327,13 +327,13 @@ export function projectConfigInspection(
 	const root = resolve(trustedRoot);
 	const reportedRoot = boundedText(value.cwd, 4 * 1024);
 	if (reportedRoot === null || resolve(reportedRoot) !== root) {
-		throw new ClioConfigInspectError("internal", "Clio inspected a different project than Workbench requested.");
+		throw new ClioConfigInspectError("internal", "Clio inspected a different project than the GUI requested.");
 	}
 	if (
 		value.settings.length > MAX_RAW_SETTINGS || value.entries.length > MAX_RAW_ENTRIES ||
 		value.issues.length > MAX_RAW_ISSUES * 4
 	) {
-		throw new ClioConfigInspectError("internal", "Clio's configuration graph exceeded Workbench's safe shape bound.");
+		throw new ClioConfigInspectError("internal", "Clio's configuration graph exceeded the GUI's safe shape bound.");
 	}
 	const projectedSettings = value.settings.map(projectSetting).filter((entry): entry is WireConfigSetting =>
 		entry !== null
@@ -380,7 +380,7 @@ export class ClioCliConfigInspector implements ClioConfigInspector {
 		} catch (error) {
 			if (!(error instanceof ClioReadCommandError)) throw error;
 			if (error.code === "spawn") {
-				throw new ClioConfigInspectError("not-ready", "Workbench could not start Clio's configuration inspector.");
+				throw new ClioConfigInspectError("not-ready", "The GUI could not start Clio's configuration inspector.");
 			}
 			if (error.code === "timeout") {
 				throw new ClioConfigInspectError("not-ready", "Clio's configuration inspection did not finish in time.");
@@ -388,7 +388,7 @@ export class ClioCliConfigInspector implements ClioConfigInspector {
 			if (error.code === "byte-limit") {
 				throw new ClioConfigInspectError(
 					"internal",
-					"Clio's configuration inspection exceeded Workbench's byte bound.",
+					"Clio's configuration inspection exceeded the GUI's byte bound.",
 				);
 			}
 			if (error.code === "exit") {
@@ -408,7 +408,7 @@ export class ClioCliConfigInspector implements ClioConfigInspector {
 			if (error.code === "json") {
 				throw new ClioConfigInspectError("internal", "Clio returned invalid configuration inspection JSON.");
 			}
-			throw new ClioConfigInspectError("internal", "Workbench could not read Clio's configuration inspection.");
+			throw new ClioConfigInspectError("internal", "The GUI could not read Clio's configuration inspection.");
 		}
 		return projectConfigInspection(parsed, root, new Date(this.#now()).toISOString());
 	}

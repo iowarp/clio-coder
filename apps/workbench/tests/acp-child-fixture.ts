@@ -577,7 +577,7 @@ async function run(): Promise<void> {
 
 	const initializeResult: JsonRpcRecord = {
 		protocolVersion: 1,
-		agentInfo: { name: "clio-coder", title: "Clio Workbench ACP fixture", version: "0.0.0" },
+		agentInfo: { name: "clio-coder", title: "Clio Coder ACP fixture", version: "0.0.0" },
 		agentCapabilities: supportedAgentCapabilities,
 		authMethods: [],
 	};

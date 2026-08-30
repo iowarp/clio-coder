@@ -6,6 +6,7 @@ import {
 	type WireCatalogInspection,
 	type WireClioSnapshot,
 	type WireConfigInspection,
+	type WireDispatchInspection,
 	type WireProjectWorkspace,
 	type WireRoutingInspection,
 	type WireSessionSummary,
@@ -17,6 +18,24 @@ import type { WireBootstrap } from "../src/state.ts";
 
 export const FIXTURE_PROJECT_ID = "project-alpha-0001";
 export const FIXTURE_ROOT = "/tmp/workbench-fixture/alpha";
+
+export function dispatchInspectionFixture(): WireDispatchInspection {
+	return {
+		scope: "installation",
+		inspectedAt: "2026-08-30T14:02:00.000Z",
+		generatedAt: "2026-08-30T14:01:28.728Z",
+		admission: { state: "open", expiresAt: null },
+		running: { total: 5, alive: 3, stale: 1, dead: 1, unreported: 0 },
+		retryingCount: 0,
+		totals: {
+			inputTokens: 9_557_544,
+			outputTokens: 517_406,
+			totalTokens: 15_918_587,
+			costUsd: 1.78098108,
+			runtimeSeconds: 42_963.751,
+		},
+	};
+}
 
 export function configInspectionFixture(): WireConfigInspection {
 	return {
@@ -364,7 +383,7 @@ export function workspaceFixture(
 export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBootstrap {
 	return {
 		protocolVersion: PROTOCOL_VERSION,
-		appName: "Clio Workbench" as const,
+		appName: "Clio Coder" as const,
 		workspaceInstanceId: "workspace-fixture-0001",
 		localToken: "token-fixture-0000000000000001",
 		mode: "browser" as const,
@@ -378,8 +397,9 @@ export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBo
 			available: true,
 		}],
 		homePath: "/home/operator",
-		stateDirNote: "Workbench keeps only its recent-project list under /tmp/workbench-fixture/state.",
-		securityNote: "Workbench enforces the project boundary in its own code; Deno grants are broad.",
+		stateDirNote: "The desktop app keeps only its recent-project list under /tmp/workbench-fixture/state.",
+		securityNote: "The desktop app enforces the project boundary in its own code; Deno grants are broad.",
+		dispatchInspection: null,
 		...overrides,
 	};
 }

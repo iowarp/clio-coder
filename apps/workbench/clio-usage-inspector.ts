@@ -2,7 +2,7 @@
  * Project-scoped projection of Clio's experimental cross-session usage report.
  *
  * The upstream JSONL mixes repo-filtered rows with global audit, evidence, and
- * memory facts. Workbench deliberately retains only the rows whose upstream
+ * memory facts. The GUI deliberately retains only the rows whose upstream
  * implementation applies `--repo` before aggregation. Suggestions, bash
  * shapes, session/run ids, store paths, and diagnostics never cross the host.
  */
@@ -371,7 +371,7 @@ export class ClioCliUsageInspector implements ClioUsageInspector {
 		} catch (error) {
 			if (!(error instanceof ClioReadCommandError)) throw error;
 			if (error.code === "spawn") {
-				throw new ClioUsageInspectError("not-ready", "Workbench could not start Clio's usage inspector.");
+				throw new ClioUsageInspectError("not-ready", "The GUI could not start Clio's usage inspector.");
 			}
 			if (error.code === "timeout") {
 				throw new ClioUsageInspectError("not-ready", "Clio's usage inspection did not finish in time.");
@@ -397,7 +397,7 @@ export class ClioCliUsageInspector implements ClioUsageInspector {
 			this.#log("Clio usage projection rejected an incompatible experimental row.");
 			throw new ClioUsageInspectError(
 				"internal",
-				"Clio's experimental usage schema is not compatible with this Workbench build.",
+				"Clio's experimental usage schema is not compatible with this GUI build.",
 			);
 		}
 	}

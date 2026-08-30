@@ -10,7 +10,7 @@ import {
 	useState,
 } from "react";
 import type { Dispatch, FormEvent, KeyboardEvent, ReactNode } from "react";
-import { AUTONOMY_LEVELS, THINKING_LEVELS } from "./protocol.ts";
+import { AUTONOMY_LEVELS, PRODUCT_NAME, THINKING_LEVELS } from "./protocol.ts";
 import type {
 	WireAutonomyLevel,
 	WireCatalogAgent,
@@ -25,6 +25,7 @@ import type {
 	WireCustomizationEntry,
 	WireCustomizationReloadClass,
 	WireDeleteChallenge,
+	WireDispatchInspection,
 	WireEventSource,
 	WirePendingPermission,
 	WireProjectSummary,
@@ -70,6 +71,7 @@ export interface WorkbenchActions {
 	inspectCatalog(projectId: string): void;
 	inspectUsage(projectId: string): void;
 	inspectRouting(projectId: string): void;
+	inspectDispatch(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
 	setAutonomy(projectId: string, level: WireAutonomyLevel): void;
@@ -82,7 +84,7 @@ interface WorkbenchViewProps {
 }
 
 type FileDialog = "create-file" | "create-folder" | "move" | "delete" | null;
-type WorkspaceView = "notebook" | "effective-clio" | "catalog" | "usage";
+type WorkspaceView = "notebook" | "effective-clio" | "catalog" | "usage" | "dispatch";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -158,22 +160,22 @@ const PHASE_PRESENTATION: Record<WireClioPhase, { label: string; tone: string }>
 const SOURCE_LABELS: Record<WireEventSource, string> = {
 	"reported-by-clio": "Reported by Clio",
 	"observed-on-acp": "Observed on ACP",
-	"observed-by-workbench": "Observed by Workbench",
+	"observed-by-workbench": "Observed by desktop",
 	"replayed-from-clio": "Replayed from Clio",
 };
 
 const SOURCE_GUIDANCE: Record<WireEventSource, { label: string; description: string }> = {
 	"reported-by-clio": {
 		label: "Clio reported",
-		description: "Clio supplied this fact; Workbench did not measure it independently.",
+		description: "Clio supplied this fact; the desktop app did not measure it independently.",
 	},
 	"observed-on-acp": {
 		label: "Observed live",
-		description: "Workbench received this event on Clio's live control channel.",
+		description: "The desktop app received this event on Clio's live control channel.",
 	},
 	"observed-by-workbench": {
 		label: "Observed locally",
-		description: "Workbench observed this fact in its own project or process boundary.",
+		description: "The desktop app observed this fact in its own project or process boundary.",
 	},
 	"replayed-from-clio": {
 		label: "Earlier record",
@@ -194,7 +196,7 @@ const SETTING_GUIDANCE: Record<string, { label: string; description: string; sco
 	},
 	"orchestrator.thinkingLevel": {
 		label: "Reasoning effort",
-		description: "Clio's configured reasoning depth. Workbench does not infer what the bound session already uses.",
+		description: "Clio's configured reasoning depth. The GUI does not infer what the bound session already uses.",
 		scope: null,
 	},
 	autonomy: {
@@ -387,7 +389,7 @@ function BrandLockup({ compact = false }: { compact?: boolean }) {
 			</div>
 			<div>
 				<div className="brand-lockup__eyebrow">IOWARP · CLIO</div>
-				<div className="brand-lockup__name">Workbench</div>
+				<div className="brand-lockup__name">{PRODUCT_NAME}</div>
 			</div>
 		</div>
 	);
@@ -404,7 +406,7 @@ function LoadingScreen() {
 			<BrandLockup />
 			<p>Starting the localhost instrument…</p>
 			<div className="boot-screen__rule" />
-			<small>Workbench talks to one Clio process and never edits Clio configuration behind your back.</small>
+			<small>The GUI talks to one Clio process and never edits Clio configuration behind your back.</small>
 		</main>
 	);
 }
@@ -415,7 +417,7 @@ function FailureScreen({ message }: { message: string }) {
 			<BrandLockup />
 			<div role="alert">
 				<p className="kicker">LOCALHOST STARTUP FAILED</p>
-				<h1>Workbench could not establish its local control channel.</h1>
+				<h1>{PRODUCT_NAME} could not establish its local control channel.</h1>
 				<pre>{message}</pre>
 			</div>
 			<button type="button" className="button button--primary" onClick={() => location.reload()}>
@@ -639,7 +641,7 @@ function SessionDeleteModal({ session, projectId, actions, onClose }: {
 				</div>
 				<p>
 					Clio deletes this session and its {session.turns}{" "}
-					recorded turns. Workbench cannot bring them back, and neither can Clio.
+					recorded turns. Neither the GUI nor Clio can bring them back.
 				</p>
 				<div className="modal__actions">
 					<button type="button" className="button button--quiet" onClick={onClose}>Keep session</button>
@@ -747,9 +749,8 @@ const ProjectRail = memo(function ProjectRail({
 										? (
 											<div className="project-recovery">
 												<p className="project-recovery__reason">
-													Workbench can no longer open this folder. It may have been moved, renamed, or deleted, or it
-													may now be a location Workbench refuses to open. Removing it from this list changes nothing on
-													disk.
+													The GUI can no longer open this folder. It may have been moved, renamed, or deleted, or it may
+													now be a location the GUI refuses to open. Removing it from this list changes nothing on disk.
 												</p>
 												<button
 													type="button"
@@ -974,7 +975,7 @@ function PermissionCard({
 					{formatDuration(elapsed)}.
 				</p>
 				<p className="approval-card__note">
-					Nothing runs until you answer. Workbench never answers for you.
+					Nothing runs until you answer. The GUI never answers for you.
 				</p>
 				<div className="approval-card__actions">
 					<button type="button" className="button button--quiet" onClick={() => onResolve("reject")}>Reject</button>
@@ -1038,7 +1039,7 @@ function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void 
 				<div className="eyebrow">A FIELD OBSERVATORY FOR CODE</div>
 				<h2 id="first-run-title">Bring a research folder. Keep every decision visible.</h2>
 				<p>
-					Workbench gives one real Clio process a bounded place to work, then turns its requests, actions, and outcomes
+					The GUI gives one real Clio process a bounded place to work, then turns its requests, actions, and outcomes
 					into a record you can inspect. You can start with a question; you do not need to start with a command.
 				</p>
 				<div className="first-run__actions">
@@ -1049,7 +1050,7 @@ function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void 
 				</div>
 			</div>
 
-			<ol className="first-run__steps" aria-label="How Workbench works">
+			<ol className="first-run__steps" aria-label={`How ${PRODUCT_NAME} works`}>
 				<li>
 					<span aria-hidden="true">01</span>
 					<div>
@@ -1081,11 +1082,11 @@ function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void 
 				<article>
 					<div className="eyebrow">LOCAL CONTROL</div>
 					<p>
-						The Workbench control channel stays on this machine. Prompts go only to the Clio target you configure.
+						The GUI control channel stays on this machine. Prompts go only to the Clio target you configure.
 					</p>
 				</article>
 				<article>
-					<div className="eyebrow">WORKBENCH STATE</div>
+					<div className="eyebrow">DESKTOP STATE</div>
 					<p>{state.stateDirNote}</p>
 				</article>
 			</div>
@@ -1112,6 +1113,7 @@ interface EvidenceRailProps {
 	onOpenConfigMap(): void;
 	onOpenCatalog(): void;
 	onOpenUsage(): void;
+	onOpenDispatch(): void;
 	obscured: boolean;
 }
 
@@ -1127,6 +1129,7 @@ const EvidenceRail = memo(function EvidenceRail({
 	onOpenConfigMap,
 	onOpenCatalog,
 	onOpenUsage,
+	onOpenDispatch,
 	obscured,
 }: EvidenceRailProps) {
 	const open = state.open;
@@ -1149,6 +1152,7 @@ const EvidenceRail = memo(function EvidenceRail({
 	const configInspection = open?.configInspection ?? null;
 	const catalogInspection = open?.catalogInspection ?? null;
 	const usageInspection = open?.usageInspection ?? null;
+	const dispatchInspection = state.dispatchInspection;
 	const configContextTokens = configInspection?.entries.reduce(
 		(total, entry) => total + (entry.contextCostTokens ?? 0),
 		0,
@@ -1394,6 +1398,48 @@ const EvidenceRail = memo(function EvidenceRail({
 					</section>
 				)}
 
+				<section className="observer-section observer-section--dispatch" aria-labelledby="observer-dispatch-title">
+					<div className="eyebrow">INSTALLATION DISPATCH</div>
+					<h3 id="observer-dispatch-title">What Clio's durable fleet ledger reports</h3>
+					{dispatchInspection === null
+						? (
+							<p className="observer-note">
+								{state.pendingDispatchInspect === null
+									? "Open the read-only snapshot for global admission, running-work counts, and durable totals."
+									: "Clio is reading its installation-wide dispatch ledger."}
+							</p>
+						)
+						: (
+							<dl className="effective-summary">
+								<div>
+									<dt>Admission</dt>
+									<dd>{dispatchInspection.admission.state}</dd>
+								</div>
+								<div>
+									<dt>Running</dt>
+									<dd>{dispatchInspection.running.total}</dd>
+								</div>
+								<div>
+									<dt>Tokens</dt>
+									<dd>{formatTokenCount(dispatchInspection.totals.totalTokens)}</dd>
+								</div>
+								<div>
+									<dt>Cost</dt>
+									<dd>{formatUsageCost(dispatchInspection.totals.costUsd)}</dd>
+								</div>
+							</dl>
+						)}
+					<button
+						type="button"
+						className="button button--quiet observer-map-button"
+						aria-pressed={workspaceView === "dispatch"}
+						onClick={onOpenDispatch}
+					>
+						<span aria-hidden="true">Σ</span>
+						{workspaceView === "dispatch" ? "Dispatch snapshot open" : "Open dispatch snapshot"}
+					</button>
+				</section>
+
 				{open !== null && (
 					<section className="observer-section" aria-labelledby="observer-usage-title">
 						<div className="observer-section__heading">
@@ -1414,7 +1460,7 @@ const EvidenceRail = memo(function EvidenceRail({
 							? (
 								<p className="observer-note">
 									{hasTerminalRecord
-										? "Clio ended a visible turn without terminal token fields, so Workbench has no token record to graph."
+										? "Clio ended a visible turn without terminal token fields, so the GUI has no token record to graph."
 										: "Token fields appear here after Clio ends a turn and reports them."}
 								</p>
 							)
@@ -1441,7 +1487,7 @@ const EvidenceRail = memo(function EvidenceRail({
 									</ul>
 									<p className="observer-method-note">
 										Bars compare field counts across terminal reports in the visible record. Fields stay separate
-										because providers may account for cached or reasoning tokens differently; Workbench does not infer a
+										because providers may account for cached or reasoning tokens differently; the GUI does not infer a
 										price.
 									</p>
 								</>
@@ -1648,8 +1694,8 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 					<div className="eyebrow">READ-ONLY CLIO INSPECTION</div>
 					<h2 id="effective-clio-title">Build the map behind Clio's behavior</h2>
 					<p>
-						Workbench asks Clio which settings, context, rules, hooks, extensions, resources, safety, and memory
-						surfaces are effective for this project. Raw values and paths outside the project stay on the host.
+						The GUI asks Clio which settings, context, rules, hooks, extensions, resources, safety, and memory surfaces
+						are effective for this project. Raw values and paths outside the project stay on the host.
 					</p>
 				</div>
 				<div className="effective-map__empty-actions">
@@ -1855,7 +1901,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 							);
 						})}
 					{inspection.entriesTruncated && (
-						<p className="config-catalog__note">The entry inventory reached Workbench's display bound.</p>
+						<p className="config-catalog__note">The entry inventory reached the GUI display bound.</p>
 					)}
 				</section>
 
@@ -1908,7 +1954,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 							</details>
 						))}
 					{inspection.settingsTruncated && (
-						<p className="config-catalog__note">The setting inventory reached Workbench's display bound.</p>
+						<p className="config-catalog__note">The setting inventory reached the GUI display bound.</p>
 					)}
 				</section>
 			</div>
@@ -1931,7 +1977,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 							</li>
 						))}
 					</ul>
-					{inspection.issuesTruncated && <p>The issue summary reached Workbench's display bound.</p>}
+					{inspection.issuesTruncated && <p>The issue summary reached the GUI display bound.</p>}
 				</section>
 			)}
 
@@ -2150,8 +2196,8 @@ function CatalogCollectionFailure({ label, onRefresh }: { label: string; onRefre
 			<div>
 				<h3>{label} could not be read</h3>
 				<p>
-					The other collections remain usable. Clio's raw diagnostic stayed on the Workbench host rather than crossing
-					into this page.
+					The other collections remain usable. Clio's raw diagnostic stayed on the local host rather than crossing into
+					this page.
 				</p>
 			</div>
 			<button type="button" className="button button--quiet" onClick={onRefresh}>Retry all catalogs</button>
@@ -2437,7 +2483,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 								<h3>Verifier discovery is real, but it is not machine-readable yet</h3>
 								<p>
 									Clio exposes <code>clio-coder verifiers discover</code>{" "}
-									as a formatted authoring preview. Workbench will not scrape that table or pretend its argv, cwd,
+									as a formatted authoring preview. The GUI will not scrape that table or pretend its argv, cwd,
 									timeout, tags, and authority are typed facts.
 								</p>
 								<p>
@@ -2470,7 +2516,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 					)}
 				{activeTruncated && tab !== "verifiers" && (
 					<p className="catalog__truncated" role="note">
-						This collection was bounded by Workbench. Refreshing cannot reveal omitted rows until the catalog is
+						This collection reached the GUI display bound. Refreshing cannot reveal omitted rows until the catalog is
 						narrowed.
 					</p>
 				)}
@@ -2609,7 +2655,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 				<div>
 					<dt>Clio-reported cost</dt>
 					<dd>{totals === null ? "—" : formatUsageCost(totals.costUsd)}</dd>
-					<dd className="usage-notebook__summary-note">Recorded cost, never a Workbench estimate</dd>
+					<dd className="usage-notebook__summary-note">Recorded cost, never a GUI estimate</dd>
 				</div>
 				<div className={inspection.stores.sessions === "missing" ? "is-missing" : undefined}>
 					<dt>Sessions</dt>
@@ -2812,8 +2858,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 					<div className="eyebrow">NEXT TYPED BRIDGES</div>
 					<h3 id="usage-boundaries-title">Historical surfaces still waiting on safe project contracts</h3>
 					<p>
-						Workbench exposes a boundary instead of scraping formatted output or leaking global records into this
-						project.
+						The GUI exposes a boundary instead of scraping formatted output or leaking global records into this project.
 					</p>
 				</div>
 				<ul>
@@ -2831,7 +2876,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 					</li>
 					<li>
 						<strong>Fleet</strong>
-						<span>Status is global and has no project selector.</span>
+						<span>Global status lives in Dispatch and is never folded into this project record.</span>
 					</li>
 				</ul>
 			</section>
@@ -2842,6 +2887,185 @@ export const UsageNotebook = memo(function UsageNotebook({
 					Only aggregates whose Clio implementation applies the trusted project root are retained. Global audit,
 					failure-tag, memory, and evidence rows are discarded; opportunity suggestions are reduced to counts. This is a
 					cached read-only snapshot and refreshes only when requested.
+				</p>
+			</footer>
+		</section>
+	);
+});
+
+function DispatchEmptyState({ pending, onRefresh, onBack }: {
+	pending: boolean;
+	onRefresh(): void;
+	onBack(): void;
+}) {
+	return (
+		<section
+			className="dispatch-ledger dispatch-ledger--empty"
+			aria-labelledby="dispatch-ledger-title"
+			aria-busy={pending}
+		>
+			<div className="dispatch-ledger__empty-dial" aria-hidden="true">
+				<span>Σ</span>
+				<small>FLEET</small>
+			</div>
+			<div>
+				<div className="eyebrow">DURABLE DISPATCH · READ ONLY</div>
+				<h2 id="dispatch-ledger-title">Read Clio's installation-wide dispatch ledger</h2>
+				<p>
+					This snapshot asks Clio for admission state, aggregate running-work heartbeats, and cumulative tokens, cost,
+					and runtime. It carries no run, agent, node, process, path, lineage, or budget identifiers.
+				</p>
+			</div>
+			<div className="dispatch-ledger__empty-actions">
+				<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+					{pending ? "Reading dispatch ledger…" : "Inspect dispatch status"}
+				</button>
+				<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+			</div>
+			<p className="dispatch-ledger__boundary">
+				This is global installation state, not a fact about the selected project and not a live event stream.
+			</p>
+		</section>
+	);
+}
+
+export const DispatchLedger = memo(function DispatchLedger({
+	inspection,
+	pending,
+	onRefresh,
+	onBack,
+}: {
+	inspection: WireDispatchInspection | null;
+	pending: boolean;
+	onRefresh(): void;
+	onBack(): void;
+}) {
+	if (inspection === null) {
+		return <DispatchEmptyState pending={pending} onRefresh={onRefresh} onBack={onBack} />;
+	}
+	const running = inspection.running;
+	const admissionOpen = inspection.admission.state === "open";
+	return (
+		<section className="dispatch-ledger" aria-labelledby="dispatch-ledger-title" aria-busy={pending}>
+			<header className="dispatch-ledger__masthead">
+				<div>
+					<div className="eyebrow">CLIO FLEET STATUS · INSTALLATION-WIDE · READ ONLY</div>
+					<h2 id="dispatch-ledger-title">Dispatch across this Clio installation</h2>
+					<p>
+						Clio read its durable ledger at{" "}
+						{formatTimestamp(inspection.generatedAt)}. Figures below are reported by Clio and deliberately are not
+						attached to the selected project.
+					</p>
+				</div>
+				<div className="dispatch-ledger__masthead-actions">
+					<span>{pending ? "Refreshing snapshot…" : `Inspected ${formatTimestamp(inspection.inspectedAt)}`}</span>
+					<div>
+						<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
+						<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
+							Refresh snapshot
+						</button>
+					</div>
+				</div>
+			</header>
+
+			<dl className="dispatch-ledger__summary" aria-label="Installation-wide dispatch summary">
+				<div className={admissionOpen ? "is-open" : "is-draining"}>
+					<dt>Admission</dt>
+					<dd>{admissionOpen ? "Open" : "Draining"}</dd>
+					<dd className="dispatch-ledger__summary-note">
+						{admissionOpen
+							? "New dispatch may be admitted"
+							: `Until ${formatTimestamp(inspection.admission.expiresAt!)}`}
+					</dd>
+				</div>
+				<div>
+					<dt>Running rows</dt>
+					<dd>{running.total.toLocaleString()}</dd>
+					<dd className="dispatch-ledger__summary-note">Durable snapshot, not a live board</dd>
+				</div>
+				<div>
+					<dt>Total tokens</dt>
+					<dd>{formatTokenCount(inspection.totals.totalTokens)}</dd>
+					<dd className="dispatch-ledger__summary-note">Across the installation ledger</dd>
+				</div>
+				<div>
+					<dt>Clio-reported cost</dt>
+					<dd>{formatUsageCost(inspection.totals.costUsd)}</dd>
+					<dd className="dispatch-ledger__summary-note">Never a GUI estimate</dd>
+				</div>
+			</dl>
+
+			<div className="dispatch-ledger__grid">
+				<section className="dispatch-record" aria-labelledby="dispatch-running-title">
+					<header>
+						<div>
+							<div className="eyebrow">CURRENT EXECUTION</div>
+							<h3 id="dispatch-running-title">Heartbeat classification</h3>
+						</div>
+						<strong>{running.total.toLocaleString()} ROWS</strong>
+					</header>
+					<dl className="dispatch-heartbeats">
+						<div className="is-alive">
+							<dt>Alive</dt>
+							<dd>{running.alive.toLocaleString()}</dd>
+						</div>
+						<div className="is-stale">
+							<dt>Stale</dt>
+							<dd>{running.stale.toLocaleString()}</dd>
+						</div>
+						<div className="is-dead">
+							<dt>Dead</dt>
+							<dd>{running.dead.toLocaleString()}</dd>
+						</div>
+						<div>
+							<dt>Not reported</dt>
+							<dd>{running.unreported.toLocaleString()}</dd>
+						</div>
+					</dl>
+					<p>
+						These counts preserve Clio's own process and heartbeat classification while removing every row identity.
+					</p>
+				</section>
+
+				<section className="dispatch-record" aria-labelledby="dispatch-totals-title">
+					<header>
+						<div>
+							<div className="eyebrow">DURABLE TOTALS</div>
+							<h3 id="dispatch-totals-title">Cumulative work recorded by Clio</h3>
+						</div>
+						<strong>ALL LEDGER ROWS</strong>
+					</header>
+					<dl className="dispatch-totals">
+						<div>
+							<dt>Input tokens</dt>
+							<dd>{formatTokenCount(inspection.totals.inputTokens)}</dd>
+						</div>
+						<div>
+							<dt>Output tokens</dt>
+							<dd>{formatTokenCount(inspection.totals.outputTokens)}</dd>
+						</div>
+						<div>
+							<dt>Runtime</dt>
+							<dd>{formatDuration(Math.round(inspection.totals.runtimeSeconds))}</dd>
+						</div>
+						<div>
+							<dt>Retry queue reported</dt>
+							<dd>{inspection.retryingCount.toLocaleString()}</dd>
+						</div>
+					</dl>
+					<p>
+						Token totals are preserved exactly as separate Clio fields; the GUI does not assume they are additive.
+					</p>
+				</section>
+			</div>
+
+			<footer className="dispatch-ledger__method">
+				<strong>Snapshot boundary</strong>
+				<p>
+					The command is provider-free and read-only, but it has no project selector. Live enqueue, progress,
+					completion, node-capacity, gate, council, and retry transitions still require sanitized Clio events. The
+					cross-process status command cannot observe another orchestrator's in-memory retry queue, and no drain or
+					resume control is exposed here.
 				</p>
 			</footer>
 		</section>
@@ -2954,6 +3178,7 @@ function ConversationCanvas({
 	onRefreshConfig,
 	onRefreshCatalog,
 	onRefreshUsage,
+	onRefreshDispatch,
 }: {
 	state: AppState;
 	dispatch: Dispatch<AppAction>;
@@ -2973,6 +3198,7 @@ function ConversationCanvas({
 	onRefreshConfig(): void;
 	onRefreshCatalog(): void;
 	onRefreshUsage(): void;
+	onRefreshDispatch(): void;
 }) {
 	const open = state.open;
 	const promptEditor = useRef<PromptEditorHandle>(null);
@@ -3029,7 +3255,9 @@ function ConversationCanvas({
 				</div>
 				<div className="conversation__identity">
 					<div className="eyebrow">
-						{workspaceView === "effective-clio"
+						{workspaceView === "dispatch"
+							? "INSTALLATION-WIDE"
+							: workspaceView === "effective-clio"
 							? "EFFECTIVE CLIO FOR"
 							: workspaceView === "catalog"
 							? "CAPABILITY ATLAS FOR"
@@ -3037,8 +3265,16 @@ function ConversationCanvas({
 							? "USAGE RECORD FOR"
 							: "ACTIVE PROJECT"}
 					</div>
-					<h1>{open === null ? "No project open" : open.project.displayName}</h1>
-					{open && <p className="conversation__root">{open.project.rootPath}</p>}
+					<h1>
+						{workspaceView === "dispatch"
+							? "Clio dispatch"
+							: open === null
+							? "No project open"
+							: open.project.displayName}
+					</h1>
+					{workspaceView === "dispatch"
+						? <p className="conversation__root">Durable fleet status across this Clio installation</p>
+						: open && <p className="conversation__root">{open.project.rootPath}</p>}
 				</div>
 				<div className="conversation__telemetry">
 					{open && (
@@ -3048,8 +3284,8 @@ function ConversationCanvas({
 						/>
 					)}
 					{open && (
-						<nav className="conversation__view-switcher" aria-label="Project views">
-							{(["notebook", "effective-clio", "catalog", "usage"] as const).map((view) => (
+						<nav className="conversation__view-switcher" aria-label="Clio views">
+							{(["notebook", "effective-clio", "catalog", "usage", "dispatch"] as const).map((view) => (
 								<button
 									type="button"
 									key={view}
@@ -3063,7 +3299,9 @@ function ConversationCanvas({
 										? "Effective Clio"
 										: view === "catalog"
 										? "Catalog"
-										: "Usage"}
+										: view === "usage"
+										? "Usage"
+										: "Dispatch"}
 								</button>
 							))}
 						</nav>
@@ -3116,6 +3354,8 @@ function ConversationCanvas({
 					? "Clio capability catalog"
 					: workspaceView === "usage"
 					? "Thirty-day project usage record"
+					: workspaceView === "dispatch"
+					? "Installation-wide dispatch snapshot"
 					: "Conversation history"}
 			>
 				{open !== null && workspaceView === "effective-clio"
@@ -3142,6 +3382,15 @@ function ConversationCanvas({
 							inspection={open.usageInspection}
 							pending={state.pendingUsageInspect !== null}
 							onRefresh={onRefreshUsage}
+							onBack={onNotebookOpen}
+						/>
+					)
+					: workspaceView === "dispatch"
+					? (
+						<DispatchLedger
+							inspection={state.dispatchInspection}
+							pending={state.pendingDispatchInspect !== null}
+							onRefresh={onRefreshDispatch}
 							onBack={onNotebookOpen}
 						/>
 					)
@@ -3420,7 +3669,7 @@ function ApprovalNotificationSetting(
 				</label>
 			)}
 			<p className="settings__note">
-				A notification carries the tool title only. Workbench never puts a project path in one.
+				A notification carries the tool title only. The GUI never puts a project path in one.
 			</p>
 		</section>
 	);
@@ -3598,7 +3847,7 @@ export const RoutingInventory = memo(function RoutingInventory({
 									</>
 								)}
 							{inspection.models.truncated && (
-								<p className="routing-bound-note">The offline model inventory reached Workbench's row bound.</p>
+								<p className="routing-bound-note">The offline model inventory reached the GUI row bound.</p>
 							)}
 						</section>
 
@@ -3687,7 +3936,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 						<h3>How Clio will work</h3>
 					</div>
 					<p>
-						Workbench reads and writes these values through Clio. Timing labels distinguish this session from the next
+						The GUI reads and writes these values through Clio. Timing labels distinguish this session from the next
 						turn or a newly created session.
 					</p>
 				</div>
@@ -3711,7 +3960,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 							const canEdit = editable.includes(key) && !busy;
 							const guidance = SETTING_GUIDANCE[key] ?? {
 								label: key,
-								description: "A setting Clio exposes to this Workbench session.",
+								description: "A setting Clio exposes to this GUI session.",
 								scope: null,
 							};
 							return (
@@ -3862,7 +4111,7 @@ function FileOperationModal({
 								before requesting a one-use confirmation challenge.
 							</p>
 							<p className="modal-form__warning">
-								Workbench deletes files and empty folders only. Symlinks and recursive deletion are blocked.
+								The GUI deletes files and empty folders only. Symlinks and recursive deletion are blocked.
 							</p>
 						</>
 					)
@@ -4008,7 +4257,7 @@ const BottomStatus = memo(
 		return (
 			<footer
 				className="status-bar"
-				aria-label="Workbench status"
+				aria-label={`${PRODUCT_NAME} status`}
 				aria-hidden={obscured ? true : undefined}
 				inert={obscured}
 			>
@@ -4203,6 +4452,9 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		if (
 			view === "usage" && open !== null && open.usageInspection === null && state.pendingUsageInspect === null
 		) actions.inspectUsage(open.project.id);
+		if (view === "dispatch" && state.dispatchInspection === null && state.pendingDispatchInspect === null) {
+			actions.inspectDispatch();
+		}
 	}, [
 		actions,
 		open?.project.id,
@@ -4210,6 +4462,8 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		open?.usageInspection,
 		state.pendingCatalogInspect,
 		state.pendingUsageInspect,
+		state.dispatchInspection,
+		state.pendingDispatchInspect,
 	]);
 
 	const openNotebook = useCallback((): void => {
@@ -4231,6 +4485,11 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		setEvidenceDrawerOpen(false);
 	}, [changeWorkspaceView]);
 
+	const openDispatch = useCallback((): void => {
+		changeWorkspaceView("dispatch");
+		setEvidenceDrawerOpen(false);
+	}, [changeWorkspaceView]);
+
 	const refreshConfig = useCallback((): void => {
 		if (open !== null) actions.inspectConfig(open.project.id);
 	}, [actions, open?.project.id]);
@@ -4242,6 +4501,10 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	const refreshUsage = useCallback((): void => {
 		if (open !== null) actions.inspectUsage(open.project.id);
 	}, [actions, open?.project.id]);
+
+	const refreshDispatch = useCallback((): void => {
+		actions.inspectDispatch();
+	}, [actions]);
 
 	useEffect(() => {
 		if (modalIsOpen || !leftDrawerObscures) return;
@@ -4274,7 +4537,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	// The approval is the one thing the operator must not miss.
 	useEffect(() => {
 		const previous = document.title;
-		document.title = pendingPermission === null ? "Clio Workbench" : "● Approval needed — Clio Workbench";
+		document.title = pendingPermission === null ? PRODUCT_NAME : `● Approval needed — ${PRODUCT_NAME}`;
 		return () => {
 			document.title = previous;
 		};
@@ -4307,7 +4570,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 		if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
 		try {
 			// Title only. A path in a notification would leave the project boundary.
-			const posted = new Notification("Clio Workbench: approval needed", { body: pendingPermission.title });
+			const posted = new Notification(`${PRODUCT_NAME}: approval needed`, { body: pendingPermission.title });
 			return () => posted.close();
 		} catch {
 			// A browser that refuses to construct one is not a Workbench failure.
@@ -4315,7 +4578,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 	}, [pendingPermission?.permissionId ?? null, state.desktopNotifications]);
 
 	if (state.boot === "loading") return <LoadingScreen />;
-	if (state.boot === "failed") return <FailureScreen message={state.bootError ?? "Workbench could not start."} />;
+	if (state.boot === "failed") return <FailureScreen message={state.bootError ?? `${PRODUCT_NAME} could not start.`} />;
 
 	return (
 		<div
@@ -4368,6 +4631,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onRefreshConfig={refreshConfig}
 				onRefreshCatalog={refreshCatalog}
 				onRefreshUsage={refreshUsage}
+				onRefreshDispatch={refreshDispatch}
 			/>
 			<EvidenceRail
 				state={state}
@@ -4381,6 +4645,7 @@ export function WorkbenchView({ state, dispatch, actions }: WorkbenchViewProps) 
 				onOpenConfigMap={openConfigMap}
 				onOpenCatalog={openCatalog}
 				onOpenUsage={openUsage}
+				onOpenDispatch={openDispatch}
 				obscured={modalIsOpen || leftDrawerObscures}
 			/>
 			<BottomStatus

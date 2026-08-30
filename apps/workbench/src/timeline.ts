@@ -97,7 +97,7 @@ export function restoreTurnProjection(
 
 const encoder = new TextEncoder();
 export const MAX_TIMELINE_STREAM_BYTES = 64 * 1024;
-export const TIMELINE_STREAM_TRUNCATION_MARKER = "\n[… stream truncated by Workbench …]";
+export const TIMELINE_STREAM_TRUNCATION_MARKER = "\n[… stream truncated by GUI …]";
 
 function boundUtf8WithMarker(value: string, maximumBytes: number, marker: string): string {
 	if (encoder.encode(value).byteLength <= maximumBytes) return value;

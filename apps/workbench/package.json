@@ -1,5 +1,6 @@
 {
 	"name": "@iowarp/clio-workbench",
+	"description": "The desktop and browser GUI for Clio Coder.",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",

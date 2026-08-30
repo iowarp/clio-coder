@@ -32,9 +32,12 @@ Deno.test("document shell provides the keyboard skip link before the React root"
 	const document = await Deno.readTextFile(new URL("../index.html", import.meta.url));
 	ok(document.indexOf('class="skip-link"') < document.indexOf('id="root"'));
 	ok(document.includes('href="#conversation"'));
+	ok(document.includes("<title>Clio Coder</title>"));
+	ok(document.includes('content="Clio Coder —'));
+	ok(!document.includes(">Workbench<"));
 });
 
-Deno.test("Workbench source has no root runtime or sibling-app imports", async () => {
+Deno.test("GUI source has no root runtime or sibling-app imports", async () => {
 	for await (const file of appSourceFiles(new URL("../", import.meta.url))) {
 		const source = await Deno.readTextFile(file);
 		ok(!/(?:\.\.\/){2,}src\//u.test(source), `${file.pathname} imports the root Clio runtime`);

@@ -1,5 +1,5 @@
 /**
- * Versioned, JSON-only contract between the Workbench browser and its local host.
+ * Versioned, JSON-only contract between the Clio Coder GUI and its local host.
  *
  * This module intentionally has no imports and no React dependencies. Both sides
  * use the same runtime validators. Only validated, bounded DTOs cross this
@@ -8,6 +8,7 @@
  */
 
 export const PROTOCOL_VERSION = 3 as const;
+export const PRODUCT_NAME = "Clio Coder" as const;
 export const MAX_CLIENT_FRAME_BYTES = 16 * 1024;
 export const MAX_SERVER_EVENT_BYTES = 256 * 1024;
 
@@ -44,6 +45,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"catalog.inspect",
 	"usage.inspect",
 	"routing.inspect",
+	"dispatch.inspect",
 	"targets.list",
 	"targets.probe",
 	"autonomy.set",
@@ -229,6 +231,8 @@ export interface RoutingInspectPayload {
 	readonly projectId: string;
 }
 
+export type DispatchInspectPayload = Readonly<Record<string, never>>;
+
 export interface TargetsListPayload {
 	readonly projectId: string;
 }
@@ -269,6 +273,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "catalog.inspect": CatalogInspectPayload;
 	readonly "usage.inspect": UsageInspectPayload;
 	readonly "routing.inspect": RoutingInspectPayload;
+	readonly "dispatch.inspect": DispatchInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
 	readonly "autonomy.set": AutonomySetPayload;
@@ -300,6 +305,7 @@ export const SERVER_EVENT_KINDS = [
 	"catalog.state",
 	"usage.state",
 	"routing.state",
+	"dispatch.state",
 	"targets.state",
 	"targets.probed",
 	"turn.started",
@@ -708,7 +714,7 @@ export interface WireCatalogInspection {
 	readonly skills: WireCatalogSkillCollection;
 	readonly library: WireCatalogLibraryCollection;
 	readonly extensions: WireCatalogExtensionCollection;
-	/** Clio currently offers no typed verifier listing; Workbench never scrapes its table. */
+	/** Clio currently offers no typed verifier listing; the GUI never scrapes its table. */
 	readonly verifiers: Readonly<{ availability: "typed-interface-required" }>;
 }
 
@@ -869,6 +875,37 @@ export interface WireRoutingInspection {
 	readonly bindings: WireRoutingBindingCollection;
 }
 
+export const DISPATCH_ADMISSION_STATES = ["open", "draining"] as const;
+export type WireDispatchAdmissionState = (typeof DISPATCH_ADMISSION_STATES)[number];
+
+/** Bounded aggregate of Clio's durable, installation-wide dispatch ledger. */
+export interface WireDispatchInspection {
+	readonly scope: "installation";
+	/** When the GUI completed its bounded projection. */
+	readonly inspectedAt: string;
+	/** When Clio read the durable ledger. */
+	readonly generatedAt: string;
+	readonly admission: Readonly<{
+		state: WireDispatchAdmissionState;
+		expiresAt: string | null;
+	}>;
+	readonly running: Readonly<{
+		total: number;
+		alive: number;
+		stale: number;
+		dead: number;
+		unreported: number;
+	}>;
+	readonly retryingCount: number;
+	readonly totals: Readonly<{
+		inputTokens: number;
+		outputTokens: number;
+		totalTokens: number;
+		costUsd: number;
+		runtimeSeconds: number;
+	}>;
+}
+
 export interface WireTarget {
 	readonly id: string;
 	readonly runtime: string;
@@ -962,6 +999,10 @@ export interface UsageStatePayload {
 
 export interface RoutingStatePayload {
 	readonly inspection: WireRoutingInspection;
+}
+
+export interface DispatchStatePayload {
+	readonly inspection: WireDispatchInspection;
 }
 
 export interface TargetsStatePayload {
@@ -1070,6 +1111,7 @@ export interface ServerEventPayloadByKind {
 	readonly "catalog.state": CatalogStatePayload;
 	readonly "usage.state": UsageStatePayload;
 	readonly "routing.state": RoutingStatePayload;
+	readonly "dispatch.state": DispatchStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
 	readonly "turn.started": TurnStartedPayload;
@@ -1346,6 +1388,8 @@ function expectSettingsPatch(value: unknown, label: string): WireSettingsPatch {
 function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unknown): ClientCommandPayloadByKind[K] {
 	const label = `${kind} payload`;
 	switch (kind) {
+		case "dispatch.inspect":
+			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
 		case "project.browse": {
 			const record = expectExactKeys(value, label, [], ["path"]);
 			const path = Object.hasOwn(record, "path") ? expectNativePath(record.path, `${label}.path`) : undefined;
@@ -2547,6 +2591,74 @@ function validateRoutingInspection(value: unknown, label: string): WireRoutingIn
 	};
 }
 
+function expectDispatchNumber(value: unknown, label: string, integer: boolean): number {
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {
+		return invalid(`${label} must be a bounded non-negative number`);
+	}
+	if (integer && !Number.isSafeInteger(value)) return invalid(`${label} must be a safe integer`);
+	return value;
+}
+
+export function validateDispatchInspection(value: unknown, label = "dispatch inspection"): WireDispatchInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"admission",
+		"running",
+		"retryingCount",
+		"totals",
+	]);
+	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
+	const admissionRecord = expectExactKeys(record.admission, `${label}.admission`, ["state", "expiresAt"]);
+	const state = expectEnum(admissionRecord.state, `${label}.admission.state`, DISPATCH_ADMISSION_STATES);
+	const expiresAt = admissionRecord.expiresAt === null
+		? null
+		: expectTimestamp(admissionRecord.expiresAt, `${label}.admission.expiresAt`);
+	if ((state === "open") !== (expiresAt === null)) {
+		invalid(`${label}.admission expiry contradicts its state`);
+	}
+	const runningRecord = expectExactKeys(record.running, `${label}.running`, [
+		"total",
+		"alive",
+		"stale",
+		"dead",
+		"unreported",
+	]);
+	const running = {
+		total: expectDispatchNumber(runningRecord.total, `${label}.running.total`, true),
+		alive: expectDispatchNumber(runningRecord.alive, `${label}.running.alive`, true),
+		stale: expectDispatchNumber(runningRecord.stale, `${label}.running.stale`, true),
+		dead: expectDispatchNumber(runningRecord.dead, `${label}.running.dead`, true),
+		unreported: expectDispatchNumber(runningRecord.unreported, `${label}.running.unreported`, true),
+	};
+	if (running.alive + running.stale + running.dead + running.unreported !== running.total) {
+		invalid(`${label}.running categories must sum to the total`);
+	}
+	const totalsRecord = expectExactKeys(record.totals, `${label}.totals`, [
+		"inputTokens",
+		"outputTokens",
+		"totalTokens",
+		"costUsd",
+		"runtimeSeconds",
+	]);
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		admission: { state, expiresAt },
+		running,
+		retryingCount: expectDispatchNumber(record.retryingCount, `${label}.retryingCount`, true),
+		totals: {
+			inputTokens: expectDispatchNumber(totalsRecord.inputTokens, `${label}.totals.inputTokens`, true),
+			outputTokens: expectDispatchNumber(totalsRecord.outputTokens, `${label}.totals.outputTokens`, true),
+			totalTokens: expectDispatchNumber(totalsRecord.totalTokens, `${label}.totals.totalTokens`, true),
+			costUsd: expectDispatchNumber(totalsRecord.costUsd, `${label}.totals.costUsd`, false),
+			runtimeSeconds: expectDispatchNumber(totalsRecord.runtimeSeconds, `${label}.totals.runtimeSeconds`, false),
+		},
+	};
+}
+
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
 	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
 	return {
@@ -2737,6 +2849,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "routing.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return { inspection: validateRoutingInspection(record.inspection, `${label}.inspection`) };
+		}
+		case "dispatch.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return { inspection: validateDispatchInspection(record.inspection, `${label}.inspection`) };
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -2943,6 +3059,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"connection.ready",
 	"protocol.error",
 	"project.browse.listing",
+	"dispatch.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"project.opened",
@@ -3301,7 +3418,7 @@ export class WebSocketLocalTransport implements LocalTransport {
 		const disconnect = { cause: "protocol-error", code: 1002, reason, wasClean: false } as const;
 		this.#signalDisconnect(disconnect);
 		if (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN) {
-			this.#socket.close(1002, "Invalid Workbench protocol event");
+			this.#socket.close(1002, "Invalid GUI protocol event");
 		}
 	}
 

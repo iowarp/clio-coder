@@ -30,6 +30,7 @@ import {
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
 	AUTONOMY_LEVELS,
+	PRODUCT_NAME,
 	type ServerEventPayloadByKind,
 	THINKING_LEVELS,
 	type WireAutonomyLevel,
@@ -159,7 +160,8 @@ const SAFE_SETTING_KEYS = [
 	"orchestrator.thinkingLevel",
 	"autonomy",
 ] as const;
-const CLIENT_INFO = { name: "clio-workbench", title: "Clio Workbench", version: "0.0.1" } as const;
+// Keep the machine identifier stable for ACP compatibility. The visible title is the product name.
+const CLIENT_INFO = { name: "clio-workbench", title: PRODUCT_NAME, version: "0.0.1" } as const;
 const EVENT_OPT_IN = { version: 1, kinds: ["safety.loopBlocked"] } as const;
 
 function bytes(value: string): number {
@@ -445,7 +447,7 @@ const CLIO_REMOTE_FAILURES: Readonly<Record<string, PublicClioFailure>> = {
 	},
 	protocol_version_unsupported: {
 		code: "clio-protocol-version-unsupported",
-		summary: "Clio does not support the ACP protocol version required by Workbench.",
+		summary: "Clio does not support the ACP protocol version required by the GUI.",
 	},
 	invalid_params: { code: "clio-invalid-params", summary: "Clio rejected the bounded ACP parameters." },
 	session_cwd_mismatch: {
@@ -572,7 +574,7 @@ export function failureProjection(error: unknown, transportFailure: AcpFailure |
 	}
 	return {
 		code: "acp-contract-failure",
-		summary: "Clio did not satisfy the bounded Workbench integration contract.",
+		summary: "Clio did not satisfy the bounded GUI integration contract.",
 		source: "observed-by-workbench",
 	};
 }
@@ -964,7 +966,7 @@ export class ClioProjectHost {
 			}
 			for (const key of Object.keys(patch)) {
 				if (!(SAFE_SETTING_KEYS as readonly string[]).includes(key)) {
-					throw new HostError("invalid", "That setting is not one Workbench may change.");
+					throw new HostError("invalid", "That setting is not one the GUI may change.");
 				}
 			}
 			const nested: Record<string, unknown> = {};
@@ -1130,7 +1132,7 @@ export class ClioProjectHost {
 		} catch {
 			await this.#failTurn(process, turn, {
 				code: "permission-settlement-failed",
-				summary: "Workbench could not deliver the permission decision to Clio.",
+				summary: "The GUI could not deliver the permission decision to Clio.",
 				source: "observed-by-workbench",
 			});
 			throw new HostError("internal", "The permission decision could not be delivered safely.");
@@ -1707,13 +1709,13 @@ export class ClioProjectHost {
 				"approval-unanswered": {
 					code: "approval-unanswered",
 					summary:
-						"An approval waited unanswered for the whole budget, so Workbench stopped the turn. Clio was not told no; send a new prompt to continue.",
+						"An approval waited unanswered for the whole budget, so the GUI stopped the turn. Clio was not told no; send a new prompt to continue.",
 				},
 				"client-disconnected": {
 					code: "client-disconnected",
-					summary: "The Workbench window went away, so the turn was stopped. Send a new prompt to continue.",
+					summary: "The GUI window went away, so the turn was stopped. Send a new prompt to continue.",
 				},
-				"host-shutdown": { code: "host-shutdown", summary: "Workbench shut down and stopped the turn." },
+				"host-shutdown": { code: "host-shutdown", summary: "The GUI shut down and stopped the turn." },
 			};
 			const cancel = turn.cancelReason === null
 				? { code: "clio-cancelled", summary: "Clio reported that the turn was cancelled." }
@@ -1776,7 +1778,7 @@ export class ClioProjectHost {
 				process,
 				turn,
 				"workbench-update-budget-exceeded",
-				"Workbench stopped this turn after the bounded update budget was exceeded.",
+				"The GUI stopped this turn after the bounded update budget was exceeded.",
 			);
 			return;
 		}
@@ -1788,7 +1790,7 @@ export class ClioProjectHost {
 					process,
 					turn,
 					"workbench-stream-budget-exceeded",
-					"Workbench stopped this turn after the bounded text budget was exceeded.",
+					"The GUI stopped this turn after the bounded text budget was exceeded.",
 				);
 				return;
 			}
@@ -2015,7 +2017,7 @@ export class ClioProjectHost {
 			// Honest rather than clamped: a short server permission ceiling simply
 			// leaves no room to escalate before the turn is stopped.
 			this.#log(
-				`Workbench cannot escalate this approval: the Clio permission ceiling leaves ${
+				`The GUI cannot escalate this approval: the Clio permission ceiling leaves ${
 					expiresAt - requestedAt
 				} ms, shorter than the ${this.#permissionEscalateMs} ms escalation budget.`,
 			);

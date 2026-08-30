@@ -418,7 +418,7 @@ Deno.test("allowlisted protocol metadata reports only numeric versions", async (
 		await rejects(test.host.open(), assertHostError("not-ready"));
 		deepStrictEqual(test.host.snapshot().lastFailure, {
 			code: "clio-protocol-version-unsupported",
-			summary: "Clio does not support the ACP protocol version required by Workbench. Supported versions: 1.",
+			summary: "Clio does not support the ACP protocol version required by the GUI. Supported versions: 1.",
 		});
 		ok(!JSON.stringify(test.sink.events).includes("unsupported protocol version"));
 	} finally {
