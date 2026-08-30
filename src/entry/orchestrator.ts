@@ -278,6 +278,7 @@ function applyHeadlessSettingsOverlay(
 interface CompactionResolution {
 	model: EngineModel;
 	targetId: string;
+	endpointKey: string | null;
 	apiKey?: string;
 }
 
@@ -375,9 +376,9 @@ function createBackgroundMemoryModelClient(
 		wireModelId: refined.wireModelId,
 		endpointKey,
 		client: {
-			// Wrapped so the endpoint this step disturbs is published from the layer
-			// that knows a request left the process. A timed-out step still moved the
-			// server's prefix cache; the usage sink never sees it.
+			// Wrapped at the layer that knows a request left the process: the step
+			// holds endpoint capacity while it is out and publishes the cache
+			// disturbance even when a timeout means the usage sink never sees it.
 			complete: announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async (request) => {
 				const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
@@ -521,7 +522,7 @@ async function resolveCompactionModel(
 	const model = synthesizeOrchestratorModel(providers, target, wireModelId);
 	if (!model) return null;
 	const apiKey = await resolveApiKeyForTarget(target, providers);
-	const resolution: CompactionResolution = { model, targetId };
+	const resolution: CompactionResolution = { model, targetId, endpointKey: canonicalEndpointKey(target) };
 	if (apiKey !== undefined) resolution.apiKey = apiKey;
 	return resolution;
 }
@@ -649,12 +650,21 @@ async function runCompactionFlow(
 	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
 
-	const result = await compact({
-		entries,
-		model: resolved.model,
-		...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
-		...(instructions !== undefined ? { instructions } : {}),
-	});
+	// A compaction summary is a full streamed request against the chat target.
+	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
+	// pre-warm so dispatch admission and background memory see its real usage.
+	const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
+	let result: CompactResult;
+	try {
+		result = await compact({
+			entries,
+			model: resolved.model,
+			...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
+			...(instructions !== undefined ? { instructions } : {}),
+		});
+	} finally {
+		releaseEndpointSlot();
+	}
 	if (result.messagesSummarized === 0 || result.summary.length === 0) return null;
 
 	const entry: Omit<CompactionSummaryEntry, "turnId" | "timestamp"> = {
@@ -1146,9 +1156,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * shows it while the session lives, and one durable out-of-turn row so
 	 * `clio-coder usage report` can still see it afterwards.
 	 *
-	 * Accounting only. The endpoint the step disturbed is published by the client
-	 * wrapper (`announceMemoryStepEndpoint`), which sees the timed-out and thrown
-	 * steps this sink never hears about because their usage stays null.
+	 * Accounting only. The client wrapper (`announceMemoryStepEndpoint`) holds the
+	 * endpoint slot and publishes the disturbance; it sees the timed-out and
+	 * thrown steps this sink never hears about because their usage stays null.
 	 */
 	const recordBackgroundMemoryUsage = (usage: TaskMemoryStepUsage): void => {
 		const meta = session?.current() ?? null;
@@ -1212,6 +1222,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		backgroundEndpointBusy: () => {
 			const endpointKey = backgroundMemoryRoute?.endpointKey ?? null;
 			if (endpointKey === null) return false;
+			// This runs before the client wrapper registers the admitted step, so the
+			// count contains other requests only and the step cannot refuse itself.
 			return (foregroundStreamUsage()[endpointKey] ?? 0) > 0;
 		},
 		onStepUsage: (usage) => recordBackgroundMemoryUsage(usage),

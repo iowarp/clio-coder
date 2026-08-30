@@ -1,5 +1,5 @@
 /**
- * Publishing the endpoint disturbance a background memory step causes.
+ * Publishing and accounting for the endpoint a background memory step uses.
  *
  * A proactive-memory step that runs on the chat target's own endpoint moves
  * that server's prefix cache, so the next turn is cold for a reason Clio caused
@@ -14,14 +14,18 @@
  * `src/interactive/turn-prewarm.ts`). Publishing from the usage sink instead
  * missed exactly that case, since usage is only assigned once the call resolves.
  *
- * So the announcement lives here, wrapped around the client's `complete`, in a
- * `finally`: it fires on resolve, on timeout and on any transport throw, and
- * never for a boundary that skipped the model altogether (`endpoint_busy`, no
- * configured route), because those never call `complete`.
+ * The same request also occupies real endpoint capacity. Both responsibilities
+ * live here around the client's `complete`: the slot is registered only after
+ * the middleware's `endpoint_busy` admission check, so a step never sees its
+ * own slot, then released in the `finally` that also announces the disturbance.
+ * Both happen on resolve, timeout, and transport throw, and neither happens for
+ * a boundary that skipped the model altogether (`endpoint_busy`, no configured
+ * route), because those never call `complete`.
  */
 
 import { BusChannels } from "../../core/bus-events.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
+import { registerForegroundStream } from "../providers/endpoint-capacity.js";
 
 /** What the announcer needs: somewhere to publish, and the route to name. */
 export interface MemoryStepEndpointAnnouncerDeps {
@@ -33,27 +37,34 @@ export interface MemoryStepEndpointAnnouncerDeps {
 
 /**
  * Wrap one background memory `complete` so every request that leaves the
- * process publishes its endpoint exactly once, whatever the call does next.
+ * process holds one endpoint slot and publishes its endpoint exactly once,
+ * whatever the call does next.
  *
- * A null bus or a route with no canonical endpoint key announces nothing: there
- * is no endpoint the turn context could match against.
+ * A route with no canonical endpoint key is unchanged. A null bus suppresses
+ * the announcement but still counts capacity for a route whose key is known.
  */
 export function announceMemoryStepEndpoint<Request, Response>(
 	deps: MemoryStepEndpointAnnouncerDeps,
 	complete: (request: Request) => Promise<Response>,
 ): (request: Request) => Promise<Response> {
 	const { bus, endpointKey, targetId } = deps;
-	if (bus === null || endpointKey === null) return complete;
+	if (endpointKey === null) return complete;
 	return async (request: Request): Promise<Response> => {
+		// `runPromptedStep` performs its busy check before it invokes `complete`,
+		// so this registration counts the outgoing request without self-refusing.
+		const releaseEndpointSlot = registerForegroundStream(endpointKey);
 		try {
 			return await complete(request);
 		} finally {
+			releaseEndpointSlot();
 			// Bookkeeping never changes memory behavior, and a crashing subscriber
 			// must not turn a resolved step into a failed one.
-			try {
-				bus.emit(BusChannels.MemoryStepCompleted, { endpointKey, targetId });
-			} catch {
-				// The safe bus already contains listener errors; this covers the rest.
+			if (bus !== null) {
+				try {
+					bus.emit(BusChannels.MemoryStepCompleted, { endpointKey, targetId });
+				} catch {
+					// The safe bus already contains listener errors; this covers the rest.
+				}
 			}
 		}
 	};
