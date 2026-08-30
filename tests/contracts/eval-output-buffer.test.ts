@@ -26,6 +26,14 @@ describe("contracts/eval output buffer", () => {
 		capture.push(`${dispatchStart.slice(37)}\n`);
 		capture.push(
 			`${JSON.stringify({
+				type: "tool_execution_start",
+				toolCallId: "read-1",
+				toolName: "read",
+				args: { path: "fixtures/target.ts", ignored: "must-not-survive" },
+			})}\n`,
+		);
+		capture.push(
+			`${JSON.stringify({
 				type: "clio_tool_finish",
 				payload: { tool: "dispatch", toolCallId: "dispatch-1", outcome: "ok", result: "y".repeat(100_000) },
 			})}\n`,
@@ -33,6 +41,8 @@ describe("contracts/eval output buffer", () => {
 		const metricJsonl = capture.finish();
 		ok(metricJsonl.includes('"toolName":"dispatch"'));
 		ok(metricJsonl.includes('"tool":"dispatch"'));
+		ok(metricJsonl.includes('"args":{"path":"fixtures/target.ts"}'));
+		strictEqual(metricJsonl.includes("must-not-survive"), false);
 		ok(metricJsonl.length < 2_000, "large tool results are not retained in metric evidence");
 	});
 });

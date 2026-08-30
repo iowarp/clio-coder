@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { shellQuote } from "../../../core/shell-quote.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import {
@@ -17,6 +18,7 @@ export async function runClioRunRunner(
 	timeoutMs: number,
 	target: EvalSuiteTargetV2,
 	env?: NodeJS.ProcessEnv,
+	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },
 ): Promise<EvalRunnerOutput> {
 	const prompt = runner.prompt ?? "";
 	const args = [
@@ -28,6 +30,7 @@ export async function runClioRunRunner(
 		shellQuote(target.id),
 		...(target.model === undefined ? [] : ["--model", shellQuote(target.model)]),
 		...(target.thinking === undefined ? [] : ["--thinking", shellQuote(target.thinking)]),
+		...(runner.autonomy === undefined ? [] : ["--autonomy", runner.autonomy]),
 		shellQuote(prompt),
 	];
 	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs, env);
@@ -36,6 +39,7 @@ export async function runClioRunRunner(
 	const tokens = result.usage;
 	const toolMetricStream = result.metricJsonl.length > 0 ? result.metricJsonl : result.stdout;
 	const tools = toolCallMetricsFromJsonl(toolMetricStream);
+	const behavioralTools = toolBehaviorMetricEntriesFromJsonl(toolMetricStream, cwd, readObservation);
 	// Evidence metrics resolve only from the sealed receipt the --agent path
 	// prints; a runner without a receipt leaves them absent so any gate on
 	// them fails closed instead of reading prose labels.
@@ -61,6 +65,7 @@ export async function runClioRunRunner(
 			"tools.totalCalls": tools.totalCalls,
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,
+			...behavioralTools,
 			"verifier.exitCode": result.exitCode,
 			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt, { envelope })),
 			...(receipt === null
@@ -129,6 +134,125 @@ export function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
 	// event for the same call. Prefer the finish stream wholesale so a call is
 	// counted once and blocked admissions stay distinct from execution errors.
 	return canonicalFinishes.totalCalls > 0 ? canonicalFinishes : executionEnds;
+}
+
+interface BehavioralToolTerminal {
+	callId: string | null;
+	tool: string;
+	outcome: ToolOutcome;
+}
+
+/**
+ * Reduce the same terminal stream to bounded behavioral facts. Tool names are
+ * a dynamic metric suffix because extensions may add tools. Read paths become
+ * bounded counters against the suite's explicit public allowlist and decoy
+ * list; they never become behavioral fact values or evidence excerpts.
+ */
+export function toolBehaviorMetricEntriesFromJsonl(
+	stdout: string,
+	cwd: string,
+	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },
+): Record<string, number> {
+	const starts = new Map<string, { tool: string; path: string | null }>();
+	const readPaths = new Set<string>();
+	const executionEnds: BehavioralToolTerminal[] = [];
+	const canonicalFinishes: BehavioralToolTerminal[] = [];
+	const seenExecution = new Set<string>();
+	const seenCanonical = new Set<string>();
+
+	for (const line of stdout.split(/\r?\n/)) {
+		if (line.trim().length === 0) continue;
+		let event: Record<string, unknown>;
+		try {
+			const parsed: unknown = JSON.parse(line);
+			if (!isRecord(parsed)) continue;
+			event = parsed;
+		} catch {
+			continue;
+		}
+		if (event.type === "tool_execution_start") {
+			const callId = stringField(event, "toolCallId");
+			const tool = stringField(event, "toolName");
+			if (callId === undefined || tool === undefined) continue;
+			const path = tool === "read" && isRecord(event.args) ? toolPath(event.args) : null;
+			starts.set(callId, { tool, path });
+			if (path !== null) readPaths.add(normalizeObservedPath(cwd, path));
+			continue;
+		}
+		if (event.type === "tool_execution_end") {
+			const callId = stringField(event, "toolCallId") ?? null;
+			if (callId !== null && seenExecution.has(callId)) continue;
+			if (callId !== null) seenExecution.add(callId);
+			const tool = stringField(event, "toolName") ?? (callId === null ? undefined : starts.get(callId)?.tool);
+			if (tool === undefined) continue;
+			executionEnds.push({ callId, tool, outcome: toolOutcome(event) ?? (event.isError === true ? "error" : "ok") });
+			continue;
+		}
+		if (event.type !== "clio_tool_finish" || !isRecord(event.payload)) continue;
+		const outcome = toolOutcome(event.payload);
+		const tool = stringField(event.payload, "tool");
+		if (outcome === undefined || tool === undefined) continue;
+		const callId = stringField(event.payload, "toolCallId") ?? stringField(event, "toolCallId") ?? null;
+		if (callId !== null && seenCanonical.has(callId)) continue;
+		if (callId !== null) seenCanonical.add(callId);
+		canonicalFinishes.push({ callId, tool, outcome });
+	}
+
+	const terminals = canonicalFinishes.length > 0 ? canonicalFinishes : executionEnds;
+	const calls = new Map<string, number>();
+	const blocked = new Map<string, number>();
+	for (const terminal of terminals) {
+		const tool = metricToolName(terminal.tool);
+		calls.set(tool, (calls.get(tool) ?? 0) + 1);
+		if (terminal.outcome === "blocked") blocked.set(tool, (blocked.get(tool) ?? 0) + 1);
+	}
+	const namedTools = new Set(["bash", "dispatch", "read", ...calls.keys(), ...blocked.keys()]);
+	const entries: Record<string, number> = { "tools.read.distinctPaths": readPaths.size };
+	for (const tool of [...namedTools].sort()) {
+		entries[`tools.calls.${tool}`] = calls.get(tool) ?? 0;
+		entries[`tools.blocked.${tool}`] = blocked.get(tool) ?? 0;
+	}
+	if (readObservation !== undefined) {
+		const allowed = readObservation.allowedPaths.map((path) => normalizeObservedPath(cwd, path));
+		const decoys = readObservation.decoyPaths.map((path) => normalizeObservedPath(cwd, path));
+		entries["tools.read.outsideAllowed"] = [...readPaths].filter(
+			(path) => !allowed.some((root) => pathWithin(path, root)),
+		).length;
+		entries["tools.read.decoyHits"] = [...readPaths].filter((path) =>
+			decoys.some((root) => pathWithin(path, root)),
+		).length;
+	}
+	return entries;
+}
+
+function toolPath(args: Record<string, unknown>): string | null {
+	for (const field of ["path", "filePath", "file_path"]) {
+		const value = args[field];
+		if (typeof value === "string" && value.length > 0 && value.length <= 4_096) return value;
+	}
+	return null;
+}
+
+function normalizeObservedPath(cwd: string, path: string): string {
+	const absolute = resolve(cwd, path);
+	const local = relative(cwd, absolute);
+	return (isAbsolute(path) && (local.startsWith("..") || isAbsolute(local)) ? absolute : local || ".")
+		.split(sep)
+		.join("/");
+}
+
+function pathWithin(path: string, root: string): boolean {
+	if (root === ".") return !isAbsolute(path) && path !== ".." && !path.startsWith("../");
+	return path === root || path.startsWith(`${root}/`);
+}
+
+function metricToolName(tool: string): string {
+	return (
+		tool
+			.toLowerCase()
+			.replaceAll(/[^a-z0-9_-]/gu, "_")
+			.slice(0, 64) || "unknown"
+	);
 }
 
 function recordToolOutcome(metrics: ToolCallMetrics, outcome: ToolOutcome): void {

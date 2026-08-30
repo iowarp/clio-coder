@@ -17,6 +17,13 @@ export const CANONICAL_METRICS = [
 	"tools.totalCalls",
 	"tools.failed",
 	"tools.blocked",
+	"tools.read.distinctPaths",
+	"tools.read.outsideAllowed",
+	"tools.read.decoyHits",
+	"tools.calls.dispatch",
+	"tools.blocked.bash",
+	"claims.unsupported",
+	"completion.reported",
 	"context.indexedFiles",
 	"context.coverage",
 	"context.structuralHash",
@@ -112,6 +119,13 @@ export const CANONICAL_METRICS = [
 	"task.solved",
 ] as const;
 
+/**
+ * Per-tool call and block counters use a dynamic suffix because extension tool
+ * ids are not closed at build time. They otherwise have the same scalar,
+ * observable-event semantics as the fixed canonical metrics above.
+ */
+export const CANONICAL_METRIC_PREFIXES = ["tools.calls.", "tools.blocked."] as const;
+
 export type EvalMetricName = (typeof CANONICAL_METRICS)[number];
 export type EvalAssertionOp = "lt" | "lte" | "gt" | "gte" | "eq" | "neq";
 export type EvalRunnerKind = "clio-run" | "context-index" | "context-init" | "external-command";
@@ -169,6 +183,8 @@ export interface EvalWorkspaceV2 {
 export interface EvalRunnerV2 {
 	kind: EvalRunnerKind;
 	prompt?: string;
+	/** One-run headless authority used to exercise allow and deny recovery. */
+	autonomy?: "read-only" | "suggest" | "auto-edit" | "full-auto";
 	/**
 	 * Fleet agent recipe id for the clio-run runner. When set the runner
 	 * invokes `clio-coder run --agent <id> --json`, whose stream ends with the full
@@ -197,6 +213,12 @@ export interface EvalVerifyV2 {
 
 export interface EvalMetricsSpecV2 {
 	collect: string[];
+	/**
+	 * Public fixture paths used to reduce read events to bounded counters. Raw
+	 * paths stay out of behavioral fact values and evidence excerpts; the metric
+	 * map records only distinct, outside-allowlist, and declared-decoy counts.
+	 */
+	readObservation?: { allowedPaths: string[]; decoyPaths: string[] };
 }
 
 export interface EvalSuiteTaskV2 {

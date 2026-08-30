@@ -54,9 +54,17 @@ export function adaptSuiteV2ResultToBehaviorV1(
 	verdict: EvalVerdictEnvelopeV1,
 	scenario: EvalBehaviorScenarioV1,
 ): EvalBehaviorVerdictV1 {
+	const requestedFacts = new Set(
+		[...scenario.expectedBehavior, ...scenario.forbiddenBehavior].map(
+			(rule) => `${rule.fact.source}\u0000${rule.fact.key}`,
+		),
+	);
+	const observedSources = new Set<EvalBehaviorFactSourceV1>();
 	const facts = Object.entries(result.metrics).flatMap(([key, value]) => {
 		if (value === null) return [];
 		const source = metricFactSource(key);
+		observedSources.add(source);
+		if (!requestedFacts.has(`${source}\u0000${key}`)) return [];
 		const serialized = JSON.stringify({ source, key, value });
 		const digest = createHash("sha256").update(serialized, "utf8").digest("hex");
 		const fact: EvalBehaviorJudgeFactV1 = {
@@ -68,10 +76,9 @@ export function adaptSuiteV2ResultToBehaviorV1(
 		};
 		return [fact];
 	});
-	const presentSources = new Set(facts.map((fact) => fact.source));
 	const allSources: EvalBehaviorFactSourceV1[] = ["transcript", "tool", "receipt", "grader"];
 	const unavailableSources = allSources.filter(
-		(source) => !presentSources.has(source) || (source === "tool" && scenario.execution.toolTarget === "none"),
+		(source) => !observedSources.has(source) || (source === "tool" && scenario.execution.toolTarget === "none"),
 	);
 	const behavior = judgeEvalBehaviorV1(scenario, verdict, {
 		facts,
@@ -84,7 +91,14 @@ export function adaptSuiteV2ResultToBehaviorV1(
 
 function metricFactSource(key: string): EvalBehaviorFactSourceV1 {
 	if (key.startsWith("tools.")) return "tool";
-	if (key.startsWith("task.") || key === "result.pass" || key === "verifier.exitCode") return "grader";
+	if (
+		key.startsWith("task.") ||
+		key.startsWith("claims.") ||
+		key.startsWith("completion.") ||
+		key === "result.pass" ||
+		key === "verifier.exitCode"
+	)
+		return "grader";
 	if (
 		key.startsWith("receipt.") ||
 		key.startsWith("evidence.") ||

@@ -19,6 +19,19 @@ data directory. Product eval artifacts and external benchmark campaigns are
 separate: public benchmark adapters live under `benchmarks/community/` and do
 not use the eval runner.
 
+The public behavioral corpus is the deliberate exception to the otherwise
+private Suite v2 data policy. Its reviewable, synthetic suites live under
+`benchmarks/eval/`: a model-free positive/adversarial authority pair for every
+built-in worker recipe, four tiny main-agent model scenarios covering all eight
+behavioral categories with event- and grader-derived facts, and an intentional
+decoy negative control. The model-free driver uses the shipped recipe catalog,
+real dispatch admission, scripted workers, and sealed receipts rather than
+frontmatter inspection. See
+[eval-runner.md](eval-runner.md#public-built-in-behavioral-corpus) for the
+focused commands. Private prompts, calibration cases, fleet coordinates, and
+campaign artifacts still belong outside this repository and must not be copied
+into the public corpus.
+
 ## Running a private suite as a measurement
 
 A private suite is usually run to answer whether a harness change moved
