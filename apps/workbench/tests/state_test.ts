@@ -9,6 +9,7 @@ import {
 } from "../src/state.ts";
 import {
 	bootstrapFixture,
+	catalogInspectionFixture,
 	clioSnapshotFixture,
 	FIXTURE_PROJECT_ID,
 	serverEventFixture,
@@ -259,6 +260,17 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		}, { sequence: 3 }),
 	});
 	equal(state.pendingConfigInspect, null);
+
+	state = appReducer(state, { type: "catalog.inspect.submitted", requestId: "request-catalog" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio could not inspect catalogs.",
+			requestId: "request-catalog",
+		}, { sequence: 4 }),
+	});
+	equal(state.pendingCatalogInspect, null);
 });
 
 Deno.test("a protocol error fails the connection", () => {
@@ -291,7 +303,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, configuration, and target events land on the open workspace", () => {
+Deno.test("session, settings, configuration, catalog, and target events land on the open workspace", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -358,6 +370,15 @@ Deno.test("session, settings, configuration, and target events land on the open 
 	});
 	equal(state.open?.configInspection?.settings[0]?.value, "suggest");
 	equal(state.pendingConfigInspect, null);
+
+	state = appReducer(state, { type: "catalog.inspect.submitted", requestId: "request-catalog" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("catalog.state", { inspection: catalogInspectionFixture() }, { sequence: 7 }),
+	});
+	equal(state.open?.catalogInspection?.agents.items[0]?.id, "researcher");
+	equal(state.open?.catalogInspection?.verifiers.availability, "typed-interface-required");
+	equal(state.pendingCatalogInspect, null);
 });
 
 Deno.test("a browse listing is held until it is dismissed", () => {

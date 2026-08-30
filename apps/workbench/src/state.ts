@@ -12,6 +12,7 @@ import {
 	PROTOCOL_VERSION,
 	type ServerEvent,
 	validateServerEvent,
+	type WireCatalogInspection,
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireDeleteChallenge,
@@ -44,6 +45,7 @@ export interface OpenWorkspaceState {
 	readonly deleteChallenge: WireDeleteChallenge | null;
 	readonly settings: WireSettingsState | null;
 	readonly configInspection: WireConfigInspection | null;
+	readonly catalogInspection: WireCatalogInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
 	readonly processGeneration: string | null;
@@ -95,6 +97,8 @@ export interface AppState {
 	readonly pendingTurnStart: string | null;
 	/** Request id of the one serialized read-only configuration inspection. */
 	readonly pendingConfigInspect: string | null;
+	/** Request id of the one serialized read-only resource catalog inspection. */
+	readonly pendingCatalogInspect: string | null;
 	/**
 	 * The recent project a `project.select` is waiting on. A refusal for this
 	 * exact request is the only evidence the renderer has that a remembered folder
@@ -116,6 +120,7 @@ export type AppAction =
 	| { readonly type: "notice.raised"; readonly tone: Notice["tone"]; readonly message: string }
 	| { readonly type: "turn.submitted"; readonly requestId: string }
 	| { readonly type: "config.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "catalog.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "project.select.submitted"; readonly requestId: string; readonly projectId: string }
 	| { readonly type: "host.events"; readonly events: readonly ServerEvent[] }
 	| { readonly type: "host.event"; readonly event: ServerEvent };
@@ -140,6 +145,7 @@ export const initialAppState: AppState = {
 	notice: null,
 	pendingTurnStart: null,
 	pendingConfigInspect: null,
+	pendingCatalogInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
 };
@@ -335,6 +341,7 @@ export function workspaceFromWire(workspace: WireProjectWorkspace): OpenWorkspac
 		deleteChallenge: workspace.deleteChallenge,
 		settings: workspace.settings,
 		configInspection: workspace.configInspection,
+		catalogInspection: workspace.catalogInspection,
 		targets: workspace.targets,
 		targetsTruncated: workspace.targetsTruncated,
 		processGeneration: workspace.processGeneration,
@@ -372,6 +379,8 @@ function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string):
 			return { ...open, settings: event.payload.settings };
 		case "config.state":
 			return { ...open, configInspection: event.payload.inspection };
+		case "catalog.state":
+			return { ...open, catalogInspection: event.payload.inspection };
 		case "targets.state":
 			return { ...open, targets: event.payload.targets, targetsTruncated: event.payload.truncated };
 		case "targets.probed": {
@@ -430,6 +439,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				stateDirNote: action.payload.stateDirNote,
 				securityNote: action.payload.securityNote,
 				pendingConfigInspect: null,
+				pendingCatalogInspect: null,
 				announcement: open === null
 					? "Clio Workbench is ready. Open a project folder to begin."
 					: `${open.project.displayName} is open`,
@@ -470,6 +480,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingTurnStart: action.requestId };
 		case "config.inspect.submitted":
 			return { ...state, pendingConfigInspect: action.requestId };
+		case "catalog.inspect.submitted":
+			return { ...state, pendingCatalogInspect: action.requestId };
 		case "project.select.submitted":
 			return { ...state, pendingProjectSelect: { requestId: action.requestId, projectId: action.projectId } };
 		case "host.events": {
@@ -499,6 +511,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						announcement: event.payload.message,
 						pendingTurnStart: null,
 						pendingConfigInspect: null,
+						pendingCatalogInspect: null,
 					};
 				case "command.error": {
 					const pendingSelect = state.pendingProjectSelect;
@@ -522,6 +535,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 							event.payload.requestId === undefined || event.payload.requestId === state.pendingConfigInspect
 								? null
 								: state.pendingConfigInspect,
+						pendingCatalogInspect:
+							event.payload.requestId === undefined || event.payload.requestId === state.pendingCatalogInspect
+								? null
+								: state.pendingCatalogInspect,
 						pendingProjectSelect: answersSelect ? null : pendingSelect,
 					};
 				}
@@ -542,6 +559,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						leftDrawerOpen: false,
 						browse: null,
 						pendingConfigInspect: null,
+						pendingCatalogInspect: null,
 						recent: state.recent.some((entry) => entry.id === open.project.id)
 							? state.recent.map((entry) => entry.id === open.project.id ? open.project : entry)
 							: [open.project, ...state.recent],
@@ -556,6 +574,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						...sequenced,
 						open: event.projectId === state.open?.project.id ? null : state.open,
 						pendingConfigInspect: event.projectId === state.open?.project.id ? null : state.pendingConfigInspect,
+						pendingCatalogInspect: event.projectId === state.open?.project.id ? null : state.pendingCatalogInspect,
 						recent: state.recent.filter((entry) => entry.id !== event.projectId),
 						pendingProjectSelect: state.pendingProjectSelect?.projectId === event.projectId
 							? null
@@ -570,6 +589,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						open,
 						pendingTurnStart: event.kind === "turn.started" ? null : state.pendingTurnStart,
 						pendingConfigInspect: event.kind === "config.state" ? null : state.pendingConfigInspect,
+						pendingCatalogInspect: event.kind === "catalog.state" ? null : state.pendingCatalogInspect,
 						announcement: announcementFor(event) ?? state.announcement,
 					};
 				}

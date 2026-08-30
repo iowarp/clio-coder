@@ -13,9 +13,10 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioLauncher } from "../clio-host.ts";
+import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
-import { configInspectionFixture } from "../tests/fixtures.ts";
+import { catalogInspectionFixture, configInspectionFixture } from "../tests/fixtures.ts";
 
 interface SmokeOptions {
 	readonly chrome: string;
@@ -76,6 +77,9 @@ const running = await startWorkbenchServer({
 	configInspector: {
 		inspect: () => Promise.resolve(configInspectionFixture()),
 	} satisfies ClioConfigInspector,
+	catalogInspector: {
+		inspect: () => Promise.resolve(catalogInspectionFixture()),
+	} satisfies ClioCatalogInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -195,6 +199,66 @@ try {
 	);
 	await page.screenshot({ path: new URL("effective-clio.png", artifactDirectory).pathname, fullPage: true });
 	await effectiveMap.getByRole("button", { name: "Back to notebook" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// The capability atlas is projected from three bounded JSON interfaces. Its
+	// fourth tab names the missing typed interface instead of scraping CLI text.
+	await page.getByRole("button", { name: "Catalog", exact: true }).click();
+	const catalog = page.locator(".catalog");
+	await catalog.getByRole("heading", { name: "Agents, skills & resource library" }).waitFor();
+	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
+	await catalog.getByText("24–64", { exact: true }).waitFor();
+	const catalogSearch = catalog.getByRole("searchbox", { name: "Filter this collection" });
+	await catalogSearch.fill("no-such-capability");
+	await catalog.getByRole("heading", { name: "No matching resources" }).waitFor();
+	await catalogSearch.fill("citation-ready");
+	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
+	await catalogSearch.fill("");
+	await page.screenshot({ path: new URL("catalog.png", artifactDirectory).pathname, fullPage: true });
+	const agentsTab = catalog.getByRole("tab", { name: /^Agents/u });
+	await agentsTab.focus();
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", { name: "frontend-design" }).waitFor();
+	equal(await catalog.getByRole("tab", { name: /^Skills/u }).getAttribute("aria-selected"), "true");
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", { name: "experiment-protocol" }).waitFor();
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", {
+		name: "Verifier discovery is real, but it is not machine-readable yet",
+	}).waitFor();
+	await catalog.getByText("clio-coder verifiers discover", { exact: false }).waitFor();
+	equal(await catalog.getByText("/home/", { exact: false }).count(), 0);
+	const catalogAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const catalogBlockingViolations = catalogAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		catalogBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("catalog-verifiers.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactCatalogGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+	}));
+	ok(compactCatalogGeometry.documentWidth <= compactCatalogGeometry.viewportWidth);
+	const compactCatalogTabs = await catalog.locator(".catalog__tabs").evaluate((tabs) => ({
+		overflowX: getComputedStyle(tabs).overflowX,
+		scrollWidth: tabs.scrollWidth,
+		clientWidth: tabs.clientWidth,
+	}));
+	ok(["auto", "scroll"].includes(compactCatalogTabs.overflowX));
+	ok(compactCatalogTabs.scrollWidth >= compactCatalogTabs.clientWidth);
+	await page.screenshot({ path: new URL("catalog-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await catalog.getByRole("button", { name: "Back to notebook" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// Desktop rails collapse independently, reclaim their full grid tracks, and
@@ -914,6 +978,8 @@ try {
 			desktopRailsCollapseAndRestoreFocus: true,
 			streamUpdatesPreservedTheDraftAndItsScrollPosition: true,
 			effectiveClioMapUsesTheBoundedReadOnlyAdapter: true,
+			catalogUsesBoundedReadOnlyAdapters: true,
+			compactCatalogHasNoPageOverflow: true,
 			approvalBannerVisibleWhenScrolledAwayAndBlurred: true,
 			approvalAnsweredByKeyboardChord: true,
 			escalatedWithoutAnotherWireEvent: true,
@@ -925,6 +991,7 @@ try {
 			shortHeightRailScrollable: true,
 			desktopRailHasNoHorizontalOverflow: true,
 			seriousOrCriticalAccessibilityViolations: configMapBlockingViolations.length + blockingViolations.length +
+				catalogBlockingViolations.length +
 				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
@@ -932,6 +999,9 @@ try {
 			screenshots: [
 				"initial.png",
 				"effective-clio.png",
+				"catalog.png",
+				"catalog-verifiers.png",
+				"catalog-compact.png",
 				"permission.png",
 				"complete.png",
 				"compact-project-drawer.png",

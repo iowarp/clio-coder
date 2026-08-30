@@ -1,9 +1,10 @@
 import { equal, match, ok } from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EffectiveClioMap, type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
+import { ClioCatalog, EffectiveClioMap, type WorkbenchActions, WorkbenchView } from "../src/App.tsx";
 import { appReducer, type AppState, initialAppState, parseBootstrapPayload } from "../src/state.ts";
 import {
 	bootstrapFixture,
+	catalogInspectionFixture,
 	clioSnapshotFixture,
 	configInspectionFixture,
 	FIXTURE_PROJECT_ID,
@@ -35,6 +36,7 @@ const inertActions: WorkbenchActions = {
 	getSettings() {},
 	patchSettings() {},
 	inspectConfig() {},
+	inspectCatalog() {},
 	listTargets() {},
 	probeTarget() {},
 	setAutonomy() {},
@@ -114,6 +116,32 @@ Deno.test("the Effective Clio map renders provenance, apply timing, redaction, a
 	match(html, /Project sources use project-relative paths/u);
 	ok(!html.includes("sourcePath"));
 	ok(!html.includes("issueCounts"));
+	ok(!html.includes("/home/"));
+});
+
+Deno.test("the capability atlas renders bounded inventory facts and names the verifier interface gap", () => {
+	const html = renderToStaticMarkup(
+		<ClioCatalog
+			inspection={catalogInspectionFixture()}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+
+	match(html, /Agents, skills &amp; resource library/u);
+	match(html, /Researcher/u);
+	match(html, /research-report/u);
+	match(html, /Tool-call budget/u);
+	match(html, /24–64/u);
+	match(html, /Installed skills/u);
+	match(html, /1 reported loader issue/u);
+	match(html, /Library resources/u);
+	match(html, /Typed interface required/u);
+	match(html, /Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side/u);
+	ok(!html.includes("sourcePath"));
+	ok(!html.includes("sourceUrl"));
+	ok(!/https?:\/\//u.test(html));
 	ok(!html.includes("/home/"));
 });
 

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type ClioLauncher, HostError } from "../clio-host.ts";
 import type { AcpLaunchSpec } from "../acp-client.ts";
+import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import {
 	defaultClioLauncher,
@@ -16,8 +17,10 @@ import {
 	parseServerEvent,
 	PROTOCOL_VERSION,
 	type ServerEvent,
+	type WireCatalogInspection,
 	type WireConfigInspection,
 } from "../src/protocol.ts";
+import { catalogInspectionFixture } from "./fixtures.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -84,6 +87,7 @@ interface FixtureOptions {
 	readonly pidFile?: boolean;
 	readonly clioLauncher?: ClioLauncher;
 	readonly configInspector?: ClioConfigInspector;
+	readonly catalogInspector?: ClioCatalogInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
@@ -121,6 +125,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			clioLauncher: options.clioLauncher ??
 				fixtureLauncher(options.scenario ?? "happy", options.pidFile === true ? pidPath : undefined),
 			...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
+			...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -715,6 +720,41 @@ Deno.test("configuration inspection is cached but never blocks the live ACP cont
 		deepStrictEqual(bootstrap.workspace.configInspection, configInspectionFixture());
 	} finally {
 		releaseInspection?.();
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("resource catalog inspection uses the trusted root, broadcasts the typed snapshot, and caches it", async () => {
+	let inspectedRoot: string | null = null;
+	const catalogInspector: ClioCatalogInspector = {
+		inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			return Promise.resolve(catalogInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ catalogInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.catalogInspection, null);
+
+		await sendCommand(socket, "request-catalog", "catalog.inspect", { projectId });
+		const catalog = (await collectThrough(socket, "catalog.state")).at(-1);
+		ok(catalog?.kind === "catalog.state");
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+		deepStrictEqual(catalog.payload.inspection, catalogInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { catalogInspection: WireCatalogInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.catalogInspection, catalogInspectionFixture());
+	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
 	}

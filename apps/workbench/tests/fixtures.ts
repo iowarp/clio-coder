@@ -3,6 +3,7 @@ import {
 	type ServerEventKind,
 	type ServerEventOf,
 	type ServerEventPayloadByKind,
+	type WireCatalogInspection,
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireProjectWorkspace,
@@ -71,6 +72,70 @@ export function configInspectionFixture(): WireConfigInspection {
 		entriesTruncated: false,
 		issueCounts: [{ surface: "hook", count: 1 }],
 		issuesTruncated: false,
+	};
+}
+
+export function catalogInspectionFixture(): WireCatalogInspection {
+	return {
+		inspectedAt: "2026-08-29T13:00:00.000Z",
+		agents: {
+			availability: "available",
+			items: [{
+				id: "researcher",
+				name: "Researcher",
+				description: "Finds and synthesizes citation-ready evidence without modifying the project.",
+				version: 1,
+				source: "builtin",
+				audience: "base",
+				category: "research",
+				capability: "read-only",
+				latency: "deep",
+				contextTier: "none",
+				tags: ["evidence", "citations"],
+				skills: ["arxiv-literature"],
+				tools: ["read", "web_fetch", "code_nav"],
+				resultKind: "research-report",
+				budget: {
+					toolCalls: 24,
+					readReserve: 4,
+					synthesis: true,
+					maximumToolCalls: 64,
+					maximumReadReserve: 10,
+				},
+			}],
+			truncated: false,
+			issueCount: 0,
+		},
+		skills: {
+			availability: "available",
+			items: [{
+				name: "frontend-design",
+				description: "Creates distinctive production-grade web interfaces with strong visual hierarchy.",
+				scope: "user",
+				source: "claude",
+				trusted: true,
+				precedence: 20,
+				modelInvocable: true,
+				issueCount: 0,
+			}],
+			truncated: false,
+			issueCount: 1,
+		},
+		library: {
+			availability: "available",
+			items: [{
+				kind: "skill",
+				name: "experiment-protocol",
+				description: "Pre-registers thresholds and verdict conditions before scientific performance measurements.",
+				version: "0.1.2",
+				category: "research",
+				origin: "catalog",
+				audit: "pass",
+			}],
+			truncated: false,
+			issueCount: 0,
+		},
+		verifiers: { availability: "typed-interface-required" },
 	};
 }
 
@@ -152,6 +217,7 @@ export function workspaceFixture(
 		deleteChallenge: null,
 		settings: null,
 		configInspection: null,
+		catalogInspection: null,
 		targets: null,
 		targetsTruncated: false,
 		processGeneration: "generation-alpha-0001",
@@ -204,6 +270,7 @@ const PROJECT_EVENT_KINDS = new Set<ServerEventKind>([
 	"session.list",
 	"settings.state",
 	"config.state",
+	"catalog.state",
 	"targets.state",
 	"targets.probed",
 ]);
