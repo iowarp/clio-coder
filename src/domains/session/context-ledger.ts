@@ -101,6 +101,22 @@ export interface BuildContextLedgerInput {
 	} | null;
 	/** Prompt-cache honesty line; null until a turn has compiled and settled. */
 	promptCache?: PromptCacheStats | null;
+	/** Last pre-warm since the previous settled run; null when none has run. */
+	prewarm?: PrewarmStats | null;
+}
+
+/**
+ * One pre-warm's result. It is deliberately not a token category: the pre-warm
+ * spends no window space and adds no message, it only says the backend has
+ * already prefilled the prefix the next turn will send.
+ */
+export interface PrewarmStats {
+	/** Prompt tokens the backend processed; null when it reported no counts. */
+	tokens: number | null;
+	/** Wall clock the round took. */
+	ms: number;
+	/** True when the operator submitted before the round settled. */
+	aborted: boolean;
 }
 
 /**
@@ -190,6 +206,8 @@ export interface ContextLedger {
 		trigger: string;
 	} | null;
 	promptCache: PromptCacheStats | null;
+	/** Last pre-warm since the previous settled run; null when none has run. */
+	prewarm: PrewarmStats | null;
 }
 
 /** Maps a prompt segment id to the ledger bucket it belongs to. */
@@ -374,5 +392,6 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		meter,
 		lastCompaction: input.lastCompaction ?? null,
 		promptCache: input.promptCache ?? null,
+		prewarm: input.prewarm ?? null,
 	};
 }

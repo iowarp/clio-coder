@@ -1,6 +1,7 @@
 /**
  * Durable record of the model calls that were billed beside a session rather
- * than inside it: `/btw` side questions and `/handoff` extraction rounds.
+ * than inside it: `/btw` side questions, `/handoff` extraction rounds, and the
+ * session pre-warm.
  *
  * These rounds deliberately append nothing to the session JSONL. A fleet run
  * briefs its workers from the transcript, so a question the operator asked to
@@ -179,7 +180,7 @@ export function readOutOfTurnUsageRows(stateDir: string): OutOfTurnUsageReadResu
 function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	if (!isRecord(value)) return null;
 	const label = value.label;
-	if (label !== "side-question" && label !== "handoff") return null;
+	if (label !== "side-question" && label !== "handoff" && label !== "prewarm") return null;
 	if (typeof value.timestamp !== "string" || value.timestamp.length === 0) return null;
 	if (!isRecord(value.usage)) return null;
 	const usage = value.usage;

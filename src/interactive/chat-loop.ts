@@ -48,7 +48,7 @@ import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/
 import { createEngineAgent } from "../engine/agent.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import { cwdHash } from "../engine/session.js";
-import type { AgentEvent, AgentMessage, ImageContent } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
@@ -65,11 +65,13 @@ import {
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
-import { runSideQuestion, type SideQuestionResult } from "./side-question.js";
+import type { runPrewarmRound } from "./prewarm.js";
+import { runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import { createTurnPersistence } from "./turn-persistence.js";
+import { createTurnPrewarm, type PrewarmOutcome, subscribePrewarmToCompaction } from "./turn-prewarm.js";
 import {
 	createTurnQueues,
 	DEFAULT_STEERING_MODE,
@@ -316,6 +318,12 @@ export interface ChatLoop {
 	 * from the selected session entries; omit it for a fresh session.
 	 */
 	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
+	/**
+	 * Resolves once the queued or in-flight session pre-warm has settled, with
+	 * the outcome, or null when none ran. Diagnostics and contracts only: no
+	 * turn path waits on a pre-warm.
+	 */
+	whenPrewarmSettled(): Promise<PrewarmOutcome | null>;
 	/** Abort the live agent and release pi-ai session-scoped resources before shutdown. */
 	dispose(): void;
 	/**
@@ -459,6 +467,34 @@ export interface CreateChatLoopDeps {
 	 * background registry, which holds exactly the attached calls.
 	 */
 	hasAttachedDispatch?: () => boolean;
+	/**
+	 * True while any dispatched worker run is outstanding, attached or detached.
+	 * The session pre-warm stands down in that state so it never competes for the
+	 * endpoint a worker is already using. Defaults to `hasAttachedDispatch`, which
+	 * is the narrower fact a bare composition has.
+	 */
+	hasActiveDispatch?: () => boolean;
+	/**
+	 * True on a surface where a person is about to type the next turn. The
+	 * orchestrator wires this false for headless `run`: the pre-warm buys latency
+	 * that an unattended run never spends. Defaults to true.
+	 */
+	isLatencySurface?: () => boolean;
+	/** The session pre-warm round. Injectable for the same reason `runSideQuestion` is. */
+	runPrewarm?: typeof runPrewarmRound;
+	/**
+	 * Whether a submit aborts the in-flight pre-warm's request or only lets go of
+	 * it. Defaults to what the measured local backend does with a cancelled
+	 * request; see `ABORT_ROUND_ON_SUBMIT` in `turn-prewarm.ts`.
+	 */
+	abortPrewarmOnSubmit?: boolean;
+	/**
+	 * Claim one in-flight request on the pre-warm's endpoint for the duration of
+	 * the round. Wired from the endpoint-capacity registry once #250 lands, so a
+	 * pre-warm counts against the same per-endpoint bound the orchestrator's
+	 * streaming turn does; see `registerEndpointSlot` in `turn-prewarm.ts`.
+	 */
+	registerPrewarmEndpointSlot?: (runtime: AgentRuntime) => (() => void) | null;
 }
 
 export function reloadProtectedArtifactsForSession(
@@ -769,6 +805,50 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			},
 		});
 	};
+
+	// A submit owns the turn state machine from the moment it starts running,
+	// which is well before `state.streaming` flips: the probe, auto-compaction,
+	// and the prompt compile all happen first. The pre-warm reads this flag, not
+	// `streaming`, so it can never be the request the operator's turn queues
+	// behind.
+	let turnActive = false;
+
+	const prewarm = createTurnPrewarm({
+		state,
+		getSettings: deps.getSettings,
+		providers: deps.providers,
+		context,
+		bus: deps.bus,
+		...(deps.session ? { session: deps.session } : {}),
+		isLatencySurface: () => deps.isLatencySurface?.() !== false,
+		isTurnActive: () => turnActive,
+		hasActiveDispatch: () => (deps.hasActiveDispatch ?? deps.hasAttachedDispatch)?.() === true,
+		prepareRuntime: async (signal) => {
+			// The same probe a submit awaits, so the pre-warm resolves the model the
+			// next turn will resolve rather than a stale catalog entry.
+			await turnRuntime.ensureLiveCapabilitiesForSelectedModel().catch(() => {});
+			return prepareOutOfTurnRound("a turn is in flight", signal);
+		},
+		applySessionTools: (runtime) => {
+			runtime.agent.state.tools = resolveSessionTools(
+				runtime,
+				deps.toolRegistry,
+				currentToolInvokeOptions,
+				turnRuntime.toolTelemetry,
+			);
+		},
+		recordUsage: (runtime, usage: Usage | null) => {
+			recordOutOfTurnUsage(runtime, sideQuestionUsage(usage), "prewarm");
+		},
+		...(deps.runPrewarm ? { runPrewarm: deps.runPrewarm } : {}),
+		...(deps.abortPrewarmOnSubmit === undefined ? {} : { abortRoundOnSubmit: deps.abortPrewarmOnSubmit }),
+		...(deps.registerPrewarmEndpointSlot ? { registerEndpointSlot: deps.registerPrewarmEndpointSlot } : {}),
+	});
+	const unsubscribePrewarmCompaction = subscribePrewarmToCompaction(deps.bus, prewarm);
+	// The prompt this process will send is known now: the session prompt compiles
+	// against the configured target, and a boot-time resume rebuilds the message
+	// array in the same tick, which the scheduler collapses onto one round.
+	prewarm.schedule("session-start");
 
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text),
@@ -1184,6 +1264,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		contextUsage: () => context.contextUsage(),
 		contextLedger: () => context.contextLedger(),
 		whenSettled: () => activeSubmit,
+		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			if (state.runtime) {
@@ -1211,11 +1292,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (deps.protectedArtifacts) {
 				reloadProtectedArtifactsForSession(deps.protectedArtifacts, deps.readSessionEntries);
 			}
+			// A resume replays a history the backend has never seen; a fresh session
+			// replays nothing but still compiles a prompt and a tool surface. Both
+			// leave a prefix the next turn will pay for unless it is sent now.
+			prewarm.schedule(replayMessages && replayMessages.length > 0 ? "resume" : "session-start");
 		},
 
 		dispose(): void {
 			unsubscribeConfigReload?.();
 			unsubscribeSynthesisLock?.();
+			unsubscribePrewarmCompaction();
+			prewarm.dispose();
 			context.dispose();
 			if (state.runtime) {
 				state.runtime.agent.abort();
@@ -1326,7 +1413,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const submitInner = api.submit.bind(api);
 	const submitTracked: ChatLoop["submit"] = (text, options) => {
 		priorSubmit = activeSubmit;
-		const run = submitInner(text, options);
+		// The flag brackets the whole submit, including the early returns an
+		// admission failure takes, so a refused turn does not leave the pre-warm
+		// believing a turn is still running.
+		turnActive = true;
+		const run = submitInner(text, options).finally(() => {
+			turnActive = false;
+		});
 		activeSubmit = run.catch(() => {});
 		return run;
 	};
@@ -1343,6 +1436,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// released at admission, not settlement, so steering stays immediate.
 	let admissionTail: Promise<void> | null = null;
 	api.submit = (text, options = {}) => {
+		// The operator owns the slot from the keystroke, not from admission. The
+		// prefix the pre-warm already pushed through stays in it either way, so
+		// aborting here costs nothing and stops the real turn from queueing behind
+		// a request nobody is waiting on.
+		prewarm.cancel();
 		const previous = admissionTail;
 		let release: () => void = () => {};
 		const ticket = new Promise<void>((resolve) => {

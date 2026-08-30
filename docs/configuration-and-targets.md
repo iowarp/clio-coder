@@ -642,6 +642,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | next turn |
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |
+| `prewarm.enabled` | `true` | boolean | next turn |
 | `defaults.maxTokens` | `32768` | integer ≥ 0 | next turn |
 | `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |
 | `budget.concurrency` | `auto` | `auto` or integer ≥ 1 | next dispatch |

@@ -42,6 +42,8 @@ export interface CostRow {
 	sideQuestions: number;
 	/** Calls in this row that were `/handoff` extraction rounds rather than turns. */
 	handoffs: number;
+	/** Calls in this row that were session pre-warms rather than turns. */
+	prewarms: number;
 	cost: CostAggregate;
 }
 
@@ -73,6 +75,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			existing.row.apiCalls += entry.apiCalls ?? 1;
 			if (entry.label === "side-question") existing.row.sideQuestions += 1;
 			if (entry.label === "handoff") existing.row.handoffs += 1;
+			if (entry.label === "prewarm") existing.row.prewarms += 1;
 			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
 			addResponseModelIdObservationCounts(
 				existing.responseModelIdObservationCounts,
@@ -95,6 +98,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				apiCalls: entry.apiCalls ?? 1,
 				sideQuestions: entry.label === "side-question" ? 1 : 0,
 				handoffs: entry.label === "handoff" ? 1 : 0,
+				prewarms: entry.label === "prewarm" ? 1 : 0,
 			},
 			requestedModelIds: new Set(entry.requestedModelIds),
 			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
@@ -133,6 +137,7 @@ function sumRows(
 			apiCalls: acc.apiCalls + row.apiCalls,
 			sideQuestions: acc.sideQuestions + row.sideQuestions,
 			handoffs: acc.handoffs + row.handoffs,
+			prewarms: acc.prewarms + row.prewarms,
 		}),
 		{
 			runs: 0,
@@ -145,6 +150,7 @@ function sumRows(
 			apiCalls: 0,
 			sideQuestions: 0,
 			handoffs: 0,
+			prewarms: 0,
 		},
 	);
 }
@@ -215,10 +221,11 @@ function summaryBlock(
 				]
 			: [];
 	return kvBlock([
-		["turns", formatTokens(totals.runs - totals.sideQuestions - totals.handoffs)],
+		["turns", formatTokens(totals.runs - totals.sideQuestions - totals.handoffs - totals.prewarms)],
 		["model calls", formatTokens(totals.apiCalls)],
 		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
 		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
+		...(totals.prewarms > 0 ? [["pre-warms", formatTokens(totals.prewarms)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
@@ -238,10 +245,11 @@ function modelBlock(row: CostRow): string[] {
 	return kvBlock([
 		["requested model ids", row.requestedModelIds.join(", ")],
 		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
-		["turns", formatTokens(row.runs - row.sideQuestions - row.handoffs)],
+		["turns", formatTokens(row.runs - row.sideQuestions - row.handoffs - row.prewarms)],
 		["model calls", formatTokens(row.apiCalls)],
 		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
 		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
+		...(row.prewarms > 0 ? [["pre-warms", formatTokens(row.prewarms)] as const] : []),
 		...(cost === null ? [] : [["cost", cost] as const]),
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],

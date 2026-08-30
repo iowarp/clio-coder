@@ -80,7 +80,12 @@ function positive(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
+/**
+ * Normalize one provider usage object into the shape `/cost` and the
+ * out-of-turn usage store take. Shared with the session pre-warm, which is
+ * another call billed beside the session rather than inside it.
+ */
+export function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
 	const usage = raw as Partial<Usage> & { reasoning?: number };
 	const input = positive(usage.input);

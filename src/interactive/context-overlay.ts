@@ -270,6 +270,14 @@ export function renderContextLedgerLines(
 		}
 	}
 
+	if (ledger.prewarm) {
+		// What the backend has already prefilled for the turn the operator has not
+		// typed yet. It survives until the next settled run answers the question.
+		const tokens = ledger.prewarm.tokens !== null ? `${formatTokens(ledger.prewarm.tokens)} tokens` : "prefix";
+		const aborted = ledger.prewarm.aborted ? " (aborted on submit; prefix stays in the slot)" : "";
+		lines.push(theme.fg("dim", `prewarmed: ${tokens} in ${formatTokens(ledger.prewarm.ms)} ms${aborted}`));
+	}
+
 	if (ledger.lastCompaction) {
 		const pruneInfo = `last compaction: reclaimed ${formatTokens(ledger.lastCompaction.tokensBefore)} -> ${formatTokens(ledger.lastCompaction.tokensAfter)} tokens (${ledger.lastCompaction.stage})`;
 		lines.push(theme.fg("dim", pruneInfo));

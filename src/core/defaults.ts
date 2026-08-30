@@ -152,6 +152,21 @@ export interface WorkingSetSettings {
 }
 
 /**
+ * Prompt pre-warm settings (`prewarm`). On a local server prefill is the cost,
+ * and the prefix the next turn will send is fully known before the operator
+ * types anything: at session start, after a resume rebuilds the message array,
+ * and after a compaction settles. Clio sends that prefix to the backend right
+ * then so the slot's prefix cache already holds it when the real turn arrives.
+ *
+ *   - enabled: master switch. The feature is off on every tier but
+ *     `local-native` whatever this says, and off for workers and headless runs,
+ *     because it buys latency for an operator watching a local server.
+ */
+export interface PrewarmSettings {
+	enabled: boolean;
+}
+
+/**
  * Transient provider retry controls for the interactive chat loop. These are
  * intentionally small and mirror the session retry helper defaults. Dispatched
  * worker runs are governed by `workers.maxRetries` instead; the two never meet.
@@ -444,6 +459,9 @@ export const DEFAULT_SETTINGS = {
 	context: {
 		workingSet: DEFAULT_WORKING_SET_SETTINGS,
 	},
+	prewarm: {
+		enabled: true,
+	} as PrewarmSettings,
 	retry: {
 		enabled: true,
 		maxRetries: 3,
@@ -750,6 +768,14 @@ context:
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
+
+# Prompt pre-warm. At session start, after a resume rebuilds the message array,
+# and after a compaction settles, Clio sends the prefix the next turn would send
+# (minus your text) so a local server has already prefilled it when you press
+# Enter. Local-native targets only, interactive sessions only, and never while a
+# turn or a dispatch is running.
+prewarm:
+  enabled: true
 
 # Transient provider/stream retry controls for interactive chat.
 # Retryable errors include overloads, rate limits, 5xx responses, network
