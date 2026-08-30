@@ -9,9 +9,14 @@ import {
 } from "../src/state.ts";
 import {
 	bootstrapFixture,
+	catalogInspectionFixture,
 	clioSnapshotFixture,
+	dispatchInspectionFixture,
 	FIXTURE_PROJECT_ID,
+	recoveryInspectionFixture,
+	routingInspectionFixture,
 	serverEventFixture,
+	usageInspectionFixture,
 	workspaceFixture,
 } from "./fixtures.ts";
 
@@ -164,7 +169,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 		}, { sequence: 4 }),
 	});
 	equal(state.open?.projection.activeTurn?.toolCalls, 1);
-	// Clio's own name for the call rather than the generic kind label.
+	// Clio Coder's own name for the call rather than the generic kind label.
 	equal(state.open?.projection.activeTurn?.lastToolTitle, "reading");
 
 	state = appReducer(state, {
@@ -172,7 +177,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 		event: serverEventFixture("turn.terminal", {
 			outcome: "completed",
 			code: "clio-completed",
-			summary: "Clio finished this turn.",
+			summary: "Clio Coder finished this turn.",
 			source: "reported-by-clio",
 		}, { sequence: 5 }),
 	});
@@ -181,6 +186,30 @@ Deno.test("turn events fold into the projection and clear the pending submission
 		state.open?.projection.timeline.map((item) => item.kind),
 		["request", "narrative", "tool", "outcome"],
 	);
+});
+
+Deno.test("a frame batch folds every validated event in sequence with one reducer action", () => {
+	const state = readyState();
+	const started = serverEventFixture("turn.started", {
+		promptSummary: "Measure the frame batch.",
+		origin: "live",
+		startedAt: "2026-08-18T12:05:00.000Z",
+		source: "observed-by-workbench",
+	}, { sequence: 2 });
+	const first = serverEventFixture(
+		"turn.text",
+		{ text: "alpha ", source },
+		{ sequence: 3, eventId: "event-frame-alpha" },
+	);
+	const second = serverEventFixture(
+		"turn.text",
+		{ text: "beta", source },
+		{ sequence: 4, eventId: "event-frame-beta" },
+	);
+	const next = appReducer(state, { type: "host.events", events: [started, first, second] });
+
+	equal(next.lastSequence, 4);
+	equal(next.open?.projection.timeline.at(-1)?.summary, "alpha beta");
 });
 
 Deno.test("events for another project or an older sequence are ignored", () => {
@@ -217,13 +246,57 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "conflict",
-			message: "Clio is still working on the previous prompt. Cancel it or wait.",
+			message: "Clio Coder is still working on the previous prompt. Cancel it or wait.",
 			requestId: "request-1",
 		}, { sequence: 2 }),
 	});
 	equal(state.notice?.tone, "warning");
 	equal(state.pendingTurnStart, null);
-	equal(state.announcement, "Clio is still working on the previous prompt. Cancel it or wait.");
+	equal(state.announcement, "Clio Coder is still working on the previous prompt. Cancel it or wait.");
+
+	state = appReducer(state, { type: "config.inspect.submitted", requestId: "request-config" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio Coder could not inspect configuration.",
+			requestId: "request-config",
+		}, { sequence: 3 }),
+	});
+	equal(state.pendingConfigInspect, null);
+
+	state = appReducer(state, { type: "catalog.inspect.submitted", requestId: "request-catalog" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio Coder could not inspect catalogs.",
+			requestId: "request-catalog",
+		}, { sequence: 4 }),
+	});
+	equal(state.pendingCatalogInspect, null);
+
+	state = appReducer(state, { type: "usage.inspect.submitted", requestId: "request-usage" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio Coder could not inspect project usage.",
+			requestId: "request-usage",
+		}, { sequence: 5 }),
+	});
+	equal(state.pendingUsageInspect, null);
+
+	state = appReducer(state, { type: "routing.inspect.submitted", requestId: "request-routing" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("command.error", {
+			code: "not-ready",
+			message: "Clio Coder could not inspect routing.",
+			requestId: "request-routing",
+		}, { sequence: 6 }),
+	});
+	equal(state.pendingRoutingInspect, null);
 });
 
 Deno.test("a protocol error fails the connection", () => {
@@ -256,7 +329,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, and target events land on the open workspace", () => {
+Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, recovery, and target events land correctly", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -305,6 +378,69 @@ Deno.test("session, settings, and target events land on the open workspace", () 
 		}, { sequence: 5 }),
 	});
 	deepStrictEqual(state.open?.settings?.editable, ["orchestrator.target"]);
+
+	state = appReducer(state, { type: "config.inspect.submitted", requestId: "request-config" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("config.state", {
+			inspection: {
+				inspectedAt: "2026-08-29T12:00:00.000Z",
+				settings: [{ key: "autonomy", source: "project", value: "suggest", valueKind: "exact" }],
+				settingsTruncated: false,
+				entries: [],
+				entriesTruncated: false,
+				issueCounts: [],
+				issuesTruncated: false,
+			},
+		}, { sequence: 6 }),
+	});
+	equal(state.open?.configInspection?.settings[0]?.value, "suggest");
+	equal(state.pendingConfigInspect, null);
+
+	state = appReducer(state, { type: "catalog.inspect.submitted", requestId: "request-catalog" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("catalog.state", { inspection: catalogInspectionFixture() }, { sequence: 7 }),
+	});
+	equal(state.open?.catalogInspection?.agents.items[0]?.id, "researcher");
+	equal(state.open?.catalogInspection?.verifiers.availability, "typed-interface-required");
+	equal(state.pendingCatalogInspect, null);
+
+	state = appReducer(state, { type: "usage.inspect.submitted", requestId: "request-usage" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("usage.state", { inspection: usageInspectionFixture() }, { sequence: 8 }),
+	});
+	equal(state.open?.usageInspection?.totals?.totalTokens, 13_922_000);
+	equal(state.open?.usageInspection?.stores.sessions, "available");
+	equal(state.pendingUsageInspect, null);
+
+	state = appReducer(state, { type: "routing.inspect.submitted", requestId: "request-routing" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("routing.state", { inspection: routingInspectionFixture() }, { sequence: 9 }),
+	});
+	equal(state.open?.routingInspection?.models.items[0]?.modelId, "qwen3.8-27b");
+	equal(state.open?.routingInspection?.bindings.items[1]?.resolved, false);
+	equal(state.pendingRoutingInspect, null);
+
+	state = appReducer(state, { type: "dispatch.inspect.submitted", requestId: "request-dispatch" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("dispatch.state", { inspection: dispatchInspectionFixture() }, { sequence: 10 }),
+	});
+	equal(state.dispatchInspection?.scope, "installation");
+	equal(state.dispatchInspection?.running.total, 5);
+	equal(state.pendingDispatchInspect, null);
+
+	state = appReducer(state, { type: "recovery.inspect.submitted", requestId: "request-recovery" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("recovery.state", { inspection: recoveryInspectionFixture() }, { sequence: 11 }),
+	});
+	equal(state.recoveryInspection?.scope, "installation");
+	equal(state.recoveryInspection?.summary.failures, 2);
+	equal(state.pendingRecoveryInspect, null);
 });
 
 Deno.test("a browse listing is held until it is dismissed", () => {
@@ -341,7 +477,7 @@ Deno.test("a reconnected socket restarts the sequence window", () => {
 	equal(state.open?.clio.phase, "idle");
 });
 
-Deno.test("the composer is blocked exactly while Clio is occupied", () => {
+Deno.test("the composer is blocked exactly while Clio Coder is occupied", () => {
 	const state = readyState();
 	equal(isPromptBlocked(state.open), false);
 	for (const phase of ["running", "awaiting-approval", "cancelling"] as const) {
@@ -398,7 +534,7 @@ Deno.test("a refused select is the only thing that marks a remembered folder uno
 			type: "host.event",
 			event: serverEventFixture("command.error", {
 				code: "conflict",
-				message: "Clio is still working in the open project.",
+				message: "Clio Coder is still working in the open project.",
 				requestId: "request-select-2",
 			}, { sequence: 3, projectId: beta.id }),
 		},

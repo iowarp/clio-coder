@@ -20,11 +20,11 @@ async function* appSourceFiles(directory: URL): AsyncGenerator<URL> {
 	}
 }
 
-Deno.test("app-local Clio marks remain byte-identical to the approved owned assets", async () => {
+Deno.test("app-local Clio Coder marks remain byte-identical to the approved owned assets", async () => {
 	for (const [name, expectedHash] of EXPECTED_ASSETS) {
 		const bytes = await Deno.readFile(new URL(`../public/assets/${name}`, import.meta.url));
 		const digest = await crypto.subtle.digest("SHA-256", bytes);
-		equal(bytesToHex(digest), expectedHash, `${name} drifted from the approved Clio-owned asset`);
+		equal(bytesToHex(digest), expectedHash, `${name} drifted from the approved Clio Coder-owned asset`);
 	}
 });
 
@@ -32,12 +32,24 @@ Deno.test("document shell provides the keyboard skip link before the React root"
 	const document = await Deno.readTextFile(new URL("../index.html", import.meta.url));
 	ok(document.indexOf('class="skip-link"') < document.indexOf('id="root"'));
 	ok(document.includes('href="#conversation"'));
+	ok(document.includes("<title>Clio Coder</title>"));
+	ok(document.includes('content="Clio Coder —'));
+	ok(!document.includes(">Workbench<"));
 });
 
-Deno.test("Workbench source has no root runtime or sibling-app imports", async () => {
+Deno.test("GUI source has no root runtime or sibling-app imports", async () => {
 	for await (const file of appSourceFiles(new URL("../", import.meta.url))) {
 		const source = await Deno.readTextFile(file);
-		ok(!/(?:\.\.\/){2,}src\//u.test(source), `${file.pathname} imports the root Clio runtime`);
+		ok(!/(?:\.\.\/){2,}src\//u.test(source), `${file.pathname} imports the root Clio Coder runtime`);
 		ok(!source.includes("../trace-viewer"), `${file.pathname} imports the sibling Trace Viewer app`);
+	}
+});
+
+Deno.test("product-facing source never abbreviates Clio Coder to the ambiguous bare brand", async () => {
+	for await (const file of appSourceFiles(new URL("../", import.meta.url))) {
+		const source = await Deno.readTextFile(file);
+		ok(!/\bClio\b(?! Coder)/u.test(source), `${file.pathname} contains a bare Clio product reference`);
+		ok(!/\bCLIO\b(?! CODER|-CODER)/u.test(source), `${file.pathname} contains a bare CLIO product reference`);
+		ok(!/\bclio[-_ ]gui\b/iu.test(source), `${file.pathname} abbreviates Clio Coder GUI`);
 	}
 });

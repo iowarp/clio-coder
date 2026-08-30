@@ -3,6 +3,12 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type ClioLauncher, HostError } from "../clio-host.ts";
 import type { AcpLaunchSpec } from "../acp-client.ts";
+import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
+import type { ClioConfigInspector } from "../clio-config-inspector.ts";
+import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
+import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
+import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
+import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import {
 	defaultClioLauncher,
 	MAX_WEBSOCKET_OUTBOUND_BYTES,
@@ -10,7 +16,25 @@ import {
 	startWorkbenchServer,
 	wouldExceedWebSocketHighWaterMark,
 } from "../main.ts";
-import { MAX_CLIENT_FRAME_BYTES, parseServerEvent, PROTOCOL_VERSION, type ServerEvent } from "../src/protocol.ts";
+import {
+	MAX_CLIENT_FRAME_BYTES,
+	parseServerEvent,
+	PROTOCOL_VERSION,
+	type ServerEvent,
+	type WireCatalogInspection,
+	type WireConfigInspection,
+	type WireDispatchInspection,
+	type WireRecoveryInspection,
+	type WireRoutingInspection,
+	type WireUsageInspection,
+} from "../src/protocol.ts";
+import {
+	catalogInspectionFixture,
+	dispatchInspectionFixture,
+	recoveryInspectionFixture,
+	routingInspectionFixture,
+	usageInspectionFixture,
+} from "./fixtures.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -76,6 +100,12 @@ interface FixtureOptions {
 	/** Records the ACP child's pid so a test can prove it is the only one. */
 	readonly pidFile?: boolean;
 	readonly clioLauncher?: ClioLauncher;
+	readonly configInspector?: ClioConfigInspector;
+	readonly catalogInspector?: ClioCatalogInspector;
+	readonly usageInspector?: ClioUsageInspector;
+	readonly routingInspector?: ClioRoutingInspector;
+	readonly dispatchInspector?: ClioDispatchInspector;
+	readonly recoveryInspector?: ClioRecoveryInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
 	readonly permissionBudgetMs?: number;
@@ -112,6 +142,12 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			},
 			clioLauncher: options.clioLauncher ??
 				fixtureLauncher(options.scenario ?? "happy", options.pidFile === true ? pidPath : undefined),
+			...(options.configInspector === undefined ? {} : { configInspector: options.configInspector }),
+			...(options.catalogInspector === undefined ? {} : { catalogInspector: options.catalogInspector }),
+			...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
+			...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
+			...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
+			...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 			...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -441,6 +477,28 @@ function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function configInspectionFixture(): WireConfigInspection {
+	return {
+		inspectedAt: "2026-08-29T12:00:00.000Z",
+		settings: [{ key: "orchestrator.model", source: "project", value: "fixture-model", valueKind: "exact" }],
+		settingsTruncated: false,
+		entries: [{
+			category: "clio-md",
+			id: "CLIO-CODER.md",
+			scope: "project",
+			sourcePath: { segments: ["CLIO-CODER.md"] },
+			trust: "trusted",
+			precedence: "single",
+			reloadClass: "next-turn",
+			contextCostTokens: 42,
+			facts: [{ label: "Preload", value: "included" }],
+		}],
+		entriesTruncated: false,
+		issueCounts: [],
+		issuesTruncated: false,
+	};
+}
+
 Deno.test("outbound WebSocket high-water accounting includes the next UTF-8 frame at the exact boundary", () => {
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES - 1, 1), false);
 	equal(wouldExceedWebSocketHighWaterMark(MAX_WEBSOCKET_OUTBOUND_BYTES, 0), false);
@@ -460,7 +518,7 @@ Deno.test("startWorkbenchServer serves a v3 bootstrap and static assets with bou
 		assertSecurityHeaders(bootstrapResponse.headers);
 		const bootstrap = await bootstrapResponse.json() as Record<string, unknown>;
 		equal(bootstrap.protocolVersion, PROTOCOL_VERSION);
-		equal(bootstrap.appName, "Clio Workbench");
+		equal(bootstrap.appName, "Clio Coder");
 		equal(bootstrap.workspaceInstanceId, running.workspaceInstanceId);
 		equal(bootstrap.localToken, running.token);
 		equal(bootstrap.mode, "browser");
@@ -625,6 +683,239 @@ Deno.test("an authenticated socket opens a real project and drives one contiguou
 	}
 });
 
+Deno.test("configuration inspection is cached but never blocks the live ACP control lane", async () => {
+	let markStarted: (() => void) | undefined;
+	const started = new Promise<void>((resolve) => {
+		markStarted = resolve;
+	});
+	let releaseInspection: (() => void) | undefined;
+	const released = new Promise<void>((resolve) => {
+		releaseInspection = resolve;
+	});
+	let inspectedRoot: string | null = null;
+	const configInspector: ClioConfigInspector = {
+		async inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			markStarted?.();
+			await released;
+			return configInspectionFixture();
+		},
+	};
+	const fixture = await startFixture({ scenario: "permission", configInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.configInspection, null);
+
+		await sendCommand(socket, "request-config", "config.inspect", { projectId });
+		await started;
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+
+		// The read process is still parked, yet turn and permission commands run
+		// to completion on the independent primary control lane.
+		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "Do not wait for the config map." });
+		const permission = (await collectThrough(socket, "turn.permission.requested")).at(-1);
+		ok(permission?.kind === "turn.permission.requested" && permission.turnId !== undefined);
+		await sendCommand(socket, "request-allow", "permission.resolve", {
+			projectId,
+			turnId: permission.turnId,
+			permissionId: permission.payload.permissionId,
+			decision: "allow-once",
+		});
+		const terminal = (await collectThrough(socket, "turn.terminal")).at(-1);
+		ok(terminal?.kind === "turn.terminal");
+		equal(terminal.payload.outcome, "completed");
+
+		releaseInspection?.();
+		const config = (await collectThrough(socket, "config.state")).at(-1);
+		ok(config?.kind === "config.state");
+		deepStrictEqual(config.payload.inspection, configInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { configInspection: WireConfigInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.configInspection, configInspectionFixture());
+	} finally {
+		releaseInspection?.();
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("resource catalog inspection uses the trusted root, broadcasts the typed snapshot, and caches it", async () => {
+	let inspectedRoot: string | null = null;
+	const catalogInspector: ClioCatalogInspector = {
+		inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			return Promise.resolve(catalogInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ catalogInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.catalogInspection, null);
+
+		await sendCommand(socket, "request-catalog", "catalog.inspect", { projectId });
+		const catalog = (await collectThrough(socket, "catalog.state")).at(-1);
+		ok(catalog?.kind === "catalog.state");
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+		deepStrictEqual(catalog.payload.inspection, catalogInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { catalogInspection: WireCatalogInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.catalogInspection, catalogInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("project usage inspection uses the trusted root, broadcasts the bounded snapshot, and caches it", async () => {
+	let inspectedRoot: string | null = null;
+	const usageInspector: ClioUsageInspector = {
+		inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			return Promise.resolve(usageInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ usageInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.usageInspection, null);
+
+		await sendCommand(socket, "request-usage", "usage.inspect", { projectId });
+		const usage = (await collectThrough(socket, "usage.state")).at(-1);
+		ok(usage?.kind === "usage.state");
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+		deepStrictEqual(usage.payload.inspection, usageInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { usageInspection: WireUsageInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.usageInspection, usageInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("routing inspection uses the trusted root, broadcasts the bounded snapshot, and caches it", async () => {
+	let inspectedRoot: string | null = null;
+	const routingInspector: ClioRoutingInspector = {
+		inspect(trustedRoot) {
+			inspectedRoot = trustedRoot;
+			return Promise.resolve(routingInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ routingInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		const projectId = opened.payload.workspace.project.id;
+		equal(opened.payload.workspace.routingInspection, null);
+
+		await sendCommand(socket, "request-routing", "routing.inspect", { projectId });
+		const routing = (await collectThrough(socket, "routing.state")).at(-1);
+		ok(routing?.kind === "routing.state");
+		equal(inspectedRoot, await Deno.realPath(fixture.projectRoot));
+		deepStrictEqual(routing.payload.inspection, routingInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			workspace: { routingInspection: WireRoutingInspection };
+		};
+		deepStrictEqual(bootstrap.workspace.routingInspection, routingInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("dispatch inspection is global, uses the configured home, and survives browser reload", async () => {
+	let inspectedCwd: string | null = null;
+	const dispatchInspector: ClioDispatchInspector = {
+		inspect(cwd) {
+			inspectedCwd = cwd;
+			return Promise.resolve(dispatchInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ dispatchInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-dispatch", "dispatch.inspect", {});
+		const dispatch = (await collectThrough(socket, "dispatch.state")).at(-1);
+		ok(dispatch?.kind === "dispatch.state");
+		equal(dispatch.projectId, undefined);
+		equal(inspectedCwd, fixture.homePath);
+		deepStrictEqual(dispatch.payload.inspection, dispatchInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			dispatchInspection: WireDispatchInspection;
+		};
+		deepStrictEqual(bootstrap.dispatchInspection, dispatchInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("recovery inspection uses home or the selected trusted root without exposing project context", async () => {
+	const calls: Array<{ cwd: string; projectContext: boolean }> = [];
+	const recoveryInspector: ClioRecoveryInspector = {
+		inspect(cwd, projectContext) {
+			calls.push({ cwd, projectContext });
+			return Promise.resolve({ ...recoveryInspectionFixture(), projectContext });
+		},
+	};
+	const fixture = await startFixture({ recoveryInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-recovery-home", "recovery.inspect", {});
+		const homeRecovery = (await collectThrough(socket, "recovery.state")).at(-1);
+		ok(homeRecovery?.kind === "recovery.state");
+		equal(homeRecovery.projectId, undefined);
+		deepStrictEqual(calls[0], { cwd: fixture.homePath, projectContext: false });
+		equal(homeRecovery.payload.inspection.projectContext, false);
+
+		await sendCommand(socket, "request-open", "project.open", { path: fixture.projectRoot });
+		const opened = (await collectThrough(socket, "project.opened")).at(-1);
+		ok(opened?.kind === "project.opened");
+		await sendCommand(socket, "request-recovery-project", "recovery.inspect", {});
+		const projectRecovery = (await collectThrough(socket, "recovery.state")).at(-1);
+		ok(projectRecovery?.kind === "recovery.state");
+		deepStrictEqual(calls[1], { cwd: await Deno.realPath(fixture.projectRoot), projectContext: true });
+		deepStrictEqual(projectRecovery.payload.inspection as WireRecoveryInspection, recoveryInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
 Deno.test("a guarded or missing folder is refused with a reason and nothing is opened", async () => {
 	const fixture = await startFixture();
 	let socket: RawWebSocket | undefined;
@@ -704,7 +995,7 @@ Deno.test("a second prompt during an active turn is refused without disturbing t
 		const conflictEvent = conflict.at(-1);
 		ok(conflictEvent?.kind === "command.error");
 		equal(conflictEvent.payload.code, "conflict");
-		equal(conflictEvent.payload.message, "Clio is still working on the previous prompt. Cancel it or wait.");
+		equal(conflictEvent.payload.message, "Clio Coder is still working on the previous prompt. Cancel it or wait.");
 		equal(conflictEvent.payload.requestId, "request-second");
 
 		await sendCommand(socket, "request-cancel", "turn.cancel", { projectId, turnId });
@@ -745,7 +1036,7 @@ Deno.test("the last socket closing during a turn stops it after the grace window
 			equal(workspace.activeTurn, null);
 			const approval = workspace.timeline.find((item) => item.kind === "approval");
 			ok(approval);
-			ok(approval.summary.includes("Clio was not told no"));
+			ok(approval.summary.includes("Clio Coder was not told no"));
 			const outcome = workspace.timeline.find((item) => item.kind === "outcome" || item.kind === "failure");
 			ok(outcome);
 			ok(outcome.detail === "client-disconnected" || outcome.summary.includes("window went away"));
@@ -907,7 +1198,7 @@ Deno.test("three prompts share one session and the third sees the first two", as
 	}
 });
 
-Deno.test("closing and reopening a session replays the branch Clio will extend", async () => {
+Deno.test("closing and reopening a session replays the branch Clio Coder will extend", async () => {
 	const fixture = await startFixture({ scenario: "resume" });
 	let socket: RawWebSocket | undefined;
 	try {
@@ -1241,7 +1532,7 @@ Deno.test("settings, targets, and autonomy round-trip over the socket and reach 
 		equal(stated.payload.snapshot.session?.autonomy, "read-only");
 		equal(stated.payload.snapshot.session?.autonomySource, "session");
 
-		// The M4 gate: what the GUI set is what Clio ran the next turn under.
+		// The M4 gate: what the GUI set is what Clio Coder ran the next turn under.
 		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "What autonomy is in force?" });
 		const turn = await collectThrough(socket, "turn.terminal");
 		const answer = turn.filter((event) => event.kind === "turn.text").map((event) => event.payload.text).join("");

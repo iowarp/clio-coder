@@ -76,11 +76,21 @@ function tool(
 	};
 }
 
-function terminal(turnId: string, outcome: "completed" | "canceled" | "failed"): TurnEventInput {
+function terminal(
+	turnId: string,
+	outcome: "completed" | "canceled" | "failed",
+	usage?: Readonly<{ input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>,
+): TurnEventInput {
 	return {
 		kind: "turn.terminal",
 		turnId,
-		payload: { outcome, code: `clio-${outcome}`, summary: `Turn ${outcome}.`, source: "reported-by-clio" },
+		payload: {
+			outcome,
+			code: `clio-${outcome}`,
+			summary: `Turn ${outcome}.`,
+			...(usage === undefined ? {} : { usage }),
+			source: "reported-by-clio",
+		},
 	};
 }
 
@@ -135,6 +145,25 @@ Deno.test("a live turn projects one card per entity with stable identifiers", ()
 	equal(state.activeTurn, null);
 	equal(state.ordinal, 5);
 	ok(state.timeline.every((item) => item.origin === "live"));
+});
+
+Deno.test("terminal usage survives the shared projection and restore path without being recomputed", () => {
+	const usage = { input: 1_024, output: 233, cacheRead: 800, cacheWrite: 17, reasoning: 91 };
+	const projected = fold([
+		{ event: started("turn-usage", "live", at(1)), now: at(1) },
+		{ event: terminal("turn-usage", "completed", usage), now: at(2) },
+	]);
+	const terminalItem = projected.timeline.at(-1);
+	equal(terminalItem?.kind, "outcome");
+	deepStrictEqual(terminalItem?.usage, usage);
+
+	const restored = restoreTurnProjection({
+		timeline: projected.timeline,
+		timelineTruncated: projected.timelineTruncated,
+		activeTurn: projected.activeTurn,
+		pendingPermission: projected.pendingPermission,
+	});
+	deepStrictEqual(restored.timeline.at(-1)?.usage, usage);
 });
 
 Deno.test("host and renderer projections of the same stream agree card for card", () => {
@@ -226,17 +255,17 @@ Deno.test("the active turn counts tools once and remembers the last title", () =
 		},
 	]);
 	equal(state.activeTurn?.toolCalls, 2);
-	// Clio's own title for the call, not the generic kind label, because during a
+	// Clio Coder's own title for the call, not the generic kind label, because during a
 	// silent run this is the only place the operator learns what is running.
 	equal(state.activeTurn?.lastToolTitle, "tool-2 in_progress");
 	equal(state.activeTurn?.repeatedShapes, 1);
 	const loop = state.timeline.find((item) => item.kind === "loop");
-	equal(loop?.title, "Clio blocked a repeated bash call");
+	equal(loop?.title, "Clio Coder blocked a repeated bash call");
 	ok(loop?.summary.includes("Repeated 3 times"));
 	equal(loop?.detail, undefined);
 });
 
-Deno.test("a pending approval clears on resolution and never claims Clio said no", () => {
+Deno.test("a pending approval clears on resolution and never claims Clio Coder said no", () => {
 	const base: readonly Stamped[] = [
 		{ event: started("turn-1", "live", at(1)), now: at(1) },
 		{ event: permissionRequested("turn-1", "permission-1"), now: at(10) },
@@ -268,7 +297,7 @@ Deno.test("a pending approval clears on resolution and never claims Clio said no
 		equal(card?.summary, resolutionSummary(decision));
 		equal(card?.title, "Write fixture note");
 		equal(card?.endedAt, at(20));
-		if (decision !== "allow-once" && decision !== "reject") ok(card?.summary.includes("Clio was not told no"));
+		if (decision !== "allow-once" && decision !== "reject") ok(card?.summary.includes("Clio Coder was not told no"));
 	}
 });
 
@@ -350,7 +379,7 @@ Deno.test("interleaved text and reasoning become separate cards in arrival order
 	);
 });
 
-Deno.test("the last tool title falls back to the kind label when Clio names nothing", () => {
+Deno.test("the last tool title falls back to the kind label when Clio Coder names nothing", () => {
 	const blank: TurnEventInput = {
 		kind: "turn.tool",
 		turnId: "turn-1",

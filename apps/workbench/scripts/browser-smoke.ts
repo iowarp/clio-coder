@@ -1,5 +1,5 @@
 /**
- * Browser smoke for Clio Workbench.
+ * Browser smoke for the Clio Coder GUI.
  *
  * The server runs in this process against the deterministic ACP child fixture,
  * so the browser drives a real conversation over the real client code path
@@ -13,7 +13,21 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioLauncher } from "../clio-host.ts";
+import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
+import type { ClioConfigInspector } from "../clio-config-inspector.ts";
+import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
+import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
+import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
+import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
 import { startWorkbenchServer } from "../main.ts";
+import {
+	catalogInspectionFixture,
+	configInspectionFixture,
+	dispatchInspectionFixture,
+	recoveryInspectionFixture,
+	routingInspectionFixture,
+	usageInspectionFixture,
+} from "../tests/fixtures.ts";
 
 interface SmokeOptions {
 	readonly chrome: string;
@@ -71,11 +85,27 @@ const running = await startWorkbenchServer({
 	stateDir: join(scratchRoot, "state"),
 	homePath,
 	clioLauncher: fixtureLauncher("permission"),
+	configInspector: {
+		inspect: () => Promise.resolve(configInspectionFixture()),
+	} satisfies ClioConfigInspector,
+	catalogInspector: {
+		inspect: () => Promise.resolve(catalogInspectionFixture()),
+	} satisfies ClioCatalogInspector,
+	usageInspector: {
+		inspect: () => Promise.resolve(usageInspectionFixture()),
+	} satisfies ClioUsageInspector,
+	routingInspector: {
+		inspect: () => Promise.resolve(routingInspectionFixture()),
+	} satisfies ClioRoutingInspector,
+	dispatchInspector: {
+		inspect: () => Promise.resolve(dispatchInspectionFixture()),
+	} satisfies ClioDispatchInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
 const browser = await chromium.launch({ executablePath: options.chrome, headless: true });
 const browserErrors: string[] = [];
+const requestFailures: string[] = [];
 
 try {
 	const context = await browser.newContext({
@@ -83,6 +113,12 @@ try {
 		colorScheme: "dark",
 		reducedMotion: "reduce",
 		deviceScaleFactor: 1,
+	});
+	// Request failures on any page are diagnostics, not verdicts: Chrome cancels
+	// in-flight requests with net::ERR_NETWORK_CHANGED whenever a WSL2 or VPN
+	// interface flaps, and the app is expected to recover from that (see below).
+	context.on("requestfailed", (request) => {
+		requestFailures.push(`${request.method()} ${request.url()} (${request.failure()?.errorText ?? "failed"})`);
 	});
 	const page = await context.newPage();
 	page.on("console", (message) => {
@@ -95,13 +131,42 @@ try {
 
 	const response = await page.goto(running.url, { waitUntil: "networkidle" });
 	equal(response?.status(), 200);
-	equal(await page.title(), "Clio Workbench");
+	equal(await page.title(), "Clio Coder");
 	await page.getByText("connected", { exact: true }).waitFor();
 	equal(await page.getByRole("main").count(), 1);
-	equal(await page.getByRole("complementary").count(), 1);
-	equal(await page.getByRole("textbox", { name: "Prompt for Clio" }).count(), 1);
+	equal(await page.getByRole("complementary").count(), 2);
+	equal(await page.getByRole("complementary", { name: "Run and evidence overview" }).count(), 1);
+	equal(await page.getByRole("textbox", { name: "Prompt for Clio Coder" }).count(), 1);
 	equal(await page.getByText("No project open", { exact: true }).count(), 1);
 	await page.screenshot({ path: new URL("initial.png", artifactDirectory).pathname });
+
+	// A launch whose first stylesheet and bootstrap requests the browser cancels
+	// (what net::ERR_NETWORK_CHANGED does on WSL2) must still come up styled and
+	// connected: the app reloads the failed stylesheet and retries the bootstrap.
+	const flappingPage = await context.newPage();
+	flappingPage.on("pageerror", (error) => browserErrors.push(`page: ${error.message}`));
+	let stylesheetCancelled = false;
+	let bootstrapCancelled = false;
+	await flappingPage.route("**/*.css", (route) => {
+		stylesheetCancelled = true;
+		return route.abort("failed");
+	}, { times: 1 });
+	await flappingPage.route("**/api/bootstrap", (route) => {
+		bootstrapCancelled = true;
+		return route.abort("failed");
+	}, { times: 1 });
+	await flappingPage.goto(running.url, { waitUntil: "networkidle" });
+	await flappingPage.getByText("connected", { exact: true }).waitFor();
+	ok(stylesheetCancelled && bootstrapCancelled);
+	deepEqual(
+		await flappingPage.evaluate(() => ({
+			stylesheetRules: [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')]
+				.map((link) => (link.sheet?.cssRules.length ?? 0) > 0),
+			statusBarDisplay: getComputedStyle(document.querySelector(".status-bar")!).display,
+		})),
+		{ stylesheetRules: [true], statusBarDisplay: "flex" },
+	);
+	await flappingPage.close();
 
 	// The directory browser lists folders only and refuses the guarded home root.
 	await page.getByRole("button", { name: "Browse folders" }).click();
@@ -110,10 +175,17 @@ try {
 	await browseDialog.getByText(/home directory cannot be opened/u).waitFor();
 	equal(await browseDialog.getByRole("button", { name: "Open this folder" }).isDisabled(), true);
 	await browseDialog.getByRole("button", { name: "code" }).click();
+	await page.waitForFunction(() =>
+		document.querySelector(".browse__path code")?.textContent?.endsWith("/code") === true
+	);
+	await browseDialog.getByRole("button", { name: "Up one folder" }).click();
+	await browseDialog.getByText(/home directory cannot be opened/u).waitFor();
+	await browseDialog.getByRole("button", { name: "code" }).click();
 	await browseDialog.getByRole("button", { name: "atlas-field-study" }).click();
 	await page.waitForFunction(() =>
 		document.querySelector(".browse__actions button:last-child")?.hasAttribute("disabled") === false
 	);
+	await page.screenshot({ path: new URL("browse-folder.png", artifactDirectory).pathname });
 	await browseDialog.getByRole("button", { name: "Open this folder" }).click();
 
 	await page.getByRole("heading", { level: 1, name: "atlas-field-study" }).waitFor();
@@ -122,7 +194,8 @@ try {
 	// A scoped file lifecycle keeps modal focus contained and restores it.
 	const scratchName = `browser-smoke-${crypto.randomUUID().slice(0, 8)}.tmp`;
 	const movedScratchName = scratchName.replace(".tmp", "-moved.tmp");
-	const fileToolbar = page.locator(".file-toolbar");
+	const filesSection = page.locator(".rail-section--files");
+	const fileToolbar = filesSection.locator(".file-toolbar");
 	const createFileButton = fileToolbar.getByRole("button", { name: "New file" });
 	await createFileButton.click();
 	let operationDialog = page.getByRole("dialog", { name: "Create empty file" });
@@ -134,6 +207,7 @@ try {
 	await createFileName.fill("   ");
 	equal(await createFileName.evaluate((input) => (input as HTMLInputElement).checkValidity()), false);
 	await createFileName.fill(scratchName);
+	await page.screenshot({ path: new URL("file-create.png", artifactDirectory).pathname });
 	await operationDialog.getByRole("button", { name: "Apply in project" }).click();
 	let scratchNode = page.locator(".file-node").filter({ hasText: scratchName });
 	await scratchNode.waitFor();
@@ -142,6 +216,7 @@ try {
 	await fileToolbar.getByRole("button", { name: "Rename" }).click();
 	operationDialog = page.getByRole("dialog", { name: "Rename or move" });
 	await operationDialog.getByLabel("Destination name").fill(movedScratchName);
+	await page.screenshot({ path: new URL("file-move.png", artifactDirectory).pathname });
 	await operationDialog.getByRole("button", { name: "Apply in project" }).click();
 	scratchNode = page.locator(".file-node").filter({ hasText: movedScratchName });
 	await scratchNode.waitFor();
@@ -152,8 +227,28 @@ try {
 	await operationDialog.getByRole("button", { name: "Inspect and prepare" }).click();
 	const deleteDialog = page.getByRole("dialog", { name: "Delete file" });
 	await deleteDialog.getByText(movedScratchName, { exact: true }).waitFor();
+	await page.screenshot({ path: new URL("file-delete.png", artifactDirectory).pathname });
 	await deleteDialog.getByRole("button", { name: "Delete exactly this item" }).click();
 	await scratchNode.waitFor({ state: "detached" });
+
+	const scratchFolderName = `browser-smoke-${crypto.randomUUID().slice(0, 8)}`;
+	await fileToolbar.getByRole("button", { name: "New folder" }).click();
+	operationDialog = page.getByRole("dialog", { name: "Create folder" });
+	await operationDialog.getByLabel("Name", { exact: true }).fill(scratchFolderName);
+	await page.screenshot({ path: new URL("folder-create.png", artifactDirectory).pathname });
+	await operationDialog.getByRole("button", { name: "Apply in project" }).click();
+	const scratchFolderNode = page.locator(".file-node").filter({ hasText: scratchFolderName });
+	await scratchFolderNode.waitFor();
+	await scratchFolderNode.click();
+	await fileToolbar.getByRole("button", { name: "Delete" }).click();
+	operationDialog = page.getByRole("dialog", { name: "Prepare confirmed delete" });
+	await operationDialog.getByRole("button", { name: "Inspect and prepare" }).click();
+	const deleteFolderDialog = page.getByRole("dialog", { name: "Delete empty folder" });
+	equal(await deleteFolderDialog.locator(".delete-confirmation__target code").innerText(), scratchFolderName);
+	await page.screenshot({ path: new URL("folder-delete.png", artifactDirectory).pathname });
+	await deleteFolderDialog.getByRole("button", { name: "Delete exactly this item" }).click();
+	await scratchFolderNode.waitFor({ state: "detached" });
+	await filesSection.getByRole("button", { name: "Refresh project tree" }).click();
 
 	const desktopRailGeometry = await page.locator("#project-rail").evaluate((rail) => ({
 		clientWidth: rail.clientWidth,
@@ -163,28 +258,294 @@ try {
 	ok(desktopRailGeometry.scrollWidth <= desktopRailGeometry.clientWidth);
 	equal(desktopRailGeometry.scrollLeft, 0);
 
+	// The first broad read-only harness surface is a real, bounded Clio Coder graph,
+	// not raw CLI JSON or a second configuration implementation in React.
+	await page.getByRole("button", { name: "Effective Clio Coder", exact: true }).click();
+	const effectiveMap = page.getByRole("region", { name: "Effective Clio Coder map" });
+	await effectiveMap.getByRole("heading", { name: "Why Clio Coder behaves this way" }).waitFor();
+	await effectiveMap.getByText("From source to behavior", { exact: true }).waitFor();
+	await effectiveMap.getByText("CLIO-CODER.md", { exact: true }).first().waitFor();
+	await effectiveMap.getByText("qwen3.8-27b", { exact: true }).waitFor();
+	await effectiveMap.getByText("Project sources use project-relative paths", { exact: false }).waitFor();
+	equal(await effectiveMap.getByText("/home/", { exact: false }).count(), 0);
+	const configMapAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const configMapBlockingViolations = configMapAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		configMapBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("effective-clio-coder.png", artifactDirectory).pathname, fullPage: true });
+	await effectiveMap.getByRole("button", { name: "Back to conversation" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// The capability atlas is projected from four bounded JSON interfaces. Its
+	// fifth tab names the missing typed interface instead of scraping CLI text.
+	await page.getByRole("button", { name: "Catalog", exact: true }).click();
+	const catalog = page.locator(".catalog");
+	await catalog.getByRole("heading", { name: "Agents, skills, extensions & resource library" }).waitFor();
+	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
+	await catalog.getByText("24–64", { exact: true }).waitFor();
+	const catalogSearch = catalog.getByRole("searchbox", { name: "Filter this collection" });
+	await catalogSearch.fill("no-such-capability");
+	await catalog.getByRole("heading", { name: "No matching resources" }).waitFor();
+	await catalog.getByRole("button", { name: "Clear catalog filter" }).click();
+	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
+	await catalogSearch.fill("citation-ready");
+	await catalog.getByRole("heading", { name: "Researcher" }).waitFor();
+	await catalogSearch.fill("");
+	await page.screenshot({ path: new URL("catalog.png", artifactDirectory).pathname, fullPage: true });
+	const agentsTab = catalog.getByRole("tab", { name: /^Agents/u });
+	await agentsTab.focus();
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", { name: "frontend-design" }).waitFor();
+	equal(await catalog.getByRole("tab", { name: /^Skills/u }).getAttribute("aria-selected"), "true");
+	await page.screenshot({ path: new URL("catalog-skills.png", artifactDirectory).pathname, fullPage: true });
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", { name: "experiment-protocol" }).waitFor();
+	equal(await catalog.getByRole("tab", { name: /^Library/u }).getAttribute("aria-selected"), "true");
+	await page.screenshot({ path: new URL("catalog-library.png", artifactDirectory).pathname, fullPage: true });
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", { name: "Clio Coder Lab Pack" }).waitFor();
+	await catalog.getByText("Project-scoped package", { exact: true }).waitFor();
+	await catalog.getByText("Native roots and lifecycle mutations remain host-side", { exact: true }).waitFor();
+	equal(await catalog.getByRole("tab", { name: /^Extensions/u }).getAttribute("aria-selected"), "true");
+	await page.screenshot({ path: new URL("catalog-extensions.png", artifactDirectory).pathname, fullPage: true });
+	await page.keyboard.press("ArrowRight");
+	await catalog.getByRole("heading", {
+		name: "Verifier discovery is real, but it is not machine-readable yet",
+	}).waitFor();
+	await catalog.getByText("clio-coder verifiers discover", { exact: false }).waitFor();
+	equal(await catalog.getByText("/home/", { exact: false }).count(), 0);
+	const catalogAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const catalogBlockingViolations = catalogAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		catalogBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("catalog-verifiers.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactCatalogGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+	}));
+	ok(compactCatalogGeometry.documentWidth <= compactCatalogGeometry.viewportWidth);
+	const compactCatalogTabs = await catalog.locator(".catalog__tabs").evaluate((tabs) => ({
+		overflowX: getComputedStyle(tabs).overflowX,
+		scrollWidth: tabs.scrollWidth,
+		clientWidth: tabs.clientWidth,
+	}));
+	ok(["auto", "scroll"].includes(compactCatalogTabs.overflowX));
+	ok(compactCatalogTabs.scrollWidth >= compactCatalogTabs.clientWidth);
+	await page.screenshot({ path: new URL("catalog-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await catalog.getByRole("button", { name: "Back to conversation" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// Historical usage is a project-filtered, bounded snapshot. Global audit,
+	// evidence, memory, raw prompts, ids, paths, and opportunity bodies never
+	// enter the browser frame.
+	await page.getByRole("button", { name: "Usage", exact: true }).click();
+	const usageRecord = page.getByRole("region", { name: "Thirty-day project usage record" });
+	await usageRecord.getByRole("heading", { name: "Thirty days of work in this project" }).waitFor();
+	await usageRecord.getByText("13,922,000", { exact: true }).first().waitFor();
+	await usageRecord.getByText("$4.125", { exact: true }).first().waitFor();
+	await usageRecord.getByText("qwen3.8-27b", { exact: true }).waitFor();
+	await usageRecord.getByText("frontend-design", { exact: true }).waitFor();
+	await usageRecord.getByText("researcher", { exact: true }).waitFor();
+	await usageRecord.getByText("Typed outcomes, not command shapes", { exact: true }).waitFor();
+	equal(await usageRecord.getByText("/home/", { exact: false }).count(), 0);
+	equal(await usageRecord.getByText("session-alpha", { exact: false }).count(), 0);
+	equal(await usageRecord.getByText("rawSuggestions", { exact: false }).count(), 0);
+	const usageAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const usageBlockingViolations = usageAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		usageBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("usage.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactUsageGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+		regionScrollWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.scrollWidth ?? 0,
+		regionClientWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.clientWidth ?? 0,
+	}));
+	ok(compactUsageGeometry.documentWidth <= compactUsageGeometry.viewportWidth);
+	ok(compactUsageGeometry.regionScrollWidth <= compactUsageGeometry.regionClientWidth + 1);
+	await page.screenshot({ path: new URL("usage-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await usageRecord.getByRole("button", { name: "Back to conversation" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// Fleet status is deliberately a separate installation-wide snapshot. The
+	// fixed adapter reduces durable rows to heartbeat counts and totals before
+	// anything reaches the browser.
+	await page.getByRole("button", { name: "Dispatch", exact: true }).click();
+	const dispatchRecord = page.getByRole("region", { name: "Installation-wide dispatch snapshot" });
+	await dispatchRecord.getByRole("heading", { name: "Dispatch across this Clio Coder installation" }).waitFor();
+	await dispatchRecord.getByText("15,918,587", { exact: true }).waitFor();
+	await dispatchRecord.getByText("Alive", { exact: true }).waitFor();
+	await dispatchRecord.getByText("5", { exact: true }).first().waitFor();
+	await dispatchRecord.getByText("Never a GUI estimate", { exact: true }).waitFor();
+	for (const forbidden of ["run-secret", "agentId", "requestedByPid", "ssh-private-node"]) {
+		equal(await dispatchRecord.getByText(forbidden, { exact: false }).count(), 0);
+	}
+	const dispatchAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const dispatchBlockingViolations = dispatchAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		dispatchBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("dispatch.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactDispatchGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+		regionScrollWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.scrollWidth ?? 0,
+		regionClientWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.clientWidth ?? 0,
+	}));
+	ok(compactDispatchGeometry.documentWidth <= compactDispatchGeometry.viewportWidth);
+	ok(compactDispatchGeometry.regionScrollWidth <= compactDispatchGeometry.regionClientWidth + 1);
+	await page.screenshot({ path: new URL("dispatch-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await dispatchRecord.getByRole("button", { name: "Back to conversation" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// Desktop rails collapse independently, reclaim their full grid tracks, and
+	// return focus to the control that can reverse the operation.
+	const conversationWidth = () => page.locator(".conversation").evaluate((element) => element.clientWidth);
+	const initialConversationWidth = await conversationWidth();
+	await page.getByRole("button", { name: "Collapse projects, files, and sessions" }).click();
+	await page.locator("#project-rail").waitFor({ state: "hidden" });
+	const showProjects = page.getByRole("button", { name: "Show projects, files, and sessions" });
+	await showProjects.waitFor();
+	equal(await showProjects.evaluate((element) => element === document.activeElement), true);
+	ok(await conversationWidth() > initialConversationWidth + 200);
+	await showProjects.click();
+	await page.locator("#project-rail").waitFor({ state: "visible" });
+	equal(
+		await page.getByRole("button", { name: "Collapse projects, files, and sessions" }).evaluate((element) =>
+			element === document.activeElement
+		),
+		true,
+	);
+
+	await page.getByRole("button", { name: "Collapse run and evidence overview" }).click();
+	await page.locator("#evidence-rail").waitFor({ state: "hidden" });
+	const showEvidence = page.getByRole("button", { name: "Show run and evidence overview" });
+	await showEvidence.waitFor();
+	equal(await showEvidence.evaluate((element) => element === document.activeElement), true);
+	ok(await conversationWidth() > initialConversationWidth + 240);
+	await showEvidence.click();
+	await page.locator("#evidence-rail").waitFor({ state: "visible" });
+	equal(
+		await page.getByRole("button", { name: "Collapse run and evidence overview" }).evaluate((element) =>
+			element === document.activeElement
+		),
+		true,
+	);
+	equal(await conversationWidth(), initialConversationWidth);
+
 	// One real conversation: prompt, mediated approval, completed turn.
-	const composer = page.getByRole("textbox", { name: "Prompt for Clio" });
+	const composer = page.getByRole("textbox", { name: "Prompt for Clio Coder" });
 	await composer.fill("Write the fixture note.");
 	await page.getByRole("button", { name: "Send" }).click();
 	await page.locator("#permission-title").waitFor();
-	equal(await page.title(), "● Approval needed — Clio Workbench");
-	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
+	equal(await page.title(), "● Approval needed — Clio Coder");
+	// The conversation folds the tool and its approval into one activity group
+	// that opens on its own while something needs attention.
+	await page.locator(".activity--warning[open] .activity-row--approval.is-waiting").waitFor();
+	await page.locator(".live-chip--waiting").getByText("Waiting for your approval").waitFor();
 	await page.screenshot({ path: new URL("permission.png", artifactDirectory).pathname });
-	// Both the banner and the anchored card offer the answer, so name which one.
+	const inProgressDraft = Array.from({ length: 24 }, (_, index) => `Draft line ${index + 1}`).join("\n");
+	await composer.fill(inProgressDraft);
+	const draftScrollTop = await composer.evaluate((element) => {
+		const textarea = element as HTMLTextAreaElement;
+		textarea.scrollTop = textarea.scrollHeight;
+		return textarea.scrollTop;
+	});
+	ok(draftScrollTop > 0);
+	// Both the banner and the anchored activity row offer the answer, so name which one.
 	equal(await page.getByRole("button", { name: "Allow once" }).count(), 2);
-	await page.locator(".approval-card").getByRole("button", { name: "Allow once" }).click();
-	const completedOutcome = page.getByRole("heading", { name: "Turn complete", exact: true });
+	await page.locator(".activity-row__approval").getByRole("button", { name: "Allow once" }).click();
+	const completedOutcome = page.locator(".turn-outcome__label", { hasText: "Turn complete" });
 	await completedOutcome.waitFor();
-	equal(await page.title(), "Clio Workbench");
-	await completedOutcome.scrollIntoViewIfNeeded();
+	equal(await page.title(), "Clio Coder");
+	// The outcome line carries the exact reported token fields; the Observatory compares them.
+	await page.locator(".turn-outcome__fact", { hasText: "tokens 5 in · 8 out" }).waitFor();
+	await page.locator(".token-ledger__row--input").getByText("5", { exact: true }).waitFor();
+	await page.getByText("the GUI does not infer a price.", { exact: false }).waitFor();
+	await page.locator(".live-chip--done").waitFor();
+	equal(await composer.inputValue(), inProgressDraft);
+	ok(await composer.evaluate((element) => (element as HTMLTextAreaElement).scrollTop) > 0);
+	// The narrative is Markdown, and the tools it used stay folded behind one summary.
+	await page.locator(".markdown.is-complete").first().waitFor();
+	equal(await page.locator(".activity").count(), 1);
 	await page.screenshot({ path: new URL("complete.png", artifactDirectory).pathname });
+
+	// The Session Timeline keeps the card-by-card record, and switching views
+	// keeps the draft and the scroll positions of both surfaces.
+	const conversationScrollTop = await page.locator(".conversation__scroll").evaluate((region) => {
+		region.scrollTop = 0;
+		return region.scrollTop;
+	});
+	await page.getByRole("button", { name: "Timeline", exact: true }).click();
+	await page.locator(".evidence-timeline").waitFor();
+	await page.getByText("Observed on ACP", { exact: true }).first().waitFor();
+	await page.locator(".turn-usage").getByText("Input", { exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Turn complete", exact: true }).waitFor();
+	equal(await page.locator(".timeline-card").count(), 6);
+	equal(await composer.inputValue(), inProgressDraft);
+	await page.screenshot({ path: new URL("timeline.png", artifactDirectory).pathname });
+	await page.locator(".conversation__scroll").evaluate((region) => {
+		region.scrollTop = 120;
+	});
+	await page.getByRole("button", { name: "Conversation", exact: true }).click();
+	await page.locator(".chat").waitFor();
+	equal(await page.locator(".conversation__scroll").evaluate((region) => region.scrollTop), conversationScrollTop);
+	equal(await composer.inputValue(), inProgressDraft);
+	await page.getByRole("button", { name: "Timeline", exact: true }).click();
+	equal(await page.locator(".conversation__scroll").evaluate((region) => region.scrollTop), 120);
+	await page.getByRole("button", { name: "Conversation", exact: true }).click();
 
 	// A reload restores the conversation from host-held state.
 	await page.reload({ waitUntil: "networkidle" });
 	await page.getByText("connected", { exact: true }).waitFor();
 	await page.getByRole("heading", { level: 1, name: "atlas-field-study" }).waitFor();
-	await page.getByRole("heading", { name: "Turn complete", exact: true }).waitFor();
+	await page.locator(".turn-outcome__label", { hasText: "Turn complete" }).waitFor();
+	equal(await page.locator(".turn-outcome__fact", { hasText: "tokens 5 in · 8 out" }).count(), 1);
 	equal(await page.locator("#permission-title").count(), 0);
 
 	// Stopping a parked turn is an operator cancellation, not a denial.
@@ -192,8 +553,8 @@ try {
 	await page.getByRole("button", { name: "Send" }).click();
 	await page.locator("#permission-title").waitFor();
 	await page.getByRole("button", { name: "Stop" }).click();
-	await page.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor();
-	await page.getByText(/Clio was not told no/u).first().waitFor();
+	await page.locator(".turn-outcome__label", { hasText: "Turn stopped" }).waitFor();
+	await page.getByText(/Clio Coder was not told no/u).first().waitFor();
 
 	const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
 	const blockingViolations = accessibility.violations.filter((violation) =>
@@ -263,6 +624,26 @@ try {
 	equal(await openProjects.evaluate((element) => element === document.activeElement), true);
 	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), false);
 
+	// The evidence overview uses the same contained, reversible drawer behavior.
+	const openEvidence = page.getByRole("button", { name: "Open run and evidence overview" });
+	await openEvidence.click();
+	await page.locator("#evidence-rail.is-open").waitFor();
+	await page.waitForFunction(() =>
+		document.activeElement?.textContent?.includes("Close run and evidence overview") === true
+	);
+	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), true);
+	equal(await page.locator("#project-rail").evaluate((element) => element.hasAttribute("inert")), true);
+	equal(await page.locator(".status-bar").evaluate((element) => element.hasAttribute("inert")), true);
+	for (let index = 0; index < 8; index += 1) {
+		await page.keyboard.press("Tab");
+		equal(await page.locator("#evidence-rail").evaluate((rail) => rail.contains(document.activeElement)), true);
+	}
+	await page.screenshot({ path: new URL("compact-evidence-drawer.png", artifactDirectory).pathname });
+	await page.keyboard.press("Escape");
+	await page.waitForFunction(() => document.querySelector("#evidence-rail")?.hasAttribute("inert") === true);
+	equal(await openEvidence.evaluate((element) => element === document.activeElement), true);
+	equal(await page.locator(".conversation").evaluate((element) => element.hasAttribute("inert")), false);
+
 	await page.emulateMedia({ forcedColors: "active" });
 	await openProjects.focus();
 	const forcedColorsFocus = await openProjects.evaluate((element) => {
@@ -326,14 +707,21 @@ try {
 		const renamedRow = resumePage.locator(".session-row").filter({ hasText: "Renamed in the browser" });
 		await renamedRow.waitFor();
 
-		// The delete confirmation is Workbench's own, and cancelling it sends nothing.
+		// The delete confirmation is the GUI's own, and cancelling it sends nothing.
 		await renamedRow.getByRole("button", { name: "Delete" }).click();
 		const deleteSessionDialog = resumePage.getByRole("dialog", { name: "Delete this session" });
-		await deleteSessionDialog.getByText(/Workbench cannot bring them back/u).waitFor();
+		await deleteSessionDialog.getByText(/Neither the desktop app nor Clio Coder can bring them back/u).waitFor();
+		await resumePage.screenshot({ path: new URL("session-delete.png", artifactDirectory).pathname });
 		await deleteSessionDialog.getByRole("button", { name: "Keep session" }).click();
 		await renamedRow.waitFor();
 
 		await renamedRow.getByRole("button", { name: "Resume" }).click();
+		// The conversation shows the replayed turns as earlier records first.
+		await resumePage.locator(".chat-turn.is-replay").first().waitFor();
+		equal(await resumePage.locator(".chat-turn.is-replay").count(), 2);
+		equal(await resumePage.locator(".chat-request__replay").count(), 2);
+		equal(await resumePage.locator(".chat-turn time").count(), 0, "replay renders without an invented time");
+		await resumePage.getByRole("button", { name: "Timeline", exact: true }).click();
 		await resumePage.getByRole("heading", { name: "Earlier request", exact: true }).first().waitFor();
 		const replayCards = resumePage.locator(".timeline-card--replay");
 		equal(await replayCards.count(), 6);
@@ -344,7 +732,7 @@ try {
 		equal(await resumePage.locator(".timeline-card--replay.is-complete").count(), 1);
 		deepEqual(
 			await replayCards.locator(".timeline-card__source").allInnerTexts(),
-			Array.from({ length: 6 }, () => "Replayed from Clio"),
+			Array.from({ length: 6 }, () => "Replayed from Clio Coder"),
 		);
 
 		await resumePage.emulateMedia({ forcedColors: "active" });
@@ -375,13 +763,16 @@ try {
 
 		// A live prompt continues the replayed branch rather than restarting it.
 		await resumePage.screenshot({ path: new URL("resumed-session.png", artifactDirectory).pathname });
-		await resumePage.getByRole("textbox", { name: "Prompt for Clio" }).fill("Continue the branch.");
+		await resumePage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("Continue the branch.");
 		await resumePage.getByRole("button", { name: "Send" }).click();
 		// The live turn is identified by being the one card that is not marked as history.
 		await resumePage.waitForFunction(() =>
 			document.querySelectorAll(".timeline-card:not(.timeline-card--replay)").length >= 3
 		);
 		ok(await resumePage.locator(".timeline-card--replay").count() >= 6);
+		await resumePage.getByRole("button", { name: "Conversation", exact: true }).click();
+		await resumePage.locator(".chat-turn.is-live, .chat-turn.is-settled:not(.is-replay)").first().waitFor();
+		equal(await resumePage.locator(".chat-turn.is-replay").count(), 2);
 		await resumePage.close();
 	} finally {
 		await resumeServer.close();
@@ -430,7 +821,7 @@ try {
 
 		const missingRow = recoveryPage.locator(".project-card-row.is-missing");
 		await missingRow.waitFor();
-		await missingRow.getByText(/Workbench can no longer open this folder\./u).waitFor();
+		await missingRow.getByText(/The GUI can no longer open this folder\./u).waitFor();
 		await missingRow.getByText(/Removing it from this list changes nothing on disk\./u).waitFor();
 		equal(await missingRow.locator(".project-card").isDisabled(), true);
 		equal(await recoveryPage.locator(".project-card-row.is-missing").count(), 1);
@@ -480,6 +871,12 @@ try {
 		stateDir: join(settingsScratch, "state"),
 		homePath: settingsHome,
 		clioLauncher: fixtureLauncher("settings"),
+		routingInspector: {
+			inspect: () => Promise.resolve(routingInspectionFixture()),
+		} satisfies ClioRoutingInspector,
+		recoveryInspector: {
+			inspect: (_cwd, projectContext) => Promise.resolve({ ...recoveryInspectionFixture(), projectContext }),
+		} satisfies ClioRecoveryInspector,
 		acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 	});
 	let settingsBlockingViolations: Array<{ id: string; impact: string | null | undefined; nodes: unknown[] }> = [];
@@ -497,21 +894,120 @@ try {
 
 		// A probe is the only thing that may put a health verdict on screen.
 		await settingsPage.getByRole("button", { name: "Settings", exact: true }).click();
-		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio settings" });
+		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio Coder settings" });
 		await settingsDialog.waitFor();
+		await settingsPage.screenshot({ path: new URL("settings-options.png", artifactDirectory).pathname });
+		await settingsDialog.getByRole("button", { name: "Run diagnostics", exact: true }).click();
+		const recoveryRecord = settingsDialog.getByLabel("Clio Coder diagnostic summary");
+		await recoveryRecord.getByText("ATTENTION REQUIRED", { exact: true }).waitFor();
+		await recoveryRecord.getByText("2 reported failures", { exact: true }).waitFor();
+		await recoveryRecord.getByText("Targets & models", { exact: true }).waitFor();
+		await recoveryRecord.getByText("0/2 passed · 1 warn · 1 fail", { exact: true }).waitFor();
+		for (const forbidden of ["/home/", "http://", "private-lab", "ssh-private", "model-secret"]) {
+			equal(await recoveryRecord.getByText(forbidden, { exact: false }).count(), 0);
+		}
+		await settingsPage.screenshot({ path: new URL("settings-recovery.png", artifactDirectory).pathname });
+		await settingsDialog.locator(".recovery-boundary").scrollIntoViewIfNeeded();
+
+		const targetSetting = settingsDialog.getByLabel("Set orchestrator.target");
+		const modelSetting = settingsDialog.getByLabel("Set orchestrator.model");
+		const thinkingSetting = settingsDialog.getByLabel("Set orchestrator.thinkingLevel");
+		const autonomySetting = settingsDialog.getByLabel("Set autonomy");
+		deepEqual(await targetSetting.locator("option").allTextContents(), ["unset", "lmstudio", "offline-lab"]);
+		deepEqual(await modelSetting.locator("option").allTextContents(), [
+			"unset",
+			"qwen3.8-27b",
+			"qwen3.8-4b",
+		]);
+		deepEqual(await thinkingSetting.locator("option").allTextContents(), [
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+			"max",
+		]);
+		deepEqual(await autonomySetting.locator("option").allTextContents(), [
+			"read-only",
+			"suggest",
+			"auto-edit",
+			"full-auto",
+		]);
+		await targetSetting.selectOption("offline-lab");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.target"]')?.value === "offline-lab"
+		);
+		await settingsPage.waitForFunction(() =>
+			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set orchestrator.model"] option')].some(
+				(option) => option.value === "stub-tiny",
+			)
+		);
+		deepEqual(await modelSetting.locator("option").allTextContents(), ["unset", "stub-tiny"]);
+		await targetSetting.selectOption("lmstudio");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.target"]')?.value === "lmstudio"
+		);
+		await settingsPage.waitForFunction(() =>
+			[...document.querySelectorAll<HTMLOptionElement>('[aria-label="Set orchestrator.model"] option')].some(
+				(option) => option.value === "qwen3.8-27b",
+			)
+		);
+		deepEqual(await modelSetting.locator("option").allTextContents(), ["unset", "qwen3.8-27b", "qwen3.8-4b"]);
+		await thinkingSetting.selectOption("high");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.thinkingLevel"]')?.value === "high"
+		);
+		await autonomySetting.selectOption("suggest");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set autonomy"]')?.value === "suggest"
+		);
+		await autonomySetting.selectOption("auto-edit");
+		await settingsPage.waitForFunction(() =>
+			document.querySelector<HTMLSelectElement>('[aria-label="Set autonomy"]')?.value === "auto-edit"
+		);
+
 		const offlineRow = settingsDialog.locator(".target-row").filter({ hasText: "offline-lab" });
 		await offlineRow.getByText("not probed").waitFor();
 		await offlineRow.getByRole("button", { name: "Probe offline-lab" }).click();
 		await offlineRow.getByText("unhealthy").waitFor();
 		await offlineRow.getByText(/not-configured/u).waitFor();
-		// The target nobody probed keeps saying so.
-		await settingsDialog.locator(".target-row").filter({ hasText: "lmstudio" }).getByText("not probed").waitFor();
+		const onlineRow = settingsDialog.locator(".target-row").filter({ hasText: "lmstudio" });
+		await onlineRow.getByText("not probed").waitFor();
+		await onlineRow.getByRole("button", { name: "Probe lmstudio" }).click();
+		await onlineRow.getByText("healthy").waitFor();
+		await onlineRow.getByText(/12 ms/u).waitFor();
 
-		// A settings patch round-trips through Clio and never through a local file.
-		await settingsDialog.getByLabel("Set orchestrator.model").selectOption("qwen3.8-4b");
+		// A settings patch round-trips through Clio Coder and never through a local file.
+		await modelSetting.selectOption("qwen3.8-4b");
 		await settingsPage.waitForFunction(() =>
 			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.model"]')?.value === "qwen3.8-4b"
 		);
+		await offlineRow.scrollIntoViewIfNeeded();
+		await settingsPage.screenshot({ path: new URL("settings-targets.png", artifactDirectory).pathname });
+
+		// The deeper routing inventory uses Clio Coder's offline catalog and effective
+		// worker-profile listings; opening it never probes an endpoint.
+		await settingsDialog.getByRole("button", { name: "Inspect models and routes" }).click();
+		const routingInventory = settingsDialog.locator(".settings__routing");
+		await routingInventory.getByRole("heading", { name: "Offline model capabilities" }).waitFor();
+		await routingInventory.getByText("262,144", { exact: true }).waitFor();
+		await routingInventory.getByRole("region", { name: "Worker profiles" })
+			.getByText("deep-research", { exact: true }).waitFor();
+		await routingInventory.getByText("Missing profile", { exact: true }).waitFor();
+		const routingModelList = routingInventory.locator(".routing-model-list");
+		await routingInventory.getByRole("button", { name: "lmstudio", exact: true }).click();
+		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor();
+		const routingSearch = routingInventory.getByRole("searchbox", { name: "Filter models" });
+		await routingSearch.fill("4b");
+		await routingModelList.getByText("qwen3.8-4b", { exact: true }).waitFor();
+		// The filter applies through a deferred value, so wait for the row to leave.
+		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor({ state: "detached" });
+		await routingSearch.fill("");
+		await routingModelList.getByText("qwen3.8-27b", { exact: true }).waitFor();
+		equal(await routingInventory.getByText("/home/", { exact: false }).count(), 0);
+		equal(await routingInventory.getByText("https://", { exact: false }).count(), 0);
+		await settingsPage.screenshot({ path: new URL("settings-routing.png", artifactDirectory).pathname });
 
 		const settingsAccessibility = await new AxeBuilder({ page: settingsPage })
 			.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -524,7 +1020,6 @@ try {
 				nodes: violation.nodes.map((node) => node.target),
 			}));
 		deepEqual(settingsBlockingViolations, []);
-		await settingsPage.screenshot({ path: new URL("settings-targets.png", artifactDirectory).pathname });
 		await settingsDialog.getByRole("button", { name: "Close" }).click();
 
 		// Binding a session first, because autonomy is a per-session override.
@@ -570,9 +1065,9 @@ try {
 		ok(compactStatus.documentWidth <= compactStatus.viewport);
 		await settingsPage.setViewportSize({ width: 1600, height: 1100 });
 
-		await settingsPage.getByRole("textbox", { name: "Prompt for Clio" }).fill("What autonomy is in force?");
+		await settingsPage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("What autonomy is in force?");
 		await settingsPage.getByRole("button", { name: "Send" }).click();
-		// The gate: Clio ran the next turn under the level the GUI set.
+		// The gate: Clio Coder ran the next turn under the level the GUI set.
 		await settingsPage.getByText("This session has seen 1 prompts at autonomy read-only.").waitFor();
 		await settingsPage.close();
 	} finally {
@@ -582,7 +1077,7 @@ try {
 
 	// A fifth host replays the recorded seventeen-bash run: the approval an
 	// operator missed, the silence between tool calls, and the expiry that must
-	// never reach Clio as a rejection.
+	// never reach Clio Coder as a rejection.
 	const loopScratch = await Deno.makeTempDir({ prefix: "workbench-browser-smoke-loop-" });
 	const loopHome = join(loopScratch, "home");
 	const loopProject = join(loopHome, "code", "atlas-audit");
@@ -612,12 +1107,12 @@ try {
 		await loopPage.getByRole("button", { name: "Open", exact: true }).click();
 		await loopPage.getByRole("heading", { level: 1, name: "atlas-audit" }).waitFor();
 
-		await loopPage.getByRole("textbox", { name: "Prompt for Clio" }).fill("Audit the convergence study.");
+		await loopPage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("Audit the convergence study.");
 		await loopPage.getByRole("button", { name: "Send" }).click();
 
 		const banner = loopPage.locator(".approval-banner");
 		await banner.waitFor();
-		equal(await loopPage.title(), "● Approval needed — Clio Workbench");
+		equal(await loopPage.title(), "● Approval needed — Clio Coder");
 
 		// Sixteen answered with the keyboard alone, which is the documented chord.
 		// Progress is counted from settled approval cards rather than from the
@@ -628,13 +1123,13 @@ try {
 			ok(title.startsWith("bash: "), `approval ${call + 1} was titled ${title}`);
 			await loopPage.keyboard.press("Alt+a");
 			await loopPage.waitForFunction(
-				(settled) => document.querySelectorAll(".timeline-card--approval.is-complete").length >= settled,
+				(settled) => document.querySelectorAll(".activity-row--approval.is-complete").length >= settled,
 				call + 1,
 				{ timeout: 10_000 },
 			);
 		}
 		// Every one of those was answered by the keyboard, never by a click.
-		equal(await loopPage.locator(".timeline-card--approval.is-complete").count(), 16);
+		equal(await loopPage.locator(".activity-row--approval.is-complete").count(), 16);
 
 		// Gate: the card is impossible to miss in the state the operator was in.
 		// Scrolled back to the top of a long timeline and with the window blurred.
@@ -648,7 +1143,7 @@ try {
 		await loopPage.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 		const discoverability = await loopPage.evaluate(() => {
 			const bannerElement = document.querySelector(".approval-banner");
-			const inlineCard = document.querySelector(".approval-card");
+			const inlineCard = document.querySelector(".activity-row__approval");
 			const viewportHeight = globalThis.innerHeight;
 			const bannerRect = bannerElement?.getBoundingClientRect();
 			const inlineRect = inlineCard?.getBoundingClientRect();
@@ -664,7 +1159,7 @@ try {
 		equal(discoverability.inlineVisible, false, "the anchored card must be scrolled away for this to prove anything");
 		// Prominent, never focus-trapping: the operator may keep working.
 		equal(discoverability.focusedInsideBanner, false);
-		equal(await loopPage.title(), "● Approval needed — Clio Workbench");
+		equal(await loopPage.title(), "● Approval needed — Clio Coder");
 		await loopPage.screenshot({ path: new URL("approval-banner.png", artifactDirectory).pathname });
 
 		// Gate: with no model prose at all, the operator can still tell what is
@@ -685,9 +1180,15 @@ try {
 			firstElapsed,
 			{ timeout: 5_000 },
 		);
-		equal(await loopPage.locator(".timeline-card--narrative").count(), 0, "the fixture speaks no prose");
-		ok(await loopPage.locator(".timeline-card--loop").count() > 0);
-		await loopPage.locator(".timeline-card--loop").first().getByText(/Reported by Clio/u).waitFor();
+		equal(await loopPage.locator(".markdown").count(), 0, "the fixture speaks no prose");
+		ok(await loopPage.locator(".activity-row--loop").count() > 0);
+		await loopPage.locator(".activity-row--loop").first().getByText(/Reported by Clio Coder/u).waitFor();
+		// The same finding is a full card in the Session Timeline.
+		await loopPage.getByRole("button", { name: "Timeline", exact: true }).click();
+		await loopPage.locator(".timeline-card--loop").first().getByText(/Reported by Clio Coder/u).waitFor();
+		equal(await loopPage.locator(".timeline-card--approval.is-complete").count(), 16);
+		await loopPage.getByRole("button", { name: "Conversation", exact: true }).click();
+		await loopPage.locator(".activity-row--loop").first().waitFor();
 
 		// The escalated treatment arrives on its own, without another wire event.
 		await loopPage.locator(".approval-banner--escalated").waitFor({ timeout: 5_000 });
@@ -741,21 +1242,21 @@ try {
 		await expiryPage.getByRole("button", { name: "Open", exact: true }).click();
 		await expiryPage.getByRole("heading", { level: 1, name: "unattended" }).waitFor();
 
-		await expiryPage.getByRole("textbox", { name: "Prompt for Clio" }).fill("Audit while nobody watches.");
+		await expiryPage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("Audit while nobody watches.");
 		await expiryPage.getByRole("button", { name: "Send" }).click();
 		await expiryPage.locator(".approval-banner").waitFor();
 		// Nobody answers. The card must park the turn, not deny the tool.
-		await expiryPage.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor({ timeout: 15_000 });
+		await expiryPage.locator(".turn-outcome__label", { hasText: "Turn stopped" }).waitFor({ timeout: 15_000 });
 		const stoppedSentence =
-			/An approval waited unanswered for the whole budget, so Workbench stopped the turn\. Clio was not told no; send a new prompt to continue\./u;
-		await expiryPage.locator(".evidence-timeline").getByText(stoppedSentence).waitFor();
+			/An approval waited unanswered for the whole budget, so the GUI stopped the turn\. Clio Coder was not told no; send a new prompt to continue\./u;
+		await expiryPage.locator(".turn-outcome__detail").getByText(stoppedSentence).waitFor();
 		// The same sentence reaches a screen reader through the live region.
 		equal(await expiryPage.locator('[aria-live="assertive"]').getByText(stoppedSentence).count(), 1);
-		await expiryPage.locator(".evidence-timeline").getByText(
-			/Nobody answered\. The turn was stopped; Clio was not told no\./u,
+		await expiryPage.locator(".activity-row--approval").getByText(
+			/Nobody answered\. The turn was stopped; Clio Coder was not told no\./u,
 		).waitFor();
 		equal(await expiryPage.locator(".approval-banner").count(), 0);
-		equal(await expiryPage.title(), "Clio Workbench");
+		equal(await expiryPage.title(), "Clio Coder");
 		await expiryPage.screenshot({ path: new URL("approval-unanswered.png", artifactDirectory).pathname });
 		await expiryPage.close();
 	} finally {
@@ -797,16 +1298,32 @@ try {
 			clioChild: "tests/acp-child-fixture.ts --scenario=permission",
 			directoryBrowserRefusedHome: true,
 			realProjectOpenedByPath: true,
-			scopedFileCreateMoveAndConfirmedDelete: true,
+			scopedFileAndFolderLifecycle: true,
 			approvalTitleFlipped: true,
 			conversationSurvivedReload: true,
+			launchRecoveredFromCancelledStylesheetAndBootstrap: true,
+			conversationRendersMarkdownWithFoldedActivity: true,
+			sessionTimelineKeepsDraftAndScrollAcrossViews: true,
+			reportedUsageVisibleAndSurvivedReload: true,
 			stopNeverDeniedTheTool: true,
 			sessionRenamedResumedAndReplayed: true,
-			sessionDeleteConfirmedByWorkbench: true,
+			sessionDeleteRequiresGuiConfirmation: true,
 			unavailableProjectExplainedAndRemovable: true,
-			targetProbedBeforeAnyHealthClaim: true,
+			bothTargetsProbedBeforeAnyHealthClaim: true,
+			recoveryUsesRedactedDoctorAndPathsAdapters: true,
+			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
+			desktopRailsCollapseAndRestoreFocus: true,
+			streamUpdatesPreservedTheDraftAndItsScrollPosition: true,
+			effectiveClioMapUsesTheBoundedReadOnlyAdapter: true,
+			catalogUsesBoundedReadOnlyAdapters: true,
+			routingInventoryUsesOfflineBoundedAdapters: true,
+			dispatchUsesInstallationWideBoundedAdapter: true,
+			compactCatalogHasNoPageOverflow: true,
+			usageUsesTheProjectFilteredBoundedAdapter: true,
+			compactUsageHasNoPageOverflow: true,
+			compactDispatchHasNoPageOverflow: true,
 			approvalBannerVisibleWhenScrolledAwayAndBlurred: true,
 			approvalAnsweredByKeyboardChord: true,
 			escalatedWithoutAnotherWireEvent: true,
@@ -817,17 +1334,46 @@ try {
 			forcedColorsFocusVisible: true,
 			shortHeightRailScrollable: true,
 			desktopRailHasNoHorizontalOverflow: true,
-			seriousOrCriticalAccessibilityViolations: blockingViolations.length + compactBlockingViolations.length +
+			seriousOrCriticalAccessibilityViolations: configMapBlockingViolations.length + blockingViolations.length +
+				catalogBlockingViolations.length +
+				usageBlockingViolations.length +
+				dispatchBlockingViolations.length +
+				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
 			browserErrors: browserErrors.length,
+			requestFailures,
 			screenshots: [
 				"initial.png",
+				"browse-folder.png",
+				"file-create.png",
+				"file-move.png",
+				"file-delete.png",
+				"folder-create.png",
+				"folder-delete.png",
+				"effective-clio-coder.png",
+				"catalog.png",
+				"catalog-skills.png",
+				"catalog-library.png",
+				"catalog-extensions.png",
+				"catalog-verifiers.png",
+				"catalog-compact.png",
+				"usage.png",
+				"usage-compact.png",
+				"dispatch.png",
+				"dispatch-compact.png",
 				"permission.png",
 				"complete.png",
+				"timeline.png",
 				"compact-project-drawer.png",
+				"compact-evidence-drawer.png",
+				"resumed-session.png",
 				"recent-project-gone.png",
+				"session-delete.png",
+				"settings-options.png",
 				"settings-targets.png",
+				"settings-recovery.png",
+				"settings-routing.png",
 				"approval-banner.png",
 				"approval-unanswered.png",
 			],
@@ -835,6 +1381,11 @@ try {
 		null,
 		2,
 	));
+} catch (error) {
+	// The assertion that failed rarely names the cause; the requests the browser
+	// dropped and the console errors it logged usually do.
+	console.error(JSON.stringify({ browserErrors, requestFailures }, null, 2));
+	throw error;
 } finally {
 	await browser.close();
 	await running.close();

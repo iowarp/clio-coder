@@ -1,5 +1,6 @@
 {
 	"name": "@iowarp/clio-workbench",
+	"description": "The desktop and browser GUI for Clio Coder.",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
@@ -11,11 +12,16 @@
 		"@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
 		"@fontsource-variable/newsreader": "5.3.0",
 		"@fontsource/commit-mono": "5.3.0",
+		"dompurify": "3.4.14",
+		"marked": "18.0.11",
+		"mermaid": "11.17.2",
+		"prismjs": "1.30.0",
 		"react": "19.2.8",
 		"react-dom": "19.2.8"
 	},
 	"devDependencies": {
 		"@axe-core/playwright": "4.13.0",
+		"@types/prismjs": "1.26.6",
 		"@types/react": "19.2.18",
 		"@types/react-dom": "19.2.4",
 		"@vitejs/plugin-react": "6.0.5",

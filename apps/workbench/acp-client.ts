@@ -732,21 +732,21 @@ function validateRemoteMeta(errorValue: Record<string, unknown>): AcpRemoteError
 	if (!isPlainRecord(data) || !isPlainRecord(data._meta)) return null;
 	const value = data._meta["clio-coder/error"];
 	if (!isPlainRecord(value) || value.version !== 1) return null;
-	const code = boundedString(value.code, "Clio error code", 64);
+	const code = boundedString(value.code, "Clio Coder error code", 64);
 	if (!(ACP_REMOTE_ERROR_CODES as readonly string[]).includes(code)) {
-		return protocolFailure("Clio error code was outside the frozen set.");
+		return protocolFailure("Clio Coder error code was outside the frozen set.");
 	}
 	let reason: string | undefined;
 	if (value.reason !== undefined) {
-		reason = boundedString(value.reason, "Clio error reason", 64);
-		if (!/^[a-z0-9_-]+$/.test(reason)) return protocolFailure("Clio error reason was invalid.");
+		reason = boundedString(value.reason, "Clio Coder error reason", 64);
+		if (!/^[a-z0-9_-]+$/.test(reason)) return protocolFailure("Clio Coder error reason was invalid.");
 	}
 	let supported: readonly number[] | undefined;
 	if (value.supported !== undefined) {
 		if (
 			!Array.isArray(value.supported) || value.supported.length > 8 ||
 			!value.supported.every((item) => Number.isSafeInteger(item))
-		) return protocolFailure("Clio supported-version metadata was invalid.");
+		) return protocolFailure("Clio Coder supported-version metadata was invalid.");
 		supported = [...value.supported] as number[];
 	}
 	return {
@@ -759,11 +759,11 @@ function validateRemoteMeta(errorValue: Record<string, unknown>): AcpRemoteError
 
 function safeFailure(code: AcpFailureCode): AcpFailure {
 	const messages: Readonly<Record<AcpFailureCode, string>> = {
-		"protocol-failure": "The Clio ACP connection violated its bounded protocol.",
-		"process-exited": "The owned Clio ACP process exited unexpectedly.",
-		"stdio-failure": "The owned Clio ACP stdio channel failed.",
-		"write-failure": "The owned Clio ACP input channel failed.",
-		"termination-failure": "The owned Clio ACP process did not exit within the cleanup bound.",
+		"protocol-failure": "The Clio Coder ACP connection violated its bounded protocol.",
+		"process-exited": "The owned Clio Coder ACP process exited unexpectedly.",
+		"stdio-failure": "The owned Clio Coder ACP stdio channel failed.",
+		"write-failure": "The owned Clio Coder ACP input channel failed.",
+		"termination-failure": "The owned Clio Coder ACP process did not exit within the cleanup bound.",
 	};
 	return { code, message: messages[code] };
 }
@@ -1335,7 +1335,7 @@ export class AcpClient {
 	#rejectPendingForRetirement(): void {
 		for (const pending of this.#pending.values()) {
 			clearTimeout(pending.timer);
-			pending.reject(new AcpClientError("client-closed", "The owned Clio ACP process was retired."));
+			pending.reject(new AcpClientError("client-closed", "The owned Clio Coder ACP process was retired."));
 		}
 		this.#pending.clear();
 	}
