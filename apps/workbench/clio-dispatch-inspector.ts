@@ -1,9 +1,9 @@
 /**
- * Bounded adapter for Clio's installation-wide durable dispatch status.
+ * Bounded adapter for Clio Coder's installation-wide durable dispatch status.
  *
  * The browser supplies no argv and receives no run, agent, node, process, path,
  * lineage, or budget identifiers. This projection carries only admission state,
- * heartbeat counts, and exact cumulative totals reported by Clio.
+ * heartbeat counts, and exact cumulative totals reported by Clio Coder.
  */
 
 import { resolve } from "node:path";
@@ -68,7 +68,7 @@ function heartbeat(value: unknown): Heartbeat | null {
 }
 
 export function projectDispatchInspection(value: unknown, inspectedAt: string): WireDispatchInspection {
-	if (!isRecord(value)) throw new ClioDispatchProjectionError("Clio returned an invalid dispatch snapshot.");
+	if (!isRecord(value)) throw new ClioDispatchProjectionError("Clio Coder returned an invalid dispatch snapshot.");
 	const generatedAt = canonicalTimestamp(value.generatedAt);
 	const admission = value.admission;
 	const runningRows = value.running;
@@ -77,7 +77,7 @@ export function projectDispatchInspection(value: unknown, inspectedAt: string): 
 	if (
 		generatedAt === null || !isRecord(admission) || !Array.isArray(runningRows) || !Array.isArray(retryingRows) ||
 		!isRecord(totals) || runningRows.length > MAX_RAW_RUNNING_ROWS || retryingRows.length > MAX_RAW_RETRY_ROWS
-	) throw new ClioDispatchProjectionError("Clio returned an invalid dispatch snapshot.");
+	) throw new ClioDispatchProjectionError("Clio Coder returned an invalid dispatch snapshot.");
 
 	let admissionState: "open" | "draining";
 	let expiresAt: string | null;
@@ -87,25 +87,27 @@ export function projectDispatchInspection(value: unknown, inspectedAt: string): 
 	} else if (admission.state === "draining") {
 		admissionState = "draining";
 		expiresAt = canonicalTimestamp(admission.expiresAt);
-		if (expiresAt === null) throw new ClioDispatchProjectionError("Clio returned an invalid dispatch drain expiry.");
-	} else throw new ClioDispatchProjectionError("Clio returned an invalid dispatch admission state.");
+		if (expiresAt === null) {
+			throw new ClioDispatchProjectionError("Clio Coder returned an invalid dispatch drain expiry.");
+		}
+	} else throw new ClioDispatchProjectionError("Clio Coder returned an invalid dispatch admission state.");
 
 	const running = { total: runningRows.length, alive: 0, stale: 0, dead: 0, unreported: 0 };
 	for (const row of runningRows) {
-		if (!isRecord(row)) throw new ClioDispatchProjectionError("Clio returned an invalid running dispatch row.");
+		if (!isRecord(row)) throw new ClioDispatchProjectionError("Clio Coder returned an invalid running dispatch row.");
 		const phase = row.outcomePhase;
 		const status = heartbeat(row.heartbeat);
 		if ((phase !== "running" && phase !== "stale") || status === null) {
-			throw new ClioDispatchProjectionError("Clio returned an invalid running dispatch row.");
+			throw new ClioDispatchProjectionError("Clio Coder returned an invalid running dispatch row.");
 		}
 		if ((phase === "stale") !== (status === "stale")) {
-			throw new ClioDispatchProjectionError("Clio returned a contradictory running dispatch row.");
+			throw new ClioDispatchProjectionError("Clio Coder returned a contradictory running dispatch row.");
 		}
 		if (status === "n/a") running.unreported += 1;
 		else running[status] += 1;
 	}
 	if (!retryingRows.every(isRecord)) {
-		throw new ClioDispatchProjectionError("Clio returned an invalid retry queue.");
+		throw new ClioDispatchProjectionError("Clio Coder returned an invalid retry queue.");
 	}
 
 	const inputTokens = boundedNumber(totals.inputTokens, true);
@@ -116,7 +118,7 @@ export function projectDispatchInspection(value: unknown, inspectedAt: string): 
 	if (
 		inputTokens === null || outputTokens === null || totalTokens === null || costUsd === null ||
 		runtimeSeconds === null
-	) throw new ClioDispatchProjectionError("Clio returned invalid dispatch totals.");
+	) throw new ClioDispatchProjectionError("Clio Coder returned invalid dispatch totals.");
 
 	return {
 		scope: "installation",
@@ -153,30 +155,33 @@ export class ClioCliDispatchInspector implements ClioDispatchInspector {
 		} catch (error) {
 			if (!(error instanceof ClioReadCommandError)) throw error;
 			if (error.code === "spawn") {
-				throw new ClioDispatchInspectError("not-ready", "The GUI could not start Clio's dispatch inspector.");
+				throw new ClioDispatchInspectError("not-ready", "The GUI could not start Clio Coder's dispatch inspector.");
 			}
 			if (error.code === "timeout") {
-				throw new ClioDispatchInspectError("not-ready", "Clio's dispatch inspection did not finish in time.");
+				throw new ClioDispatchInspectError("not-ready", "Clio Coder's dispatch inspection did not finish in time.");
 			}
 			if (error.code === "exit") {
 				const unsupported = /(?:unknown|unsupported).{0,32}(?:command|fleet)|fleet.{0,32}(?:unknown|unsupported)/iu
 					.test(error.diagnostic);
-				this.#log(`Clio dispatch inspector exited with code ${error.exitCode ?? "unknown"}.`);
+				this.#log(`Clio Coder dispatch inspector exited with code ${error.exitCode ?? "unknown"}.`);
 				throw new ClioDispatchInspectError(
 					unsupported ? "unsupported" : "not-ready",
 					unsupported
-						? "This Clio version does not provide dispatch status inspection."
-						: "Clio could not inspect the installation-wide dispatch ledger.",
+						? "This Clio Coder version does not provide dispatch status inspection."
+						: "Clio Coder could not inspect the installation-wide dispatch ledger.",
 				);
 			}
-			throw new ClioDispatchInspectError("internal", "Clio returned an invalid or oversized dispatch snapshot.");
+			throw new ClioDispatchInspectError("internal", "Clio Coder returned an invalid or oversized dispatch snapshot.");
 		}
 		try {
 			return projectDispatchInspection(parsed, new Date(this.#now()).toISOString());
 		} catch (error) {
 			if (!(error instanceof ClioDispatchProjectionError)) throw error;
-			this.#log("Clio dispatch projection rejected an incompatible snapshot.");
-			throw new ClioDispatchInspectError("internal", "Clio's dispatch status is not compatible with this GUI build.");
+			this.#log("Clio Coder dispatch projection rejected an incompatible snapshot.");
+			throw new ClioDispatchInspectError(
+				"internal",
+				"Clio Coder's dispatch status is not compatible with this GUI build.",
+			);
 		}
 	}
 }

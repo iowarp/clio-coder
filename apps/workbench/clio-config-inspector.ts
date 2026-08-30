@@ -322,18 +322,21 @@ export function projectConfigInspection(
 	if (
 		!isRecord(value) || !Array.isArray(value.settings) || !Array.isArray(value.entries) || !Array.isArray(value.issues)
 	) {
-		throw new ClioConfigInspectError("internal", "Clio returned an invalid configuration inspection graph.");
+		throw new ClioConfigInspectError("internal", "Clio Coder returned an invalid configuration inspection graph.");
 	}
 	const root = resolve(trustedRoot);
 	const reportedRoot = boundedText(value.cwd, 4 * 1024);
 	if (reportedRoot === null || resolve(reportedRoot) !== root) {
-		throw new ClioConfigInspectError("internal", "Clio inspected a different project than the GUI requested.");
+		throw new ClioConfigInspectError("internal", "Clio Coder inspected a different project than the GUI requested.");
 	}
 	if (
 		value.settings.length > MAX_RAW_SETTINGS || value.entries.length > MAX_RAW_ENTRIES ||
 		value.issues.length > MAX_RAW_ISSUES * 4
 	) {
-		throw new ClioConfigInspectError("internal", "Clio's configuration graph exceeded the GUI's safe shape bound.");
+		throw new ClioConfigInspectError(
+			"internal",
+			"Clio Coder's configuration graph exceeded the GUI's safe shape bound.",
+		);
 	}
 	const projectedSettings = value.settings.map(projectSetting).filter((entry): entry is WireConfigSetting =>
 		entry !== null
@@ -380,35 +383,35 @@ export class ClioCliConfigInspector implements ClioConfigInspector {
 		} catch (error) {
 			if (!(error instanceof ClioReadCommandError)) throw error;
 			if (error.code === "spawn") {
-				throw new ClioConfigInspectError("not-ready", "The GUI could not start Clio's configuration inspector.");
+				throw new ClioConfigInspectError("not-ready", "The GUI could not start Clio Coder's configuration inspector.");
 			}
 			if (error.code === "timeout") {
-				throw new ClioConfigInspectError("not-ready", "Clio's configuration inspection did not finish in time.");
+				throw new ClioConfigInspectError("not-ready", "Clio Coder's configuration inspection did not finish in time.");
 			}
 			if (error.code === "byte-limit") {
 				throw new ClioConfigInspectError(
 					"internal",
-					"Clio's configuration inspection exceeded the GUI's byte bound.",
+					"Clio Coder's configuration inspection exceeded the GUI's byte bound.",
 				);
 			}
 			if (error.code === "exit") {
 				const unsupported = /(?:unknown|unsupported).{0,32}(?:command|config)|config.{0,32}(?:unknown|unsupported)/iu
 					.test(error.diagnostic);
-				this.#log(`Clio configuration inspector exited with code ${error.exitCode ?? "unknown"}.`);
+				this.#log(`Clio Coder configuration inspector exited with code ${error.exitCode ?? "unknown"}.`);
 				throw new ClioConfigInspectError(
 					unsupported ? "unsupported" : "not-ready",
 					unsupported
-						? "This Clio version does not provide configuration inspection."
-						: "Clio could not inspect the effective configuration for this project.",
+						? "This Clio Coder version does not provide configuration inspection."
+						: "Clio Coder could not inspect the effective configuration for this project.",
 				);
 			}
 			if (error.code === "encoding") {
-				throw new ClioConfigInspectError("internal", "Clio returned non-text configuration inspection output.");
+				throw new ClioConfigInspectError("internal", "Clio Coder returned non-text configuration inspection output.");
 			}
 			if (error.code === "json") {
-				throw new ClioConfigInspectError("internal", "Clio returned invalid configuration inspection JSON.");
+				throw new ClioConfigInspectError("internal", "Clio Coder returned invalid configuration inspection JSON.");
 			}
-			throw new ClioConfigInspectError("internal", "The GUI could not read Clio's configuration inspection.");
+			throw new ClioConfigInspectError("internal", "The GUI could not read Clio Coder's configuration inspection.");
 		}
 		return projectConfigInspection(parsed, root, new Date(this.#now()).toISOString());
 	}

@@ -115,11 +115,11 @@ export interface WorkbenchServerOptions {
 	mode?: "browser" | "desktop";
 	distRoot?: URL;
 	clioLauncher?: ClioLauncher;
-	/** Overrides the fixed read-only Clio configuration adapter (tests). */
+	/** Overrides the fixed read-only Clio Coder configuration adapter (tests). */
 	configInspector?: ClioConfigInspector;
-	/** Overrides the fixed read-only Clio resource-catalog adapter (tests). */
+	/** Overrides the fixed read-only Clio Coder resource-catalog adapter (tests). */
 	catalogInspector?: ClioCatalogInspector;
-	/** Overrides the fixed project-scoped Clio usage adapter (tests). */
+	/** Overrides the fixed project-scoped Clio Coder usage adapter (tests). */
 	usageInspector?: ClioUsageInspector;
 	/** Overrides the fixed offline model and worker-routing adapter (tests). */
 	routingInspector?: ClioRoutingInspector;
@@ -232,7 +232,7 @@ export function defaultClioLauncher(platform = Deno.build.os): ClioLauncher {
 	if (platform !== "windows") return createLocalClioLauncher();
 	return {
 		launch() {
-			throw new HostError("not-ready", "Native Windows Clio launch requires an explicit WSL configuration.");
+			throw new HostError("not-ready", "Native Windows Clio Coder launch requires an explicit WSL configuration.");
 		},
 	};
 }
@@ -352,7 +352,7 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, and installation-wide dispatch inspections ask Clio for typed data, redact it on the host, and never change Clio configuration.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, and installation-wide dispatch inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
 			securityNote: SECURITY_NOTE,
 			dispatchInspection: this.#dispatchInspection,
 		};
@@ -441,7 +441,7 @@ class WorkbenchRuntime implements HostSink {
 			try {
 				await open.host.close();
 			} catch (error) {
-				if (!this.#quiet) console.error("The GUI could not close the Clio host cleanly", error);
+				if (!this.#quiet) console.error("The GUI could not close the Clio Coder host cleanly", error);
 			}
 			this.#store.unregister(open.project.id);
 		}
@@ -684,7 +684,7 @@ class WorkbenchRuntime implements HostSink {
 						if (this.#open.host.hasActivePrompt) {
 							throw new HostError(
 								"conflict",
-								"Clio is still working in this project. Cancel the turn before forgetting it.",
+								"Clio Coder is still working in this project. Cancel the turn before forgetting it.",
 							);
 						}
 						await this.#closeOpen();
@@ -843,7 +843,7 @@ class WorkbenchRuntime implements HostSink {
 		if (this.#open?.host.hasActivePrompt) {
 			throw new HostError(
 				"conflict",
-				"Clio is still working in the open project. Cancel the turn or wait before opening another project.",
+				"Clio Coder is still working in the open project. Cancel the turn or wait before opening another project.",
 			);
 		}
 		const resolved = await this.#state.resolveOpenable(typedPath);
