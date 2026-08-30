@@ -26,7 +26,7 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import type { TUI } from "../../src/engine/tui.js";
+import { type TUI, visibleWidth } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -34,6 +34,7 @@ import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
 import type { TurnPreparationPhase } from "../../src/interactive/turn-state.js";
+import { formatCouncilMemberShareNote } from "../../src/interactive/worker-share.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const ESC = String.fromCharCode(27);
@@ -527,5 +528,75 @@ describe("contracts/pending transcript row", () => {
 		panel.appendUser("plan the significance section");
 		const rendered = panel.render(60).map(stripAnsi).join("\n");
 		ok(!rendered.includes("· preparing") && !rendered.includes("· not sent"), rendered);
+	});
+});
+
+/**
+ * The uncommitted tail used to be concatenated onto the last rendered line with
+ * no width budget, so a body that had folded to the full content width came out
+ * wider than the terminal and pi-tui's `doRender` killed the process. `/share`
+ * of a worker answer is the ordinary way to reach it: a `research-report` body
+ * is JSON with no space to fold at (#257).
+ */
+describe("contracts/pending transcript row width", () => {
+	/** A `research-report` answer: JSON, no space anywhere in it to fold at. */
+	const spacelessBody = (length: number): string => {
+		const wrapper = '{"finding":""}';
+		return `{"finding":"${"z".repeat(Math.max(0, length - wrapper.length))}"}`;
+	};
+	const shareNote = (body: string): string => {
+		const note = formatCouncilMemberShareNote(
+			{ agentId: "researcher", runId: "pk8h3nfzy5xc", outcome: "succeeded", text: body },
+			"alpha",
+		);
+		ok(note !== null, "the share note has a body");
+		return note;
+	};
+	const renderRow = (note: string, status: "pending" | "refused", width: number): string[] => {
+		const panel = createChatPanel({} as never);
+		panel.appendUser(note, () => status);
+		return panel.render(width);
+	};
+
+	for (const [state, tail] of [
+		["pending", "· preparing"],
+		["refused", "· not sent"],
+	] as const) {
+		it(`folds a 200-character spaceless shared body at 80 columns while a row is ${state}`, () => {
+			const body = spacelessBody(200);
+			const rendered = renderRow(shareNote(body), state, 80);
+			for (const line of rendered) {
+				ok(visibleWidth(line) <= 80, `${visibleWidth(line)} cells of 80 in ${JSON.stringify(line)}`);
+			}
+			const text = rendered.map(stripAnsi).join("\n");
+			ok(text.includes(tail), `the row still reports its state: ${text}`);
+			strictEqual(text.replace(/\n {2}/gu, "").includes(body), true, "the body is folded, not dropped");
+		});
+	}
+
+	/**
+	 * The crash needed the last folded line to be close enough to full that the
+	 * tail pushed it over, which a single body length does not reliably produce.
+	 * Sweeping the length walks the last line across every offset in the fold.
+	 */
+	it("keeps every shared-note body length inside an 80-column terminal", () => {
+		for (let length = 14; length <= 260; length += 1) {
+			const note = shareNote(spacelessBody(length));
+			for (const status of ["pending", "refused"] as const) {
+				for (const line of renderRow(note, status, 80)) {
+					ok(visibleWidth(line) <= 80, `body ${length}, ${status}: ${visibleWidth(line)} cells in ${JSON.stringify(line)}`);
+				}
+			}
+		}
+	});
+
+	/** Every terminal an operator can drag to, down to the ones that leave no room for the tail. */
+	it("never renders past the terminal at any width", () => {
+		const note = shareNote(spacelessBody(194));
+		for (let width = 8; width <= 120; width += 1) {
+			for (const line of renderRow(note, "pending", width)) {
+				ok(visibleWidth(line) <= width, `width ${width}: ${visibleWidth(line)} cells in ${JSON.stringify(line)}`);
+			}
+		}
 	});
 });
