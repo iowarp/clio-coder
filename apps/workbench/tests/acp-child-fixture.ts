@@ -257,7 +257,7 @@ const SEVENTEEN_BASH_CALLS = 17;
 const SEVENTEEN_BASH_CANDIDATE_LIMIT = 128;
 /** Blocks a turn may spend before the disposition stops being a plain block. */
 const LOOP_BUDGET = 8;
-/** A shape must be seen this many times before Clio reports it as a loop. */
+/** A shape must be seen this many times before Clio Coder reports it as a loop. */
 const LOOP_REPEAT_THRESHOLD = 3;
 
 /** The first two words of a command, which is what repeats when a model rephrases. */
@@ -341,7 +341,7 @@ function selectedCallLogPath(): string | null {
 /**
  * Separate from the call log so its array shape stays untouched. This one records
  * every answer the client sent to an outbound permission request, which is how a
- * test proves an expiry never reached Clio as a rejection.
+ * test proves an expiry never reached Clio Coder as a rejection.
  */
 function selectedPermissionLogPath(): string | null {
 	return Deno.args.find((argument) => argument.startsWith("--permission-log="))?.slice("--permission-log=".length) ??
@@ -399,7 +399,7 @@ async function run(): Promise<void> {
 	let hostedSessionId = SESSION_ID;
 	let sessionCwd = Deno.cwd();
 	let activeTurn: ActiveTurn | null = null;
-	// A real Clio never reuses a JSON-RPC id across turns, so neither does this.
+	// A real Clio Coder never reuses a JSON-RPC id across turns, so neither does this.
 	let turnOrdinal = 0;
 	let resistantInterval: ReturnType<typeof setInterval> | undefined;
 	const calls: RecordedCall[] = [];
@@ -612,7 +612,7 @@ async function run(): Promise<void> {
 		return scenarioInitializeResult;
 	};
 
-	// A per-process session store. Real Clio persists this; the fixture keeps it in
+	// A per-process session store. Real Clio Coder persists this; the fixture keeps it in
 	// memory so list, label, and delete are observable end to end.
 	const sessions = new Map<string, StoredSession>();
 	if (conversational) {
@@ -1179,7 +1179,7 @@ async function run(): Promise<void> {
 			const base = SEVENTEEN_BASH_COMMANDS[Math.min(commandIndex, SEVENTEEN_BASH_COMMANDS.length - 1)] ?? "git status";
 			const command = retryAttempt === 0 ? base : rephraseCommand(base, retryAttempt);
 
-			// Clio notices the repeat when the shape lands for the third time, and
+			// Clio Coder notices the repeat when the shape lands for the third time, and
 			// blocks that candidate before any tool start reaches ACP.
 			const shape = commandShape(command);
 			const repeatCount = (shapeCounts.get(shape) ?? 0) + 1;

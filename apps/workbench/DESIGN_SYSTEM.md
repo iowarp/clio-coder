@@ -2,12 +2,12 @@
 
 ## Product thesis
 
-The Clio Coder GUI is a field observatory for code: a calm scientific instrument wrapped around one real Clio process.
-It helps scientists, researchers, and domain experts describe an outcome, observe work, make consequential decisions,
-and inspect the evidence without first learning an IDE or terminal vocabulary.
+The Clio Coder GUI is a field observatory for code: a calm scientific instrument wrapped around one real Clio Coder
+process. It helps scientists, researchers, and domain experts describe an outcome, observe work, make consequential
+decisions, and inspect the evidence without first learning an IDE or terminal vocabulary.
 
 The interface should feel like a field notebook joined to a calibrated instrument. It must not feel like a terminal
-emulator, a fictional mission-control dashboard, a generic chat application, or a second implementation of Clio.
+emulator, a fictional mission-control dashboard, a generic chat application, or a second implementation of Clio Coder.
 
 The memorable visual element is the evidence spine. Requests, actions, approvals, narrative, and outcomes form one
 legible record. A supplementary Observatory summarizes that same record without inventing facts.
@@ -15,25 +15,30 @@ legible record. A supplementary Observatory summarizes that same record without 
 ### Product naming
 
 The product name shown to people is **Clio Coder**. “GUI” and “desktop app” are descriptions used only when the
-interface must distinguish its local observations or settings from Clio's authoritative state. “Workbench” is an
+interface must distinguish its local observations or settings from Clio Coder's authoritative state. “Workbench” is an
 internal compatibility name for the source directory, persisted state, protocol provenance, and implementation types; it
 is not a separate product, API, or user-facing brand. A future `apps/workbench` to `apps/gui` source move must be a
 separate migration that preserves upgrades and local state.
 
+Bare **Clio** is not a product alias here. Visible prose, status and provenance labels, accessibility names, errors,
+documentation, and diagnostics must say **Clio Coder** so this application cannot be confused with `clio-agent`,
+`clio-core`, or `clio-kit`. Exact compatibility identifiers—including the `clio-coder` executable, protocol enum values,
+persisted keys, bundle identifiers, and internal implementation type names—remain unchanged.
+
 ## Authority and truthfulness
 
-- Clio remains authoritative for sessions, tools, routing, models, autonomy, permissions, context, agents, skills, and
-  outcomes. The GUI renders only facts exposed through its bounded protocol.
-- UI summaries must say whether a fact was reported by Clio, observed live on ACP, observed locally by the GUI, or
-  replayed by Clio.
+- Clio Coder remains authoritative for sessions, tools, routing, models, autonomy, permissions, context, agents, skills,
+  and outcomes. The GUI renders only facts exposed through its bounded protocol.
+- UI summaries must say whether a fact was reported by Clio Coder, observed live on ACP, observed locally by the GUI, or
+  replayed by Clio Coder.
 - Missing evidence is not success. Silence is not completion. A target is not healthy until an explicit, timestamped
   probe says so.
 - Measured, estimated, reported, replayed, unavailable, failed, stopped, and skipped are distinct states.
 - A pending approval is never answered implicitly. An unanswered approval is never presented as a rejection.
 - Internal identifiers, hidden reasoning, raw provider payloads, untrusted paths, and speculative dependency graphs do
   not become presentation data.
-- The GUI may simplify vocabulary, but it must retain access to the exact underlying Clio key or fact where that is
-  useful for auditability.
+- The GUI may simplify vocabulary, but it must retain access to the exact underlying Clio Coder key or fact where that
+  is useful for auditability.
 - Resource inventories enter the browser only through bounded projections. Skill bodies, hashes, native locations,
   extension roots and manifests, source URLs, requirements, and raw diagnostics stay host-side; a formatted CLI table is
   not a typed fact source.
@@ -47,7 +52,8 @@ The desktop shell has three complementary regions and one status strip:
 1. **Project atlas** — projects, bounded files, and resumable conversations.
 2. **Evidence notebook** — the human request, visible work, approval decisions, narrative, and outcome along a single
    evidence spine, followed by the composer.
-3. **Observatory** — a compact view of current state, Clio-attributed routing, recorded-event counts, and provenance.
+3. **Observatory** — a compact view of current state, Clio Coder-attributed routing, recorded-event counts, and
+   provenance.
 4. **Status strip** — connection, bound-session facts, next-turn differences, next-session differences, autonomy, and
    current operation.
 
@@ -55,15 +61,16 @@ On desktop, the Project atlas and Observatory must collapse independently. Colla
 track immediately and restores focus predictably when reopened; it must not cause a full-shell animated reflow while
 text is streaming.
 
-The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio, the Capability
-atlas—including installed extension precedence—and the 30-day Usage record. These are alternate views of the same
-bounded workspace, not a second application shell or an invitation to add global navigation. They retain a direct path
-back to the notebook and expose unavailable interfaces honestly. Historical views must distinguish a missing store from
-zero activity and must not mix global records into a project canvas merely because an upstream report contains both.
+The center notebook may switch in place to project-scoped analytical canvases such as Effective Clio Coder, the
+Capability atlas—including installed extension precedence—and the 30-day Usage record. These are alternate views of the
+same bounded workspace, not a second application shell or an invitation to add global navigation. They retain a direct
+path back to the notebook and expose unavailable interfaces honestly. Historical views must distinguish a missing store
+from zero activity and must not mix global records into a project canvas merely because an upstream report contains
+both.
 
-The Dispatch snapshot is the narrow exception: it is explicitly installation-wide because Clio's public fleet status has
-no project selector. It must announce that scope in the header, summary, and method note, remain a manually refreshed
-read-only aggregate, and never masquerade as a project view or a live run board.
+The Dispatch snapshot is the narrow exception: it is explicitly installation-wide because Clio Coder's public fleet
+status has no project selector. It must announce that scope in the header, summary, and method note, remain a manually
+refreshed read-only aggregate, and never masquerade as a project view or a live run board.
 
 Configuration-adjacent inventories that support an existing decision, such as offline model capabilities, worker
 profiles, and agent bindings, belong inside the Settings instrument rather than becoming another top-level canvas. Keep
@@ -93,7 +100,7 @@ The source of truth is the custom properties in `src/styles.css`.
 | Amber            | `--warning`                 | Waiting, uncertainty, pending scope, or degraded state       |
 | Red              | `--error`                   | Failure and destructive action                               |
 | Blue             | `--info`                    | Tool observation and neutral live information                |
-| Violet           | `--reason`                  | Clio-reported reasoning or narrative provenance              |
+| Violet           | `--reason`                  | Clio Coder-reported reasoning or narrative provenance        |
 
 Color is always supplementary. Text, labels, shape, or pattern must carry the same distinction.
 
@@ -143,14 +150,14 @@ Color is always supplementary. Text, labels, shape, or pattern must carry the sa
 
 - Prefer research language: “project,” “question,” “working freedom,” “evidence,” “outcome,” “earlier record,” and
   “choose a folder.”
-- Preserve precise Clio terms when changing them would hide scope: “target,” “model,” “session,” “turn,” and “ACP” in
-  provenance or diagnostics.
-- Do not use “execute” as the primary composer action. The operator sends a request; Clio decides which permitted tools
-  are appropriate.
-- Do not expose “fleet” or direct-agent chat unless Clio provides an explicit addressable operation. Subagents can be
-  observed without pretending they are independently controllable.
+- Preserve precise Clio Coder terms when changing them would hide scope: “target,” “model,” “session,” “turn,” and “ACP”
+  in provenance or diagnostics.
+- Do not use “execute” as the primary composer action. The operator sends a request; Clio Coder decides which permitted
+  tools are appropriate.
+- Do not expose “fleet” or direct-agent chat unless Clio Coder provides an explicit addressable operation. Subagents can
+  be observed without pretending they are independently controllable.
 - Explain timing beside configuration. Routing reaches the next turn; default autonomy reaches the next session; the
-  bound session retains the autonomy Clio says it is enforcing.
+  bound session retains the autonomy Clio Coder says it is enforcing.
 
 ## Open-source component policy
 
@@ -200,7 +207,7 @@ Good Stitch assignments include:
 - a graphical context or agent view from an exact supplied schema.
 
 Avoid prompts for a generic “AI coding dashboard.” They tend to produce terminal motifs, fictional health metrics, raw
-JSON, developer-only navigation, continuous neon animation, and controls that have no Clio operation behind them.
+JSON, developer-only navigation, continuous neon animation, and controls that have no Clio Coder operation behind them.
 
 ## Acceptance floor
 

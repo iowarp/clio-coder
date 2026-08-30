@@ -90,7 +90,7 @@ export const PERMISSION_RESOLUTIONS = [
 ] as const;
 export type PermissionResolution = (typeof PERMISSION_RESOLUTIONS)[number];
 
-/** `open`: hosted by the live process. `closed`: Clio recorded an end. `unknown`: unended and not hosted here. */
+/** `open`: hosted by the live process. `closed`: Clio Coder recorded an end. `unknown`: unended and not hosted here. */
 export const SESSION_STATES = ["open", "closed", "unknown"] as const;
 export type WireSessionState = (typeof SESSION_STATES)[number];
 
@@ -440,7 +440,7 @@ export interface WireTimelineItem {
 	readonly startedAt: string | null;
 	readonly endedAt?: string;
 	readonly sequence?: number;
-	/** Exact terminal usage fields reported by Clio; present only on live outcome/failure cards. */
+	/** Exact terminal usage fields reported by Clio Coder; present only on live outcome/failure cards. */
 	readonly usage?: WireUsage;
 	readonly source: WireEventSource;
 }
@@ -714,7 +714,7 @@ export interface WireCatalogInspection {
 	readonly skills: WireCatalogSkillCollection;
 	readonly library: WireCatalogLibraryCollection;
 	readonly extensions: WireCatalogExtensionCollection;
-	/** Clio currently offers no typed verifier listing; the GUI never scrapes its table. */
+	/** Clio Coder currently offers no typed verifier listing; the GUI never scrapes its table. */
 	readonly verifiers: Readonly<{ availability: "typed-interface-required" }>;
 }
 
@@ -727,7 +727,7 @@ export const MAX_WIRE_USAGE_TOOLS = 16;
 export const MAX_WIRE_USAGE_SKILLS = 64;
 export const MAX_WIRE_USAGE_RECIPES = 64;
 
-/** Exact aggregate fields reported by Clio's project-filtered usage reader. */
+/** Exact aggregate fields reported by Clio Coder's project-filtered usage reader. */
 export interface WireHistoricalUsageTotals {
 	readonly apiCalls: number;
 	readonly input: number;
@@ -821,7 +821,7 @@ export const MAX_WIRE_ROUTING_MODELS = 256;
 export const MAX_WIRE_ROUTING_PROFILES = 64;
 export const MAX_WIRE_ROUTING_BINDINGS = 128;
 
-/** Offline model facts projected from Clio's own catalog and cached discovery. */
+/** Offline model facts projected from Clio Coder's own catalog and cached discovery. */
 export interface WireRoutingModel {
 	readonly targetId: string;
 	readonly runtimeId: string;
@@ -852,7 +852,7 @@ export interface WireRoutingModelCollection {
 	readonly availability: WireRoutingAvailability;
 	readonly items: readonly WireRoutingModel[];
 	readonly truncated: boolean;
-	/** Clio's explicit `(no models)` rows, normalized without presenting the sentinel as a model id. */
+	/** Clio Coder's explicit `(no models)` rows, normalized without presenting the sentinel as a model id. */
 	readonly emptyTargetCount: number;
 }
 
@@ -878,12 +878,12 @@ export interface WireRoutingInspection {
 export const DISPATCH_ADMISSION_STATES = ["open", "draining"] as const;
 export type WireDispatchAdmissionState = (typeof DISPATCH_ADMISSION_STATES)[number];
 
-/** Bounded aggregate of Clio's durable, installation-wide dispatch ledger. */
+/** Bounded aggregate of Clio Coder's durable, installation-wide dispatch ledger. */
 export interface WireDispatchInspection {
 	readonly scope: "installation";
 	/** When the GUI completed its bounded projection. */
 	readonly inspectedAt: string;
-	/** When Clio read the durable ledger. */
+	/** When Clio Coder read the durable ledger. */
 	readonly generatedAt: string;
 	readonly admission: Readonly<{
 		state: WireDispatchAdmissionState;
@@ -1007,7 +1007,7 @@ export interface DispatchStatePayload {
 
 export interface TargetsStatePayload {
 	readonly targets: readonly WireTarget[];
-	/** True when Clio's own byte budget dropped a target or model from the list. */
+	/** True when Clio Coder's own byte budget dropped a target or model from the list. */
 	readonly truncated: boolean;
 }
 

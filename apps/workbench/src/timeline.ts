@@ -181,13 +181,13 @@ export function resolutionSummary(decision: PermissionResolution): string {
 		case "allow-once":
 			return "Allowed once by the operator.";
 		case "reject":
-			return "Rejected by the operator. Clio was told no.";
+			return "Rejected by the operator. Clio Coder was told no.";
 		case "cancelled":
-			return "Withdrawn when the turn was cancelled. Clio was not told no.";
+			return "Withdrawn when the turn was cancelled. Clio Coder was not told no.";
 		case "unanswered":
-			return "Nobody answered. The turn was stopped; Clio was not told no.";
+			return "Nobody answered. The turn was stopped; Clio Coder was not told no.";
 		case "disconnect":
-			return "Withdrawn when the local connection closed. Clio was not told no.";
+			return "Withdrawn when the local connection closed. Clio Coder was not told no.";
 	}
 }
 
@@ -269,7 +269,7 @@ export function applyTurnEvent(state: TurnProjection, event: TurnEventInput, now
 			return upsert(state, {
 				id: streamId,
 				kind: isThought ? "thought" : "narrative",
-				title: isThought ? "Reasoning" : "Clio",
+				title: isThought ? "Reasoning" : "Clio Coder",
 				summary: event.payload.text,
 				status: origin === "replay" ? "replayed" : "complete",
 				...base,
@@ -288,7 +288,7 @@ export function applyTurnEvent(state: TurnProjection, event: TurnEventInput, now
 				? {
 					...state.activeTurn,
 					toolCalls: existing === undefined ? state.activeTurn.toolCalls + 1 : state.activeTurn.toolCalls,
-					// Clio's own title rather than the kind label, because during a silent
+					// Clio Coder's own title rather than the kind label, because during a silent
 					// run this line is the only place the operator learns which command is
 					// running. It is the same string the tool card already shows.
 					lastToolTitle: event.payload.summary.trim().length > 0 ? event.payload.summary : event.payload.title,
@@ -313,10 +313,10 @@ export function applyTurnEvent(state: TurnProjection, event: TurnEventInput, now
 			return upsert({ ...state, activeTurn }, {
 				id: itemId(event.turnId, "loop", String(state.ordinal + 1)),
 				kind: "loop",
-				title: `Clio blocked a repeated ${event.payload.tool} call`,
+				title: `Clio Coder blocked a repeated ${event.payload.tool} call`,
 				summary:
 					`Repeated ${event.payload.repeatCount} times; ${event.payload.blocksThisTurn} of ${event.payload.budget} blocks used this turn (${event.payload.disposition}).${
-						event.payload.interrupted ? " Clio interrupted the turn." : ""
+						event.payload.interrupted ? " Clio Coder interrupted the turn." : ""
 					}`,
 				status: "complete",
 				...base,

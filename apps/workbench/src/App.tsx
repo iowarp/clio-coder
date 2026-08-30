@@ -147,7 +147,7 @@ export function formatDuration(seconds: number): string {
 }
 
 const PHASE_PRESENTATION: Record<WireClioPhase, { label: string; tone: string }> = {
-	starting: { label: "Starting Clio", tone: "info" },
+	starting: { label: "Starting Clio Coder", tone: "info" },
 	unbound: { label: "No session", tone: "info" },
 	idle: { label: "Idle", tone: "success" },
 	running: { label: "Running", tone: "action" },
@@ -158,20 +158,20 @@ const PHASE_PRESENTATION: Record<WireClioPhase, { label: string; tone: string }>
 };
 
 const SOURCE_LABELS: Record<WireEventSource, string> = {
-	"reported-by-clio": "Reported by Clio",
+	"reported-by-clio": "Reported by Clio Coder",
 	"observed-on-acp": "Observed on ACP",
 	"observed-by-workbench": "Observed by desktop",
-	"replayed-from-clio": "Replayed from Clio",
+	"replayed-from-clio": "Replayed from Clio Coder",
 };
 
 const SOURCE_GUIDANCE: Record<WireEventSource, { label: string; description: string }> = {
 	"reported-by-clio": {
-		label: "Clio reported",
-		description: "Clio supplied this fact; the desktop app did not measure it independently.",
+		label: "Clio Coder reported",
+		description: "Clio Coder supplied this fact; the desktop app did not measure it independently.",
 	},
 	"observed-on-acp": {
 		label: "Observed live",
-		description: "The desktop app received this event on Clio's live control channel.",
+		description: "The desktop app received this event on Clio Coder's live control channel.",
 	},
 	"observed-by-workbench": {
 		label: "Observed locally",
@@ -179,24 +179,24 @@ const SOURCE_GUIDANCE: Record<WireEventSource, { label: string; description: str
 	},
 	"replayed-from-clio": {
 		label: "Earlier record",
-		description: "Clio replayed this from an earlier turn in the same session.",
+		description: "Clio Coder replayed this from an earlier turn in the same session.",
 	},
 };
 
 const SETTING_GUIDANCE: Record<string, { label: string; description: string; scope: string | null }> = {
 	"orchestrator.target": {
-		label: "Clio target",
-		description: "The configured service or runtime Clio will route the next turn through.",
+		label: "Clio Coder target",
+		description: "The configured service or runtime Clio Coder will route the next turn through.",
 		scope: "NEXT TURN",
 	},
 	"orchestrator.model": {
 		label: "Model",
-		description: "The model Clio will ask to work on the next turn.",
+		description: "The model Clio Coder will ask to work on the next turn.",
 		scope: "NEXT TURN",
 	},
 	"orchestrator.thinkingLevel": {
 		label: "Reasoning effort",
-		description: "Clio's configured reasoning depth. The GUI does not infer what the bound session already uses.",
+		description: "Clio Coder's configured reasoning depth. The GUI does not infer what the bound session already uses.",
 		scope: null,
 	},
 	autonomy: {
@@ -234,17 +234,17 @@ const SESSION_STATE_LABELS: Record<WireSessionSummary["state"], string> = {
 	unknown: "unknown",
 };
 
-const UNKNOWN_SESSION_NOTE = "Clio cannot tell whether another process still holds this session.";
+const UNKNOWN_SESSION_NOTE = "Clio Coder cannot tell whether another process still holds this session.";
 
 const CUSTOMIZATION_CATEGORY_PRESENTATION: Record<
 	WireCustomizationCategory,
 	{ readonly label: string; readonly short: string; readonly description: string }
 > = {
-	settings: { label: "Settings", short: "SET", description: "Layered values that shape Clio's behavior." },
+	settings: { label: "Settings", short: "SET", description: "Layered values that shape Clio Coder's behavior." },
 	"clio-md": {
 		label: "Project context",
 		short: "CTX",
-		description: "CLIO-CODER.md context Clio can add to the next turn.",
+		description: "CLIO-CODER.md context Clio Coder can add to the next turn.",
 	},
 	rule: { label: "Rules", short: "RUL", description: "Project rules and conditional context boundaries." },
 	"operator-profile": {
@@ -252,13 +252,17 @@ const CUSTOMIZATION_CATEGORY_PRESENTATION: Record<
 		short: "OPR",
 		description: "Declared operator preferences added to context.",
 	},
-	hook: { label: "Hooks", short: "HOK", description: "Middleware reactions loaded by Clio." },
+	hook: { label: "Hooks", short: "HOK", description: "Middleware reactions loaded by Clio Coder." },
 	extension: { label: "Extensions", short: "EXT", description: "Installed packages and their effective precedence." },
-	"skill-root": { label: "Skill roots", short: "SKL", description: "Locations Clio searches for skills." },
-	"prompt-root": { label: "Prompt roots", short: "PMT", description: "Locations Clio searches for saved prompts." },
+	"skill-root": { label: "Skill roots", short: "SKL", description: "Locations Clio Coder searches for skills." },
+	"prompt-root": {
+		label: "Prompt roots",
+		short: "PMT",
+		description: "Locations Clio Coder searches for saved prompts.",
+	},
 	agents: { label: "Agents", short: "AGT", description: "Agent recipe sources visible to this project." },
 	safety: { label: "Safety", short: "SAFE", description: "Effective working-freedom and safety facts." },
-	memory: { label: "Memory", short: "MEM", description: "The durable memory surface Clio can consult." },
+	memory: { label: "Memory", short: "MEM", description: "The durable memory surface Clio Coder can consult." },
 };
 
 const CUSTOMIZATION_CATEGORY_ORDER = Object.keys(
@@ -269,9 +273,9 @@ const RELOAD_PRESENTATION: Record<
 	WireCustomizationReloadClass,
 	{ readonly label: string; readonly description: string }
 > = {
-	hot: { label: "Now", description: "Clio reports this surface as hot-reloadable." },
-	"next-turn": { label: "Next turn", description: "Clio reads this surface when the next turn begins." },
-	restart: { label: "Restart", description: "A new Clio process is required before this changes." },
+	hot: { label: "Now", description: "Clio Coder reports this surface as hot-reloadable." },
+	"next-turn": { label: "Next turn", description: "Clio Coder reads this surface when the next turn begins." },
+	restart: { label: "Restart", description: "A new Clio Coder process is required before this changes." },
 	"n/a": { label: "Informational", description: "No apply timing is attached to this entry." },
 };
 
@@ -357,7 +361,7 @@ function usageBarWidth(value: bigint, maximum: bigint): string {
 
 function TurnUsageRecord({ usage }: { usage: WireUsage }) {
 	return (
-		<dl className="turn-usage" aria-label="Token fields reported by Clio for this turn">
+		<dl className="turn-usage" aria-label="Token fields reported by Clio Coder for this turn">
 			{USAGE_FIELDS.map((field) => (
 				<div key={field.key} title={field.description}>
 					<dt>{field.shortLabel}</dt>
@@ -388,7 +392,7 @@ function BrandLockup({ compact = false }: { compact?: boolean }) {
 				<img src="/assets/clio-coder-logo-128.webp" width="40" height="40" alt="" />
 			</div>
 			<div>
-				<div className="brand-lockup__eyebrow">IOWARP · CLIO</div>
+				<div className="brand-lockup__eyebrow">IOWARP · CLIO CODER</div>
 				<div className="brand-lockup__name">{PRODUCT_NAME}</div>
 			</div>
 		</div>
@@ -406,7 +410,10 @@ function LoadingScreen() {
 			<BrandLockup />
 			<p>Starting the localhost instrument…</p>
 			<div className="boot-screen__rule" />
-			<small>The GUI talks to one Clio process and never edits Clio configuration behind your back.</small>
+			<small>
+				The Clio Coder desktop app talks to one Clio Coder process and never edits Clio Coder configuration behind your
+				back.
+			</small>
 		</main>
 	);
 }
@@ -640,8 +647,8 @@ function SessionDeleteModal({ session, projectId, actions, onClose }: {
 					<code>{title}</code>
 				</div>
 				<p>
-					Clio deletes this session and its {session.turns}{" "}
-					recorded turns. Neither the GUI nor Clio can bring them back.
+					Clio Coder deletes this session and its {session.turns}{" "}
+					recorded turns. Neither the desktop app nor Clio Coder can bring them back.
 				</p>
 				<div className="modal__actions">
 					<button type="button" className="button button--quiet" onClick={onClose}>Keep session</button>
@@ -777,7 +784,7 @@ const ProjectRail = memo(function ProjectRail({
 							);
 						})}
 				</div>
-				{busy && <p className="project-lock-note">Clio is working. Projects can be switched between turns.</p>}
+				{busy && <p className="project-lock-note">Clio Coder is working. Projects can be switched between turns.</p>}
 			</section>
 
 			{open && (
@@ -855,7 +862,7 @@ const ProjectRail = memo(function ProjectRail({
 						/>
 						<div className="session-list">
 							{open.sessions.length === 0
-								? <p className="rail-empty">Clio has no session for this project yet.</p>
+								? <p className="rail-empty">Clio Coder has no session for this project yet.</p>
 								: open.sessions.map((session) => (
 									<SessionRow
 										key={session.id}
@@ -868,10 +875,10 @@ const ProjectRail = memo(function ProjectRail({
 								))}
 						</div>
 						{open.sessionsTruncated && (
-							<p className="tree-note">This list is shortened; Clio has more sessions than are shown.</p>
+							<p className="tree-note">This list is shortened; Clio Coder has more sessions than are shown.</p>
 						)}
 						{open.clio.capabilities?.list === false && (
-							<p className="tree-note">This Clio cannot list its earlier sessions over ACP.</p>
+							<p className="tree-note">This Clio Coder cannot list its earlier sessions over ACP.</p>
 						)}
 					</section>
 				</>
@@ -1039,8 +1046,9 @@ function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void 
 				<div className="eyebrow">A FIELD OBSERVATORY FOR CODE</div>
 				<h2 id="first-run-title">Bring a research folder. Keep every decision visible.</h2>
 				<p>
-					The GUI gives one real Clio process a bounded place to work, then turns its requests, actions, and outcomes
-					into a record you can inspect. You can start with a question; you do not need to start with a command.
+					The Clio Coder desktop app gives one real Clio Coder process a bounded place to work, then turns its requests,
+					actions, and outcomes into a record you can inspect. You can start with a question; you do not need to start
+					with a command.
 				</p>
 				<div className="first-run__actions">
 					<button type="button" className="button button--primary" onClick={onBrowse}>
@@ -1062,14 +1070,14 @@ function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void 
 					<span aria-hidden="true">02</span>
 					<div>
 						<strong>Describe the outcome</strong>
-						<p>Ask in your own words. Clio plans and uses the tools its configuration permits.</p>
+						<p>Ask in your own words. Clio Coder plans and uses the tools its configuration permits.</p>
 					</div>
 				</li>
 				<li>
 					<span aria-hidden="true">03</span>
 					<div>
 						<strong>Inspect the evidence</strong>
-						<p>See what was observed, what Clio reported, and where your approval was required.</p>
+						<p>See what was observed, what Clio Coder reported, and where your approval was required.</p>
 					</div>
 				</li>
 			</ol>
@@ -1082,7 +1090,8 @@ function FirstRunGuide({ state, onBrowse }: { state: AppState; onBrowse(): void 
 				<article>
 					<div className="eyebrow">LOCAL CONTROL</div>
 					<p>
-						The GUI control channel stays on this machine. Prompts go only to the Clio target you configure.
+						The Clio Coder desktop app control channel stays on this machine. Prompts go only to the Clio Coder target
+						you configure.
 					</p>
 				</article>
 				<article>
@@ -1214,8 +1223,8 @@ const EvidenceRail = memo(function EvidenceRail({
 							<>
 								<p className="observer-lede">
 									{activeTurn === null
-										? "Clio is ready for the next research question."
-										: `Clio has been working for ${formatDuration(activeSeconds)}.`}
+										? "Clio Coder is ready for the next research question."
+										: `Clio Coder has been working for ${formatDuration(activeSeconds)}.`}
 								</p>
 								{activeTurn !== null && (
 									<div className="observer-activity">
@@ -1229,7 +1238,7 @@ const EvidenceRail = memo(function EvidenceRail({
 										</div>
 										{activeTurn.lastToolTitle !== null && (
 											<p>
-												<span>CLIO'S LATEST TOOL</span>
+												<span>CLIO CODER'S LATEST TOOL</span>
 												<strong>{activeTurn.lastToolTitle}</strong>
 											</p>
 										)}
@@ -1242,7 +1251,7 @@ const EvidenceRail = memo(function EvidenceRail({
 				{open !== null && (
 					<section className="observer-section" aria-labelledby="observer-session-title">
 						<div className="eyebrow">SESSION ROUTING</div>
-						<h3 id="observer-session-title">Bound by Clio</h3>
+						<h3 id="observer-session-title">Bound by Clio Coder</h3>
 						{open.clio.session === null
 							? <p className="observer-note">No session is bound to this project.</p>
 							: (
@@ -1267,13 +1276,13 @@ const EvidenceRail = memo(function EvidenceRail({
 				{open !== null && (
 					<section className="observer-section observer-section--effective" aria-labelledby="observer-effective-title">
 						<div className="eyebrow">CONFIGURATION PROVENANCE</div>
-						<h3 id="observer-effective-title">Why Clio behaves this way</h3>
+						<h3 id="observer-effective-title">Why Clio Coder behaves this way</h3>
 						{configInspection === null
 							? (
 								<p className="observer-note">
 									{state.pendingConfigInspect === null
-										? "The read-only Effective Clio inspection has not produced a map yet."
-										: "Clio is inspecting settings, context, rules, resources, and apply timing."}
+										? "The read-only Effective Clio Coder inspection has not produced a map yet."
+										: "Clio Coder is inspecting settings, context, rules, resources, and apply timing."}
 								</p>
 							)
 							: (
@@ -1303,7 +1312,7 @@ const EvidenceRail = memo(function EvidenceRail({
 							onClick={onOpenConfigMap}
 						>
 							<span aria-hidden="true">⌘</span>
-							{workspaceView === "effective-clio" ? "Effective map open" : "Open Effective Clio map"}
+							{workspaceView === "effective-clio" ? "Effective map open" : "Open Effective Clio Coder map"}
 						</button>
 					</section>
 				)}
@@ -1311,13 +1320,13 @@ const EvidenceRail = memo(function EvidenceRail({
 				{open !== null && (
 					<section className="observer-section observer-section--catalog" aria-labelledby="observer-catalog-title">
 						<div className="eyebrow">DISCOVERED CAPABILITY</div>
-						<h3 id="observer-catalog-title">What Clio can bring to the work</h3>
+						<h3 id="observer-catalog-title">What Clio Coder can bring to the work</h3>
 						{catalogInspection === null
 							? (
 								<p className="observer-note">
 									{state.pendingCatalogInspect === null
 										? "Open the read-only atlas to inspect agents, skills, extensions, and library resources."
-										: "Clio is reading its typed resource catalogs."}
+										: "Clio Coder is reading its typed resource catalogs."}
 								</p>
 							)
 							: (
@@ -1355,13 +1364,13 @@ const EvidenceRail = memo(function EvidenceRail({
 				{open !== null && (
 					<section className="observer-section observer-section--history" aria-labelledby="observer-history-title">
 						<div className="eyebrow">PROJECT HISTORY</div>
-						<h3 id="observer-history-title">What Clio recorded across sessions</h3>
+						<h3 id="observer-history-title">What Clio Coder recorded across sessions</h3>
 						{usageInspection === null
 							? (
 								<p className="observer-note">
 									{state.pendingUsageInspect === null
 										? "Open the read-only Usage record for a project-filtered 30-day view."
-										: "Clio is reading the bounded project usage record."}
+										: "Clio Coder is reading the bounded project usage record."}
 								</p>
 							)
 							: (
@@ -1400,13 +1409,13 @@ const EvidenceRail = memo(function EvidenceRail({
 
 				<section className="observer-section observer-section--dispatch" aria-labelledby="observer-dispatch-title">
 					<div className="eyebrow">INSTALLATION DISPATCH</div>
-					<h3 id="observer-dispatch-title">What Clio's durable fleet ledger reports</h3>
+					<h3 id="observer-dispatch-title">What Clio Coder's durable fleet ledger reports</h3>
 					{dispatchInspection === null
 						? (
 							<p className="observer-note">
 								{state.pendingDispatchInspect === null
 									? "Open the read-only snapshot for global admission, running-work counts, and durable totals."
-									: "Clio is reading its installation-wide dispatch ledger."}
+									: "Clio Coder is reading its installation-wide dispatch ledger."}
 							</p>
 						)
 						: (
@@ -1460,8 +1469,8 @@ const EvidenceRail = memo(function EvidenceRail({
 							? (
 								<p className="observer-note">
 									{hasTerminalRecord
-										? "Clio ended a visible turn without terminal token fields, so the GUI has no token record to graph."
-										: "Token fields appear here after Clio ends a turn and reports them."}
+										? "Clio Coder ended a visible turn without terminal token fields, so the GUI has no token record to graph."
+										: "Token fields appear here after Clio Coder ends a turn and reports them."}
 								</p>
 							)
 							: (
@@ -1535,7 +1544,7 @@ const EvidenceRail = memo(function EvidenceRail({
 									</div>
 								</div>
 								{(open?.projection.timelineTruncated === true || open?.clio.session?.replayTruncated === true) && (
-									<p className="observer-note">This view is shortened; Clio still holds the full context.</p>
+									<p className="observer-note">This view is shortened; Clio Coder still holds the full context.</p>
 								)}
 							</>
 						)}
@@ -1545,7 +1554,7 @@ const EvidenceRail = memo(function EvidenceRail({
 					<div className="eyebrow">PROVENANCE</div>
 					<h3 id="observer-sources-title">Where each fact came from</h3>
 					{sourceCounts.length === 0
-						? <p className="observer-note">Sources appear here only after Clio records activity.</p>
+						? <p className="observer-note">Sources appear here only after Clio Coder records activity.</p>
 						: (
 							<ul className="source-ledger">
 								{sourceCounts.map(({ source, count }) => (
@@ -1691,16 +1700,17 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 					<span>03</span>
 				</div>
 				<div>
-					<div className="eyebrow">READ-ONLY CLIO INSPECTION</div>
-					<h2 id="effective-clio-title">Build the map behind Clio's behavior</h2>
+					<div className="eyebrow">READ-ONLY CLIO CODER INSPECTION</div>
+					<h2 id="effective-clio-title">Build the map behind Clio Coder's behavior</h2>
 					<p>
-						The GUI asks Clio which settings, context, rules, hooks, extensions, resources, safety, and memory surfaces
-						are effective for this project. Raw values and paths outside the project stay on the host.
+						The Clio Coder desktop app asks Clio Coder which settings, context, rules, hooks, extensions, resources,
+						safety, and memory surfaces are effective for this project. Raw values and paths outside the project stay on
+						the host.
 					</p>
 				</div>
 				<div className="effective-map__empty-actions">
 					<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
-						{pending ? "Inspecting with Clio…" : "Inspect Effective Clio"}
+						{pending ? "Inspecting with Clio Coder…" : "Inspect Effective Clio Coder"}
 					</button>
 					<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
 				</div>
@@ -1745,10 +1755,11 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 		<section className="effective-map" aria-labelledby="effective-clio-title">
 			<header className="effective-map__masthead">
 				<div>
-					<div className="eyebrow">EFFECTIVE CLIO · REPORTED BY CLIO</div>
-					<h2 id="effective-clio-title">Why Clio behaves this way</h2>
+					<div className="eyebrow">EFFECTIVE CLIO CODER · REPORTED BY CLIO CODER</div>
+					<h2 id="effective-clio-title">Why Clio Coder behaves this way</h2>
 					<p>
-						A bounded snapshot of the layers Clio says it loaded, where they came from, and when a change takes effect.
+						A bounded snapshot of the layers Clio Coder says it loaded, where they came from, and when a change takes
+						effect.
 					</p>
 				</div>
 				<div className="effective-map__masthead-actions">
@@ -1762,7 +1773,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 				</div>
 			</header>
 
-			<dl className="effective-map__summary" aria-label="Effective Clio inspection summary">
+			<dl className="effective-map__summary" aria-label="Effective Clio Coder inspection summary">
 				<div>
 					<dt>Effective setting facts</dt>
 					<dd>{inspection.settings.length}</dd>
@@ -1800,7 +1811,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 					<div className="effective-flow__stage effective-flow__stage--sources">
 						<span className="effective-flow__index">01</span>
 						<h4>Sources</h4>
-						<p>Scopes and setting layers Clio inspected.</p>
+						<p>Scopes and setting layers Clio Coder inspected.</p>
 						<ul>
 							{sources.slice(0, 8).map(([source, count]) => (
 								<li key={source}>
@@ -1829,7 +1840,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 					<div className="effective-flow__stage effective-flow__stage--timing">
 						<span className="effective-flow__index">03</span>
 						<h4>Apply timing</h4>
-						<p>When Clio says each surface can change behavior.</p>
+						<p>When Clio Coder says each surface can change behavior.</p>
 						<ul>
 							{reloads.map(({ reloadClass, count }) => (
 								<li key={reloadClass}>
@@ -1848,12 +1859,12 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 					<div className="effective-map__section-heading">
 						<div>
 							<div className="eyebrow">CUSTOMIZATION INVENTORY</div>
-							<h3 id="customization-catalog-title">What Clio loaded</h3>
+							<h3 id="customization-catalog-title">What Clio Coder loaded</h3>
 						</div>
 						<strong>{inspection.entries.length}</strong>
 					</div>
 					{categoryGroups.length === 0
-						? <p className="config-catalog__empty">Clio reported no customization entries for this project.</p>
+						? <p className="config-catalog__empty">Clio Coder reported no customization entries for this project.</p>
 						: categoryGroups.map(({ category, entries }, categoryIndex) => {
 							const presentation = CUSTOMIZATION_CATEGORY_PRESENTATION[category];
 							return (
@@ -1918,7 +1929,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 						else says configured without copying the raw value.
 					</p>
 					{settingGroups.length === 0
-						? <p className="config-catalog__empty">Clio reported only built-in defaults.</p>
+						? <p className="config-catalog__empty">Clio Coder reported only built-in defaults.</p>
 						: settingGroups.map(({ family, settings }, groupIndex) => (
 							<details
 								className="setting-family"
@@ -1963,7 +1974,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 				<section className="config-issues" aria-labelledby="config-issues-title">
 					<div>
 						<div className="eyebrow">INSPECTION ISSUES</div>
-						<h3 id="config-issues-title">Clio could not fully inspect every surface</h3>
+						<h3 id="config-issues-title">Clio Coder could not fully inspect every surface</h3>
 						<p>
 							Raw diagnostic text and native paths remain on the host. Use the CLI when the exact repair detail is
 							needed.
@@ -2196,8 +2207,8 @@ function CatalogCollectionFailure({ label, onRefresh }: { label: string; onRefre
 			<div>
 				<h3>{label} could not be read</h3>
 				<p>
-					The other collections remain usable. Clio's raw diagnostic stayed on the local host rather than crossing into
-					this page.
+					The other collections remain usable. Clio Coder's raw diagnostic stayed on the local host rather than crossing
+					into this page.
 				</p>
 			</div>
 			<button type="button" className="button button--quiet" onClick={onRefresh}>Retry all catalogs</button>
@@ -2214,7 +2225,7 @@ function CatalogEmptyCollection({ label, query }: { label: string; query: string
 				<p>
 					{query.length > 0
 						? "Try a broader name, description, category, capability, or provenance term."
-						: "This is an explicit empty result from the corresponding Clio listing, not a guessed absence."}
+						: "This is an explicit empty result from the corresponding Clio Coder listing, not a guessed absence."}
 				</p>
 			</div>
 		</div>
@@ -2247,15 +2258,15 @@ export const ClioCatalog = memo(function ClioCatalog({
 				</div>
 				<div>
 					<div className="eyebrow">READ-ONLY RESOURCE DISCOVERY</div>
-					<h2 id="clio-catalog-title">Map the capabilities Clio can actually see</h2>
+					<h2 id="clio-catalog-title">Map the capabilities Clio Coder can actually see</h2>
 					<p>
 						Inspect discovered agents, installed skills and extensions, and available library resources through their
-						public JSON interfaces. Verifiers remain explicitly unavailable until Clio offers a typed listing.
+						public JSON interfaces. Verifiers remain explicitly unavailable until Clio Coder offers a typed listing.
 					</p>
 				</div>
 				<div className="catalog__empty-actions">
 					<button type="button" className="button button--primary" onClick={onRefresh} disabled={pending}>
-						{pending ? "Reading Clio catalogs…" : "Inspect Clio catalogs"}
+						{pending ? "Reading Clio Coder catalogs…" : "Inspect Clio Coder catalogs"}
 					</button>
 					<button type="button" className="button button--quiet" onClick={onBack}>Back to notebook</button>
 				</div>
@@ -2367,7 +2378,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 		<section className="catalog" aria-labelledby="clio-catalog-title" aria-busy={pending}>
 			<header className="catalog__masthead">
 				<div>
-					<div className="eyebrow">CLIO CAPABILITY ATLAS · REPORTED BY CLIO</div>
+					<div className="eyebrow">CLIO CODER CAPABILITY ATLAS · REPORTED BY CLIO CODER</div>
 					<h2 id="clio-catalog-title">Agents, skills, extensions &amp; resource library</h2>
 					<p>A searchable inventory of what this project can discover—not a fictional control plane.</p>
 				</div>
@@ -2382,7 +2393,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 				</div>
 			</header>
 
-			<dl className="catalog__summary" aria-label="Clio catalog inspection summary">
+			<dl className="catalog__summary" aria-label="Clio Coder catalog inspection summary">
 				<div>
 					<dt>Agent recipes</dt>
 					<dd>{inspection.agents.availability === "available" ? inspection.agents.items.length : "—"}</dd>
@@ -2482,12 +2493,12 @@ export const ClioCatalog = memo(function ClioCatalog({
 								<div className="eyebrow">HONEST UPSTREAM BOUNDARY</div>
 								<h3>Verifier discovery is real, but it is not machine-readable yet</h3>
 								<p>
-									Clio exposes <code>clio-coder verifiers discover</code>{" "}
+									Clio Coder exposes <code>clio-coder verifiers discover</code>{" "}
 									as a formatted authoring preview. The GUI will not scrape that table or pretend its argv, cwd,
 									timeout, tags, and authority are typed facts.
 								</p>
 								<p>
-									Once Clio publishes a JSON listing, this tab can become a real checks catalog with preview and
+									Once Clio Coder publishes a JSON listing, this tab can become a real checks catalog with preview and
 									confirmation states for mutations.
 								</p>
 							</div>
@@ -2538,7 +2549,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 const usageCurrency = new Intl.NumberFormat(undefined, {
 	style: "currency",
 	currency: "USD",
-	// Cost is already a Clio-reported number. Preserve its useful precision
+	// Cost is already a Clio Coder-reported number. Preserve its useful precision
 	// instead of rounding it to a Workbench-selected accounting increment.
 	maximumSignificantDigits: 15,
 });
@@ -2573,10 +2584,10 @@ function UsageEmptyState({ pending, onRefresh, onBack }: {
 			</div>
 			<div>
 				<div className="eyebrow">PROJECT HISTORY · READ ONLY</div>
-				<h2 id="usage-notebook-title">Read the work Clio has recorded here</h2>
+				<h2 id="usage-notebook-title">Read the work Clio Coder has recorded here</h2>
 				<p>
-					This record asks Clio for project-filtered sessions, dispatch receipts, model usage, tools, skills, recipes,
-					and safe opportunity counts across a fixed 30-day window.
+					This record asks Clio Coder for project-filtered sessions, dispatch receipts, model usage, tools, skills,
+					recipes, and safe opportunity counts across a fixed 30-day window.
 				</p>
 			</div>
 			<div className="usage-notebook__empty-actions">
@@ -2626,11 +2637,11 @@ export const UsageNotebook = memo(function UsageNotebook({
 		<section className="usage-notebook" aria-labelledby="usage-notebook-title" aria-busy={pending}>
 			<header className="usage-notebook__masthead">
 				<div>
-					<div className="eyebrow">CLIO USAGE RECORD · EXPERIMENTAL SCHEMA</div>
+					<div className="eyebrow">CLIO CODER USAGE RECORD · EXPERIMENTAL SCHEMA</div>
 					<h2 id="usage-notebook-title">Thirty days of work in this project</h2>
 					<p>
 						{formatTimestamp(inspection.windowFrom)} through {formatTimestamp(inspection.windowTo)}{" "}
-						· figures are reported by Clio, not inferred from the visible conversation.
+						· figures are reported by Clio Coder, not inferred from the visible conversation.
 					</p>
 				</div>
 				<div className="usage-notebook__masthead-actions">
@@ -2653,7 +2664,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 					</dd>
 				</div>
 				<div>
-					<dt>Clio-reported cost</dt>
+					<dt>Clio Coder-reported cost</dt>
 					<dd>{totals === null ? "—" : formatUsageCost(totals.costUsd)}</dd>
 					<dd className="usage-notebook__summary-note">Recorded cost, never a GUI estimate</dd>
 				</div>
@@ -2671,7 +2682,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 
 			{!storesComplete && (
 				<p className="usage-notebook__store-note" role="note">
-					A dash means Clio could not find that local history store. It does not mean zero activity.
+					A dash means Clio Coder could not find that local history store. It does not mean zero activity.
 				</p>
 			)}
 
@@ -2687,8 +2698,8 @@ export const UsageNotebook = memo(function UsageNotebook({
 					{totals === null
 						? (
 							<p className="usage-record__empty">
-								Clio reported no token aggregate for this window. Store availability and resource observations remain
-								visible independently.
+								Clio Coder reported no token aggregate for this window. Store availability and resource observations
+								remain visible independently.
 							</p>
 						)
 						: (
@@ -2706,7 +2717,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 										</li>
 									))}
 								</ul>
-								<dl className="usage-origin-ledger" aria-label="Clio usage origins">
+								<dl className="usage-origin-ledger" aria-label="Clio Coder usage origins">
 									<div>
 										<dt>Turns</dt>
 										<dd>{totals.turns === null ? "not split" : totals.turns.toLocaleString()}</dd>
@@ -2884,7 +2895,7 @@ export const UsageNotebook = memo(function UsageNotebook({
 			<footer className="usage-notebook__method">
 				<strong>Projection boundary</strong>
 				<p>
-					Only aggregates whose Clio implementation applies the trusted project root are retained. Global audit,
+					Only aggregates whose Clio Coder implementation applies the trusted project root are retained. Global audit,
 					failure-tag, memory, and evidence rows are discarded; opportunity suggestions are reduced to counts. This is a
 					cached read-only snapshot and refreshes only when requested.
 				</p>
@@ -2910,10 +2921,10 @@ function DispatchEmptyState({ pending, onRefresh, onBack }: {
 			</div>
 			<div>
 				<div className="eyebrow">DURABLE DISPATCH · READ ONLY</div>
-				<h2 id="dispatch-ledger-title">Read Clio's installation-wide dispatch ledger</h2>
+				<h2 id="dispatch-ledger-title">Read Clio Coder's installation-wide dispatch ledger</h2>
 				<p>
-					This snapshot asks Clio for admission state, aggregate running-work heartbeats, and cumulative tokens, cost,
-					and runtime. It carries no run, agent, node, process, path, lineage, or budget identifiers.
+					This snapshot asks Clio Coder for admission state, aggregate running-work heartbeats, and cumulative tokens,
+					cost, and runtime. It carries no run, agent, node, process, path, lineage, or budget identifiers.
 				</p>
 			</div>
 			<div className="dispatch-ledger__empty-actions">
@@ -2949,11 +2960,11 @@ export const DispatchLedger = memo(function DispatchLedger({
 		<section className="dispatch-ledger" aria-labelledby="dispatch-ledger-title" aria-busy={pending}>
 			<header className="dispatch-ledger__masthead">
 				<div>
-					<div className="eyebrow">CLIO FLEET STATUS · INSTALLATION-WIDE · READ ONLY</div>
-					<h2 id="dispatch-ledger-title">Dispatch across this Clio installation</h2>
+					<div className="eyebrow">CLIO CODER FLEET STATUS · INSTALLATION-WIDE · READ ONLY</div>
+					<h2 id="dispatch-ledger-title">Dispatch across this Clio Coder installation</h2>
 					<p>
-						Clio read its durable ledger at{" "}
-						{formatTimestamp(inspection.generatedAt)}. Figures below are reported by Clio and deliberately are not
+						Clio Coder read its durable ledger at{" "}
+						{formatTimestamp(inspection.generatedAt)}. Figures below are reported by Clio Coder and deliberately are not
 						attached to the selected project.
 					</p>
 				</div>
@@ -2989,7 +3000,7 @@ export const DispatchLedger = memo(function DispatchLedger({
 					<dd className="dispatch-ledger__summary-note">Across the installation ledger</dd>
 				</div>
 				<div>
-					<dt>Clio-reported cost</dt>
+					<dt>Clio Coder-reported cost</dt>
 					<dd>{formatUsageCost(inspection.totals.costUsd)}</dd>
 					<dd className="dispatch-ledger__summary-note">Never a GUI estimate</dd>
 				</div>
@@ -3023,7 +3034,8 @@ export const DispatchLedger = memo(function DispatchLedger({
 						</div>
 					</dl>
 					<p>
-						These counts preserve Clio's own process and heartbeat classification while removing every row identity.
+						These counts preserve Clio Coder's own process and heartbeat classification while removing every row
+						identity.
 					</p>
 				</section>
 
@@ -3031,7 +3043,7 @@ export const DispatchLedger = memo(function DispatchLedger({
 					<header>
 						<div>
 							<div className="eyebrow">DURABLE TOTALS</div>
-							<h3 id="dispatch-totals-title">Cumulative work recorded by Clio</h3>
+							<h3 id="dispatch-totals-title">Cumulative work recorded by Clio Coder</h3>
 						</div>
 						<strong>ALL LEDGER ROWS</strong>
 					</header>
@@ -3054,7 +3066,7 @@ export const DispatchLedger = memo(function DispatchLedger({
 						</div>
 					</dl>
 					<p>
-						Token totals are preserved exactly as separate Clio fields; the GUI does not assume they are additive.
+						Token totals are preserved exactly as separate Clio Coder fields; the GUI does not assume they are additive.
 					</p>
 				</section>
 			</div>
@@ -3063,7 +3075,7 @@ export const DispatchLedger = memo(function DispatchLedger({
 				<strong>Snapshot boundary</strong>
 				<p>
 					The command is provider-free and read-only, but it has no project selector. Live enqueue, progress,
-					completion, node-capacity, gate, council, and retry transitions still require sanitized Clio events. The
+					completion, node-capacity, gate, council, and retry transitions still require sanitized Clio Coder events. The
 					cross-process status command cannot observe another orchestrator's in-memory retry queue, and no drain or
 					resume control is exposed here.
 				</p>
@@ -3127,8 +3139,8 @@ const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(func
 					value={prompt}
 					onChange={(event) => setPrompt(event.target.value)}
 					onKeyDown={onKeyDown}
-					placeholder={projectId === null ? "Open a project first" : "Ask Clio to do something in this project"}
-					aria-label="Prompt for Clio"
+					placeholder={projectId === null ? "Open a project first" : "Ask Clio Coder to do something in this project"}
+					aria-label="Prompt for Clio Coder"
 					rows={3}
 					disabled={projectId === null}
 				/>
@@ -3150,10 +3162,10 @@ const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(func
 			</div>
 			<div className="composer__footer">
 				{occupied && activeTurnId === null && (
-					<span className="composer__notice">Clio is finishing the previous prompt.</span>
+					<span className="composer__notice">Clio Coder is finishing the previous prompt.</span>
 				)}
 				<span className="composer__shortcut">Ctrl or Cmd + Enter sends</span>
-				<span className="composer__privacy">Prompts go only to the Clio target you configured.</span>
+				<span className="composer__privacy">Prompts go only to the Clio Coder target you configured.</span>
 			</div>
 		</form>
 	);
@@ -3258,7 +3270,7 @@ function ConversationCanvas({
 						{workspaceView === "dispatch"
 							? "INSTALLATION-WIDE"
 							: workspaceView === "effective-clio"
-							? "EFFECTIVE CLIO FOR"
+							? "EFFECTIVE CLIO CODER FOR"
 							: workspaceView === "catalog"
 							? "CAPABILITY ATLAS FOR"
 							: workspaceView === "usage"
@@ -3267,13 +3279,13 @@ function ConversationCanvas({
 					</div>
 					<h1>
 						{workspaceView === "dispatch"
-							? "Clio dispatch"
+							? "Clio Coder dispatch"
 							: open === null
 							? "No project open"
 							: open.project.displayName}
 					</h1>
 					{workspaceView === "dispatch"
-						? <p className="conversation__root">Durable fleet status across this Clio installation</p>
+						? <p className="conversation__root">Durable fleet status across this Clio Coder installation</p>
 						: open && <p className="conversation__root">{open.project.rootPath}</p>}
 				</div>
 				<div className="conversation__telemetry">
@@ -3284,7 +3296,7 @@ function ConversationCanvas({
 						/>
 					)}
 					{open && (
-						<nav className="conversation__view-switcher" aria-label="Clio views">
+						<nav className="conversation__view-switcher" aria-label="Clio Coder views">
 							{(["notebook", "effective-clio", "catalog", "usage", "dispatch"] as const).map((view) => (
 								<button
 									type="button"
@@ -3296,7 +3308,7 @@ function ConversationCanvas({
 									{view === "notebook"
 										? "Notebook"
 										: view === "effective-clio"
-										? "Effective Clio"
+										? "Effective Clio Coder"
 										: view === "catalog"
 										? "Catalog"
 										: view === "usage"
@@ -3349,9 +3361,9 @@ function ConversationCanvas({
 				tabIndex={0}
 				role="region"
 				aria-label={workspaceView === "effective-clio"
-					? "Effective Clio map"
+					? "Effective Clio Coder map"
 					: workspaceView === "catalog"
-					? "Clio capability catalog"
+					? "Clio Coder capability catalog"
 					: workspaceView === "usage"
 					? "Thirty-day project usage record"
 					: workspaceView === "dispatch"
@@ -3400,13 +3412,13 @@ function ConversationCanvas({
 						<>
 							{open.clio.lastFailure && (
 								<section className="conversation__failure" role="status">
-									<div className="eyebrow">CLIO REPORTED A FAILURE</div>
+									<div className="eyebrow">CLIO CODER REPORTED A FAILURE</div>
 									<p>{open.clio.lastFailure.summary}</p>
 									<code>{open.clio.lastFailure.code}</code>
 								</section>
 							)}
 							{(projection?.timelineTruncated === true || open.clio.session?.replayTruncated === true) && (
-								<p className="timeline-note">Earlier turns are not shown; Clio still has the full context.</p>
+								<p className="timeline-note">Earlier turns are not shown; Clio Coder still has the full context.</p>
 							)}
 							<section
 								className="evidence-timeline"
@@ -3463,7 +3475,7 @@ function ConversationCanvas({
 								activeTurn.lastToolTitle === null ? "" : ` · ${activeTurn.lastToolTitle}`
 							}${activeTurn.repeatedShapes > 0 ? ` · ${activeTurn.repeatedShapes} repeated` : ""}`
 							: open === null
-							? "Open a project folder to talk to Clio."
+							? "Open a project folder to talk to Clio Coder."
 							: "Ready for your next prompt."}
 					</span>
 				</div>
@@ -3750,18 +3762,18 @@ export const RoutingInventory = memo(function RoutingInventory({
 			<div className="settings__section-heading settings__routing-heading">
 				<div>
 					<div className="eyebrow">MODELS · WORKER ROUTING</div>
-					<h3 id="settings-routing-title">What Clio can route work to</h3>
+					<h3 id="settings-routing-title">What Clio Coder can route work to</h3>
 				</div>
 				<p>
-					Offline model facts and effective worker profiles from Clio—no endpoint probe, package mutation, or local
-					configuration rewrite.
+					Offline model facts and effective worker profiles from Clio Coder—no endpoint probe, package mutation, or
+					local configuration rewrite.
 				</p>
 			</div>
 
 			{inspection === null
 				? (
 					<div className="routing-inventory__empty">
-						<p>Read Clio's cached/configured model catalog and agent-profile bindings for this project.</p>
+						<p>Read Clio Coder's cached/configured model catalog and agent-profile bindings for this project.</p>
 						<button type="button" className="button button--quiet" onClick={refresh} disabled={pending}>
 							{pending ? "Inspecting models and routes…" : "Inspect models and routes"}
 						</button>
@@ -3797,16 +3809,20 @@ export const RoutingInventory = memo(function RoutingInventory({
 							<div className="routing-subhead">
 								<div>
 									<h4 id="routing-models-title">Offline model capabilities</h4>
-									<p>Limits and residency are Clio's cached or configured facts; they are not a health claim.</p>
+									<p>Limits and residency are Clio Coder's cached or configured facts; they are not a health claim.</p>
 								</div>
 								{inspection.models.emptyTargetCount > 0 && (
 									<small>{inspection.models.emptyTargetCount} target reported no model candidates</small>
 								)}
 							</div>
 							{inspection.models.availability === "failed"
-								? <p className="routing-collection-state is-failed">Clio's offline model listing could not be read.</p>
+								? (
+									<p className="routing-collection-state is-failed">
+										Clio Coder's offline model listing could not be read.
+									</p>
+								)
 								: targets.length === 0
-								? <p className="routing-collection-state">Clio reported no offline model candidates.</p>
+								? <p className="routing-collection-state">Clio Coder reported no offline model candidates.</p>
 								: (
 									<>
 										<div className="routing-models__controls">
@@ -3871,7 +3887,9 @@ export const RoutingInventory = memo(function RoutingInventory({
 														<strong>{profile.name}</strong>
 														<span>{catalogLabel(profile.thinkingLevel)} thinking</span>
 													</header>
-													<code>{profile.target ?? "Clio default target"} · {profile.model ?? "default model"}</code>
+													<code>
+														{profile.target ?? "Clio Coder default target"} · {profile.model ?? "default model"}
+													</code>
 													<small>{profile.runtime ?? "Runtime resolved when used"}</small>
 												</li>
 											))}
@@ -3906,8 +3924,8 @@ export const RoutingInventory = memo(function RoutingInventory({
 						</div>
 
 						<p className="routing-boundary">
-							Model and route identifiers already belong to Clio's public routing surface. Provider URLs, credentials,
-							environment, native paths, and raw warnings remain on the host.
+							Model and route identifiers already belong to Clio Coder's public routing surface. Provider URLs,
+							credentials, environment, native paths, and raw warnings remain on the host.
 						</p>
 					</>
 				)}
@@ -3928,21 +3946,21 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 	const editable = settings?.editable ?? [];
 	const targets = open?.targets ?? null;
 	return (
-		<Modal title="Clio settings" eyebrow="CONTROLS WITH EXPLICIT SCOPE" onClose={onClose} size="wide">
+		<Modal title="Clio Coder settings" eyebrow="CONTROLS WITH EXPLICIT SCOPE" onClose={onClose} size="wide">
 			<div className="settings">
 				<div className="settings__intro">
 					<div>
 						<div className="eyebrow">CONFIGURATION</div>
-						<h3>How Clio will work</h3>
+						<h3>How Clio Coder will work</h3>
 					</div>
 					<p>
-						The GUI reads and writes these values through Clio. Timing labels distinguish this session from the next
-						turn or a newly created session.
+						The Clio Coder desktop app reads and writes these values through Clio Coder. Timing labels distinguish this
+						session from the next turn or a newly created session.
 					</p>
 				</div>
-				{open === null && <p>Open a project before reading Clio's settings.</p>}
+				{open === null && <p>Open a project before reading Clio Coder's settings.</p>}
 				{open !== null && open.clio.capabilities?.settings !== true && (
-					<p className="settings__unavailable">This Clio does not expose settings over ACP.</p>
+					<p className="settings__unavailable">This Clio Coder does not expose settings over ACP.</p>
 				)}
 				{open !== null && settings === null && open.clio.capabilities?.settings === true && (
 					<button
@@ -3960,7 +3978,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 							const canEdit = editable.includes(key) && !busy;
 							const guidance = SETTING_GUIDANCE[key] ?? {
 								label: key,
-								description: "A setting Clio exposes to this GUI session.",
+								description: "A setting Clio Coder exposes to this desktop app session.",
 								scope: null,
 							};
 							return (
@@ -3996,7 +4014,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 						})}
 					</dl>
 				)}
-				{busy && <p className="settings__note">Settings change between turns. Clio is working right now.</p>}
+				{busy && <p className="settings__note">Settings change between turns. Clio Coder is working right now.</p>}
 
 				<ApprovalNotificationSetting enabled={state.desktopNotifications} onChange={onNotificationsChange} />
 
@@ -4010,7 +4028,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 							<p>Health is a point-in-time probe, never an assumed green light.</p>
 						</div>
 						{open.clio.capabilities?.targets !== true
-							? <p className="settings__unavailable">This Clio does not expose targets over ACP.</p>
+							? <p className="settings__unavailable">This Clio Coder does not expose targets over ACP.</p>
 							: targets === null
 							? (
 								<button
@@ -4022,7 +4040,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 								</button>
 							)
 							: targets.length === 0
-							? <p className="settings__note">Clio reports no configured targets.</p>
+							? <p className="settings__note">Clio Coder reports no configured targets.</p>
 							: (
 								<ul className="target-list">
 									{targets.map((target) => (
@@ -4032,7 +4050,7 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 							)}
 						{open.targetsTruncated && (
 							<p className="settings__note">
-								This list is shortened; Clio has more targets or models than are shown.
+								This list is shortened; Clio Coder has more targets or models than are shown.
 							</p>
 						)}
 						{targets !== null && targets.length > 0 && (
@@ -4235,11 +4253,11 @@ const BottomStatus = memo(
 			: "idle";
 		const autonomyEditable = open !== null && session !== null && open.clio.capabilities?.autonomy === true &&
 			!isPromptBlocked(open);
-		// Settings describe what Clio would bind next, which is a different fact from
+		// Settings describe what Clio Coder would bind next, which is a different fact from
 		// what the bound session is running on. Only show it when the two disagree.
 		//
 		// The two facts reach the bound session on different schedules and must never
-		// share a label. Clio reads target and model routing at prompt time, so a
+		// share a label. Clio Coder reads target and model routing at prompt time, so a
 		// patch to either lands on this session's next turn. Autonomy is pinned at
 		// session/new for the life of the process, so a patched global autonomy
 		// reaches only the next session and the bound one moves through

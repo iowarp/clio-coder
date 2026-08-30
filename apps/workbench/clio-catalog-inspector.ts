@@ -1,5 +1,5 @@
 /**
- * Bounded adapters for Clio's public read-only resource catalogs.
+ * Bounded adapters for Clio Coder's public read-only resource catalogs.
  *
  * The upstream JSON shapes contain fields that must not become browser data:
  * skill bodies and hashes, native user paths, arbitrary diagnostics, and source
@@ -195,7 +195,7 @@ function uniqueBy<T>(items: readonly T[], key: (item: T) => string): readonly T[
 
 export function projectAgentCatalog(value: unknown): WireCatalogAgentCollection {
 	if (!Array.isArray(value) || value.length > MAX_RAW_CATALOG_ITEMS) {
-		throw new ClioCatalogProjectionError("Clio returned an invalid agent catalog.");
+		throw new ClioCatalogProjectionError("Clio Coder returned an invalid agent catalog.");
 	}
 	const candidates = value.map(projectAgent).filter((entry): entry is WireCatalogAgent => entry !== null);
 	const projected = uniqueBy(candidates, (entry) => entry.id);
@@ -238,10 +238,10 @@ function projectSkill(value: unknown): WireCatalogSkill | null {
 
 export function projectSkillCatalog(value: unknown): WireCatalogSkillCollection {
 	if (!isRecord(value) || !Array.isArray(value.skills) || value.skills.length > MAX_RAW_CATALOG_ITEMS) {
-		throw new ClioCatalogProjectionError("Clio returned an invalid skill catalog.");
+		throw new ClioCatalogProjectionError("Clio Coder returned an invalid skill catalog.");
 	}
 	const issues = diagnosticCount(value.diagnostics);
-	if (issues === null) throw new ClioCatalogProjectionError("Clio returned invalid skill catalog diagnostics.");
+	if (issues === null) throw new ClioCatalogProjectionError("Clio Coder returned invalid skill catalog diagnostics.");
 	const candidates = value.skills.map(projectSkill).filter((entry): entry is WireCatalogSkill => entry !== null);
 	const projected = uniqueBy(candidates, (entry) => entry.name);
 	const items = projected.slice(0, MAX_WIRE_CATALOG_SKILLS);
@@ -279,10 +279,10 @@ function projectLibraryEntry(value: unknown): WireCatalogLibraryEntry | null {
 
 export function projectLibraryCatalog(value: unknown): WireCatalogLibraryCollection {
 	if (!isRecord(value) || !Array.isArray(value.entries) || value.entries.length > MAX_RAW_CATALOG_ITEMS) {
-		throw new ClioCatalogProjectionError("Clio returned an invalid library catalog.");
+		throw new ClioCatalogProjectionError("Clio Coder returned an invalid library catalog.");
 	}
 	const issues = diagnosticCount(value.diagnostics);
-	if (issues === null) throw new ClioCatalogProjectionError("Clio returned invalid library catalog diagnostics.");
+	if (issues === null) throw new ClioCatalogProjectionError("Clio Coder returned invalid library catalog diagnostics.");
 	const candidates = value.entries.map(projectLibraryEntry).filter((
 		entry,
 	): entry is WireCatalogLibraryEntry => entry !== null);
@@ -344,7 +344,7 @@ function projectExtension(value: unknown): WireCatalogExtension | null {
 
 export function projectExtensionCatalog(value: unknown): WireCatalogExtensionCollection {
 	if (!isRecord(value) || !Array.isArray(value.extensions) || value.extensions.length > MAX_RAW_CATALOG_ITEMS) {
-		throw new ClioCatalogProjectionError("Clio returned an invalid extension catalog.");
+		throw new ClioCatalogProjectionError("Clio Coder returned an invalid extension catalog.");
 	}
 	const candidates = value.extensions.map(projectExtension).filter((
 		entry,
@@ -353,7 +353,7 @@ export function projectExtensionCatalog(value: unknown): WireCatalogExtensionCol
 	const items = projected.slice(0, MAX_WIRE_CATALOG_EXTENSIONS);
 	const issueCount = items.reduce((total, item) => total + item.issueCount, 0);
 	if (issueCount > MAX_CATALOG_NUMBER) {
-		throw new ClioCatalogProjectionError("Clio returned too many extension diagnostics.");
+		throw new ClioCatalogProjectionError("Clio Coder returned too many extension diagnostics.");
 	}
 	return {
 		availability: "available",
@@ -407,7 +407,7 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 		try {
 			return project(await this.#runner.runJson(root, args));
 		} catch (error) {
-			this.#log(`Clio ${label} catalog inspection failed (${failureCode(error)}).`);
+			this.#log(`Clio Coder ${label} catalog inspection failed (${failureCode(error)}).`);
 			return failedCollection();
 		}
 	}

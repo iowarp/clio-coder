@@ -127,7 +127,7 @@ try {
 	equal(await page.getByRole("main").count(), 1);
 	equal(await page.getByRole("complementary").count(), 2);
 	equal(await page.getByRole("complementary", { name: "Run and evidence overview" }).count(), 1);
-	equal(await page.getByRole("textbox", { name: "Prompt for Clio" }).count(), 1);
+	equal(await page.getByRole("textbox", { name: "Prompt for Clio Coder" }).count(), 1);
 	equal(await page.getByText("No project open", { exact: true }).count(), 1);
 	await page.screenshot({ path: new URL("initial.png", artifactDirectory).pathname });
 
@@ -191,11 +191,11 @@ try {
 	ok(desktopRailGeometry.scrollWidth <= desktopRailGeometry.clientWidth);
 	equal(desktopRailGeometry.scrollLeft, 0);
 
-	// The first broad read-only harness surface is a real, bounded Clio graph,
+	// The first broad read-only harness surface is a real, bounded Clio Coder graph,
 	// not raw CLI JSON or a second configuration implementation in React.
-	await page.getByRole("button", { name: "Effective Clio", exact: true }).click();
-	const effectiveMap = page.getByRole("region", { name: "Effective Clio map" });
-	await effectiveMap.getByRole("heading", { name: "Why Clio behaves this way" }).waitFor();
+	await page.getByRole("button", { name: "Effective Clio Coder", exact: true }).click();
+	const effectiveMap = page.getByRole("region", { name: "Effective Clio Coder map" });
+	await effectiveMap.getByRole("heading", { name: "Why Clio Coder behaves this way" }).waitFor();
 	await effectiveMap.getByText("From source to behavior", { exact: true }).waitFor();
 	await effectiveMap.getByText("CLIO-CODER.md", { exact: true }).first().waitFor();
 	await effectiveMap.getByText("qwen3.8-27b", { exact: true }).waitFor();
@@ -241,7 +241,7 @@ try {
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "experiment-protocol" }).waitFor();
 	await page.keyboard.press("ArrowRight");
-	await catalog.getByRole("heading", { name: "Clio Lab Pack" }).waitFor();
+	await catalog.getByRole("heading", { name: "Clio Coder Lab Pack" }).waitFor();
 	await catalog.getByText("Project-scoped package", { exact: true }).waitFor();
 	await catalog.getByText("Native roots and lifecycle mutations remain host-side", { exact: true }).waitFor();
 	equal(await catalog.getByRole("tab", { name: /^Extensions/u }).getAttribute("aria-selected"), "true");
@@ -334,7 +334,7 @@ try {
 	// anything reaches the browser.
 	await page.getByRole("button", { name: "Dispatch", exact: true }).click();
 	const dispatchRecord = page.getByRole("region", { name: "Installation-wide dispatch snapshot" });
-	await dispatchRecord.getByRole("heading", { name: "Dispatch across this Clio installation" }).waitFor();
+	await dispatchRecord.getByRole("heading", { name: "Dispatch across this Clio Coder installation" }).waitFor();
 	await dispatchRecord.getByText("15,918,587", { exact: true }).waitFor();
 	await dispatchRecord.getByText("Alive", { exact: true }).waitFor();
 	await dispatchRecord.getByText("5", { exact: true }).first().waitFor();
@@ -407,7 +407,7 @@ try {
 	equal(await conversationWidth(), initialConversationWidth);
 
 	// One real conversation: prompt, mediated approval, completed turn.
-	const composer = page.getByRole("textbox", { name: "Prompt for Clio" });
+	const composer = page.getByRole("textbox", { name: "Prompt for Clio Coder" });
 	await composer.fill("Write the fixture note.");
 	await page.getByRole("button", { name: "Send" }).click();
 	await page.locator("#permission-title").waitFor();
@@ -450,7 +450,7 @@ try {
 	await page.locator("#permission-title").waitFor();
 	await page.getByRole("button", { name: "Stop" }).click();
 	await page.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor();
-	await page.getByText(/Clio was not told no/u).first().waitFor();
+	await page.getByText(/Clio Coder was not told no/u).first().waitFor();
 
 	const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
 	const blockingViolations = accessibility.violations.filter((violation) =>
@@ -606,7 +606,7 @@ try {
 		// The delete confirmation is the GUI's own, and cancelling it sends nothing.
 		await renamedRow.getByRole("button", { name: "Delete" }).click();
 		const deleteSessionDialog = resumePage.getByRole("dialog", { name: "Delete this session" });
-		await deleteSessionDialog.getByText(/Neither the GUI nor Clio can bring them back/u).waitFor();
+		await deleteSessionDialog.getByText(/Neither the desktop app nor Clio Coder can bring them back/u).waitFor();
 		await deleteSessionDialog.getByRole("button", { name: "Keep session" }).click();
 		await renamedRow.waitFor();
 
@@ -621,7 +621,7 @@ try {
 		equal(await resumePage.locator(".timeline-card--replay.is-complete").count(), 1);
 		deepEqual(
 			await replayCards.locator(".timeline-card__source").allInnerTexts(),
-			Array.from({ length: 6 }, () => "Replayed from Clio"),
+			Array.from({ length: 6 }, () => "Replayed from Clio Coder"),
 		);
 
 		await resumePage.emulateMedia({ forcedColors: "active" });
@@ -652,7 +652,7 @@ try {
 
 		// A live prompt continues the replayed branch rather than restarting it.
 		await resumePage.screenshot({ path: new URL("resumed-session.png", artifactDirectory).pathname });
-		await resumePage.getByRole("textbox", { name: "Prompt for Clio" }).fill("Continue the branch.");
+		await resumePage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("Continue the branch.");
 		await resumePage.getByRole("button", { name: "Send" }).click();
 		// The live turn is identified by being the one card that is not marked as history.
 		await resumePage.waitForFunction(() =>
@@ -777,7 +777,7 @@ try {
 
 		// A probe is the only thing that may put a health verdict on screen.
 		await settingsPage.getByRole("button", { name: "Settings", exact: true }).click();
-		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio settings" });
+		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio Coder settings" });
 		await settingsDialog.waitFor();
 		const offlineRow = settingsDialog.locator(".target-row").filter({ hasText: "offline-lab" });
 		await offlineRow.getByText("not probed").waitFor();
@@ -787,13 +787,13 @@ try {
 		// The target nobody probed keeps saying so.
 		await settingsDialog.locator(".target-row").filter({ hasText: "lmstudio" }).getByText("not probed").waitFor();
 
-		// A settings patch round-trips through Clio and never through a local file.
+		// A settings patch round-trips through Clio Coder and never through a local file.
 		await settingsDialog.getByLabel("Set orchestrator.model").selectOption("qwen3.8-4b");
 		await settingsPage.waitForFunction(() =>
 			document.querySelector<HTMLSelectElement>('[aria-label="Set orchestrator.model"]')?.value === "qwen3.8-4b"
 		);
 
-		// The deeper routing inventory uses Clio's offline catalog and effective
+		// The deeper routing inventory uses Clio Coder's offline catalog and effective
 		// worker-profile listings; opening it never probes an endpoint.
 		await settingsDialog.getByRole("button", { name: "Inspect models and routes" }).click();
 		const routingInventory = settingsDialog.locator(".settings__routing");
@@ -870,9 +870,9 @@ try {
 		ok(compactStatus.documentWidth <= compactStatus.viewport);
 		await settingsPage.setViewportSize({ width: 1600, height: 1100 });
 
-		await settingsPage.getByRole("textbox", { name: "Prompt for Clio" }).fill("What autonomy is in force?");
+		await settingsPage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("What autonomy is in force?");
 		await settingsPage.getByRole("button", { name: "Send" }).click();
-		// The gate: Clio ran the next turn under the level the GUI set.
+		// The gate: Clio Coder ran the next turn under the level the GUI set.
 		await settingsPage.getByText("This session has seen 1 prompts at autonomy read-only.").waitFor();
 		await settingsPage.close();
 	} finally {
@@ -882,7 +882,7 @@ try {
 
 	// A fifth host replays the recorded seventeen-bash run: the approval an
 	// operator missed, the silence between tool calls, and the expiry that must
-	// never reach Clio as a rejection.
+	// never reach Clio Coder as a rejection.
 	const loopScratch = await Deno.makeTempDir({ prefix: "workbench-browser-smoke-loop-" });
 	const loopHome = join(loopScratch, "home");
 	const loopProject = join(loopHome, "code", "atlas-audit");
@@ -912,7 +912,7 @@ try {
 		await loopPage.getByRole("button", { name: "Open", exact: true }).click();
 		await loopPage.getByRole("heading", { level: 1, name: "atlas-audit" }).waitFor();
 
-		await loopPage.getByRole("textbox", { name: "Prompt for Clio" }).fill("Audit the convergence study.");
+		await loopPage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("Audit the convergence study.");
 		await loopPage.getByRole("button", { name: "Send" }).click();
 
 		const banner = loopPage.locator(".approval-banner");
@@ -987,7 +987,7 @@ try {
 		);
 		equal(await loopPage.locator(".timeline-card--narrative").count(), 0, "the fixture speaks no prose");
 		ok(await loopPage.locator(".timeline-card--loop").count() > 0);
-		await loopPage.locator(".timeline-card--loop").first().getByText(/Reported by Clio/u).waitFor();
+		await loopPage.locator(".timeline-card--loop").first().getByText(/Reported by Clio Coder/u).waitFor();
 
 		// The escalated treatment arrives on its own, without another wire event.
 		await loopPage.locator(".approval-banner--escalated").waitFor({ timeout: 5_000 });
@@ -1041,18 +1041,18 @@ try {
 		await expiryPage.getByRole("button", { name: "Open", exact: true }).click();
 		await expiryPage.getByRole("heading", { level: 1, name: "unattended" }).waitFor();
 
-		await expiryPage.getByRole("textbox", { name: "Prompt for Clio" }).fill("Audit while nobody watches.");
+		await expiryPage.getByRole("textbox", { name: "Prompt for Clio Coder" }).fill("Audit while nobody watches.");
 		await expiryPage.getByRole("button", { name: "Send" }).click();
 		await expiryPage.locator(".approval-banner").waitFor();
 		// Nobody answers. The card must park the turn, not deny the tool.
 		await expiryPage.getByRole("heading", { name: "Turn stopped", exact: true }).waitFor({ timeout: 15_000 });
 		const stoppedSentence =
-			/An approval waited unanswered for the whole budget, so the GUI stopped the turn\. Clio was not told no; send a new prompt to continue\./u;
+			/An approval waited unanswered for the whole budget, so the GUI stopped the turn\. Clio Coder was not told no; send a new prompt to continue\./u;
 		await expiryPage.locator(".evidence-timeline").getByText(stoppedSentence).waitFor();
 		// The same sentence reaches a screen reader through the live region.
 		equal(await expiryPage.locator('[aria-live="assertive"]').getByText(stoppedSentence).count(), 1);
 		await expiryPage.locator(".evidence-timeline").getByText(
-			/Nobody answered\. The turn was stopped; Clio was not told no\./u,
+			/Nobody answered\. The turn was stopped; Clio Coder was not told no\./u,
 		).waitFor();
 		equal(await expiryPage.locator(".approval-banner").count(), 0);
 		equal(await expiryPage.title(), "Clio Coder");

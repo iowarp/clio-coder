@@ -1,8 +1,8 @@
 /**
- * Bounded adapter for Clio's offline model and worker-routing inventories.
+ * Bounded adapter for Clio Coder's offline model and worker-routing inventories.
  *
  * The browser cannot supply argv. Model inspection explicitly stays offline,
- * while profiles and bindings use Clio's read-only JSON listings. Only routing
+ * while profiles and bindings use Clio Coder's read-only JSON listings. Only routing
  * identifiers and typed capability facts cross the protocol; raw warnings,
  * provider configuration, URLs, credentials, environment, and paths do not.
  */
@@ -159,7 +159,7 @@ function uniqueBy<T>(items: readonly T[], key: (item: T) => string): readonly T[
 
 export function projectRoutingModels(value: unknown): WireRoutingModelCollection {
 	if (!Array.isArray(value) || value.length > MAX_RAW_ROUTING_ITEMS) {
-		throw new ClioRoutingProjectionError("Clio returned an invalid offline model listing.");
+		throw new ClioRoutingProjectionError("Clio Coder returned an invalid offline model listing.");
 	}
 	const candidates = value.map(projectModelRow).filter((row): row is ProjectedModelRow => row !== null);
 	const modelCandidates = candidates.filter((row): row is Extract<ProjectedModelRow, { kind: "model" }> =>
@@ -196,7 +196,7 @@ function projectProfile(value: unknown): WireRoutingProfile | null {
 
 export function projectRoutingProfiles(value: unknown): WireRoutingProfileCollection {
 	if (!Array.isArray(value) || value.length > MAX_RAW_ROUTING_ITEMS) {
-		throw new ClioRoutingProjectionError("Clio returned an invalid worker profile listing.");
+		throw new ClioRoutingProjectionError("Clio Coder returned an invalid worker profile listing.");
 	}
 	const candidates = value.map(projectProfile).filter((profile): profile is WireRoutingProfile => profile !== null);
 	const projected = uniqueBy(candidates, (profile) => profile.name);
@@ -226,7 +226,7 @@ function projectBinding(value: unknown): WireRoutingBinding | null {
 
 export function projectRoutingBindings(value: unknown): WireRoutingBindingCollection {
 	if (!Array.isArray(value) || value.length > MAX_RAW_ROUTING_ITEMS) {
-		throw new ClioRoutingProjectionError("Clio returned an invalid agent profile binding listing.");
+		throw new ClioRoutingProjectionError("Clio Coder returned an invalid agent profile binding listing.");
 	}
 	const candidates = value.map(projectBinding).filter((binding): binding is WireRoutingBinding => binding !== null);
 	const projected = uniqueBy(candidates, (binding) => binding.agentId);
@@ -284,7 +284,7 @@ export class ClioCliRoutingInspector implements ClioRoutingInspector {
 		try {
 			return project(await this.#runner.runJson(root, args));
 		} catch (error) {
-			this.#log(`Clio ${label} routing inspection failed (${failureCode(error)}).`);
+			this.#log(`Clio Coder ${label} routing inspection failed (${failureCode(error)}).`);
 			return failed();
 		}
 	}

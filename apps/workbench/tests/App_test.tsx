@@ -97,8 +97,8 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	match(html, /aria-live="polite"/u);
 	match(html, /class="file-tree"/u);
 	match(html, /class="file-node file-node--file"/u);
-	match(html, /aria-label="Prompt for Clio"/u);
-	match(html, /Prompts go only to the Clio target you configured/u);
+	match(html, /aria-label="Prompt for Clio Coder"/u);
+	match(html, /Prompts go only to the Clio Coder target you configured/u);
 	match(html, /Collapse projects, files, and sessions/u);
 	match(html, /Collapse run and evidence overview/u);
 	equal((html.match(/<main/gu) ?? []).length, 1);
@@ -110,7 +110,7 @@ Deno.test("the shell renders three truthful regions with accessible landmarks an
 	ok(!html.includes("No prompt leaves this machine"));
 });
 
-Deno.test("the Effective Clio map renders provenance, apply timing, redaction, and bounded issues without raw JSON", () => {
+Deno.test("the Effective Clio Coder map renders provenance, apply timing, redaction, and bounded issues without raw JSON", () => {
 	const html = renderToStaticMarkup(
 		<EffectiveClioMap
 			inspection={configInspectionFixture()}
@@ -120,7 +120,7 @@ Deno.test("the Effective Clio map renders provenance, apply timing, redaction, a
 		/>,
 	);
 
-	match(html, /Why Clio behaves this way/u);
+	match(html, /Why Clio Coder behaves this way/u);
 	match(html, /From source to behavior/u);
 	match(html, /Project context/u);
 	match(html, /Next turn/u);
@@ -128,7 +128,7 @@ Deno.test("the Effective Clio map renders provenance, apply timing, redaction, a
 	match(html, /Estimated context cost/u);
 	match(html, /orchestrator\.model/u);
 	match(html, /qwen3\.8-27b/u);
-	match(html, /Clio could not fully inspect every surface/u);
+	match(html, /Clio Coder could not fully inspect every surface/u);
 	match(html, /Project sources use project-relative paths/u);
 	ok(!html.includes("sourcePath"));
 	ok(!html.includes("issueCounts"));
@@ -201,7 +201,7 @@ Deno.test("the Dispatch snapshot is installation-wide and omits raw fleet identi
 			onBack={() => undefined}
 		/>,
 	);
-	match(html, /Dispatch across this Clio installation/u);
+	match(html, /Dispatch across this Clio Coder installation/u);
 	match(html, /Installation-wide dispatch summary/u);
 	match(html, /15,918,587/u);
 	match(html, /Alive/u);
@@ -221,7 +221,7 @@ Deno.test("the routing inventory renders offline model limits and explicit agent
 		/>,
 	);
 
-	match(html, /What Clio can route work to/u);
+	match(html, /What Clio Coder can route work to/u);
 	match(html, /qwen3\.8-27b/u);
 	match(html, /262,144/u);
 	match(html, /32,768/u);
@@ -255,7 +255,7 @@ Deno.test("the observatory summarizes recorded facts without inventing telemetry
 				id: "turn-1:tool:check",
 				kind: "tool",
 				title: "Run project checks",
-				summary: "Clio ran the configured checks.",
+				summary: "Clio Coder ran the configured checks.",
 				status: "failed",
 				turnId: "turn-1",
 				origin: "live",
@@ -284,7 +284,7 @@ Deno.test("reported terminal usage becomes a legible per-turn record and a visib
 			id: "turn-1:terminal",
 			kind: "outcome",
 			title: "Turn complete",
-			summary: "Clio finished this turn.",
+			summary: "Clio Coder finished this turn.",
 			detail: "end_turn",
 			status: "complete",
 			turnId: "turn-1",
@@ -299,7 +299,7 @@ Deno.test("reported terminal usage becomes a legible per-turn record and a visib
 	const html = render(stateWith(workspace));
 
 	match(html, /Reported token record/u);
-	match(html, /Token fields reported by Clio for this turn/u);
+	match(html, /Token fields reported by Clio Coder for this turn/u);
 	match(html, /aria-label="1 turn report"/u);
 	match(html, /aria-label="Run and evidence details"/u);
 	match(html, /Prompt \+ context/u);
@@ -326,7 +326,7 @@ Deno.test("with no project open the rail offers a path field and the canvas expl
 	match(html, /The desktop app enforces the project boundary in its own code/u);
 	match(html, /No project open/u);
 	match(html, />START</u);
-	ok(!html.includes("Clio is finishing the previous prompt."));
+	ok(!html.includes("Clio Coder is finishing the previous prompt."));
 	ok(!html.includes("sandbox"));
 });
 
@@ -401,24 +401,24 @@ Deno.test("an unknown session is explained honestly and cannot be resumed or del
 		clio: clioSnapshotFixture("idle", { session: null }),
 	});
 	const html = render(stateWith(workspace));
-	match(html, /Clio cannot tell whether another process still holds this session\./u);
+	match(html, /Clio Coder cannot tell whether another process still holds this session\./u);
 	ok((html.match(/disabled=""/gu) ?? []).length >= 2);
 });
 
-Deno.test("a Clio failure is visible in the conversation region without opening anything", () => {
+Deno.test("a Clio Coder failure is visible in the conversation region without opening anything", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		clio: clioSnapshotFixture("failed", {
 			session: null,
-			lastFailure: { code: "acp-process-exited", summary: "Clio exited before the session was bound." },
+			lastFailure: { code: "acp-process-exited", summary: "Clio Coder exited before the session was bound." },
 		}),
 	});
 	const html = render(stateWith(workspace));
-	match(html, /CLIO REPORTED A FAILURE/u);
-	match(html, /Clio exited before the session was bound\./u);
+	match(html, /CLIO CODER REPORTED A FAILURE/u);
+	match(html, /Clio Coder exited before the session was bound\./u);
 	match(html, /acp-process-exited/u);
 });
 
-Deno.test("truncated replay says so without claiming Clio lost the context", () => {
+Deno.test("truncated replay says so without claiming Clio Coder lost the context", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		timeline: [{
 			id: "turn-1:request",
@@ -435,11 +435,11 @@ Deno.test("truncated replay says so without claiming Clio lost the context", () 
 		timelineTruncated: true,
 	});
 	const html = render(stateWith(workspace));
-	match(html, /earlier turns are not shown; Clio still has the full context/iu);
+	match(html, /earlier turns are not shown; Clio Coder still has the full context/iu);
 	match(html, /timeline-card--replay/u);
 	match(html, /is-replayed/u);
 	match(html, />earlier</u);
-	match(html, /Replayed from Clio/u);
+	match(html, /Replayed from Clio Coder/u);
 	match(html, />replayed</u);
 	ok(!html.includes("<time"), "replay history must render without an invented time");
 });
@@ -458,12 +458,12 @@ Deno.test("a command notice is rendered as an alert the operator can dismiss", (
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "conflict",
-			message: "Clio is still working on the previous prompt. Cancel it or wait.",
+			message: "Clio Coder is still working on the previous prompt. Cancel it or wait.",
 		}, { sequence: 2 }),
 	});
 	const html = render(state);
 	match(html, /role="alert"/u);
-	match(html, /Clio is still working on the previous prompt\. Cancel it or wait\./u);
+	match(html, /Clio Coder is still working on the previous prompt\. Cancel it or wait\./u);
 	match(html, /Dismiss notification/u);
 });
 
@@ -504,7 +504,7 @@ Deno.test("the session rail renders state, attribution, and the actions each ses
 	match(html, />Resume</u);
 	match(html, />Rename</u);
 	match(html, />Delete</u);
-	match(html, /This list is shortened; Clio has more sessions than are shown\./u);
+	match(html, /This list is shortened; Clio Coder has more sessions than are shown\./u);
 	ok(!html.includes("fixture-session"));
 });
 
@@ -538,9 +538,9 @@ Deno.test("a resumed session with truncated replay says so without claiming lost
 		timelineTruncated: false,
 	});
 	const html = render(stateWith(workspace));
-	match(html, /Earlier turns are not shown; Clio still has the full context\./u);
+	match(html, /Earlier turns are not shown; Clio Coder still has the full context\./u);
 	match(html, /timeline-card--replay/u);
-	match(html, /Replayed from Clio/u);
+	match(html, /Replayed from Clio Coder/u);
 	ok(!html.includes("<time"), "resumed replay history must render without an invented time");
 });
 
@@ -550,14 +550,14 @@ Deno.test("an unknown session can be neither resumed nor deleted, and says why",
 		clio: clioSnapshotFixture("idle", { session: null }),
 	});
 	const html = render(stateWith(workspace));
-	match(html, /Clio cannot tell whether another process still holds this session\./u);
+	match(html, /Clio Coder cannot tell whether another process still holds this session\./u);
 	const resumeDisabled = /<button[^>]*disabled=""[^>]*>Resume<\/button>/u.test(html);
 	const deleteDisabled = /<button[^>]*disabled=""[^>]*>Delete<\/button>/u.test(html);
 	ok(resumeDisabled, "resume must be disabled for an unknown session");
 	ok(deleteDisabled, "delete must be disabled for an unknown session");
 });
 
-Deno.test("a Clio that cannot list, label, or delete sessions hides those controls honestly", () => {
+Deno.test("a Clio Coder that cannot list, label, or delete sessions hides those controls honestly", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		sessions: [sessionSummaryFixture("session-alpha-0001", { hosted: true, state: "open" })],
 		clio: clioSnapshotFixture("idle", {
@@ -574,7 +574,7 @@ Deno.test("a Clio that cannot list, label, or delete sessions hides those contro
 		}),
 	});
 	const html = render(stateWith(workspace));
-	match(html, /This Clio cannot list its earlier sessions over ACP\./u);
+	match(html, /This Clio Coder cannot list its earlier sessions over ACP\./u);
 	// The file toolbar has its own Rename; only the session row's must disappear.
 	const sessionActions = html.slice(html.indexOf("session-row__actions"), html.indexOf("</article>"));
 	ok(!sessionActions.includes(">Rename<"), "the rename control must be absent without the label capability");
@@ -668,9 +668,9 @@ Deno.test("the settings page claims a target's health only after that target was
 	match(html, /12 ms/u);
 	match(html, /not probed/u);
 	match(html, /A target&#x27;s health is shown only after you probe it\./u);
-	match(html, /This list is shortened; Clio has more targets or models than are shown\./u);
+	match(html, /This list is shortened; Clio Coder has more targets or models than are shown\./u);
 	match(html, /orchestrator\.thinkingLevel/u);
-	match(html, /Clio target/u);
+	match(html, /Clio Coder target/u);
 	match(html, /Reasoning effort/u);
 	match(html, /Default working freedom/u);
 	match(html, /NEXT TURN/u);
@@ -681,7 +681,7 @@ Deno.test("the settings page claims a target's health only after that target was
 	ok(!offlineRow.includes("12 ms"));
 });
 
-Deno.test("a Clio without the targets capability says so instead of showing an empty list", () => {
+Deno.test("a Clio Coder without the targets capability says so instead of showing an empty list", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		clio: clioSnapshotFixture("idle", {
 			capabilities: {
@@ -697,8 +697,8 @@ Deno.test("a Clio without the targets capability says so instead of showing an e
 		}),
 	});
 	const html = render(appReducer(stateWith(workspace), { type: "settings.opened", open: true }));
-	match(html, /This Clio does not expose settings over ACP\./u);
-	match(html, /This Clio does not expose targets over ACP\./u);
+	match(html, /This Clio Coder does not expose settings over ACP\./u);
+	match(html, /This Clio Coder does not expose targets over ACP\./u);
 	ok(!html.includes("Probe "));
 });
 
@@ -753,7 +753,7 @@ Deno.test("a patched target or model is labelled next turn while a patched auton
 	match(routingOnly, /offline-lab · stub-tiny/u);
 	ok(!routingOnly.includes("Next session"), "an autonomy that already matches the session must add no row");
 
-	// Clio pins autonomy at session/new for the life of the bound session, so a
+	// Clio Coder pins autonomy at session/new for the life of the bound session, so a
 	// global autonomy patch reaches only the session bound after this one.
 	const autonomyOnly = render(stateWith(workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		settings: {
@@ -769,7 +769,7 @@ Deno.test("a patched target or model is labelled next turn while a patched auton
 	match(autonomyOnly, /Next session/u);
 	match(autonomyOnly, /read only autonomy/u);
 	ok(!autonomyOnly.includes("Next turn"), "a pinned autonomy must never be announced as this session's next turn");
-	// The bound session keeps reporting the level Clio is actually enforcing.
+	// The bound session keeps reporting the level Clio Coder is actually enforcing.
 	match(autonomyOnly, /inherited from settings/u);
 });
 
@@ -898,7 +898,7 @@ Deno.test("a tool call that has been open past thirty seconds says so", () => {
 	match(html, /timeline-card--long/u);
 });
 
-Deno.test("a repeated command shape is reported as Clio's finding, never as a GUI guess", () => {
+Deno.test("a repeated command shape is reported as Clio Coder's finding, never as a GUI guess", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
 		clio: clioSnapshotFixture("running"),
 		activeTurn: {
@@ -911,7 +911,7 @@ Deno.test("a repeated command shape is reported as Clio's finding, never as a GU
 		timeline: [{
 			id: "turn-1:loop-1",
 			kind: "loop",
-			title: "Clio blocked a repeated bash call",
+			title: "Clio Coder blocked a repeated bash call",
 			summary: "Repeated 3 times; 1 of 8 blocks used this turn (block).",
 			status: "complete",
 			turnId: "turn-1",
@@ -922,8 +922,8 @@ Deno.test("a repeated command shape is reported as Clio's finding, never as a GU
 		}],
 	});
 	const html = render(stateWith(workspace));
-	match(html, /Clio blocked a repeated bash call/u);
-	match(html, /Reported by Clio/u);
+	match(html, /Clio Coder blocked a repeated bash call/u);
+	match(html, /Reported by Clio Coder/u);
 	match(html, /17 tool calls/u);
 	match(html, /2 repeated/u);
 	match(html, /bash: git log --all --stat/u);

@@ -1,5 +1,5 @@
 /**
- * Project-scoped projection of Clio's experimental cross-session usage report.
+ * Project-scoped projection of Clio Coder's experimental cross-session usage report.
  *
  * The upstream JSONL mixes repo-filtered rows with global audit, evidence, and
  * memory facts. The GUI deliberately retains only the rows whose upstream
@@ -103,11 +103,11 @@ function cost(value: unknown): number | null {
 }
 
 function requiredCount(record: Record<string, unknown>, key: string, label: string): number {
-	return count(record[key]) ?? projectionError(`Clio returned an invalid ${label} ${key}.`);
+	return count(record[key]) ?? projectionError(`Clio Coder returned an invalid ${label} ${key}.`);
 }
 
 function requiredCost(record: Record<string, unknown>, key: string, label: string): number {
-	return cost(record[key]) ?? projectionError(`Clio returned an invalid ${label} ${key}.`);
+	return cost(record[key]) ?? projectionError(`Clio Coder returned an invalid ${label} ${key}.`);
 }
 
 function totals(
@@ -130,7 +130,7 @@ function projectTotals(record: Record<string, unknown>): WireHistoricalUsageTota
 	const originKeys = ["turns", "sideQuestions", "handoffs"] as const;
 	const present = originKeys.filter((key) => Object.hasOwn(record, key));
 	if (present.length !== 0 && present.length !== originKeys.length) {
-		projectionError("Clio returned an incomplete usage origin split.");
+		projectionError("Clio Coder returned an incomplete usage origin split.");
 	}
 	return {
 		...totals(record, "usage total"),
@@ -143,13 +143,13 @@ function projectTotals(record: Record<string, unknown>): WireHistoricalUsageTota
 function projectModel(record: Record<string, unknown>): WireUsageModel {
 	const provider = exactText(record.providerId, 128);
 	const model = exactText(record.attributedModelId, 256);
-	if (provider === null || model === null) projectionError("Clio returned invalid model usage attribution.");
+	if (provider === null || model === null) projectionError("Clio Coder returned invalid model usage attribution.");
 	return { provider, model, ...totals(record, "model usage") };
 }
 
 function projectTool(record: Record<string, unknown>): WireUsageTool {
 	const name = exactText(record.tool, 128);
-	if (name === null) projectionError("Clio returned an invalid usage tool name.");
+	if (name === null) projectionError("Clio Coder returned an invalid usage tool name.");
 	return {
 		name,
 		calls: requiredCount(record, "count", "tool usage"),
@@ -164,13 +164,13 @@ function limited<T>(items: readonly T[], maximum: number): { items: readonly T[]
 }
 
 function setSingleton<T>(current: T | undefined, value: T, label: string): T {
-	if (current !== undefined) projectionError(`Clio returned duplicate ${label} rows.`);
+	if (current !== undefined) projectionError(`Clio Coder returned duplicate ${label} rows.`);
 	return value;
 }
 
 export function projectUsageInspection(rows: readonly unknown[], inspectedAt: string): WireUsageInspection {
 	if (rows.length === 0 || rows.length > MAX_USAGE_INSPECT_ROWS || timestamp(inspectedAt) === null) {
-		projectionError("Clio returned an invalid usage report frame.");
+		projectionError("Clio Coder returned an invalid usage report frame.");
 	}
 
 	let windowFrom: string | undefined;
@@ -191,18 +191,18 @@ export function projectUsageInspection(rows: readonly unknown[], inspectedAt: st
 
 	for (const value of rows) {
 		if (!isRecord(value) || value.schema !== "experimental" || value.windowDays !== 30) {
-			projectionError("Clio returned an incompatible experimental usage row.");
+			projectionError("Clio Coder returned an incompatible experimental usage row.");
 		}
 		const from = timestamp(value.from);
 		const to = timestamp(value.to);
 		if (from === null || to === null || Date.parse(from) > Date.parse(to)) {
-			projectionError("Clio returned an invalid usage window.");
+			projectionError("Clio Coder returned an invalid usage window.");
 		}
 		if (windowFrom === undefined) {
 			windowFrom = from;
 			windowTo = to;
 		} else if (windowFrom !== from || windowTo !== to) {
-			projectionError("Clio returned inconsistent usage windows.");
+			projectionError("Clio Coder returned inconsistent usage windows.");
 		}
 
 		if (value.kind === "opportunity") {
@@ -215,31 +215,31 @@ export function projectUsageInspection(rows: readonly unknown[], inspectedAt: st
 		}
 		if (value.kind !== "fact") continue;
 		const fact = exactText(value.fact, 64);
-		if (fact === null) projectionError("Clio returned an invalid usage fact discriminator.");
+		if (fact === null) projectionError("Clio Coder returned an invalid usage fact discriminator.");
 		switch (fact) {
 			case "sessions": {
-				if (sessionsMissing) projectionError("Clio contradicted the session store state.");
+				if (sessionsMissing) projectionError("Clio Coder contradicted the session store state.");
 				const projected = count(value.value);
-				if (projected === null) projectionError("Clio returned an invalid session count.");
+				if (projected === null) projectionError("Clio Coder returned an invalid session count.");
 				sessionCount = setSingleton(sessionCount, projected, "session count");
 				break;
 			}
 			case "session-store-missing":
 				if (sessionsMissing || sessionCount !== undefined) {
-					projectionError("Clio contradicted the session store state.");
+					projectionError("Clio Coder contradicted the session store state.");
 				}
 				sessionsMissing = true;
 				break;
 			case "dispatch-runs": {
-				if (receiptsMissing) projectionError("Clio contradicted the receipt store state.");
+				if (receiptsMissing) projectionError("Clio Coder contradicted the receipt store state.");
 				const projected = count(value.value);
-				if (projected === null) projectionError("Clio returned an invalid dispatch run count.");
+				if (projected === null) projectionError("Clio Coder returned an invalid dispatch run count.");
 				dispatchRunCount = setSingleton(dispatchRunCount, projected, "dispatch run count");
 				break;
 			}
 			case "receipt-store-missing":
 				if (receiptsMissing || dispatchRunCount !== undefined) {
-					projectionError("Clio contradicted the receipt store state.");
+					projectionError("Clio Coder contradicted the receipt store state.");
 				}
 				receiptsMissing = true;
 				break;
@@ -249,22 +249,24 @@ export function projectUsageInspection(rows: readonly unknown[], inspectedAt: st
 			case "model-usage": {
 				const model = projectModel(value);
 				const key = `${model.provider}\u001f${model.model}`;
-				if (models.has(key)) projectionError("Clio returned duplicate model usage rows.");
+				if (models.has(key)) projectionError("Clio Coder returned duplicate model usage rows.");
 				models.set(key, model);
 				break;
 			}
 			case "top-tool": {
 				const tool = projectTool(value);
-				if (tools.has(tool.name)) projectionError("Clio returned duplicate tool usage rows.");
+				if (tools.has(tool.name)) projectionError("Clio Coder returned duplicate tool usage rows.");
 				tools.set(tool.name, tool);
 				break;
 			}
 			case "skill-activated":
 			case "skill-never-activated": {
 				const name = exactText(value.skill, 128);
-				if (name === null || skills.has(name)) projectionError("Clio returned invalid or duplicate skill usage rows.");
+				if (name === null || skills.has(name)) {
+					projectionError("Clio Coder returned invalid or duplicate skill usage rows.");
+				}
 				const activations = fact === "skill-activated" ? positiveCount(value.activations) : 0;
-				if (activations === null) projectionError("Clio returned an invalid skill activation count.");
+				if (activations === null) projectionError("Clio Coder returned an invalid skill activation count.");
 				skills.set(name, { name, activations, observedInWindow: activations > 0 });
 				break;
 			}
@@ -272,7 +274,7 @@ export function projectUsageInspection(rows: readonly unknown[], inspectedAt: st
 				const agentId = exactText(value.agentId, 128);
 				const runs = positiveCount(value.runs);
 				if (agentId === null || runs === null || recipes.has(agentId)) {
-					projectionError("Clio returned invalid or duplicate recipe usage rows.");
+					projectionError("Clio Coder returned invalid or duplicate recipe usage rows.");
 				}
 				recipes.set(agentId, { agentId, runs });
 				break;
@@ -289,9 +291,11 @@ export function projectUsageInspection(rows: readonly unknown[], inspectedAt: st
 		}
 	}
 
-	if (windowFrom === undefined || windowTo === undefined) projectionError("Clio returned no usage window.");
-	if (!sessionsMissing && sessionCount === undefined) projectionError("Clio omitted the session store state.");
-	if (!receiptsMissing && dispatchRunCount === undefined) projectionError("Clio omitted the receipt store state.");
+	if (windowFrom === undefined || windowTo === undefined) projectionError("Clio Coder returned no usage window.");
+	if (!sessionsMissing && sessionCount === undefined) projectionError("Clio Coder omitted the session store state.");
+	if (!receiptsMissing && dispatchRunCount === undefined) {
+		projectionError("Clio Coder omitted the receipt store state.");
+	}
 
 	const boundedModels = limited(
 		[...models.values()].sort((left, right) =>
@@ -371,33 +375,33 @@ export class ClioCliUsageInspector implements ClioUsageInspector {
 		} catch (error) {
 			if (!(error instanceof ClioReadCommandError)) throw error;
 			if (error.code === "spawn") {
-				throw new ClioUsageInspectError("not-ready", "The GUI could not start Clio's usage inspector.");
+				throw new ClioUsageInspectError("not-ready", "The GUI could not start Clio Coder's usage inspector.");
 			}
 			if (error.code === "timeout") {
-				throw new ClioUsageInspectError("not-ready", "Clio's usage inspection did not finish in time.");
+				throw new ClioUsageInspectError("not-ready", "Clio Coder's usage inspection did not finish in time.");
 			}
 			if (error.code === "exit") {
 				const unsupported = /(?:unknown|unsupported).{0,32}(?:command|usage)|usage.{0,32}(?:unknown|unsupported)/iu
 					.test(error.diagnostic);
-				this.#log(`Clio usage inspector exited with code ${error.exitCode ?? "unknown"}.`);
+				this.#log(`Clio Coder usage inspector exited with code ${error.exitCode ?? "unknown"}.`);
 				throw new ClioUsageInspectError(
 					unsupported ? "unsupported" : "not-ready",
 					unsupported
-						? "This Clio version does not provide project usage inspection."
-						: "Clio could not inspect usage for this project.",
+						? "This Clio Coder version does not provide project usage inspection."
+						: "Clio Coder could not inspect usage for this project.",
 				);
 			}
-			throw new ClioUsageInspectError("internal", "Clio returned an invalid or oversized project usage report.");
+			throw new ClioUsageInspectError("internal", "Clio Coder returned an invalid or oversized project usage report.");
 		}
 
 		try {
 			return projectUsageInspection(rows, new Date(this.#now()).toISOString());
 		} catch (error) {
 			if (!(error instanceof ClioUsageProjectionError)) throw error;
-			this.#log("Clio usage projection rejected an incompatible experimental row.");
+			this.#log("Clio Coder usage projection rejected an incompatible experimental row.");
 			throw new ClioUsageInspectError(
 				"internal",
-				"Clio's experimental usage schema is not compatible with this GUI build.",
+				"Clio Coder's experimental usage schema is not compatible with this GUI build.",
 			);
 		}
 	}

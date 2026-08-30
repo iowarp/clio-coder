@@ -160,7 +160,7 @@ export function catalogInspectionFixture(): WireCatalogInspection {
 			availability: "available",
 			items: [{
 				id: "clio-lab-pack",
-				name: "Clio Lab Pack",
+				name: "Clio Coder Lab Pack",
 				version: "2.1.0",
 				description: "Contributes research agents, prompts, and skills to this project.",
 				scope: "project",

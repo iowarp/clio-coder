@@ -2,7 +2,7 @@
  * Workbench UI state: the recent-project list, the refuse-to-open guards, and
  * the host-side directory browser.
  *
- * This is Workbench state, not Clio configuration. The only file it owns is
+ * This is Workbench state, not Clio Coder configuration. The only file it owns is
  * `projects.json` under the Workbench state directory. Deno's read/write grants
  * are broad at launch, so the boundary that keeps the operator away from `/`,
  * `$HOME`, dot-config directories, and system trees is enforced here, in

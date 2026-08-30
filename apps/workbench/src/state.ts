@@ -248,7 +248,7 @@ function expectAbsolutePath(value: unknown, label: string): string {
 export function workspaceConsistencyError(workspace: WireProjectWorkspace): string | null {
 	const awaiting = workspace.clio.phase === "awaiting-approval";
 	if (awaiting !== (workspace.pendingPermission !== null)) {
-		return "pendingPermission must be present exactly while Clio awaits approval";
+		return "pendingPermission must be present exactly while Clio Coder awaits approval";
 	}
 	if (workspace.pendingPermission !== null && workspace.activeTurn === null) {
 		return "pendingPermission requires an active turn";
@@ -433,12 +433,12 @@ function announcementFor(event: ServerEvent): string | null {
 		case "turn.permission.requested":
 			return `${event.payload.title} needs your approval`;
 		case "turn.terminal":
-			return event.payload.outcome === "completed" ? "Clio finished this turn." : event.payload.summary;
+			return event.payload.outcome === "completed" ? "Clio Coder finished this turn." : event.payload.summary;
 		case "turn.loop":
-			return `Clio blocked a repeated ${event.payload.tool} call`;
+			return `Clio Coder blocked a repeated ${event.payload.tool} call`;
 		case "clio.state":
 			return event.payload.snapshot.phase === "failed"
-				? (event.payload.snapshot.lastFailure?.summary ?? "Clio failed.")
+				? (event.payload.snapshot.lastFailure?.summary ?? "Clio Coder failed.")
 				: null;
 		case "project.opened":
 			return `${event.payload.workspace.project.displayName} is open`;

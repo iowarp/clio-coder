@@ -71,7 +71,7 @@ if (command === "agents --json") {
 			id: "fixture-lab-pack",
 			name: "Fixture Lab Pack",
 			version: "2.1.0",
-			description: "Contributes research agents, prompts, and skills to Clio.",
+			description: "Contributes research agents, prompts, and skills to Clio Coder.",
 			scope: "project",
 			rootPath: "/home/operator/project/.clio-coder/extensions/fixture-lab-pack",
 			manifestPath: "/home/operator/project/.clio-coder/extensions/fixture-lab-pack/clio-coder-extension.yaml",

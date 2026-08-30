@@ -956,7 +956,7 @@ Deno.test("a second prompt during an active turn is refused without disturbing t
 		const conflictEvent = conflict.at(-1);
 		ok(conflictEvent?.kind === "command.error");
 		equal(conflictEvent.payload.code, "conflict");
-		equal(conflictEvent.payload.message, "Clio is still working on the previous prompt. Cancel it or wait.");
+		equal(conflictEvent.payload.message, "Clio Coder is still working on the previous prompt. Cancel it or wait.");
 		equal(conflictEvent.payload.requestId, "request-second");
 
 		await sendCommand(socket, "request-cancel", "turn.cancel", { projectId, turnId });
@@ -997,7 +997,7 @@ Deno.test("the last socket closing during a turn stops it after the grace window
 			equal(workspace.activeTurn, null);
 			const approval = workspace.timeline.find((item) => item.kind === "approval");
 			ok(approval);
-			ok(approval.summary.includes("Clio was not told no"));
+			ok(approval.summary.includes("Clio Coder was not told no"));
 			const outcome = workspace.timeline.find((item) => item.kind === "outcome" || item.kind === "failure");
 			ok(outcome);
 			ok(outcome.detail === "client-disconnected" || outcome.summary.includes("window went away"));
@@ -1159,7 +1159,7 @@ Deno.test("three prompts share one session and the third sees the first two", as
 	}
 });
 
-Deno.test("closing and reopening a session replays the branch Clio will extend", async () => {
+Deno.test("closing and reopening a session replays the branch Clio Coder will extend", async () => {
 	const fixture = await startFixture({ scenario: "resume" });
 	let socket: RawWebSocket | undefined;
 	try {
@@ -1493,7 +1493,7 @@ Deno.test("settings, targets, and autonomy round-trip over the socket and reach 
 		equal(stated.payload.snapshot.session?.autonomy, "read-only");
 		equal(stated.payload.snapshot.session?.autonomySource, "session");
 
-		// The M4 gate: what the GUI set is what Clio ran the next turn under.
+		// The M4 gate: what the GUI set is what Clio Coder ran the next turn under.
 		await sendCommand(socket, "request-turn", "turn.start", { projectId, prompt: "What autonomy is in force?" });
 		const turn = await collectThrough(socket, "turn.terminal");
 		const answer = turn.filter((event) => event.kind === "turn.text").map((event) => event.payload.text).join("");

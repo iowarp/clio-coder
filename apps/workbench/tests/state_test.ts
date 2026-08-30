@@ -168,7 +168,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 		}, { sequence: 4 }),
 	});
 	equal(state.open?.projection.activeTurn?.toolCalls, 1);
-	// Clio's own name for the call rather than the generic kind label.
+	// Clio Coder's own name for the call rather than the generic kind label.
 	equal(state.open?.projection.activeTurn?.lastToolTitle, "reading");
 
 	state = appReducer(state, {
@@ -176,7 +176,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 		event: serverEventFixture("turn.terminal", {
 			outcome: "completed",
 			code: "clio-completed",
-			summary: "Clio finished this turn.",
+			summary: "Clio Coder finished this turn.",
 			source: "reported-by-clio",
 		}, { sequence: 5 }),
 	});
@@ -245,20 +245,20 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "conflict",
-			message: "Clio is still working on the previous prompt. Cancel it or wait.",
+			message: "Clio Coder is still working on the previous prompt. Cancel it or wait.",
 			requestId: "request-1",
 		}, { sequence: 2 }),
 	});
 	equal(state.notice?.tone, "warning");
 	equal(state.pendingTurnStart, null);
-	equal(state.announcement, "Clio is still working on the previous prompt. Cancel it or wait.");
+	equal(state.announcement, "Clio Coder is still working on the previous prompt. Cancel it or wait.");
 
 	state = appReducer(state, { type: "config.inspect.submitted", requestId: "request-config" });
 	state = appReducer(state, {
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "not-ready",
-			message: "Clio could not inspect configuration.",
+			message: "Clio Coder could not inspect configuration.",
 			requestId: "request-config",
 		}, { sequence: 3 }),
 	});
@@ -269,7 +269,7 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "not-ready",
-			message: "Clio could not inspect catalogs.",
+			message: "Clio Coder could not inspect catalogs.",
 			requestId: "request-catalog",
 		}, { sequence: 4 }),
 	});
@@ -280,7 +280,7 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "not-ready",
-			message: "Clio could not inspect project usage.",
+			message: "Clio Coder could not inspect project usage.",
 			requestId: "request-usage",
 		}, { sequence: 5 }),
 	});
@@ -291,7 +291,7 @@ Deno.test("a command error becomes a visible notice and releases the composer", 
 		type: "host.event",
 		event: serverEventFixture("command.error", {
 			code: "not-ready",
-			message: "Clio could not inspect routing.",
+			message: "Clio Coder could not inspect routing.",
 			requestId: "request-routing",
 		}, { sequence: 6 }),
 	});
@@ -467,7 +467,7 @@ Deno.test("a reconnected socket restarts the sequence window", () => {
 	equal(state.open?.clio.phase, "idle");
 });
 
-Deno.test("the composer is blocked exactly while Clio is occupied", () => {
+Deno.test("the composer is blocked exactly while Clio Coder is occupied", () => {
 	const state = readyState();
 	equal(isPromptBlocked(state.open), false);
 	for (const phase of ["running", "awaiting-approval", "cancelling"] as const) {
@@ -524,7 +524,7 @@ Deno.test("a refused select is the only thing that marks a remembered folder uno
 			type: "host.event",
 			event: serverEventFixture("command.error", {
 				code: "conflict",
-				message: "Clio is still working in the open project.",
+				message: "Clio Coder is still working in the open project.",
 				requestId: "request-select-2",
 			}, { sequence: 3, projectId: beta.id }),
 		},
