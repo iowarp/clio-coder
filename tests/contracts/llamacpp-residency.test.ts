@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { residentModelsSummary } from "../../src/cli/targets.js";
 import {
@@ -75,6 +75,38 @@ function fakeRouter(initial: Array<{ id: string; state: string; tags?: string[] 
 	}) as typeof fetch;
 	const posts = () => calls.filter((call) => call.method === "POST").map((call) => [call.url, call.body]);
 	return { fetchImpl, calls, posts, states };
+}
+
+/**
+ * A load rejection whose following `/v1/models` snapshots are scripted. The
+ * first listing is always the stale `unloaded` snapshot that made Clio POST;
+ * later entries model the router's state after its own wake raced that POST.
+ */
+function rejectingLoadRouter(input: { status: number; body: string; statesAfterPost: string[] }) {
+	const modelId = "race-model";
+	const calls: RouterCall[] = [];
+	let modelReads = 0;
+	const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+		const href = String(url);
+		const method = init?.method ?? "GET";
+		const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+		calls.push({ url: href, method, body });
+		if (href.endsWith("/v1/models")) {
+			const laterIndex = Math.min(Math.max(0, modelReads - 1), Math.max(0, input.statesAfterPost.length - 1));
+			const state = modelReads === 0 ? "unloaded" : (input.statesAfterPost[laterIndex] ?? "unloaded");
+			modelReads += 1;
+			return jsonResponse(modelsPayload([{ id: modelId, state }]));
+		}
+		if (href.endsWith("/props")) return jsonResponse({ max_instances: 1 });
+		if (href.endsWith("/models/load")) {
+			return new Response(input.body, {
+				status: input.status,
+				headers: { "content-type": "application/json" },
+			});
+		}
+		throw new Error(`unexpected fetch ${method} ${href}`);
+	}) as typeof fetch;
+	return { fetchImpl, calls, modelId, modelReads: () => modelReads };
 }
 
 function ensureInput(fetchImpl: typeof fetch, keepModelId: string, managed = true): LlamaCppResidencyInput {
@@ -171,6 +203,47 @@ describe("contracts/llamacpp router residency", () => {
 		deepStrictEqual(router.posts(), [["http://mini:8080/models/load", { model: CODER }]]);
 		strictEqual(router.states.get(SCOUT), "loaded");
 		strictEqual(notices[0]?.kind, "co-resident");
+	});
+
+	it("treats a rejected load followed by a loading snapshot as the router wake race", async () => {
+		const router = rejectingLoadRouter({
+			status: 500,
+			body: '{"error":{"message":"wake already claimed the slot"}}',
+			statesAfterPost: ["loading", "loaded"],
+		});
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, router.modelId));
+
+		strictEqual(router.modelReads(), 3, "the rejection is re-read once, then the ordinary loaded wait completes");
+		strictEqual(router.calls.filter((call) => call.method === "POST" && call.url.endsWith("/models/load")).length, 1);
+	});
+
+	it("treats the router's already-running rejection as an in-progress load", async () => {
+		const router = rejectingLoadRouter({
+			status: 400,
+			body: '{"error":{"code":400,"message":"model is already running"}}',
+			// The body itself wins even when the immediate confirming snapshot is
+			// still stale; the normal wait observes the completed wake next.
+			statesAfterPost: ["unloaded", "loaded"],
+		});
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, router.modelId));
+
+		strictEqual(router.modelReads(), 3);
+	});
+
+	it("preserves a real load rejection and includes the router response body", async () => {
+		const responseBody = '{"error":{"code":500,"message":"insufficient VRAM"}}';
+		const router = rejectingLoadRouter({ status: 500, body: responseBody, statesAfterPost: ["unloaded"] });
+
+		await rejects(ensureLlamaCppResidency(ensureInput(router.fetchImpl, router.modelId)), (error: unknown) => {
+			ok(error instanceof Error);
+			ok(error.message.includes("HTTP 500"), error.message);
+			ok(error.message.includes(responseBody), error.message);
+			return true;
+		});
+
+		strictEqual(router.modelReads(), 2, "a definitively unloaded re-read rejects without entering the wait loop");
 	});
 
 	it("capacity-full eviction picks the non-protected resident, spares the pinned scout, and config-protected models", async () => {

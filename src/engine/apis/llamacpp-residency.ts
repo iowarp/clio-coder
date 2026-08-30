@@ -170,6 +170,26 @@ async function fetchRouterModels(
 	return parseRouterModels(await response.json());
 }
 
+class RouterModelPostError extends Error {
+	constructor(
+		readonly url: string,
+		readonly status: number,
+		readonly responseBody: string,
+	) {
+		super(`llama.cpp router rejected ${url}: HTTP ${status}; response: ${responseBody}`);
+		this.name = "RouterModelPostError";
+	}
+}
+
+async function routerErrorBody(response: Response): Promise<string> {
+	try {
+		const body = (await response.text()).trim();
+		return body.length > 0 ? body : "<empty body>";
+	} catch (error) {
+		return `<unreadable body: ${error instanceof Error ? error.message : String(error)}>`;
+	}
+}
+
 async function postRouterModel(fetchImpl: typeof fetch, url: string, modelId: string): Promise<void> {
 	const response = await fetchImpl(url, {
 		method: "POST",
@@ -178,7 +198,38 @@ async function postRouterModel(fetchImpl: typeof fetch, url: string, modelId: st
 		signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
 	});
 	if (response.ok) return;
-	throw new Error(`llama.cpp router rejected ${url}: HTTP ${response.status}`);
+	throw new RouterModelPostError(url, response.status, await routerErrorBody(response));
+}
+
+function alreadyRunningResponse(body: string): boolean {
+	return body.toLowerCase().includes("already running");
+}
+
+/**
+ * A router wake and Clio's explicit load can cross between the listing and the
+ * POST. In that race the router rejects the duplicate request even though the
+ * requested model now owns a resident slot. Re-read the authoritative listing
+ * before treating a non-2xx as a load failure; only a definitively absent,
+ * unloaded, or failed model preserves the rejection.
+ */
+async function postRouterLoad(input: LlamaCppResidencyInput, fetchImpl: typeof fetch, modelId: string): Promise<void> {
+	try {
+		await postRouterModel(fetchImpl, loadUrl(input.baseUrl), modelId);
+	} catch (error) {
+		if (!(error instanceof RouterModelPostError)) throw error;
+		let model: LlamaCppRouterModel | undefined;
+		try {
+			model = (await fetchRouterModels(input, fetchImpl)).find((entry) => entry.id === modelId);
+		} catch {
+			// The router's explicit "already running" answer is sufficient even if
+			// the confirming snapshot itself races or is temporarily unavailable.
+			if (alreadyRunningResponse(error.responseBody)) return;
+			throw error;
+		}
+		if (alreadyRunningResponse(error.responseBody)) return;
+		if (model !== undefined && model.state !== "unloaded" && model.state !== "failed") return;
+		throw error;
+	}
 }
 
 async function waitForLoaded(input: LlamaCppResidencyInput, fetchImpl: typeof fetch, modelId: string): Promise<void> {
@@ -207,7 +258,7 @@ async function ensureModelLoaded(
 	// router answers `400 model is already running`, which fails the turn before
 	// it reaches the model.
 	if (knownState === "loaded" || knownState === "sleeping") return;
-	if (knownState !== "loading") await postRouterModel(fetchImpl, loadUrl(input.baseUrl), modelId);
+	if (knownState !== "loading") await postRouterLoad(input, fetchImpl, modelId);
 	await waitForLoaded(input, fetchImpl, modelId);
 }
 

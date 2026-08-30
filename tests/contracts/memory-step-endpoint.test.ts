@@ -21,19 +21,24 @@ function recorder() {
 /**
  * The disturbance is caused by the request leaving the process, not by the
  * answer coming back: a llama.cpp prefill runs to completion whether or not the
- * client is still listening. So every path out of `complete` announces once,
- * and a boundary that never called `complete` announces nothing.
+ * client is still listening. So every path through `complete` holds one slot,
+ * every path out announces once and releases it, and a boundary that never
+ * called `complete` does neither.
  */
-describe("contracts/memory step endpoint announcement", () => {
-	it("announces once when the step resolves", async () => {
+describe("contracts/memory step endpoint tracking", () => {
+	it("counts one endpoint slot while the step runs, then announces and releases on resolve", async () => {
 		const { bus, seen } = recorder();
-		const complete = announceMemoryStepEndpoint({ bus, endpointKey: ENDPOINT_KEY, targetId: "mini" }, async () => ({
-			text: "<no_intervention/>",
-		}));
+		const inFlightUsage: number[] = [];
+		const complete = announceMemoryStepEndpoint({ bus, endpointKey: ENDPOINT_KEY, targetId: "mini" }, async () => {
+			inFlightUsage.push(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0);
+			return { text: "<no_intervention/>" };
+		});
 
 		const result = await complete({});
 
 		strictEqual(result.text, "<no_intervention/>");
+		deepStrictEqual(inFlightUsage, [1]);
+		strictEqual(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0, 0);
 		deepStrictEqual(seen, [{ endpointKey: ENDPOINT_KEY, targetId: "mini" }]);
 	});
 
@@ -50,14 +55,18 @@ describe("contracts/memory step endpoint announcement", () => {
 		deepStrictEqual(seen, [{ endpointKey: ENDPOINT_KEY, targetId: "mini" }]);
 	});
 
-	it("announces once when the transport throws for any other reason", async () => {
+	it("counts one endpoint slot while the step runs, then announces and releases on throw", async () => {
 		const { bus, seen } = recorder();
+		const inFlightUsage: number[] = [];
 		const complete = announceMemoryStepEndpoint({ bus, endpointKey: ENDPOINT_KEY, targetId: "mini" }, async () => {
+			inFlightUsage.push(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0);
 			throw new Error("fetch failed");
 		});
 
 		await rejects(complete({}), /fetch failed/);
 
+		deepStrictEqual(inFlightUsage, [1]);
+		strictEqual(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0, 0);
 		strictEqual(seen.length, 1);
 	});
 
@@ -89,6 +98,19 @@ describe("contracts/memory step endpoint announcement", () => {
 		strictEqual(seen.length, 0);
 	});
 
+	it("still counts endpoint capacity when no event bus is available", async () => {
+		const inFlightUsage: number[] = [];
+		const complete = announceMemoryStepEndpoint({ bus: null, endpointKey: ENDPOINT_KEY, targetId: "mini" }, async () => {
+			inFlightUsage.push(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0);
+			return { text: "ok" };
+		});
+
+		await complete({});
+
+		deepStrictEqual(inFlightUsage, [1]);
+		strictEqual(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0, 0);
+	});
+
 	/**
 	 * A skipped boundary sent no bytes, so the chat target's prefix cache is
 	 * untouched and the next turn owes no explanation. The wrapper gets this for
@@ -99,16 +121,23 @@ describe("contracts/memory step endpoint announcement", () => {
 		const release = registerForegroundStream(ENDPOINT_KEY);
 		try {
 			let modelCalls = 0;
+			const busyChecks: number[] = [];
+			const inFlightUsage: number[] = [];
 			const registration = createMemoryInterventionRegistration({
 				bank: new TaskMemoryBank(),
 				telemetry: { record: () => {} },
 				getModelClient: () => ({
 					complete: announceMemoryStepEndpoint({ bus, endpointKey: ENDPOINT_KEY, targetId: "mini" }, async () => {
 						modelCalls += 1;
+						inFlightUsage.push(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0);
 						return { text: "<operations>[]</operations>\n<no_intervention/>" };
 					}),
 				}),
-				backgroundEndpointBusy: () => (foregroundStreamUsage()[ENDPOINT_KEY] ?? 0) > 0,
+				backgroundEndpointBusy: () => {
+					const usage = foregroundStreamUsage()[ENDPOINT_KEY] ?? 0;
+					busyChecks.push(usage);
+					return usage > 0;
+				},
 			});
 
 			const skipped = await registration.runPromptedStep({ deterministicTrigger: true, task: "busy endpoint" });
@@ -116,11 +145,16 @@ describe("contracts/memory step endpoint announcement", () => {
 			strictEqual(skipped.reason, "endpoint_busy");
 			strictEqual(modelCalls, 0);
 			strictEqual(seen.length, 0);
+			deepStrictEqual(busyChecks, [1], "the chat stream is visible before the memory client can register itself");
+			strictEqual(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0, 1, "the skipped step added no slot of its own");
 
 			release();
 			await registration.runPromptedStep({ deterministicTrigger: true, task: "free endpoint" });
 
 			strictEqual(modelCalls, 1);
+			deepStrictEqual(busyChecks, [1, 0], "the admitted step checks capacity before registering its request");
+			deepStrictEqual(inFlightUsage, [1], "the admitted memory request then owns exactly one slot");
+			strictEqual(foregroundStreamUsage()[ENDPOINT_KEY] ?? 0, 0);
 			deepStrictEqual(seen, [{ endpointKey: ENDPOINT_KEY, targetId: "mini" }]);
 		} finally {
 			// registerForegroundStream hands back an idempotent release.

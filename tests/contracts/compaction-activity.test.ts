@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { BusChannels, type ContextActivityPayload } from "../../src/core/bus-events.js";
@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
+import { foregroundStreamUsage } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -25,6 +26,9 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // --- Minimal chat-loop harness (mirrors tests/contracts/chat-loop.test.ts). ---
 
+const COMPACTION_TARGET_URL = "http://127.0.0.1:18080/v1/";
+const COMPACTION_ENDPOINT_KEY = "http://127.0.0.1:18080";
+
 function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 	value.orchestrator.target = "test-target";
@@ -41,11 +45,12 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 	return value;
 }
 
-function providers(modelOverride?: EngineModel): ProvidersContract {
+function providers(modelOverride?: EngineModel, targetUrl?: string): ProvidersContract {
 	const target: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",
+		...(targetUrl === undefined ? {} : { url: targetUrl }),
 		capabilities: { contextWindow: 1000, maxTokens: 256, tools: true, chat: true },
 	};
 	const runtime: RuntimeDescriptor = {
@@ -869,6 +874,142 @@ describe("contracts/production compaction failure wiring", () => {
 				`compaction must report a smaller context, got ${summary.tokensBefore} -> ${summary.tokensAfter}`,
 			);
 			ok(summary.tokensAfter > 0, `the after figure stays positive, got ${summary.tokensAfter}`);
+		} finally {
+			await session.close();
+			faux.unregister();
+			isolated.restore();
+		}
+	});
+});
+
+describe("contracts/compaction endpoint capacity", () => {
+	it("holds one canonical endpoint slot while the summary round is in flight, then releases it", async () => {
+		const isolated = await isolateClioEnv("clio-compaction-endpoint-slot-");
+		const bus = createSafeEventBus();
+		const faux = registerFauxProvider({
+			provider: "production-compaction-endpoint-slot",
+			models: [{ id: "model" }],
+			tokensPerSecond: 0,
+		});
+		const session = persistentSession(bus);
+		let markRequestStarted: () => void = () => {};
+		const requestStarted = new Promise<void>((resolve) => {
+			markRequestStarted = resolve;
+		});
+		let releaseResponse: () => void = () => {};
+		const responseReleased = new Promise<void>((resolve) => {
+			releaseResponse = resolve;
+		});
+		let pending: Promise<CompactResult | null> | null = null;
+
+		try {
+			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+			seedPersistentCompactionHistory(session);
+			faux.setResponses([
+				async () => {
+					markRequestStarted();
+					await responseReleased;
+					return fauxAssistantMessage("## Goal\nThe endpoint slot was held.");
+				},
+			]);
+			const model = faux.getModel("model") as EngineModel;
+			const productionProviders = providers(model, COMPACTION_TARGET_URL);
+			const currentSettings = settings();
+			pending = createProductionAutoCompact(session, () => currentSettings, productionProviders)();
+
+			await requestStarted;
+			strictEqual(
+				foregroundStreamUsage()[COMPACTION_ENDPOINT_KEY] ?? 0,
+				1,
+				"the compaction stream is one in-process request on the chat endpoint",
+			);
+			releaseResponse();
+			const result = await pending;
+
+			ok(result, "the held round still completes normally");
+			strictEqual(
+				foregroundStreamUsage()[COMPACTION_ENDPOINT_KEY] ?? 0,
+				0,
+				"the compaction slot is released after resolution",
+			);
+		} finally {
+			releaseResponse();
+			if (pending !== null) await pending.catch(() => {});
+			await session.close();
+			faux.unregister();
+			isolated.restore();
+		}
+	});
+
+	it("releases the endpoint slot when the summary round throws", async () => {
+		const isolated = await isolateClioEnv("clio-compaction-endpoint-throw-");
+		const bus = createSafeEventBus();
+		const faux = registerFauxProvider({
+			provider: "production-compaction-endpoint-throw",
+			models: [{ id: "model" }],
+			tokensPerSecond: 0,
+		});
+		const session = persistentSession(bus);
+
+		try {
+			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+			seedPersistentCompactionHistory(session);
+			const inFlightUsage: number[] = [];
+			faux.setResponses([
+				async () => {
+					inFlightUsage.push(foregroundStreamUsage()[COMPACTION_ENDPOINT_KEY] ?? 0);
+					throw new Error("compaction endpoint exploded");
+				},
+			]);
+			const model = faux.getModel("model") as EngineModel;
+			const productionProviders = providers(model, COMPACTION_TARGET_URL);
+			const currentSettings = settings();
+
+			await rejects(
+				createProductionAutoCompact(session, () => currentSettings, productionProviders)(),
+				/compaction endpoint exploded/,
+			);
+
+			deepStrictEqual(inFlightUsage, [1]);
+			strictEqual(
+				foregroundStreamUsage()[COMPACTION_ENDPOINT_KEY] ?? 0,
+				0,
+				"a failed compaction leaves no endpoint slot behind",
+			);
+		} finally {
+			await session.close();
+			faux.unregister();
+			isolated.restore();
+		}
+	});
+
+	it("claims nothing when the compaction target has no canonical endpoint key", async () => {
+		const isolated = await isolateClioEnv("clio-compaction-no-endpoint-key-");
+		const bus = createSafeEventBus();
+		const faux = registerFauxProvider({
+			provider: "production-compaction-no-endpoint-key",
+			models: [{ id: "model" }],
+			tokensPerSecond: 0,
+		});
+		const session = persistentSession(bus);
+
+		try {
+			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+			seedPersistentCompactionHistory(session);
+			const observedUsage: Readonly<Record<string, number>>[] = [];
+			faux.setResponses([
+				async () => {
+					observedUsage.push(foregroundStreamUsage());
+					return fauxAssistantMessage("## Goal\nNo endpoint key was available.");
+				},
+			]);
+			const model = faux.getModel("model") as EngineModel;
+			const productionProviders = providers(model);
+			const currentSettings = settings();
+
+			await createProductionAutoCompact(session, () => currentSettings, productionProviders)();
+
+			deepStrictEqual(observedUsage, [{}]);
 		} finally {
 			await session.close();
 			faux.unregister();
