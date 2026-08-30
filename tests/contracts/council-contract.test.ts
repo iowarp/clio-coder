@@ -4,8 +4,6 @@ import { after, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { DomainContext } from "../../src/core/domain-loader.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import {
 	COUNCIL_BALLOT_VERDICT_MAX_BYTES,
 	parseCouncilReport,
@@ -13,7 +11,6 @@ import {
 	parseWorkerResultContract,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
-import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { COUNCIL_VOTE_MEMBER_DIRECTIVE } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
@@ -28,43 +25,6 @@ const TARGET = { id: "local", runtime: "openai", defaultModel: "model" };
 
 function roster(members: unknown[]): unknown {
 	return { targets: [TARGET], workers: { rosters: { design: { members } } } };
-}
-
-/**
- * The stub fleet's `researcher` recipe is a permissive harness fixture: an
- * `external-delegation` contract and the `base` audience. Neither is what a
- * real council seats. `src/domains/agents/builtins/researcher.md` declares
- * `resultContract: {kind: research-report}` and `audience: shadow`, and both
- * facts are what the judge synthesis broke on: the contract it could never
- * satisfy, and the audience that refused its bounded gate-role prompt as a
- * persona override. A council test that means to exercise either has to run
- * the production recipe facts.
- */
-function withBuiltinResearcherFacts(context: DomainContext): DomainContext {
-	const agents = context.getContract<AgentsContract>("agents");
-	if (agents === undefined) throw new Error("the dispatch stub context has no agents contract");
-	const recipes = agents
-		.list()
-		.map((recipe) =>
-			recipe.id === "researcher"
-				? { ...recipe, audience: "shadow" as const, resultContract: { kind: "research-report" as const } }
-				: recipe,
-		);
-	const faithful: AgentsContract = {
-		...agents,
-		list: () => recipes,
-		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
-		listSpecs: () => recipes.map(normalizeAgentSpec),
-		getSpec: (id) => {
-			const recipe = recipes.find((entry) => entry.id === id);
-			return recipe ? normalizeAgentSpec(recipe) : null;
-		},
-	};
-	return {
-		bus: context.bus,
-		getContract: ((name: string) =>
-			name === "agents" ? faithful : context.getContract(name)) as DomainContext["getContract"],
-	};
 }
 
 /** The sealed receipt on disk, which is where the applied result contract is recorded. */
@@ -401,7 +361,12 @@ describe("council dispatch", () => {
 
 	it("labels only the other members' bounded prior answers in round two", async () => {
 		const specs: WorkerSpec[] = [];
-		const answers = ["alpha-answer", "beta-answer", "alpha-final", "beta-final"];
+		const answers = [
+			"alpha-answer",
+			researchReport("beta-answer"),
+			researchReport("alpha-final"),
+			researchReport("beta-final"),
+		];
 		const spawnWorker = (spec: WorkerSpec): SpawnedWorker => {
 			specs.push(spec);
 			const spawnIndex = specs.length;
@@ -418,7 +383,7 @@ describe("council dispatch", () => {
 		};
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.workers.maxRetries = 0;
-		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker });
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker, resilienceCooldownMs: 0 });
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract, getAgentSpecs: () => [] });
@@ -443,7 +408,7 @@ describe("council dispatch", () => {
 				specs[2]?.dynamicPromptMessages?.find((message) => message.id === "dispatch-briefing")?.body ?? "";
 			const betaBriefing =
 				specs[3]?.dynamicPromptMessages?.find((message) => message.id === "dispatch-briefing")?.body ?? "";
-			match(alphaBriefing, /\[beta\] beta-answer/);
+			match(alphaBriefing, /\[beta\].*"claim":"beta-answer"/);
 			ok(!alphaBriefing.includes("[alpha] alpha-answer"));
 			match(betaBriefing, /\[alpha\] failed in prior round; no answer contributed\./);
 			ok(!betaBriefing.includes("[beta] beta-answer"));
@@ -456,10 +421,8 @@ describe("council dispatch", () => {
 	/**
 	 * One default council through `--synthesis vote` against the builtin
 	 * researcher's real recipe facts, which is the shape #230 says can never
-	 * tally. `withBuiltinResearcherFacts` restores the `research-report`
-	 * contract and the `shadow` audience the harness stub drops; without it a
-	 * council runs against a permissive `external-delegation` fixture and any
-	 * answer at all passes, which is what hid the defect.
+	 * tally. The shared dispatch stub loads that production recipe so no council
+	 * test can accidentally exercise a permissive substitute.
 	 */
 	const runVoteCouncil = async (
 		ballots: string[],
@@ -475,7 +438,7 @@ describe("council dispatch", () => {
 		stop: () => Promise<void>;
 	}> => {
 		const fabric = scriptedGateFabric({ memberAnswers: ballots });
-		const bundle = makeDispatchBundle(withBuiltinResearcherFacts(dispatchStubContext()), {
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: fabric.spawn,
 		});
 		await bundle.extension.start();
@@ -530,7 +493,7 @@ describe("council dispatch", () => {
 				deepStrictEqual(spawn.spec.resultContract, { kind: "council-ballot" });
 				strictEqual(spawn.spec.autonomy, "read-only");
 				strictEqual(spawn.spec.toolProfile, "council-read-only");
-				match(spawn.spec.systemPrompt, /# Test Researcher Recipe/);
+				match(spawn.spec.systemPrompt, /# Researcher/);
 				ok(!spawn.spec.systemPrompt.includes(COUNCIL_VOTE_MEMBER_DIRECTIVE));
 				// The worker re-parses this field before its first model call, so a
 				// spec the coordinator can send but the worker cannot read is a
@@ -617,7 +580,7 @@ describe("council dispatch", () => {
 			builderText: researchReport("the tuple key survives a node rename"),
 			synthesisAnswers: [councilSynthesisReport("pass", "synthesized")],
 		});
-		const bundle = makeDispatchBundle(withBuiltinResearcherFacts(dispatchStubContext()), {
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: fabric.spawn,
 		});
 		await bundle.extension.start();
@@ -665,7 +628,7 @@ describe("council dispatch", () => {
 			builderText: researchReport("keep the tuple key"),
 			synthesisAnswers: [councilSynthesisReport("keep", "the members agree on the tuple key")],
 		});
-		const bundle = makeDispatchBundle(withBuiltinResearcherFacts(dispatchStubContext()), {
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: fabric.spawn,
 		});
 		await bundle.extension.start();

@@ -13,6 +13,7 @@ import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispa
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 async function waitFor(predicate: () => boolean, message: string, timeoutMs = 8000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -25,7 +26,10 @@ async function waitFor(predicate: () => boolean, message: string, timeoutMs = 80
 
 function okWorker(): SpawnedWorker {
 	const events = (async function* () {
-		yield { type: "message_end", message: { role: "assistant", content: "done", usage: { input: 1, output: 1 } } };
+		yield {
+			type: "message_end",
+			message: { role: "assistant", content: mutationReport("done"), usage: { input: 1, output: 1 } },
+		};
 	})();
 	return {
 		pid: 100,

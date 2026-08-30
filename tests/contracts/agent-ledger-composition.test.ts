@@ -16,14 +16,8 @@
  */
 
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import type { DomainContext } from "../../src/core/domain-loader.js";
-import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
-import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
-import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -35,6 +29,7 @@ import type { AgentLedgerBody, AgentLedgerEntry } from "../../src/worker/protoco
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
@@ -51,35 +46,6 @@ async function waitFor(predicate: () => boolean, message: string, timeoutMs = 80
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
 	throw new Error(message);
-}
-
-/**
- * The stub context with the real builtin recipe registry in place of the
- * fixture recipes. The ledger's first live break was a recipe that never
- * declared the tool, which no fixture recipe can reproduce.
- */
-function builtinAgentsContext(): DomainContext {
-	const base = dispatchStubContext();
-	const recipes = loadRecipesFromDir({
-		dir: join(resolvePackageRoot(), "src", "domains", "agents", "builtins"),
-		source: "builtin",
-	});
-	const agents: AgentsContract = {
-		list: () => recipes,
-		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
-		diagnostics: () => [],
-		listSpecs: () => recipes.map(normalizeAgentSpec),
-		getSpec: (id) => {
-			const recipe = recipes.find((entry) => entry.id === id);
-			return recipe ? normalizeAgentSpec(recipe) : null;
-		},
-		reload: () => {},
-	};
-	return {
-		bus: base.bus,
-		getContract: ((name: string) =>
-			name === "agents" ? agents : base.getContract(name)) as DomainContext["getContract"],
-	};
 }
 
 /**
@@ -122,7 +88,11 @@ function ledgerWorkerFactory(pidBase = 500): {
 				if (result.exitCode === 0) {
 					yield {
 						type: "message_end",
-						message: { role: "assistant", content: "ledger worker done", usage: { input: 1, output: 1 } },
+						message: {
+							role: "assistant",
+							content: mutationReport("ledger worker done"),
+							usage: { input: 1, output: 1 },
+						},
 					};
 				}
 			})();
@@ -164,7 +134,7 @@ describe("contracts/agent-ledger composition: bundle", () => {
 
 	it("carries a post from one worker's control lane to the board, to its peer's mirror, and into both receipts", async () => {
 		const factory = ledgerWorkerFactory();
-		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: factory.spawn });
 		await bundle.extension.start();
 		const ledgerId = "ledger-composition-1";
 		try {
@@ -270,7 +240,7 @@ describe("contracts/agent-ledger composition: bundle", () => {
 		// later. A post in that gap used to be dropped with no diagnostic while
 		// the worker's mirror had already counted it and told the model "posted".
 		const factory = ledgerWorkerFactory(650);
-		const bundle = makeDispatchBundle(builtinAgentsContext(), {
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: (spec, opts) => {
 				const worker = factory.spawn(spec, opts);
 				// Synchronously inside spawn: nothing about this run exists yet.
@@ -319,7 +289,7 @@ describe("contracts/agent-ledger composition: bundle", () => {
 				return factory.spawn(spec, opts);
 			},
 		};
-		const bundle = makeDispatchBundle(builtinAgentsContext(), {
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: () => {
 				throw new Error("a placed run must not fall back to the local spawner");
 			},
@@ -364,7 +334,7 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 
 	it("parallel opens one board for the batch and closes it when the batch settles", async () => {
 		const factory = ledgerWorkerFactory(700);
-		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: factory.spawn });
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
@@ -408,7 +378,7 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 		// A board nobody posted to has nothing to tell the main model, and a
 		// result that says so anyway spends the model's attention on a heading.
 		const factory = ledgerWorkerFactory(750);
-		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: factory.spawn });
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
@@ -454,7 +424,7 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 		// close as a const null and never assigned it, so a collected batch's
 		// board stayed open, still admitting posts.
 		const factory = ledgerWorkerFactory(800);
-		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: factory.spawn });
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();
@@ -523,7 +493,7 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 		// for runs that were still live, and the detached record it converted
 		// into carried no ledger id for collect to close later.
 		const factory = ledgerWorkerFactory(900);
-		const bundle = makeDispatchBundle(builtinAgentsContext(), { spawnWorker: factory.spawn });
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: factory.spawn });
 		await bundle.extension.start();
 		try {
 			const runEvents = createDispatchRunEventRegistry();

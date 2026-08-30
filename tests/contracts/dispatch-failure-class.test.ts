@@ -19,6 +19,7 @@ import {
 	restoreDispatchState,
 } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 const BASE_EVIDENCE: RunTerminationEvidence = {
 	exitCode: 1,
@@ -157,7 +158,9 @@ describe("dispatch failure classification", () => {
 				resilienceCooldownMs: 5_000,
 				spawnWorker: () => {
 					spawns += 1;
-					if (spawns > 1) return worker({ exitCode: 0, signal: null }, "next admitted");
+					if (spawns > 1) {
+						return worker({ exitCode: 0, signal: null }, mutationReport("next dispatch admitted"));
+					}
 					if (kind === "permission") {
 						return worker({ exitCode: WORKER_EXIT_PERMISSION_REQUIRED, signal: null });
 					}
@@ -196,7 +199,7 @@ describe("dispatch failure classification", () => {
 				spawns += 1;
 				return spawns === 1
 					? worker({ exitCode: 1, signal: null, stderrTail: "provider queue full" })
-					: worker({ exitCode: 0, signal: null }, "same target admitted");
+					: worker({ exitCode: 0, signal: null }, mutationReport("same target admitted"));
 			},
 		});
 		await bundle.extension.start();
@@ -224,7 +227,7 @@ describe("dispatch failure classification", () => {
 				if (reproductionCalls === 1) throw new Error("synthetic finalization failure");
 				return fastReproducibility(cwd, safety);
 			},
-			spawnWorker: () => worker({ exitCode: 0, signal: null }, "same target after internal failure"),
+			spawnWorker: () => worker({ exitCode: 0, signal: null }, mutationReport("same target after internal failure")),
 		});
 		await internalBundle.extension.start();
 		try {
@@ -289,7 +292,7 @@ describe("dispatch failure classification", () => {
 		const bundle = makeDispatchBundle(context, {
 			resolveNode,
 			resilienceCooldownMs: 0,
-			spawnWorker: () => worker({ exitCode: 0, signal: null }, "local recovery"),
+			spawnWorker: () => worker({ exitCode: 0, signal: null }, mutationReport("local recovery")),
 		});
 		await bundle.extension.start();
 		try {
@@ -406,7 +409,7 @@ describe("dispatch failure classification", () => {
 				authSpawns += 1;
 				return authSpawns === 1
 					? worker({ exitCode: 1, signal: null, stderrTail: "401 invalid API key" })
-					: worker({ exitCode: 0, signal: null }, "auth failover recovered");
+					: worker({ exitCode: 0, signal: null }, mutationReport("auth failover recovered"));
 			},
 		});
 		await authBundle.extension.start();
@@ -448,7 +451,7 @@ describe("dispatch failure classification", () => {
 				spawns += 1;
 				return spawns === 1
 					? worker({ exitCode: 1, signal: null, stderrTail: "HTTP 429 Too Many Requests" })
-					: worker({ exitCode: 0, signal: null }, "secondary recovered");
+					: worker({ exitCode: 0, signal: null }, mutationReport("secondary recovered"));
 			},
 		});
 		await bundle.extension.start();

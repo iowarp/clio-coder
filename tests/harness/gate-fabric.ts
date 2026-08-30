@@ -40,6 +40,15 @@ export function researchReport(claim: string, evidence = "read the file"): strin
 	return JSON.stringify({ source: "local", findings: [{ claim, evidence }] });
 }
 
+/** The coder recipe's `mutation-report` contract for successful scripted workers. */
+export function mutationReport(summary: string, mutatedPaths: string[] = []): string {
+	return JSON.stringify({
+		mutatedPaths,
+		validations: [{ name: "scripted worker completion", passed: true, evidence: summary }],
+		summary,
+	});
+}
+
 /**
  * A council member's `council-ballot`, which is what a `vote` council asks for
  * and seals instead of the seated recipe's own contract.
@@ -102,7 +111,10 @@ export function scriptedGateFabric(script: GateFabricScript): {
 		} else if (spec.task.startsWith("Synthesize the council answers")) {
 			text = synthesisAnswers.shift() ?? councilSynthesisReport("supported", "the council agrees");
 		} else {
-			text = memberAnswers.shift() ?? script.builderText ?? "built it";
+			text =
+				memberAnswers.shift() ??
+				script.builderText ??
+				mutationReport("built it", script.builderWritesFile === undefined ? [] : [script.builderWritesFile]);
 			if (script.builderWritesFile !== undefined && opts?.cwd !== undefined) {
 				writeFileSync(join(opts.cwd, script.builderWritesFile), `work in ${opts.cwd}\n`);
 			}

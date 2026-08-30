@@ -1,16 +1,19 @@
 /**
  * Minimal DomainContext stub for dispatch-bundle contract tests: one healthy
- * openai-compat target, a permissive safety contract, a `coder` recipe plus the
- * builtin `verifier` every quality gate defaults to, and an under-budget
- * scheduling gate. Callers override individual contracts by wrapping getContract.
+ * openai-compat target, the production builtin agent recipes, a permissive safety
+ * contract, and an under-budget scheduling gate. Callers override individual
+ * contracts by wrapping getContract.
  */
 
+import { join } from "node:path";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
+import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
@@ -20,21 +23,19 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
-import { agentRecipeFixture } from "./agent-recipe.js";
 
 export interface DispatchStubOptions {
 	settings?: typeof DEFAULT_SETTINGS;
 	scheduling?: Partial<SchedulingContract>;
 	runtime?: RuntimeDescriptor;
+	/** Deliberately constrains only the coder's tools, capability, requirements, and now-unreachable bound skills. */
 	agentTools?: ReadonlyArray<ToolName>;
+	/** With agentTools, deliberately removes the coder's exact budget so opaque-runtime policy tests reach telemetry. */
+	useRuntimeDefaultAgentBudget?: boolean;
 }
 
 export function dispatchStubContext(options: DispatchStubOptions = {}): DomainContext {
 	const settings = options.settings ?? structuredClone(DEFAULT_SETTINGS);
-	const agentTools = [...(options.agentTools ?? [])];
-	const agentCapabilityClass = agentTools.some((tool) => tool === ToolNames.Write || tool === ToolNames.Edit)
-		? "workspace-edit"
-		: "read-only";
 	const target: TargetDescriptor = settings.targets[0] ?? { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
 	if (settings.targets.length === 0) {
 		settings.targets = [target];
@@ -108,50 +109,35 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		isSubset,
 		audit: { recordCount: () => 0 },
 	};
-	const recipes: ReadonlyArray<AgentRecipe> = [
-		{
-			...agentRecipeFixture(),
-			tools: agentTools,
-			toolRequirements: { required: agentCapabilityClass === "workspace-edit" ? agentTools : [], optional: [] },
-			capabilityClass: agentCapabilityClass,
-			id: "coder",
-			name: "coder",
-			description: "test recipe",
-			source: "builtin" as const,
-			filepath: "/test/coder.md",
-			body: "# Test Recipe",
-		},
-		{
-			// A council that names no agent seats the builtin researcher, so the
-			// stub fleet must offer a read-only answerer or every council fails
-			// admission before its first member runs.
-			...agentRecipeFixture(),
-			tools: [ToolNames.Read],
-			toolRequirements: { required: [ToolNames.Read], optional: [] },
-			id: "researcher",
-			name: "researcher",
-			description: "test researcher recipe",
-			capabilityClass: "read-only" as const,
-			source: "builtin" as const,
-			filepath: "/test/researcher.md",
-			body: "# Test Researcher Recipe",
-		},
-		{
-			// Review and compete gates default to the builtin Verifier, so the stub
-			// fleet must offer it or every gated dispatch fails admission.
-			...agentRecipeFixture(),
-			tools: [ToolNames.Verify],
-			toolRequirements: { required: [ToolNames.Verify], optional: [] },
-			id: "verifier",
-			name: "verifier",
-			description: "test verifier recipe",
-			capabilityClass: "verification" as const,
-			resultContract: { kind: "verifier-report" as const },
-			source: "builtin" as const,
-			filepath: "/test/verifier.md",
-			body: "# Test Verifier Recipe",
-		},
-	];
+	const builtinRecipes = loadRecipesFromDir({
+		dir: join(resolvePackageRoot(), "src", "domains", "agents", "builtins"),
+		source: "builtin",
+		cwd: process.cwd(),
+	});
+	const agentToolsOverride = options.agentTools;
+	const recipes: ReadonlyArray<AgentRecipe> =
+		agentToolsOverride === undefined
+			? builtinRecipes
+			: builtinRecipes.map((recipe) => {
+					if (recipe.id !== "coder") return recipe;
+					// Some dispatch policy tests need a deliberately constrained coder.
+					// Every field outside this option's documented seams still comes from
+					// the shipped recipe.
+					const agentTools = [...agentToolsOverride];
+					const capabilityClass = agentTools.some((tool) => tool === ToolNames.Write || tool === ToolNames.Edit)
+						? "workspace-edit"
+						: "read-only";
+					return {
+						...recipe,
+						tools: agentTools,
+						toolRequirements: { required: agentTools, optional: [] },
+						capabilityClass,
+						// A constrained surface without context cannot load the coder's bound
+						// skills. Keep this test-only override internally policy-consistent.
+						...(agentTools.includes(ToolNames.Context) ? {} : { skills: [], boundSkillPaths: [] }),
+						...(options.useRuntimeDefaultAgentBudget ? { budget: null as unknown as AgentRecipe["budget"] } : {}),
+					};
+				});
 	const agents: AgentsContract = {
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,

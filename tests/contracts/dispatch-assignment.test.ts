@@ -13,6 +13,7 @@ import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { EMPTY_CAPABILITIES, type RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { mutationReport } from "../harness/gate-fabric.js";
 
 async function waitFor(predicate: () => boolean, message: string, timeoutMs = 4000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -26,7 +27,14 @@ async function waitFor(predicate: () => boolean, message: string, timeoutMs = 40
 function worker(exitCode: number, text?: string): SpawnedWorker {
 	const events = (async function* () {
 		if (text !== undefined) {
-			yield { type: "message_end", message: { role: "assistant", content: text, usage: { input: 1, output: 1 } } };
+			yield {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: exitCode === 0 ? mutationReport(text) : text,
+					usage: { input: 1, output: 1 },
+				},
+			};
 		}
 	})();
 	return {
@@ -201,14 +209,22 @@ describe("dispatch assignments", () => {
 		settings.workers.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
 		const workspace = mkdtempSync(join(tmpdir(), "clio-opaque-retry-"));
 		let spawns = 0;
-		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: CLAUDE_CODE_RUNTIME }), {
-			resilienceCooldownMs: 0,
-			spawnWorker: () => {
-				spawns += 1;
-				writeFileSync(join(workspace, "partial-edit.txt"), "changed before failure");
-				return worker(1);
+		const bundle = makeDispatchBundle(
+			dispatchStubContext({
+				settings,
+				runtime: CLAUDE_CODE_RUNTIME,
+				agentTools: [ToolNames.Read, ToolNames.Edit],
+				useRuntimeDefaultAgentBudget: true,
+			}),
+			{
+				resilienceCooldownMs: 0,
+				spawnWorker: () => {
+					spawns += 1;
+					writeFileSync(join(workspace, "partial-edit.txt"), "changed before failure");
+					return worker(1);
+				},
 			},
-		});
+		);
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
@@ -241,10 +257,18 @@ describe("dispatch assignments", () => {
 		settings.targets = [{ id: "claude-cli", runtime: "claude-code", defaultModel: "claude-sonnet" }];
 		settings.workers.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
 		let spawns = 0;
-		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: CLAUDE_CODE_RUNTIME }), {
-			resilienceCooldownMs: 0,
-			spawnWorker: () => (++spawns === 1 ? worker(1) : worker(0, "read-only recovery")),
-		});
+		const bundle = makeDispatchBundle(
+			dispatchStubContext({
+				settings,
+				runtime: CLAUDE_CODE_RUNTIME,
+				agentTools: [ToolNames.Read],
+				useRuntimeDefaultAgentBudget: true,
+			}),
+			{
+				resilienceCooldownMs: 0,
+				spawnWorker: () => (++spawns === 1 ? worker(1) : worker(0, "read-only recovery")),
+			},
+		);
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
@@ -287,7 +311,7 @@ describe("dispatch assignments", () => {
 				coverage: "partial",
 				ingestionErrors: 0,
 				unfinished: [{ tool: "edit", count: 1 }],
-				workspaceMutationPossible: false,
+				workspaceMutationPossible: true,
 			});
 			strictEqual(spawns, 1);
 			ok(bundle.contract.assignments?.get(handle.runId)?.outcomeDetail?.includes("incomplete tool telemetry"));
