@@ -158,9 +158,11 @@ export function createInteractiveShell<TTerminal extends Terminal, TTui extends 
 }
 
 /**
- * Trace for the current process, created once when CLIO_CODER_RENDER_TRACE names a
- * file. The panel wires its render metrics into the same instance, so the
- * frame rows carry both the build cost and the write cost.
+ * Trace for the current process, created once per interactive shell. It writes
+ * a JSONL file when CLIO_CODER_RENDER_TRACE names one and otherwise keeps only
+ * its bounded input-wedge ring in memory. The panel wires its render metrics
+ * into the same instance, so the frame rows carry both the build cost and the
+ * write cost.
  */
 let activeRenderTrace: RenderTrace | null = null;
 
@@ -203,20 +205,21 @@ export function createProcessInteractiveShell(
 	let restoreRoot: (() => void) | null = null;
 	let backpressure: StdoutBackpressureGate | null = null;
 	let observedBackpressure = false;
-	if (tracePath) {
-		let candidate: RenderTrace | null = null;
-		try {
-			candidate = createRenderTrace(tracePath);
-			restoreStdout = traceProcessStdout(candidate);
-			activeRenderTrace = candidate;
-		} catch {
-			// A diagnostics path must never prevent the interactive application from starting.
-			restoreStdout?.();
-			restoreStdout = null;
-			void candidate?.close().catch(() => {});
-			activeRenderTrace = null;
-		}
-	} else activeRenderTrace = null;
+	let candidate: RenderTrace | null = null;
+	try {
+		// A null path is the ring-only mode: no file, but the input-wedge ring still
+		// fills, because the operator who hits a wedge did not arm a trace before it
+		// happened (#224).
+		candidate = createRenderTrace(tracePath);
+		restoreStdout = traceProcessStdout(candidate);
+		activeRenderTrace = candidate;
+	} catch {
+		// A diagnostics path must never prevent the interactive application from starting.
+		restoreStdout?.();
+		restoreStdout = null;
+		void candidate?.close().catch(() => {});
+		activeRenderTrace = null;
+	}
 	const trace = activeRenderTrace;
 	if (trace && options.onFirstFrameCommit) trace.onFirstFrameCommit(options.onFirstFrameCommit);
 	let firstFrameDelivered = false;

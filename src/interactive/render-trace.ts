@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { TuiRenderObserver, TuiRenderPhase } from "../engine/tui.js";
 
 /** The trace format is append-only JSONL so partial sessions remain readable. */
@@ -105,6 +105,106 @@ export type RenderTraceRecord =
 			waitMs: number;
 	  }
 	| { type: "trace_drop"; version: typeof RENDER_TRACE_VERSION; at: number; records: number };
+
+/** One byte-level delivery from the stdin reader to the application listener. */
+export type RenderTraceInputIngressRecord = Extract<RenderTraceRecord, { type: "input_ingress" }>;
+
+/**
+ * How many `input_ingress` records and how many committed frame records the
+ * always-on ring keeps, each. 256 keystrokes and 256 committed frames cover the
+ * last stretch of interaction an operator would still be describing when they
+ * kill a wedged pane, and cost about 200 KB of process memory in the worst case
+ * (a frame record carries its terminal-write commits).
+ */
+export const INPUT_WEDGE_RING_CAPACITY = 256;
+
+/** Subdirectory of the state directory that holds SIGTERM wedge dumps. */
+export const INPUT_WEDGE_DUMP_DIRNAME = "input-wedge";
+
+/** Dumps kept in that directory; older ones are removed as new ones land. */
+export const INPUT_WEDGE_DUMP_RETAINED = 5;
+
+/**
+ * Which half of the input pipeline was still moving when the dump was taken.
+ *
+ * `input-not-committed` is the consumer's failure: bytes reached the
+ * application listener and no frame that carries them ever reached stdout.
+ * `no-input-recorded` is the reader's: nothing was delivered at all, so an
+ * operator who was typing was typing into a reader that had stopped.
+ * `input-committed` says neither half of this pipeline was stuck.
+ */
+export type InputWedgeClassification = "no-input-recorded" | "input-not-committed" | "input-committed";
+
+export interface InputWedgeSnapshot {
+	version: typeof RENDER_TRACE_VERSION;
+	capacity: number;
+	pid: number;
+	/** Wall clock at trace open, so a record's relative `at` maps onto real time. */
+	openedAtEpochMs: number;
+	atEpochMs: number;
+	/** Milliseconds since trace open, the same clock every record's `at` uses. */
+	at: number;
+	classification: InputWedgeClassification;
+	msSinceLastInputIngress: number | null;
+	msSinceLastCommittedFrame: number | null;
+	inputIngress: RenderTraceInputIngressRecord[];
+	frames: RenderTraceFrameRecord[];
+}
+
+/** Bounded FIFO that overwrites its oldest entry rather than growing. */
+function createRing<T>(capacity: number): { push(value: T): void; toArray(): T[] } {
+	const slots: T[] = [];
+	let next = 0;
+	return {
+		push(value): void {
+			if (slots.length < capacity) slots.push(value);
+			else slots[next] = value;
+			next = (next + 1) % capacity;
+		},
+		toArray(): T[] {
+			if (slots.length < capacity) return [...slots];
+			return [...slots.slice(next), ...slots.slice(0, next)];
+		},
+	};
+}
+
+/**
+ * Read the two rings the way the ticket asks the wedge to be read: the newest
+ * input the operator should have seen, against the newest frame that reached
+ * stdout carrying it.
+ */
+function classifyInputWedge(
+	inputIngress: ReadonlyArray<RenderTraceInputIngressRecord>,
+	frames: ReadonlyArray<RenderTraceFrameRecord>,
+): InputWedgeClassification {
+	const newest = [...inputIngress].reverse().find((record) => record.visualExpected) ?? inputIngress.at(-1);
+	if (newest === undefined) return "no-input-recorded";
+	return frames.some((frame) => frame.inputHighWater >= newest.inputSeq) ? "input-committed" : "input-not-committed";
+}
+
+/**
+ * Write one snapshot under `<stateDir>/input-wedge/`, newest-first by name, and
+ * drop everything past the retention bound. Synchronous on purpose: the caller
+ * is a signal handler on a process that is about to end.
+ */
+export function writeInputWedgeDump(stateDir: string, snapshot: InputWedgeSnapshot): string {
+	const directory = join(stateDir, INPUT_WEDGE_DUMP_DIRNAME);
+	mkdirSync(directory, { recursive: true });
+	const stamp = new Date(snapshot.atEpochMs).toISOString().replace(/[:.]/gu, "-");
+	const path = join(directory, `${stamp}-${snapshot.pid}.json`);
+	writeFileSync(path, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+	try {
+		const existing = readdirSync(directory)
+			.filter((name) => name.endsWith(".json"))
+			.sort();
+		for (const name of existing.slice(0, Math.max(0, existing.length - INPUT_WEDGE_DUMP_RETAINED))) {
+			rmSync(join(directory, name), { force: true });
+		}
+	} catch {
+		// Retention is housekeeping; a dump that landed is worth more than a tidy directory.
+	}
+	return path;
+}
 
 interface TraceWriter {
 	enqueue(record: RenderTraceRecord): void;
@@ -236,6 +336,8 @@ export interface RenderTrace extends TuiRenderObserver {
 	recordTerminalDrain(writeId: number): void;
 	currentFrameId(): number | null;
 	onFirstFrameCommit(listener: (frameId: number) => void): void;
+	/** The always-on ring as it stands, classified. Allocates; call it once, on the way out. */
+	snapshotInputWedge(): InputWedgeSnapshot;
 	close(): Promise<void>;
 }
 
@@ -255,17 +357,32 @@ export function renderTracePath(env: NodeJS.ProcessEnv = process.env): string | 
 	return raw && raw.length > 0 ? raw : null;
 }
 
+/**
+ * One tracer, two sinks. The JSONL file is the armed sink: it exists only when
+ * `CLIO_CODER_RENDER_TRACE` named a path, and it keeps every record. The
+ * bounded in-memory ring is the always-on sink: it keeps the last
+ * {@link INPUT_WEDGE_RING_CAPACITY} `input_ingress` records and the same number
+ * of committed frames, so the SIGTERM that recovers a wedged pane can still say
+ * which half of the input pipeline stopped (#224). A null `path` is the
+ * ring-only mode, and there the recorders that only ever fed the file keep
+ * their counters and skip building a record nothing would read.
+ */
 export function createRenderTrace(
-	path: string,
+	path: string | null,
 	now: () => number = () => performance.now(),
 	writerOptions: AsyncTraceWriterOptions = {},
 ): RenderTrace {
 	// Initialization happens before the terminal/TUI starts, never in a frame.
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, "", "utf8");
+	if (path !== null) {
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, "", "utf8");
+	}
 	const openedAt = now();
+	const openedAtEpochMs = Date.now();
 	const at = (): number => rounded(now() - openedAt);
-	const writer = createAsyncTraceWriter(path, { ...writerOptions, recordTime: at });
+	const writer = path === null ? null : createAsyncTraceWriter(path, { ...writerOptions, recordTime: at });
+	const inputRing = createRing<RenderTraceInputIngressRecord>(INPUT_WEDGE_RING_CAPACITY);
+	const frameRing = createRing<RenderTraceFrameRecord>(INPUT_WEDGE_RING_CAPACITY);
 	let frameSeq = 0;
 	let writeSeq = 0;
 	let eventSeq = 0;
@@ -282,7 +399,7 @@ export function createRenderTrace(
 	const ranges = new Map<string, { codeUnits: number; graphemes: number }>();
 	const pendingDrains = new Map<number, { frameId: number | null; at: number }>();
 
-	writer.enqueue({ type: "trace_start", version: RENDER_TRACE_VERSION, at: 0 });
+	writer?.enqueue({ type: "trace_start", version: RENDER_TRACE_VERSION, at: 0 });
 
 	const trace: RenderTrace = {
 		recordPanelRender(metrics): void {
@@ -294,12 +411,15 @@ export function createRenderTrace(
 		},
 		recordVisibleEvent(fields): number {
 			eventSeq += 1;
+			// The ring keeps no provider deltas, so ring-only mode does not pay for
+			// grapheme segmentation on every token of every stream.
+			if (writer === null) return eventSeq;
 			const key = `${generation}:${fields.kind}:${fields.contentIndex}`;
 			const previous = ranges.get(key) ?? { codeUnits: 0, graphemes: 0 };
 			const graphemes = graphemeCount(fields.delta);
 			const next = { codeUnits: previous.codeUnits + fields.delta.length, graphemes: previous.graphemes + graphemes };
 			ranges.set(key, next);
-			writer.enqueue({
+			writer?.enqueue({
 				type: "event_ingress",
 				version: RENDER_TRACE_VERSION,
 				eventSeq,
@@ -317,7 +437,7 @@ export function createRenderTrace(
 		},
 		recordQueue(sequence, action): void {
 			queueDepth = Math.max(0, queueDepth + (action === "admit" ? 1 : -1));
-			writer.enqueue({
+			writer?.enqueue({
 				type: "queue",
 				version: RENDER_TRACE_VERSION,
 				eventSeq: sequence,
@@ -328,7 +448,7 @@ export function createRenderTrace(
 		},
 		recordPanelApplied(sequence): void {
 			panelHighWater = Math.max(panelHighWater, sequence);
-			writer.enqueue({
+			writer?.enqueue({
 				type: "panel",
 				version: RENDER_TRACE_VERSION,
 				eventSeq: sequence,
@@ -339,7 +459,7 @@ export function createRenderTrace(
 		recordInputIngress(action, bytes, visualExpected = action !== "no-visual-change"): number {
 			inputSeq += 1;
 			if (visualExpected) inputHighWater = inputSeq;
-			writer.enqueue({
+			const record: RenderTraceInputIngressRecord = {
 				type: "input_ingress",
 				version: RENDER_TRACE_VERSION,
 				inputSeq,
@@ -347,7 +467,9 @@ export function createRenderTrace(
 				at: at(),
 				bytes,
 				visualExpected,
-			});
+			};
+			inputRing.push(record);
+			writer?.enqueue(record);
 			return inputSeq;
 		},
 		beginFrame(fields): FrameState {
@@ -403,8 +525,11 @@ export function createRenderTrace(
 				},
 				commits: frame.commits,
 			};
-			writer.enqueue(record);
+			writer?.enqueue(record);
 			if (frame.commits.length > 0) {
+				// Only a frame that reached stdout answers the question the ring exists
+				// for, which is whether the consumer half is still painting.
+				frameRing.push(record);
 				lastCommitAt = frame.commits.at(-1)?.at ?? endAt;
 				if (!firstCommitDelivered) {
 					firstCommitDelivered = true;
@@ -439,6 +564,7 @@ export function createRenderTrace(
 				backpressured: !fields.returned,
 			};
 			currentFrame?.commits.push(commit);
+			if (writer === null) return writeSeq;
 			writer.enqueue({ type: "terminal_write", version: RENDER_TRACE_VERSION, frameId, ...commit });
 			if (!fields.returned) pendingDrains.set(writeSeq, { frameId, at: commit.at });
 			return writeSeq;
@@ -448,7 +574,7 @@ export function createRenderTrace(
 			if (!pending) return;
 			pendingDrains.delete(writeId);
 			const drainAt = at();
-			writer.enqueue({
+			writer?.enqueue({
 				type: "terminal_drain",
 				version: RENDER_TRACE_VERSION,
 				writeId,
@@ -461,7 +587,28 @@ export function createRenderTrace(
 		onFirstFrameCommit(listener): void {
 			firstCommitListener = listener;
 		},
-		close: () => writer.close(),
+		snapshotInputWedge(): InputWedgeSnapshot {
+			const inputIngress = inputRing.toArray();
+			const frames = frameRing.toArray();
+			const nowAt = at();
+			const lastIngressAt = inputIngress.at(-1)?.at;
+			const lastFrame = frames.at(-1);
+			const lastFrameCommitAt = lastFrame?.commits.at(-1)?.at ?? lastFrame?.endAt;
+			return {
+				version: RENDER_TRACE_VERSION,
+				capacity: INPUT_WEDGE_RING_CAPACITY,
+				pid: process.pid,
+				openedAtEpochMs,
+				atEpochMs: Date.now(),
+				at: nowAt,
+				classification: classifyInputWedge(inputIngress, frames),
+				msSinceLastInputIngress: lastIngressAt === undefined ? null : rounded(nowAt - lastIngressAt),
+				msSinceLastCommittedFrame: lastFrameCommitAt === undefined ? null : rounded(nowAt - lastFrameCommitAt),
+				inputIngress,
+				frames,
+			};
+		},
+		close: () => writer?.close() ?? Promise.resolve(),
 	};
 	return trace;
 }

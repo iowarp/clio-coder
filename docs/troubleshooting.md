@@ -76,6 +76,43 @@ One case is expected on hybrid architectures and looks like a bug. Qwen3.8 keeps
 
 ---
 
+## A TUI that stops answering the keyboard
+
+When an interactive session stops responding to typing, the question worth
+answering before anything else is which half of the input pipeline stopped: the
+stdin reader that hands bytes to the application, or the renderer that turns
+them into a frame on stdout. Clio keeps that evidence without being asked. Every
+interactive process holds a bounded in-memory ring of the last 256 input-ingress
+records and the last 256 committed frames, and writes it out when the process
+receives `SIGTERM`, which is the signal a `kill` of the stuck pane sends.
+
+The dump lands in the state directory `clio-coder paths` reports:
+
+```text
+<stateDir>/input-wedge/<ISO timestamp>-<pid>.json
+```
+
+The five newest dumps are kept and older ones are removed as new ones land.
+Read `classification` first:
+
+| `classification` | What it means |
+| :--- | :--- |
+| `input-not-committed` | Bytes reached the application and no frame carrying them ever reached stdout. The renderer is the stuck half. |
+| `no-input-recorded` | Nothing was delivered at all. If the operator was typing, the stdin reader is the stuck half. |
+| `input-committed` | Both halves were moving. Whatever the session was doing, it was not this pipeline. |
+
+`msSinceLastInputIngress` and `msSinceLastCommittedFrame` say how long each half
+had been quiet when the signal arrived, and the `inputIngress` and `frames`
+arrays carry the records themselves. Frames are kept only when they reached
+stdout, so an empty `frames` array is itself a finding.
+
+For a full session trace rather than the tail, set `CLIO_CODER_RENDER_TRACE` to
+a file path before starting the session. That writes every record, including
+provider deltas and terminal writes, as JSONL. The ring is the always-on subset
+of the same records, for the case where nobody armed the trace first.
+
+---
+
 ## Diagnostic Commands
 
 When encountering unexpected system behavior:
