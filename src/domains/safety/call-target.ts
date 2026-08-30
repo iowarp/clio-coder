@@ -31,6 +31,58 @@ function oneLine(value: string): string {
 	return value.replace(/\s+/g, " ").trim();
 }
 
+/** Columns one tab occupies when a multi-line surface expands it. */
+const DISPLAY_TAB_WIDTH = 4;
+
+/** Stands in for a control byte that was neutralized, so the cut is visible. */
+const CONTROL_BYTE_PLACEHOLDER = "·";
+
+export interface SanitizedDisplayText {
+	text: string;
+	/** A control byte or escape sequence was neutralized. */
+	neutralized: boolean;
+	/** A tab was expanded, so column positions are display positions. */
+	tabsExpanded: boolean;
+}
+
+/**
+ * Neutralize escape sequences and control bytes while keeping line structure.
+ * {@link sanitizeCallTargetText} is the one-line form for a card; this is the
+ * form a multi-line operator surface needs, where the newlines are the content
+ * rather than whitespace to collapse. Tabs become spaces because a bordered
+ * frame measures visible width and a literal tab makes that measurement a lie.
+ * Every other C0 byte and DEL becomes a visible placeholder, so a payload
+ * cannot style, reposition, or spoof the surface that is approving it.
+ */
+export function sanitizeMultilineDisplayText(value: string): SanitizedDisplayText {
+	const escapesStripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
+	let neutralized = escapesStripped.length !== value.length;
+	// CRLF is line structure, not an injection, so it normalizes rather than
+	// showing a placeholder at the end of every line of a Windows-authored file.
+	const stripped = escapesStripped.replace(/\r\n/g, "\n");
+	let tabsExpanded = false;
+	let out = "";
+	for (const ch of stripped) {
+		if (ch === "\n") {
+			out += ch;
+			continue;
+		}
+		if (ch === "\t") {
+			out += " ".repeat(DISPLAY_TAB_WIDTH);
+			tabsExpanded = true;
+			continue;
+		}
+		const code = ch.codePointAt(0) ?? 0;
+		if (code < 0x20 || code === 0x7f) {
+			out += CONTROL_BYTE_PLACEHOLDER;
+			neutralized = true;
+			continue;
+		}
+		out += ch;
+	}
+	return { text: out, neutralized, tabsExpanded };
+}
+
 /**
  * Neutralize escape sequences and control bytes in a pre-composed target
  * string and collapse it to one line. Used where a description crosses a

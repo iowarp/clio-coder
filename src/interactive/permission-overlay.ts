@@ -6,13 +6,21 @@ import {
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
 import type { Component, OverlayOptions, TUI } from "../engine/tui.js";
+import {
+	MUTATION_PREVIEW_VISIBLE_ROWS,
+	type MutationFacts,
+	type MutationInspector,
+	type MutationPreview,
+	mutationFactsLine,
+	mutationPreviewWindow,
+} from "./mutation-preview.js";
 import { fitHintEntries } from "./overlay-frame.js";
-import { permissionHintEntries } from "./permission-hint.js";
+import { MUTATION_PREVIEW_KEY, type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioToken } from "./theme/index.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
-export { permissionHintEntries } from "./permission-hint.js";
+export { MUTATION_PREVIEW_KEY, type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 
 export interface ApprovalRequestView {
 	requestId: string;
@@ -34,6 +42,14 @@ export interface ApprovalRequestView {
 	 * when nothing meaningful is derivable.
 	 */
 	target?: string;
+	/**
+	 * Size and digest facts for a parked `write` or `edit`, and nothing else
+	 * about it. The mutation text is deliberately absent: this view is what
+	 * reaches the transcript row, the parked notice, and the approval-state
+	 * event, so anything on it has already left the overlay. The text itself is
+	 * held by the inspector the overlay opener is given (issue #254).
+	 */
+	mutation?: MutationFacts;
 	queueDepth?: number;
 }
 
@@ -79,11 +95,59 @@ export function permissionOverlayPlacement(
 	};
 }
 
-class PermissionOverlayBody implements Component {
-	constructor(private readonly view: ApprovalRequestView) {}
+/**
+ * The overlay body, plus the inspection state the key router drives. The
+ * preview is built on the first toggle rather than per frame, so the file read
+ * and the diff happen once when the operator asks for them.
+ */
+export interface PermissionOverlayBodyHandle extends Component {
+	/** Whether this card has a mutation the operator can read locally. */
+	canInspect(): boolean;
+	isInspecting(): boolean;
+	toggleInspect(): void;
+	scrollInspect(delta: number): void;
+}
+
+class PermissionOverlayBody implements PermissionOverlayBodyHandle {
+	private preview: MutationPreview | null = null;
+	private scroll = 0;
+	private lastLineCount = 0;
+
+	constructor(
+		private readonly view: ApprovalRequestView,
+		private readonly inspect?: MutationInspector,
+	) {}
+
+	canInspect(): boolean {
+		return this.inspect !== undefined;
+	}
+
+	isInspecting(): boolean {
+		return this.preview !== null;
+	}
+
+	toggleInspect(): void {
+		if (this.inspect === undefined) return;
+		if (this.preview !== null) {
+			this.preview = null;
+			this.scroll = 0;
+			return;
+		}
+		this.preview = this.inspect();
+		this.scroll = 0;
+	}
+
+	scrollInspect(delta: number): void {
+		if (this.preview === null) return;
+		const maxScroll = Math.max(0, this.lastLineCount - MUTATION_PREVIEW_VISIBLE_ROWS);
+		this.scroll = Math.max(0, Math.min(this.scroll + delta, maxScroll));
+	}
 
 	render(width: number): string[] {
-		return permissionOverlayLines(this.view, width);
+		if (this.preview === null) return permissionOverlayLines(this.view, width);
+		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
+		this.lastLineCount = rendered.wrappedLineCount;
+		return rendered.lines;
 	}
 
 	invalidate(): void {}
@@ -167,12 +231,72 @@ export function permissionOverlayTone(view: ApprovalRequestView): ClioToken {
  * three columns the bottom border spends on `─ ` and the trailing space come
  * off the top, which is what `buildResponsiveHint` does for every other frame.
  */
-export function permissionOverlayHint(innerWidth: number, composerHasDraft = false): string {
-	return fitHintEntries(permissionHintEntries(composerHasDraft), innerWidth - 3);
+export function permissionOverlayHint(
+	innerWidth: number,
+	composerHasDraft = false,
+	inspection: PermissionInspectionHint = "none",
+): string {
+	return fitHintEntries(permissionHintEntries(composerHasDraft, inspection), innerWidth - 3);
+}
+
+/** The tools whose parked call mutates a file, so a card without a preview owes the operator a reason. */
+function isFileMutationTool(tool: string): boolean {
+	return tool === "write" || tool === "edit";
 }
 
 function actionConsequence(presentation: DecisionPresentation, id: "deny" | "stop"): string {
 	return presentation.requiredActions.find((action) => action.id === id)?.consequence ?? "";
+}
+
+/**
+ * Hard wrap for mutation text. Prose wraps on words; a proposed file line and a
+ * diff row do not, because the column a character sits in is part of what the
+ * operator is reading. The continuation marker says the row was folded rather
+ * than cut, which is the difference between a wrap and unmarked truncation.
+ */
+function wrapMutationLine(value: string, max: number): string[] {
+	if (max <= 1) return [value];
+	if (value.length <= max) return [value];
+	const lines: string[] = [];
+	let remaining = value;
+	while (remaining.length > max) {
+		lines.push(`${remaining.slice(0, max - 1)}↩`);
+		remaining = remaining.slice(max - 1);
+	}
+	lines.push(remaining);
+	return lines;
+}
+
+/**
+ * The card with the mutation open. The tool, target, and digest facts stay at
+ * the top so the bytes on screen remain tied to the call they belong to, and
+ * the standing safety prose gives way to the mutation itself: the operator
+ * opened this to read what changes, and the keys that answer the ask are on the
+ * footer throughout.
+ */
+function permissionInspectionLines(
+	view: ApprovalRequestView,
+	preview: MutationPreview,
+	width: number,
+	scroll: number,
+): { lines: string[]; wrappedLineCount: number } {
+	const content = Math.max(8, Math.floor(width));
+	const wrapped = preview.body.flatMap((line) => wrapMutationLine(line, content));
+	const pane = mutationPreviewWindow(wrapped, scroll);
+	const notes: string[] = [];
+	if (preview.neutralized) notes.push("control characters shown as ·");
+	if (preview.tabsExpanded) notes.push("tabs shown as spaces");
+	const lines = [
+		field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
+		...(view.target !== undefined && view.target.length > 0 ? [field("Target: ", view.target, content)] : []),
+		...wrapSentence(`Mutation: ${mutationFactsLine(preview.facts)}`, content),
+		"",
+		...wrapSentence(preview.heading, content),
+		...pane.window,
+		...(pane.position === null ? [] : [pane.position]),
+		...(notes.length > 0 ? [`Rendered safely: ${notes.join(", ")}.`] : []),
+	];
+	return { lines, wrappedLineCount: wrapped.length };
 }
 
 /**
@@ -193,6 +317,24 @@ export function permissionOverlayLines(view: ApprovalRequestView, width: number)
 	const lines = [
 		field("Tool: ", `${view.tool} · Action: ${view.actionClass}`, content),
 		...(view.target !== undefined && view.target.length > 0 ? [field("Target: ", view.target, content)] : []),
+		// Size and digest stay on the collapsed card whether or not the operator
+		// opens the mutation, so the decision always carries the identity of the
+		// bytes it applies to.
+		// Wrapped, never ellipsized: at 40 columns the digest is the tail of the
+		// line, and ellipsizing it would drop the one fact that ties the decision
+		// to the bytes it applies to.
+		...(view.mutation !== undefined
+			? [
+					...wrapSentence(`Mutation: ${mutationFactsLine(view.mutation)}`, content),
+					...wrapSentence(`Press ${MUTATION_PREVIEW_KEY} to read it before deciding.`, content),
+				]
+			: []),
+		...(view.mutation === undefined && view.origin.kind === "worker" && isFileMutationTool(view.tool)
+			? wrapSentence(
+					"No local preview: this call's arguments stay inside the worker, so you are approving the target above without inspecting the mutation.",
+					content,
+				)
+			: []),
 		...wrapSentence(`Requested by: ${presentation.requestedByCopy}`, content),
 		...(view.artifact !== undefined
 			? [
@@ -215,6 +357,14 @@ export function permissionOverlayLines(view: ApprovalRequestView, width: number)
 	return lines;
 }
 
-export function createPermissionOverlayBody(view: ApprovalRequestView): Component {
-	return new PermissionOverlayBody(view);
+/**
+ * The overlay body for one parked call. The inspector, when present, is the
+ * only path the mutation text takes: it is never placed on `view`, so nothing
+ * that renders or forwards the view can carry the bytes with it.
+ */
+export function createPermissionOverlayBody(
+	view: ApprovalRequestView,
+	inspect?: MutationInspector,
+): PermissionOverlayBodyHandle {
+	return new PermissionOverlayBody(view, inspect);
 }

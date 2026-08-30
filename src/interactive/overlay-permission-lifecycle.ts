@@ -11,6 +11,7 @@ import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js"
 import { approvalParkedNotice, autonomyDeniedNotice, workerEscalationNotice } from "./bus-notices.js";
 import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
+import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type ApprovalRequestView, askAxis, describeCallTarget } from "./permission-overlay.js";
 
@@ -43,7 +44,12 @@ export interface OverlayPermissionLifecycleDeps {
 	dispatch: Pick<DispatchContract, "resolveWorkerPermission">;
 	getAutonomy(): string;
 	getOverlayState(): OverlayState;
-	openPermissionOverlay(view: ApprovalRequestView): boolean;
+	/**
+	 * Open the dialog for one parked call. `inspect` carries the complete
+	 * mutation text and is the only channel that does; it is process-local by
+	 * construction, so it is passed here rather than folded into the view.
+	 */
+	openPermissionOverlay(view: ApprovalRequestView, inspect?: MutationInspector): boolean;
 	closeOverlay(): void;
 	appendNotice(level: NoticeLevel, text: string): void;
 	applyApprovalState(event: ToolApprovalStateEvent): void;
@@ -131,6 +137,9 @@ function mainApprovalRequestView(
 			? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 			: { kind: "autonomy" as const, level: autonomy });
 	const target = describeCallTarget(call.tool, call.args);
+	// Facts only. The mutation text stays in the inspector the overlay opener
+	// gets; this object reaches the transcript row and the approval-state event.
+	const mutation = mutationFacts(call.tool, call.args);
 	return {
 		requestId: meta?.requestId ?? "permission-pending",
 		tool: call.tool,
@@ -144,8 +153,19 @@ function mainApprovalRequestView(
 			: {}),
 		...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
 		...(target.length > 0 ? { target } : {}),
+		...(mutation !== null ? { mutation } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
 	};
+}
+
+/**
+ * The inspector for a main-agent ask, or undefined when there is nothing local
+ * to read. A worker escalation never gets one: its arguments stay in the
+ * worker, and the card says so rather than implying an inspection it cannot do.
+ */
+function mainMutationInspector(call: ClassifierCall, view: ApprovalRequestView): MutationInspector | undefined {
+	if (view.mutation === undefined) return undefined;
+	return createMutationInspector(call.tool, call.args, view.mutation);
 }
 
 function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: string): WorkerEscalationEntry | null {
@@ -240,7 +260,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				announceParked();
 				return;
 			}
-			if (!deps.openPermissionOverlay(view)) {
+			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view))) {
 				announceParked();
 				return;
 			}

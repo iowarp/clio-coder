@@ -498,6 +498,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		getLeaderArmed: () => leaderArmed,
 		getShutdownArmed: () => shutdownArmed,
 		isAwaitingApproval: () => overlayLifecycle?.getState() === "permission-confirm",
+		getPermissionInspection: () => {
+			if (overlayLifecycle === undefined || overlayLifecycle === null) return "none";
+			if (!overlayLifecycle.canInspectMutation()) return "none";
+			return overlayLifecycle.isInspectingMutation() ? "open" : "closed";
+		},
 		resolveVisibleEventSequence: (event) => visibleEventIngress.get(event)?.traceSequence ?? null,
 		resolveStreamIngress: (event) => visibleEventIngress.get(event) ?? null,
 		commitFrame: (reason) => shell.commitCurrentFrame(reason === "teardown" ? 300 : 30_000),

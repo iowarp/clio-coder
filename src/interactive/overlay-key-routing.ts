@@ -1,5 +1,6 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { isKeyRelease, matchesKey } from "../engine/tui.js";
+import { MUTATION_PREVIEW_KEY } from "./permission-hint.js";
 
 export type OverlayState =
 	| "closed"
@@ -47,6 +48,11 @@ export interface PermissionOverlayKeyDeps {
 	 * the call. Only the deletion keys in `isDraftEditKey` arrive here.
 	 */
 	editDraft?: (data: string) => void;
+	/** Whether this card has a mutation the operator can read locally (issue #254). */
+	canInspectMutation?: () => boolean;
+	isInspectingMutation?: () => boolean;
+	toggleMutationInspection?: () => void;
+	scrollMutationInspection?: (delta: number) => void;
 }
 
 export interface DispatchBoardOverlayKeyDeps {
@@ -85,6 +91,18 @@ function isDraftEditKey(data: string): boolean {
 	return !isKeyRelease(data) && DRAFT_EDIT_KEYS.some((key) => matchesKey(data, key));
 }
 
+/** Rows one page key moves the open mutation. Matches the window the card renders. */
+const MUTATION_PAGE_ROWS = 16;
+
+/** How far a key scrolls the open mutation, or 0 when the key is not a scroll key. */
+function mutationScrollDelta(data: string): number {
+	if (matchesKey(data, "up")) return -1;
+	if (matchesKey(data, "down")) return 1;
+	if (matchesKey(data, "pageUp")) return -MUTATION_PAGE_ROWS;
+	if (matchesKey(data, "pageDown")) return MUTATION_PAGE_ROWS;
+	return 0;
+}
+
 /** Pure permission overlay key router: returns true when the input was consumed. */
 export function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
 	if (matchesKey(data, "enter") && !isKeyRelease(data)) {
@@ -97,6 +115,26 @@ export function routePermissionOverlayKey(data: string, deps: PermissionOverlayK
 	if (deps.editDraft && isDraftEditKey(data)) {
 		deps.editDraft(data);
 		return true;
+	}
+	// Reading the mutation is the one thing this dialog does that is not an
+	// answer, so it toggles rather than navigating away: Enter, `s`, and Esc keep
+	// their meanings the whole time the mutation is on screen, and `v` is what
+	// puts it away. A card with nothing local to inspect leaves the key inert.
+	if (
+		matchesKey(data, MUTATION_PREVIEW_KEY) &&
+		!isKeyRelease(data) &&
+		(deps.canInspectMutation?.() ?? false) &&
+		deps.toggleMutationInspection
+	) {
+		deps.toggleMutationInspection();
+		return true;
+	}
+	if ((deps.isInspectingMutation?.() ?? false) && deps.scrollMutationInspection && !isKeyRelease(data)) {
+		const delta = mutationScrollDelta(data);
+		if (delta !== 0) {
+			deps.scrollMutationInspection(delta);
+			return true;
+		}
 	}
 	if (isEscapeKey(data)) {
 		deps.cancelPermission();
