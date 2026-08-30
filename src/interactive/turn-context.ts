@@ -254,6 +254,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
+	// The hash this process compiled *for the session that is current now*, and
+	// the manifest's `previousHash` whenever it is set. It is not read off
+	// `sessionPrompt`: an in-process `/resume` leaves that compile in place so
+	// the ledger keeps its project-preload labels until the next compile, but
+	// manifest provenance follows the session, so a switch drops the hash here
+	// and the next compile falls through to the incoming session's own manifest
+	// exactly as a cold-start resume does (#249).
+	let sessionPromptHash: string | null = null;
 	// Whether this process has already looked up the resumed session's last
 	// recorded prompt hash. The lookup reads the manifest file, so it happens
 	// once, on the first compile, and never on the reuse path.
@@ -990,22 +998,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				| undefined;
 			// `Context window: N` is the window the backend will actually serve
 			// this session, taken from the resolution the turn already ran rather
-			// than from the model descriptor's copy of it (issue #249). A probed
-			// window is a number the target advertises without saying it is what
-			// is loaded, so a loaded figure outranks it; brief #227's
-			// carry-forward is what puts that figure in reach on a resume. The
-			// source rides into the prompt manifest, so a recompile after the
-			// loaded window is first observed is explained by the record.
+			// than from the model descriptor's copy of it (issue #249). The
+			// ranking that puts a loaded figure ahead of a probed one lives in
+			// `resolveContextWindowDetails`, which tests `loadedContextWindow`
+			// first and only then `probedContextWindow`, so `effectiveContextWindow`
+			// already is the loaded window whenever one is known and the source
+			// already reads "loaded"; brief #227's carry-forward is what puts that
+			// figure in reach on a resume. The source rides into the prompt
+			// manifest, so a recompile after the loaded window is first observed
+			// is explained by the record.
 			const windowDetails = agentRuntime.runtimeResolution.contextWindowDetails;
-			const loadedWindow =
-				typeof windowDetails.loadedContextWindow === "number" && windowDetails.loadedContextWindow > 0
-					? windowDetails.loadedContextWindow
-					: null;
-			const preferLoaded = loadedWindow !== null && windowDetails.contextWindowSource === "probe";
-			const resolvedWindow = preferLoaded ? loadedWindow : windowDetails.effectiveContextWindow;
+			const resolvedWindow = windowDetails.effectiveContextWindow;
 			const contextWindow = typeof resolvedWindow === "number" && resolvedWindow > 0 ? resolvedWindow : null;
 			const contextWindowSource: ContextWindowSource | null =
-				contextWindow === null ? null : preferLoaded ? "loaded" : windowDetails.contextWindowSource;
+				contextWindow === null ? null : windowDetails.contextWindowSource;
 			const guidance = modelState?.clio?.quirks?.thinking?.guidance;
 			// Per-tool prompt hints come from registry metadata, derived once from
 			// the frozen surface per compile. The compiler renders them sorted by
@@ -1041,7 +1047,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					cwd: process.cwd(),
 					workingContextPaths: [...sessionWorkingContextPaths],
 				});
-				const previousHash = sessionPrompt?.systemPromptHash ?? lastRecordedPromptHash();
+				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
 				if (changed) {
 					agentRuntime.agent.state.systemPrompt = result.systemPrompt;
@@ -1066,6 +1072,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 				lastSystemPromptReused = !changed;
 				sessionPrompt = result;
+				sessionPromptHash = result.systemPromptHash;
 				sessionPromptKey = key;
 				return result;
 			} catch (err) {
@@ -1308,9 +1315,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		resetForSession(): void {
+			// An in-process switch replaces the whole prefix: the backend's slot
+			// still holds the outgoing session's prompt and history, so the first
+			// turn on the incoming one is expected-cold on every tier, exactly as
+			// a recompile is. The manifest can no longer say so on its own once
+			// provenance follows the session, because the incoming session's last
+			// recorded hash usually equals its fresh compile, so the stamp comes
+			// from here. Only when this process had actually applied a prompt:
+			// before the first compile there is nothing in the slot to have lost.
+			if (sessionPromptHash !== null) noteColdReason("prompt_recompiled");
 			lastPromptCache = null;
 			lastPrewarm = null;
 			lastSystemPromptReused = false;
+			sessionPromptHash = null;
 			sessionPromptKey = null;
 			resumedPromptHashRead = false;
 			resumedPromptHash = null;
