@@ -13,7 +13,7 @@ import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
 import type { MuxContract } from "../domains/mux/index.js";
-import type { PanesOperations } from "../domains/mux/operations.js";
+import type { PanesOperations, PanesWatchController } from "../domains/mux/operations.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -45,6 +45,7 @@ import { createInteractiveTickers } from "./interactive-tickers.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
+import { paneWatchDecision } from "./pane-policy.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
@@ -56,6 +57,7 @@ import type {
 } from "./slash-commands.js";
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
 import type { TerminalLease } from "./terminal-lease.js";
+import type { createWatchPaneController } from "./watch-pane.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
 
@@ -152,6 +154,13 @@ export interface InteractiveDeps {
 	createMuxBridge?: typeof createMuxBridge;
 	/** Bind the file-pane return path after the composer and TUI exist. */
 	attachYaziBridge?: (bridge: YaziBridge) => () => void;
+	/**
+	 * Watch-pane factory from the `--with-panes` composition root; absent on a
+	 * plain boot. The controller it builds backs Enter in the workers view.
+	 */
+	createWatchPane?: typeof createWatchPaneController;
+	/** Bind the watch controller into the shared PanesOperations for `/panes show`. */
+	attachWatchPane?: (controller: PanesWatchController) => () => void;
 	/**
 	 * File-pane factory. Supplied by the `--with-panes` composition root (or a
 	 * contract test); absent on a plain boot, which therefore loads no yazi code.
@@ -919,45 +928,64 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		};
 		notify(outcome.ok ? "success" : "info", outcome.message, "dispatch:background");
 	};
-	// Spec 4.7. Built only when a pane host answered detection, so a session with
-	// no panes subscribes to nothing and the bus handlers do not exist at all.
-	// The factory arrives from the `--with-panes` composition root (or a test);
-	// a plain session loads none of the bridge code.
+	// Built only when a pane host answered detection, so a session with no
+	// panes subscribes to nothing and the bus handlers do not exist at all.
+	// The factories arrive from the `--with-panes` composition root (or a
+	// test); a plain session loads none of the bridge code.
 	const mux = deps.mux;
 	const muxBridge =
 		mux && mux.mode !== "none" && deps.createMuxBridge
 			? deps.createMuxBridge({
 					bus: deps.bus,
 					mux,
-					getPanesSettings: () => {
-						const panes = deps.getSettings?.().panes;
-						return {
-							agents: panes?.agents ?? "auto",
-							keepFailed: panes?.keepFailed ?? true,
-							notifications: panes?.notifications ?? "failures",
-						};
-					},
-					// Both the detached path and the attach-to-background conversion
-					// write one durable batch record, so this single read answers the
-					// `auto` policy for both without a second signal.
-					isDetached: (runId) =>
-						deps.dispatch.detached
-							?.list()
-							.some((batch) => batch.runs.some((run) => run.runId === runId || run.assignmentId === runId)) === true,
-					// A resumed session re-adopts the panes still on screen for runs the
-					// dispatch domain still considers live, rather than opening seconds.
-					resumableRuns: () =>
-						deps.dispatch.snapshot().running.map((run) => ({
-							runId: run.runId,
-							agentId: run.agentId,
-							...(typeof run.task === "string" ? { task: run.task } : {}),
-						})),
+					notificationsPolicy: () => deps.getSettings?.().panes.notifications ?? "failures",
 					log: (level, message) => {
 						if (level === "warning") notify("warning", message, "mux:bridge");
 					},
 					notice: (level, text) => appendNotice(level, text, busNoticeSink),
 				})
 			: null;
+	// The workers-view watch pane: opened on Enter over a live run, retargeted
+	// by arrow keys through its selection file. `/panes show` and the panes
+	// tool drive the same controller through the shared operations object.
+	const watchPane =
+		mux && mux.mode !== "none" && deps.createWatchPane
+			? deps.createWatchPane({ mux, getCwd: () => process.cwd() })
+			: null;
+	const detachWatchPane = watchPane ? deps.attachWatchPane?.(watchPane) : undefined;
+	const selectedWatchableRun = (): { runId: string; agentId: string } | null => {
+		if (!watchPane) return null;
+		const row = dispatchBoard.selectedRow();
+		if (!row) return null;
+		const decision = paneWatchDecision({ source: "workers-view", runStatus: row.status });
+		return decision.open ? { runId: row.runId, agentId: row.agentId } : null;
+	};
+	/**
+	 * Enter in the workers view. True means the watch pane took the key; false
+	 * (panes off, nothing watchable under the policy) falls back to the inline
+	 * worker-progress detail, so a terminal run's Enter still expands its card.
+	 */
+	const watchSelectedDispatch = (): boolean => {
+		const selected = selectedWatchableRun();
+		if (!watchPane || !selected) return false;
+		void watchPane.watch(selected.runId).then((result) => {
+			if (result.status === "watching") {
+				if (result.opened) {
+					notify("success", `watching ${selected.agentId} (${selected.runId}) in a pane`, "panes:watch");
+				}
+			} else {
+				notify("warning", result.reason, "panes:watch");
+			}
+			tui.requestRender();
+		});
+		return true;
+	};
+	/** Arrow keys: the watch pane follows the cursor, but only once it exists. */
+	const followBoardSelection = (): void => {
+		if (!watchPane?.isOpen()) return;
+		const selected = selectedWatchableRun();
+		if (selected) watchPane.follow(selected.runId);
+	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
 		refreshFooter: () => footer.refresh(),
@@ -1008,7 +1036,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		onShutdownArmedChange: (armed) => {
 			shutdownArmed = armed;
 		},
-		dispatchBoard,
+		dispatchBoard: {
+			selectPrevious: () => {
+				dispatchBoard.selectPrevious();
+				followBoardSelection();
+			},
+			selectNext: () => {
+				dispatchBoard.selectNext();
+				followBoardSelection();
+			},
+			toggleDetail: () => dispatchBoard.toggleDetail(),
+		},
+		watchSelectedDispatch,
 		steerSelectedDispatch,
 		cancelSelectedDispatch,
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
@@ -1050,6 +1089,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			disposeSubscriptions: () => {
 				detachYaziBridge?.();
 				yaziBridge?.dispose();
+				detachWatchPane?.();
+				watchPane?.dispose();
 				muxBridge?.dispose();
 				interactiveSubscriptions.dispose();
 			},

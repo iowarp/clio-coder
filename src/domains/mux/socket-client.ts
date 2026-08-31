@@ -88,14 +88,6 @@ export interface MuxSplitRequest {
 	ratio?: number;
 }
 
-export interface MuxTabCreateRequest {
-	workspaceId?: string;
-	label?: string;
-	cwd?: string;
-	env?: Readonly<Record<string, string>>;
-	focus?: boolean;
-}
-
 export interface MuxReportAgentRequest {
 	paneId: string;
 	source: string;
@@ -196,14 +188,10 @@ export interface MuxClient {
 	snapshot(): Promise<MuxSnapshot>;
 	paneCurrent(callerPaneId?: string): Promise<MuxPane>;
 	paneList(workspaceId?: string): Promise<ReadonlyArray<MuxPane>>;
-	paneGet(paneId: string): Promise<MuxPane>;
 	paneSplit(request: MuxSplitRequest): Promise<MuxPane>;
 	paneClose(paneId: string): Promise<void>;
 	/** Pane ids sharing a tab with `paneId`, read off the tab's layout snapshot. */
 	paneLayout(paneId?: string): Promise<ReadonlyArray<string>>;
-	tabCreate(request: MuxTabCreateRequest): Promise<{ tab: MuxTab; rootPane: MuxPane }>;
-	tabList(workspaceId?: string): Promise<ReadonlyArray<MuxTab>>;
-	tabFocus(tabId: string): Promise<MuxTab>;
 	worktreeList(request?: MuxWorktreeListRequest): Promise<MuxWorktreeListResult>;
 	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult>;
 	worktreeOpen(request: MuxWorktreeOpenRequest): Promise<MuxWorktreeOpenedResult>;
@@ -222,14 +210,6 @@ export interface MuxClient {
 	 * `protocol.ts`. The server answers whether it painted one and why not.
 	 */
 	notificationShow(request: MuxNotificationRequest): Promise<MuxNotificationResult>;
-	/**
-	 * Focus the pane hosting an agent, and clear herdr's attention state on it.
-	 * `target` is a pane id for panes Clio gave agent authority through
-	 * `pane.report_agent`, or an agent name. Protocol-gated; `tab.focus` is the
-	 * fallback for a pane with no agent authority.
-	 */
-	agentFocus(target: string): Promise<void>;
-
 	subscribe(
 		kinds: ReadonlyArray<MuxEventKind>,
 		handler: (event: MuxEvent) => void,
@@ -690,10 +670,6 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 			const result = await callObject("pane.list", params({ workspace_id: workspaceId }));
 			return readArray(result, "panes").map(readPane);
 		},
-		async paneGet(paneId: string): Promise<MuxPane> {
-			const result = await callObject("pane.get", { pane_id: paneId });
-			return readPane(result.pane);
-		},
 		async paneSplit(request: MuxSplitRequest): Promise<MuxPane> {
 			const result = await callObject(
 				"pane.split",
@@ -723,27 +699,6 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 				if (typeof id === "string") ids.push(id);
 			}
 			return ids;
-		},
-		async tabCreate(request: MuxTabCreateRequest): Promise<{ tab: MuxTab; rootPane: MuxPane }> {
-			const result = await callObject(
-				"tab.create",
-				params({
-					workspace_id: request.workspaceId,
-					label: request.label,
-					cwd: request.cwd,
-					env: request.env,
-					focus: request.focus ?? false,
-				}),
-			);
-			return { tab: readTab(result.tab), rootPane: readPane(result.root_pane) };
-		},
-		async tabList(workspaceId?: string): Promise<ReadonlyArray<MuxTab>> {
-			const result = await callObject("tab.list", params({ workspace_id: workspaceId }));
-			return readArray(result, "tabs").map(readTab);
-		},
-		async tabFocus(tabId: string): Promise<MuxTab> {
-			const result = await callObject("tab.focus", { tab_id: tabId });
-			return readTab(result.tab);
 		},
 		async worktreeList(request = {}): Promise<MuxWorktreeListResult> {
 			const result = await callObject("worktree.list", params({ workspace_id: request.workspaceId, cwd: request.cwd }));
@@ -846,9 +801,6 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 				shown: result.shown === true,
 				reason: optionalString(result, "reason") ?? (result.shown === true ? "shown" : "unknown"),
 			};
-		},
-		async agentFocus(target: string): Promise<void> {
-			await call("agent.focus", { target });
 		},
 		subscribe,
 		async close(): Promise<void> {

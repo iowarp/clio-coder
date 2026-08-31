@@ -311,6 +311,11 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 			"the panes composition root (src/entry/with-panes.ts) supplies the file-pane bridge factory; it loads only behind the --with-panes dynamic import.",
 	},
 	{
+		module: "src/interactive/watch-pane.ts",
+		reason:
+			"the panes composition root (src/entry/with-panes.ts) supplies the workers-view watch-pane factory; it loads only behind the --with-panes dynamic import.",
+	},
+	{
 		module: "src/interactive/tool-prose-registration.ts",
 		reason: "the Stage 1 composition root registers interactive prose renderers for tool results.",
 	},

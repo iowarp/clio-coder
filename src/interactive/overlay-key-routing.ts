@@ -63,6 +63,12 @@ export interface DispatchBoardOverlayKeyDeps {
 	cancelSelectedDispatch: () => void;
 	/** Open or close the selected run's worker-progress detail. */
 	toggleSelectedDispatchDetail: () => void;
+	/**
+	 * Open or retarget the watch pane for the selected run. True when the pane
+	 * layer took the key; false hands Enter back to the inline detail toggle,
+	 * which is the whole behavior when panes are off or the run is terminal.
+	 */
+	watchSelectedDispatch: () => boolean;
 }
 
 interface CloseOverlayKeyDeps {
@@ -173,10 +179,11 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 		deps.cancelSelectedDispatch();
 		return true;
 	}
-	// Worker progress is expanded detail the operator asks for. The default list
-	// stays compact so a fan-out of scouts costs one card each.
+	// Enter on a live run enters it: the watch pane opens (or retargets) and
+	// renders the run's stream beside the board. Where panes are off, absent,
+	// or the run is terminal, Enter keeps its inline worker-progress detail.
 	if (matchesKey(data, "enter")) {
-		deps.toggleSelectedDispatchDetail();
+		if (!deps.watchSelectedDispatch()) deps.toggleSelectedDispatchDetail();
 		return true;
 	}
 	return false;

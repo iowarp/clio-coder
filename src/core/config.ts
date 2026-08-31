@@ -1612,18 +1612,14 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.panes)) {
 			issues.add("panes", `expected a map, got ${describe(raw.panes)}`);
 		} else {
+			// `agents` and `keepFailed` are retired: pane-opening is no longer a
+			// per-dispatch policy (src/interactive/pane-policy.ts holds the one
+			// decision). They stay accepted-and-ignored so a settings file written
+			// against an older release keeps passing the strict boot gate.
 			issues.unknownKeys("panes", raw.panes, ["enabled", "agents", "keepFailed", "notifications", "journal", "yazi"]);
 			if ("enabled" in raw.panes) {
 				const v = expectEnum(issues, "panes.enabled", raw.panes.enabled, ["auto", "embedded", "off"] as const);
 				if (v !== undefined) settings.panes.enabled = v;
-			}
-			if ("agents" in raw.panes) {
-				const v = expectEnum(issues, "panes.agents", raw.panes.agents, ["auto", "all", "off"] as const);
-				if (v !== undefined) settings.panes.agents = v;
-			}
-			if ("keepFailed" in raw.panes) {
-				const v = expectBoolean(issues, "panes.keepFailed", raw.panes.keepFailed);
-				if (v !== undefined) settings.panes.keepFailed = v;
 			}
 			if ("notifications" in raw.panes) {
 				const v = expectEnum(issues, "panes.notifications", raw.panes.notifications, ["failures", "all", "off"] as const);

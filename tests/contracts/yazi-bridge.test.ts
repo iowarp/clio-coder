@@ -9,13 +9,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type {
-	MuxAdoptableRun,
-	MuxContract,
-	MuxOpenUtilityPaneRequest,
-	MuxPaneRecord,
-	MuxPaneRef,
-} from "../../src/domains/mux/index.js";
+import type { MuxContract, MuxOpenUtilityPaneRequest, MuxPaneRecord, MuxPaneRef } from "../../src/domains/mux/index.js";
 import type { YaziEvent } from "../../src/domains/mux/yazi/event-stream.js";
 import {
 	createYaziSession,
@@ -53,13 +47,6 @@ function fakeMux(): FakeMux {
 			candidates: ["/tmp/herdr.sock"],
 			reason: "fake",
 		}),
-		async openRunPane(): Promise<MuxPaneRef | null> {
-			return null;
-		},
-		async focusRunPane(): Promise<boolean> {
-			return false;
-		},
-		async closeRunPane(): Promise<void> {},
 		async openUtilityPane(request): Promise<MuxPaneRef | null> {
 			opened.push(request);
 			next += 1;
@@ -69,11 +56,11 @@ function fakeMux(): FakeMux {
 				purpose: "utility",
 				label: request.label,
 				openedAt: 0,
-				runId: null,
-				agentId: null,
-				outcome: null,
 			});
 			return ref;
+		},
+		async adoptPane(): Promise<MuxPaneRef | null> {
+			return null;
 		},
 		async closePane(paneId): Promise<boolean> {
 			const index = records.findIndex((record) => record.ref.paneId === paneId);
@@ -81,16 +68,12 @@ function fakeMux(): FakeMux {
 			records.splice(index, 1);
 			return true;
 		},
-		async reportRunState(): Promise<void> {},
 		async notify(): Promise<void> {},
 		async worktreeCreate(): Promise<null> {
 			return null;
 		},
 		async worktreeRemove(): Promise<boolean> {
 			return false;
-		},
-		async adoptRunPanes(_runs: ReadonlyArray<MuxAdoptableRun>): Promise<ReadonlyArray<string>> {
-			return [];
 		},
 		onPaneGone: () => () => {},
 		list: () => [...records],

@@ -456,6 +456,7 @@ describe("fleet runs detail control", () => {
 				steerSelectedDispatch: () => {},
 				cancelSelectedDispatch: () => {},
 				toggleSelectedDispatchDetail: () => view.toggleDetail(),
+				watchSelectedDispatch: () => false,
 			});
 			strictEqual(routed, true);
 			strictEqual(view.detailExpanded(), true);

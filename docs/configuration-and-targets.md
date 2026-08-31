@@ -670,8 +670,6 @@ Every one of these has an environment override for a single process; see [enviro
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |
 | `prewarm.enabled` | `true` | boolean | next turn |
 | `panes.enabled` | `off` | `auto`, `embedded`, or `off` | restart; `--with-panes` / `--no-panes` beat it |
-| `panes.agents` | `auto` | `auto`, `all`, or `off` | next dispatch |
-| `panes.keepFailed` | `true` | boolean | next dispatch |
 | `panes.notifications` | `failures` | `failures`, `all`, or `off` | next dispatch |
 | `panes.journal` | `true` | boolean | next dispatch |
 | `panes.yazi.enabled` | `true` | boolean | immediately, on the next files-pane open |

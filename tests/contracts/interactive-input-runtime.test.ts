@@ -46,6 +46,7 @@ it("constructs the input runtime without a terminal and wires controller-owned a
 		},
 		refreshFooter: () => events.push("footer:refresh"),
 		dispatchBoard: { selectPrevious: () => {}, selectNext: () => {}, toggleDetail: () => {} },
+		watchSelectedDispatch: () => false,
 		steerSelectedDispatch: () => {},
 		cancelSelectedDispatch: () => {},
 		cancelActiveEditorBash: () => false,

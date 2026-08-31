@@ -184,15 +184,6 @@ export interface PanesSettings {
 	 * degrades to none until that ships; `off` skips detection entirely.
 	 */
 	enabled: "auto" | "embedded" | "off";
-	/**
-	 * Which dispatched runs get a viewer pane. `auto` opens one for the runs an
-	 * operator loses sight of, which is detached batches and dispatches moved to
-	 * the background; `all` also opens one for attached runs, which already
-	 * narrate into the transcript; `off` opens none.
-	 */
-	agents: "auto" | "all" | "off";
-	/** Keep a failed run's viewer pane open for post-mortem instead of closing it. */
-	keepFailed: boolean;
 	/** Which terminal run states raise a pane-host toast. */
 	notifications: "failures" | "all" | "off";
 	journal: boolean;
@@ -514,17 +505,6 @@ export const DEFAULT_SETTINGS = {
 		 * directions.
 		 */
 		enabled: "off",
-		/**
-		 * Detached batches and backgrounded dispatches are the runs that vanish
-		 * from the operator's view, so they are the ones a pane is worth. An
-		 * attached run already narrates into the transcript.
-		 */
-		agents: "auto",
-		/**
-		 * A failed run's pane is where the post-mortem happens, so it outlives the
-		 * run. A succeeded run's pane closes with it.
-		 */
-		keepFailed: true,
 		/** A toast per finished run is noise; a toast per failure is the signal. */
 		notifications: "failures",
 		/**
@@ -870,8 +850,6 @@ prewarm:
 # \`clio-coder reset --state\` clears them with the rest of the state root.
 panes:
   enabled: off
-  agents: auto
-  keepFailed: true
   notifications: failures
   journal: true
   # The files pane uses a managed, reproducible Yazi profile by default.

@@ -112,8 +112,6 @@ describe("contracts/interactive slash runtime", () => {
 			server: { version: "0.8.2", protocol: 21 },
 			settings: {
 				enabled: "auto",
-				agents: "auto",
-				keepFailed: true,
 				notifications: "failures",
 				journal: true,
 				yazi: { enabled: true, mode: "companion", profile: "managed", followCwd: true },
@@ -135,9 +133,6 @@ describe("contracts/interactive slash runtime", () => {
 					tabId: "w1:t2",
 					purpose: "utility",
 					label: "shell",
-					runId: null,
-					agentId: null,
-					outcome: null,
 					adopted: false,
 				});
 				return { status: "opened", label: "shell", paneId: "w1:p9" };
@@ -146,6 +141,7 @@ describe("contracts/interactive slash runtime", () => {
 				return { status: "closed", closed: 0, labels: [] };
 			},
 			attachYazi: () => () => {},
+			attachWatch: () => () => {},
 		} satisfies PanesOperations;
 		const runtime = createInteractiveSlashRuntime(harness.deps);
 		const opening = runtime.admitCommand("/panes open shell");

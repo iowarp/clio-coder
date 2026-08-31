@@ -82,6 +82,8 @@ export interface InteractiveInputRuntimeDeps {
 		selectNext(): void;
 		toggleDetail(): void;
 	};
+	/** Enter in the workers view; false falls through to the detail toggle. */
+	watchSelectedDispatch: () => boolean;
 	steerSelectedDispatch: () => void;
 	cancelSelectedDispatch: () => void;
 	cancelActiveEditorBash: () => boolean;
@@ -237,6 +239,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					toggleSelectedDispatchDetail: () => {
 						deps.dispatchBoard.toggleDetail();
 						deps.requestRender();
+					},
+					watchSelectedDispatch: () => {
+						const handled = deps.watchSelectedDispatch();
+						if (handled) deps.requestRender();
+						return handled;
 					},
 					steerSelectedDispatch: deps.steerSelectedDispatch,
 					cancelSelectedDispatch: deps.cancelSelectedDispatch,

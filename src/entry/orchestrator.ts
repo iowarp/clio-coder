@@ -894,11 +894,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				? [
 						withPanes.createMuxDomainModule({
 							enabled: muxEnablement,
-							cwd: process.cwd(),
-							// A viewer pane follows the run's on-disk journal through this
-							// install's own CLI, so it needs no herdr knowledge and keeps
-							// working when the pane host goes away mid-run.
-							viewerCommand: (request) => withPanes.runViewerCommand(request.runId),
 							log: (level, message) => {
 								if (level === "warning") bootStderr(`[mux] ${message}\n`);
 							},
@@ -2083,7 +2078,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The interactive surface never imports the panes glue itself; the
 		// factories arrive only on an active boot, through the same dynamic
 		// import that loaded the mux domain.
-		...(withPanes ? { createMuxBridge: withPanes.createMuxBridge, createYaziBridge: withPanes.createYaziBridge } : {}),
+		...(withPanes
+			? {
+					createMuxBridge: withPanes.createMuxBridge,
+					createYaziBridge: withPanes.createYaziBridge,
+					createWatchPane: withPanes.createWatchPaneController,
+				}
+			: {}),
+		...(panes ? { attachWatchPane: (controller) => panes.attachWatch(controller) } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),

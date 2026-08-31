@@ -200,7 +200,7 @@ describe("mux socket client", () => {
 		const live = client(fake.socketPath);
 		await live.ping();
 		await live.paneList();
-		await live.paneGet("w1:p1");
+		await live.paneCurrent("w1:p1");
 		const connectionIds = fake.requests.map((request) => request.connectionId);
 		strictEqual(new Set(connectionIds).size, connectionIds.length, "each request must get its own connection");
 		strictEqual(live.connected(), true);
@@ -219,17 +219,10 @@ describe("mux socket client", () => {
 		strictEqual(snapshot.focusedPaneId, "w1:p1");
 
 		strictEqual((await live.paneCurrent()).paneId, "w1:p1");
-		strictEqual((await live.paneGet("w1:p1")).tabId, "w1:t1");
 		strictEqual((await live.paneList()).length, 1);
 
-		const created = await live.tabCreate({ label: "Fleet", focus: false });
-		strictEqual(created.tab.label, "Fleet");
-		strictEqual(created.rootPane.tabId, created.tab.tabId);
-		ok((await live.tabList()).some((tab) => tab.label === "Fleet"));
-		strictEqual((await live.tabFocus(created.tab.tabId)).tabId, created.tab.tabId);
-
-		const split = await live.paneSplit({ direction: "down", targetPaneId: created.rootPane.paneId, focus: false });
-		strictEqual(split.tabId, created.tab.tabId);
+		const split = await live.paneSplit({ direction: "down", targetPaneId: "w1:p1", focus: false });
+		strictEqual(split.tabId, "w1:t1");
 		ok((await live.paneLayout(split.paneId)).includes(split.paneId));
 
 		await live.paneSendText(split.paneId, "echo hi\n");
@@ -243,7 +236,6 @@ describe("mux socket client", () => {
 
 		// A split with no focus request must not ask herdr to steal focus.
 		strictEqual(fake.requestsFor("pane.split")[0]?.params.focus, false);
-		strictEqual(fake.requestsFor("tab.create")[0]?.params.focus, false);
 	});
 
 	it("surfaces a request with no response as MuxRequestTimeout", async () => {
@@ -281,14 +273,14 @@ describe("mux socket client", () => {
 			["some_future_herdr_code", "unknown"],
 		];
 		for (const [wireCode, kind] of cases) {
-			fake.setHandler("pane.get", () => ({ error: { code: wireCode, message: `boom: ${wireCode}` } }));
+			fake.setHandler("pane.current", () => ({ error: { code: wireCode, message: `boom: ${wireCode}` } }));
 			await rejects(
-				() => live.paneGet("w1:p1"),
+				() => live.paneCurrent("w1:p1"),
 				(error: unknown) => {
 					ok(error instanceof MuxError, `${wireCode} should raise MuxError`);
 					strictEqual(error.kind, kind, `${wireCode} should map to ${kind}`);
 					strictEqual(error.wireCode, wireCode);
-					strictEqual(error.method, "pane.get");
+					strictEqual(error.method, "pane.current");
 					return true;
 				},
 			);
@@ -298,9 +290,9 @@ describe("mux socket client", () => {
 	it("ignores response fields it does not know about", async () => {
 		const fake = await server();
 		const live = client(fake.socketPath);
-		fake.setHandler("pane.get", () => ({
+		fake.setHandler("pane.current", () => ({
 			result: {
-				type: "pane_info",
+				type: "pane_current",
 				future_top_level_field: { anything: true },
 				pane: {
 					pane_id: "w1:p1",
@@ -315,7 +307,7 @@ describe("mux socket client", () => {
 				},
 			},
 		}));
-		const pane = await live.paneGet("w1:p1");
+		const pane = await live.paneCurrent("w1:p1");
 		strictEqual(pane.paneId, "w1:p1");
 		strictEqual(pane.agentState, "working");
 		strictEqual(pane.revision, 9);
@@ -326,9 +318,9 @@ describe("mux socket client", () => {
 	it("maps an agent status it has never seen to unknown", async () => {
 		const fake = await server();
 		const live = client(fake.socketPath);
-		fake.setHandler("pane.get", () => ({
+		fake.setHandler("pane.current", () => ({
 			result: {
-				type: "pane_info",
+				type: "pane_current",
 				pane: {
 					pane_id: "w1:p1",
 					terminal_id: "term_1",
@@ -340,7 +332,7 @@ describe("mux socket client", () => {
 				},
 			},
 		}));
-		strictEqual((await live.paneGet("w1:p1")).agentState, "unknown");
+		strictEqual((await live.paneCurrent("w1:p1")).agentState, "unknown");
 	});
 
 	it("delivers pushed lifecycle events on a dedicated connection", async () => {
