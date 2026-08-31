@@ -21,6 +21,8 @@ import type { FleetCommandRegistry } from "../agents/fleet-commands.js";
 import type { FleetContract } from "../agents/fleet-contract.js";
 import { resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
+import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../observability/cost.js";
+import type { CostProvenance } from "../providers/index.js";
 import { claimAssignmentVerdict, recordAssignmentAttempt, settleStoredAssignment } from "./assignment-store.js";
 import { runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
@@ -84,6 +86,15 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	/** Terminal run id, which is the receipt id for an agent step. */
 	terminalRunId: string;
 	costUsd: number;
+	/**
+	 * Where the number in `costUsd` came from, carried beside it because the two
+	 * are one fact. A gateway-routed run seals `costUsd: 0` with `unknown`: its
+	 * tokens were measured and nobody priced them. A renderer that reads the
+	 * amount without this prints `$0.0000` and turns unpriced work into a
+	 * measured zero. `known_free` on a deterministic step is the honest reading:
+	 * no model ran, so the zero is something code observed rather than missed.
+	 */
+	costProvenance: CostProvenance;
 	/** The sealed agent receipt when this was an agent step. */
 	receipt?: RunReceipt;
 	/** The durable code-step record when this was a deterministic step. */
@@ -193,7 +204,18 @@ export interface FleetRunOutcome {
 	planHash: string;
 	result: ExecutionPlanResult;
 	receipts: ReadonlyArray<RunReceipt>;
+	/**
+	 * The bare sum of every receipt's `costUsd`, which adds unpriced zeros to
+	 * priced dollars and so cannot be rendered on its own. Retained for the
+	 * interactive fleet overlay, which still reads it. Render `totalCost`.
+	 */
 	totalCostUsd: number;
+	/**
+	 * The fold that keeps unpriced calls distinguishable from priced ones, so a
+	 * run whose every receipt came back `unknown` renders as not measured rather
+	 * than as a total of zero dollars.
+	 */
+	totalCost: CostAggregate;
 	/** Steps that ran unconditionally, excluding nodes a resolved loop skipped. */
 	requiredStepCount: number;
 	succeededStepCount: number;
@@ -357,6 +379,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			succeeded: true,
 			terminalRunId: replayedResult.terminalRunId,
 			costUsd: receiptsByStep.get(stepId)?.costUsd ?? 0,
+			// A replay whose receipt no longer exists on disk has no cost claim at
+			// all, which is `unknown` rather than a zero the projection invented.
+			costProvenance: receiptsByStep.get(stepId)?.costProvenance ?? "unknown",
 			result: replayedResult,
 		});
 		await fileStepAttempt(replayedResult.terminalRunId);
@@ -623,11 +648,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							succeeded: stepSucceeded,
 							terminalRunId: receipt.runId,
 							costUsd: receipt.costUsd,
+							costProvenance: receipt.costProvenance,
 							receipt,
 							...(failureReason !== undefined ? { failureReason } : {}),
 						});
 						notice(
-							`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}`,
+							`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderCostAmount(receipt.costUsd, receipt.costProvenance)}`,
 						);
 						return {
 							stepId: step.id,
@@ -690,6 +716,8 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					succeeded: outcome.report.passed,
 					terminalRunId: outcome.record.runId,
 					costUsd: 0,
+					// No model ran, so nothing needed pricing. This zero was observed.
+					costProvenance: "known_free",
 					codeStep: outcome.record,
 					recordPath,
 				});
@@ -835,6 +863,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		result,
 		receipts,
 		totalCostUsd: receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0),
+		totalCost: aggregateCostAmounts(
+			receipts.map((receipt) => ({ usd: receipt.costUsd, provenance: receipt.costProvenance })),
+		),
 		requiredStepCount: required.length,
 		succeededStepCount,
 		resolvedLoopCount: result.loops.length - failedLoops.length,

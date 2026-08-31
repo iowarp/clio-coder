@@ -42,6 +42,8 @@ export {
 	costWasMeasured,
 	emptyCostAggregate,
 	formatCostAggregate,
+	renderCostAggregate,
+	renderCostAmount,
 	type UsageBreakdown,
 } from "./cost.js";
 export type { EvidenceIndexRow } from "./evidence-index.js";

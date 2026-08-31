@@ -6,6 +6,7 @@ import { parseFleetCommands, parseFleetContract } from "../../src/domains/agents
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import { agentRoleFactsResolver } from "../../src/domains/dispatch/execution-role.js";
 import type { ExecuteFleetRunInput, FleetRunOutcome } from "../../src/domains/dispatch/index.js";
+import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import type { Component, OverlayHandle, TUI } from "../../src/engine/tui.js";
 import {
 	createDispatchBoardStore,
@@ -179,6 +180,7 @@ function openersHarness(options: { preview?: string; inFlight?: boolean } = {}) 
 				result: { planHash: input.plan.hash } as FleetRunOutcome["result"],
 				receipts: [],
 				totalCostUsd: 0,
+				totalCost: emptyCostAggregate(),
 				requiredStepCount: 3,
 				succeededStepCount: 3,
 				resolvedLoopCount: 0,
