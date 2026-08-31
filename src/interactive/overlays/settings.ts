@@ -3772,7 +3772,7 @@ export class SettingsCenter implements Component {
 		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
 		// A detail page owns the work area, and the footer describes the row the
 		// operator has already left, so it is suppressed while a submenu is open.
-		const footer = this.submenuComponent ? [] : this.renderFooter(width, this.footerBudget(available));
+		const footer = this.submenuComponent ? [] : this.renderFooter(width, this.footerBudget(available, width));
 		const contentHeight = Math.max(1, available - footer.length);
 		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
 		const separator = barSep(clioTheme());
@@ -3792,9 +3792,16 @@ export class SettingsCenter implements Component {
 	 * The footer is help, and the list is the work. A fixed six-line ceiling spent
 	 * a third of a 20-row body on prose, so the budget is what the body can spare
 	 * once the list keeps six rows.
+	 *
+	 * The ceiling follows the scope note, which wraps rather than cuts: at 90
+	 * columns that note needs two rows, and the flat four-line ceiling then paid
+	 * for the second row out of the explanation above it. The note buys its own
+	 * rows instead. A note that fits on one line leaves the ceiling at four, so
+	 * every width above the wrap point renders exactly as it did.
 	 */
-	private footerBudget(bodyHeight: number): number {
-		return Math.min(4, Math.max(0, bodyHeight - 6));
+	private footerBudget(bodyHeight: number, width: number): number {
+		const noteLines = wrapTextWithAnsi(this.footerNoteText(), Math.max(1, width)).length;
+		return Math.min(2 + noteLines + 1, Math.max(0, bodyHeight - 6));
 	}
 
 	private renderSectionLane(width: number, height: number): string[] {
@@ -3960,15 +3967,27 @@ export class SettingsCenter implements Component {
 		const query = this.filterQuery.trim().length > 0 ? `  ${theme.fg("accent", `/${this.filterQuery}`)}` : "";
 		const positionText = `${theme.fg("dim", `section ${position}/${sections.length}`)}${query}`;
 
+		// The note is prose the operator acts on ("choose session, global, or
+		// cancel"), so it wraps under the same rule as the description above it. A
+		// truncated instruction is the one line in this footer that cannot afford
+		// to be a fragment.
+		const noteLines = (text: string, tone: "dim" | "muted"): string[] =>
+			wrapTextWithAnsi(theme.fg(tone, text), safeWidth);
+
 		if (this.level === "sections") {
 			const breadcrumb = `${screenTitle(theme, section.label)}  ${theme.fg("dim", "·")}  ${positionText}`;
 			const body = wrapTextWithAnsi(theme.fg("muted", SETTINGS_SECTION_DESCRIPTIONS[section.id]), safeWidth);
-			const note = theme.fg("dim", "Tab or → to edit its settings");
-			return this.assembleFooter([separator, breadcrumb], body, note, maxFooterLines, safeWidth);
+			return this.assembleFooter(
+				[separator, breadcrumb],
+				body,
+				noteLines(this.footerNoteText(), "dim"),
+				maxFooterLines,
+				safeWidth,
+			);
 		}
 
 		if (!item) {
-			return this.assembleFooter([separator], [], theme.fg("muted", "No setting selected."), maxFooterLines, safeWidth);
+			return this.assembleFooter([separator], [], noteLines(this.footerNoteText(), "muted"), maxFooterLines, safeWidth);
 		}
 
 		const breadcrumb = `${screenTitle(theme, section.label)} ${theme.fg("dim", "›")} ${theme.style("accent", item.label, { bold: true })}  ${theme.fg("dim", "·")}  ${positionText}`;
@@ -3977,8 +3996,27 @@ export class SettingsCenter implements Component {
 		if (item.help) contentLines.push(...wrapTextWithAnsi(theme.fg("dim", item.help), safeWidth));
 		const detail = this.footerDetail(item, theme);
 		if (detail) contentLines.push(...wrapTextWithAnsi(detail, safeWidth));
-		const note = theme.fg("dim", truncateToWidth(this.footerScopeNote(item), safeWidth, ELLIPSIS, true));
-		return this.assembleFooter([separator, breadcrumb], contentLines, note, maxFooterLines, safeWidth);
+		return this.assembleFooter(
+			[separator, breadcrumb],
+			contentLines,
+			noteLines(this.footerScopeNote(item), "dim"),
+			maxFooterLines,
+			safeWidth,
+		);
+	}
+
+	/**
+	 * The note text renderFooter will show, without theming. `footerBudget` needs
+	 * its wrapped height before the footer is rendered, so both read it here and
+	 * the ceiling can never disagree with what lands.
+	 */
+	private footerNoteText(): string {
+		const section = this.currentSection();
+		if (!section) return "";
+		if (this.level === "sections") return "Tab or → to edit its settings";
+		const item = this.selectedItem();
+		if (!item) return "No setting selected.";
+		return this.footerScopeNote(item);
 	}
 
 	private footerDetail(item: SettingsCenterItem, theme: ReturnType<typeof clioTheme>): string {
@@ -4015,7 +4053,7 @@ export class SettingsCenter implements Component {
 	private assembleFooter(
 		top: readonly string[],
 		middle: readonly string[],
-		note: string,
+		note: readonly string[],
 		maxFooterLines: number,
 		width: number,
 	): string[] {
@@ -4024,7 +4062,11 @@ export class SettingsCenter implements Component {
 		if (maxFooterLines <= top.length) {
 			out = top.slice(0, maxFooterLines).map(fit);
 		} else {
-			const middleBudget = Math.max(0, maxFooterLines - top.length - 1);
+			// The note owns the rows it wrapped to, up to whatever is left under the
+			// breadcrumb; the explanation fills the rest. Dropping a wrapped note
+			// line loses less than cutting the sentence mid-word did.
+			const noteKept = note.slice(0, Math.max(1, maxFooterLines - top.length));
+			const middleBudget = Math.max(0, maxFooterLines - top.length - noteKept.length);
 			// The explanation is wrapped, so a short terminal drops whole lines off
 			// its end rather than cutting one. At 40 columns the autonomy help
 			// stopped at "read-only observes; suggest" and read as the whole
@@ -4033,7 +4075,7 @@ export class SettingsCenter implements Component {
 			const last = kept.at(-1);
 			const marked =
 				middle.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${ELLIPSIS}`] : kept;
-			out = [...top.map(fit), ...marked.map(fit), fit(note)];
+			out = [...top.map(fit), ...marked.map(fit), ...noteKept.map(fit)];
 		}
 		while (out.length < maxFooterLines) out.push("");
 		return out.slice(0, maxFooterLines);
