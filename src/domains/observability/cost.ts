@@ -101,6 +101,27 @@ export function costAggregateForAmount(usd: number, provenance: CostProvenance |
 	return aggregateCostAmounts([{ usd, provenance: normalizeCostProvenance(provenance) }]);
 }
 
+/**
+ * What a fixed-width surface renders for an already-folded aggregate: the cost
+ * claim when one exists, {@link COST_NOT_MEASURED} when none does. Named here
+ * because the fallback is part of the derivation, not a caller's choice, and a
+ * surface that spells the `?? COST_NOT_MEASURED` out by hand is one edit away
+ * from spelling `$0.00` instead.
+ */
+export function renderCostAggregate(cost: CostAggregate | null | undefined): string {
+	return formatCostAggregate(cost) ?? COST_NOT_MEASURED;
+}
+
+/**
+ * The same render for a single sealed amount, which is the shape a receipt or a
+ * ledger row hands over. A caller that reaches for `usd.toFixed(4)` here drops
+ * the provenance on the floor and turns unpriced work into a measured `$0.0000`,
+ * which is a claim nobody made.
+ */
+export function renderCostAmount(usd: number, provenance: CostProvenance | undefined): string {
+	return renderCostAggregate(costAggregateForAmount(usd, provenance));
+}
+
 export interface UsageBreakdown {
 	input: number;
 	output: number;
