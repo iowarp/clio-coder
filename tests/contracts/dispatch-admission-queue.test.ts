@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert";
 import { describe, it } from "node:test";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
+import { AdmissionCanceledError } from "../../src/domains/dispatch/admission-error.js";
 import {
 	type AdmissionQueueRequest,
 	createAdmissionQueue,
@@ -232,7 +233,10 @@ describe("bounded dispatch admission queue", () => {
 			// A cancel for the rejected assignment must not match a live request id.
 			strictEqual(controller.cancel("overflow"), false);
 			strictEqual(controller.cancel("queued"), true);
-			await rejects(queued, /admission canceled/);
+			await rejects(
+				queued,
+				(error) => error instanceof AdmissionCanceledError && /admission canceled/u.test(error.message),
+			);
 			controller.release(held.lease.leaseId);
 		} finally {
 			controller.stop();

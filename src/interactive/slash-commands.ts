@@ -4,6 +4,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
+import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
@@ -302,7 +303,11 @@ async function runAttributed(
 		if (share) shareReceipt(request.agentId, receipt, deps);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		notice("error", `${command} failed: ${msg}`);
+		if (err instanceof AdmissionCanceledError) {
+			notice("warn", `${command} aborted: ${msg.replace(/^dispatch:\s*/u, "")}`);
+		} else {
+			notice("error", `${command} failed: ${msg}`);
+		}
 	}
 }
 
