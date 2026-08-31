@@ -160,15 +160,26 @@ function forceCleanupDirectPid(pid: number | null): void {
  * prompt, which failed `ActiveRun kill and abort both bound a SIGTERM-resistant
  * ACP peer lifetime` as "abort ACP peer never reached prompt".
  *
- * The grace windows are deliberately not here. `terminationGraceMs` and
- * `cancelGraceMs` stay at their small literals because being small is what
- * drives the escalation path those cases exist to exercise, and the case at
- * line ~1325 keeps its 20ms because there the timeout firing is the claim.
+ * Most grace windows are deliberately not here. `cancelGraceMs` and the
+ * `terminationGraceMs` of every case that only asserts the escalation happened
+ * stay at their small literals because being small is what drives that
+ * escalation, and the case at line ~1325 keeps its 20ms because there the
+ * timeout firing is the claim.
+ *
+ * `PEER_RESISTANT_TERM_GRACE_MS` is the one exception, and it is a watchdog
+ * rather than a driver. Its case asserts that the peer observed SIGTERM, by
+ * reading the file the peer's own handler writes, so the window has to cover a
+ * starved child scheduling a JS signal handler and not merely the moment the
+ * signal was delivered. That peer answers SIGTERM by writing the file and
+ * keeps a `setInterval` alive, so it never exits on SIGTERM and `waitForExit`
+ * expires at any value: SIGKILL still follows, and widening only stops the
+ * assertion firing on a child that had not been scheduled yet.
  */
 const PEER_CONNECT_MS = scaleWatchdog(1_000);
 const PEER_TURN_MS = scaleWatchdog(1_000);
 const PEER_PERMISSION_MS = scaleWatchdog(1_000);
 const PEER_TERMINATION_WAIT_MS = scaleWatchdog(1_000);
+const PEER_RESISTANT_TERM_GRACE_MS = scaleWatchdog(30);
 
 /**
  * Both of these bound a wait on the ACP peer, not a claim that the peer is
@@ -2002,16 +2013,20 @@ setInterval(() => {}, 1000);
 					task: `exercise ${action}`,
 					cwd: scratch,
 					safety,
-					terminationGraceMs: 30,
+					terminationGraceMs: PEER_RESISTANT_TERM_GRACE_MS,
 					terminationWaitMs: PEER_TERMINATION_WAIT_MS,
 					cancelGraceMs: 100,
 				});
 				const pid = handle.pid;
 				try {
-					await waitForCondition(() => existsSync(readyPath), 1_000, `${action} ACP peer never reached prompt`);
+					await waitForCondition(() => existsSync(readyPath), PEER_CONNECT_MS, `${action} ACP peer never reached prompt`);
 					if (action === "kill") handle.kill();
 					else handle.abort();
-					const result = await within(handle.promise, 2_000, `${action} did not settle the resistant ACP run`);
+					const result = await within(
+						handle.promise,
+						scaleWatchdog(2_000),
+						`${action} did not settle the resistant ACP run`,
+					);
 					strictEqual(result.exitCode, 1);
 					strictEqual(result.stopReason, "cancelled");
 					strictEqual(pidIsAlive(pid), false, `${action} left the resistant ACP pid alive`);
