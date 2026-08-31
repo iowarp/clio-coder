@@ -1664,7 +1664,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
 			if (command.kind === "panes-usage") {
-				if (entry) ctx.notice("info", command.reason ? `${command.reason}${usageNotice(entry)}` : usageNotice(entry));
+				// usageNotice trims the leading newline usageLine carries, so the reason
+				// and the usage line need their own separator or they run together as
+				// `Missing required argument: run-or-agentusage: /panes show ...`.
+				if (entry)
+					ctx.notice("info", command.reason ? `${command.reason}\n${usageNotice(entry)}` : usageNotice(entry));
 				return;
 			}
 			const panes = ctx.panes;
