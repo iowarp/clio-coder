@@ -25,11 +25,31 @@ graph TD
 | :--- | :--- | :--- |
 | Global | All dispatches using the state directory. | `budget.concurrency: auto` remains four. |
 | Node | The local node or one configured fleet node. | The configured node limit applies. An unset local node cap remains unbounded. |
-| Inference endpoint | A normalized scheme, host, port, and base path. | A target's `maxConcurrentRequests` override wins, followed by cached probe discovery. Other local-native targets default to one slot. vLLM and SGLang remain unbounded. |
+| Inference endpoint | A normalized scheme, host, port, and base path. | A target's `maxConcurrentRequests` override wins, then a probe in this process, then a persisted probe from an earlier process, then one slot for other local-native targets. vLLM and SGLang remain unbounded. |
 
 The conventional final `/v1` mount and a trailing slash normalize to the same endpoint. Host aliases are not collapsed because Clio cannot prove they address the same server. For example, `http://localhost:8080/` and `http://127.0.0.1:8080/v1` remain distinct, while two target descriptors that use the same normalized URL share one endpoint limit.
 
 llama.cpp discovery reads `total_slots` from cached probe results. A router can expose the selected worker's value from `/props?model=<id>` even when router `/props` has no slot count. The selected model's `/v1/models` argv supplies a `--parallel` fallback. LM Studio defaults to one slot when its REST response supplies no concurrency fact. Ollama defaults to one unless `OLLAMA_NUM_PARALLEL` is visible to the local process.
+
+### Persisted Slot Discovery
+
+A probe learns a fact about a server, not about the process that asked, so a discovered slot count is written to disk and read back as a prior by the next process.
+
+- **Path**: `<stateDir>/endpoint-slots.json` (`src/domains/providers/endpoint-slots-store.ts:endpointSlotsPath()`)
+- **Version**: `version: 1`, one record per canonical endpoint key
+- **Transaction lock**: `<stateDir>/endpoint-slots.json.lock` (`withStateFileLock`)
+- **Staleness bound**: 24 hours, overridable per process with `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS`
+
+```typescript
+export interface DiscoveredEndpointSlots {
+  endpointKey: string;   // Canonical inference endpoint identifier
+  runtimeId: string;     // Runtime that observed the count
+  slots: number;         // Discovered parallel slot count
+  observedAt: string;    // ISO-8601 observation timestamp
+}
+```
+
+Three things bound what a record may claim. A record older than the staleness bound is ignored and pruned by the next write, so a server restarted with a smaller `--parallel` cannot keep over-admitting against yesterday's number. A record written by a different runtime for the same host and port is ignored, because a different inference server is a different scheduler. A probe in this process always wins over the record, and `maxConcurrentRequests` wins over both. A well-formed record that fails any of these checks falls back to the conservative default rather than to a guess.
 
 ### State Storage & Format
 

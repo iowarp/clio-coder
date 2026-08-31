@@ -11,6 +11,7 @@ import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { ContextWindowProvenance, ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
+import { recordEndpointSlotsFromStatus } from "./endpoint-capacity.js";
 import { resolveProviderKnowledgeBaseRoots } from "./knowledge-base-path.js";
 import { probeCapabilitiesForModel } from "./model-capabilities.js";
 import { loadPluginRuntimes } from "./plugins.js";
@@ -414,6 +415,10 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		const status = buildStatus(target, desc, probeResult, previous);
 		statuses.set(target.id, status);
+		// Durable so the next process resolves this endpoint's real slot count
+		// instead of the conservative default. Fire and forget: the probe's answer
+		// is already in `statuses`, and a failed write must not fail the probe.
+		void recordEndpointSlotsFromStatus(status);
 		context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
 		return status;
 	}
