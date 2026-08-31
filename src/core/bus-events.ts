@@ -468,6 +468,8 @@ export interface PermissionRequestedPayload {
 	/** Sanitized one-line preview of the call's object (command, path, or compact args). */
 	target?: string | undefined;
 	timeoutMs?: number | undefined;
+	/** Admitted timeout fallback, so the operator surface can name what an expired ask became. */
+	fallback?: "deny" | "fail" | undefined;
 	escalation?: boolean | undefined;
 }
 
@@ -486,6 +488,8 @@ export interface PermissionResolvedPayload {
 	actionClass?: string | undefined;
 	reason?: string | undefined;
 	requestedBy?: string | undefined;
+	/** Effective fallback applied to an expired worker escalation. */
+	fallback?: "deny" | "fail" | undefined;
 	at?: number | undefined;
 }
 

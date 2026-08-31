@@ -1,6 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BusChannels, type PermissionRequestedPayload } from "../../src/core/bus-events.js";
+import {
+	BusChannels,
+	type PermissionRequestedPayload,
+	type PermissionResolvedPayload,
+} from "../../src/core/bus-events.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
@@ -18,20 +22,27 @@ interface PermissionHarness {
 	lifecycle: ReturnType<typeof createOverlayLifecycle>;
 	permissionRequired: (call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void;
 	permissionRequested: (payload: PermissionRequestedPayload) => void;
+	permissionResolved: (payload: PermissionResolvedPayload) => void;
+	dispatchCompleted: (runId: string) => void;
+	dispatchFailed: (runId: string) => void;
 	/** The registry's parked queue, in arrival order, as the stub registry sees it. */
 	parked: Array<{ call: ClassifierCall; decision: SafetyDecision; meta: PermissionRequiredMeta }>;
 	draft: { text: string };
 	frames: Array<{ title: string; tone?: string; body: string[] }>;
+	notices: string[];
 }
 
-function createPermissionHarness(options: { columns?: number } = {}): PermissionHarness {
+function createPermissionHarness(
+	options: { columns?: number; resolveWorkerPermissionError?: Error } = {},
+): PermissionHarness {
 	const events: string[] = [];
 	let permissionRequired: PermissionHarness["permissionRequired"] = () => {};
-	let permissionRequested: PermissionHarness["permissionRequested"] = () => {};
+	const busListeners = new Map<string, (payload: unknown) => void>();
 	let overlayNumber = 0;
 	const parked: PermissionHarness["parked"] = [];
 	const draft = { text: "" };
 	const frames: PermissionHarness["frames"] = [];
+	const notices: string[] = [];
 	const overlayHandle = (id: string): OverlayHandle =>
 		({
 			hide: () => events.push(`hide:${id}`),
@@ -74,17 +85,18 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 	const app = {
 		toolRegistry,
 		bus: {
-			on: (channel: string, listener: PermissionHarness["permissionRequested"]) => {
-				strictEqual(channel, BusChannels.PermissionRequested);
-				permissionRequested = listener;
-				return () => events.push("unsubscribe:worker");
+			on: (channel: string, listener: (payload: unknown) => void) => {
+				busListeners.set(channel, listener);
+				return () => events.push(`unsubscribe:${channel}`);
 			},
 			emit: (channel: string, payload: { status?: string; requestId?: string }) =>
 				events.push(`emit:${channel}:${payload.status}:${payload.requestId}`),
 		},
 		dispatch: {
-			resolveWorkerPermission: (runId: string, requestId: string, decision: string) =>
-				events.push(`resolve-worker:${runId}:${requestId}:${decision}`),
+			resolveWorkerPermission: (runId: string, requestId: string, decision: string) => {
+				if (options.resolveWorkerPermissionError) throw options.resolveWorkerPermissionError;
+				events.push(`resolve-worker:${runId}:${requestId}:${decision}`);
+			},
 		},
 		getSettings: () => ({ autonomy: "ask" }),
 		chat: {
@@ -103,7 +115,10 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 			renderTaskIsland: () => events.push("task-island"),
 		},
 		busNoticeSink: {
-			appendReplayBlock: () => events.push("notice"),
+			appendReplayBlock: (render: (width: number) => string[]) => {
+				events.push("notice");
+				notices.push(render(240).join(" "));
+			},
 			requestRender: () => events.push("notice-render"),
 		},
 		chatRenderer: { applyEvent: () => events.push("chat") },
@@ -153,10 +168,14 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 		events,
 		lifecycle: createOverlayLifecycle(runtime),
 		permissionRequired: (...args) => permissionRequired(...args),
-		permissionRequested: (payload) => permissionRequested(payload),
+		permissionRequested: (payload) => busListeners.get(BusChannels.PermissionRequested)?.(payload),
+		permissionResolved: (payload) => busListeners.get(BusChannels.PermissionResolved)?.(payload),
+		dispatchCompleted: (runId) => busListeners.get(BusChannels.DispatchCompleted)?.({ runId }),
+		dispatchFailed: (runId) => busListeners.get(BusChannels.DispatchFailed)?.({ runId }),
 		parked,
 		draft,
 		frames,
+		notices,
 	};
 }
 
@@ -347,6 +366,89 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 		);
 	});
 
+	it("withdraws a worker dialog when its escalation timeout applies the fallback", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequested({
+			tool: "bash",
+			actionClass: "execute",
+			requestId: "worker-timeout",
+			origin: "worker:run-timeout",
+			requestedBy: "run-timeout",
+			agentId: "coder",
+			escalation: true,
+			timeoutMs: 20_000,
+			fallback: "fail",
+		});
+		strictEqual(harness.lifecycle.getState(), "permission-confirm");
+		harness.events.length = 0;
+
+		harness.permissionResolved({
+			status: "denied",
+			requestId: "worker-timeout",
+			origin: "worker:run-timeout",
+			requestedBy: "run-timeout",
+			decidedBy: "timeout",
+			fallback: "fail",
+		});
+
+		strictEqual(harness.lifecycle.getState(), "closed", "expiry restores the message editor");
+		ok(harness.events.includes("hide:1"), harness.events.join("\n"));
+		ok(!harness.events.some((event) => event.startsWith("resolve-worker:")), harness.events.join("\n"));
+		strictEqual(harness.notices.length, 1);
+		ok(harness.notices[0]?.includes("worker-timeout"), harness.notices[0]);
+		ok(harness.notices[0]?.includes("run-timeout"), harness.notices[0]);
+		ok(harness.notices[0]?.includes("fallback fail applied"), harness.notices[0]);
+	});
+
+	it("withdraws a worker dialog when its run reaches a terminal state", () => {
+		const harness = createPermissionHarness();
+		harness.permissionRequested({
+			tool: "write",
+			actionClass: "write",
+			requestId: "worker-terminal",
+			origin: "worker:run-terminal",
+			requestedBy: "run-terminal",
+			agentId: "coder",
+			escalation: true,
+			fallback: "deny",
+		});
+
+		harness.dispatchCompleted("run-terminal");
+
+		strictEqual(harness.lifecycle.getState(), "closed");
+		strictEqual(harness.notices.length, 1);
+		ok(harness.notices[0]?.includes("worker-terminal"), harness.notices[0]);
+		ok(harness.notices[0]?.includes("expired when its run ended"), harness.notices[0]);
+		ok(harness.notices[0]?.includes("fallback deny applied"), harness.notices[0]);
+	});
+
+	it("treats a late operator answer that loses the terminal race as one benign expiry", () => {
+		const harness = createPermissionHarness({
+			resolveWorkerPermissionError: new Error(
+				"resolveWorkerPermission: run or assignment 'run-race' is not active; only running native workers accept permission decisions",
+			),
+		});
+		harness.permissionRequested({
+			tool: "bash",
+			actionClass: "execute",
+			requestId: "worker-race",
+			origin: "worker:run-race",
+			requestedBy: "run-race",
+			agentId: "debugger",
+			escalation: true,
+			fallback: "deny",
+		});
+
+		harness.lifecycle.confirmPermission();
+		harness.dispatchFailed("run-race");
+
+		strictEqual(harness.lifecycle.getState(), "closed");
+		strictEqual(harness.notices.length, 1, "the terminal event must not duplicate the raced-answer notice");
+		ok(harness.notices[0]?.includes("expired before the operator decision arrived"), harness.notices[0]);
+		ok(harness.notices[0]?.includes("fallback deny applied"), harness.notices[0]);
+		ok(!harness.notices[0]?.includes("Could not deliver"), harness.notices[0]);
+	});
+
 	it("retains each queued request's tier and attribution when the next dialog opens", () => {
 		const harness = createPermissionHarness();
 		harness.permissionRequired(
@@ -483,6 +585,13 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 
 		harness.lifecycle.dispose();
 
-		deepStrictEqual(harness.events, ["unsubscribe:permission", "unsubscribe:worker", "unsubscribe:autonomy"]);
+		deepStrictEqual(harness.events, [
+			"unsubscribe:permission",
+			`unsubscribe:${BusChannels.PermissionRequested}`,
+			`unsubscribe:${BusChannels.PermissionResolved}`,
+			`unsubscribe:${BusChannels.DispatchCompleted}`,
+			`unsubscribe:${BusChannels.DispatchFailed}`,
+			"unsubscribe:autonomy",
+		]);
 	});
 });

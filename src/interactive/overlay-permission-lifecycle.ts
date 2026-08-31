@@ -36,6 +36,7 @@ interface WorkerEscalationEntry {
 	axis: ApprovalRequestView["axis"];
 	reason: string;
 	target?: string;
+	fallback: "deny" | "fail";
 }
 
 export interface OverlayPermissionLifecycleDeps {
@@ -190,6 +191,7 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 		...(typeof payload.target === "string" && payload.target.length > 0
 			? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
 			: {}),
+		fallback: payload.fallback === "fail" ? "fail" : "deny",
 	};
 }
 
@@ -207,17 +209,20 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
 
 export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycleDeps): OverlayPermissionLifecycle {
 	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
-	let pendingWorker: Pick<WorkerEscalationEntry, "agentId" | "requestId" | "runId"> | null = null;
+	let pendingWorker: WorkerEscalationEntry | null = null;
 	const workerQueue: WorkerEscalationEntry[] = [];
 	const announcedRequestIds = new Set<string>();
 	/** Worker escalations already surfaced, so one request parks the operator once. */
 	const announcedWorkerRequestIds = new Set<string>();
+	/** Expiry notices already printed, including a decision that lost the terminal-state race. */
+	const expiredWorkerRequestIds = new Set<string>();
 	let confirmed = false;
 	let stopping = false;
+	let withdrawingWorker = false;
 
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry))) return false;
-		pendingWorker = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
+		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;
 		return true;
@@ -231,6 +236,50 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (deps.getOverlayState() !== "permission-confirm" && deps.toolRegistry?.hasParkedCalls()) {
 			deps.toolRegistry.renotifyHead();
 		}
+	};
+	const announceWorkerExpiry = (
+		entry: WorkerEscalationEntry,
+		fallback: "deny" | "fail",
+		cause: "timeout" | "terminal" | "late-answer",
+	): void => {
+		if (!markPermissionRequestSurfaced(expiredWorkerRequestIds, entry.requestId)) return;
+		const why =
+			cause === "timeout"
+				? "expired after its escalation timeout"
+				: cause === "terminal"
+					? "expired when its run ended"
+					: "expired before the operator decision arrived";
+		deps.appendNotice(
+			"warn",
+			`Worker approval request ${entry.requestId} for ${entry.agentId} (${entry.runId}) ${why}; fallback ${fallback} applied.`,
+		);
+	};
+	const removeQueuedWorkers = (matches: (entry: WorkerEscalationEntry) => boolean): WorkerEscalationEntry[] => {
+		const removed: WorkerEscalationEntry[] = [];
+		for (let index = workerQueue.length - 1; index >= 0; index -= 1) {
+			const entry = workerQueue[index];
+			if (entry === undefined || !matches(entry)) continue;
+			removed.unshift(entry);
+			workerQueue.splice(index, 1);
+		}
+		return removed;
+	};
+	const withdrawWorkers = (
+		matches: (entry: WorkerEscalationEntry) => boolean,
+		cause: "timeout" | "terminal",
+		fallback?: "deny" | "fail",
+	): void => {
+		const active = pendingWorker !== null && matches(pendingWorker) ? pendingWorker : null;
+		const expired = [...(active === null ? [] : [active]), ...removeQueuedWorkers(matches)];
+		if (expired.length === 0) return;
+		if (active !== null) {
+			pendingWorker = null;
+			confirmed = false;
+			withdrawingWorker = true;
+			deps.closeOverlay();
+		}
+		for (const entry of expired) announceWorkerExpiry(entry, fallback ?? entry.fallback, cause);
+		deps.requestRender();
 	};
 
 	const unsubscribePermission =
@@ -274,6 +323,18 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		workerQueue.push(entry);
 		maybeOpenWorker();
 	});
+	const unsubscribeWorkerResolution = deps.bus.on(BusChannels.PermissionResolved, (payload) => {
+		if (typeof payload.requestId !== "string") return;
+		if (payload.decidedBy !== "timeout" && payload.status !== "expired") return;
+		const fallback = payload.fallback === "fail" ? "fail" : "deny";
+		withdrawWorkers((entry) => entry.requestId === payload.requestId, "timeout", fallback);
+	});
+	const withdrawTerminalRun = (payload: { runId?: unknown }): void => {
+		if (typeof payload.runId !== "string") return;
+		withdrawWorkers((entry) => entry.runId === payload.runId, "terminal");
+	};
+	const unsubscribeWorkerCompleted = deps.bus.on(BusChannels.DispatchCompleted, withdrawTerminalRun);
+	const unsubscribeWorkerFailed = deps.bus.on(BusChannels.DispatchFailed, withdrawTerminalRun);
 
 	const unsubscribeAutonomy =
 		deps.toolRegistry?.onAutonomyDenied((_call, decision, level) => {
@@ -283,6 +344,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		}) ?? (() => {});
 
 	const onPermissionOverlayClosed = (): void => {
+		if (withdrawingWorker) {
+			withdrawingWorker = false;
+			confirmed = false;
+			retryPending();
+			return;
+		}
 		const permission = pendingPermission;
 		const worker = pendingWorker;
 		pendingPermission = null;
@@ -293,10 +360,14 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			try {
 				deps.dispatch.resolveWorkerPermission?.(worker.runId, worker.requestId, wasConfirmed ? "approve" : "deny");
 			} catch (error) {
-				deps.appendNotice(
-					"warn",
-					`Could not deliver permission decision to run ${worker.runId}: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				const message = error instanceof Error ? error.message : String(error);
+				if (
+					/run or assignment '.+' is not active|run '.+' is (?:aborting|terminating)|no longer accepts input/u.test(message)
+				) {
+					announceWorkerExpiry(worker, worker.fallback, "late-answer");
+				} else {
+					deps.appendNotice("warn", `Could not deliver permission decision to run ${worker.runId}: ${message}`);
+				}
 			}
 		} else if (wasConfirmed && permission) {
 			deps.bus.emit(BusChannels.PermissionResolved, {
@@ -378,6 +449,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		dispose: () => {
 			unsubscribePermission();
 			unsubscribeWorker();
+			unsubscribeWorkerResolution();
+			unsubscribeWorkerCompleted();
+			unsubscribeWorkerFailed();
 			unsubscribeAutonomy();
 		},
 	};
