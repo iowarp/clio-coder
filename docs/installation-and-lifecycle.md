@@ -269,7 +269,7 @@ inventory of what a level covers, because a remembered list drifts as soon as a
 new artifact is written into a root.
 
 *   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the audit trail beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
-*   `--data`: Deletes the data root only: memory, evidence, evals (durable products).
+*   `--data`: Deletes the data root only: memory, evidence, evals, and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml`. Removes all saved keys.
 *   `--config`: Deletes `settings.yaml` to revert preferences to default.
