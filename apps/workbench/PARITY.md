@@ -78,7 +78,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Resource library                  | `/library [kind]`                                   | **Partial** | Read-only library cards are present; install/use flows are absent.                                                                                                                  |
 | Saved prompts                     | `/prompts`                                          | **Partial** | Effective prompt roots are visible, but saved-prompt selection and expansion are absent.                                                                                            |
 | Extensions                        | `/extensions`                                       | **Partial** | **deferred-by-design**: Installed extensions are visible; interactive enablement and lifecycle controls are absent.                                                                 |
-| Interoperability                  | `/interop`                                          | **Partial** | Settings names every detected coding agent, its version, its ACP adapter, and how far it is wired. Reviewing and wiring a peer stays an explicit terminal operation.                 |
+| Interoperability                  | `/interop`                                          | **Partial** | Settings names every detected coding agent, its version, its ACP adapter, and how far it is wired. Reviewing and wiring a peer stays an explicit terminal operation.                |
 | Worker result and archive sharing | `/share [runId]`, `/share export                    | import`     | **Absent**                                                                                                                                                                          |
 | Attributed worker run             | `/run <agent> <task>`                               | **Partial** | ACP tools expose live attributed dispatch activity, but the operator cannot directly start an addressable worker run.                                                               |
 | Delegation                        | `/delegate <agent> <task>`                          | **Partial** | Delegated tool calls are attributed when Clio Coder creates them; there is no direct operator control.                                                                              |
@@ -147,7 +147,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | -------------- | ----------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Config         | Layered settings, sources, reload class, safe edits               | **Partial** | Effective graph and four safe edits are present; most groups and live reload events are absent.                                                                                       |
 | Extensions     | Package resources and precedence                                  | **Partial** | Inventory is present; lifecycle and runtime activation controls are absent.                                                                                                           |
-| Interop        | Compatibility detection and import hints                          | **Partial** | Path-free detection, ACP adapter state, and standing accept/decline answers reach Settings; wiring a peer and adopting foreign context remain terminal operations.                     |
+| Interop        | Compatibility detection and import hints                          | **Partial** | Path-free detection, ACP adapter state, and standing accept/decline answers reach Settings; wiring a peer and adopting foreign context remain terminal operations.                    |
 | Resources      | Skills, prompts, library catalogs                                 | **Partial** | Skills and library inventories are present; prompts and lifecycle operations are incomplete.                                                                                          |
 | Share          | Project/resource archives and worker-result sharing               | **Absent**  | **deferred-by-design**: No bounded preview or confirmed operation exists.                                                                                                             |
 | Context        | Project context, codewiki, working set, recall, compaction inputs | **Partial** | Effective context sources and replay are present; live accounting and mutations are absent.                                                                                           |
@@ -196,9 +196,9 @@ unmarked, so the read half stays visible as work this GUI can still do.
    the version Clio Coder last recorded for each, whether its ACP adapter can start offline, whether a delegation entry
    already names it, and whether the operator's standing accept or decline still holds. The read runs no foreign
    executable and carries no resolved binary or agent home directory, and wiring a peer stays an explicit terminal
-   review. Still to come:
-   safe ACP settings and operations for target/auth lifecycle, memory review, resource installation, verifiers, share
-   import/export, doctor repair, and fleet admission, each with preview, confirmation, progress, and recovery.
+   review. Still to come: safe ACP settings and operations for target/auth lifecycle, memory review, resource
+   installation, verifiers, share import/export, doctor repair, and fleet admission, each with preview, confirmation,
+   progress, and recovery.
 7. Expand sanitized ACP events for context pressure and working-set activity, safety budgets and protected artifacts,
    provider retry/runtime notices, agent status, cost budgets, config reload, middleware failures, and shutdown phases.
 8. Add the remaining session-native surfaces: task and decision ledgers, branch tree/fork, side questions, handoff
