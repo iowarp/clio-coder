@@ -1358,6 +1358,27 @@ describe("contracts/settings center", () => {
 		}
 	});
 
+	// F14's residual: at the width the settings center reaches with a watch pane
+	// open, the footer's scope note was cut mid-word ("before anyth…"). It is the
+	// one footer line that says what happens next, so it wraps like the
+	// explanation above it.
+	it("wraps the footer scope note instead of cutting it in the two-lane layout", () => {
+		for (const width of [82, 90, 100]) {
+			const center = noopSettingsCenter(26);
+			const lines = center.render(width).map(stripAnsi);
+			const footer = lines
+				.filter((line) => !line.includes("│"))
+				.join(" ")
+				.replace(/\s+/g, " ");
+			ok(
+				footer.includes("Enter chooses a value") && footer.includes("before anything changes"),
+				`${width} cut the scope note:\n${lines.join("\n")}`,
+			);
+			const listRows = lines.findIndex((line) => !line.includes("│"));
+			ok(listRows >= 6, `${width} left ${listRows} list rows:\n${lines.join("\n")}`);
+		}
+	});
+
 	it("caps the two-lane footer so the list keeps its rows", () => {
 		for (const { bodyHeight, footerMax } of [
 			{ bodyHeight: 26, footerMax: 4 },
