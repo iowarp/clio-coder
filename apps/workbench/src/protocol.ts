@@ -46,6 +46,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"usage.inspect",
 	"routing.inspect",
 	"dispatch.inspect",
+	"fleet.inspect",
 	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
@@ -74,9 +75,22 @@ export const EVENT_SOURCES = [
 ] as const;
 export type WireEventSource = (typeof EVENT_SOURCES)[number];
 
-export const AUTONOMY_LEVELS = ["read-only", "suggest", "auto-edit", "full-auto"] as const;
+export const AUTONOMY_LEVELS = [
+	"read-only",
+	"suggest",
+	"auto-edit",
+	"full-auto",
+] as const;
 export type WireAutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
-export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const THINKING_LEVELS = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const;
 export type WireThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export const PERMISSION_DECISIONS = ["allow-once", "reject"] as const;
@@ -234,6 +248,8 @@ export interface RoutingInspectPayload {
 
 export type DispatchInspectPayload = Readonly<Record<string, never>>;
 
+export type FleetInspectPayload = Readonly<Record<string, never>>;
+
 export type RecoveryInspectPayload = Readonly<Record<string, never>>;
 
 export interface TargetsListPayload {
@@ -277,6 +293,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "usage.inspect": UsageInspectPayload;
 	readonly "routing.inspect": RoutingInspectPayload;
 	readonly "dispatch.inspect": DispatchInspectPayload;
+	readonly "fleet.inspect": FleetInspectPayload;
 	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
@@ -310,6 +327,7 @@ export const SERVER_EVENT_KINDS = [
 	"usage.state",
 	"routing.state",
 	"dispatch.state",
+	"fleet.inspection.state",
 	"recovery.state",
 	"targets.state",
 	"targets.probed",
@@ -328,7 +346,11 @@ export const SERVER_EVENT_KINDS = [
 
 export type ServerEventKind = (typeof SERVER_EVENT_KINDS)[number];
 
-export type ProtocolErrorCode = "unsupported-version" | "invalid-frame" | "sequence-error" | "internal";
+export type ProtocolErrorCode =
+	| "unsupported-version"
+	| "invalid-frame"
+	| "sequence-error"
+	| "internal";
 export const COMMAND_ERROR_CODES = [
 	"invalid",
 	"conflict",
@@ -444,7 +466,14 @@ export interface WireTimelineItem {
 	readonly title: string;
 	readonly summary: string;
 	readonly detail?: string;
-	readonly status: "queued" | "active" | "waiting" | "complete" | "canceled" | "failed" | "replayed";
+	readonly status:
+		| "queued"
+		| "active"
+		| "waiting"
+		| "complete"
+		| "canceled"
+		| "failed"
+		| "replayed";
 	readonly turnId: string;
 	readonly origin: "live" | "replay";
 	readonly startedAt: string | null;
@@ -492,10 +521,21 @@ export interface WireSettingsState {
 	readonly checkedAt: string;
 }
 
-export const CONFIG_SETTING_SOURCES = ["built-in", "user", "project", "project.local", "cli"] as const;
+export const CONFIG_SETTING_SOURCES = [
+	"built-in",
+	"user",
+	"project",
+	"project.local",
+	"cli",
+] as const;
 export type WireConfigSettingSource = (typeof CONFIG_SETTING_SOURCES)[number];
 
-export const CONFIG_VALUE_KINDS = ["exact", "configured", "collection", "unset"] as const;
+export const CONFIG_VALUE_KINDS = [
+	"exact",
+	"configured",
+	"collection",
+	"unset",
+] as const;
 export type WireConfigValueKind = (typeof CONFIG_VALUE_KINDS)[number];
 
 export const CUSTOMIZATION_CATEGORIES = [
@@ -515,9 +555,19 @@ export type WireCustomizationCategory = (typeof CUSTOMIZATION_CATEGORIES)[number
 
 export const CUSTOMIZATION_TRUST = ["trusted", "untrusted", "n/a"] as const;
 export type WireCustomizationTrust = (typeof CUSTOMIZATION_TRUST)[number];
-export const CUSTOMIZATION_PRECEDENCE = ["winner", "loser", "single", "layer"] as const;
+export const CUSTOMIZATION_PRECEDENCE = [
+	"winner",
+	"loser",
+	"single",
+	"layer",
+] as const;
 export type WireCustomizationPrecedence = (typeof CUSTOMIZATION_PRECEDENCE)[number];
-export const CUSTOMIZATION_RELOAD_CLASSES = ["hot", "next-turn", "restart", "n/a"] as const;
+export const CUSTOMIZATION_RELOAD_CLASSES = [
+	"hot",
+	"next-turn",
+	"restart",
+	"n/a",
+] as const;
 export type WireCustomizationReloadClass = (typeof CUSTOMIZATION_RELOAD_CLASSES)[number];
 
 export const MAX_WIRE_CONFIG_SETTINGS = 192;
@@ -571,9 +621,20 @@ export interface WireConfigInspection {
 
 export const CATALOG_AVAILABILITY = ["available", "failed"] as const;
 export type WireCatalogAvailability = (typeof CATALOG_AVAILABILITY)[number];
-export const CATALOG_AGENT_SOURCES = ["builtin", "extension", "user", "project", "custom"] as const;
+export const CATALOG_AGENT_SOURCES = [
+	"builtin",
+	"extension",
+	"user",
+	"project",
+	"custom",
+] as const;
 export type WireCatalogAgentSource = (typeof CATALOG_AGENT_SOURCES)[number];
-export const CATALOG_AGENT_AUDIENCES = ["base", "shadow", "custom", "internal"] as const;
+export const CATALOG_AGENT_AUDIENCES = [
+	"base",
+	"shadow",
+	"custom",
+	"internal",
+] as const;
 export type WireCatalogAgentAudience = (typeof CATALOG_AGENT_AUDIENCES)[number];
 export const CATALOG_AGENT_CATEGORIES = [
 	"explore",
@@ -600,7 +661,12 @@ export const CATALOG_AGENT_LATENCIES = ["fast", "balanced", "deep"] as const;
 export type WireCatalogAgentLatency = (typeof CATALOG_AGENT_LATENCIES)[number];
 export const CATALOG_CONTEXT_TIERS = ["none", "bounded"] as const;
 export type WireCatalogContextTier = (typeof CATALOG_CONTEXT_TIERS)[number];
-export const CATALOG_RESOURCE_SCOPES = ["package", "user", "project", "cli"] as const;
+export const CATALOG_RESOURCE_SCOPES = [
+	"package",
+	"user",
+	"project",
+	"cli",
+] as const;
 export type WireCatalogResourceScope = (typeof CATALOG_RESOURCE_SCOPES)[number];
 export const CATALOG_SKILL_SOURCES = [
 	"clio",
@@ -614,15 +680,32 @@ export const CATALOG_SKILL_SOURCES = [
 	"cli",
 ] as const;
 export type WireCatalogSkillSource = (typeof CATALOG_SKILL_SOURCES)[number];
-export const CATALOG_LIBRARY_KINDS = ["skill", "agent", "prompt", "fleet"] as const;
+export const CATALOG_LIBRARY_KINDS = [
+	"skill",
+	"agent",
+	"prompt",
+	"fleet",
+] as const;
 export type WireCatalogLibraryKind = (typeof CATALOG_LIBRARY_KINDS)[number];
 export const CATALOG_LIBRARY_ORIGINS = ["catalog", "index"] as const;
 export type WireCatalogLibraryOrigin = (typeof CATALOG_LIBRARY_ORIGINS)[number];
-export const CATALOG_AUDIT_STATES = ["pass", "warn", "fail", "unknown", "not-reported"] as const;
+export const CATALOG_AUDIT_STATES = [
+	"pass",
+	"warn",
+	"fail",
+	"unknown",
+	"not-reported",
+] as const;
 export type WireCatalogAuditState = (typeof CATALOG_AUDIT_STATES)[number];
 export const CATALOG_EXTENSION_SCOPES = ["user", "project"] as const;
 export type WireCatalogExtensionScope = (typeof CATALOG_EXTENSION_SCOPES)[number];
-export const CATALOG_EXTENSION_RESOURCE_KINDS = ["skills", "prompts", "agents", "fleets", "themes"] as const;
+export const CATALOG_EXTENSION_RESOURCE_KINDS = [
+	"skills",
+	"prompts",
+	"agents",
+	"fleets",
+	"themes",
+] as const;
 export type WireCatalogExtensionResourceKind = (typeof CATALOG_EXTENSION_RESOURCE_KINDS)[number];
 
 export const MAX_WIRE_CATALOG_AGENTS = 64;
@@ -732,7 +815,10 @@ export interface WireCatalogInspection {
 
 export const USAGE_STORE_STATES = ["available", "missing"] as const;
 export type WireUsageStoreState = (typeof USAGE_STORE_STATES)[number];
-export const USAGE_OPPORTUNITY_KINDS = ["workflow-distiller", "recipe"] as const;
+export const USAGE_OPPORTUNITY_KINDS = [
+	"workflow-distiller",
+	"recipe",
+] as const;
 export type WireUsageOpportunityKind = (typeof USAGE_OPPORTUNITY_KINDS)[number];
 export const MAX_WIRE_USAGE_MODELS = 32;
 export const MAX_WIRE_USAGE_TOOLS = 16;
@@ -827,7 +913,13 @@ export const ROUTING_MODEL_CAPABILITIES = [
 	"fim",
 ] as const;
 export type WireRoutingModelCapability = (typeof ROUTING_MODEL_CAPABILITIES)[number];
-export const ROUTING_MODEL_RESIDENCIES = ["loaded", "loading", "unloaded", "unknown", "not-reported"] as const;
+export const ROUTING_MODEL_RESIDENCIES = [
+	"loaded",
+	"loading",
+	"unloaded",
+	"unknown",
+	"not-reported",
+] as const;
 export type WireRoutingModelResidency = (typeof ROUTING_MODEL_RESIDENCIES)[number];
 export const MAX_WIRE_ROUTING_MODELS = 256;
 export const MAX_WIRE_ROUTING_PROFILES = 64;
@@ -916,6 +1008,55 @@ export interface WireDispatchInspection {
 		costUsd: number;
 		runtimeSeconds: number;
 	}>;
+}
+
+export const FLEET_JOURNAL_STATES = ["available", "missing"] as const;
+export type WireFleetJournalState = (typeof FLEET_JOURNAL_STATES)[number];
+export const FLEET_EVIDENCE_STATES = [
+	"pending",
+	"verified",
+	"failed",
+	"unavailable",
+] as const;
+export type WireFleetEvidenceState = (typeof FLEET_EVIDENCE_STATES)[number];
+export const MAX_WIRE_FLEET_INSPECTION_RUNS = 8;
+export const MAX_WIRE_FLEET_INSPECTION_EVENTS = 32;
+
+export interface WireFleetInspectionEvent {
+	readonly at: string;
+	readonly label: string;
+	readonly detail: string | null;
+}
+
+export interface WireFleetInspectionRun {
+	readonly runId: string;
+	readonly agentId: string;
+	readonly model: string;
+	readonly target: string;
+	readonly node: string;
+	readonly phase: string;
+	readonly startedAt: string;
+	readonly elapsedMs: number;
+	readonly task: string | null;
+	readonly journal: WireFleetJournalState;
+	readonly events: readonly WireFleetInspectionEvent[];
+	readonly eventsTruncated: boolean;
+	readonly evidence: Readonly<{
+		state: WireFleetEvidenceState;
+		summary: string;
+	}>;
+	readonly outcome: string | null;
+	readonly outcomeDetail: string | null;
+	readonly terminal: boolean;
+}
+
+/** Bounded newest-first run window selected by Clio Coder, never by browser argv. */
+export interface WireFleetInspection {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	readonly runs: readonly WireFleetInspectionRun[];
+	readonly truncated: boolean;
 }
 
 export const RECOVERY_SECTION_IDS = [
@@ -1060,6 +1201,10 @@ export interface DispatchStatePayload {
 	readonly inspection: WireDispatchInspection;
 }
 
+export interface FleetInspectionStatePayload {
+	readonly inspection: WireFleetInspection;
+}
+
 export interface RecoveryStatePayload {
 	readonly inspection: WireRecoveryInspection;
 }
@@ -1127,7 +1272,13 @@ export interface TurnToolPayload {
  * it is a running run that has reported activity, kept distinct so a strip can
  * show that a run is doing work rather than merely admitted.
  */
-export const FLEET_RUN_STATES = ["queued", "running", "progress", "done", "failed"] as const;
+export const FLEET_RUN_STATES = [
+	"queued",
+	"running",
+	"progress",
+	"done",
+	"failed",
+] as const;
 export type WireFleetRunState = (typeof FLEET_RUN_STATES)[number];
 
 /**
@@ -1194,7 +1345,13 @@ export interface WireUsage {
 export const TURN_OUTCOMES = ["completed", "canceled", "failed"] as const;
 export type TurnOutcome = (typeof TURN_OUTCOMES)[number];
 
-export const TURN_STOP_REASONS = ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"] as const;
+export const TURN_STOP_REASONS = [
+	"end_turn",
+	"max_tokens",
+	"max_turn_requests",
+	"refusal",
+	"cancelled",
+] as const;
 export type TurnStopReason = (typeof TURN_STOP_REASONS)[number];
 
 export interface TurnTerminalPayload {
@@ -1234,6 +1391,7 @@ export interface ServerEventPayloadByKind {
 	readonly "usage.state": UsageStatePayload;
 	readonly "routing.state": RoutingStatePayload;
 	readonly "dispatch.state": DispatchStatePayload;
+	readonly "fleet.inspection.state": FleetInspectionStatePayload;
 	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
@@ -1264,7 +1422,9 @@ interface ServerEnvelopeBase<K extends ServerEventKind> {
 	readonly payload: ServerEventPayloadByKind[K];
 }
 
-export type ServerEventOf<K extends ServerEventKind> = Readonly<ServerEnvelopeBase<K>>;
+export type ServerEventOf<K extends ServerEventKind> = Readonly<
+	ServerEnvelopeBase<K>
+>;
 
 export type ServerEvent = {
 	[K in ServerEventKind]: ServerEventOf<K>;
@@ -1298,7 +1458,9 @@ function utf8Bytes(value: string): number {
 function hasControlCharacter(value: string): boolean {
 	for (const character of value) {
 		const codePoint = character.codePointAt(0);
-		if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)) return true;
+		if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -1308,7 +1470,9 @@ function hasUnsafePresentationCharacter(value: string): boolean {
 		const codePoint = character.codePointAt(0);
 		if (
 			codePoint !== undefined &&
-			(codePoint === 0x7f || (codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d))
+			(codePoint === 0x7f ||
+				(codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a &&
+					codePoint !== 0x0d))
 		) return true;
 	}
 	return false;
@@ -1334,10 +1498,14 @@ function expectExactKeys(
 	const record = expectRecord(value, label);
 	const allowed = new Set([...required, ...optional]);
 	for (const key of Object.keys(record)) {
-		if (!allowed.has(key)) invalid(`${label} has unknown field ${JSON.stringify(key)}`);
+		if (!allowed.has(key)) {
+			invalid(`${label} has unknown field ${JSON.stringify(key)}`);
+		}
 	}
 	for (const key of required) {
-		if (!Object.hasOwn(record, key)) invalid(`${label} is missing field ${JSON.stringify(key)}`);
+		if (!Object.hasOwn(record, key)) {
+			invalid(`${label} is missing field ${JSON.stringify(key)}`);
+		}
 	}
 	return record;
 }
@@ -1353,7 +1521,9 @@ function expectString(
 	},
 ): string {
 	if (typeof value !== "string") return invalid(`${label} must be a string`);
-	if (options.trim && value.trim() !== value) return invalid(`${label} must not have surrounding whitespace`);
+	if (options.trim && value.trim() !== value) {
+		return invalid(`${label} must not have surrounding whitespace`);
+	}
 	if (options.noControls && hasControlCharacter(value)) {
 		return invalid(`${label} contains control characters`);
 	}
@@ -1365,14 +1535,23 @@ function expectString(
 }
 
 function expectId(value: unknown, label: string): string {
-	const id = expectString(value, label, { minBytes: 1, maxBytes: MAX_ID_BYTES, trim: true, noControls: true });
+	const id = expectString(value, label, {
+		minBytes: 1,
+		maxBytes: MAX_ID_BYTES,
+		trim: true,
+		noControls: true,
+	});
 	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id)) {
 		return invalid(`${label} is not a valid identifier`);
 	}
 	return id;
 }
 
-function expectOpaqueString(value: unknown, label: string, maximumBytes = 256): string {
+function expectOpaqueString(
+	value: unknown,
+	label: string,
+	maximumBytes = 256,
+): string {
 	return expectString(value, label, {
 		minBytes: 1,
 		maxBytes: maximumBytes,
@@ -1382,16 +1561,29 @@ function expectOpaqueString(value: unknown, label: string, maximumBytes = 256): 
 }
 
 function expectName(value: unknown, label: string): string {
-	const name = expectString(value, label, { minBytes: 1, maxBytes: MAX_NAME_BYTES, trim: true, noControls: true });
-	if (name === "." || name === ".." || /[\\/]/u.test(name)) return invalid(`${label} is not a valid name`);
+	const name = expectString(value, label, {
+		minBytes: 1,
+		maxBytes: MAX_NAME_BYTES,
+		trim: true,
+		noControls: true,
+	});
+	if (name === "." || name === ".." || /[\\/]/u.test(name)) {
+		return invalid(`${label} is not a valid name`);
+	}
 	return name;
 }
 
 function expectEntryName(value: unknown, label: string): string {
 	// Real directory listings contain names with surrounding whitespace; the
 	// picker shows them but never trims them.
-	const name = expectString(value, label, { minBytes: 1, maxBytes: 255, noControls: true });
-	if (name === "." || name === ".." || /[\\/]/u.test(name)) return invalid(`${label} is not a valid name`);
+	const name = expectString(value, label, {
+		minBytes: 1,
+		maxBytes: 255,
+		noControls: true,
+	});
+	if (name === "." || name === ".." || /[\\/]/u.test(name)) {
+		return invalid(`${label} is not a valid name`);
+	}
 	return name;
 }
 
@@ -1413,7 +1605,9 @@ export function expectNativePath(value: unknown, label: string): string {
 		noControls: true,
 	});
 	if (path.includes("\0")) return invalid(`${label} contains a null byte`);
-	if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/u.test(path)) return invalid(`${label} must be absolute`);
+	if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/u.test(path)) {
+		return invalid(`${label} must be absolute`);
+	}
 	return path;
 }
 
@@ -1424,20 +1618,32 @@ function expectBoolean(value: unknown, label: string): boolean {
 
 function expectInteger(value: unknown, label: string, minimum = 0): number {
 	if (!Number.isSafeInteger(value) || (value as number) < minimum) {
-		return invalid(`${label} must be a safe integer greater than or equal to ${minimum}`);
+		return invalid(
+			`${label} must be a safe integer greater than or equal to ${minimum}`,
+		);
 	}
 	return value as number;
 }
 
-function expectEnum<const T extends readonly string[]>(value: unknown, label: string, choices: T): T[number] {
+function expectEnum<const T extends readonly string[]>(
+	value: unknown,
+	label: string,
+	choices: T,
+): T[number] {
 	if (typeof value !== "string" || !choices.includes(value as T[number])) {
 		return invalid(`${label} must be one of ${choices.join(", ")}`);
 	}
 	return value as T[number];
 }
 
-function expectPath(value: unknown, label: string, allowRoot: boolean): ProjectPath {
-	if (!Array.isArray(value)) return invalid(`${label} must be an array of path segments`);
+function expectPath(
+	value: unknown,
+	label: string,
+	allowRoot: boolean,
+): ProjectPath {
+	if (!Array.isArray(value)) {
+		return invalid(`${label} must be an array of path segments`);
+	}
 	if ((!allowRoot && value.length === 0) || value.length > MAX_PATH_DEPTH) {
 		return invalid(`${label} has an invalid path depth`);
 	}
@@ -1455,22 +1661,37 @@ function expectSettingsKey(value: string, label: string): string {
 		trim: true,
 		noControls: true,
 	});
-	if (!/^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/u.test(key)) return invalid(`${label} is not a valid settings key`);
+	if (!/^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/u.test(key)) {
+		return invalid(`${label} is not a valid settings key`);
+	}
 	return key;
 }
 
 function expectSettingsValue(value: unknown, label: string): WireSettingsValue {
 	if (value === null) return null;
-	return expectString(value, label, { minBytes: 0, maxBytes: MAX_SETTINGS_VALUE_BYTES, trim: true, noControls: true });
+	return expectString(value, label, {
+		minBytes: 0,
+		maxBytes: MAX_SETTINGS_VALUE_BYTES,
+		trim: true,
+		noControls: true,
+	});
 }
 
-function expectSettingsRecord(value: unknown, label: string): Readonly<Record<string, WireSettingsValue>> {
+function expectSettingsRecord(
+	value: unknown,
+	label: string,
+): Readonly<Record<string, WireSettingsValue>> {
 	const record = expectRecord(value, label);
 	const keys = Object.keys(record);
-	if (keys.length > MAX_SETTINGS_KEYS) return invalid(`${label} has too many keys`);
+	if (keys.length > MAX_SETTINGS_KEYS) {
+		return invalid(`${label} has too many keys`);
+	}
 	const result: Record<string, WireSettingsValue> = {};
 	for (const key of keys) {
-		result[expectSettingsKey(key, `${label} key`)] = expectSettingsValue(record[key], `${label}.${key}`);
+		result[expectSettingsKey(key, `${label} key`)] = expectSettingsValue(
+			record[key],
+			`${label}.${key}`,
+		);
 	}
 	return result;
 }
@@ -1497,10 +1718,18 @@ function expectSettingsPatch(value: unknown, label: string): WireSettingsPatch {
 				});
 				break;
 			case "orchestrator.thinkingLevel":
-				result[key] = expectEnum(record[key], `${label}.${key}`, THINKING_LEVELS);
+				result[key] = expectEnum(
+					record[key],
+					`${label}.${key}`,
+					THINKING_LEVELS,
+				);
 				break;
 			case "autonomy":
-				result[key] = expectEnum(record[key], `${label}.${key}`, AUTONOMY_LEVELS);
+				result[key] = expectEnum(
+					record[key],
+					`${label}.${key}`,
+					AUTONOMY_LEVELS,
+				);
 				break;
 			default:
 				return invalid(`${label} contains an unsupported setting`);
@@ -1509,20 +1738,28 @@ function expectSettingsPatch(value: unknown, label: string): WireSettingsPatch {
 	return result;
 }
 
-function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unknown): ClientCommandPayloadByKind[K] {
+function validateClientPayload<K extends ClientCommandKind>(
+	kind: K,
+	value: unknown,
+): ClientCommandPayloadByKind[K] {
 	const label = `${kind} payload`;
 	switch (kind) {
 		case "dispatch.inspect":
+		case "fleet.inspect":
 		case "recovery.inspect":
 			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
 		case "project.browse": {
 			const record = expectExactKeys(value, label, [], ["path"]);
 			const path = Object.hasOwn(record, "path") ? expectNativePath(record.path, `${label}.path`) : undefined;
-			return { ...(path === undefined ? {} : { path }) } as ClientCommandPayloadByKind[K];
+			return {
+				...(path === undefined ? {} : { path }),
+			} as ClientCommandPayloadByKind[K];
 		}
 		case "project.open": {
 			const record = expectExactKeys(value, label, ["path"]);
-			return { path: expectNativePath(record.path, `${label}.path`) } as ClientCommandPayloadByKind[K];
+			return {
+				path: expectNativePath(record.path, `${label}.path`),
+			} as ClientCommandPayloadByKind[K];
 		}
 		case "project.select":
 		case "project.forget":
@@ -1536,7 +1773,9 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 		case "routing.inspect":
 		case "targets.list": {
 			const record = expectExactKeys(value, label, ["projectId"]);
-			return { projectId: expectId(record.projectId, `${label}.projectId`) } as ClientCommandPayloadByKind[K];
+			return {
+				projectId: expectId(record.projectId, `${label}.projectId`),
+			} as ClientCommandPayloadByKind[K];
 		}
 		case "fs.refresh": {
 			const record = expectExactKeys(value, label, ["projectId", "directory"]);
@@ -1547,7 +1786,11 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 		}
 		case "fs.create-file":
 		case "fs.create-folder": {
-			const record = expectExactKeys(value, label, ["projectId", "parent", "name"]);
+			const record = expectExactKeys(value, label, [
+				"projectId",
+				"parent",
+				"name",
+			]);
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
 				parent: expectPath(record.parent, `${label}.parent`, true),
@@ -1555,25 +1798,45 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "fs.move": {
-			const record = expectExactKeys(value, label, ["projectId", "source", "destination"], ["expectedNodeVersion"]);
-			const destination = expectExactKeys(record.destination, `${label}.destination`, ["parent", "name"]);
+			const record = expectExactKeys(value, label, [
+				"projectId",
+				"source",
+				"destination",
+			], ["expectedNodeVersion"]);
+			const destination = expectExactKeys(
+				record.destination,
+				`${label}.destination`,
+				["parent", "name"],
+			);
 			const expectedNodeVersion = Object.hasOwn(record, "expectedNodeVersion")
-				? expectOpaqueString(record.expectedNodeVersion, `${label}.expectedNodeVersion`)
+				? expectOpaqueString(
+					record.expectedNodeVersion,
+					`${label}.expectedNodeVersion`,
+				)
 				: undefined;
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
 				source: expectPath(record.source, `${label}.source`, false),
 				destination: {
-					parent: expectPath(destination.parent, `${label}.destination.parent`, true),
+					parent: expectPath(
+						destination.parent,
+						`${label}.destination.parent`,
+						true,
+					),
 					name: expectName(destination.name, `${label}.destination.name`),
 				},
 				...(expectedNodeVersion === undefined ? {} : { expectedNodeVersion }),
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "fs.delete.prepare": {
-			const record = expectExactKeys(value, label, ["projectId", "target"], ["expectedNodeVersion"]);
+			const record = expectExactKeys(value, label, ["projectId", "target"], [
+				"expectedNodeVersion",
+			]);
 			const expectedNodeVersion = Object.hasOwn(record, "expectedNodeVersion")
-				? expectOpaqueString(record.expectedNodeVersion, `${label}.expectedNodeVersion`)
+				? expectOpaqueString(
+					record.expectedNodeVersion,
+					`${label}.expectedNodeVersion`,
+				)
 				: undefined;
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
@@ -1582,10 +1845,16 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "fs.delete.confirm": {
-			const record = expectExactKeys(value, label, ["projectId", "confirmationId"]);
+			const record = expectExactKeys(value, label, [
+				"projectId",
+				"confirmationId",
+			]);
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
-				confirmationId: expectId(record.confirmationId, `${label}.confirmationId`),
+				confirmationId: expectId(
+					record.confirmationId,
+					`${label}.confirmationId`,
+				),
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "session.load":
@@ -1597,7 +1866,11 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "session.label": {
-			const record = expectExactKeys(value, label, ["projectId", "sessionId", "label"]);
+			const record = expectExactKeys(value, label, [
+				"projectId",
+				"sessionId",
+				"label",
+			]);
 			const labelText = expectString(record.label, `${label}.label`, {
 				minBytes: 0,
 				maxBytes: 256,
@@ -1617,7 +1890,9 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 				maxBytes: 8 * 1024,
 				trim: true,
 			});
-			if (prompt.includes("\0")) invalid(`${label}.prompt contains a null character`);
+			if (prompt.includes("\0")) {
+				invalid(`${label}.prompt contains a null character`);
+			}
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
 				prompt,
@@ -1631,12 +1906,21 @@ function validateClientPayload<K extends ClientCommandKind>(kind: K, value: unkn
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "permission.resolve": {
-			const record = expectExactKeys(value, label, ["projectId", "turnId", "permissionId", "decision"]);
+			const record = expectExactKeys(value, label, [
+				"projectId",
+				"turnId",
+				"permissionId",
+				"decision",
+			]);
 			return {
 				projectId: expectId(record.projectId, `${label}.projectId`),
 				turnId: expectId(record.turnId, `${label}.turnId`),
 				permissionId: expectId(record.permissionId, `${label}.permissionId`),
-				decision: expectEnum(record.decision, `${label}.decision`, PERMISSION_DECISIONS),
+				decision: expectEnum(
+					record.decision,
+					`${label}.decision`,
+					PERMISSION_DECISIONS,
+				),
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "settings.patch": {
@@ -1681,13 +1965,27 @@ function expectArray<T>(
 	return value.map((entry, index) => validate(entry, `${label}[${index}]`));
 }
 
-function expectPresentationText(value: unknown, label: string, maximumBytes = 4 * 1024): string {
-	const text = expectString(value, label, { minBytes: 1, maxBytes: maximumBytes, trim: true });
-	if (hasUnsafePresentationCharacter(text)) return invalid(`${label} contains an unsafe control character`);
+function expectPresentationText(
+	value: unknown,
+	label: string,
+	maximumBytes = 4 * 1024,
+): string {
+	const text = expectString(value, label, {
+		minBytes: 1,
+		maxBytes: maximumBytes,
+		trim: true,
+	});
+	if (hasUnsafePresentationCharacter(text)) {
+		return invalid(`${label} contains an unsafe control character`);
+	}
 	return text;
 }
 
-function expectNullablePresentationText(value: unknown, label: string, maximumBytes = 4 * 1024): string | null {
+function expectNullablePresentationText(
+	value: unknown,
+	label: string,
+	maximumBytes = 4 * 1024,
+): string | null {
 	return value === null ? null : expectPresentationText(value, label, maximumBytes);
 }
 
@@ -1713,27 +2011,52 @@ function expectNullableId(value: unknown, label: string): string | null {
 	return value === null ? null : expectId(value, label);
 }
 
-function validateWireProjectPath(value: unknown, label: string, allowRoot = true): WireProjectPath {
+function validateWireProjectPath(
+	value: unknown,
+	label: string,
+	allowRoot = true,
+): WireProjectPath {
 	const record = expectExactKeys(value, label, ["segments"]);
-	return { segments: expectPath(record.segments, `${label}.segments`, allowRoot) };
+	return {
+		segments: expectPath(record.segments, `${label}.segments`, allowRoot),
+	};
 }
 
 function validateEventSource(value: unknown, label: string): WireEventSource {
 	return expectEnum(value, label, EVENT_SOURCES);
 }
 
-function validateLocations(value: unknown, label: string): readonly WireProjectPath[] {
-	return expectArray(value, label, 32, (entry, entryLabel) => validateWireProjectPath(entry, entryLabel, false));
+function validateLocations(
+	value: unknown,
+	label: string,
+): readonly WireProjectPath[] {
+	return expectArray(
+		value,
+		label,
+		32,
+		(entry, entryLabel) => validateWireProjectPath(entry, entryLabel, false),
+	);
 }
 
 interface TreeBudget {
 	nodes: number;
 }
 
-function validateWireTreeNode(value: unknown, label: string, budget: TreeBudget): WireTreeNode {
+function validateWireTreeNode(
+	value: unknown,
+	label: string,
+	budget: TreeBudget,
+): WireTreeNode {
 	budget.nodes += 1;
-	if (budget.nodes > MAX_WIRE_TREE_NODES) return invalid(`${label} exceeds the wire tree node limit`);
-	const record = expectExactKeys(value, label, ["name", "path", "kind", "operable"], [
+	if (budget.nodes > MAX_WIRE_TREE_NODES) {
+		return invalid(`${label} exceeds the wire tree node limit`);
+	}
+	const record = expectExactKeys(value, label, [
+		"name",
+		"path",
+		"kind",
+		"operable",
+	], [
 		"size",
 		"modifiedAt",
 		"nodeVersion",
@@ -1757,7 +2080,11 @@ function validateWireTreeNode(value: unknown, label: string, budget: TreeBudget)
 	return {
 		name: expectName(record.name, `${label}.name`),
 		path: validateWireProjectPath(record.path, `${label}.path`),
-		kind: expectEnum(record.kind, `${label}.kind`, ["file", "directory", "symlink", "other"] as const),
+		kind: expectEnum(
+			record.kind,
+			`${label}.kind`,
+			["file", "directory", "symlink", "other"] as const,
+		),
 		operable: expectBoolean(record.operable, `${label}.operable`),
 		...(size === undefined ? {} : { size }),
 		...(modifiedAt === undefined ? {} : { modifiedAt }),
@@ -1766,7 +2093,10 @@ function validateWireTreeNode(value: unknown, label: string, budget: TreeBudget)
 	};
 }
 
-function validateWireTree(value: unknown, label: string): readonly WireTreeNode[] {
+function validateWireTree(
+	value: unknown,
+	label: string,
+): readonly WireTreeNode[] {
 	const budget = { nodes: 0 };
 	return expectArray(
 		value,
@@ -1776,8 +2106,17 @@ function validateWireTree(value: unknown, label: string): readonly WireTreeNode[
 	);
 }
 
-function validateWireProjectSummary(value: unknown, label: string): WireProjectSummary {
-	const record = expectExactKeys(value, label, ["id", "displayName", "rootPath", "lastOpenedAt", "available"]);
+function validateWireProjectSummary(
+	value: unknown,
+	label: string,
+): WireProjectSummary {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"displayName",
+		"rootPath",
+		"lastOpenedAt",
+		"available",
+	]);
 	return {
 		id: expectId(record.id, `${label}.id`),
 		displayName: expectDisplayName(record.displayName, `${label}.displayName`),
@@ -1787,7 +2126,10 @@ function validateWireProjectSummary(value: unknown, label: string): WireProjectS
 	};
 }
 
-function validateWireSessionSummary(value: unknown, label: string): WireSessionSummary {
+function validateWireSessionSummary(
+	value: unknown,
+	label: string,
+): WireSessionSummary {
 	const record = expectExactKeys(value, label, [
 		"id",
 		"label",
@@ -1803,11 +2145,19 @@ function validateWireSessionSummary(value: unknown, label: string): WireSessionS
 	return {
 		id: expectId(record.id, `${label}.id`),
 		label: expectNullablePresentationText(record.label, `${label}.label`, 256),
-		preview: expectString(record.preview, `${label}.preview`, { minBytes: 0, maxBytes: 512, noControls: true }),
+		preview: expectString(record.preview, `${label}.preview`, {
+			minBytes: 0,
+			maxBytes: 512,
+			noControls: true,
+		}),
 		createdAt: expectTimestamp(record.createdAt, `${label}.createdAt`),
 		updatedAt: expectTimestamp(record.updatedAt, `${label}.updatedAt`),
 		turns: expectInteger(record.turns, `${label}.turns`),
-		target: expectNullablePresentationText(record.target, `${label}.target`, 128),
+		target: expectNullablePresentationText(
+			record.target,
+			`${label}.target`,
+			128,
+		),
 		model: expectNullablePresentationText(record.model, `${label}.model`, 256),
 		state: expectEnum(record.state, `${label}.state`, SESSION_STATES),
 		hosted: expectBoolean(record.hosted, `${label}.hosted`),
@@ -1828,13 +2178,27 @@ function validateBoundSession(value: unknown, label: string): WireBoundSession {
 	]);
 	return {
 		id: expectId(record.id, `${label}.id`),
-		target: expectNullablePresentationText(record.target, `${label}.target`, 128),
+		target: expectNullablePresentationText(
+			record.target,
+			`${label}.target`,
+			128,
+		),
 		model: expectNullablePresentationText(record.model, `${label}.model`, 256),
 		autonomy: expectEnum(record.autonomy, `${label}.autonomy`, AUTONOMY_LEVELS),
-		autonomySource: expectEnum(record.autonomySource, `${label}.autonomySource`, ["settings", "session"] as const),
+		autonomySource: expectEnum(
+			record.autonomySource,
+			`${label}.autonomySource`,
+			["settings", "session"] as const,
+		),
 		resumed: expectBoolean(record.resumed, `${label}.resumed`),
-		replayedTurns: expectInteger(record.replayedTurns, `${label}.replayedTurns`),
-		replayTruncated: expectBoolean(record.replayTruncated, `${label}.replayTruncated`),
+		replayedTurns: expectInteger(
+			record.replayedTurns,
+			`${label}.replayedTurns`,
+		),
+		replayTruncated: expectBoolean(
+			record.replayTruncated,
+			`${label}.replayTruncated`,
+		),
 		createdAt: expectTimestamp(record.createdAt, `${label}.createdAt`),
 	};
 }
@@ -1852,10 +2216,15 @@ const CAPABILITY_KEYS = [
 	"agentAttribution",
 ] as const;
 
-function validateCapabilities(value: unknown, label: string): WireClioCapabilities {
+function validateCapabilities(
+	value: unknown,
+	label: string,
+): WireClioCapabilities {
 	const record = expectExactKeys(value, label, CAPABILITY_KEYS);
 	const result: Record<string, boolean> = {};
-	for (const key of CAPABILITY_KEYS) result[key] = expectBoolean(record[key], `${label}.${key}`);
+	for (const key of CAPABILITY_KEYS) {
+		result[key] = expectBoolean(record[key], `${label}.${key}`);
+	}
 	return result as unknown as WireClioCapabilities;
 }
 
@@ -1870,18 +2239,36 @@ function validateClioSnapshot(value: unknown, label: string): WireClioSnapshot {
 	]);
 	let agent: WireClioAgent | null = null;
 	if (record.agent !== null) {
-		const agentRecord = expectExactKeys(record.agent, `${label}.agent`, ["name", "version"]);
+		const agentRecord = expectExactKeys(record.agent, `${label}.agent`, [
+			"name",
+			"version",
+		]);
 		agent = {
-			name: expectPresentationText(agentRecord.name, `${label}.agent.name`, 128),
-			version: expectPresentationText(agentRecord.version, `${label}.agent.version`, 128),
+			name: expectPresentationText(
+				agentRecord.name,
+				`${label}.agent.name`,
+				128,
+			),
+			version: expectPresentationText(
+				agentRecord.version,
+				`${label}.agent.version`,
+				128,
+			),
 		};
 	}
 	let lastFailure: WireClioFailure | null = null;
 	if (record.lastFailure !== null) {
-		const failure = expectExactKeys(record.lastFailure, `${label}.lastFailure`, ["code", "summary"]);
+		const failure = expectExactKeys(
+			record.lastFailure,
+			`${label}.lastFailure`,
+			["code", "summary"],
+		);
 		lastFailure = {
 			code: expectId(failure.code, `${label}.lastFailure.code`),
-			summary: expectSanitizedMessage(failure.summary, `${label}.lastFailure.summary`),
+			summary: expectSanitizedMessage(
+				failure.summary,
+				`${label}.lastFailure.summary`,
+			),
 		};
 	}
 	return {
@@ -1903,21 +2290,38 @@ function validateClioSnapshot(value: unknown, label: string): WireClioSnapshot {
  * chain. An empty list means Clio Coder reported no identity, which the GUI
  * renders as the product rather than as a guess.
  */
-function validateAgentAttributions(value: unknown, label: string): readonly WireAgentAttribution[] {
-	return expectArray(value, label, MAX_WIRE_AGENT_ATTRIBUTIONS, (entry, entryLabel) => {
-		const record = expectExactKeys(entry, entryLabel, ["role", "agentId", "runId", "node"]);
-		const role = expectEnum(record.role, `${entryLabel}.role`, AGENT_ROLES);
-		const runId = record.runId === null ? null : expectPresentationText(record.runId, `${entryLabel}.runId`, 128);
-		if (role === "orchestrator" && runId !== null) {
-			invalid(`${entryLabel}.runId must be null for the orchestrator`);
-		}
-		return {
-			role,
-			agentId: expectPresentationText(record.agentId, `${entryLabel}.agentId`, 128),
-			runId,
-			node: record.node === null ? null : expectPresentationText(record.node, `${entryLabel}.node`, 128),
-		};
-	});
+function validateAgentAttributions(
+	value: unknown,
+	label: string,
+): readonly WireAgentAttribution[] {
+	return expectArray(
+		value,
+		label,
+		MAX_WIRE_AGENT_ATTRIBUTIONS,
+		(entry, entryLabel) => {
+			const record = expectExactKeys(entry, entryLabel, [
+				"role",
+				"agentId",
+				"runId",
+				"node",
+			]);
+			const role = expectEnum(record.role, `${entryLabel}.role`, AGENT_ROLES);
+			const runId = record.runId === null ? null : expectPresentationText(record.runId, `${entryLabel}.runId`, 128);
+			if (role === "orchestrator" && runId !== null) {
+				invalid(`${entryLabel}.runId must be null for the orchestrator`);
+			}
+			return {
+				role,
+				agentId: expectPresentationText(
+					record.agentId,
+					`${entryLabel}.agentId`,
+					128,
+				),
+				runId,
+				node: record.node === null ? null : expectPresentationText(record.node, `${entryLabel}.node`, 128),
+			};
+		},
+	);
 }
 
 function validateFleetRun(value: unknown, label: string): WireFleetRun {
@@ -1949,8 +2353,15 @@ function validateFleetRun(value: unknown, label: string): WireFleetRun {
 			: expectPresentationText(record.taskPreview, `${label}.taskPreview`, 512),
 		node: record.node === null ? null : expectPresentationText(record.node, `${label}.node`, 128),
 		attempt: record.attempt === null ? null : expectInteger(record.attempt, `${label}.attempt`, 0),
-		progressCount: expectInteger(record.progressCount, `${label}.progressCount`, 0),
-		progressTruncated: expectBoolean(record.progressTruncated, `${label}.progressTruncated`),
+		progressCount: expectInteger(
+			record.progressCount,
+			`${label}.progressCount`,
+			0,
+		),
+		progressTruncated: expectBoolean(
+			record.progressTruncated,
+			`${label}.progressTruncated`,
+		),
 		outcome,
 		durationMs: record.durationMs === null ? null : expectInteger(record.durationMs, `${label}.durationMs`, 0),
 		tokenCount: record.tokenCount === null ? null : expectInteger(record.tokenCount, `${label}.tokenCount`, 0),
@@ -1958,11 +2369,24 @@ function validateFleetRun(value: unknown, label: string): WireFleetRun {
 	};
 }
 
-function validateWireTimelineItem(value: unknown, label: string): WireTimelineItem {
+function validateWireTimelineItem(
+	value: unknown,
+	label: string,
+): WireTimelineItem {
 	const record = expectExactKeys(
 		value,
 		label,
-		["id", "kind", "title", "summary", "status", "turnId", "origin", "startedAt", "source"],
+		[
+			"id",
+			"kind",
+			"title",
+			"summary",
+			"status",
+			"turnId",
+			"origin",
+			"startedAt",
+			"source",
+		],
 		["detail", "sequence", "endedAt", "usage", "agents"],
 	);
 	const agents = Object.hasOwn(record, "agents")
@@ -1977,37 +2401,84 @@ function validateWireTimelineItem(value: unknown, label: string): WireTimelineIt
 	const kind = expectEnum(
 		record.kind,
 		`${label}.kind`,
-		["request", "narrative", "thought", "tool", "loop", "approval", "outcome", "failure"] as const,
+		[
+			"request",
+			"narrative",
+			"thought",
+			"tool",
+			"loop",
+			"approval",
+			"outcome",
+			"failure",
+		] as const,
 	);
 	const status = expectEnum(
 		record.status,
 		`${label}.status`,
-		["queued", "active", "waiting", "complete", "canceled", "failed", "replayed"] as const,
+		[
+			"queued",
+			"active",
+			"waiting",
+			"complete",
+			"canceled",
+			"failed",
+			"replayed",
+		] as const,
 	);
-	const origin = expectEnum(record.origin, `${label}.origin`, ["live", "replay"] as const);
+	const origin = expectEnum(
+		record.origin,
+		`${label}.origin`,
+		["live", "replay"] as const,
+	);
 	const startedAt = record.startedAt === null ? null : expectTimestamp(record.startedAt, `${label}.startedAt`);
 	const source = validateEventSource(record.source, `${label}.source`);
 	if (usage !== undefined && kind !== "outcome" && kind !== "failure") {
 		invalid(`${label}.usage is valid only for a terminal outcome or failure`);
 	}
 	if (origin === "replay") {
-		if (startedAt !== null) invalid(`${label}.startedAt must be null for replay history`);
-		if (endedAt !== undefined) invalid(`${label}.endedAt must be omitted for replay history`);
-		if (source !== "replayed-from-clio") invalid(`${label}.source must identify replay history`);
-		if (kind === "outcome" || kind === "failure") invalid(`${label}.kind cannot claim a replay outcome`);
-		if (status !== "replayed" && !(kind === "tool" && ["complete", "canceled", "failed"].includes(status))) {
-			invalid(`${label}.status must stay neutral unless a replayed tool supplied its terminal status`);
+		if (startedAt !== null) {
+			invalid(`${label}.startedAt must be null for replay history`);
+		}
+		if (endedAt !== undefined) {
+			invalid(`${label}.endedAt must be omitted for replay history`);
+		}
+		if (source !== "replayed-from-clio") {
+			invalid(`${label}.source must identify replay history`);
+		}
+		if (kind === "outcome" || kind === "failure") {
+			invalid(`${label}.kind cannot claim a replay outcome`);
+		}
+		if (
+			status !== "replayed" &&
+			!(kind === "tool" && ["complete", "canceled", "failed"].includes(status))
+		) {
+			invalid(
+				`${label}.status must stay neutral unless a replayed tool supplied its terminal status`,
+			);
 		}
 	} else {
-		if (startedAt === null) invalid(`${label}.startedAt must identify when a live item began`);
-		if (source === "replayed-from-clio") invalid(`${label}.source cannot identify live activity as replay history`);
-		if (status === "replayed") invalid(`${label}.status cannot identify live activity as replay history`);
+		if (startedAt === null) {
+			invalid(`${label}.startedAt must identify when a live item began`);
+		}
+		if (source === "replayed-from-clio") {
+			invalid(
+				`${label}.source cannot identify live activity as replay history`,
+			);
+		}
+		if (status === "replayed") {
+			invalid(
+				`${label}.status cannot identify live activity as replay history`,
+			);
+		}
 	}
 	return {
 		id: expectId(record.id, `${label}.id`),
 		kind,
 		title: expectPresentationText(record.title, `${label}.title`, 512),
-		summary: expectString(record.summary, `${label}.summary`, { minBytes: 0, maxBytes: 64 * 1024 + 64 }),
+		summary: expectString(record.summary, `${label}.summary`, {
+			minBytes: 0,
+			maxBytes: 64 * 1024 + 64,
+		}),
 		...(detail === undefined ? {} : { detail }),
 		status,
 		turnId: expectId(record.turnId, `${label}.turnId`),
@@ -2021,7 +2492,10 @@ function validateWireTimelineItem(value: unknown, label: string): WireTimelineIt
 	};
 }
 
-function validateWirePendingPermission(value: unknown, label: string): WirePendingPermission {
+function validateWirePendingPermission(
+	value: unknown,
+	label: string,
+): WirePendingPermission {
 	const record = expectExactKeys(value, label, [
 		"permissionId",
 		"toolCallId",
@@ -2046,30 +2520,67 @@ function validateWirePendingPermission(value: unknown, label: string): WirePendi
 	};
 }
 
-function validateWireDeleteChallenge(value: unknown, label: string): WireDeleteChallenge {
-	const record = expectExactKeys(value, label, ["confirmationId", "target", "displayPath", "targetKind", "expiresAt"]);
+function validateWireDeleteChallenge(
+	value: unknown,
+	label: string,
+): WireDeleteChallenge {
+	const record = expectExactKeys(value, label, [
+		"confirmationId",
+		"target",
+		"displayPath",
+		"targetKind",
+		"expiresAt",
+	]);
 	return {
 		confirmationId: expectId(record.confirmationId, `${label}.confirmationId`),
 		target: validateWireProjectPath(record.target, `${label}.target`),
-		displayPath: expectPresentationText(record.displayPath, `${label}.displayPath`),
-		targetKind: expectEnum(record.targetKind, `${label}.targetKind`, ["file", "empty-directory"] as const),
+		displayPath: expectPresentationText(
+			record.displayPath,
+			`${label}.displayPath`,
+		),
+		targetKind: expectEnum(
+			record.targetKind,
+			`${label}.targetKind`,
+			["file", "empty-directory"] as const,
+		),
 		expiresAt: expectTimestamp(record.expiresAt, `${label}.expiresAt`),
 	};
 }
 
 function validateActiveTurn(value: unknown, label: string): WireActiveTurn {
-	const record = expectExactKeys(value, label, ["turnId", "startedAt", "toolCalls", "lastToolTitle", "repeatedShapes"]);
+	const record = expectExactKeys(value, label, [
+		"turnId",
+		"startedAt",
+		"toolCalls",
+		"lastToolTitle",
+		"repeatedShapes",
+	]);
 	return {
 		turnId: expectId(record.turnId, `${label}.turnId`),
 		startedAt: expectTimestamp(record.startedAt, `${label}.startedAt`),
 		toolCalls: expectInteger(record.toolCalls, `${label}.toolCalls`),
-		lastToolTitle: expectNullablePresentationText(record.lastToolTitle, `${label}.lastToolTitle`, 512),
-		repeatedShapes: expectInteger(record.repeatedShapes, `${label}.repeatedShapes`),
+		lastToolTitle: expectNullablePresentationText(
+			record.lastToolTitle,
+			`${label}.lastToolTitle`,
+			512,
+		),
+		repeatedShapes: expectInteger(
+			record.repeatedShapes,
+			`${label}.repeatedShapes`,
+		),
 	};
 }
 
-function validateSettingsState(value: unknown, label: string): WireSettingsState {
-	const record = expectExactKeys(value, label, ["settings", "editable", "options", "checkedAt"]);
+function validateSettingsState(
+	value: unknown,
+	label: string,
+): WireSettingsState {
+	const record = expectExactKeys(value, label, [
+		"settings",
+		"editable",
+		"options",
+		"checkedAt",
+	]);
 	const settings = expectSettingsRecord(record.settings, `${label}.settings`);
 	const editable = expectArray(
 		record.editable,
@@ -2080,7 +2591,9 @@ function validateSettingsState(value: unknown, label: string): WireSettingsState
 	const optionsRecord = expectRecord(record.options, `${label}.options`);
 	const options: Record<string, readonly string[]> = {};
 	const optionKeys = Object.keys(optionsRecord);
-	if (optionKeys.length > MAX_SETTINGS_KEYS) invalid(`${label}.options has too many keys`);
+	if (optionKeys.length > MAX_SETTINGS_KEYS) {
+		invalid(`${label}.options has too many keys`);
+	}
 	for (const key of optionKeys) {
 		options[expectSettingsKey(key, `${label}.options key`)] = expectArray(
 			optionsRecord[key],
@@ -2089,10 +2602,19 @@ function validateSettingsState(value: unknown, label: string): WireSettingsState
 			(entry, entryLabel) => expectPresentationText(entry, entryLabel, MAX_SETTINGS_VALUE_BYTES),
 		);
 	}
-	return { settings, editable, options, checkedAt: expectTimestamp(record.checkedAt, `${label}.checkedAt`) };
+	return {
+		settings,
+		editable,
+		options,
+		checkedAt: expectTimestamp(record.checkedAt, `${label}.checkedAt`),
+	};
 }
 
-function expectConfigText(value: unknown, label: string, maximumBytes: number): string {
+function expectConfigText(
+	value: unknown,
+	label: string,
+	maximumBytes: number,
+): string {
 	return expectString(value, label, {
 		minBytes: 1,
 		maxBytes: maximumBytes,
@@ -2101,17 +2623,36 @@ function expectConfigText(value: unknown, label: string, maximumBytes: number): 
 	});
 }
 
-function validateConfigSetting(value: unknown, label: string): WireConfigSetting {
-	const record = expectExactKeys(value, label, ["key", "source", "value", "valueKind"]);
+function validateConfigSetting(
+	value: unknown,
+	label: string,
+): WireConfigSetting {
+	const record = expectExactKeys(value, label, [
+		"key",
+		"source",
+		"value",
+		"valueKind",
+	]);
 	return {
 		key: expectConfigText(record.key, `${label}.key`, 256),
-		source: expectEnum(record.source, `${label}.source`, CONFIG_SETTING_SOURCES),
+		source: expectEnum(
+			record.source,
+			`${label}.source`,
+			CONFIG_SETTING_SOURCES,
+		),
 		value: expectConfigText(record.value, `${label}.value`, 256),
-		valueKind: expectEnum(record.valueKind, `${label}.valueKind`, CONFIG_VALUE_KINDS),
+		valueKind: expectEnum(
+			record.valueKind,
+			`${label}.valueKind`,
+			CONFIG_VALUE_KINDS,
+		),
 	};
 }
 
-function validateCustomizationFact(value: unknown, label: string): WireCustomizationFact {
+function validateCustomizationFact(
+	value: unknown,
+	label: string,
+): WireCustomizationFact {
 	const record = expectExactKeys(value, label, ["label", "value"]);
 	return {
 		label: expectConfigText(record.label, `${label}.label`, 64),
@@ -2119,7 +2660,10 @@ function validateCustomizationFact(value: unknown, label: string): WireCustomiza
 	};
 }
 
-function validateCustomizationEntry(value: unknown, label: string): WireCustomizationEntry {
+function validateCustomizationEntry(
+	value: unknown,
+	label: string,
+): WireCustomizationEntry {
 	const record = expectExactKeys(
 		value,
 		label,
@@ -2132,26 +2676,40 @@ function validateCustomizationEntry(value: unknown, label: string): WireCustomiz
 	let hash: string | undefined;
 	if (Object.hasOwn(record, "hash")) {
 		hash = expectConfigText(record.hash, `${label}.hash`, 128);
-		if (!/^[A-Fa-f0-9]{4,128}$/u.test(hash)) invalid(`${label}.hash must be hexadecimal`);
+		if (!/^[A-Fa-f0-9]{4,128}$/u.test(hash)) {
+			invalid(`${label}.hash must be hexadecimal`);
+		}
 	}
 	const trust = Object.hasOwn(record, "trust")
 		? expectEnum(record.trust, `${label}.trust`, CUSTOMIZATION_TRUST)
 		: undefined;
 	const precedence = Object.hasOwn(record, "precedence")
-		? expectEnum(record.precedence, `${label}.precedence`, CUSTOMIZATION_PRECEDENCE)
+		? expectEnum(
+			record.precedence,
+			`${label}.precedence`,
+			CUSTOMIZATION_PRECEDENCE,
+		)
 		: undefined;
 	const contextCostTokens = Object.hasOwn(record, "contextCostTokens")
 		? expectInteger(record.contextCostTokens, `${label}.contextCostTokens`)
 		: undefined;
 	return {
-		category: expectEnum(record.category, `${label}.category`, CUSTOMIZATION_CATEGORIES),
+		category: expectEnum(
+			record.category,
+			`${label}.category`,
+			CUSTOMIZATION_CATEGORIES,
+		),
 		id: expectConfigText(record.id, `${label}.id`, 256),
 		scope: expectConfigText(record.scope, `${label}.scope`, 128),
 		...(sourcePath === undefined ? {} : { sourcePath }),
 		...(hash === undefined ? {} : { hash }),
 		...(trust === undefined ? {} : { trust }),
 		...(precedence === undefined ? {} : { precedence }),
-		reloadClass: expectEnum(record.reloadClass, `${label}.reloadClass`, CUSTOMIZATION_RELOAD_CLASSES),
+		reloadClass: expectEnum(
+			record.reloadClass,
+			`${label}.reloadClass`,
+			CUSTOMIZATION_RELOAD_CLASSES,
+		),
 		...(contextCostTokens === undefined ? {} : { contextCostTokens }),
 		facts: expectArray(
 			record.facts,
@@ -2162,7 +2720,10 @@ function validateCustomizationEntry(value: unknown, label: string): WireCustomiz
 	};
 }
 
-function validateConfigIssueCount(value: unknown, label: string): WireConfigIssueCount {
+function validateConfigIssueCount(
+	value: unknown,
+	label: string,
+): WireConfigIssueCount {
 	const record = expectExactKeys(value, label, ["surface", "count"]);
 	return {
 		surface: expectConfigText(record.surface, `${label}.surface`, 64),
@@ -2170,7 +2731,10 @@ function validateConfigIssueCount(value: unknown, label: string): WireConfigIssu
 	};
 }
 
-function validateConfigInspection(value: unknown, label: string): WireConfigInspection {
+function validateConfigInspection(
+	value: unknown,
+	label: string,
+): WireConfigInspection {
 	const record = expectExactKeys(value, label, [
 		"inspectedAt",
 		"settings",
@@ -2188,21 +2752,30 @@ function validateConfigInspection(value: unknown, label: string): WireConfigInsp
 			MAX_WIRE_CONFIG_SETTINGS,
 			validateConfigSetting,
 		),
-		settingsTruncated: expectBoolean(record.settingsTruncated, `${label}.settingsTruncated`),
+		settingsTruncated: expectBoolean(
+			record.settingsTruncated,
+			`${label}.settingsTruncated`,
+		),
 		entries: expectArray(
 			record.entries,
 			`${label}.entries`,
 			MAX_WIRE_CUSTOMIZATION_ENTRIES,
 			validateCustomizationEntry,
 		),
-		entriesTruncated: expectBoolean(record.entriesTruncated, `${label}.entriesTruncated`),
+		entriesTruncated: expectBoolean(
+			record.entriesTruncated,
+			`${label}.entriesTruncated`,
+		),
 		issueCounts: expectArray(
 			record.issueCounts,
 			`${label}.issueCounts`,
 			MAX_WIRE_CONFIG_ISSUE_GROUPS,
 			validateConfigIssueCount,
 		),
-		issuesTruncated: expectBoolean(record.issuesTruncated, `${label}.issuesTruncated`),
+		issuesTruncated: expectBoolean(
+			record.issuesTruncated,
+			`${label}.issuesTruncated`,
+		),
 	};
 }
 
@@ -2212,7 +2785,10 @@ function expectCatalogCount(value: unknown, label: string): number {
 	return count;
 }
 
-function validateCatalogLabels(value: unknown, label: string): readonly string[] {
+function validateCatalogLabels(
+	value: unknown,
+	label: string,
+): readonly string[] {
 	return expectArray(
 		value,
 		label,
@@ -2221,7 +2797,10 @@ function validateCatalogLabels(value: unknown, label: string): readonly string[]
 	);
 }
 
-function validateCatalogAgentBudget(value: unknown, label: string): WireCatalogAgentBudget {
+function validateCatalogAgentBudget(
+	value: unknown,
+	label: string,
+): WireCatalogAgentBudget {
 	const record = expectExactKeys(value, label, [
 		"toolCalls",
 		"readReserve",
@@ -2233,12 +2812,14 @@ function validateCatalogAgentBudget(value: unknown, label: string): WireCatalogA
 		toolCalls: expectCatalogCount(record.toolCalls, `${label}.toolCalls`),
 		readReserve: expectCatalogCount(record.readReserve, `${label}.readReserve`),
 		synthesis: expectBoolean(record.synthesis, `${label}.synthesis`),
-		maximumToolCalls: record.maximumToolCalls === null
-			? null
-			: expectCatalogCount(record.maximumToolCalls, `${label}.maximumToolCalls`),
-		maximumReadReserve: record.maximumReadReserve === null
-			? null
-			: expectCatalogCount(record.maximumReadReserve, `${label}.maximumReadReserve`),
+		maximumToolCalls: record.maximumToolCalls === null ? null : expectCatalogCount(
+			record.maximumToolCalls,
+			`${label}.maximumToolCalls`,
+		),
+		maximumReadReserve: record.maximumReadReserve === null ? null : expectCatalogCount(
+			record.maximumReadReserve,
+			`${label}.maximumReadReserve`,
+		),
 	};
 }
 
@@ -2263,18 +2844,46 @@ function validateCatalogAgent(value: unknown, label: string): WireCatalogAgent {
 	return {
 		id: expectPresentationText(record.id, `${label}.id`, 128),
 		name: expectPresentationText(record.name, `${label}.name`, 128),
-		description: expectPresentationText(record.description, `${label}.description`, 512),
+		description: expectPresentationText(
+			record.description,
+			`${label}.description`,
+			512,
+		),
 		version: expectCatalogCount(record.version, `${label}.version`),
 		source: expectEnum(record.source, `${label}.source`, CATALOG_AGENT_SOURCES),
-		audience: expectEnum(record.audience, `${label}.audience`, CATALOG_AGENT_AUDIENCES),
-		category: expectEnum(record.category, `${label}.category`, CATALOG_AGENT_CATEGORIES),
-		capability: expectEnum(record.capability, `${label}.capability`, CATALOG_AGENT_CAPABILITIES),
-		latency: expectEnum(record.latency, `${label}.latency`, CATALOG_AGENT_LATENCIES),
-		contextTier: expectEnum(record.contextTier, `${label}.contextTier`, CATALOG_CONTEXT_TIERS),
+		audience: expectEnum(
+			record.audience,
+			`${label}.audience`,
+			CATALOG_AGENT_AUDIENCES,
+		),
+		category: expectEnum(
+			record.category,
+			`${label}.category`,
+			CATALOG_AGENT_CATEGORIES,
+		),
+		capability: expectEnum(
+			record.capability,
+			`${label}.capability`,
+			CATALOG_AGENT_CAPABILITIES,
+		),
+		latency: expectEnum(
+			record.latency,
+			`${label}.latency`,
+			CATALOG_AGENT_LATENCIES,
+		),
+		contextTier: expectEnum(
+			record.contextTier,
+			`${label}.contextTier`,
+			CATALOG_CONTEXT_TIERS,
+		),
 		tags: validateCatalogLabels(record.tags, `${label}.tags`),
 		skills: validateCatalogLabels(record.skills, `${label}.skills`),
 		tools: validateCatalogLabels(record.tools, `${label}.tools`),
-		resultKind: expectPresentationText(record.resultKind, `${label}.resultKind`, 128),
+		resultKind: expectPresentationText(
+			record.resultKind,
+			`${label}.resultKind`,
+			128,
+		),
 		budget: validateCatalogAgentBudget(record.budget, `${label}.budget`),
 	};
 }
@@ -2292,17 +2901,27 @@ function validateCatalogSkill(value: unknown, label: string): WireCatalogSkill {
 	]);
 	return {
 		name: expectPresentationText(record.name, `${label}.name`, 128),
-		description: expectPresentationText(record.description, `${label}.description`, 512),
+		description: expectPresentationText(
+			record.description,
+			`${label}.description`,
+			512,
+		),
 		scope: expectEnum(record.scope, `${label}.scope`, CATALOG_RESOURCE_SCOPES),
 		source: expectEnum(record.source, `${label}.source`, CATALOG_SKILL_SOURCES),
 		trusted: expectBoolean(record.trusted, `${label}.trusted`),
 		precedence: expectCatalogCount(record.precedence, `${label}.precedence`),
-		modelInvocable: expectBoolean(record.modelInvocable, `${label}.modelInvocable`),
+		modelInvocable: expectBoolean(
+			record.modelInvocable,
+			`${label}.modelInvocable`,
+		),
 		issueCount: expectCatalogCount(record.issueCount, `${label}.issueCount`),
 	};
 }
 
-function validateCatalogLibraryEntry(value: unknown, label: string): WireCatalogLibraryEntry {
+function validateCatalogLibraryEntry(
+	value: unknown,
+	label: string,
+): WireCatalogLibraryEntry {
 	const record = expectExactKeys(value, label, [
 		"kind",
 		"name",
@@ -2315,15 +2934,34 @@ function validateCatalogLibraryEntry(value: unknown, label: string): WireCatalog
 	return {
 		kind: expectEnum(record.kind, `${label}.kind`, CATALOG_LIBRARY_KINDS),
 		name: expectPresentationText(record.name, `${label}.name`, 128),
-		description: expectPresentationText(record.description, `${label}.description`, 512),
-		version: expectNullablePresentationText(record.version, `${label}.version`, 64),
-		category: expectNullablePresentationText(record.category, `${label}.category`, 64),
-		origin: expectEnum(record.origin, `${label}.origin`, CATALOG_LIBRARY_ORIGINS),
+		description: expectPresentationText(
+			record.description,
+			`${label}.description`,
+			512,
+		),
+		version: expectNullablePresentationText(
+			record.version,
+			`${label}.version`,
+			64,
+		),
+		category: expectNullablePresentationText(
+			record.category,
+			`${label}.category`,
+			64,
+		),
+		origin: expectEnum(
+			record.origin,
+			`${label}.origin`,
+			CATALOG_LIBRARY_ORIGINS,
+		),
 		audit: expectEnum(record.audit, `${label}.audit`, CATALOG_AUDIT_STATES),
 	};
 }
 
-function validateCatalogExtension(value: unknown, label: string): WireCatalogExtension {
+function validateCatalogExtension(
+	value: unknown,
+	label: string,
+): WireCatalogExtension {
 	const record = expectExactKeys(value, label, [
 		"id",
 		"name",
@@ -2336,29 +2974,45 @@ function validateCatalogExtension(value: unknown, label: string): WireCatalogExt
 		"resources",
 		"issueCount",
 	]);
-	const scope = expectEnum(record.scope, `${label}.scope`, CATALOG_EXTENSION_SCOPES);
+	const scope = expectEnum(
+		record.scope,
+		`${label}.scope`,
+		CATALOG_EXTENSION_SCOPES,
+	);
 	const enabled = expectBoolean(record.enabled, `${label}.enabled`);
 	const effective = expectBoolean(record.effective, `${label}.effective`);
-	const overriddenBy = record.overriddenBy === null
-		? null
-		: expectEnum(record.overriddenBy, `${label}.overriddenBy`, CATALOG_EXTENSION_SCOPES);
+	const overriddenBy = record.overriddenBy === null ? null : expectEnum(
+		record.overriddenBy,
+		`${label}.overriddenBy`,
+		CATALOG_EXTENSION_SCOPES,
+	);
 	if (!effective) {
 		if (scope !== "user" || overriddenBy !== "project") {
-			invalid(`${label} shadowing must describe a user extension overridden by project scope`);
+			invalid(
+				`${label} shadowing must describe a user extension overridden by project scope`,
+			);
 		}
-	} else if (overriddenBy !== null) invalid(`${label} can name an overriding scope only when ineffective`);
+	} else if (overriddenBy !== null) {
+		invalid(`${label} can name an overriding scope only when ineffective`);
+	}
 	const resources = expectArray(
 		record.resources,
 		`${label}.resources`,
 		CATALOG_EXTENSION_RESOURCE_KINDS.length,
 		(entry, entryLabel) => expectEnum(entry, entryLabel, CATALOG_EXTENSION_RESOURCE_KINDS),
 	);
-	if (new Set(resources).size !== resources.length) invalid(`${label}.resources contains duplicate kinds`);
+	if (new Set(resources).size !== resources.length) {
+		invalid(`${label}.resources contains duplicate kinds`);
+	}
 	return {
 		id: expectPresentationText(record.id, `${label}.id`, 128),
 		name: expectPresentationText(record.name, `${label}.name`, 128),
 		version: expectPresentationText(record.version, `${label}.version`, 64),
-		description: expectPresentationText(record.description, `${label}.description`, 512),
+		description: expectPresentationText(
+			record.description,
+			`${label}.description`,
+			512,
+		),
 		scope,
 		enabled,
 		effective,
@@ -2373,11 +3027,32 @@ function validateCatalogCollection<T>(
 	label: string,
 	maximum: number,
 	validateItem: (entry: unknown, label: string) => T,
-): { availability: WireCatalogAvailability; items: readonly T[]; truncated: boolean; issueCount: number } {
-	const record = expectExactKeys(value, label, ["availability", "items", "truncated", "issueCount"]);
-	const availability = expectEnum(record.availability, `${label}.availability`, CATALOG_AVAILABILITY);
-	const items = expectArray(record.items, `${label}.items`, maximum, validateItem);
-	if (availability === "failed" && items.length > 0) invalid(`${label} cannot carry items when its adapter failed`);
+): {
+	availability: WireCatalogAvailability;
+	items: readonly T[];
+	truncated: boolean;
+	issueCount: number;
+} {
+	const record = expectExactKeys(value, label, [
+		"availability",
+		"items",
+		"truncated",
+		"issueCount",
+	]);
+	const availability = expectEnum(
+		record.availability,
+		`${label}.availability`,
+		CATALOG_AVAILABILITY,
+	);
+	const items = expectArray(
+		record.items,
+		`${label}.items`,
+		maximum,
+		validateItem,
+	);
+	if (availability === "failed" && items.length > 0) {
+		invalid(`${label} cannot carry items when its adapter failed`);
+	}
 	return {
 		availability,
 		items,
@@ -2386,7 +3061,10 @@ function validateCatalogCollection<T>(
 	};
 }
 
-function validateCatalogInspection(value: unknown, label: string): WireCatalogInspection {
+function validateCatalogInspection(
+	value: unknown,
+	label: string,
+): WireCatalogInspection {
 	const record = expectExactKeys(value, label, [
 		"inspectedAt",
 		"agents",
@@ -2395,7 +3073,9 @@ function validateCatalogInspection(value: unknown, label: string): WireCatalogIn
 		"extensions",
 		"verifiers",
 	]);
-	const verifiers = expectExactKeys(record.verifiers, `${label}.verifiers`, ["availability"]);
+	const verifiers = expectExactKeys(record.verifiers, `${label}.verifiers`, [
+		"availability",
+	]);
 	if (verifiers.availability !== "typed-interface-required") {
 		invalid(`${label}.verifiers.availability must be typed-interface-required`);
 	}
@@ -2430,20 +3110,33 @@ function validateCatalogInspection(value: unknown, label: string): WireCatalogIn
 }
 
 function expectUsageCost(value: unknown, label: string): number {
-	if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000_000) {
-		return invalid(`${label} must be a finite non-negative cost within the usage bound`);
+	if (
+		typeof value !== "number" || !Number.isFinite(value) || value < 0 ||
+		value > 1_000_000_000
+	) {
+		return invalid(
+			`${label} must be a finite non-negative cost within the usage bound`,
+		);
 	}
 	return value;
 }
 
 function expectUsageCount(value: unknown, label: string): number {
-	if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > 1_000_000_000_000_000) {
-		return invalid(`${label} must be a non-negative safe integer within the usage bound`);
+	if (
+		!Number.isSafeInteger(value) || (value as number) < 0 ||
+		(value as number) > 1_000_000_000_000_000
+	) {
+		return invalid(
+			`${label} must be a non-negative safe integer within the usage bound`,
+		);
 	}
 	return value as number;
 }
 
-function validateHistoricalUsageTotals(value: unknown, label: string): WireHistoricalUsageTotals {
+function validateHistoricalUsageTotals(
+	value: unknown,
+	label: string,
+): WireHistoricalUsageTotals {
 	const record = expectExactKeys(value, label, [
 		"apiCalls",
 		"input",
@@ -2467,7 +3160,10 @@ function validateHistoricalUsageTotals(value: unknown, label: string): WireHisto
 		totalTokens: expectUsageCount(record.totalTokens, `${label}.totalTokens`),
 		costUsd: expectUsageCost(record.costUsd, `${label}.costUsd`),
 		turns: record.turns === null ? null : expectUsageCount(record.turns, `${label}.turns`),
-		sideQuestions: expectUsageCount(record.sideQuestions, `${label}.sideQuestions`),
+		sideQuestions: expectUsageCount(
+			record.sideQuestions,
+			`${label}.sideQuestions`,
+		),
 		handoffs: expectUsageCount(record.handoffs, `${label}.handoffs`),
 	};
 }
@@ -2500,7 +3196,13 @@ function validateUsageModel(value: unknown, label: string): WireUsageModel {
 }
 
 function validateUsageTool(value: unknown, label: string): WireUsageTool {
-	const record = expectExactKeys(value, label, ["name", "calls", "successful", "errors", "blocked"]);
+	const record = expectExactKeys(value, label, [
+		"name",
+		"calls",
+		"successful",
+		"errors",
+		"blocked",
+	]);
 	return {
 		name: expectPresentationText(record.name, `${label}.name`, 128),
 		calls: expectUsageCount(record.calls, `${label}.calls`),
@@ -2511,10 +3213,22 @@ function validateUsageTool(value: unknown, label: string): WireUsageTool {
 }
 
 function validateUsageSkill(value: unknown, label: string): WireUsageSkill {
-	const record = expectExactKeys(value, label, ["name", "activations", "observedInWindow"]);
-	const activations = expectUsageCount(record.activations, `${label}.activations`);
-	const observedInWindow = expectBoolean(record.observedInWindow, `${label}.observedInWindow`);
-	if (observedInWindow !== (activations > 0)) invalid(`${label} observation state contradicts its activation count`);
+	const record = expectExactKeys(value, label, [
+		"name",
+		"activations",
+		"observedInWindow",
+	]);
+	const activations = expectUsageCount(
+		record.activations,
+		`${label}.activations`,
+	);
+	const observedInWindow = expectBoolean(
+		record.observedInWindow,
+		`${label}.observedInWindow`,
+	);
+	if (observedInWindow !== (activations > 0)) {
+		invalid(`${label} observation state contradicts its activation count`);
+	}
 	return {
 		name: expectPresentationText(record.name, `${label}.name`, 128),
 		activations,
@@ -2530,7 +3244,10 @@ function validateUsageRecipe(value: unknown, label: string): WireUsageRecipe {
 	};
 }
 
-function validateUsageOpportunity(value: unknown, label: string): WireUsageOpportunityCount {
+function validateUsageOpportunity(
+	value: unknown,
+	label: string,
+): WireUsageOpportunityCount {
 	const record = expectExactKeys(value, label, ["kind", "count"]);
 	return {
 		kind: expectEnum(record.kind, `${label}.kind`, USAGE_OPPORTUNITY_KINDS),
@@ -2538,12 +3255,21 @@ function validateUsageOpportunity(value: unknown, label: string): WireUsageOppor
 	};
 }
 
-function uniqueUsageRows<T>(items: readonly T[], label: string, key: (item: T) => string): readonly T[] {
-	if (new Set(items.map(key)).size !== items.length) invalid(`${label} contains duplicate rows`);
+function uniqueUsageRows<T>(
+	items: readonly T[],
+	label: string,
+	key: (item: T) => string,
+): readonly T[] {
+	if (new Set(items.map(key)).size !== items.length) {
+		invalid(`${label} contains duplicate rows`);
+	}
 	return items;
 }
 
-function validateUsageInspection(value: unknown, label: string): WireUsageInspection {
+function validateUsageInspection(
+	value: unknown,
+	label: string,
+): WireUsageInspection {
 	const record = expectExactKeys(value, label, [
 		"inspectedAt",
 		"schema",
@@ -2564,14 +3290,25 @@ function validateUsageInspection(value: unknown, label: string): WireUsageInspec
 		"recipesTruncated",
 		"opportunities",
 	]);
-	if (record.schema !== "experimental") invalid(`${label}.schema must be experimental`);
+	if (record.schema !== "experimental") {
+		invalid(`${label}.schema must be experimental`);
+	}
 	if (record.windowDays !== 30) invalid(`${label}.windowDays must be 30`);
 	const windowFrom = expectTimestamp(record.windowFrom, `${label}.windowFrom`);
 	const windowTo = expectTimestamp(record.windowTo, `${label}.windowTo`);
-	if (Date.parse(windowFrom) > Date.parse(windowTo)) invalid(`${label} window is reversed`);
-	const storesRecord = expectExactKeys(record.stores, `${label}.stores`, ["sessions", "dispatchReceipts"]);
+	if (Date.parse(windowFrom) > Date.parse(windowTo)) {
+		invalid(`${label} window is reversed`);
+	}
+	const storesRecord = expectExactKeys(record.stores, `${label}.stores`, [
+		"sessions",
+		"dispatchReceipts",
+	]);
 	const stores = {
-		sessions: expectEnum(storesRecord.sessions, `${label}.stores.sessions`, USAGE_STORE_STATES),
+		sessions: expectEnum(
+			storesRecord.sessions,
+			`${label}.stores.sessions`,
+			USAGE_STORE_STATES,
+		),
 		dispatchReceipts: expectEnum(
 			storesRecord.dispatchReceipts,
 			`${label}.stores.dispatchReceipts`,
@@ -2591,22 +3328,42 @@ function validateUsageInspection(value: unknown, label: string): WireUsageInspec
 		invalid(`${label}.dispatchRunCount contradicts the receipt store state`);
 	}
 	const models = uniqueUsageRows(
-		expectArray(record.models, `${label}.models`, MAX_WIRE_USAGE_MODELS, validateUsageModel),
+		expectArray(
+			record.models,
+			`${label}.models`,
+			MAX_WIRE_USAGE_MODELS,
+			validateUsageModel,
+		),
 		`${label}.models`,
 		(item) => `${item.provider}\u001f${item.model}`,
 	);
 	const tools = uniqueUsageRows(
-		expectArray(record.tools, `${label}.tools`, MAX_WIRE_USAGE_TOOLS, validateUsageTool),
+		expectArray(
+			record.tools,
+			`${label}.tools`,
+			MAX_WIRE_USAGE_TOOLS,
+			validateUsageTool,
+		),
 		`${label}.tools`,
 		(item) => item.name,
 	);
 	const skills = uniqueUsageRows(
-		expectArray(record.skills, `${label}.skills`, MAX_WIRE_USAGE_SKILLS, validateUsageSkill),
+		expectArray(
+			record.skills,
+			`${label}.skills`,
+			MAX_WIRE_USAGE_SKILLS,
+			validateUsageSkill,
+		),
 		`${label}.skills`,
 		(item) => item.name,
 	);
 	const recipes = uniqueUsageRows(
-		expectArray(record.recipes, `${label}.recipes`, MAX_WIRE_USAGE_RECIPES, validateUsageRecipe),
+		expectArray(
+			record.recipes,
+			`${label}.recipes`,
+			MAX_WIRE_USAGE_RECIPES,
+			validateUsageRecipe,
+		),
 		`${label}.recipes`,
 		(item) => item.agentId,
 	);
@@ -2631,27 +3388,45 @@ function validateUsageInspection(value: unknown, label: string): WireUsageInspec
 		dispatchRunCount,
 		totals: record.totals === null ? null : validateHistoricalUsageTotals(record.totals, `${label}.totals`),
 		models,
-		modelsTruncated: expectBoolean(record.modelsTruncated, `${label}.modelsTruncated`),
+		modelsTruncated: expectBoolean(
+			record.modelsTruncated,
+			`${label}.modelsTruncated`,
+		),
 		tools,
-		toolsTruncated: expectBoolean(record.toolsTruncated, `${label}.toolsTruncated`),
+		toolsTruncated: expectBoolean(
+			record.toolsTruncated,
+			`${label}.toolsTruncated`,
+		),
 		skills,
-		skillsTruncated: expectBoolean(record.skillsTruncated, `${label}.skillsTruncated`),
+		skillsTruncated: expectBoolean(
+			record.skillsTruncated,
+			`${label}.skillsTruncated`,
+		),
 		recipes,
-		recipesTruncated: expectBoolean(record.recipesTruncated, `${label}.recipesTruncated`),
+		recipesTruncated: expectBoolean(
+			record.recipesTruncated,
+			`${label}.recipesTruncated`,
+		),
 		opportunities,
 	};
 }
 
 function expectRoutingNumber(value: unknown, label: string): number {
 	const parsed = expectInteger(value, label);
-	if (parsed > 10_000_000_000) invalid(`${label} exceeds the routing inventory bound`);
+	if (parsed > 10_000_000_000) {
+		invalid(`${label} exceeds the routing inventory bound`);
+	}
 	return parsed;
 }
 
 const ROUTING_LOCATION_PREFIX =
 	/^(?:(?:https?|file|ftp|ssh):|[a-z][a-z0-9+.-]*:\/\/|~?[\\/]|\.{1,2}[\\/]|[a-z]:[\\/])/iu;
 
-function expectRoutingIdentifier(value: unknown, label: string, maximumBytes: number): string {
+function expectRoutingIdentifier(
+	value: unknown,
+	label: string,
+	maximumBytes: number,
+): string {
 	const text = expectPresentationText(value, label, maximumBytes);
 	if (ROUTING_LOCATION_PREFIX.test(text) || text.includes("\\")) {
 		invalid(`${label} cannot contain a URL or native path`);
@@ -2659,7 +3434,11 @@ function expectRoutingIdentifier(value: unknown, label: string, maximumBytes: nu
 	return text;
 }
 
-function expectNullableRoutingIdentifier(value: unknown, label: string, maximumBytes: number): string | null {
+function expectNullableRoutingIdentifier(
+	value: unknown,
+	label: string,
+	maximumBytes: number,
+): string | null {
 	if (value === null) return null;
 	return expectRoutingIdentifier(value, label, maximumBytes);
 }
@@ -2680,35 +3459,95 @@ function validateRoutingModel(value: unknown, label: string): WireRoutingModel {
 		ROUTING_MODEL_CAPABILITIES.length,
 		(entry, entryLabel) => expectEnum(entry, entryLabel, ROUTING_MODEL_CAPABILITIES),
 	);
-	if (new Set(capabilities).size !== capabilities.length) invalid(`${label}.capabilities contains duplicate values`);
+	if (new Set(capabilities).size !== capabilities.length) {
+		invalid(`${label}.capabilities contains duplicate values`);
+	}
 	return {
-		targetId: expectRoutingIdentifier(record.targetId, `${label}.targetId`, 128),
-		runtimeId: expectRoutingIdentifier(record.runtimeId, `${label}.runtimeId`, 128),
+		targetId: expectRoutingIdentifier(
+			record.targetId,
+			`${label}.targetId`,
+			128,
+		),
+		runtimeId: expectRoutingIdentifier(
+			record.runtimeId,
+			`${label}.runtimeId`,
+			128,
+		),
 		modelId: expectRoutingIdentifier(record.modelId, `${label}.modelId`, 256),
 		capabilities,
-		contextWindow: expectRoutingNumber(record.contextWindow, `${label}.contextWindow`),
-		maxOutputTokens: expectRoutingNumber(record.maxOutputTokens, `${label}.maxOutputTokens`),
-		residency: expectEnum(record.residency, `${label}.residency`, ROUTING_MODEL_RESIDENCIES),
+		contextWindow: expectRoutingNumber(
+			record.contextWindow,
+			`${label}.contextWindow`,
+		),
+		maxOutputTokens: expectRoutingNumber(
+			record.maxOutputTokens,
+			`${label}.maxOutputTokens`,
+		),
+		residency: expectEnum(
+			record.residency,
+			`${label}.residency`,
+			ROUTING_MODEL_RESIDENCIES,
+		),
 	};
 }
 
-function validateRoutingProfile(value: unknown, label: string): WireRoutingProfile {
-	const record = expectExactKeys(value, label, ["name", "target", "runtime", "model", "thinkingLevel"]);
+function validateRoutingProfile(
+	value: unknown,
+	label: string,
+): WireRoutingProfile {
+	const record = expectExactKeys(value, label, [
+		"name",
+		"target",
+		"runtime",
+		"model",
+		"thinkingLevel",
+	]);
 	return {
 		name: expectRoutingIdentifier(record.name, `${label}.name`, 128),
-		target: expectNullableRoutingIdentifier(record.target, `${label}.target`, 128),
-		runtime: expectNullableRoutingIdentifier(record.runtime, `${label}.runtime`, 128),
+		target: expectNullableRoutingIdentifier(
+			record.target,
+			`${label}.target`,
+			128,
+		),
+		runtime: expectNullableRoutingIdentifier(
+			record.runtime,
+			`${label}.runtime`,
+			128,
+		),
 		model: expectNullableRoutingIdentifier(record.model, `${label}.model`, 256),
-		thinkingLevel: expectEnum(record.thinkingLevel, `${label}.thinkingLevel`, THINKING_LEVELS),
+		thinkingLevel: expectEnum(
+			record.thinkingLevel,
+			`${label}.thinkingLevel`,
+			THINKING_LEVELS,
+		),
 	};
 }
 
-function validateRoutingBinding(value: unknown, label: string): WireRoutingBinding {
-	const record = expectExactKeys(value, label, ["agentId", "profile", "target", "model", "resolved"]);
-	const target = expectNullableRoutingIdentifier(record.target, `${label}.target`, 128);
-	const model = expectNullableRoutingIdentifier(record.model, `${label}.model`, 256);
+function validateRoutingBinding(
+	value: unknown,
+	label: string,
+): WireRoutingBinding {
+	const record = expectExactKeys(value, label, [
+		"agentId",
+		"profile",
+		"target",
+		"model",
+		"resolved",
+	]);
+	const target = expectNullableRoutingIdentifier(
+		record.target,
+		`${label}.target`,
+		128,
+	);
+	const model = expectNullableRoutingIdentifier(
+		record.model,
+		`${label}.model`,
+		256,
+	);
 	const resolved = expectBoolean(record.resolved, `${label}.resolved`);
-	if (!resolved && (target !== null || model !== null)) invalid(`${label} unresolved binding cannot name a route`);
+	if (!resolved && (target !== null || model !== null)) {
+		invalid(`${label} unresolved binding cannot name a route`);
+	}
 	return {
 		agentId: expectRoutingIdentifier(record.agentId, `${label}.agentId`, 128),
 		profile: expectRoutingIdentifier(record.profile, `${label}.profile`, 128),
@@ -2718,13 +3557,27 @@ function validateRoutingBinding(value: unknown, label: string): WireRoutingBindi
 	};
 }
 
-function uniqueRoutingRows<T>(items: readonly T[], label: string, key: (item: T) => string): readonly T[] {
-	if (new Set(items.map(key)).size !== items.length) invalid(`${label} contains duplicate rows`);
+function uniqueRoutingRows<T>(
+	items: readonly T[],
+	label: string,
+	key: (item: T) => string,
+): readonly T[] {
+	if (new Set(items.map(key)).size !== items.length) {
+		invalid(`${label} contains duplicate rows`);
+	}
 	return items;
 }
 
-function validateRoutingInspection(value: unknown, label: string): WireRoutingInspection {
-	const record = expectExactKeys(value, label, ["inspectedAt", "models", "profiles", "bindings"]);
+function validateRoutingInspection(
+	value: unknown,
+	label: string,
+): WireRoutingInspection {
+	const record = expectExactKeys(value, label, [
+		"inspectedAt",
+		"models",
+		"profiles",
+		"bindings",
+	]);
 	const modelsRecord = expectExactKeys(record.models, `${label}.models`, [
 		"availability",
 		"items",
@@ -2757,51 +3610,114 @@ function validateRoutingInspection(value: unknown, label: string): WireRoutingIn
 		ROUTING_AVAILABILITY,
 	);
 	const models = uniqueRoutingRows(
-		expectArray(modelsRecord.items, `${label}.models.items`, MAX_WIRE_ROUTING_MODELS, validateRoutingModel),
+		expectArray(
+			modelsRecord.items,
+			`${label}.models.items`,
+			MAX_WIRE_ROUTING_MODELS,
+			validateRoutingModel,
+		),
 		`${label}.models.items`,
 		(item) => `${item.targetId}\u001f${item.modelId}`,
 	);
 	const profiles = uniqueRoutingRows(
-		expectArray(profilesRecord.items, `${label}.profiles.items`, MAX_WIRE_ROUTING_PROFILES, validateRoutingProfile),
+		expectArray(
+			profilesRecord.items,
+			`${label}.profiles.items`,
+			MAX_WIRE_ROUTING_PROFILES,
+			validateRoutingProfile,
+		),
 		`${label}.profiles.items`,
 		(item) => item.name,
 	);
 	const bindings = uniqueRoutingRows(
-		expectArray(bindingsRecord.items, `${label}.bindings.items`, MAX_WIRE_ROUTING_BINDINGS, validateRoutingBinding),
+		expectArray(
+			bindingsRecord.items,
+			`${label}.bindings.items`,
+			MAX_WIRE_ROUTING_BINDINGS,
+			validateRoutingBinding,
+		),
 		`${label}.bindings.items`,
 		(item) => item.agentId,
 	);
-	const modelsTruncated = expectBoolean(modelsRecord.truncated, `${label}.models.truncated`);
-	const profilesTruncated = expectBoolean(profilesRecord.truncated, `${label}.profiles.truncated`);
-	const bindingsTruncated = expectBoolean(bindingsRecord.truncated, `${label}.bindings.truncated`);
-	const emptyTargetCount = expectInteger(modelsRecord.emptyTargetCount, `${label}.models.emptyTargetCount`);
-	if (emptyTargetCount > 64) invalid(`${label}.models.emptyTargetCount exceeds the target bound`);
-	if (modelsAvailability === "failed" && (models.length > 0 || modelsTruncated || emptyTargetCount > 0)) {
+	const modelsTruncated = expectBoolean(
+		modelsRecord.truncated,
+		`${label}.models.truncated`,
+	);
+	const profilesTruncated = expectBoolean(
+		profilesRecord.truncated,
+		`${label}.profiles.truncated`,
+	);
+	const bindingsTruncated = expectBoolean(
+		bindingsRecord.truncated,
+		`${label}.bindings.truncated`,
+	);
+	const emptyTargetCount = expectInteger(
+		modelsRecord.emptyTargetCount,
+		`${label}.models.emptyTargetCount`,
+	);
+	if (emptyTargetCount > 64) {
+		invalid(`${label}.models.emptyTargetCount exceeds the target bound`);
+	}
+	if (
+		modelsAvailability === "failed" &&
+		(models.length > 0 || modelsTruncated || emptyTargetCount > 0)
+	) {
 		invalid(`${label}.models cannot carry results when its adapter failed`);
 	}
-	if (profilesAvailability === "failed" && (profiles.length > 0 || profilesTruncated)) {
+	if (
+		profilesAvailability === "failed" &&
+		(profiles.length > 0 || profilesTruncated)
+	) {
 		invalid(`${label}.profiles cannot carry results when its adapter failed`);
 	}
-	if (bindingsAvailability === "failed" && (bindings.length > 0 || bindingsTruncated)) {
+	if (
+		bindingsAvailability === "failed" &&
+		(bindings.length > 0 || bindingsTruncated)
+	) {
 		invalid(`${label}.bindings cannot carry results when its adapter failed`);
 	}
 	return {
 		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
-		models: { availability: modelsAvailability, items: models, truncated: modelsTruncated, emptyTargetCount },
-		profiles: { availability: profilesAvailability, items: profiles, truncated: profilesTruncated },
-		bindings: { availability: bindingsAvailability, items: bindings, truncated: bindingsTruncated },
+		models: {
+			availability: modelsAvailability,
+			items: models,
+			truncated: modelsTruncated,
+			emptyTargetCount,
+		},
+		profiles: {
+			availability: profilesAvailability,
+			items: profiles,
+			truncated: profilesTruncated,
+		},
+		bindings: {
+			availability: bindingsAvailability,
+			items: bindings,
+			truncated: bindingsTruncated,
+		},
 	};
 }
 
-function expectDispatchNumber(value: unknown, label: string, integer: boolean): number {
-	if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {
+function expectDispatchNumber(
+	value: unknown,
+	label: string,
+	integer: boolean,
+): number {
+	if (
+		typeof value !== "number" || !Number.isFinite(value) || value < 0 ||
+		value > Number.MAX_SAFE_INTEGER
+	) {
 		return invalid(`${label} must be a bounded non-negative number`);
 	}
-	if (integer && !Number.isSafeInteger(value)) return invalid(`${label} must be a safe integer`);
+	if (integer && !Number.isSafeInteger(value)) {
+		return invalid(`${label} must be a safe integer`);
+	}
 	return value;
 }
 
-export function validateDispatchInspection(value: unknown, label = "dispatch inspection"): WireDispatchInspection {
+export function validateDispatchInspection(
+	value: unknown,
+	label = "dispatch inspection",
+): WireDispatchInspection {
 	const record = expectExactKeys(value, label, [
 		"scope",
 		"inspectedAt",
@@ -2811,12 +3727,23 @@ export function validateDispatchInspection(value: unknown, label = "dispatch ins
 		"retryingCount",
 		"totals",
 	]);
-	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
-	const admissionRecord = expectExactKeys(record.admission, `${label}.admission`, ["state", "expiresAt"]);
-	const state = expectEnum(admissionRecord.state, `${label}.admission.state`, DISPATCH_ADMISSION_STATES);
-	const expiresAt = admissionRecord.expiresAt === null
-		? null
-		: expectTimestamp(admissionRecord.expiresAt, `${label}.admission.expiresAt`);
+	if (record.scope !== "installation") {
+		invalid(`${label}.scope must be installation`);
+	}
+	const admissionRecord = expectExactKeys(
+		record.admission,
+		`${label}.admission`,
+		["state", "expiresAt"],
+	);
+	const state = expectEnum(
+		admissionRecord.state,
+		`${label}.admission.state`,
+		DISPATCH_ADMISSION_STATES,
+	);
+	const expiresAt = admissionRecord.expiresAt === null ? null : expectTimestamp(
+		admissionRecord.expiresAt,
+		`${label}.admission.expiresAt`,
+	);
 	if ((state === "open") !== (expiresAt === null)) {
 		invalid(`${label}.admission expiry contradicts its state`);
 	}
@@ -2828,13 +3755,36 @@ export function validateDispatchInspection(value: unknown, label = "dispatch ins
 		"unreported",
 	]);
 	const running = {
-		total: expectDispatchNumber(runningRecord.total, `${label}.running.total`, true),
-		alive: expectDispatchNumber(runningRecord.alive, `${label}.running.alive`, true),
-		stale: expectDispatchNumber(runningRecord.stale, `${label}.running.stale`, true),
-		dead: expectDispatchNumber(runningRecord.dead, `${label}.running.dead`, true),
-		unreported: expectDispatchNumber(runningRecord.unreported, `${label}.running.unreported`, true),
+		total: expectDispatchNumber(
+			runningRecord.total,
+			`${label}.running.total`,
+			true,
+		),
+		alive: expectDispatchNumber(
+			runningRecord.alive,
+			`${label}.running.alive`,
+			true,
+		),
+		stale: expectDispatchNumber(
+			runningRecord.stale,
+			`${label}.running.stale`,
+			true,
+		),
+		dead: expectDispatchNumber(
+			runningRecord.dead,
+			`${label}.running.dead`,
+			true,
+		),
+		unreported: expectDispatchNumber(
+			runningRecord.unreported,
+			`${label}.running.unreported`,
+			true,
+		),
 	};
-	if (running.alive + running.stale + running.dead + running.unreported !== running.total) {
+	if (
+		running.alive + running.stale + running.dead + running.unreported !==
+			running.total
+	) {
 		invalid(`${label}.running categories must sum to the total`);
 	}
 	const totalsRecord = expectExactKeys(record.totals, `${label}.totals`, [
@@ -2850,19 +3800,187 @@ export function validateDispatchInspection(value: unknown, label = "dispatch ins
 		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
 		admission: { state, expiresAt },
 		running,
-		retryingCount: expectDispatchNumber(record.retryingCount, `${label}.retryingCount`, true),
+		retryingCount: expectDispatchNumber(
+			record.retryingCount,
+			`${label}.retryingCount`,
+			true,
+		),
 		totals: {
-			inputTokens: expectDispatchNumber(totalsRecord.inputTokens, `${label}.totals.inputTokens`, true),
-			outputTokens: expectDispatchNumber(totalsRecord.outputTokens, `${label}.totals.outputTokens`, true),
-			totalTokens: expectDispatchNumber(totalsRecord.totalTokens, `${label}.totals.totalTokens`, true),
-			costUsd: expectDispatchNumber(totalsRecord.costUsd, `${label}.totals.costUsd`, false),
-			runtimeSeconds: expectDispatchNumber(totalsRecord.runtimeSeconds, `${label}.totals.runtimeSeconds`, false),
+			inputTokens: expectDispatchNumber(
+				totalsRecord.inputTokens,
+				`${label}.totals.inputTokens`,
+				true,
+			),
+			outputTokens: expectDispatchNumber(
+				totalsRecord.outputTokens,
+				`${label}.totals.outputTokens`,
+				true,
+			),
+			totalTokens: expectDispatchNumber(
+				totalsRecord.totalTokens,
+				`${label}.totals.totalTokens`,
+				true,
+			),
+			costUsd: expectDispatchNumber(
+				totalsRecord.costUsd,
+				`${label}.totals.costUsd`,
+				false,
+			),
+			runtimeSeconds: expectDispatchNumber(
+				totalsRecord.runtimeSeconds,
+				`${label}.totals.runtimeSeconds`,
+				false,
+			),
 		},
 	};
 }
 
-function validateRecoveryCounts(value: unknown, label: string): WireRecoveryCounts {
-	const record = expectExactKeys(value, label, ["checks", "passed", "warnings", "failures"]);
+export function validateFleetInspection(
+	value: unknown,
+	label = "fleet inspection",
+): WireFleetInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"runs",
+		"truncated",
+	]);
+	if (record.scope !== "installation") {
+		invalid(`${label}.scope must be installation`);
+	}
+	const seen = new Set<string>();
+	const runs = expectArray(
+		record.runs,
+		`${label}.runs`,
+		MAX_WIRE_FLEET_INSPECTION_RUNS,
+		(value, runLabel): WireFleetInspectionRun => {
+			const run = expectExactKeys(value, runLabel, [
+				"runId",
+				"agentId",
+				"model",
+				"target",
+				"node",
+				"phase",
+				"startedAt",
+				"elapsedMs",
+				"task",
+				"journal",
+				"events",
+				"eventsTruncated",
+				"evidence",
+				"outcome",
+				"outcomeDetail",
+				"terminal",
+			]);
+			const runId = expectPresentationText(run.runId, `${runLabel}.runId`, 128);
+			if (seen.has(runId)) invalid(`${label}.runs repeats ${runId}`);
+			seen.add(runId);
+			const evidence = expectExactKeys(run.evidence, `${runLabel}.evidence`, [
+				"state",
+				"summary",
+			]);
+			return {
+				runId,
+				agentId: expectPresentationText(
+					run.agentId,
+					`${runLabel}.agentId`,
+					128,
+				),
+				model: expectPresentationText(run.model, `${runLabel}.model`, 256),
+				target: expectPresentationText(run.target, `${runLabel}.target`, 128),
+				node: expectPresentationText(run.node, `${runLabel}.node`, 128),
+				phase: expectPresentationText(run.phase, `${runLabel}.phase`, 128),
+				startedAt: expectTimestamp(run.startedAt, `${runLabel}.startedAt`),
+				elapsedMs: expectDispatchNumber(
+					run.elapsedMs,
+					`${runLabel}.elapsedMs`,
+					true,
+				),
+				task: expectNullablePresentationText(
+					run.task,
+					`${runLabel}.task`,
+					1024,
+				),
+				journal: expectEnum(
+					run.journal,
+					`${runLabel}.journal`,
+					FLEET_JOURNAL_STATES,
+				),
+				events: expectArray(
+					run.events,
+					`${runLabel}.events`,
+					MAX_WIRE_FLEET_INSPECTION_EVENTS,
+					(event, eventLabel) => {
+						const entry = expectExactKeys(event, eventLabel, [
+							"at",
+							"label",
+							"detail",
+						]);
+						return {
+							at: expectTimestamp(entry.at, `${eventLabel}.at`),
+							label: expectPresentationText(
+								entry.label,
+								`${eventLabel}.label`,
+								128,
+							),
+							detail: expectNullablePresentationText(
+								entry.detail,
+								`${eventLabel}.detail`,
+								512,
+							),
+						};
+					},
+				),
+				eventsTruncated: expectBoolean(
+					run.eventsTruncated,
+					`${runLabel}.eventsTruncated`,
+				),
+				evidence: {
+					state: expectEnum(
+						evidence.state,
+						`${runLabel}.evidence.state`,
+						FLEET_EVIDENCE_STATES,
+					),
+					summary: expectPresentationText(
+						evidence.summary,
+						`${runLabel}.evidence.summary`,
+						512,
+					),
+				},
+				outcome: expectNullablePresentationText(
+					run.outcome,
+					`${runLabel}.outcome`,
+					256,
+				),
+				outcomeDetail: expectNullablePresentationText(
+					run.outcomeDetail,
+					`${runLabel}.outcomeDetail`,
+					512,
+				),
+				terminal: expectBoolean(run.terminal, `${runLabel}.terminal`),
+			};
+		},
+	);
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		runs,
+		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+	};
+}
+
+function validateRecoveryCounts(
+	value: unknown,
+	label: string,
+): WireRecoveryCounts {
+	const record = expectExactKeys(value, label, [
+		"checks",
+		"passed",
+		"warnings",
+		"failures",
+	]);
 	const counts = {
 		checks: expectDispatchNumber(record.checks, `${label}.checks`, true),
 		passed: expectDispatchNumber(record.passed, `${label}.passed`, true),
@@ -2875,7 +3993,10 @@ function validateRecoveryCounts(value: unknown, label: string): WireRecoveryCoun
 	return counts;
 }
 
-export function validateRecoveryInspection(value: unknown, label = "recovery inspection"): WireRecoveryInspection {
+export function validateRecoveryInspection(
+	value: unknown,
+	label = "recovery inspection",
+): WireRecoveryInspection {
 	const record = expectExactKeys(value, label, [
 		"scope",
 		"projectContext",
@@ -2886,17 +4007,43 @@ export function validateRecoveryInspection(value: unknown, label = "recovery ins
 		"summary",
 		"sections",
 	]);
-	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
-	const pathsResolved = expectDispatchNumber(record.pathsResolved, `${label}.pathsResolved`, true);
-	if (pathsResolved !== 4) invalid(`${label}.pathsResolved must describe all four fixed roots`);
-	const versionsRecord = expectExactKeys(record.versions, `${label}.versions`, ["clioCoder", "node", "platform"]);
+	if (record.scope !== "installation") {
+		invalid(`${label}.scope must be installation`);
+	}
+	const pathsResolved = expectDispatchNumber(
+		record.pathsResolved,
+		`${label}.pathsResolved`,
+		true,
+	);
+	if (pathsResolved !== 4) {
+		invalid(`${label}.pathsResolved must describe all four fixed roots`);
+	}
+	const versionsRecord = expectExactKeys(record.versions, `${label}.versions`, [
+		"clioCoder",
+		"node",
+		"platform",
+	]);
 	const versions = {
-		clioCoder: expectNullablePresentationText(versionsRecord.clioCoder, `${label}.versions.clioCoder`, 64),
-		node: expectNullablePresentationText(versionsRecord.node, `${label}.versions.node`, 64),
-		platform: expectNullablePresentationText(versionsRecord.platform, `${label}.versions.platform`, 64),
+		clioCoder: expectNullablePresentationText(
+			versionsRecord.clioCoder,
+			`${label}.versions.clioCoder`,
+			64,
+		),
+		node: expectNullablePresentationText(
+			versionsRecord.node,
+			`${label}.versions.node`,
+			64,
+		),
+		platform: expectNullablePresentationText(
+			versionsRecord.platform,
+			`${label}.versions.platform`,
+			64,
+		),
 	};
 	const summary = validateRecoveryCounts(record.summary, `${label}.summary`);
-	if (summary.checks === 0) invalid(`${label}.summary must contain at least one reported check`);
+	if (summary.checks === 0) {
+		invalid(`${label}.summary must contain at least one reported check`);
+	}
 	const seen = new Set<WireRecoverySectionId>();
 	const sections = expectArray(
 		record.sections,
@@ -2910,7 +4057,11 @@ export function validateRecoveryInspection(value: unknown, label = "recovery ins
 				"warnings",
 				"failures",
 			]);
-			const id = expectEnum(sectionRecord.id, `${rowLabel}.id`, RECOVERY_SECTION_IDS);
+			const id = expectEnum(
+				sectionRecord.id,
+				`${rowLabel}.id`,
+				RECOVERY_SECTION_IDS,
+			);
 			if (seen.has(id)) invalid(`${label}.sections repeats ${id}`);
 			seen.add(id);
 			const counts = validateRecoveryCounts(
@@ -2935,14 +4086,21 @@ export function validateRecoveryInspection(value: unknown, label = "recovery ins
 		{ checks: 0, passed: 0, warnings: 0, failures: 0 },
 	);
 	if (
-		sectionTotals.checks !== summary.checks || sectionTotals.passed !== summary.passed ||
-		sectionTotals.warnings !== summary.warnings || sectionTotals.failures !== summary.failures
+		sectionTotals.checks !== summary.checks ||
+		sectionTotals.passed !== summary.passed ||
+		sectionTotals.warnings !== summary.warnings ||
+		sectionTotals.failures !== summary.failures
 	) invalid(`${label}.sections contradict the summary`);
 	const healthy = expectBoolean(record.healthy, `${label}.healthy`);
-	if (healthy !== (summary.failures === 0)) invalid(`${label}.healthy contradicts its failure count`);
+	if (healthy !== (summary.failures === 0)) {
+		invalid(`${label}.healthy contradicts its failure count`);
+	}
 	return {
 		scope: "installation",
-		projectContext: expectBoolean(record.projectContext, `${label}.projectContext`),
+		projectContext: expectBoolean(
+			record.projectContext,
+			`${label}.projectContext`,
+		),
 		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
 		healthy,
 		pathsResolved,
@@ -2953,17 +4111,32 @@ export function validateRecoveryInspection(value: unknown, label = "recovery ins
 }
 
 function validateTargetHealth(value: unknown, label: string): WireTargetHealth {
-	const record = expectExactKeys(value, label, ["healthy", "latencyMs", "reason", "probedAt"]);
+	const record = expectExactKeys(value, label, [
+		"healthy",
+		"latencyMs",
+		"reason",
+		"probedAt",
+	]);
 	return {
 		healthy: expectBoolean(record.healthy, `${label}.healthy`),
 		latencyMs: record.latencyMs === null ? null : expectInteger(record.latencyMs, `${label}.latencyMs`),
-		reason: expectNullablePresentationText(record.reason, `${label}.reason`, 128),
+		reason: expectNullablePresentationText(
+			record.reason,
+			`${label}.reason`,
+			128,
+		),
 		probedAt: expectTimestamp(record.probedAt, `${label}.probedAt`),
 	};
 }
 
 function validateTarget(value: unknown, label: string): WireTarget {
-	const record = expectExactKeys(value, label, ["id", "runtime", "models", "isOrchestrator", "health"]);
+	const record = expectExactKeys(value, label, [
+		"id",
+		"runtime",
+		"models",
+		"isOrchestrator",
+		"health",
+	]);
 	return {
 		id: expectPresentationText(record.id, `${label}.id`, 128),
 		runtime: expectPresentationText(record.runtime, `${label}.runtime`, 64),
@@ -2973,7 +4146,10 @@ function validateTarget(value: unknown, label: string): WireTarget {
 			64,
 			(entry, entryLabel) => expectPresentationText(entry, entryLabel, 256),
 		),
-		isOrchestrator: expectBoolean(record.isOrchestrator, `${label}.isOrchestrator`),
+		isOrchestrator: expectBoolean(
+			record.isOrchestrator,
+			`${label}.isOrchestrator`,
+		),
 		health: record.health === null ? null : validateTargetHealth(record.health, `${label}.health`),
 	};
 }
@@ -2982,7 +4158,10 @@ function validateTargets(value: unknown, label: string): readonly WireTarget[] {
 	return expectArray(value, label, 64, validateTarget);
 }
 
-function validateWireWorkspace(value: unknown, label: string): WireProjectWorkspace {
+function validateWireWorkspace(
+	value: unknown,
+	label: string,
+): WireProjectWorkspace {
 	const record = expectExactKeys(value, label, [
 		"project",
 		"tree",
@@ -3009,80 +4188,148 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 	return {
 		project: validateWireProjectSummary(record.project, `${label}.project`),
 		tree: validateWireTree(record.tree, `${label}.tree`),
-		treeTruncated: expectBoolean(record.treeTruncated, `${label}.treeTruncated`),
+		treeTruncated: expectBoolean(
+			record.treeTruncated,
+			`${label}.treeTruncated`,
+		),
 		sessions: expectArray(
 			record.sessions,
 			`${label}.sessions`,
 			MAX_WIRE_COLLECTION_ENTRIES,
 			validateWireSessionSummary,
 		),
-		sessionsTruncated: expectBoolean(record.sessionsTruncated, `${label}.sessionsTruncated`),
+		sessionsTruncated: expectBoolean(
+			record.sessionsTruncated,
+			`${label}.sessionsTruncated`,
+		),
 		clio: validateClioSnapshot(record.clio, `${label}.clio`),
-		timeline: expectArray(record.timeline, `${label}.timeline`, MAX_WIRE_TIMELINE_ENTRIES, validateWireTimelineItem),
-		timelineTruncated: expectBoolean(record.timelineTruncated, `${label}.timelineTruncated`),
+		timeline: expectArray(
+			record.timeline,
+			`${label}.timeline`,
+			MAX_WIRE_TIMELINE_ENTRIES,
+			validateWireTimelineItem,
+		),
+		timelineTruncated: expectBoolean(
+			record.timelineTruncated,
+			`${label}.timelineTruncated`,
+		),
 		activeTurn: record.activeTurn === null ? null : validateActiveTurn(record.activeTurn, `${label}.activeTurn`),
-		pendingPermission: record.pendingPermission === null
-			? null
-			: validateWirePendingPermission(record.pendingPermission, `${label}.pendingPermission`),
-		deleteChallenge: record.deleteChallenge === null
-			? null
-			: validateWireDeleteChallenge(record.deleteChallenge, `${label}.deleteChallenge`),
+		pendingPermission: record.pendingPermission === null ? null : validateWirePendingPermission(
+			record.pendingPermission,
+			`${label}.pendingPermission`,
+		),
+		deleteChallenge: record.deleteChallenge === null ? null : validateWireDeleteChallenge(
+			record.deleteChallenge,
+			`${label}.deleteChallenge`,
+		),
 		settings: record.settings === null ? null : validateSettingsState(record.settings, `${label}.settings`),
-		configInspection: record.configInspection === null
-			? null
-			: validateConfigInspection(record.configInspection, `${label}.configInspection`),
-		catalogInspection: record.catalogInspection === null
-			? null
-			: validateCatalogInspection(record.catalogInspection, `${label}.catalogInspection`),
-		usageInspection: record.usageInspection === null
-			? null
-			: validateUsageInspection(record.usageInspection, `${label}.usageInspection`),
-		routingInspection: record.routingInspection === null
-			? null
-			: validateRoutingInspection(record.routingInspection, `${label}.routingInspection`),
+		configInspection: record.configInspection === null ? null : validateConfigInspection(
+			record.configInspection,
+			`${label}.configInspection`,
+		),
+		catalogInspection: record.catalogInspection === null ? null : validateCatalogInspection(
+			record.catalogInspection,
+			`${label}.catalogInspection`,
+		),
+		usageInspection: record.usageInspection === null ? null : validateUsageInspection(
+			record.usageInspection,
+			`${label}.usageInspection`,
+		),
+		routingInspection: record.routingInspection === null ? null : validateRoutingInspection(
+			record.routingInspection,
+			`${label}.routingInspection`,
+		),
 		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
-		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
-		fleet: expectArray(record.fleet, `${label}.fleet`, MAX_WIRE_FLEET_RUNS, validateFleetRun),
-		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
+		targetsTruncated: expectBoolean(
+			record.targetsTruncated,
+			`${label}.targetsTruncated`,
+		),
+		fleet: expectArray(
+			record.fleet,
+			`${label}.fleet`,
+			MAX_WIRE_FLEET_RUNS,
+			validateFleetRun,
+		),
+		processGeneration: expectNullableId(
+			record.processGeneration,
+			`${label}.processGeneration`,
+		),
 		lastSequence: expectInteger(record.lastSequence, `${label}.lastSequence`),
 	};
 }
 
-function validateProjectSnapshotPayload(value: unknown, label: string): ProjectSnapshotPayload {
+function validateProjectSnapshotPayload(
+	value: unknown,
+	label: string,
+): ProjectSnapshotPayload {
 	const record = expectExactKeys(value, label, ["tree", "treeTruncated"]);
 	return {
 		tree: validateWireTree(record.tree, `${label}.tree`),
-		treeTruncated: expectBoolean(record.treeTruncated, `${label}.treeTruncated`),
+		treeTruncated: expectBoolean(
+			record.treeTruncated,
+			`${label}.treeTruncated`,
+		),
 	};
 }
 
-function validateBrowseListing(value: unknown, label: string): ProjectBrowseListingPayload {
-	const record = expectExactKeys(value, label, ["path", "parent", "entries", "truncated", "openable", "reason"]);
+function validateBrowseListing(
+	value: unknown,
+	label: string,
+): ProjectBrowseListingPayload {
+	const record = expectExactKeys(value, label, [
+		"path",
+		"parent",
+		"entries",
+		"truncated",
+		"openable",
+		"reason",
+	]);
 	return {
 		path: expectNativePath(record.path, `${label}.path`),
 		parent: record.parent === null ? null : expectNativePath(record.parent, `${label}.parent`),
-		entries: expectArray(record.entries, `${label}.entries`, MAX_WIRE_BROWSE_ENTRIES, (entry, entryLabel) => {
-			const entryRecord = expectExactKeys(entry, entryLabel, ["name", "hidden", "guarded"]);
-			return {
-				name: expectEntryName(entryRecord.name, `${entryLabel}.name`),
-				hidden: expectBoolean(entryRecord.hidden, `${entryLabel}.hidden`),
-				guarded: expectBoolean(entryRecord.guarded, `${entryLabel}.guarded`),
-			};
-		}),
+		entries: expectArray(
+			record.entries,
+			`${label}.entries`,
+			MAX_WIRE_BROWSE_ENTRIES,
+			(entry, entryLabel) => {
+				const entryRecord = expectExactKeys(entry, entryLabel, [
+					"name",
+					"hidden",
+					"guarded",
+				]);
+				return {
+					name: expectEntryName(entryRecord.name, `${entryLabel}.name`),
+					hidden: expectBoolean(entryRecord.hidden, `${entryLabel}.hidden`),
+					guarded: expectBoolean(entryRecord.guarded, `${entryLabel}.guarded`),
+				};
+			},
+		),
 		truncated: expectBoolean(record.truncated, `${label}.truncated`),
 		openable: expectBoolean(record.openable, `${label}.openable`),
-		reason: expectNullablePresentationText(record.reason, `${label}.reason`, 512),
+		reason: expectNullablePresentationText(
+			record.reason,
+			`${label}.reason`,
+			512,
+		),
 	};
 }
 
 function expectStreamText(value: unknown, label: string): string {
 	const text = expectString(value, label, { minBytes: 1, maxBytes: 16 * 1024 });
-	if (hasUnsafePresentationCharacter(text)) invalid(`${label} contains an unsafe control character`);
+	if (hasUnsafePresentationCharacter(text)) {
+		invalid(`${label} contains an unsafe control character`);
+	}
 	return text;
 }
 
 function validateUsage(value: unknown, label: string): WireUsage {
-	const record = expectExactKeys(value, label, ["input", "output", "cacheRead", "cacheWrite", "reasoning"]);
+	const record = expectExactKeys(value, label, [
+		"input",
+		"output",
+		"cacheRead",
+		"cacheWrite",
+		"reasoning",
+	]);
 	return {
 		input: expectInteger(record.input, `${label}.input`),
 		output: expectInteger(record.output, `${label}.output`),
@@ -3092,7 +4339,10 @@ function validateUsage(value: unknown, label: string): WireUsage {
 	};
 }
 
-function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEventPayloadByKind[ServerEventKind] {
+function validateServerPayload(
+	kind: ServerEventKind,
+	value: unknown,
+): ServerEventPayloadByKind[ServerEventKind] {
 	const label = `${kind} payload`;
 	switch (kind) {
 		case "connection.ready":
@@ -3105,13 +4355,20 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 			return validateProjectSnapshotPayload(value, label);
 		case "project.opened": {
 			const record = expectExactKeys(value, label, ["workspace"]);
-			return { workspace: validateWireWorkspace(record.workspace, `${label}.workspace`) };
+			return {
+				workspace: validateWireWorkspace(
+					record.workspace,
+					`${label}.workspace`,
+				),
+			};
 		}
 		case "fs.delete.challenge":
 			return validateWireDeleteChallenge(value, label);
 		case "clio.state": {
 			const record = expectExactKeys(value, label, ["snapshot"]);
-			return { snapshot: validateClioSnapshot(record.snapshot, `${label}.snapshot`) };
+			return {
+				snapshot: validateClioSnapshot(record.snapshot, `${label}.snapshot`),
+			};
 		}
 		case "session.list": {
 			const record = expectExactKeys(value, label, ["sessions", "truncated"]);
@@ -3127,31 +4384,72 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		}
 		case "settings.state": {
 			const record = expectExactKeys(value, label, ["settings"]);
-			return { settings: validateSettingsState(record.settings, `${label}.settings`) };
+			return {
+				settings: validateSettingsState(record.settings, `${label}.settings`),
+			};
 		}
 		case "config.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
-			return { inspection: validateConfigInspection(record.inspection, `${label}.inspection`) };
+			return {
+				inspection: validateConfigInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
 		}
 		case "catalog.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
-			return { inspection: validateCatalogInspection(record.inspection, `${label}.inspection`) };
+			return {
+				inspection: validateCatalogInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
 		}
 		case "usage.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
-			return { inspection: validateUsageInspection(record.inspection, `${label}.inspection`) };
+			return {
+				inspection: validateUsageInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
 		}
 		case "routing.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
-			return { inspection: validateRoutingInspection(record.inspection, `${label}.inspection`) };
+			return {
+				inspection: validateRoutingInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
 		}
 		case "dispatch.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
-			return { inspection: validateDispatchInspection(record.inspection, `${label}.inspection`) };
+			return {
+				inspection: validateDispatchInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
+		}
+		case "fleet.inspection.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return {
+				inspection: validateFleetInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
 		}
 		case "recovery.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
-			return { inspection: validateRecoveryInspection(record.inspection, `${label}.inspection`) };
+			return {
+				inspection: validateRecoveryInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
 		}
 		case "targets.state": {
 			const record = expectExactKeys(value, label, ["targets", "truncated"]);
@@ -3163,24 +4461,51 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "targets.probed": {
 			const record = expectExactKeys(value, label, ["targetId", "health"]);
 			return {
-				targetId: expectPresentationText(record.targetId, `${label}.targetId`, 128),
+				targetId: expectPresentationText(
+					record.targetId,
+					`${label}.targetId`,
+					128,
+				),
 				health: validateTargetHealth(record.health, `${label}.health`),
 			};
 		}
 		case "turn.started": {
-			const record = expectExactKeys(value, label, ["promptSummary", "origin", "startedAt", "source"]);
-			const origin = expectEnum(record.origin, `${label}.origin`, ["live", "replay"] as const);
+			const record = expectExactKeys(value, label, [
+				"promptSummary",
+				"origin",
+				"startedAt",
+				"source",
+			]);
+			const origin = expectEnum(
+				record.origin,
+				`${label}.origin`,
+				["live", "replay"] as const,
+			);
 			const startedAt = record.startedAt === null ? null : expectTimestamp(record.startedAt, `${label}.startedAt`);
 			const source = validateEventSource(record.source, `${label}.source`);
 			if (origin === "replay") {
-				if (startedAt !== null) invalid(`${label}.startedAt must be null for replay history`);
-				if (source !== "replayed-from-clio") invalid(`${label}.source must identify replay history`);
+				if (startedAt !== null) {
+					invalid(`${label}.startedAt must be null for replay history`);
+				}
+				if (source !== "replayed-from-clio") {
+					invalid(`${label}.source must identify replay history`);
+				}
 			} else {
-				if (startedAt === null) invalid(`${label}.startedAt must identify when a live turn began`);
-				if (source === "replayed-from-clio") invalid(`${label}.source cannot identify a live turn as replay history`);
+				if (startedAt === null) {
+					invalid(`${label}.startedAt must identify when a live turn began`);
+				}
+				if (source === "replayed-from-clio") {
+					invalid(
+						`${label}.source cannot identify a live turn as replay history`,
+					);
+				}
 			}
 			return {
-				promptSummary: expectPresentationText(record.promptSummary, `${label}.promptSummary`, 8 * 1024),
+				promptSummary: expectPresentationText(
+					record.promptSummary,
+					`${label}.promptSummary`,
+					8 * 1024,
+				),
 				origin,
 				startedAt,
 				source,
@@ -3188,7 +4513,11 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		}
 		case "turn.text":
 		case "turn.thought": {
-			const record = expectExactKeys(value, label, ["text", "agents", "source"]);
+			const record = expectExactKeys(value, label, [
+				"text",
+				"agents",
+				"source",
+			]);
 			return {
 				text: expectStreamText(record.text, `${label}.text`),
 				agents: validateAgentAttributions(record.agents, `${label}.agents`),
@@ -3240,15 +4569,26 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				"shape",
 				"source",
 			]);
-			if (record.toolCallId !== null) invalid(`${label}.toolCallId must be null for event version 1`);
-			if (record.shape !== null) invalid(`${label}.shape must be null for event version 1`);
+			if (record.toolCallId !== null) {
+				invalid(`${label}.toolCallId must be null for event version 1`);
+			}
+			if (record.shape !== null) {
+				invalid(`${label}.shape must be null for event version 1`);
+			}
 			return {
 				toolCallId: null,
 				tool: expectPresentationText(record.tool, `${label}.tool`, 64),
 				repeatCount: expectInteger(record.repeatCount, `${label}.repeatCount`),
-				blocksThisTurn: expectInteger(record.blocksThisTurn, `${label}.blocksThisTurn`),
+				blocksThisTurn: expectInteger(
+					record.blocksThisTurn,
+					`${label}.blocksThisTurn`,
+				),
 				budget: expectInteger(record.budget, `${label}.budget`),
-				disposition: expectEnum(record.disposition, `${label}.disposition`, LOOP_DISPOSITIONS),
+				disposition: expectEnum(
+					record.disposition,
+					`${label}.disposition`,
+					LOOP_DISPOSITIONS,
+				),
 				interrupted: expectBoolean(record.interrupted, `${label}.interrupted`),
 				shape: null,
 				source: validateEventSource(record.source, `${label}.source`),
@@ -3257,20 +4597,37 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		case "turn.permission.requested":
 			return validateWirePendingPermission(value, label);
 		case "turn.permission.resolved": {
-			const record = expectExactKeys(value, label, ["permissionId", "decision", "source"]);
+			const record = expectExactKeys(value, label, [
+				"permissionId",
+				"decision",
+				"source",
+			]);
 			return {
 				permissionId: expectId(record.permissionId, `${label}.permissionId`),
-				decision: expectEnum(record.decision, `${label}.decision`, PERMISSION_RESOLUTIONS),
+				decision: expectEnum(
+					record.decision,
+					`${label}.decision`,
+					PERMISSION_RESOLUTIONS,
+				),
 				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
 		case "turn.terminal": {
-			const record = expectExactKeys(value, label, ["outcome", "code", "summary", "source"], [
+			const record = expectExactKeys(value, label, [
+				"outcome",
+				"code",
+				"summary",
+				"source",
+			], [
 				"stopReason",
 				"usage",
 			]);
 			const stopReason = Object.hasOwn(record, "stopReason")
-				? expectEnum(record.stopReason, `${label}.stopReason`, TURN_STOP_REASONS)
+				? expectEnum(
+					record.stopReason,
+					`${label}.stopReason`,
+					TURN_STOP_REASONS,
+				)
 				: undefined;
 			const usage = Object.hasOwn(record, "usage") ? validateUsage(record.usage, `${label}.usage`) : undefined;
 			return {
@@ -3283,7 +4640,9 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 			};
 		}
 		case "protocol.error": {
-			const record = expectExactKeys(value, label, ["code", "message"], ["requestId"]);
+			const record = expectExactKeys(value, label, ["code", "message"], [
+				"requestId",
+			]);
 			const requestId = Object.hasOwn(record, "requestId")
 				? expectId(record.requestId, `${label}.requestId`)
 				: undefined;
@@ -3291,14 +4650,21 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				code: expectEnum(
 					record.code,
 					`${label}.code`,
-					["unsupported-version", "invalid-frame", "sequence-error", "internal"] as const,
+					[
+						"unsupported-version",
+						"invalid-frame",
+						"sequence-error",
+						"internal",
+					] as const,
 				),
 				message: expectSanitizedMessage(record.message, `${label}.message`),
 				...(requestId === undefined ? {} : { requestId }),
 			};
 		}
 		case "command.error": {
-			const record = expectExactKeys(value, label, ["code", "message"], ["requestId"]);
+			const record = expectExactKeys(value, label, ["code", "message"], [
+				"requestId",
+			]);
 			const requestId = Object.hasOwn(record, "requestId")
 				? expectId(record.requestId, `${label}.requestId`)
 				: undefined;
@@ -3311,43 +4677,80 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 	}
 }
 
-function parseJsonFrame(frame: string, maximumBytes: number, label: string): unknown {
-	if (typeof frame !== "string") throw new ProtocolValidationError("invalid-frame", `${label} must be a text frame`);
+function parseJsonFrame(
+	frame: string,
+	maximumBytes: number,
+	label: string,
+): unknown {
+	if (typeof frame !== "string") {
+		throw new ProtocolValidationError(
+			"invalid-frame",
+			`${label} must be a text frame`,
+		);
+	}
 	if (utf8Bytes(frame) > maximumBytes) {
-		throw new ProtocolValidationError("frame-too-large", `${label} exceeds ${maximumBytes} bytes`);
+		throw new ProtocolValidationError(
+			"frame-too-large",
+			`${label} exceeds ${maximumBytes} bytes`,
+		);
 	}
 	try {
 		return JSON.parse(frame) as unknown;
 	} catch {
-		throw new ProtocolValidationError("invalid-frame", `${label} is not valid JSON`);
+		throw new ProtocolValidationError(
+			"invalid-frame",
+			`${label} is not valid JSON`,
+		);
 	}
 }
 
-function encodeJsonFrame(value: unknown, maximumBytes: number, label: string): string {
+function encodeJsonFrame(
+	value: unknown,
+	maximumBytes: number,
+	label: string,
+): string {
 	let frame: string;
 	try {
 		frame = JSON.stringify(value);
 	} catch {
-		throw new ProtocolValidationError("invalid-frame", `${label} is not JSON serializable`);
+		throw new ProtocolValidationError(
+			"invalid-frame",
+			`${label} is not JSON serializable`,
+		);
 	}
 	if (typeof frame !== "string") {
-		throw new ProtocolValidationError("invalid-frame", `${label} is not JSON serializable`);
+		throw new ProtocolValidationError(
+			"invalid-frame",
+			`${label} is not JSON serializable`,
+		);
 	}
 	if (utf8Bytes(frame) > maximumBytes) {
-		throw new ProtocolValidationError("frame-too-large", `${label} exceeds ${maximumBytes} bytes`);
+		throw new ProtocolValidationError(
+			"frame-too-large",
+			`${label} exceeds ${maximumBytes} bytes`,
+		);
 	}
 	return frame;
 }
 
 export function validateClientCommand(value: unknown): ClientCommand {
-	const record = expectExactKeys(value, "client command", ["protocolVersion", "requestId", "kind", "payload"]);
+	const record = expectExactKeys(value, "client command", [
+		"protocolVersion",
+		"requestId",
+		"kind",
+		"payload",
+	]);
 	if (record.protocolVersion !== PROTOCOL_VERSION) {
 		throw new ProtocolValidationError(
 			"unsupported-version",
 			`client command protocolVersion must be ${PROTOCOL_VERSION}`,
 		);
 	}
-	const kind = expectEnum(record.kind, "client command.kind", CLIENT_COMMAND_KINDS);
+	const kind = expectEnum(
+		record.kind,
+		"client command.kind",
+		CLIENT_COMMAND_KINDS,
+	);
 	return {
 		protocolVersion: PROTOCOL_VERSION,
 		requestId: expectId(record.requestId, "client command.requestId"),
@@ -3357,11 +4760,17 @@ export function validateClientCommand(value: unknown): ClientCommand {
 }
 
 export function parseClientCommand(frame: string): ClientCommand {
-	return validateClientCommand(parseJsonFrame(frame, MAX_CLIENT_FRAME_BYTES, "client frame"));
+	return validateClientCommand(
+		parseJsonFrame(frame, MAX_CLIENT_FRAME_BYTES, "client frame"),
+	);
 }
 
 export function encodeClientCommand(command: ClientCommand): string {
-	return encodeJsonFrame(validateClientCommand(command), MAX_CLIENT_FRAME_BYTES, "client frame");
+	return encodeJsonFrame(
+		validateClientCommand(command),
+		MAX_CLIENT_FRAME_BYTES,
+		"client frame",
+	);
 }
 
 const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
@@ -3369,6 +4778,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"protocol.error",
 	"project.browse.listing",
 	"dispatch.state",
+	"fleet.inspection.state",
 	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
@@ -3409,7 +4819,10 @@ export function isTurnEventKind(kind: ServerEventKind): boolean {
 function validateContext(
 	kind: ServerEventKind,
 	record: Record<string, unknown>,
-): Pick<ServerEnvelopeBase<ServerEventKind>, "projectId" | "processGeneration" | "sessionId" | "turnId"> {
+): Pick<
+	ServerEnvelopeBase<ServerEventKind>,
+	"projectId" | "processGeneration" | "sessionId" | "turnId"
+> {
 	const hasProject = Object.hasOwn(record, "projectId");
 	const hasGeneration = Object.hasOwn(record, "processGeneration");
 	const hasSession = Object.hasOwn(record, "sessionId");
@@ -3417,29 +4830,42 @@ function validateContext(
 
 	if (NO_CONTEXT_EVENT_KINDS.has(kind)) {
 		if (hasProject || hasGeneration || hasSession || hasTurn) {
-			invalid(`${kind} must not carry project, process-generation, session, or turn IDs`);
+			invalid(
+				`${kind} must not carry project, process-generation, session, or turn IDs`,
+			);
 		}
 		return {};
 	}
 	if (PROJECT_CONTEXT_EVENT_KINDS.has(kind)) {
-		if (!hasProject || hasGeneration || hasSession || hasTurn) invalid(`${kind} must carry only a projectId context`);
+		if (!hasProject || hasGeneration || hasSession || hasTurn) {
+			invalid(`${kind} must carry only a projectId context`);
+		}
 		return { projectId: expectId(record.projectId, "server event.projectId") };
 	}
 	if (TURN_EVENT_KINDS.has(kind)) {
 		if (!hasProject || !hasGeneration || !hasSession || !hasTurn) {
-			invalid(`${kind} must carry projectId, processGeneration, sessionId, and turnId`);
+			invalid(
+				`${kind} must carry projectId, processGeneration, sessionId, and turnId`,
+			);
 		}
 		return {
 			projectId: expectId(record.projectId, "server event.projectId"),
-			processGeneration: expectId(record.processGeneration, "server event.processGeneration"),
+			processGeneration: expectId(
+				record.processGeneration,
+				"server event.processGeneration",
+			),
 			sessionId: expectId(record.sessionId, "server event.sessionId"),
 			turnId: expectId(record.turnId, "server event.turnId"),
 		};
 	}
 	// command.error may be global or scoped. Context must remain hierarchical.
 	if (hasGeneration) invalid(`${kind} cannot carry a process generation`);
-	if (hasTurn && !hasSession) invalid(`${kind} cannot carry turnId without sessionId`);
-	if ((hasSession || hasTurn) && !hasProject) invalid(`${kind} cannot carry session/turn IDs without projectId`);
+	if (hasTurn && !hasSession) {
+		invalid(`${kind} cannot carry turnId without sessionId`);
+	}
+	if ((hasSession || hasTurn) && !hasProject) {
+		invalid(`${kind} cannot carry session/turn IDs without projectId`);
+	}
 	return {
 		...(hasProject ? { projectId: expectId(record.projectId, "server event.projectId") } : {}),
 		...(hasSession ? { sessionId: expectId(record.sessionId, "server event.sessionId") } : {}),
@@ -3451,7 +4877,15 @@ export function validateServerEvent(value: unknown): ServerEvent {
 	const record = expectExactKeys(
 		value,
 		"server event",
-		["protocolVersion", "workspaceInstanceId", "sequence", "eventId", "kind", "terminal", "payload"],
+		[
+			"protocolVersion",
+			"workspaceInstanceId",
+			"sequence",
+			"eventId",
+			"kind",
+			"terminal",
+			"payload",
+		],
 		["projectId", "processGeneration", "sessionId", "turnId"],
 	);
 	if (record.protocolVersion !== PROTOCOL_VERSION) {
@@ -3469,7 +4903,10 @@ export function validateServerEvent(value: unknown): ServerEvent {
 	const payload = validateServerPayload(kind, record.payload);
 	const event = {
 		protocolVersion: PROTOCOL_VERSION,
-		workspaceInstanceId: expectId(record.workspaceInstanceId, "server event.workspaceInstanceId"),
+		workspaceInstanceId: expectId(
+			record.workspaceInstanceId,
+			"server event.workspaceInstanceId",
+		),
 		sequence: expectInteger(record.sequence, "server event.sequence", 1),
 		eventId: expectId(record.eventId, "server event.eventId"),
 		kind,
@@ -3481,11 +4918,17 @@ export function validateServerEvent(value: unknown): ServerEvent {
 }
 
 export function parseServerEvent(frame: string): ServerEvent {
-	return validateServerEvent(parseJsonFrame(frame, MAX_SERVER_EVENT_BYTES, "server event frame"));
+	return validateServerEvent(
+		parseJsonFrame(frame, MAX_SERVER_EVENT_BYTES, "server event frame"),
+	);
 }
 
 export function encodeServerEvent(event: ServerEvent): string {
-	return encodeJsonFrame(validateServerEvent(event), MAX_SERVER_EVENT_BYTES, "server event frame");
+	return encodeJsonFrame(
+		validateServerEvent(event),
+		MAX_SERVER_EVENT_BYTES,
+		"server event frame",
+	);
 }
 
 function canonicalJson(value: unknown): string {
@@ -3507,7 +4950,10 @@ export class ServerSequenceGuard {
 	readonly #eventIds = new Set<string>();
 	readonly #maximumEvents: number;
 
-	constructor(nextSequence = 1, maximumEvents = MAX_SERVER_EVENTS_PER_CONNECTION) {
+	constructor(
+		nextSequence = 1,
+		maximumEvents = MAX_SERVER_EVENTS_PER_CONNECTION,
+	) {
 		this.#nextSequence = expectInteger(nextSequence, "nextSequence", 1);
 		this.#maximumEvents = expectInteger(maximumEvents, "maximumEvents", 1);
 	}
@@ -3526,17 +4972,32 @@ export class ServerSequenceGuard {
 
 	observe(value: unknown): SequenceDisposition {
 		const event = validateServerEvent(value);
-		if (this.#workspaceInstanceId !== undefined && event.workspaceInstanceId !== this.#workspaceInstanceId) {
-			throw new ProtocolValidationError("sequence-error", "server event workspace instance changed mid-stream");
+		if (
+			this.#workspaceInstanceId !== undefined &&
+			event.workspaceInstanceId !== this.#workspaceInstanceId
+		) {
+			throw new ProtocolValidationError(
+				"sequence-error",
+				"server event workspace instance changed mid-stream",
+			);
 		}
 
 		const fingerprint = canonicalJson(event);
-		if (event.sequence === this.#nextSequence - 1 && this.#lastFingerprint !== undefined) {
+		if (
+			event.sequence === this.#nextSequence - 1 &&
+			this.#lastFingerprint !== undefined
+		) {
 			if (fingerprint === this.#lastFingerprint) return "duplicate";
-			throw new ProtocolValidationError("sequence-error", `conflicting server event at sequence ${event.sequence}`);
+			throw new ProtocolValidationError(
+				"sequence-error",
+				`conflicting server event at sequence ${event.sequence}`,
+			);
 		}
 		if (event.sequence < this.#nextSequence) {
-			throw new ProtocolValidationError("sequence-error", `server event sequence regressed to ${event.sequence}`);
+			throw new ProtocolValidationError(
+				"sequence-error",
+				`server event sequence regressed to ${event.sequence}`,
+			);
 		}
 		if (event.sequence > this.#nextSequence) {
 			throw new ProtocolValidationError(
@@ -3545,7 +5006,10 @@ export class ServerSequenceGuard {
 			);
 		}
 		if (this.#eventIds.has(event.eventId)) {
-			throw new ProtocolValidationError("sequence-error", `server eventId ${event.eventId} was reused`);
+			throw new ProtocolValidationError(
+				"sequence-error",
+				`server eventId ${event.eventId} was reused`,
+			);
 		}
 		if (this.#eventIds.size >= this.#maximumEvents) {
 			throw new ProtocolValidationError(
@@ -3574,7 +5038,11 @@ export class ServerSequenceGuard {
 }
 
 export type LocalTransportState = "connecting" | "open" | "closing" | "closed";
-export type DisconnectCause = "client-close" | "remote-close" | "network-error" | "protocol-error";
+export type DisconnectCause =
+	| "client-close"
+	| "remote-close"
+	| "network-error"
+	| "protocol-error";
 
 export interface LocalTransportDisconnect {
 	readonly cause: DisconnectCause;
@@ -3587,20 +5055,26 @@ export interface LocalTransport {
 	readonly state: LocalTransportState;
 	send(command: ClientCommand): void;
 	onEvent(listener: (event: ServerEvent) => void): () => void;
-	onDisconnect(listener: (disconnect: LocalTransportDisconnect) => void): () => void;
+	onDisconnect(
+		listener: (disconnect: LocalTransportDisconnect) => void,
+	): () => void;
 	close(code?: number, reason?: string): void;
 }
 
 export interface WebSocketLocalTransportOptions {
 	readonly protocols?: string | readonly string[];
 	readonly expectedSequence?: number;
-	readonly webSocketFactory?: (url: string, protocols?: string | string[]) => WebSocket;
+	readonly webSocketFactory?: (
+		url: string,
+		protocols?: string | string[],
+	) => WebSocket;
 }
 
 function isLoopbackHostname(hostname: string): boolean {
 	const normalized = hostname.toLowerCase();
 	if (
-		normalized === "localhost" || normalized.endsWith(".localhost") || normalized === "[::1]" || normalized === "::1"
+		normalized === "localhost" || normalized.endsWith(".localhost") ||
+		normalized === "[::1]" || normalized === "::1"
 	) {
 		return true;
 	}
@@ -3617,11 +5091,18 @@ export function assertLocalWebSocketUrl(value: string | URL): string {
 	} catch {
 		throw new TypeError("LocalTransport URL must be absolute");
 	}
-	if ((url.protocol !== "ws:" && url.protocol !== "wss:") || !isLoopbackHostname(url.hostname)) {
-		throw new TypeError("LocalTransport URL must use ws/wss on a loopback host");
+	if (
+		(url.protocol !== "ws:" && url.protocol !== "wss:") ||
+		!isLoopbackHostname(url.hostname)
+	) {
+		throw new TypeError(
+			"LocalTransport URL must use ws/wss on a loopback host",
+		);
 	}
 	if (url.username !== "" || url.password !== "" || url.hash !== "") {
-		throw new TypeError("LocalTransport URL must not contain credentials or a fragment");
+		throw new TypeError(
+			"LocalTransport URL must not contain credentials or a fragment",
+		);
 	}
 	return url.href;
 }
@@ -3631,21 +5112,30 @@ export class WebSocketLocalTransport implements LocalTransport {
 	readonly #socket: WebSocket;
 	readonly #sequenceGuard: ServerSequenceGuard;
 	readonly #eventListeners = new Set<(event: ServerEvent) => void>();
-	readonly #disconnectListeners = new Set<(disconnect: LocalTransportDisconnect) => void>();
+	readonly #disconnectListeners = new Set<
+		(disconnect: LocalTransportDisconnect) => void
+	>();
 	#disconnect: LocalTransportDisconnect | undefined;
 	#clientClosing = false;
 	#sawNetworkError = false;
 
-	constructor(endpoint: string | URL, options: WebSocketLocalTransportOptions = {}) {
+	constructor(
+		endpoint: string | URL,
+		options: WebSocketLocalTransportOptions = {},
+	) {
 		const url = assertLocalWebSocketUrl(endpoint);
 		let protocols: string | string[] | undefined;
 		if (typeof options.protocols === "string") protocols = options.protocols;
-		else if (options.protocols !== undefined) protocols = [...options.protocols];
+		else if (options.protocols !== undefined) {
+			protocols = [...options.protocols];
+		}
 		const factory = options.webSocketFactory ??
 			((socketUrl: string, socketProtocols?: string | string[]) =>
 				socketProtocols === undefined ? new WebSocket(socketUrl) : new WebSocket(socketUrl, socketProtocols));
 		this.#socket = factory(url, protocols);
-		this.#sequenceGuard = new ServerSequenceGuard(options.expectedSequence ?? 1);
+		this.#sequenceGuard = new ServerSequenceGuard(
+			options.expectedSequence ?? 1,
+		);
 
 		this.#socket.addEventListener("message", (event: MessageEvent<unknown>) => {
 			if (typeof event.data !== "string") {
@@ -3655,9 +5145,13 @@ export class WebSocketLocalTransport implements LocalTransport {
 			try {
 				const serverEvent = parseServerEvent(event.data);
 				if (this.#sequenceGuard.observe(serverEvent) === "duplicate") return;
-				for (const listener of this.#eventListeners) this.#notifyEventListener(listener, serverEvent);
+				for (const listener of this.#eventListeners) {
+					this.#notifyEventListener(listener, serverEvent);
+				}
 			} catch (error) {
-				this.#failProtocol(error instanceof Error ? error.message : "Invalid server event");
+				this.#failProtocol(
+					error instanceof Error ? error.message : "Invalid server event",
+				);
 			}
 		});
 		this.#socket.addEventListener("error", () => {
@@ -3687,7 +5181,9 @@ export class WebSocketLocalTransport implements LocalTransport {
 	}
 
 	send(command: ClientCommand): void {
-		if (this.#socket.readyState !== WebSocket.OPEN) throw new Error(`LocalTransport is ${this.state}`);
+		if (this.#socket.readyState !== WebSocket.OPEN) {
+			throw new Error(`LocalTransport is ${this.state}`);
+		}
 		this.#socket.send(encodeClientCommand(command));
 	}
 
@@ -3696,7 +5192,9 @@ export class WebSocketLocalTransport implements LocalTransport {
 		return () => this.#eventListeners.delete(listener);
 	}
 
-	onDisconnect(listener: (disconnect: LocalTransportDisconnect) => void): () => void {
+	onDisconnect(
+		listener: (disconnect: LocalTransportDisconnect) => void,
+	): () => void {
 		if (this.#disconnect !== undefined) {
 			listener(this.#disconnect);
 			return () => undefined;
@@ -3708,13 +5206,21 @@ export class WebSocketLocalTransport implements LocalTransport {
 	close(code = 1000, reason = "Client closed the connection"): void {
 		this.#clientClosing = true;
 		if (this.#socket.readyState === WebSocket.CLOSED) {
-			this.#signalDisconnect({ cause: "client-close", code, reason, wasClean: true });
+			this.#signalDisconnect({
+				cause: "client-close",
+				code,
+				reason,
+				wasClean: true,
+			});
 			return;
 		}
 		this.#socket.close(code, reason);
 	}
 
-	#notifyEventListener(listener: (event: ServerEvent) => void, event: ServerEvent): void {
+	#notifyEventListener(
+		listener: (event: ServerEvent) => void,
+		event: ServerEvent,
+	): void {
 		try {
 			listener(event);
 		} catch (error) {
@@ -3725,9 +5231,17 @@ export class WebSocketLocalTransport implements LocalTransport {
 	}
 
 	#failProtocol(reason: string): void {
-		const disconnect = { cause: "protocol-error", code: 1002, reason, wasClean: false } as const;
+		const disconnect = {
+			cause: "protocol-error",
+			code: 1002,
+			reason,
+			wasClean: false,
+		} as const;
 		this.#signalDisconnect(disconnect);
-		if (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN) {
+		if (
+			this.#socket.readyState === WebSocket.CONNECTING ||
+			this.#socket.readyState === WebSocket.OPEN
+		) {
 			this.#socket.close(1002, "Invalid GUI protocol event");
 		}
 	}

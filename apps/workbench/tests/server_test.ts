@@ -6,6 +6,7 @@ import type { AcpLaunchSpec } from "../acp-client.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
+import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -24,6 +25,7 @@ import {
 	type WireCatalogInspection,
 	type WireConfigInspection,
 	type WireDispatchInspection,
+	type WireFleetInspection,
 	type WireRecoveryInspection,
 	type WireRoutingInspection,
 	type WireUsageInspection,
@@ -31,6 +33,7 @@ import {
 import {
 	catalogInspectionFixture,
 	dispatchInspectionFixture,
+	fleetInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	usageInspectionFixture,
@@ -105,6 +108,7 @@ interface FixtureOptions {
 	readonly usageInspector?: ClioUsageInspector;
 	readonly routingInspector?: ClioRoutingInspector;
 	readonly dispatchInspector?: ClioDispatchInspector;
+	readonly fleetInspector?: ClioFleetInspector;
 	readonly recoveryInspector?: ClioRecoveryInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
@@ -147,6 +151,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 			...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 			...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
+			...(options.fleetInspector === undefined ? {} : { fleetInspector: options.fleetInspector }),
 			...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
@@ -876,6 +881,36 @@ Deno.test("dispatch inspection is global, uses the configured home, and survives
 			dispatchInspection: WireDispatchInspection;
 		};
 		deepStrictEqual(bootstrap.dispatchInspection, dispatchInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("fleet inspection is global, uses the configured home, and survives browser reload", async () => {
+	let inspectedCwd: string | null = null;
+	const fleetInspector: ClioFleetInspector = {
+		inspect(cwd) {
+			inspectedCwd = cwd;
+			return Promise.resolve(fleetInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ fleetInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-fleet", "fleet.inspect", {});
+		const fleet = (await collectThrough(socket, "fleet.inspection.state")).at(-1);
+		ok(fleet?.kind === "fleet.inspection.state");
+		equal(fleet.projectId, undefined);
+		equal(inspectedCwd, fixture.homePath);
+		deepStrictEqual(fleet.payload.inspection, fleetInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			fleetInspection: WireFleetInspection;
+		};
+		deepStrictEqual(bootstrap.fleetInspection, fleetInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

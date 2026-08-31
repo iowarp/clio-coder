@@ -27,8 +27,17 @@ import {
 	WebSocketLocalTransport,
 } from "../src/protocol.ts";
 
-function clientFrame(kind: string, payload: unknown, requestId = "request-0001"): string {
-	return JSON.stringify({ protocolVersion: PROTOCOL_VERSION, requestId, kind, payload });
+function clientFrame(
+	kind: string,
+	payload: unknown,
+	requestId = "request-0001",
+): string {
+	return JSON.stringify({
+		protocolVersion: PROTOCOL_VERSION,
+		requestId,
+		kind,
+		payload,
+	});
 }
 
 function parseCommand(kind: string, payload: unknown): ClientCommand {
@@ -80,7 +89,13 @@ function wireWorkspace(overrides: Record<string, unknown> = {}) {
 			lastOpenedAt: "2026-08-18T12:00:00.000Z",
 			available: true,
 		},
-		tree: [{ name: "src", path: { segments: ["src"] }, kind: "directory", operable: true, children: [] }],
+		tree: [{
+			name: "src",
+			path: { segments: ["src"] },
+			kind: "directory",
+			operable: true,
+			children: [],
+		}],
 		treeTruncated: false,
 		sessions: [],
 		sessionsTruncated: false,
@@ -104,7 +119,11 @@ function wireWorkspace(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function serverEvent<K extends ServerEventKind>(kind: K, payload: unknown, sequence = 1): ServerEventOf<K> {
+function serverEvent<K extends ServerEventKind>(
+	kind: K,
+	payload: unknown,
+	sequence = 1,
+): ServerEventOf<K> {
 	const context = isTurnEventKind(kind)
 		? {
 			projectId: "project-alpha",
@@ -112,8 +131,11 @@ function serverEvent<K extends ServerEventKind>(kind: K, payload: unknown, seque
 			sessionId: "session-public-001",
 			turnId: "turn-1",
 		}
-		: kind === "connection.ready" || kind === "protocol.error" || kind === "command.error" ||
-				kind === "project.browse.listing" || kind === "dispatch.state" || kind === "recovery.state"
+		: kind === "connection.ready" || kind === "protocol.error" ||
+				kind === "command.error" ||
+				kind === "project.browse.listing" || kind === "dispatch.state" ||
+				kind === "fleet.inspection.state" ||
+				kind === "recovery.state"
 		? {}
 		: { projectId: "project-alpha" };
 	return validateServerEvent({
@@ -157,6 +179,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"usage.inspect",
 		"routing.inspect",
 		"dispatch.inspect",
+		"fleet.inspect",
 		"recovery.inspect",
 		"targets.list",
 		"targets.probe",
@@ -174,17 +197,34 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		expectProtocolError(() => parseCommand(removed, { projectId: "project-alpha" }));
 	}
 	deepStrictEqual(PERMISSION_DECISIONS, ["allow-once", "reject"]);
-	deepStrictEqual(PERMISSION_RESOLUTIONS, ["allow-once", "reject", "cancelled", "unanswered", "disconnect"]);
+	deepStrictEqual(PERMISSION_RESOLUTIONS, [
+		"allow-once",
+		"reject",
+		"cancelled",
+		"unanswered",
+		"disconnect",
+	]);
 	deepStrictEqual(SESSION_STATES, ["open", "closed", "unknown"]);
-	deepStrictEqual(AUTONOMY_LEVELS, ["read-only", "suggest", "auto-edit", "full-auto"]);
+	deepStrictEqual(AUTONOMY_LEVELS, [
+		"read-only",
+		"suggest",
+		"auto-edit",
+		"full-auto",
+	]);
 });
 
 Deno.test("project commands accept absolute native paths only", () => {
-	deepStrictEqual(parseCommand("project.open", { path: "/tmp/workbench/alpha" }).payload, {
-		path: "/tmp/workbench/alpha",
-	});
+	deepStrictEqual(
+		parseCommand("project.open", { path: "/tmp/workbench/alpha" }).payload,
+		{
+			path: "/tmp/workbench/alpha",
+		},
+	);
 	deepStrictEqual(parseCommand("project.browse", {}).payload, {});
-	deepStrictEqual(parseCommand("project.browse", { path: "/home/operator" }).payload, { path: "/home/operator" });
+	deepStrictEqual(
+		parseCommand("project.browse", { path: "/home/operator" }).payload,
+		{ path: "/home/operator" },
+	);
 	for (
 		const invalidPath of [
 			"relative/path",
@@ -197,49 +237,98 @@ Deno.test("project commands accept absolute native paths only", () => {
 		expectProtocolError(() => parseCommand("project.open", { path: invalidPath }));
 	}
 	expectProtocolError(() => parseCommand("project.open", { path: "/tmp/a", extra: 1 }));
-	deepStrictEqual(parseCommand("project.select", { projectId: "project-alpha" }).payload, {
-		projectId: "project-alpha",
-	});
+	deepStrictEqual(
+		parseCommand("project.select", { projectId: "project-alpha" }).payload,
+		{
+			projectId: "project-alpha",
+		},
+	);
 	expectProtocolError(() => parseCommand("project.forget", { projectId: "project alpha" }));
 });
 
 Deno.test("session and autonomy commands round-trip their exact shapes", () => {
-	deepStrictEqual(parseCommand("session.load", { projectId: "project-alpha", sessionId: "session-1" }).payload, {
-		projectId: "project-alpha",
-		sessionId: "session-1",
-	});
 	deepStrictEqual(
-		parseCommand("session.label", { projectId: "project-alpha", sessionId: "session-1", label: "Audit" }).payload,
+		parseCommand("session.load", {
+			projectId: "project-alpha",
+			sessionId: "session-1",
+		}).payload,
+		{
+			projectId: "project-alpha",
+			sessionId: "session-1",
+		},
+	);
+	deepStrictEqual(
+		parseCommand("session.label", {
+			projectId: "project-alpha",
+			sessionId: "session-1",
+			label: "Audit",
+		}).payload,
 		{ projectId: "project-alpha", sessionId: "session-1", label: "Audit" },
 	);
 	// An empty label clears it; a padded or oversized one is refused.
 	deepStrictEqual(
-		parseCommand("session.label", { projectId: "project-alpha", sessionId: "session-1", label: "" }).payload,
+		parseCommand("session.label", {
+			projectId: "project-alpha",
+			sessionId: "session-1",
+			label: "",
+		}).payload,
 		{ projectId: "project-alpha", sessionId: "session-1", label: "" },
 	);
 	expectProtocolError(() =>
-		parseCommand("session.label", { projectId: "project-alpha", sessionId: "session-1", label: " padded " })
+		parseCommand("session.label", {
+			projectId: "project-alpha",
+			sessionId: "session-1",
+			label: " padded ",
+		})
 	);
 	expectProtocolError(() =>
-		parseCommand("session.label", { projectId: "project-alpha", sessionId: "session-1", label: "x".repeat(257) })
+		parseCommand("session.label", {
+			projectId: "project-alpha",
+			sessionId: "session-1",
+			label: "x".repeat(257),
+		})
 	);
-	deepStrictEqual(parseCommand("autonomy.set", { projectId: "project-alpha", level: "read-only" }).payload, {
-		projectId: "project-alpha",
-		level: "read-only",
-	});
+	deepStrictEqual(
+		parseCommand("autonomy.set", {
+			projectId: "project-alpha",
+			level: "read-only",
+		}).payload,
+		{
+			projectId: "project-alpha",
+			level: "read-only",
+		},
+	);
 	expectProtocolError(() => parseCommand("autonomy.set", { projectId: "project-alpha", level: "yolo" }));
 });
 
 Deno.test("turn and permission commands stay bounded and one-use", () => {
-	deepStrictEqual(parseCommand("turn.start", { projectId: "project-alpha", prompt: "Audit the study" }).payload, {
-		projectId: "project-alpha",
-		prompt: "Audit the study",
-	});
-	for (const prompt of ["", " ", " padded ", "x".repeat(8 * 1024 + 1), "with\0null"]) {
+	deepStrictEqual(
+		parseCommand("turn.start", {
+			projectId: "project-alpha",
+			prompt: "Audit the study",
+		}).payload,
+		{
+			projectId: "project-alpha",
+			prompt: "Audit the study",
+		},
+	);
+	for (
+		const prompt of [
+			"",
+			" ",
+			" padded ",
+			"x".repeat(8 * 1024 + 1),
+			"with\0null",
+		]
+	) {
 		expectProtocolError(() => parseCommand("turn.start", { projectId: "project-alpha", prompt }));
 	}
 	expectProtocolError(() =>
-		parseCommand("turn.start", { projectId: "project-alpha", prompt: "ok", fakeScenario: "complete" })
+		parseCommand("turn.start", {
+			projectId: "project-alpha",
+			prompt: "ok",
+			fakeScenario: "complete",
+		})
 	);
 	deepStrictEqual(
 		parseCommand("permission.resolve", {
@@ -248,7 +337,12 @@ Deno.test("turn and permission commands stay bounded and one-use", () => {
 			permissionId: "permission-1",
 			decision: "allow-once",
 		}).payload,
-		{ projectId: "project-alpha", turnId: "turn-1", permissionId: "permission-1", decision: "allow-once" },
+		{
+			projectId: "project-alpha",
+			turnId: "turn-1",
+			permissionId: "permission-1",
+			decision: "allow-once",
+		},
 	);
 	for (const decision of ["allow-always", "timeout", "cancelled"]) {
 		expectProtocolError(() =>
@@ -264,9 +358,15 @@ Deno.test("turn and permission commands stay bounded and one-use", () => {
 
 Deno.test("settings patches encode the four key specific value domains", () => {
 	deepStrictEqual(
-		parseCommand("settings.patch", { projectId: "project-alpha", patch: { "orchestrator.model": "qwen3.8-27b" } })
+		parseCommand("settings.patch", {
+			projectId: "project-alpha",
+			patch: { "orchestrator.model": "qwen3.8-27b" },
+		})
 			.payload,
-		{ projectId: "project-alpha", patch: { "orchestrator.model": "qwen3.8-27b" } },
+		{
+			projectId: "project-alpha",
+			patch: { "orchestrator.model": "qwen3.8-27b" },
+		},
 	);
 	deepStrictEqual(
 		parseCommand("settings.patch", {
@@ -299,14 +399,20 @@ Deno.test("settings patches encode the four key specific value domains", () => {
 			{ autonomy: null },
 			{ autonomy: "yolo" },
 		]
-	) expectProtocolError(() => parseCommand("settings.patch", { projectId: "project-alpha", patch }));
+	) {
+		expectProtocolError(() => parseCommand("settings.patch", { projectId: "project-alpha", patch }));
+	}
 });
 
 Deno.test("filesystem commands keep their strict project-relative DTOs", () => {
-	deepStrictEqual(parseCommand("fs.refresh", { projectId: "project-alpha", directory: [] }).payload, {
-		projectId: "project-alpha",
-		directory: [],
-	});
+	deepStrictEqual(
+		parseCommand("fs.refresh", { projectId: "project-alpha", directory: [] })
+			.payload,
+		{
+			projectId: "project-alpha",
+			directory: [],
+		},
+	);
 	deepStrictEqual(
 		parseCommand("fs.move", {
 			projectId: "project-alpha",
@@ -322,9 +428,19 @@ Deno.test("filesystem commands keep their strict project-relative DTOs", () => {
 		},
 	);
 	for (const segment of ["..", ".", "a/b", "a\\b", ""]) {
-		expectProtocolError(() => parseCommand("fs.refresh", { projectId: "project-alpha", directory: [segment] }));
+		expectProtocolError(() =>
+			parseCommand("fs.refresh", {
+				projectId: "project-alpha",
+				directory: [segment],
+			})
+		);
 	}
-	expectProtocolError(() => parseCommand("fs.delete.prepare", { projectId: "project-alpha", target: [] }));
+	expectProtocolError(() =>
+		parseCommand("fs.delete.prepare", {
+			projectId: "project-alpha",
+			target: [],
+		})
+	);
 });
 
 Deno.test("every command kind round-trips and the list stays exhaustive", () => {
@@ -334,16 +450,35 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"project.select": { projectId: "project-alpha" },
 		"project.forget": { projectId: "project-alpha" },
 		"fs.refresh": { projectId: "project-alpha", directory: [] },
-		"fs.create-file": { projectId: "project-alpha", parent: [], name: "notes.md" },
-		"fs.create-folder": { projectId: "project-alpha", parent: [], name: "analysis" },
-		"fs.move": { projectId: "project-alpha", source: ["notes.md"], destination: { parent: [], name: "renamed.md" } },
+		"fs.create-file": {
+			projectId: "project-alpha",
+			parent: [],
+			name: "notes.md",
+		},
+		"fs.create-folder": {
+			projectId: "project-alpha",
+			parent: [],
+			name: "analysis",
+		},
+		"fs.move": {
+			projectId: "project-alpha",
+			source: ["notes.md"],
+			destination: { parent: [], name: "renamed.md" },
+		},
 		"fs.delete.prepare": { projectId: "project-alpha", target: ["notes.md"] },
-		"fs.delete.confirm": { projectId: "project-alpha", confirmationId: "confirmation-1" },
+		"fs.delete.confirm": {
+			projectId: "project-alpha",
+			confirmationId: "confirmation-1",
+		},
 		"session.new": { projectId: "project-alpha" },
 		"session.load": { projectId: "project-alpha", sessionId: "session-1" },
 		"session.close": { projectId: "project-alpha" },
 		"session.list": { projectId: "project-alpha" },
-		"session.label": { projectId: "project-alpha", sessionId: "session-1", label: "Audit" },
+		"session.label": {
+			projectId: "project-alpha",
+			sessionId: "session-1",
+			label: "Audit",
+		},
 		"session.delete": { projectId: "project-alpha", sessionId: "session-1" },
 		"turn.start": { projectId: "project-alpha", prompt: "Audit the study" },
 		"turn.cancel": { projectId: "project-alpha", turnId: "turn-1" },
@@ -354,21 +489,31 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 			decision: "reject",
 		},
 		"settings.get": { projectId: "project-alpha" },
-		"settings.patch": { projectId: "project-alpha", patch: { autonomy: "suggest" } },
+		"settings.patch": {
+			projectId: "project-alpha",
+			patch: { autonomy: "suggest" },
+		},
 		"config.inspect": { projectId: "project-alpha" },
 		"catalog.inspect": { projectId: "project-alpha" },
 		"usage.inspect": { projectId: "project-alpha" },
 		"routing.inspect": { projectId: "project-alpha" },
 		"dispatch.inspect": {},
+		"fleet.inspect": {},
 		"recovery.inspect": {},
 		"targets.list": { projectId: "project-alpha" },
 		"targets.probe": { projectId: "project-alpha", targetId: "lmstudio" },
 		"autonomy.set": { projectId: "project-alpha", level: "auto-edit" },
 	};
-	deepStrictEqual(Object.keys(samples).sort(), [...CLIENT_COMMAND_KINDS].sort());
+	deepStrictEqual(
+		Object.keys(samples).sort(),
+		[...CLIENT_COMMAND_KINDS].sort(),
+	);
 	for (const kind of CLIENT_COMMAND_KINDS) {
 		const command = parseCommand(kind, samples[kind]);
-		deepStrictEqual(validateClientCommand(JSON.parse(encodeClientCommand(command))), command);
+		deepStrictEqual(
+			validateClientCommand(JSON.parse(encodeClientCommand(command))),
+			command,
+		);
 	}
 });
 
@@ -376,10 +521,22 @@ Deno.test("client frames reject malformed, inherited, unknown, and oversized inp
 	expectProtocolError(() => parseClientCommand("{"), "invalid-frame");
 	expectProtocolError(() => parseClientCommand("[]"));
 	expectProtocolError(
-		() => parseClientCommand(JSON.stringify({ protocolVersion: 2, requestId: "r", kind: "session.new", payload: {} })),
+		() =>
+			parseClientCommand(
+				JSON.stringify({
+					protocolVersion: 2,
+					requestId: "r",
+					kind: "session.new",
+					payload: {},
+				}),
+			),
 		"unsupported-version",
 	);
-	expectProtocolError(() => parseClientCommand(clientFrame("session.new", { projectId: "project-alpha" }, " padded ")));
+	expectProtocolError(() =>
+		parseClientCommand(
+			clientFrame("session.new", { projectId: "project-alpha" }, " padded "),
+		)
+	);
 	const oversized = clientFrame("turn.start", {
 		projectId: "project-alpha",
 		prompt: "x".repeat(MAX_CLIENT_FRAME_BYTES),
@@ -388,11 +545,17 @@ Deno.test("client frames reject malformed, inherited, unknown, and oversized inp
 });
 
 Deno.test("clio snapshots use closed phases and never carry an engine kind", () => {
-	const event = serverEvent("clio.state", { snapshot: clioSnapshot("awaiting-approval") });
+	const event = serverEvent("clio.state", {
+		snapshot: clioSnapshot("awaiting-approval"),
+	});
 	equal(event.kind, "clio.state");
 	expectProtocolError(() => serverEvent("clio.state", { snapshot: { ...clioSnapshot(), kind: "fake" } }));
 	expectProtocolError(() => serverEvent("clio.state", { snapshot: clioSnapshot("ready") }));
-	expectProtocolError(() => serverEvent("clio.state", { snapshot: { ...clioSnapshot(), capabilities: {} } }));
+	expectProtocolError(() =>
+		serverEvent("clio.state", {
+			snapshot: { ...clioSnapshot(), capabilities: {} },
+		})
+	);
 });
 
 Deno.test("workspace payloads accept only the exact v4 workspace", () => {
@@ -401,10 +564,16 @@ Deno.test("workspace payloads accept only the exact v4 workspace", () => {
 	expectProtocolError(() => serverEvent("project.opened", { workspace: wireWorkspace({ agents: [] }) }));
 	expectProtocolError(() =>
 		serverEvent("project.opened", {
-			workspace: wireWorkspace({ project: { id: "project-alpha", displayName: "Alpha", identity: {} } }),
+			workspace: wireWorkspace({
+				project: { id: "project-alpha", displayName: "Alpha", identity: {} },
+			}),
 		})
 	);
-	expectProtocolError(() => serverEvent("project.opened", { workspace: wireWorkspace({ lastSequence: -1 }) }));
+	expectProtocolError(() =>
+		serverEvent("project.opened", {
+			workspace: wireWorkspace({ lastSequence: -1 }),
+		})
+	);
 });
 
 Deno.test("workspace terminal cards preserve bounded Clio Coder usage and reject usage on non-terminal cards", () => {
@@ -420,10 +589,18 @@ Deno.test("workspace terminal cards preserve bounded Clio Coder usage and reject
 		startedAt: "2026-08-18T12:00:00.000Z",
 		endedAt: "2026-08-18T12:00:01.000Z",
 		sequence: 1,
-		usage: { input: 1_024, output: 233, cacheRead: 800, cacheWrite: 17, reasoning: 91 },
+		usage: {
+			input: 1_024,
+			output: 233,
+			cacheRead: 800,
+			cacheWrite: 17,
+			reasoning: 91,
+		},
 		source: "reported-by-clio",
 	};
-	const opened = serverEvent("project.opened", { workspace: wireWorkspace({ timeline: [terminal] }) });
+	const opened = serverEvent("project.opened", {
+		workspace: wireWorkspace({ timeline: [terminal] }),
+	});
 	deepStrictEqual(opened.payload.workspace.timeline[0]?.usage, terminal.usage);
 
 	for (
@@ -434,7 +611,9 @@ Deno.test("workspace terminal cards preserve bounded Clio Coder usage and reject
 		]
 	) {
 		expectProtocolError(() =>
-			serverEvent("project.opened", { workspace: wireWorkspace({ timeline: [invalidTimeline] }) })
+			serverEvent("project.opened", {
+				workspace: wireWorkspace({ timeline: [invalidTimeline] }),
+			})
 		);
 	}
 });
@@ -452,7 +631,9 @@ Deno.test("replay timeline DTOs carry neutral status, no clock, and an explicit 
 		sequence: 1,
 		source: "replayed-from-clio",
 	};
-	const opened = serverEvent("project.opened", { workspace: wireWorkspace({ timeline: [replayedRequest] }) });
+	const opened = serverEvent("project.opened", {
+		workspace: wireWorkspace({ timeline: [replayedRequest] }),
+	});
 	equal(opened.payload.workspace.timeline[0]?.startedAt, null);
 	equal(opened.payload.workspace.timeline[0]?.status, "replayed");
 	equal(opened.payload.workspace.timeline[0]?.source, "replayed-from-clio");
@@ -473,7 +654,9 @@ Deno.test("replay timeline DTOs carry neutral status, no clock, and an explicit 
 		]
 	) {
 		expectProtocolError(() =>
-			serverEvent("project.opened", { workspace: wireWorkspace({ timeline: [invalidTimeline] }) })
+			serverEvent("project.opened", {
+				workspace: wireWorkspace({ timeline: [invalidTimeline] }),
+			})
 		);
 	}
 	expectProtocolError(() =>
@@ -557,7 +740,10 @@ const FLEET_RUN = {
 };
 
 Deno.test("fleet activity carries only reported dispatch facts under a closed state set", () => {
-	const activity = serverEvent("fleet.activity", { run: FLEET_RUN, source: "reported-by-clio" });
+	const activity = serverEvent("fleet.activity", {
+		run: FLEET_RUN,
+		source: "reported-by-clio",
+	});
 	equal(activity.payload.run.state, "progress");
 	equal(activity.payload.run.progressCount, 4);
 	// A fleet fact belongs to the session, not to a turn: a detached run settles
@@ -573,11 +759,22 @@ Deno.test("fleet activity carries only reported dispatch facts under a closed st
 			{ ...FLEET_RUN, task: "the exact dispatched task" },
 		]
 	) {
-		expectProtocolError(() => serverEvent("fleet.activity", { run: invalidRun, source: "reported-by-clio" }));
+		expectProtocolError(() =>
+			serverEvent("fleet.activity", {
+				run: invalidRun,
+				source: "reported-by-clio",
+			})
+		);
 	}
 	// A settled run may name its outcome; that is the only state that may.
 	const settled = serverEvent("fleet.activity", {
-		run: { ...FLEET_RUN, state: "done", outcome: "succeeded", durationMs: 1_200, tokenCount: 640 },
+		run: {
+			...FLEET_RUN,
+			state: "done",
+			outcome: "succeeded",
+			durationMs: 1_200,
+			tokenCount: 640,
+		},
 		source: "reported-by-clio",
 	});
 	equal(settled.payload.run.outcome, "succeeded");
@@ -587,7 +784,12 @@ Deno.test("agent attribution is a closed role set that binds a worker to its run
 	const attributed = serverEvent("turn.text", {
 		text: "The worker reported back.",
 		agents: [
-			{ role: "orchestrator", agentId: "orchestrator", runId: null, node: null },
+			{
+				role: "orchestrator",
+				agentId: "orchestrator",
+				runId: null,
+				node: null,
+			},
 			{ role: "worker", agentId: "explorer", runId: "run-1", node: "blade" },
 		],
 		source: "observed-on-acp",
@@ -598,14 +800,32 @@ Deno.test("agent attribution is a closed role set that binds a worker to its run
 	for (
 		const invalidAgents of [
 			[{ role: "supervisor", agentId: "explorer", runId: "run-1", node: null }],
-			[{ role: "orchestrator", agentId: "orchestrator", runId: "run-1", node: null }],
+			[{
+				role: "orchestrator",
+				agentId: "orchestrator",
+				runId: "run-1",
+				node: null,
+			}],
 			[{ role: "worker", agentId: "explorer", runId: "run-1" }],
-			[{ role: "worker", agentId: "explorer", runId: "run-1", node: null, task: "raw" }],
-			Array.from({ length: 18 }, () => ({ role: "worker", agentId: "a", runId: "r", node: null })),
+			[{
+				role: "worker",
+				agentId: "explorer",
+				runId: "run-1",
+				node: null,
+				task: "raw",
+			}],
+			Array.from(
+				{ length: 18 },
+				() => ({ role: "worker", agentId: "a", runId: "r", node: null }),
+			),
 		]
 	) {
 		expectProtocolError(() =>
-			serverEvent("turn.text", { text: "x", agents: invalidAgents, source: "observed-on-acp" })
+			serverEvent("turn.text", {
+				text: "x",
+				agents: invalidAgents,
+				source: "observed-on-acp",
+			})
 		);
 	}
 });
@@ -727,7 +947,13 @@ Deno.test("only terminal events are flagged terminal and usage stays exact", () 
 			outcome: "completed",
 			code: "clio-completed",
 			summary: "done",
-			usage: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+			usage: {
+				input: -1,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoning: 0,
+			},
 			source: "reported-by-clio",
 		})
 	);
@@ -770,7 +996,13 @@ Deno.test("browse listings, session lists, settings, and targets keep their boun
 	});
 	equal(sessions.payload.sessions[0]?.state, "unknown");
 	const targets = serverEvent("targets.state", {
-		targets: [{ id: "lmstudio", runtime: "openai", models: ["qwen"], isOrchestrator: true, health: null }],
+		targets: [{
+			id: "lmstudio",
+			runtime: "openai",
+			models: ["qwen"],
+			isOrchestrator: true,
+			health: null,
+		}],
 		truncated: true,
 	});
 	equal(targets.payload.targets[0]?.health, null);
@@ -778,12 +1010,23 @@ Deno.test("browse listings, session lists, settings, and targets keep their boun
 	// A target list without its truncation flag would let a shortened list read as complete.
 	expectProtocolError(() =>
 		serverEvent("targets.state", {
-			targets: [{ id: "lmstudio", runtime: "openai", models: ["qwen"], isOrchestrator: true, health: null }],
+			targets: [{
+				id: "lmstudio",
+				runtime: "openai",
+				models: ["qwen"],
+				isOrchestrator: true,
+				health: null,
+			}],
 		})
 	);
 	const probed = serverEvent("targets.probed", {
 		targetId: "lmstudio",
-		health: { healthy: false, latencyMs: null, reason: "not-configured", probedAt: "2026-08-18T12:00:00.000Z" },
+		health: {
+			healthy: false,
+			latencyMs: null,
+			reason: "not-configured",
+			probedAt: "2026-08-18T12:00:00.000Z",
+		},
 	});
 	equal(probed.payload.health.healthy, false);
 	const settings = serverEvent("settings.state", {
@@ -801,7 +1044,12 @@ Deno.test("effective configuration events accept only the redacted bounded graph
 	const event = serverEvent("config.state", {
 		inspection: {
 			inspectedAt: "2026-08-29T12:00:00.000Z",
-			settings: [{ key: "orchestrator.model", source: "project", value: "qwen", valueKind: "exact" }],
+			settings: [{
+				key: "orchestrator.model",
+				source: "project",
+				value: "qwen",
+				valueKind: "exact",
+			}],
 			settingsTruncated: false,
 			entries: [{
 				category: "rule",
@@ -820,12 +1068,18 @@ Deno.test("effective configuration events accept only the redacted bounded graph
 			issuesTruncated: false,
 		},
 	});
-	equal(event.payload.inspection.entries[0]?.sourcePath?.segments.join("/"), ".clio-coder/rules/project.yaml");
+	equal(
+		event.payload.inspection.entries[0]?.sourcePath?.segments.join("/"),
+		".clio-coder/rules/project.yaml",
+	);
 	expectProtocolError(() =>
 		serverEvent("config.state", {
 			inspection: {
 				...event.payload.inspection,
-				entries: [{ ...event.payload.inspection.entries[0], sourcePath: "/home/operator/private" }],
+				entries: [{
+					...event.payload.inspection.entries[0],
+					sourcePath: "/home/operator/private",
+				}],
 			},
 		})
 	);
@@ -833,7 +1087,12 @@ Deno.test("effective configuration events accept only the redacted bounded graph
 		serverEvent("config.state", {
 			inspection: {
 				...event.payload.inspection,
-				settings: [{ key: "secret", source: "user", value: "configured", valueKind: "raw" }],
+				settings: [{
+					key: "secret",
+					source: "user",
+					value: "configured",
+					valueKind: "raw",
+				}],
 			},
 		})
 	);
@@ -929,14 +1188,20 @@ Deno.test("resource catalog events accept only bounded inventory fields", () => 
 				...event.payload.inspection,
 				skills: {
 					...event.payload.inspection.skills,
-					items: [{ ...event.payload.inspection.skills.items[0], content: "raw skill body" }],
+					items: [{
+						...event.payload.inspection.skills.items[0],
+						content: "raw skill body",
+					}],
 				},
 			},
 		})
 	);
 	expectProtocolError(() =>
 		serverEvent("catalog.state", {
-			inspection: { ...event.payload.inspection, verifiers: { availability: "scraped-table" } },
+			inspection: {
+				...event.payload.inspection,
+				verifiers: { availability: "scraped-table" },
+			},
 		})
 	);
 	expectProtocolError(() =>
@@ -993,9 +1258,19 @@ Deno.test("project usage events keep exact aggregates while rejecting raw and co
 				costUsd: 4.125,
 			}],
 			modelsTruncated: false,
-			tools: [{ name: "read", calls: 17, successful: 16, errors: 1, blocked: 0 }],
+			tools: [{
+				name: "read",
+				calls: 17,
+				successful: 16,
+				errors: 1,
+				blocked: 0,
+			}],
 			toolsTruncated: false,
-			skills: [{ name: "frontend-design", activations: 5, observedInWindow: true }],
+			skills: [{
+				name: "frontend-design",
+				activations: 5,
+				observedInWindow: true,
+			}],
 			skillsTruncated: false,
 			recipes: [{ agentId: "researcher", runs: 4 }],
 			recipesTruncated: false,
@@ -1021,7 +1296,10 @@ Deno.test("project usage events keep exact aggregates while rejecting raw and co
 		serverEvent("usage.state", {
 			inspection: {
 				...event.payload.inspection,
-				models: [{ ...event.payload.inspection.models[0], requestedModelIds: ["private-model"] }],
+				models: [{
+					...event.payload.inspection.models[0],
+					requestedModelIds: ["private-model"],
+				}],
 			},
 		})
 	);
@@ -1037,7 +1315,11 @@ Deno.test("project usage events keep exact aggregates while rejecting raw and co
 		serverEvent("usage.state", {
 			inspection: {
 				...event.payload.inspection,
-				skills: [{ name: "frontend-design", activations: 0, observedInWindow: true }],
+				skills: [{
+					name: "frontend-design",
+					activations: 0,
+					observedInWindow: true,
+				}],
 			},
 		})
 	);
@@ -1093,7 +1375,10 @@ Deno.test("routing events accept only bounded offline model and resolved profile
 				...event.payload.inspection,
 				models: {
 					...event.payload.inspection.models,
-					items: [{ ...event.payload.inspection.models.items[0], baseUrl: "https://private.invalid" }],
+					items: [{
+						...event.payload.inspection.models.items[0],
+						baseUrl: "https://private.invalid",
+					}],
 				},
 			},
 		})
@@ -1136,19 +1421,78 @@ Deno.test("dispatch events are installation-wide aggregates with no project or r
 		admission: { state: "open", expiresAt: null },
 		running: { total: 3, alive: 1, stale: 1, dead: 1, unreported: 0 },
 		retryingCount: 0,
-		totals: { inputTokens: 10, outputTokens: 5, totalTokens: 18, costUsd: 0.25, runtimeSeconds: 31.5 },
+		totals: {
+			inputTokens: 10,
+			outputTokens: 5,
+			totalTokens: 18,
+			costUsd: 0.25,
+			runtimeSeconds: 31.5,
+		},
 	};
 	const event = serverEvent("dispatch.state", { inspection });
 	equal(event.projectId, undefined);
 	deepStrictEqual(event.payload.inspection.running, inspection.running);
 	expectProtocolError(() =>
 		serverEvent("dispatch.state", {
-			inspection: { ...inspection, running: { ...inspection.running, total: 4 } },
+			inspection: {
+				...inspection,
+				running: { ...inspection.running, total: 4 },
+			},
 		})
 	);
 	expectProtocolError(() =>
 		serverEvent("dispatch.state", {
 			inspection: { ...inspection, runId: "run-private" },
+		})
+	);
+});
+
+Deno.test("durable run inspection validates bounded journal and receipt trust facts", () => {
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:28.728Z",
+		runs: [{
+			runId: "run-alpha",
+			agentId: "builder",
+			model: "qwen3-coder",
+			target: "local-lmstudio",
+			node: "local",
+			phase: "running",
+			startedAt: "2026-08-31T14:00:00.000Z",
+			elapsedMs: 88_728,
+			task: "Inspect durable work",
+			journal: "available",
+			events: [{
+				at: "2026-08-31T14:00:01.000Z",
+				label: "run opened",
+				detail: null,
+			}],
+			eventsTruncated: false,
+			evidence: { state: "pending", summary: "Receipt pending." },
+			outcome: null,
+			outcomeDetail: null,
+			terminal: false,
+		}],
+		truncated: false,
+	};
+	const event = serverEvent("fleet.inspection.state", { inspection });
+	equal(event.projectId, undefined);
+	equal(event.payload.inspection.runs[0]?.runId, "run-alpha");
+	expectProtocolError(() =>
+		serverEvent("fleet.inspection.state", {
+			inspection: {
+				...inspection,
+				runs: [{ ...inspection.runs[0], receiptPath: "/private/receipt.json" }],
+			},
+		})
+	);
+	expectProtocolError(() =>
+		serverEvent("fleet.inspection.state", {
+			inspection: {
+				...inspection,
+				runs: [...inspection.runs, inspection.runs[0]],
+			},
 		})
 	);
 });
@@ -1202,7 +1546,11 @@ Deno.test("recovery events retain category counts while rejecting identities and
 
 Deno.test("command errors use the closed code set and stay hierarchical", () => {
 	for (const code of COMMAND_ERROR_CODES) {
-		const event = serverEvent("command.error", { code, message: "refused", requestId: "request-1" });
+		const event = serverEvent("command.error", {
+			code,
+			message: "refused",
+			requestId: "request-1",
+		});
 		equal(event.payload.code, code);
 	}
 	expectProtocolError(() => serverEvent("command.error", { code: "teapot", message: "refused" }));
@@ -1234,10 +1582,25 @@ Deno.test("server envelopes reject old versions, unknown kinds, and oversized fr
 			}),
 		"unsupported-version",
 	);
-	for (const removed of ["engine.state", "turn.agent", "turn.change", "turn.evidence", "project.created"]) {
-		ok(!(SERVER_EVENT_KINDS as readonly string[]).includes(removed), `${removed} must be gone`);
+	for (
+		const removed of [
+			"engine.state",
+			"turn.agent",
+			"turn.change",
+			"turn.evidence",
+			"project.created",
+		]
+	) {
+		ok(
+			!(SERVER_EVENT_KINDS as readonly string[]).includes(removed),
+			`${removed} must be gone`,
+		);
 	}
-	const modest = serverEvent("turn.text", { text: "x".repeat(1_024), agents: [], source: "observed-on-acp" });
+	const modest = serverEvent("turn.text", {
+		text: "x".repeat(1_024),
+		agents: [],
+		source: "observed-on-acp",
+	});
 	deepStrictEqual(parseServerEvent(encodeServerEvent(modest)), modest);
 	// Every field below is individually legal; only the assembled frame is too large.
 	const inflated = serverEvent("project.opened", {
@@ -1256,7 +1619,10 @@ Deno.test("server envelopes reject old versions, unknown kinds, and oversized fr
 			})),
 		}),
 	});
-	ok(new TextEncoder().encode(JSON.stringify(inflated)).byteLength > MAX_SERVER_EVENT_BYTES);
+	ok(
+		new TextEncoder().encode(JSON.stringify(inflated)).byteLength >
+			MAX_SERVER_EVENT_BYTES,
+	);
 	expectProtocolError(() => encodeServerEvent(inflated), "frame-too-large");
 });
 
@@ -1264,13 +1630,22 @@ Deno.test("the sequence guard accepts contiguous events and only the exact lates
 	const guard = new ServerSequenceGuard();
 	equal(guard.observe(serverEvent("connection.ready", {}, 1)), "accepted");
 	equal(guard.observe(serverEvent("connection.ready", {}, 1)), "duplicate");
-	equal(guard.observe(serverEvent("clio.state", { snapshot: clioSnapshot() }, 2)), "accepted");
+	equal(
+		guard.observe(serverEvent("clio.state", { snapshot: clioSnapshot() }, 2)),
+		"accepted",
+	);
 	equal(guard.nextSequence, 3);
 	throws(
-		() => guard.observe(serverEvent("clio.state", { snapshot: clioSnapshot("running") }, 2)),
+		() =>
+			guard.observe(
+				serverEvent("clio.state", { snapshot: clioSnapshot("running") }, 2),
+			),
 		ProtocolValidationError,
 	);
-	throws(() => guard.observe(serverEvent("connection.ready", {}, 9)), ProtocolValidationError);
+	throws(
+		() => guard.observe(serverEvent("connection.ready", {}, 9)),
+		ProtocolValidationError,
+	);
 	throws(
 		() =>
 			guard.observe({
@@ -1282,8 +1657,17 @@ Deno.test("the sequence guard accepts contiguous events and only the exact lates
 });
 
 Deno.test("the browser transport is loopback-only", () => {
-	equal(assertLocalWebSocketUrl("ws://127.0.0.1:8720/api/events"), "ws://127.0.0.1:8720/api/events");
-	for (const url of ["ws://example.com/api/events", "http://127.0.0.1/api/events", "ws://10.0.0.1/api/events"]) {
+	equal(
+		assertLocalWebSocketUrl("ws://127.0.0.1:8720/api/events"),
+		"ws://127.0.0.1:8720/api/events",
+	);
+	for (
+		const url of [
+			"ws://example.com/api/events",
+			"http://127.0.0.1/api/events",
+			"ws://10.0.0.1/api/events",
+		]
+	) {
 		throws(() => assertLocalWebSocketUrl(url));
 	}
 	match(WebSocketLocalTransport.name, /WebSocketLocalTransport/u);

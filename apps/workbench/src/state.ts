@@ -14,12 +14,14 @@ import {
 	PROTOCOL_VERSION,
 	type ServerEvent,
 	validateDispatchInspection,
+	validateFleetInspection,
 	validateServerEvent,
 	type WireCatalogInspection,
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
+	type WireFleetInspection,
 	type WireFleetRun,
 	type WireProjectPath,
 	type WireProjectSummary,
@@ -40,7 +42,11 @@ import {
 	type TurnProjection,
 } from "./timeline.ts";
 
-export type ConnectionState = "connecting" | "connected" | "disconnected" | "failed";
+export type ConnectionState =
+	| "connecting"
+	| "connected"
+	| "disconnected"
+	| "failed";
 
 export interface OpenWorkspaceState {
 	readonly project: WireProjectSummary;
@@ -76,6 +82,7 @@ export interface WireBootstrap {
 	readonly stateDirNote: string;
 	readonly securityNote: string;
 	readonly dispatchInspection: WireDispatchInspection | null;
+	readonly fleetInspection: WireFleetInspection | null;
 }
 
 export interface Notice {
@@ -96,6 +103,7 @@ export interface AppState {
 	readonly stateDirNote: string;
 	readonly securityNote: string;
 	readonly dispatchInspection: WireDispatchInspection | null;
+	readonly fleetInspection: WireFleetInspection | null;
 	readonly recoveryInspection: WireRecoveryInspection | null;
 	readonly browse: ProjectBrowseListingPayload | null;
 	readonly leftDrawerOpen: boolean;
@@ -120,6 +128,8 @@ export interface AppState {
 	readonly pendingRoutingInspect: string | null;
 	/** Request id of the installation-wide, read-only dispatch snapshot. */
 	readonly pendingDispatchInspect: string | null;
+	/** Request id of the installation-wide durable run and journal snapshot. */
+	readonly pendingFleetInspect: string | null;
 	/** Request id of the redacted Clio Coder doctor/paths sweep. */
 	readonly pendingRecoveryInspect: string | null;
 	/**
@@ -127,28 +137,43 @@ export interface AppState {
 	 * exact request is the only evidence the renderer has that a remembered folder
 	 * stopped being openable since bootstrap computed its availability.
 	 */
-	readonly pendingProjectSelect: { readonly requestId: string; readonly projectId: string } | null;
+	readonly pendingProjectSelect: {
+		readonly requestId: string;
+		readonly projectId: string;
+	} | null;
 	readonly lastSequence: number;
 }
 
 export type AppAction =
 	| { readonly type: "bootstrap.loaded"; readonly payload: WireBootstrap }
 	| { readonly type: "bootstrap.failed"; readonly message: string }
-	| { readonly type: "connection.changed"; readonly connection: ConnectionState }
+	| {
+		readonly type: "connection.changed";
+		readonly connection: ConnectionState;
+	}
 	| { readonly type: "drawer.left"; readonly open: boolean }
 	| { readonly type: "settings.opened"; readonly open: boolean }
 	| { readonly type: "notifications.set"; readonly enabled: boolean }
 	| { readonly type: "browse.dismissed" }
 	| { readonly type: "notice.dismissed" }
-	| { readonly type: "notice.raised"; readonly tone: Notice["tone"]; readonly message: string }
+	| {
+		readonly type: "notice.raised";
+		readonly tone: Notice["tone"];
+		readonly message: string;
+	}
 	| { readonly type: "turn.submitted"; readonly requestId: string }
 	| { readonly type: "config.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "catalog.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "usage.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "routing.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "dispatch.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "fleet.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "recovery.inspect.submitted"; readonly requestId: string }
-	| { readonly type: "project.select.submitted"; readonly requestId: string; readonly projectId: string }
+	| {
+		readonly type: "project.select.submitted";
+		readonly requestId: string;
+		readonly projectId: string;
+	}
 	| { readonly type: "host.events"; readonly events: readonly ServerEvent[] }
 	| { readonly type: "host.event"; readonly event: ServerEvent };
 
@@ -165,6 +190,7 @@ export const initialAppState: AppState = {
 	stateDirNote: "The desktop app has not reported where it keeps its own state yet.",
 	securityNote: "The desktop app has not reported its project boundary yet.",
 	dispatchInspection: null,
+	fleetInspection: null,
 	recoveryInspection: null,
 	browse: null,
 	leftDrawerOpen: false,
@@ -178,6 +204,7 @@ export const initialAppState: AppState = {
 	pendingUsageInspect: null,
 	pendingRoutingInspect: null,
 	pendingDispatchInspect: null,
+	pendingFleetInspect: null,
 	pendingRecoveryInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
@@ -197,10 +224,13 @@ const BOOTSTRAP_KEYS = [
 	"stateDirNote",
 	"securityNote",
 	"dispatchInspection",
+	"fleetInspection",
 ] as const;
 
 function invalidBootstrap(detail: string): never {
-	throw new Error(`The GUI bootstrap response did not match protocol v${PROTOCOL_VERSION}: ${detail}.`);
+	throw new Error(
+		`The GUI bootstrap response did not match protocol v${PROTOCOL_VERSION}: ${detail}.`,
+	);
 }
 
 function expectExactBootstrapRecord(value: unknown): Record<string, unknown> {
@@ -214,10 +244,14 @@ function expectExactBootstrapRecord(value: unknown): Record<string, unknown> {
 	const record = value as Record<string, unknown>;
 	const expected = new Set<string>(BOOTSTRAP_KEYS);
 	for (const key of Object.keys(record)) {
-		if (!expected.has(key)) invalidBootstrap(`the payload has unknown field ${JSON.stringify(key)}`);
+		if (!expected.has(key)) {
+			invalidBootstrap(`the payload has unknown field ${JSON.stringify(key)}`);
+		}
 	}
 	for (const key of BOOTSTRAP_KEYS) {
-		if (!Object.hasOwn(record, key)) invalidBootstrap(`the payload is missing field ${JSON.stringify(key)}`);
+		if (!Object.hasOwn(record, key)) {
+			invalidBootstrap(`the payload is missing field ${JSON.stringify(key)}`);
+		}
 	}
 	return record;
 }
@@ -225,14 +259,26 @@ function expectExactBootstrapRecord(value: unknown): Record<string, unknown> {
 function expectBootstrapString(
 	value: unknown,
 	label: string,
-	options: { readonly maxBytes: number; readonly trim?: boolean } = { maxBytes: 4096 },
+	options: { readonly maxBytes: number; readonly trim?: boolean } = {
+		maxBytes: 4096,
+	},
 ): string {
-	if (typeof value !== "string" || value.length === 0) return invalidBootstrap(`${label} must be a non-empty string`);
-	if (options.trim && value.trim() !== value) return invalidBootstrap(`${label} must not have surrounding whitespace`);
-	if (encoder.encode(value).byteLength > options.maxBytes) return invalidBootstrap(`${label} is too long`);
+	if (typeof value !== "string" || value.length === 0) {
+		return invalidBootstrap(`${label} must be a non-empty string`);
+	}
+	if (options.trim && value.trim() !== value) {
+		return invalidBootstrap(`${label} must not have surrounding whitespace`);
+	}
+	if (encoder.encode(value).byteLength > options.maxBytes) {
+		return invalidBootstrap(`${label} is too long`);
+	}
 	for (const character of value) {
 		const codePoint = character.codePointAt(0) ?? 0;
-		if (codePoint === 0x7f || (codePoint < 0x20 && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d)) {
+		if (
+			codePoint === 0x7f ||
+			(codePoint < 0x20 && codePoint !== 0x09 && codePoint !== 0x0a &&
+				codePoint !== 0x0d)
+		) {
 			return invalidBootstrap(`${label} contains an unsafe control character`);
 		}
 	}
@@ -241,13 +287,20 @@ function expectBootstrapString(
 
 function expectBootstrapId(value: unknown, label: string): string {
 	const id = expectBootstrapString(value, label, { maxBytes: 128, trim: true });
-	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id)) return invalidBootstrap(`${label} is not a valid identifier`);
+	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id)) {
+		return invalidBootstrap(`${label} is not a valid identifier`);
+	}
 	return id;
 }
 
 function expectAbsolutePath(value: unknown, label: string): string {
-	const path = expectBootstrapString(value, label, { maxBytes: 4096, trim: true });
-	if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/u.test(path)) return invalidBootstrap(`${label} must be absolute`);
+	const path = expectBootstrapString(value, label, {
+		maxBytes: 4096,
+		trim: true,
+	});
+	if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/u.test(path)) {
+		return invalidBootstrap(`${label} must be absolute`);
+	}
 	return path;
 }
 
@@ -256,7 +309,9 @@ function expectAbsolutePath(value: unknown, label: string): string {
  * without the phase that says so, or the reverse. The host publishes the card
  * and the phase in the same step, so a disagreement means a broken host.
  */
-export function workspaceConsistencyError(workspace: WireProjectWorkspace): string | null {
+export function workspaceConsistencyError(
+	workspace: WireProjectWorkspace,
+): string | null {
 	const awaiting = workspace.clio.phase === "awaiting-approval";
 	if (awaiting !== (workspace.pendingPermission !== null)) {
 		return "pendingPermission must be present exactly while Clio Coder awaits approval";
@@ -264,11 +319,16 @@ export function workspaceConsistencyError(workspace: WireProjectWorkspace): stri
 	if (workspace.pendingPermission !== null && workspace.activeTurn === null) {
 		return "pendingPermission requires an active turn";
 	}
-	if (workspace.pendingPermission !== null && workspace.pendingPermission.toolCallId.length === 0) {
+	if (
+		workspace.pendingPermission !== null &&
+		workspace.pendingPermission.toolCallId.length === 0
+	) {
 		return "pendingPermission must name its tool call";
 	}
 	const sessionIds = new Set(workspace.sessions.map((session) => session.id));
-	if (sessionIds.size !== workspace.sessions.length) return "session identifiers must be unique";
+	if (sessionIds.size !== workspace.sessions.length) {
+		return "session identifiers must be unique";
+	}
 	return null;
 }
 
@@ -291,16 +351,27 @@ function validateBootstrapWorkspace(
 			payload: { workspace: value },
 		});
 	} catch (error) {
-		return invalidBootstrap(`workspace is invalid${error instanceof Error ? ` (${error.message})` : ""}`);
+		return invalidBootstrap(
+			`workspace is invalid${error instanceof Error ? ` (${error.message})` : ""}`,
+		);
 	}
-	if (event.kind !== "project.opened") return invalidBootstrap("workspace could not be validated");
+	if (event.kind !== "project.opened") {
+		return invalidBootstrap("workspace could not be validated");
+	}
 	const consistency = workspaceConsistencyError(event.payload.workspace);
-	if (consistency !== null) return invalidBootstrap(`workspace is contradictory (${consistency})`);
+	if (consistency !== null) {
+		return invalidBootstrap(`workspace is contradictory (${consistency})`);
+	}
 	return event.payload.workspace;
 }
 
-function validateRecent(value: unknown, workspaceInstanceId: string): readonly WireProjectSummary[] {
-	if (!Array.isArray(value) || value.length > 512) return invalidBootstrap("recent must be a bounded array");
+function validateRecent(
+	value: unknown,
+	workspaceInstanceId: string,
+): readonly WireProjectSummary[] {
+	if (!Array.isArray(value) || value.length > 512) {
+		return invalidBootstrap("recent must be a bounded array");
+	}
 	const summaries = value.map((entry, index) => {
 		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
 			return invalidBootstrap(`recent[${index}] must be a record`);
@@ -308,12 +379,23 @@ function validateRecent(value: unknown, workspaceInstanceId: string): readonly W
 		const record = entry as Record<string, unknown>;
 		return {
 			id: expectBootstrapId(record.id, `recent[${index}].id`),
-			displayName: expectBootstrapString(record.displayName, `recent[${index}].displayName`, {
-				maxBytes: 128,
-				trim: true,
-			}),
-			rootPath: expectAbsolutePath(record.rootPath, `recent[${index}].rootPath`),
-			lastOpenedAt: expectBootstrapString(record.lastOpenedAt, `recent[${index}].lastOpenedAt`, { maxBytes: 128 }),
+			displayName: expectBootstrapString(
+				record.displayName,
+				`recent[${index}].displayName`,
+				{
+					maxBytes: 128,
+					trim: true,
+				},
+			),
+			rootPath: expectAbsolutePath(
+				record.rootPath,
+				`recent[${index}].rootPath`,
+			),
+			lastOpenedAt: expectBootstrapString(
+				record.lastOpenedAt,
+				`recent[${index}].lastOpenedAt`,
+				{ maxBytes: 128 },
+			),
 			available: typeof record.available === "boolean"
 				? record.available
 				: invalidBootstrap(`recent[${index}].available must be a boolean`),
@@ -328,18 +410,32 @@ function validateRecent(value: unknown, workspaceInstanceId: string): readonly W
 
 export function parseBootstrapPayload(value: unknown): WireBootstrap {
 	const record = expectExactBootstrapRecord(value);
-	if (record.protocolVersion !== PROTOCOL_VERSION) invalidBootstrap(`protocolVersion must be ${PROTOCOL_VERSION}`);
+	if (record.protocolVersion !== PROTOCOL_VERSION) {
+		invalidBootstrap(`protocolVersion must be ${PROTOCOL_VERSION}`);
+	}
 	if (record.appName !== PRODUCT_NAME) invalidBootstrap("appName is invalid");
-	const workspaceInstanceId = expectBootstrapId(record.workspaceInstanceId, "workspaceInstanceId");
-	const localToken = expectBootstrapString(record.localToken, "localToken", { maxBytes: 512, trim: true });
-	if (record.mode !== "browser" && record.mode !== "desktop") invalidBootstrap("mode is invalid");
+	const workspaceInstanceId = expectBootstrapId(
+		record.workspaceInstanceId,
+		"workspaceInstanceId",
+	);
+	const localToken = expectBootstrapString(record.localToken, "localToken", {
+		maxBytes: 512,
+		trim: true,
+	});
+	if (record.mode !== "browser" && record.mode !== "desktop") {
+		invalidBootstrap("mode is invalid");
+	}
 	const openProjectId = record.openProjectId === null ? null : expectBootstrapId(record.openProjectId, "openProjectId");
 	if ((record.workspace === null) !== (openProjectId === null)) {
-		invalidBootstrap("workspace and openProjectId must be present or absent together");
+		invalidBootstrap(
+			"workspace and openProjectId must be present or absent together",
+		);
 	}
-	const workspace = record.workspace === null || openProjectId === null
-		? null
-		: validateBootstrapWorkspace(record.workspace, workspaceInstanceId, openProjectId);
+	const workspace = record.workspace === null || openProjectId === null ? null : validateBootstrapWorkspace(
+		record.workspace,
+		workspaceInstanceId,
+		openProjectId,
+	);
 	if (workspace !== null && workspace.project.id !== openProjectId) {
 		invalidBootstrap("workspace does not describe the open project");
 	}
@@ -353,15 +449,26 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 		workspace,
 		recent: validateRecent(record.recent, workspaceInstanceId),
 		homePath: expectAbsolutePath(record.homePath, "homePath"),
-		stateDirNote: expectBootstrapString(record.stateDirNote, "stateDirNote", { maxBytes: 4096 }),
-		securityNote: expectBootstrapString(record.securityNote, "securityNote", { maxBytes: 4096 }),
-		dispatchInspection: record.dispatchInspection === null
-			? null
-			: validateDispatchInspection(record.dispatchInspection, "bootstrap.dispatchInspection"),
+		stateDirNote: expectBootstrapString(record.stateDirNote, "stateDirNote", {
+			maxBytes: 4096,
+		}),
+		securityNote: expectBootstrapString(record.securityNote, "securityNote", {
+			maxBytes: 4096,
+		}),
+		dispatchInspection: record.dispatchInspection === null ? null : validateDispatchInspection(
+			record.dispatchInspection,
+			"bootstrap.dispatchInspection",
+		),
+		fleetInspection: record.fleetInspection === null ? null : validateFleetInspection(
+			record.fleetInspection,
+			"bootstrap.fleetInspection",
+		),
 	};
 }
 
-export function workspaceFromWire(workspace: WireProjectWorkspace): OpenWorkspaceState {
+export function workspaceFromWire(
+	workspace: WireProjectWorkspace,
+): OpenWorkspaceState {
 	return {
 		project: workspace.project,
 		tree: workspace.tree,
@@ -399,22 +506,39 @@ const TURN_EVENT_KINDS = new Set<ServerEvent["kind"]>([
 	"turn.terminal",
 ]);
 
-function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string): OpenWorkspaceState {
+function applyToOpen(
+	open: OpenWorkspaceState,
+	event: ServerEvent,
+	now: string,
+): OpenWorkspaceState {
 	if (TURN_EVENT_KINDS.has(event.kind)) {
 		if (event.turnId === undefined) return open;
-		const input = { kind: event.kind, turnId: event.turnId, payload: event.payload } as TurnEventInput;
+		const input = {
+			kind: event.kind,
+			turnId: event.turnId,
+			payload: event.payload,
+		} as TurnEventInput;
 		return { ...open, projection: applyTurnEvent(open.projection, input, now) };
 	}
 	switch (event.kind) {
 		case "project.snapshot":
 		case "fs.changed":
-			return { ...open, tree: event.payload.tree, treeTruncated: event.payload.treeTruncated, deleteChallenge: null };
+			return {
+				...open,
+				tree: event.payload.tree,
+				treeTruncated: event.payload.treeTruncated,
+				deleteChallenge: null,
+			};
 		case "fs.delete.challenge":
 			return { ...open, deleteChallenge: event.payload };
 		case "clio.state":
 			return { ...open, clio: event.payload.snapshot };
 		case "session.list":
-			return { ...open, sessions: event.payload.sessions, sessionsTruncated: event.payload.truncated };
+			return {
+				...open,
+				sessions: event.payload.sessions,
+				sessionsTruncated: event.payload.truncated,
+			};
 		case "settings.state":
 			return { ...open, settings: event.payload.settings };
 		case "config.state":
@@ -426,7 +550,11 @@ function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string):
 		case "routing.state":
 			return { ...open, routingInspection: event.payload.inspection };
 		case "targets.state":
-			return { ...open, targets: event.payload.targets, targetsTruncated: event.payload.truncated };
+			return {
+				...open,
+				targets: event.payload.targets,
+				targetsTruncated: event.payload.truncated,
+			};
 		case "fleet.activity": {
 			// Keyed by run: the strip shows one entry per run, and a later fact
 			// about a run replaces the earlier one in place rather than stacking.
@@ -493,11 +621,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				stateDirNote: action.payload.stateDirNote,
 				securityNote: action.payload.securityNote,
 				dispatchInspection: action.payload.dispatchInspection,
+				fleetInspection: action.payload.fleetInspection,
 				pendingConfigInspect: null,
 				pendingCatalogInspect: null,
 				pendingUsageInspect: null,
 				pendingRoutingInspect: null,
 				pendingDispatchInspect: null,
+				pendingFleetInspect: null,
 				announcement: open === null
 					? `${PRODUCT_NAME} is ready. Open a project folder to begin.`
 					: `${open.project.displayName} is open`,
@@ -533,7 +663,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 		case "notice.dismissed":
 			return { ...state, notice: null };
 		case "notice.raised":
-			return { ...state, notice: { tone: action.tone, message: action.message }, announcement: action.message };
+			return {
+				...state,
+				notice: { tone: action.tone, message: action.message },
+				announcement: action.message,
+			};
 		case "turn.submitted":
 			return { ...state, pendingTurnStart: action.requestId };
 		case "config.inspect.submitted":
@@ -546,18 +680,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingRoutingInspect: action.requestId };
 		case "dispatch.inspect.submitted":
 			return { ...state, pendingDispatchInspect: action.requestId };
+		case "fleet.inspect.submitted":
+			return { ...state, pendingFleetInspect: action.requestId };
 		case "recovery.inspect.submitted":
 			return { ...state, pendingRecoveryInspect: action.requestId };
 		case "project.select.submitted":
-			return { ...state, pendingProjectSelect: { requestId: action.requestId, projectId: action.projectId } };
+			return {
+				...state,
+				pendingProjectSelect: {
+					requestId: action.requestId,
+					projectId: action.projectId,
+				},
+			};
 		case "host.events": {
 			let next = state;
-			for (const event of action.events) next = appReducer(next, { type: "host.event", event });
+			for (const event of action.events) {
+				next = appReducer(next, { type: "host.event", event });
+			}
 			return next;
 		}
 		case "host.event": {
 			const event = action.event;
-			if (state.workspaceInstanceId !== null && event.workspaceInstanceId !== state.workspaceInstanceId) return state;
+			if (
+				state.workspaceInstanceId !== null &&
+				event.workspaceInstanceId !== state.workspaceInstanceId
+			) return state;
 			if (event.kind === "connection.ready") {
 				return {
 					...state,
@@ -581,50 +728,59 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingUsageInspect: null,
 						pendingRoutingInspect: null,
 						pendingDispatchInspect: null,
+						pendingFleetInspect: null,
 						pendingRecoveryInspect: null,
 					};
 				case "command.error": {
 					const pendingSelect = state.pendingProjectSelect;
-					const answersSelect = pendingSelect !== null && event.payload.requestId === pendingSelect.requestId;
+					const answersSelect = pendingSelect !== null &&
+						event.payload.requestId === pendingSelect.requestId;
 					// Only a refusal means the guards or the filesystem rejected the
 					// canonical path. A conflict or an internal fault says nothing about
 					// whether the folder is still openable, so neither may flip the row.
 					const unavailableId = answersSelect && event.payload.code === "refused" ? pendingSelect.projectId : null;
 					return {
 						...sequenced,
-						notice: { tone: noticeToneFor(event.payload.code), message: event.payload.message },
+						notice: {
+							tone: noticeToneFor(event.payload.code),
+							message: event.payload.message,
+						},
 						announcement: event.payload.message,
 						recent: unavailableId === null
 							? state.recent
 							: state.recent.map((entry) => entry.id === unavailableId ? { ...entry, available: false } : entry),
-						pendingTurnStart:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingTurnStart
-								? null
-								: state.pendingTurnStart,
-						pendingConfigInspect:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingConfigInspect
-								? null
-								: state.pendingConfigInspect,
-						pendingCatalogInspect:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingCatalogInspect
-								? null
-								: state.pendingCatalogInspect,
-						pendingUsageInspect:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingUsageInspect
-								? null
-								: state.pendingUsageInspect,
-						pendingRoutingInspect:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingRoutingInspect
-								? null
-								: state.pendingRoutingInspect,
-						pendingDispatchInspect:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingDispatchInspect
-								? null
-								: state.pendingDispatchInspect,
-						pendingRecoveryInspect:
-							event.payload.requestId === undefined || event.payload.requestId === state.pendingRecoveryInspect
-								? null
-								: state.pendingRecoveryInspect,
+						pendingTurnStart: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingTurnStart
+							? null
+							: state.pendingTurnStart,
+						pendingConfigInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingConfigInspect
+							? null
+							: state.pendingConfigInspect,
+						pendingCatalogInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingCatalogInspect
+							? null
+							: state.pendingCatalogInspect,
+						pendingUsageInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingUsageInspect
+							? null
+							: state.pendingUsageInspect,
+						pendingRoutingInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingRoutingInspect
+							? null
+							: state.pendingRoutingInspect,
+						pendingDispatchInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingDispatchInspect
+							? null
+							: state.pendingDispatchInspect,
+						pendingFleetInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingFleetInspect
+							? null
+							: state.pendingFleetInspect,
+						pendingRecoveryInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingRecoveryInspect
+							? null
+							: state.pendingRecoveryInspect,
 						pendingProjectSelect: answersSelect ? null : pendingSelect,
 					};
 				}
@@ -637,6 +793,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingDispatchInspect: null,
 						announcement: "Installation-wide dispatch snapshot updated",
 					};
+				case "fleet.inspection.state":
+					return {
+						...sequenced,
+						fleetInspection: event.payload.inspection,
+						pendingFleetInspect: null,
+						announcement: "Recent durable run record updated",
+					};
 				case "recovery.state":
 					return {
 						...sequenced,
@@ -647,11 +810,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 							: "Clio Coder diagnostics found failures",
 					};
 				case "project.opened": {
-					const consistency = workspaceConsistencyError(event.payload.workspace);
+					const consistency = workspaceConsistencyError(
+						event.payload.workspace,
+					);
 					if (consistency !== null) {
 						return {
 							...sequenced,
-							notice: { tone: "error", message: "The GUI received a contradictory project snapshot and ignored it." },
+							notice: {
+								tone: "error",
+								message: "The GUI received a contradictory project snapshot and ignored it.",
+							},
 						};
 					}
 					const open = workspaceFromWire(event.payload.workspace);
@@ -684,7 +852,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingUsageInspect: event.projectId === state.open?.project.id ? null : state.pendingUsageInspect,
 						pendingRoutingInspect: event.projectId === state.open?.project.id ? null : state.pendingRoutingInspect,
 						pendingRecoveryInspect: event.projectId === state.open?.project.id ? null : state.pendingRecoveryInspect,
-						recoveryInspection: event.projectId === state.open?.project.id && state.recoveryInspection?.projectContext
+						recoveryInspection: event.projectId === state.open?.project.id &&
+								state.recoveryInspection?.projectContext
 							? null
 							: state.recoveryInspection,
 						recent: state.recent.filter((entry) => entry.id !== event.projectId),
@@ -694,7 +863,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						announcement: "The project was removed from the recent list",
 					};
 				default: {
-					if (state.open === null || event.projectId !== state.open.project.id) return sequenced;
+					if (
+						state.open === null || event.projectId !== state.open.project.id
+					) return sequenced;
 					const open = applyToOpen(state.open, event, new Date().toISOString());
 					return {
 						...sequenced,
@@ -712,13 +883,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 	}
 }
 
-export function formatProjectPath(path: WireProjectPath | Readonly<{ segments: readonly string[] }>): string {
+export function formatProjectPath(
+	path: WireProjectPath | Readonly<{ segments: readonly string[] }>,
+): string {
 	return path.segments.length === 0 ? "/" : path.segments.join("/");
 }
 
 export function isPromptBlocked(open: OpenWorkspaceState | null): boolean {
 	if (open === null) return true;
-	return open.clio.phase === "running" || open.clio.phase === "awaiting-approval" || open.clio.phase === "cancelling";
+	return open.clio.phase === "running" ||
+		open.clio.phase === "awaiting-approval" || open.clio.phase === "cancelling";
 }
 
 export const emptyProjection = emptyTurnProjection;

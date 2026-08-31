@@ -16,6 +16,7 @@ import type { ClioLauncher } from "../clio-host.ts";
 import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
+import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -24,6 +25,7 @@ import {
 	catalogInspectionFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	fleetInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	usageInspectionFixture,
@@ -100,6 +102,9 @@ const running = await startWorkbenchServer({
 	dispatchInspector: {
 		inspect: () => Promise.resolve(dispatchInspectionFixture()),
 	} satisfies ClioDispatchInspector,
+	fleetInspector: {
+		inspect: () => Promise.resolve(fleetInspectionFixture()),
+	} satisfies ClioFleetInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -441,6 +446,46 @@ try {
 	await page.screenshot({ path: new URL("dispatch-compact.png", artifactDirectory).pathname, fullPage: true });
 	await page.setViewportSize({ width: 1600, height: 1100 });
 	await dispatchRecord.getByRole("button", { name: "Back to conversation" }).click();
+	await page.getByRole("region", { name: "Conversation history" }).waitFor();
+
+	// Durable run inspection is also installation-wide, but retains bounded run
+	// identities, journal lines, and receipt trust selected by Clio Coder.
+	await page.getByRole("button", { name: "Runs", exact: true }).click();
+	const fleetJournal = page.getByRole("region", { name: "Recent run journal" });
+	await fleetJournal.getByText("Inspect the durable event boundary", { exact: true }).waitFor();
+	await fleetJournal.getByText("Receipt verified", { exact: true }).waitFor();
+	await fleetJournal.getByText("tool completed", { exact: true }).waitFor();
+	await fleetJournal.getByText("run-alpha", { exact: true }).first().waitFor();
+	for (const forbidden of ["receiptPath", "events.ndjson", "/receipts/"]) {
+		equal(await fleetJournal.getByText(forbidden, { exact: false }).count(), 0);
+	}
+	const fleetAccessibility = await new AxeBuilder({ page })
+		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+		.analyze();
+	const fleetBlockingViolations = fleetAccessibility.violations.filter((violation) =>
+		violation.impact === "critical" || violation.impact === "serious"
+	);
+	deepEqual(
+		fleetBlockingViolations.map((violation) => ({
+			id: violation.id,
+			impact: violation.impact,
+			nodes: violation.nodes.map((node) => node.target),
+		})),
+		[],
+	);
+	await page.screenshot({ path: new URL("runs.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 375, height: 820 });
+	const compactFleetGeometry = await page.evaluate(() => ({
+		documentWidth: document.documentElement.scrollWidth,
+		viewportWidth: globalThis.innerWidth,
+		regionScrollWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.scrollWidth ?? 0,
+		regionClientWidth: document.querySelector<HTMLElement>(".conversation__scroll")?.clientWidth ?? 0,
+	}));
+	ok(compactFleetGeometry.documentWidth <= compactFleetGeometry.viewportWidth);
+	ok(compactFleetGeometry.regionScrollWidth <= compactFleetGeometry.regionClientWidth + 1);
+	await page.screenshot({ path: new URL("runs-compact.png", artifactDirectory).pathname, fullPage: true });
+	await page.setViewportSize({ width: 1600, height: 1100 });
+	await fleetJournal.getByRole("button", { name: "Back to conversation" }).click();
 	await page.getByRole("region", { name: "Conversation history" }).waitFor();
 
 	// Desktop rails collapse independently, reclaim their full grid tracks, and
@@ -1320,10 +1365,12 @@ try {
 			catalogUsesBoundedReadOnlyAdapters: true,
 			routingInventoryUsesOfflineBoundedAdapters: true,
 			dispatchUsesInstallationWideBoundedAdapter: true,
+			fleetRunsUseDurableBoundedAdapter: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,
 			compactDispatchHasNoPageOverflow: true,
+			compactFleetHasNoPageOverflow: true,
 			approvalBannerVisibleWhenScrolledAwayAndBlurred: true,
 			approvalAnsweredByKeyboardChord: true,
 			escalatedWithoutAnotherWireEvent: true,
@@ -1338,6 +1385,7 @@ try {
 				catalogBlockingViolations.length +
 				usageBlockingViolations.length +
 				dispatchBlockingViolations.length +
+				fleetBlockingViolations.length +
 				compactBlockingViolations.length +
 				resumeBlockingViolations.length + recoveryBlockingViolations.length + settingsBlockingViolations.length +
 				loopBlockingViolations.length,
@@ -1362,6 +1410,8 @@ try {
 				"usage-compact.png",
 				"dispatch.png",
 				"dispatch-compact.png",
+				"runs.png",
+				"runs-compact.png",
 				"permission.png",
 				"complete.png",
 				"timeline.png",

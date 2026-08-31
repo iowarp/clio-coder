@@ -6,6 +6,7 @@ import {
 	ClioDispatchInspectError,
 	type ClioDispatchInspector,
 } from "./clio-dispatch-inspector.ts";
+import { ClioCliFleetInspector, ClioFleetInspectError, type ClioFleetInspector } from "./clio-fleet-inspector.ts";
 import {
 	ClioCliRecoveryInspector,
 	ClioRecoveryInspectError,
@@ -41,6 +42,7 @@ import {
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
+	type WireFleetInspection,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
 	type WireRoutingInspection,
@@ -108,7 +110,10 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 export const SECURITY_NOTE =
 	"The desktop app enforces the project boundary in its own code against the canonical root you opened; Deno's file grants are broad at launch, so that boundary is not a sandbox.";
 
-export function wouldExceedWebSocketHighWaterMark(bufferedAmount: number, encodedFrameBytes: number): boolean {
+export function wouldExceedWebSocketHighWaterMark(
+	bufferedAmount: number,
+	encodedFrameBytes: number,
+): boolean {
 	if (
 		!Number.isSafeInteger(bufferedAmount) || bufferedAmount < 0 ||
 		!Number.isSafeInteger(encodedFrameBytes) || encodedFrameBytes < 0
@@ -159,6 +164,8 @@ export interface WorkbenchServerOptions {
 	routingInspector?: ClioRoutingInspector;
 	/** Overrides the fixed installation-wide dispatch status adapter (tests). */
 	dispatchInspector?: ClioDispatchInspector;
+	/** Overrides the fixed installation-wide durable run adapter (tests). */
+	fleetInspector?: ClioFleetInspector;
 	/** Overrides the redacted Clio Coder doctor/paths adapter (tests). */
 	recoveryInspector?: ClioRecoveryInspector;
 	/** Overrides the Workbench state directory (tests). */
@@ -182,7 +189,11 @@ export interface RunningWorkbenchServer {
 	close(): Promise<void>;
 }
 
-function parsePositiveInteger(value: string, label: string, maximum: number): number {
+function parsePositiveInteger(
+	value: string,
+	label: string,
+	maximum: number,
+): number {
 	const parsed = Number(value);
 	if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > maximum) {
 		throw new Error(`${label} must be an integer from 0 through ${maximum}.`);
@@ -197,15 +208,28 @@ export function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
 	let print: RuntimeCliOptions["print"];
 	for (const argument of args) {
 		if (argument.startsWith("--port=")) {
-			port = parsePositiveInteger(argument.slice("--port=".length), "port", 65_535);
+			port = parsePositiveInteger(
+				argument.slice("--port=".length),
+				"port",
+				65_535,
+			);
 		} else if (argument.startsWith("--smoke-ms=")) {
-			smokeMs = parsePositiveInteger(argument.slice("--smoke-ms=".length), "smoke-ms", 120_000);
+			smokeMs = parsePositiveInteger(
+				argument.slice("--smoke-ms=".length),
+				"smoke-ms",
+				120_000,
+			);
 		} else if (argument === "--open") open = true;
 		else if (argument === "--version" || argument === "-V") print ??= "version";
 		else if (argument === "--help" || argument === "-h") print = "help";
 		else throw new Error(`Unknown GUI argument: ${argument}. Try --help.`);
 	}
-	return { port, open, ...(smokeMs === undefined ? {} : { smokeMs }), ...(print === undefined ? {} : { print }) };
+	return {
+		port,
+		open,
+		...(smokeMs === undefined ? {} : { smokeMs }),
+		...(print === undefined ? {} : { print }),
+	};
 }
 
 /**
@@ -215,7 +239,12 @@ export function parseCliOptions(args: readonly string[]): RuntimeCliOptions {
 async function openInBrowser(url: string): Promise<boolean> {
 	if (Deno.build.os !== "linux") return false;
 	try {
-		const command = new Deno.Command("xdg-open", { args: [url], stdin: "null", stdout: "null", stderr: "null" });
+		const command = new Deno.Command("xdg-open", {
+			args: [url],
+			stdin: "null",
+			stdout: "null",
+			stderr: "null",
+		});
 		const child = command.spawn();
 		child.unref();
 		const status = await child.status;
@@ -249,7 +278,9 @@ function textResponse(value: string, status: number): Response {
 
 function normalizeStaticRoot(value: URL): URL {
 	const root = new URL(value.href);
-	if (root.protocol !== "file:") throw new Error("GUI distRoot must be a local file URL.");
+	if (root.protocol !== "file:") {
+		throw new Error("GUI distRoot must be a local file URL.");
+	}
 	root.search = "";
 	root.hash = "";
 	if (!root.pathname.endsWith("/")) root.pathname = `${root.pathname}/`;
@@ -264,7 +295,9 @@ function resolveStaticAsset(root: URL, relativePath: string): URL | null {
 	} catch {
 		return null;
 	}
-	if (candidate.protocol !== "file:" || !candidate.href.startsWith(root.href)) return null;
+	if (candidate.protocol !== "file:" || !candidate.href.startsWith(root.href)) {
+		return null;
+	}
 	return candidate;
 }
 
@@ -290,7 +323,10 @@ export function defaultClioLauncher(platform = Deno.build.os): ClioLauncher {
 	if (platform !== "windows") return createLocalClioLauncher();
 	return {
 		launch() {
-			throw new HostError("not-ready", "Native Windows Clio Coder launch requires an explicit WSL configuration.");
+			throw new HostError(
+				"not-ready",
+				"Native Windows Clio Coder launch requires an explicit WSL configuration.",
+			);
 		},
 	};
 }
@@ -308,7 +344,12 @@ interface OpenProject {
 	routingInspection: WireRoutingInspection | null;
 }
 
-type EventContext = { projectId?: string; processGeneration?: string; sessionId?: string; turnId?: string };
+type EventContext = {
+	projectId?: string;
+	processGeneration?: string;
+	sessionId?: string;
+	turnId?: string;
+};
 
 class WorkbenchRuntime implements HostSink {
 	readonly workspaceInstanceId = `workspace-${crypto.randomUUID()}`;
@@ -321,6 +362,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #usageInspector: ClioUsageInspector;
 	readonly #routingInspector: ClioRoutingInspector;
 	readonly #dispatchInspector: ClioDispatchInspector;
+	readonly #fleetInspector: ClioFleetInspector;
 	readonly #recoveryInspector: ClioRecoveryInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
@@ -328,11 +370,15 @@ class WorkbenchRuntime implements HostSink {
 	readonly #disconnectGraceMs: number;
 	readonly #hostOptions: Pick<
 		WorkbenchServerOptions,
-		"permissionEscalateMs" | "permissionBudgetMs" | "promptTimeoutMs" | "acpTiming"
+		| "permissionEscalateMs"
+		| "permissionBudgetMs"
+		| "promptTimeoutMs"
+		| "acpTiming"
 	>;
 	readonly #sockets = new Set<SocketSession>();
 	#open: OpenProject | null = null;
 	#dispatchInspection: WireDispatchInspection | null = null;
+	#fleetInspection: WireFleetInspection | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
 	#readCommandQueue: Promise<void> = Promise.resolve();
@@ -343,7 +389,12 @@ class WorkbenchRuntime implements HostSink {
 		store: ProjectStore,
 		state: WorkbenchState,
 		options:
-			& Required<Pick<WorkbenchServerOptions, "quiet" | "mode" | "distRoot" | "disconnectGraceMs">>
+			& Required<
+				Pick<
+					WorkbenchServerOptions,
+					"quiet" | "mode" | "distRoot" | "disconnectGraceMs"
+				>
+			>
 			& Pick<
 				WorkbenchServerOptions,
 				| "clioLauncher"
@@ -352,6 +403,7 @@ class WorkbenchRuntime implements HostSink {
 				| "usageInspector"
 				| "routingInspector"
 				| "dispatchInspector"
+				| "fleetInspector"
 				| "recoveryInspector"
 				| "permissionEscalateMs"
 				| "permissionBudgetMs"
@@ -365,24 +417,32 @@ class WorkbenchRuntime implements HostSink {
 		this.#mode = options.mode;
 		this.#distRoot = normalizeStaticRoot(options.distRoot);
 		this.#launcher = options.clioLauncher ?? defaultClioLauncher();
-		this.#configInspector = options.configInspector ?? new ClioCliConfigInspector({
-			log: options.quiet ? () => undefined : (message) => console.error(message),
-		});
-		this.#catalogInspector = options.catalogInspector ?? new ClioCliCatalogInspector({
-			log: options.quiet ? () => undefined : (message) => console.error(message),
-		});
+		this.#configInspector = options.configInspector ??
+			new ClioCliConfigInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
+		this.#catalogInspector = options.catalogInspector ??
+			new ClioCliCatalogInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
 		this.#usageInspector = options.usageInspector ?? new ClioCliUsageInspector({
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
-		this.#routingInspector = options.routingInspector ?? new ClioCliRoutingInspector({
+		this.#routingInspector = options.routingInspector ??
+			new ClioCliRoutingInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
+		this.#dispatchInspector = options.dispatchInspector ??
+			new ClioCliDispatchInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
+		this.#fleetInspector = options.fleetInspector ?? new ClioCliFleetInspector({
 			log: options.quiet ? () => undefined : (message) => console.error(message),
 		});
-		this.#dispatchInspector = options.dispatchInspector ?? new ClioCliDispatchInspector({
-			log: options.quiet ? () => undefined : (message) => console.error(message),
-		});
-		this.#recoveryInspector = options.recoveryInspector ?? new ClioCliRecoveryInspector({
-			log: options.quiet ? () => undefined : (message) => console.error(message),
-		});
+		this.#recoveryInspector = options.recoveryInspector ??
+			new ClioCliRecoveryInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
 		this.#disconnectGraceMs = options.disconnectGraceMs;
 		this.#hostOptions = {
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
@@ -415,15 +475,18 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, durable run, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
 			securityNote: SECURITY_NOTE,
 			dispatchInspection: this.#dispatchInspection,
+			fleetInspection: this.#fleetInspection,
 		};
 	}
 
 	async #recentDtos(): Promise<WireProjectSummary[]> {
 		const recent = this.#state.recent();
-		return await Promise.all(recent.map(async (project) => await this.#recentDto(project)));
+		return await Promise.all(
+			recent.map(async (project) => await this.#recentDto(project)),
+		);
 	}
 
 	async #recentDto(project: RecentProject): Promise<WireProjectSummary> {
@@ -483,11 +546,15 @@ class WorkbenchRuntime implements HostSink {
 		}
 		const url = new URL(request.url);
 		if (url.pathname === "/api/bootstrap") {
-			if (request.method !== "GET") return textResponse("Method not allowed", 405);
+			if (request.method !== "GET") {
+				return textResponse("Method not allowed", 405);
+			}
 			return jsonResponse(await this.bootstrap());
 		}
 		if (url.pathname === "/api/events") return this.#upgrade(request, url);
-		if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not-found" }, 404);
+		if (url.pathname.startsWith("/api/")) {
+			return jsonResponse({ error: "not-found" }, 404);
+		}
 		return await this.#serveStatic(request, url);
 	}
 
@@ -505,11 +572,18 @@ class WorkbenchRuntime implements HostSink {
 			try {
 				await open.host.close();
 			} catch (error) {
-				if (!this.#quiet) console.error("The GUI could not close the Clio Coder host cleanly", error);
+				if (!this.#quiet) {
+					console.error(
+						"The GUI could not close the Clio Coder host cleanly",
+						error,
+					);
+				}
 			}
 			this.#store.unregister(open.project.id);
 		}
-		for (const session of this.#sockets) session.close(1001, "The GUI is shutting down");
+		for (const session of this.#sockets) {
+			session.close(1001, "The GUI is shutting down");
+		}
 		this.#sockets.clear();
 	}
 
@@ -521,7 +595,9 @@ class WorkbenchRuntime implements HostSink {
 		switch (event.type) {
 			case "clio.state":
 				if (event.projectId !== open.project.id) return;
-				this.#broadcast("clio.state", { projectId: event.projectId }, { snapshot: event.snapshot });
+				this.#broadcast("clio.state", { projectId: event.projectId }, {
+					snapshot: event.snapshot,
+				});
 				return;
 			case "session.list":
 				if (event.projectId !== open.project.id) return;
@@ -532,7 +608,9 @@ class WorkbenchRuntime implements HostSink {
 				return;
 			case "settings.state":
 				if (event.projectId !== open.project.id) return;
-				this.#broadcast("settings.state", { projectId: event.projectId }, { settings: event.settings });
+				this.#broadcast("settings.state", { projectId: event.projectId }, {
+					settings: event.settings,
+				});
 				return;
 			case "targets.state":
 				if (event.projectId !== open.project.id) return;
@@ -567,9 +645,21 @@ class WorkbenchRuntime implements HostSink {
 					sessionId: event.context.sessionId,
 					turnId: event.context.turnId,
 				};
-				const input = { kind: event.type, turnId: event.context.turnId, payload: event.payload } as TurnEventInput;
-				open.projection = applyTurnEvent(open.projection, input, new Date().toISOString());
-				this.#broadcast(event.type, context, event.payload as ServerEventPayloadByKind[typeof event.type]);
+				const input = {
+					kind: event.type,
+					turnId: event.context.turnId,
+					payload: event.payload,
+				} as TurnEventInput;
+				open.projection = applyTurnEvent(
+					open.projection,
+					input,
+					new Date().toISOString(),
+				);
+				this.#broadcast(
+					event.type,
+					context,
+					event.payload as ServerEventPayloadByKind[typeof event.type],
+				);
 			}
 		}
 	}
@@ -602,6 +692,9 @@ class WorkbenchRuntime implements HostSink {
 		if (command.kind === "dispatch.inspect") {
 			return this.#serializeRead(() => this.#dispatchDispatchInspect(session, command));
 		}
+		if (command.kind === "fleet.inspect") {
+			return this.#serializeRead(() => this.#dispatchFleetInspect(session, command));
+		}
 		if (command.kind === "recovery.inspect") {
 			return this.#serializeRead(() => this.#dispatchRecoveryInspect(session, command));
 		}
@@ -625,14 +718,20 @@ class WorkbenchRuntime implements HostSink {
 		command: ClientCommandOf<"config.inspect">,
 	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
 			const open = this.#requireOpen(command.payload.projectId);
-			const inspection = await this.#configInspector.inspect(open.project.identity.canonicalPath);
+			const inspection = await this.#configInspector.inspect(
+				open.project.identity.canonicalPath,
+			);
 			// Project switching and inspection are intentionally concurrent. A late
 			// result belongs only to the exact OpenProject instance that requested it.
 			if (this.#closed || this.#open !== open) return;
 			open.configInspection = inspection;
-			this.#broadcast("config.state", { projectId: open.project.id }, { inspection });
+			this.#broadcast("config.state", { projectId: open.project.id }, {
+				inspection,
+			});
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send(
@@ -648,13 +747,19 @@ class WorkbenchRuntime implements HostSink {
 		command: ClientCommandOf<"catalog.inspect">,
 	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
 			const open = this.#requireOpen(command.payload.projectId);
-			const inspection = await this.#catalogInspector.inspect(open.project.identity.canonicalPath);
+			const inspection = await this.#catalogInspector.inspect(
+				open.project.identity.canonicalPath,
+			);
 			// As with config inspection, a project switch invalidates a late result.
 			if (this.#closed || this.#open !== open) return;
 			open.catalogInspection = inspection;
-			this.#broadcast("catalog.state", { projectId: open.project.id }, { inspection });
+			this.#broadcast("catalog.state", { projectId: open.project.id }, {
+				inspection,
+			});
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send(
@@ -670,14 +775,20 @@ class WorkbenchRuntime implements HostSink {
 		command: ClientCommandOf<"usage.inspect">,
 	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
 			const open = this.#requireOpen(command.payload.projectId);
-			const inspection = await this.#usageInspector.inspect(open.project.identity.canonicalPath);
+			const inspection = await this.#usageInspector.inspect(
+				open.project.identity.canonicalPath,
+			);
 			// Read adapters may outlive a project switch; late results are discarded
 			// instead of being attached to whichever project is open now.
 			if (this.#closed || this.#open !== open) return;
 			open.usageInspection = inspection;
-			this.#broadcast("usage.state", { projectId: open.project.id }, { inspection });
+			this.#broadcast("usage.state", { projectId: open.project.id }, {
+				inspection,
+			});
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send(
@@ -693,14 +804,20 @@ class WorkbenchRuntime implements HostSink {
 		command: ClientCommandOf<"routing.inspect">,
 	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
 			const open = this.#requireOpen(command.payload.projectId);
-			const inspection = await this.#routingInspector.inspect(open.project.identity.canonicalPath);
+			const inspection = await this.#routingInspector.inspect(
+				open.project.identity.canonicalPath,
+			);
 			// The routing listing is a cached project snapshot. A late result cannot
 			// attach to a project selected while the read was in flight.
 			if (this.#closed || this.#open !== open) return;
 			open.routingInspection = inspection;
-			this.#broadcast("routing.state", { projectId: open.project.id }, { inspection });
+			this.#broadcast("routing.state", { projectId: open.project.id }, {
+				inspection,
+			});
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send(
@@ -716,14 +833,44 @@ class WorkbenchRuntime implements HostSink {
 		command: ClientCommandOf<"dispatch.inspect">,
 	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
-			const inspection = await this.#dispatchInspector.inspect(this.#state.homePath);
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			const inspection = await this.#dispatchInspector.inspect(
+				this.#state.homePath,
+			);
 			if (this.#closed || session.closed) return;
 			this.#dispatchInspection = inspection;
 			this.#broadcast("dispatch.state", {}, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
-			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
+		}
+	}
+
+	async #dispatchFleetInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"fleet.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			const inspection = await this.#fleetInspector.inspect(
+				this.#state.homePath,
+			);
+			if (this.#closed || session.closed) return;
+			this.#fleetInspection = inspection;
+			this.#broadcast("fleet.inspection.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
 		}
 	}
 
@@ -732,16 +879,27 @@ class WorkbenchRuntime implements HostSink {
 		command: ClientCommandOf<"recovery.inspect">,
 	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
 			const open = this.#open;
 			const projectContext = open !== null;
 			const cwd = open?.project.identity.canonicalPath ?? this.#state.homePath;
-			const inspection = await this.#recoveryInspector.inspect(cwd, projectContext);
-			if (this.#closed || session.closed || (projectContext && this.#open !== open)) return;
+			const inspection = await this.#recoveryInspector.inspect(
+				cwd,
+				projectContext,
+			);
+			if (
+				this.#closed || session.closed ||
+				(projectContext && this.#open !== open)
+			) return;
 			this.#broadcast("recovery.state", {}, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
-			session.send("command.error", {}, { ...mapped, requestId: command.requestId });
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
 		}
 	}
 
@@ -753,9 +911,14 @@ class WorkbenchRuntime implements HostSink {
 		return open;
 	}
 
-	async #dispatchCommand(session: SocketSession, command: ClientCommand): Promise<void> {
+	async #dispatchCommand(
+		session: SocketSession,
+		command: ClientCommand,
+	): Promise<void> {
 		try {
-			if (this.#closed || session.closed) throw new HostError("not-ready", "The local client is closed.");
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
 			switch (command.kind) {
 				case "project.browse": {
 					const listing = await this.#state.browse(command.payload.path);
@@ -767,9 +930,16 @@ class WorkbenchRuntime implements HostSink {
 					break;
 				case "project.select": {
 					const recent = this.#state.recentById(command.payload.projectId);
-					if (recent === null) throw new HostError("not-found", "That project is not in the recent list.");
+					if (recent === null) {
+						throw new HostError(
+							"not-found",
+							"That project is not in the recent list.",
+						);
+					}
 					if (this.#open?.project.id === recent.id) {
-						this.#broadcast("project.opened", { projectId: recent.id }, { workspace: this.#workspaceDto(this.#open) });
+						this.#broadcast("project.opened", { projectId: recent.id }, {
+							workspace: this.#workspaceDto(this.#open),
+						});
 						break;
 					}
 					await this.#openPath(recent.canonicalPath, recent);
@@ -787,7 +957,10 @@ class WorkbenchRuntime implements HostSink {
 						await this.#closeOpen();
 					}
 					if (!(await this.#state.forget(projectId))) {
-						throw new HostError("not-found", "That project is not in the recent list.");
+						throw new HostError(
+							"not-found",
+							"That project is not in the recent list.",
+						);
 					}
 					this.#broadcast("project.forgotten", { projectId }, {});
 					break;
@@ -826,7 +999,11 @@ class WorkbenchRuntime implements HostSink {
 						expiresAt: challenge.expiresAt,
 					};
 					open.deleteChallenge = wire;
-					this.#broadcast("fs.delete.challenge", { projectId: open.project.id }, wire);
+					this.#broadcast(
+						"fs.delete.challenge",
+						{ projectId: open.project.id },
+						wire,
+					);
 					break;
 				}
 				case "fs.delete.confirm": {
@@ -861,7 +1038,10 @@ class WorkbenchRuntime implements HostSink {
 				}
 				case "session.label": {
 					const open = this.#requireOpen(command.payload.projectId);
-					await open.host.labelSession(command.payload.sessionId, command.payload.label);
+					await open.host.labelSession(
+						command.payload.sessionId,
+						command.payload.label,
+					);
 					break;
 				}
 				case "session.delete": {
@@ -871,7 +1051,10 @@ class WorkbenchRuntime implements HostSink {
 				}
 				case "turn.start": {
 					const open = this.#requireOpen(command.payload.projectId);
-					if (open.host.boundSessionPublicId === null && !open.host.hasActivePrompt) {
+					if (
+						open.host.boundSessionPublicId === null &&
+						!open.host.hasActivePrompt
+					) {
 						this.#resetProjection(open);
 						await open.host.newSession();
 					}
@@ -919,7 +1102,8 @@ class WorkbenchRuntime implements HostSink {
 				}
 			}
 		} catch (error) {
-			const projectId = "projectId" in command.payload && typeof command.payload.projectId === "string"
+			const projectId = "projectId" in command.payload &&
+					typeof command.payload.projectId === "string"
 				? command.payload.projectId
 				: undefined;
 			const mapped = this.#commandError(error);
@@ -936,7 +1120,10 @@ class WorkbenchRuntime implements HostSink {
 	}
 
 	/** Opens a real directory as the one open project, replacing whatever was open. */
-	async #openPath(typedPath: string, recent: RecentProject | null): Promise<void> {
+	async #openPath(
+		typedPath: string,
+		recent: RecentProject | null,
+	): Promise<void> {
 		if (this.#open?.host.hasActivePrompt) {
 			throw new HostError(
 				"conflict",
@@ -944,7 +1131,10 @@ class WorkbenchRuntime implements HostSink {
 			);
 		}
 		const resolved = await this.#state.resolveOpenable(typedPath);
-		if (this.#open !== null && this.#open.project.identity.canonicalPath === resolved.canonicalPath) {
+		if (
+			this.#open !== null &&
+			this.#open.project.identity.canonicalPath === resolved.canonicalPath
+		) {
 			this.#broadcast("project.opened", { projectId: this.#open.project.id }, {
 				workspace: this.#workspaceDto(this.#open),
 			});
@@ -964,7 +1154,11 @@ class WorkbenchRuntime implements HostSink {
 		});
 		const host = new ClioProjectHost({
 			launcher: this.#launcher,
-			project: { projectId: project.id, trustedRoot: resolved.canonicalPath, displayName: resolved.displayName },
+			project: {
+				projectId: project.id,
+				trustedRoot: resolved.canonicalPath,
+				displayName: resolved.displayName,
+			},
 			sink: this,
 			...this.#hostOptions,
 		});
@@ -982,7 +1176,11 @@ class WorkbenchRuntime implements HostSink {
 		};
 		this.#open = open;
 		try {
-			const tree = await this.#store.getTree({ projectId: project.id, maxDepth: TREE_DEPTH, maxNodes: TREE_NODES });
+			const tree = await this.#store.getTree({
+				projectId: project.id,
+				maxDepth: TREE_DEPTH,
+				maxNodes: TREE_NODES,
+			});
 			open.tree = (tree.root.children ?? []).map(treeNodeToWire);
 			open.treeTruncated = tree.truncated;
 		} catch {
@@ -995,7 +1193,9 @@ class WorkbenchRuntime implements HostSink {
 			// The host records the failure in its snapshot; the project is open regardless.
 		}
 		if (this.#open !== open) return;
-		this.#broadcast("project.opened", { projectId: project.id }, { workspace: this.#workspaceDto(open) });
+		this.#broadcast("project.opened", { projectId: project.id }, {
+			workspace: this.#workspaceDto(open),
+		});
 	}
 
 	async #closeOpen(): Promise<void> {
@@ -1010,16 +1210,30 @@ class WorkbenchRuntime implements HostSink {
 		}
 	}
 
-	async #refreshTree(open: OpenProject, kind: "project.snapshot" | "fs.changed"): Promise<void> {
-		const tree = await this.#store.getTree({ projectId: open.project.id, maxDepth: TREE_DEPTH, maxNodes: TREE_NODES });
+	async #refreshTree(
+		open: OpenProject,
+		kind: "project.snapshot" | "fs.changed",
+	): Promise<void> {
+		const tree = await this.#store.getTree({
+			projectId: open.project.id,
+			maxDepth: TREE_DEPTH,
+			maxNodes: TREE_NODES,
+		});
 		if (this.#open !== open) return;
 		open.tree = (tree.root.children ?? []).map(treeNodeToWire);
 		open.treeTruncated = tree.truncated;
 		if (kind === "fs.changed") open.deleteChallenge = null;
-		this.#broadcast(kind, { projectId: open.project.id }, { tree: open.tree, treeTruncated: open.treeTruncated });
+		this.#broadcast(kind, { projectId: open.project.id }, {
+			tree: open.tree,
+			treeTruncated: open.treeTruncated,
+		});
 	}
 
-	#broadcast<K extends ServerEventKind>(kind: K, context: EventContext, payload: ServerEventPayloadByKind[K]): void {
+	#broadcast<K extends ServerEventKind>(
+		kind: K,
+		context: EventContext,
+		payload: ServerEventPayloadByKind[K],
+	): void {
 		for (const socket of this.#sockets) socket.send(kind, context, payload);
 	}
 
@@ -1032,7 +1246,9 @@ class WorkbenchRuntime implements HostSink {
 		if (open !== null) {
 			// The bootstrap the browser fetched may predate events on this socket; a
 			// full snapshot on the same ordered stream closes that gap.
-			session.send("project.opened", { projectId: open.project.id }, { workspace: this.#workspaceDto(open) });
+			session.send("project.opened", { projectId: open.project.id }, {
+				workspace: this.#workspaceDto(open),
+			});
 		}
 	}
 
@@ -1046,7 +1262,9 @@ class WorkbenchRuntime implements HostSink {
 			this.#graceTimer = null;
 			if (this.#closed || this.#sockets.size > 0 || this.#open !== open) return;
 			void open.host.abandon().catch((error) => {
-				if (!this.#quiet) console.error("The GUI could not stop the abandoned turn", error);
+				if (!this.#quiet) {
+					console.error("The GUI could not stop the abandoned turn", error);
+				}
 			});
 		}, this.#disconnectGraceMs);
 	}
@@ -1059,31 +1277,47 @@ class WorkbenchRuntime implements HostSink {
 	}
 
 	#upgrade(request: Request, url: URL): Response {
-		if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+		if (
+			request.method !== "GET" ||
+			request.headers.get("upgrade")?.toLowerCase() !== "websocket"
+		) {
 			return textResponse("WebSocket upgrade required", 426);
 		}
-		if (request.headers.get("origin") !== this.#origin || url.searchParams.get("token") !== this.token) {
+		if (
+			request.headers.get("origin") !== this.#origin ||
+			url.searchParams.get("token") !== this.token
+		) {
 			return textResponse("Local control channel authorization failed", 403);
 		}
 		// Deno sends a WebSocket ping and waits this many seconds for its pong;
 		// browser clients answer automatically, so this health bound does not
 		// shorten an otherwise idle permission deadline.
-		const { socket, response } = Deno.upgradeWebSocket(request, { idleTimeout: 30 });
+		const { socket, response } = Deno.upgradeWebSocket(request, {
+			idleTimeout: 30,
+		});
 		const session = new SocketSession(this, socket);
 		this.#sockets.add(session);
-		socket.addEventListener("open", () => void this.#serialize(() => Promise.resolve(this.socketOpened(session))));
+		socket.addEventListener(
+			"open",
+			() => void this.#serialize(() => Promise.resolve(this.socketOpened(session))),
+		);
 		return response;
 	}
 
 	async #serveStatic(request: Request, url: URL): Promise<Response> {
-		if (request.method !== "GET" && request.method !== "HEAD") return textResponse("Method not allowed", 405);
+		if (request.method !== "GET" && request.method !== "HEAD") {
+			return textResponse("Method not allowed", 405);
+		}
 		let pathname: string;
 		try {
 			pathname = decodeURIComponent(url.pathname);
 		} catch {
 			return textResponse("Invalid URL encoding", 400);
 		}
-		if (pathname.includes("\\") || pathname.split("/").some((segment) => segment === "..")) {
+		if (
+			pathname.includes("\\") ||
+			pathname.split("/").some((segment) => segment === "..")
+		) {
 			return textResponse("Invalid asset path", 400);
 		}
 		const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
@@ -1094,7 +1328,10 @@ class WorkbenchRuntime implements HostSink {
 			bytes = await Deno.readFile(assetUrl);
 		} catch (error) {
 			const acceptsHtml = request.headers.get("accept")?.includes("text/html") === true;
-			if (!(error instanceof Deno.errors.NotFound) || !acceptsHtml || extname(relativePath) !== "") {
+			if (
+				!(error instanceof Deno.errors.NotFound) || !acceptsHtml ||
+				extname(relativePath) !== ""
+			) {
 				return textResponse("Asset not found", 404);
 			}
 			assetUrl = resolveStaticAsset(this.#distRoot, "index.html");
@@ -1102,13 +1339,25 @@ class WorkbenchRuntime implements HostSink {
 			try {
 				bytes = await Deno.readFile(assetUrl);
 			} catch {
-				return textResponse("The Clio Coder GUI has not been built. Run deno task build.", 503);
+				return textResponse(
+					"The Clio Coder GUI has not been built. Run deno task build.",
+					503,
+				);
 			}
 		}
 		const headers = new Headers(STATIC_SECURITY_HEADERS);
-		headers.set("content-type", MIME_TYPES[extname(assetUrl.pathname)] ?? "application/octet-stream");
-		headers.set("cache-control", assetUrl.pathname.includes("/assets/") ? "public, max-age=3600" : "no-cache");
-		return new Response(request.method === "HEAD" ? null : Uint8Array.from(bytes).buffer, { headers });
+		headers.set(
+			"content-type",
+			MIME_TYPES[extname(assetUrl.pathname)] ?? "application/octet-stream",
+		);
+		headers.set(
+			"cache-control",
+			assetUrl.pathname.includes("/assets/") ? "public, max-age=3600" : "no-cache",
+		);
+		return new Response(
+			request.method === "HEAD" ? null : Uint8Array.from(bytes).buffer,
+			{ headers },
+		);
 	}
 
 	#commandError(error: unknown): { code: CommandErrorCode; message: string } {
@@ -1122,14 +1371,32 @@ class WorkbenchRuntime implements HostSink {
 				: "invalid";
 			return { code, message: error.message };
 		}
-		if (error instanceof WorkbenchStateError) return { code: error.code, message: error.message };
-		if (error instanceof HostError) return { code: error.code, message: error.message };
-		if (error instanceof ClioConfigInspectError) return { code: error.code, message: error.message };
-		if (error instanceof ClioUsageInspectError) return { code: error.code, message: error.message };
-		if (error instanceof ClioDispatchInspectError) return { code: error.code, message: error.message };
-		if (error instanceof ClioRecoveryInspectError) return { code: error.code, message: error.message };
+		if (error instanceof WorkbenchStateError) {
+			return { code: error.code, message: error.message };
+		}
+		if (error instanceof HostError) {
+			return { code: error.code, message: error.message };
+		}
+		if (error instanceof ClioConfigInspectError) {
+			return { code: error.code, message: error.message };
+		}
+		if (error instanceof ClioUsageInspectError) {
+			return { code: error.code, message: error.message };
+		}
+		if (error instanceof ClioDispatchInspectError) {
+			return { code: error.code, message: error.message };
+		}
+		if (error instanceof ClioFleetInspectError) {
+			return { code: error.code, message: error.message };
+		}
+		if (error instanceof ClioRecoveryInspectError) {
+			return { code: error.code, message: error.message };
+		}
 		if (!this.#quiet) console.error("GUI command failed", error);
-		return { code: "internal", message: "The local command could not be completed." };
+		return {
+			code: "internal",
+			message: "The local command could not be completed.",
+		};
 	}
 }
 
@@ -1152,7 +1419,11 @@ class SocketSession {
 		return this.#closed;
 	}
 
-	send<K extends ServerEventKind>(kind: K, context: EventContext, payload: ServerEventPayloadByKind[K]): void {
+	send<K extends ServerEventKind>(
+		kind: K,
+		context: EventContext,
+		payload: ServerEventPayloadByKind[K],
+	): void {
 		if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) return;
 		const sequence = this.#sequence + 1;
 		const terminal = kind === "turn.terminal" || kind === "protocol.error";
@@ -1175,7 +1446,12 @@ class SocketSession {
 			return;
 		}
 		const frame = encodeServerEvent(event);
-		if (wouldExceedWebSocketHighWaterMark(this.#socket.bufferedAmount, encoder.encode(frame).byteLength)) {
+		if (
+			wouldExceedWebSocketHighWaterMark(
+				this.#socket.bufferedAmount,
+				encoder.encode(frame).byteLength,
+			)
+		) {
 			this.close(1008, SLOW_CLIENT_CLOSE_REASON);
 			return;
 		}
@@ -1217,13 +1493,17 @@ class SocketSession {
 		try {
 			command = parseClientCommand(event.data);
 		} catch (error) {
-			const code = error instanceof ProtocolValidationError && error.code === "unsupported-version"
+			const code = error instanceof ProtocolValidationError &&
+					error.code === "unsupported-version"
 				? "unsupported-version"
 				: "invalid-frame";
 			const message = error instanceof Error ? error.message.slice(0, 240) : "The client frame was invalid.";
 			this.send("protocol.error", {}, { code, message });
 			this.close(
-				error instanceof ProtocolValidationError && error.code === "frame-too-large" ? 1009 : 1002,
+				error instanceof ProtocolValidationError &&
+					error.code === "frame-too-large"
+					? 1009
+					: 1002,
 				INVALID_CLIENT_FRAME_CLOSE_REASON,
 			);
 			return;
@@ -1232,9 +1512,13 @@ class SocketSession {
 	}
 }
 
-export async function startWorkbenchServer(options: WorkbenchServerOptions = {}): Promise<RunningWorkbenchServer> {
+export async function startWorkbenchServer(
+	options: WorkbenchServerOptions = {},
+): Promise<RunningWorkbenchServer> {
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
-	if (hostname !== DEFAULT_HOSTNAME) throw new Error("The GUI may bind only to 127.0.0.1.");
+	if (hostname !== DEFAULT_HOSTNAME) {
+		throw new Error("The GUI may bind only to 127.0.0.1.");
+	}
 	const port = options.port ?? DEFAULT_PORT;
 	const desktopAddress = options.mode === undefined ? Deno.env.get("DENO_SERVE_ADDRESS") : undefined;
 	const mode = options.mode ?? (desktopAddress ? "desktop" : "browser");
@@ -1255,6 +1539,7 @@ export async function startWorkbenchServer(options: WorkbenchServerOptions = {})
 		...(options.usageInspector === undefined ? {} : { usageInspector: options.usageInspector }),
 		...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 		...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
+		...(options.fleetInspector === undefined ? {} : { fleetInspector: options.fleetInspector }),
 		...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),
@@ -1317,7 +1602,9 @@ async function runMain(): Promise<void> {
 	}
 	const running = await startWorkbenchServer({ port: options.port });
 	if (options.open && !(await openInBrowser(running.url))) {
-		console.log(`Could not open a browser with xdg-open; open ${running.url} yourself.`);
+		console.log(
+			`Could not open a browser with xdg-open; open ${running.url} yourself.`,
+		);
 	}
 	if (options.smokeMs !== undefined) {
 		setTimeout(async () => {

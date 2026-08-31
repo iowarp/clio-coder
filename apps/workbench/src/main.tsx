@@ -40,7 +40,9 @@ function App() {
 						}),
 					abortController.signal,
 				);
-				if (!response.ok) throw new Error(`Bootstrap failed with HTTP ${response.status}.`);
+				if (!response.ok) {
+					throw new Error(`Bootstrap failed with HTTP ${response.status}.`);
+				}
 				const bootstrap = parseBootstrapPayload(await response.json());
 				if (!mounted) return;
 				dispatch({ type: "bootstrap.loaded", payload: bootstrap });
@@ -90,7 +92,10 @@ function App() {
 	}, []);
 
 	const actions = useMemo<WorkbenchActions>(() => {
-		function send<K extends ClientCommandKind>(kind: K, payload: ClientCommandPayloadByKind[K]): string | null {
+		function send<K extends ClientCommandKind>(
+			kind: K,
+			payload: ClientCommandPayloadByKind[K],
+		): string | null {
 			const transport = transportRef.current;
 			if (!transport || transport.state !== "open") {
 				dispatch({
@@ -101,7 +106,12 @@ function App() {
 				return null;
 			}
 			const requestId = `request-${crypto.randomUUID()}`;
-			const command = { protocolVersion: PROTOCOL_VERSION, requestId, kind, payload } as ClientCommand;
+			const command = {
+				protocolVersion: PROTOCOL_VERSION,
+				requestId,
+				kind,
+				payload,
+			} as ClientCommand;
 			try {
 				transport.send(command);
 				return requestId;
@@ -124,7 +134,9 @@ function App() {
 			},
 			selectProject(projectId) {
 				const requestId = send("project.select", { projectId });
-				if (requestId !== null) dispatch({ type: "project.select.submitted", requestId, projectId });
+				if (requestId !== null) {
+					dispatch({ type: "project.select.submitted", requestId, projectId });
+				}
 			},
 			forgetProject(projectId) {
 				send("project.forget", { projectId });
@@ -133,8 +145,9 @@ function App() {
 				send("fs.refresh", { projectId, directory });
 			},
 			createNode(projectId, parent, name, kind) {
-				if (kind === "file") send("fs.create-file", { projectId, parent, name });
-				else send("fs.create-folder", { projectId, parent, name });
+				if (kind === "file") {
+					send("fs.create-file", { projectId, parent, name });
+				} else send("fs.create-folder", { projectId, parent, name });
 			},
 			moveNode(projectId, source, destination, expectedNodeVersion) {
 				send("fs.move", {
@@ -180,7 +193,12 @@ function App() {
 				send("turn.cancel", { projectId, turnId });
 			},
 			resolvePermission(projectId, turnId, permissionId, decision) {
-				send("permission.resolve", { projectId, turnId, permissionId, decision });
+				send("permission.resolve", {
+					projectId,
+					turnId,
+					permissionId,
+					decision,
+				});
 			},
 			getSettings(projectId) {
 				send("settings.get", { projectId });
@@ -190,27 +208,45 @@ function App() {
 			},
 			inspectConfig(projectId) {
 				const requestId = send("config.inspect", { projectId });
-				if (requestId !== null) dispatch({ type: "config.inspect.submitted", requestId });
+				if (requestId !== null) {
+					dispatch({ type: "config.inspect.submitted", requestId });
+				}
 			},
 			inspectCatalog(projectId) {
 				const requestId = send("catalog.inspect", { projectId });
-				if (requestId !== null) dispatch({ type: "catalog.inspect.submitted", requestId });
+				if (requestId !== null) {
+					dispatch({ type: "catalog.inspect.submitted", requestId });
+				}
 			},
 			inspectUsage(projectId) {
 				const requestId = send("usage.inspect", { projectId });
-				if (requestId !== null) dispatch({ type: "usage.inspect.submitted", requestId });
+				if (requestId !== null) {
+					dispatch({ type: "usage.inspect.submitted", requestId });
+				}
 			},
 			inspectRouting(projectId) {
 				const requestId = send("routing.inspect", { projectId });
-				if (requestId !== null) dispatch({ type: "routing.inspect.submitted", requestId });
+				if (requestId !== null) {
+					dispatch({ type: "routing.inspect.submitted", requestId });
+				}
 			},
 			inspectDispatch() {
 				const requestId = send("dispatch.inspect", {});
-				if (requestId !== null) dispatch({ type: "dispatch.inspect.submitted", requestId });
+				if (requestId !== null) {
+					dispatch({ type: "dispatch.inspect.submitted", requestId });
+				}
+			},
+			inspectFleet() {
+				const requestId = send("fleet.inspect", {});
+				if (requestId !== null) {
+					dispatch({ type: "fleet.inspect.submitted", requestId });
+				}
 			},
 			inspectRecovery() {
 				const requestId = send("recovery.inspect", {});
-				if (requestId !== null) dispatch({ type: "recovery.inspect.submitted", requestId });
+				if (requestId !== null) {
+					dispatch({ type: "recovery.inspect.submitted", requestId });
+				}
 			},
 			listTargets(projectId) {
 				send("targets.list", { projectId });
@@ -228,6 +264,8 @@ function App() {
 }
 
 const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error(`${PRODUCT_NAME} could not find its root element.`);
+if (!rootElement) {
+	throw new Error(`${PRODUCT_NAME} could not find its root element.`);
+}
 reloadFailedStylesheets(document);
 createRoot(rootElement).render(<App />);
