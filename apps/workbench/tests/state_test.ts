@@ -408,7 +408,8 @@ Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, 
 		event: serverEventFixture("catalog.state", { inspection: catalogInspectionFixture() }, { sequence: 7 }),
 	});
 	equal(state.open?.catalogInspection?.agents.items[0]?.id, "researcher");
-	equal(state.open?.catalogInspection?.verifiers.availability, "typed-interface-required");
+	equal(state.open?.catalogInspection?.verifiers.items[1]?.id, "lint.rust");
+	equal(state.open?.catalogInspection?.verifiers.catalogValid, true);
 	equal(state.pendingCatalogInspect, null);
 
 	state = appReducer(state, { type: "usage.inspect.submitted", requestId: "request-usage" });

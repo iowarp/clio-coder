@@ -1193,7 +1193,45 @@ Deno.test("resource catalog events accept only bounded inventory fields", () => 
 				truncated: false,
 				issueCount: 1,
 			},
-			verifiers: { availability: "typed-interface-required" },
+			verifiers: {
+				availability: "available",
+				items: [
+					{
+						id: "test",
+						description: "Run package.json script 'test'.",
+						origin: "package-script",
+						signal: "package-script",
+						authority: "project-declared",
+						runner: "npm",
+						argumentCount: 2,
+						runsAtRepositoryRoot: true,
+						argvFixed: false,
+						timeoutMs: 120_000,
+						tags: ["test"],
+					},
+					{
+						id: "lint.rust",
+						description: "Lint the workspace with clippy.",
+						origin: "catalog",
+						signal: "project-catalog",
+						authority: "project-declared",
+						runner: "cargo",
+						argumentCount: 3,
+						runsAtRepositoryRoot: false,
+						argvFixed: true,
+						timeoutMs: 300_000,
+						tags: ["lint", "rust"],
+					},
+				],
+				truncated: false,
+				issueCount: 2,
+				discovery: "complete",
+				blockedBy: null,
+				catalogPresent: true,
+				catalogValid: true,
+				rejection: null,
+				rejectedAt: null,
+			},
 		},
 	});
 	equal(event.payload.inspection.agents.items[0]?.capability, "read-only");
@@ -1213,11 +1251,85 @@ Deno.test("resource catalog events accept only bounded inventory fields", () => 
 			},
 		})
 	);
+	equal(event.payload.inspection.verifiers.items[1]?.runner, "cargo");
+	// A package-script check is the one origin verify does not pin, so claiming a
+	// fixed argv for one is a contradiction rather than a harmless extra field.
 	expectProtocolError(() =>
 		serverEvent("catalog.state", {
 			inspection: {
 				...event.payload.inspection,
-				verifiers: { availability: "scraped-table" },
+				verifiers: {
+					...event.payload.inspection.verifiers,
+					items: [{ ...event.payload.inspection.verifiers.items[0], argvFixed: true }],
+				},
+			},
+		})
+	);
+	// A catalog check cannot exist where no catalog does.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				verifiers: {
+					...event.payload.inspection.verifiers,
+					catalogPresent: false,
+					catalogValid: null,
+				},
+			},
+		})
+	);
+	// Discovery reads the catalog through the same parser, so a refused catalog
+	// and an enumerated check plane cannot both be true.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				verifiers: {
+					...event.payload.inspection.verifiers,
+					catalogValid: false,
+					rejection: "invalid-yaml",
+				},
+			},
+		})
+	);
+	// The blocked flag and its reason are the same fact stated twice.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				verifiers: { ...event.payload.inspection.verifiers, blockedBy: "id-collision" },
+			},
+		})
+	);
+	// The argv itself never crosses, so a field carrying one is refused outright.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				verifiers: {
+					...event.payload.inspection.verifiers,
+					items: [{
+						...event.payload.inspection.verifiers.items[0],
+						command: ["npm", "run", "test"],
+					}],
+				},
+			},
+		})
+	);
+	// A rejection location is a schema path, never a workspace one.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				verifiers: {
+					...event.payload.inspection.verifiers,
+					discovery: "blocked",
+					blockedBy: "catalog-rejected",
+					items: [],
+					catalogValid: false,
+					rejection: "invalid-cwd",
+					rejectedAt: "/home/operator/project/.clio-coder/verifiers.yaml",
+				},
 			},
 		})
 	);

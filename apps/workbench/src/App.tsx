@@ -20,6 +20,8 @@ import type {
 	WireCatalogInspection,
 	WireCatalogLibraryEntry,
 	WireCatalogSkill,
+	WireCatalogVerifier,
+	WireCatalogVerifierCollection,
 	WireClioPhase,
 	WireConfigInspection,
 	WireConfigSettingSource,
@@ -2617,6 +2619,137 @@ function SkillCatalogCard({ skill }: { skill: WireCatalogSkill }) {
 	);
 }
 
+const VERIFIER_ORIGIN_COPY: Record<
+	WireCatalogVerifier["origin"],
+	{ eyebrow: string; signal: string; note: string }
+> = {
+	"package-script": {
+		eyebrow: "Package script",
+		signal: "Runs today",
+		note: "Verify runs npm with this script name and may pass extra argv",
+	},
+	catalog: {
+		eyebrow: "Project catalog",
+		signal: "Runs today",
+		note: "Verify pins argv, working directory, and timeout through safe-exec",
+	},
+	proposed: {
+		eyebrow: "Toolchain declaration",
+		signal: "Not adopted",
+		note: "Authoring would offer this check; nothing runs it until you write the catalog",
+	},
+};
+
+const VERIFIER_REJECTION_COPY: Record<
+	NonNullable<WireCatalogVerifierCollection["rejection"]>,
+	string
+> = {
+	unreadable: "the catalog file could not be read as a regular file inside this repository",
+	"invalid-yaml": "the catalog is not valid YAML",
+	"unsupported-version": "the catalog declares a schema version this Clio Coder does not support",
+	"unknown-field": "the catalog declares a field the schema does not define",
+	"missing-field": "a required field is missing",
+	"duplicate-id": "two declarations claim the same identifier",
+	"shell-command": "a check tries to run through a shell instead of an exact argument vector",
+	"too-large": "a value passed one of the schema's size caps",
+	"invalid-cwd": "a check names a working directory outside this repository",
+	"invalid-value": "a value does not match the shape the schema requires",
+	unclassified: "the parser refused it for a reason this read could not classify",
+};
+
+const VERIFIER_BLOCK_COPY: Record<
+	NonNullable<WireCatalogVerifierCollection["blockedBy"]>,
+	string
+> = {
+	"catalog-rejected": "the project catalog did not parse, so no check plane could be read",
+	"id-collision": "a package.json script and a catalog check claim the same identifier",
+	unclassified: "Clio Coder refused the read for a reason this projection could not classify",
+};
+
+function VerifierCatalogCard({ check }: { check: WireCatalogVerifier }) {
+	const copy = VERIFIER_ORIGIN_COPY[check.origin];
+	return (
+		<article className="catalog-card catalog-card--verifier">
+			<header className="catalog-card__header">
+				<div>
+					<div className="eyebrow">
+						{copy.eyebrow} · {catalogLabel(check.signal)}
+					</div>
+					<h3>{check.id}</h3>
+				</div>
+				<span
+					className={`catalog-card__signal catalog-card__signal--verifier-${check.origin}`}
+				>
+					{copy.signal}
+				</span>
+			</header>
+			<p className="catalog-card__description">{check.description}</p>
+			<dl className="catalog-card__facts catalog-card__facts--three">
+				<div>
+					<dt>Toolchain</dt>
+					<dd>{check.runner === "other" ? "Outside the known set" : check.runner}</dd>
+				</div>
+				<div>
+					<dt>Arguments</dt>
+					<dd>
+						{check.argumentCount} held host-side
+					</dd>
+				</div>
+				<div>
+					<dt>Timeout</dt>
+					<dd>{Math.round(check.timeoutMs / 1000)}s</dd>
+				</div>
+			</dl>
+			<div className="catalog-card__binding">
+				<strong>Catalog tags</strong>
+				{check.tags.length === 0 ? <p className="catalog-card__empty-binding">No tags declared</p> : (
+					<ul>
+						{check.tags.map((tag) => <li key={tag}>{tag}</li>)}
+					</ul>
+				)}
+			</div>
+			<footer className="catalog-card__footer">
+				<span>
+					{check.runsAtRepositoryRoot ? "Runs at the repository root" : "Runs in a subdirectory"}
+				</span>
+				<span>{copy.note}</span>
+			</footer>
+		</article>
+	);
+}
+
+function VerifierCatalogSummary(
+	{ verifiers }: { verifiers: WireCatalogVerifierCollection },
+) {
+	const catalogState = !verifiers.catalogPresent
+		? "This project has no .clio-coder verifier catalog. Every check below was declared somewhere else."
+		: verifiers.catalogValid === true
+		? "The production parser accepted this project's verifier catalog."
+		: verifiers.rejection === null
+		? "The catalog's verdict is unavailable."
+		: `The production parser refused this project's verifier catalog because ${
+			VERIFIER_REJECTION_COPY[verifiers.rejection]
+		}${verifiers.rejectedAt === null ? "" : `, at ${verifiers.rejectedAt}`}.`;
+	return (
+		<div className="catalog-verifier-state" role="note">
+			<div className="eyebrow">CHECK PLANE</div>
+			<p>{catalogState}</p>
+			{verifiers.discovery === "blocked" && verifiers.blockedBy !== null && (
+				<p className="catalog-verifier-state__blocked">
+					Clio Coder could not enumerate the checks:{" "}
+					{VERIFIER_BLOCK_COPY[verifiers.blockedBy]}. Repair the declaration in a terminal and refresh.
+				</p>
+			)}
+			<p className="catalog-verifier-state__boundary">
+				Each check's exact argument vector, its declared working directory, the file it was read out of, and every
+				discovery diagnostic stay on the host. A check's arguments can be absolute paths by schema, so they are counted
+				rather than carried, and the executable crosses as a toolchain class. Authoring, editing, and dry-running a
+				check stay explicit terminal operations.
+			</p>
+		</div>
+	);
+}
+
 function LibraryCatalogCard({ entry }: { entry: WireCatalogLibraryEntry }) {
 	return (
 		<article className="catalog-card catalog-card--library">
@@ -2802,8 +2935,8 @@ export const ClioCatalog = memo(function ClioCatalog({
 						Map the capabilities Clio Coder can actually see
 					</h2>
 					<p>
-						Inspect discovered agents, installed skills and extensions, and available library resources through their
-						public JSON interfaces. Verifiers remain explicitly unavailable until Clio Coder offers a typed listing.
+						Inspect discovered agents, installed skills and extensions, available library resources, and this project's
+						verification checks through their public JSON interfaces.
 					</p>
 				</div>
 				<div className="catalog__empty-actions">
@@ -2876,6 +3009,17 @@ export const ClioCatalog = memo(function ClioCatalog({
 			...extension.resources,
 		])
 	);
+	const verifiers = inspection.verifiers.items.filter((check) =>
+		includesCatalogQuery(deferredQuery, [
+			check.id,
+			check.description,
+			check.origin,
+			check.signal,
+			check.runner,
+			check.authority,
+			...check.tags,
+		])
+	);
 	const activeCount = tab === "agents"
 		? agents.length
 		: tab === "skills"
@@ -2884,7 +3028,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 		? library.length
 		: tab === "extensions"
 		? extensions.length
-		: 0;
+		: verifiers.length;
 	const activeAvailability = tab === "agents"
 		? inspection.agents.availability
 		: tab === "skills"
@@ -2893,7 +3037,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 		? inspection.library.availability
 		: tab === "extensions"
 		? inspection.extensions.availability
-		: "available";
+		: inspection.verifiers.availability;
 	const activeTruncated = tab === "agents"
 		? inspection.agents.truncated
 		: tab === "skills"
@@ -2902,7 +3046,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 		? inspection.library.truncated
 		: tab === "extensions"
 		? inspection.extensions.truncated
-		: false;
+		: inspection.verifiers.truncated;
 	function selectTab(nextTab: CatalogTab): void {
 		setTab(nextTab);
 		setQuery("");
@@ -3021,9 +3165,21 @@ export const ClioCatalog = memo(function ClioCatalog({
 					</dd>
 				</div>
 				<div>
-					<dt>Verifier listing</dt>
-					<dd>—</dd>
-					<dd className="catalog__summary-note">Typed interface required</dd>
+					<dt>Project checks</dt>
+					<dd>
+						{inspection.verifiers.availability === "available" ? inspection.verifiers.items.length : "—"}
+					</dd>
+					<dd className="catalog__summary-note">
+						{inspection.verifiers.availability === "failed"
+							? catalogLabel(inspection.verifiers.availability)
+							: inspection.verifiers.discovery === "blocked"
+							? "Discovery blocked"
+							: !inspection.verifiers.catalogPresent
+							? "No project catalog"
+							: inspection.verifiers.catalogValid === true
+							? "Catalog accepted"
+							: "Catalog refused"}
+					</dd>
 				</div>
 			</dl>
 
@@ -3063,7 +3219,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 								CATALOG_TABS.find((item) => item.id === tab)?.label
 									.toLocaleLowerCase("en-US") ?? "catalog"
 							}`}
-							disabled={tab === "verifiers" || activeAvailability === "failed"}
+							disabled={activeAvailability === "failed"}
 						/>
 						{query.length > 0 && (
 							<button
@@ -3076,9 +3232,7 @@ export const ClioCatalog = memo(function ClioCatalog({
 						)}
 					</div>
 					<small>
-						{tab === "verifiers"
-							? "No typed rows to search"
-							: activeAvailability === "failed"
+						{activeAvailability === "failed"
 							? "This collection is unavailable"
 							: `${activeCount} visible ${activeCount === 1 ? "record" : "records"}`}
 					</small>
@@ -3091,37 +3245,10 @@ export const ClioCatalog = memo(function ClioCatalog({
 				role="tabpanel"
 				aria-labelledby={`catalog-tab-${tab}`}
 			>
-				{tab === "verifiers"
-					? (
-						<div className="catalog-verifier-boundary">
-							<div
-								className="catalog-verifier-boundary__track"
-								aria-hidden="true"
-							>
-								<span>DISCOVER</span>
-								<i />
-								<span>TYPE</span>
-								<i />
-								<span>RENDER</span>
-							</div>
-							<div>
-								<div className="eyebrow">HONEST UPSTREAM BOUNDARY</div>
-								<h3>
-									Verifier discovery is real, but it is not machine-readable yet
-								</h3>
-								<p>
-									Clio Coder exposes <code>clio-coder verifiers discover</code>{" "}
-									as a formatted authoring preview. The GUI will not scrape that table or pretend its argv, cwd,
-									timeout, tags, and authority are typed facts.
-								</p>
-								<p>
-									Once Clio Coder publishes a JSON listing, this tab can become a real checks catalog with preview and
-									confirmation states for mutations.
-								</p>
-							</div>
-						</div>
-					)
-					: activeAvailability === "failed"
+				{tab === "verifiers" && inspection.verifiers.availability === "available" && (
+					<VerifierCatalogSummary verifiers={inspection.verifiers} />
+				)}
+				{activeAvailability === "failed"
 					? (
 						<CatalogCollectionFailure
 							label={CATALOG_TABS.find((item) => item.id === tab)?.label ??
@@ -3151,9 +3278,16 @@ export const ClioCatalog = memo(function ClioCatalog({
 										key={`${extension.scope}:${extension.id}`}
 									/>
 								))}
+							{tab === "verifiers" &&
+								verifiers.map((check) => (
+									<VerifierCatalogCard
+										check={check}
+										key={`${check.origin}:${check.id}`}
+									/>
+								))}
 						</div>
 					)}
-				{activeTruncated && tab !== "verifiers" && (
+				{activeTruncated && (
 					<p className="catalog__truncated" role="note">
 						This collection reached the GUI display bound. Refreshing cannot reveal omitted rows until the catalog is
 						narrowed.

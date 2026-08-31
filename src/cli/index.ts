@@ -68,7 +68,7 @@ Usage:
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder skills               list, inspect, validate, or install skills
   clio-coder library              list, search, add, or sync agents, prompts, fleets, and skills from catalogs
-  clio-coder verifiers            discover, author, validate, edit, or dry-run project checks
+  clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
   clio-coder panes install        install the pane multiplexer (alias for 'tools install herdr')
