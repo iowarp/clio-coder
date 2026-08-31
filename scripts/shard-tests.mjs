@@ -90,11 +90,21 @@ const DEFAULT_PATTERNS = ["tests/contracts/**/*.test.ts", "tests/smoke/**/*.test
  * no matter how the test is written. Their only honest fix is a quiet box, so
  * they get one.
  *
- * Cost is about 40s of wall clock added to a ~120s run, and every entry is
- * here because it failed under 24-way load and passed alone. Keep the list
- * short: a file belongs here only when widening its margin would weaken what
- * it proves. Anything that merely waits for something belongs in the parallel
- * lanes with a scaled watchdog.
+ * The last three are here for the same reason from the other direction: the
+ * budget they need to hold belongs to the product or to the kernel, and no
+ * edit to the test can widen it. `model-residency` is answered by a fixture
+ * server on the lane's own event loop against a fixed 750ms greeting probe in
+ * `src/domains/providers/probe/fingerprint.ts`. `commit-attribution` asserts a
+ * repository probe is still inside its cache window. `cli-recovery-messages`
+ * needs a port it just closed to still be refused, which only holds while
+ * nothing else on the box is claiming ephemeral ports.
+ *
+ * Cost is about 70s of wall clock added to a ~115s run, which is the price of
+ * the suite meaning something. Every entry is here because it failed under
+ * 24-way load and passed alone. Keep the list short: a file belongs here only
+ * when widening its margin would weaken what it proves, or when the margin is
+ * not the test's to widen. Anything that merely waits for something belongs in
+ * the parallel lanes with a scaled watchdog.
  */
 const SERIAL_FILES = [
 	// per-call admission under 1ms; a concurrent batch under 2x one tool's delay
@@ -107,6 +117,12 @@ const SERIAL_FILES = [
 	"tests/contracts/live-spawn.test.ts",
 	// two Ctrl-C inside the TUI's 500ms double-tap window exit, one outside it does not
 	"tests/smoke/tui-width-matrix.test.ts",
+	// a fixture LM Studio answers the product's fixed 750ms greeting probe
+	"tests/contracts/model-residency.test.ts",
+	// a repository probe taken moments ago is still inside its cache window
+	"tests/contracts/commit-attribution.test.ts",
+	// a port closed a moment ago is still refused, which needs nothing else binding
+	"tests/smoke/cli-recovery-messages.test.ts",
 ];
 const SERIAL_LANE_NAME = "lane-serial";
 const RUNNER_ARGS = [
