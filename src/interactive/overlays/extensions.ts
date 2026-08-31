@@ -45,6 +45,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 	});
 
 	return openListOverlay(tui, {
+		markerId: "extensions",
 		title: "Extensions Reference",
 		items,
 		filterable: true,

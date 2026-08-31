@@ -18,6 +18,7 @@ export type {
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
+	OverlayUnfocusOptions,
 	ScrollViewScrollbar,
 	SelectItem,
 	SelectListLayoutOptions,

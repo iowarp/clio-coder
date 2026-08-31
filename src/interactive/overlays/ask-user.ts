@@ -1190,6 +1190,9 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 			// the terminal has left after the margins.
 			...(geometry.maxInnerRows > 0 ? { maxHeight: geometry.maxInnerRows + ASK_USER_FRAME_ROWS } : {}),
 			margin: geometry.margin,
+			// Not derived from the title: this modal swaps between a waiting title
+			// and a classified decision title without ever changing hands.
+			markerId: "ask-user",
 			title: () => (view.isDecisionPending() ? view.decisionTitle() : ASK_USER_WAITING_TITLE),
 			tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 			footerHint: () => view.footerHint(),

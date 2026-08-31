@@ -191,6 +191,7 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 	const handle = showClioOverlayFrame(tui, focus, {
 		anchor: "center",
 		width: fleetRunApprovalOverlayWidth(options.columns),
+		markerId: "fleet-run-approval",
 		title: FLEET_RUN_APPROVAL_OVERLAY_TITLE,
 		footerHint: buildResponsiveHint(
 			[...(acceptable ? [{ key: "Enter", verb: "dispatch" }] : []), { key: "↑↓", verb: "scroll" }],

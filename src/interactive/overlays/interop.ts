@@ -120,6 +120,7 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 	};
 
 	const handle: ListOverlayHandle = openListOverlay(tui, {
+		markerId: "interop",
 		title: "Interop",
 		items: buildItems(deps),
 		filterable: true,

@@ -4,12 +4,14 @@ import {
 	type Component,
 	type OverlayHandle,
 	type OverlayOptions,
+	type OverlayUnfocusOptions,
 	type SelectListTheme,
 	type SettingsListTheme,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
+import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
 import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme, settingsListTheme } from "./theme/index.js";
 
 export const IDENTITY = (text: string): string => text;
@@ -464,6 +466,15 @@ export class ClioOverlayFrame implements Component {
  * screen at 40x12. It learns the terminal height through the `visible`
  * predicate, which the engine evaluates with the live dimensions in the same
  * pass that renders the overlay.
+ *
+ * This is also where the modal marker is claimed and released. Every framed
+ * overlay is modal and every modal is framed: the only two overlays Clio shows
+ * without a frame are the context and task islands, and both pass
+ * `nonCapturing: true` straight to the engine. Hanging the marker here rather
+ * than on the overlay lifecycle therefore covers the nested frames the
+ * lifecycle's single `OverlayState` cannot see, and it cannot drift out of
+ * sync with what actually owns the keyboard, because the same call that takes
+ * the screen takes the marker.
  */
 export function showClioOverlayFrame(
 	tui: TUI,
@@ -473,12 +484,21 @@ export function showClioOverlayFrame(
 		footerHint?: string | ((innerWidth: number) => string | undefined);
 		/** Border and title token; omitted leaves the informational frame. */
 		tone?: OverlayTone;
+		/**
+		 * Stable id for the modal marker, published on the terminal title while
+		 * this overlay owns the keys. Required, and deliberately not defaulted
+		 * from `title`: several titles carry a session id, a decision
+		 * classification, or the active tab, and an id that moves with the
+		 * content is not an identifier. Use `modalMarkerId(...)` where the title
+		 * really is fixed and surface-specific.
+		 */
+		markerId: string;
 	},
 ): OverlayHandle {
-	const { title, footerHint, tone, width, visible, maxHeight, margin, ...overlayOptions } = options;
+	const { title, footerHint, tone, width, visible, maxHeight, margin, markerId, ...overlayOptions } = options;
 	const boxWidth = typeof width === "number" ? width : 0;
 	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor), tone);
-	return tui.showOverlay(frame, {
+	const handle = tui.showOverlay(frame, {
 		...overlayOptions,
 		...(margin !== undefined ? { margin } : {}),
 		width: "100%",
@@ -493,6 +513,42 @@ export function showClioOverlayFrame(
 			return shown;
 		},
 	});
+	const marker = enterModal(markerId, modalMarkerSink(tui));
+	return {
+		hide(): void {
+			marker.release();
+			handle.hide();
+		},
+		setHidden(hidden: boolean): void {
+			marker.setActive(!hidden);
+			handle.setHidden(hidden);
+		},
+		isHidden: (): boolean => handle.isHidden(),
+		focus(): void {
+			marker.raise();
+			handle.focus();
+		},
+		// A pure passthrough on purpose. The engine hands focus to the next
+		// visible capturing overlay, which is another modal, so the stack is
+		// unchanged; the surface that gives the keyboard back to the composer
+		// does it by hiding, which `setHidden` already reports.
+		unfocus: (unfocusOptions?: OverlayUnfocusOptions): void =>
+			unfocusOptions ? handle.unfocus(unfocusOptions) : handle.unfocus(),
+		isFocused: (): boolean => handle.isFocused(),
+	};
+}
+
+/**
+ * The title sink behind a TUI, or null when there is none.
+ *
+ * The engine's `Terminal` declares `setTitle`, but the stub TUIs the overlay
+ * tests mount against are structural casts that carry only what the overlay
+ * under test reads. Probing for the method keeps the marker inert on those
+ * rather than throwing inside a render path.
+ */
+function modalMarkerSink(tui: TUI): ModalMarkerSink | null {
+	const terminal: Partial<ModalMarkerSink> | undefined = tui.terminal;
+	return typeof terminal?.setTitle === "function" ? (terminal as ModalMarkerSink) : null;
 }
 
 /** Rows from an overlay size value, matching how the engine reads one. */

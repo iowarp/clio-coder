@@ -523,6 +523,7 @@ export function openTasksOverlay(
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: TASKS_OVERLAY_WIDTH,
+		markerId: "tasks",
 		title: () => "Tasks",
 		footerHint: () => body.footerHint(),
 	});

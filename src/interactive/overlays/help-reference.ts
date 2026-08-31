@@ -140,6 +140,7 @@ export function openHelpOverlay(
 	const items = [...commands, ...keys, ...topics];
 
 	return openListOverlay(tui, {
+		markerId: "help",
 		title: "Help Center",
 		items,
 		filterable: true,

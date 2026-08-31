@@ -548,6 +548,7 @@ export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	};
 
 	handle = openListOverlay(tui, {
+		markerId: "skills-hub",
 		title: SKILLS_HUB_TITLE,
 		items: [],
 		tabs,

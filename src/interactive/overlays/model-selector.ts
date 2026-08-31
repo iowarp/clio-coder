@@ -1085,6 +1085,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
 		width: overlayWidth,
+		markerId: "model",
 		title: "Models",
 		footerHint: buildHint([
 			FILTER_HINT,
