@@ -293,7 +293,9 @@ async function runAttributed(
 			progressBus?.emit(BusChannels.DispatchProgress, { runId: handle.runId, agentId: request.agentId, event });
 		}
 		const receipt = await handle.finalPromise;
-		if (receipt.exitCode !== 0 || receipt.failureMessage) {
+		if (receipt.outcome === "canceled") {
+			notice("warn", `${command} aborted: ${receipt.outcomeDetail ?? "operator abort"}`);
+		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
 			notice("error", `${command} failed: exit=${receipt.exitCode}${failure}`);
 		}
