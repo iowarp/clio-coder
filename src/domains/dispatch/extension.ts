@@ -237,6 +237,7 @@ import {
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { reduceRouteQuality } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
+import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import {
@@ -399,6 +400,15 @@ export interface DispatchBundleOptions {
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/** Observer injection seam. Production constructs the durable observer. */
 	routeObserver?: RouteObserver;
+	/**
+	 * Write the durable run event journal for every run this bundle dispatches.
+	 * Off by default and turned on by the three composition roots
+	 * (src/entry/orchestrator.ts, src/cli/run.ts, src/cli/fleet.ts), because the
+	 * process that owns a bundle also decides who owns the journal file: a
+	 * composed process routes `registerAllTools`' event registry to
+	 * `journal: null` so a tool-path run is transcribed once, not twice.
+	 */
+	journalRunEvents?: boolean;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -6173,8 +6183,15 @@ export function createDispatchBundle(
 		return receipt;
 	}
 
+	let journalBridge: RunEventJournalBridge | null = null;
+
 	const extension: DomainExtension = {
 		async start() {
+			// The journal subscribes before anything can dispatch. It rides the
+			// domain's own progress and terminal channels, so it covers a run
+			// whose caller iterates the handle itself (every operator path) as
+			// well as one drained by the dispatch tool's event registry.
+			if (options?.journalRunEvents === true) journalBridge = attachRunEventJournalBridge(context.bus);
 			// No in-memory executor survives a process restart, so every active
 			// side-store lease from an earlier bundle is orphaned and must expire.
 			cleanupDispatchReservations({ startup: true, nowMs: now() });
@@ -6240,6 +6257,10 @@ export function createDispatchBundle(
 			for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
 			ownedReservations.clear();
 			await Promise.allSettled([...assignmentWrites]);
+			// After drain(), so the last run's terminal line is written before the
+			// bridge stops listening.
+			journalBridge?.stop();
+			journalBridge = null;
 		},
 	};
 
