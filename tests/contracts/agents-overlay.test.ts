@@ -4,8 +4,9 @@ import type { Component, OverlayHandle, OverlayOptions, TUI } from "../../src/en
 import { openAgentsOverlay } from "../../src/interactive/overlays/agents.js";
 import type { ListOverlayOptions } from "../../src/interactive/overlays/list-overlay.js";
 
-function captureListOptions(): { tui: TUI; options: () => ListOverlayOptions } {
+function captureListOptions(): { tui: TUI; options: () => ListOverlayOptions; view: () => Component } {
 	let captured: ListOverlayOptions | null = null;
+	let capturedView: Component | null = null;
 	const handle: OverlayHandle = {
 		hide() {},
 		setHidden() {},
@@ -17,8 +18,9 @@ function captureListOptions(): { tui: TUI; options: () => ListOverlayOptions } {
 	return {
 		tui: {
 			showOverlay(component: Component, _options?: OverlayOptions): OverlayHandle {
-				const frame = component as unknown as { child: { options: ListOverlayOptions } };
+				const frame = component as unknown as { child: Component & { options: ListOverlayOptions } };
 				captured = frame.child.options;
+				capturedView = frame.child;
 				return handle;
 			},
 			requestRender() {},
@@ -26,6 +28,10 @@ function captureListOptions(): { tui: TUI; options: () => ListOverlayOptions } {
 		options: () => {
 			if (!captured) throw new Error("list overlay options were not captured");
 			return captured;
+		},
+		view: () => {
+			if (!capturedView) throw new Error("list overlay view was not captured");
+			return capturedView;
 		},
 	};
 }
@@ -93,5 +99,42 @@ describe("contracts/agents-overlay", () => {
 			"ACP delegation specs should appear only in their dedicated group",
 		);
 		strictEqual(options.items.find((item) => item.id === "claude-cli")?.group, "ACP delegation agents");
+	});
+
+	it("opens detail with Enter and reserves Esc for closing", () => {
+		const mounted = captureListOptions();
+		let closes = 0;
+		openAgentsOverlay(
+			mounted.tui,
+			{
+				listAgents: () => [
+					{
+						id: "architect",
+						description: "Designs bounded changes",
+						audience: "base",
+						category: "plan",
+						capabilityClass: "artifact-write",
+						skills: ["cut-it"],
+					},
+				],
+				listDelegationAgents: () => [],
+			} as never,
+			() => {
+				closes += 1;
+			},
+		);
+
+		const view = mounted.view();
+		ok(!view.render(100).some((line) => line.includes("Fleet Agent: architect")));
+		view.handleInput?.("\r");
+		ok(view.render(100).some((line) => line.includes("Fleet Agent: architect")));
+		strictEqual(closes, 0, "Enter activates the advertised detail pane");
+
+		view.handleInput?.("\r");
+		ok(!view.render(100).some((line) => line.includes("Fleet Agent: architect")));
+		strictEqual(closes, 0, "a second Enter toggles detail closed without closing the overlay");
+
+		view.handleInput?.("\u001b");
+		strictEqual(closes, 1, "Esc is the overlay close key");
 	});
 });
