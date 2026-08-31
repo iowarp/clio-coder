@@ -1119,6 +1119,114 @@ export interface WireFleetInspectionRoot {
 	readonly stepsTruncated: boolean;
 }
 
+export const MAX_WIRE_FLEET_INSPECTION_COUNCILS = 4;
+export const MAX_WIRE_FLEET_INSPECTION_COUNCIL_MEMBERS = 5;
+export const MAX_WIRE_FLEET_INSPECTION_COUNCIL_TURNS = 3;
+
+export const COUNCIL_SYNTHESIS_KINDS = ["none", "vote", "judge"] as const;
+export type WireCouncilSynthesisKind = (typeof COUNCIL_SYNTHESIS_KINDS)[number];
+export const COUNCIL_APPROVALS = ["operator", "full-auto"] as const;
+export type WireCouncilApproval = (typeof COUNCIL_APPROVALS)[number];
+export const COUNCIL_ORIGINS = ["user", "agent", "internal"] as const;
+export type WireCouncilOrigin = (typeof COUNCIL_ORIGINS)[number];
+export const COUNCIL_RUN_STATUSES = [
+	"queued",
+	"running",
+	"completed",
+	"failed",
+	"interrupted",
+	"stale",
+	"dead",
+] as const;
+export type WireCouncilRunStatus = (typeof COUNCIL_RUN_STATUSES)[number];
+export const COUNCIL_RUN_OUTCOMES = [
+	"succeeded",
+	"failed",
+	"timed_out",
+	"stalled",
+	"canceled",
+	"denied_by_policy",
+	"spawn_failed",
+] as const;
+export type WireCouncilRunOutcome = (typeof COUNCIL_RUN_OUTCOMES)[number];
+export const COUNCIL_EXECUTION_ROLES = [
+	"builder",
+	"reviewer",
+	"judge",
+	"researcher",
+	"verifier",
+	"recovery",
+] as const;
+export type WireCouncilExecutionRole = (typeof COUNCIL_EXECUTION_ROLES)[number];
+
+/**
+ * The seated-member label shape, identical on both sides of this boundary.
+ *
+ * A member label is operator-authored, so it is the one council string that did
+ * not come from the harness. Both harness entry paths already reject anything
+ * outside this pattern, and the host projection drops a stored label that fails
+ * it, so a label arriving here that fails it means the host projection did not
+ * run. That is a rejection, not a redaction.
+ */
+export const COUNCIL_MEMBER_LABEL_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
+
+export interface WireFleetInspectionCouncilTurn {
+	readonly round: number;
+	readonly runId: string;
+	readonly status: WireCouncilRunStatus;
+	readonly outcome: WireCouncilRunOutcome | null;
+	readonly terminal: boolean;
+}
+
+export interface WireFleetInspectionCouncilMember {
+	readonly label: string;
+	readonly agentId: string;
+	readonly target: string;
+	readonly model: string;
+	readonly executionRole: WireCouncilExecutionRole;
+	readonly turns: readonly WireFleetInspectionCouncilTurn[];
+	readonly turnsTruncated: boolean;
+}
+
+export interface WireFleetInspectionCouncilJudge {
+	readonly runId: string;
+	readonly agentId: string;
+	readonly target: string;
+	readonly model: string;
+	readonly status: WireCouncilRunStatus;
+	readonly outcome: WireCouncilRunOutcome | null;
+}
+
+/**
+ * One council's topology, grouped out of the same ledger the run window reads.
+ *
+ * A council owns no durable record: it is a set of ordinary dispatch runs
+ * sharing a group stamp, so this is a shape rather than a transcript. The
+ * members' answers, the judge's synthesis prose, and the vote tally are free
+ * model text living in receipt output and are host-only permanently. What
+ * crosses is who was seated, where each voice ran, how many rounds it took, and
+ * whether a synthesis was reached.
+ */
+export interface WireFleetInspectionCouncil {
+	readonly group: string;
+	readonly startedAt: string;
+	readonly endedAt: string | null;
+	readonly running: boolean;
+	readonly roundsPlanned: number | null;
+	readonly roundsObserved: number;
+	readonly origin: WireCouncilOrigin | null;
+	readonly approval: WireCouncilApproval | null;
+	readonly members: readonly WireFleetInspectionCouncilMember[];
+	readonly membersTruncated: boolean;
+	/** Rows whose stored label the host refused to repeat. */
+	readonly membersRejected: number;
+	readonly synthesis: Readonly<{
+		kind: WireCouncilSynthesisKind | null;
+		sealedRunId: string | null;
+		judge: WireFleetInspectionCouncilJudge | null;
+	}>;
+}
+
 /** Bounded newest-first run window selected by Clio Coder, never by browser argv. */
 export interface WireFleetInspection {
 	readonly scope: "installation";
@@ -1128,6 +1236,8 @@ export interface WireFleetInspection {
 	readonly truncated: boolean;
 	readonly roots: readonly WireFleetInspectionRoot[];
 	readonly rootsTruncated: boolean;
+	readonly councils: readonly WireFleetInspectionCouncil[];
+	readonly councilsTruncated: boolean;
 }
 
 export const EVIDENCE_SOURCE_KINDS = ["run", "session", "eval"] as const;
@@ -4263,6 +4373,188 @@ export function validateDispatchInspection(
 	};
 }
 
+function validateCouncilMember(
+	value: unknown,
+	label: string,
+): WireFleetInspectionCouncilMember {
+	const member = expectExactKeys(value, label, [
+		"label",
+		"agentId",
+		"target",
+		"model",
+		"executionRole",
+		"turns",
+		"turnsTruncated",
+	]);
+	const memberLabel = expectPresentationText(member.label, `${label}.label`, 64);
+	if (!COUNCIL_MEMBER_LABEL_PATTERN.test(memberLabel)) {
+		invalid(`${label}.label is not a seated-member label this GUI will repeat`);
+	}
+	const seenRuns = new Set<string>();
+	let previousRound = 0;
+	const turns = expectArray(
+		member.turns,
+		`${label}.turns`,
+		MAX_WIRE_FLEET_INSPECTION_COUNCIL_TURNS,
+		(entry, turnLabel): WireFleetInspectionCouncilTurn => {
+			const turn = expectExactKeys(entry, turnLabel, [
+				"round",
+				"runId",
+				"status",
+				"outcome",
+				"terminal",
+			]);
+			const round = expectDispatchNumber(turn.round, `${turnLabel}.round`, true);
+			// A member speaks once per round, in order. A repeated or descending
+			// round means two rows were folded into one voice.
+			if (round < 1) invalid(`${turnLabel}.round must start at one`);
+			if (round <= previousRound) invalid(`${label}.turns are not in ascending round order`);
+			previousRound = round;
+			const runId = expectPresentationText(turn.runId, `${turnLabel}.runId`, 128);
+			if (seenRuns.has(runId)) invalid(`${label}.turns repeats ${runId}`);
+			seenRuns.add(runId);
+			const terminal = expectBoolean(turn.terminal, `${turnLabel}.terminal`);
+			const outcome = turn.outcome === null
+				? null
+				: expectEnum(turn.outcome, `${turnLabel}.outcome`, COUNCIL_RUN_OUTCOMES);
+			// An outcome is written at finalization, so a turn that has not ended
+			// cannot have one and one that reports an outcome has ended.
+			if (outcome !== null && !terminal) {
+				invalid(`${turnLabel} reports an outcome for a turn that has not finished`);
+			}
+			return {
+				round,
+				runId,
+				status: expectEnum(turn.status, `${turnLabel}.status`, COUNCIL_RUN_STATUSES),
+				outcome,
+				terminal,
+			};
+		},
+	);
+	return {
+		label: memberLabel,
+		agentId: expectPresentationText(member.agentId, `${label}.agentId`, 128),
+		target: expectPresentationText(member.target, `${label}.target`, 128),
+		model: expectPresentationText(member.model, `${label}.model`, 256),
+		executionRole: expectEnum(member.executionRole, `${label}.executionRole`, COUNCIL_EXECUTION_ROLES),
+		turns,
+		turnsTruncated: expectBoolean(member.turnsTruncated, `${label}.turnsTruncated`),
+	};
+}
+
+function validateCouncil(value: unknown, label: string): WireFleetInspectionCouncil {
+	const council = expectExactKeys(value, label, [
+		"group",
+		"startedAt",
+		"endedAt",
+		"running",
+		"roundsPlanned",
+		"roundsObserved",
+		"origin",
+		"approval",
+		"members",
+		"membersTruncated",
+		"membersRejected",
+		"synthesis",
+	]);
+	const seenLabels = new Set<string>();
+	const members = expectArray(
+		council.members,
+		`${label}.members`,
+		MAX_WIRE_FLEET_INSPECTION_COUNCIL_MEMBERS,
+		(entry, memberLabel) => {
+			const member = validateCouncilMember(entry, memberLabel);
+			if (seenLabels.has(member.label)) invalid(`${label}.members repeats ${member.label}`);
+			seenLabels.add(member.label);
+			return member;
+		},
+	);
+	const endedAt = council.endedAt === null ? null : expectTimestamp(council.endedAt, `${label}.endedAt`);
+	const running = expectBoolean(council.running, `${label}.running`);
+	// A council is running exactly while one of its rows has not ended. An end
+	// stamp beside a running council would be a settled verdict on unfinished
+	// work.
+	if (running !== (endedAt === null)) {
+		invalid(`${label} reports an end stamp that contradicts its running state`);
+	}
+	const roundsObserved = expectDispatchNumber(council.roundsObserved, `${label}.roundsObserved`, true);
+	const highestTurn = members.reduce(
+		(highest, member) => member.turns.reduce((inner, turn) => Math.max(inner, turn.round), highest),
+		0,
+	);
+	// The observed count is folded from the same turns this frame carries, so a
+	// disagreement means the two were computed from different rows.
+	if (roundsObserved !== highestTurn) {
+		invalid(`${label}.roundsObserved does not match the rounds its members recorded`);
+	}
+	const roundsPlanned = council.roundsPlanned === null
+		? null
+		: expectDispatchNumber(council.roundsPlanned, `${label}.roundsPlanned`, true);
+	if (roundsPlanned !== null && (roundsPlanned < 1 || roundsObserved > roundsPlanned)) {
+		invalid(`${label} observed more rounds than it planned`);
+	}
+	const synthesis = expectExactKeys(council.synthesis, `${label}.synthesis`, [
+		"kind",
+		"sealedRunId",
+		"judge",
+	]);
+	const kind = synthesis.kind === null
+		? null
+		: expectEnum(synthesis.kind, `${label}.synthesis.kind`, COUNCIL_SYNTHESIS_KINDS);
+	const sealedRunId = expectNullablePresentationText(synthesis.sealedRunId, `${label}.synthesis.sealedRunId`, 128);
+	// The kind is classified from the sealed report's own task, so naming a kind
+	// without the record it was read off is a claim with no source.
+	if (kind !== null && sealedRunId === null) {
+		invalid(`${label}.synthesis names a kind with no sealed record behind it`);
+	}
+	let judge: WireFleetInspectionCouncilJudge | null = null;
+	if (synthesis.judge !== null) {
+		const record = expectExactKeys(synthesis.judge, `${label}.synthesis.judge`, [
+			"runId",
+			"agentId",
+			"target",
+			"model",
+			"status",
+			"outcome",
+		]);
+		judge = {
+			runId: expectPresentationText(record.runId, `${label}.synthesis.judge.runId`, 128),
+			agentId: expectPresentationText(record.agentId, `${label}.synthesis.judge.agentId`, 128),
+			target: expectPresentationText(record.target, `${label}.synthesis.judge.target`, 128),
+			model: expectPresentationText(record.model, `${label}.synthesis.judge.model`, 256),
+			status: expectEnum(record.status, `${label}.synthesis.judge.status`, COUNCIL_RUN_STATUSES),
+			outcome: record.outcome === null
+				? null
+				: expectEnum(record.outcome, `${label}.synthesis.judge.outcome`, COUNCIL_RUN_OUTCOMES),
+		};
+		// Only a judge synthesis dispatches a judge. A vote is tallied from the
+		// members' own answers and a `none` council synthesizes nothing, so either
+		// reporting a judge run means two councils were merged.
+		if (kind === "vote" || kind === "none") {
+			invalid(`${label}.synthesis reports a judge run for a ${kind} synthesis`);
+		}
+		// The sealed report is a zero-cost record the ledger writes; the judge is
+		// a dispatch that consumed a model. One row cannot be both.
+		if (judge.runId === sealedRunId) {
+			invalid(`${label}.synthesis reports one run as both its judge and its sealed record`);
+		}
+	}
+	return {
+		group: expectPresentationText(council.group, `${label}.group`, 128),
+		startedAt: expectTimestamp(council.startedAt, `${label}.startedAt`),
+		endedAt,
+		running,
+		roundsPlanned,
+		roundsObserved,
+		origin: council.origin === null ? null : expectEnum(council.origin, `${label}.origin`, COUNCIL_ORIGINS),
+		approval: council.approval === null ? null : expectEnum(council.approval, `${label}.approval`, COUNCIL_APPROVALS),
+		members,
+		membersTruncated: expectBoolean(council.membersTruncated, `${label}.membersTruncated`),
+		membersRejected: expectDispatchNumber(council.membersRejected, `${label}.membersRejected`, true),
+		synthesis: { kind, sealedRunId, judge },
+	};
+}
+
 export function validateFleetInspection(
 	value: unknown,
 	label = "fleet inspection",
@@ -4275,6 +4567,8 @@ export function validateFleetInspection(
 		"truncated",
 		"roots",
 		"rootsTruncated",
+		"councils",
+		"councilsTruncated",
 	]);
 	if (record.scope !== "installation") {
 		invalid(`${label}.scope must be installation`);
@@ -4467,6 +4761,18 @@ export function validateFleetInspection(
 			};
 		},
 	);
+	const seenCouncils = new Set<string>();
+	const councils = expectArray(
+		record.councils,
+		`${label}.councils`,
+		MAX_WIRE_FLEET_INSPECTION_COUNCILS,
+		(value, councilLabel) => {
+			const council = validateCouncil(value, councilLabel);
+			if (seenCouncils.has(council.group)) invalid(`${label}.councils repeats ${council.group}`);
+			seenCouncils.add(council.group);
+			return council;
+		},
+	);
 	return {
 		scope: "installation",
 		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
@@ -4475,6 +4781,8 @@ export function validateFleetInspection(
 		truncated: expectBoolean(record.truncated, `${label}.truncated`),
 		roots,
 		rootsTruncated: expectBoolean(record.rootsTruncated, `${label}.rootsTruncated`),
+		councils,
+		councilsTruncated: expectBoolean(record.councilsTruncated, `${label}.councilsTruncated`),
 	};
 }
 

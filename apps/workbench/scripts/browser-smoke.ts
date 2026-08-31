@@ -568,6 +568,41 @@ try {
 	// Selecting the step whose run is in the window drives the run record beside it.
 	await stepIndex.getByRole("button", { disabled: false }).first().click();
 	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
+
+	// Council topology names who was seated and how many rounds each voice took,
+	// and says nothing about what any of them argued.
+	const councils = fleetJournal.getByRole("region", { name: "Councils that ran through this ledger" });
+	await councils.getByText("council-mfa2x1-7b3d0e", { exact: true }).waitFor();
+	await councils.getByText("2 seated voices", { exact: true }).waitFor();
+	await councils.getByText("2 of 2", { exact: true }).waitFor();
+	await councils.getByText("the operator asked for it", { exact: true }).waitFor();
+	await councils.getByText("operator approved the plan", { exact: true }).waitFor();
+	const councilGrid = councils.getByRole("list", { name: "Seated voices for council council-mfa2x1-7b3d0e" });
+	await councilGrid.getByText("architect", { exact: true }).waitFor();
+	await councilGrid.getByText("skeptic", { exact: true }).waitFor();
+	// The closed outcome taxonomy is said, not the member's answer.
+	await councilGrid.getByText("round 2 · timed out", { exact: true }).waitFor();
+	await councils.getByText("a judge dispatched to synthesize the answers", { exact: true }).waitFor();
+	await councils.getByText("verifier · local-lmstudio/qwen3-coder", { exact: true }).waitFor();
+	// One voice's final round is inside the run window and three references are
+	// not, so exactly one round chip is selectable. The wait precedes the count,
+	// which does not auto-wait.
+	await councilGrid.getByRole("button", { disabled: false }).first().waitFor();
+	equal(await councilGrid.getByRole("button", { disabled: false }).count(), 1);
+	equal(await councilGrid.getByRole("button", { disabled: true }).count(), 3);
+	// The sealed report is a ledger row like any other and aged out of the window.
+	await councils.getByText("run-council-sealed · outside this run window", { exact: true }).waitFor();
+	// A council's deliberation is host-only, and the panel says so rather than
+	// leaving the absence to be inferred.
+	await councils.getByText(/Member answers, the judge's text, and the vote tally are model prose/u).waitFor();
+	// The run window's own task text sits a few hundred pixels above this panel
+	// and is exactly the class of prose a council row must never acquire.
+	for (const forbidden of ["Inspect the durable event boundary", "briefing", "receipts/", "/home/"]) {
+		equal(await councils.getByText(forbidden, { exact: false }).count(), 0);
+	}
+	// Selecting a round drives the same run record the step index drives.
+	await councilGrid.getByRole("button", { disabled: false }).first().click();
+	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
 	const fleetAccessibility = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
 		.analyze();
@@ -1503,6 +1538,7 @@ try {
 			dispatchUsesInstallationWideBoundedAdapter: true,
 			fleetRunsUseDurableBoundedAdapter: true,
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
+			councilTopologyCrossesItsShapeAndNotItsDeliberation: true,
 			traceAccountingCarriesNoRequestTextOrPath: true,
 			traceTailsCrossAsShapesNotRows: true,
 			evidenceInventoryCarriesShapeAndTrustOnly: true,

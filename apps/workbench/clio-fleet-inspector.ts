@@ -10,17 +10,31 @@ import { resolve } from "node:path";
 import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
 import {
 	type CommandErrorCode,
+	COUNCIL_APPROVALS,
+	COUNCIL_EXECUTION_ROLES,
+	COUNCIL_MEMBER_LABEL_PATTERN,
+	COUNCIL_ORIGINS,
+	COUNCIL_RUN_OUTCOMES,
+	COUNCIL_RUN_STATUSES,
+	COUNCIL_SYNTHESIS_KINDS,
 	EVIDENCE_AXES,
 	EVIDENCE_AXIS_STATES,
 	FLEET_EVIDENCE_STATES,
 	FLEET_JOURNAL_STATES,
 	FLEET_VERIFY_REASONS,
 	FLEET_VERIFY_STATES,
+	MAX_WIRE_FLEET_INSPECTION_COUNCIL_MEMBERS,
+	MAX_WIRE_FLEET_INSPECTION_COUNCIL_TURNS,
+	MAX_WIRE_FLEET_INSPECTION_COUNCILS,
 	MAX_WIRE_FLEET_INSPECTION_EVENTS,
 	MAX_WIRE_FLEET_INSPECTION_ROOTS,
 	MAX_WIRE_FLEET_INSPECTION_RUNS,
 	MAX_WIRE_FLEET_INSPECTION_STEPS,
 	type WireFleetInspection,
+	type WireFleetInspectionCouncil,
+	type WireFleetInspectionCouncilJudge,
+	type WireFleetInspectionCouncilMember,
+	type WireFleetInspectionCouncilTurn,
 	type WireFleetInspectionEvent,
 	type WireFleetInspectionRoot,
 	type WireFleetInspectionRun,
@@ -301,6 +315,181 @@ function projectRoot(value: unknown): WireFleetInspectionRoot {
 	};
 }
 
+function councilError(): never {
+	return projectionError("Clio Coder returned an invalid council topology.");
+}
+
+function projectCouncilTurn(value: unknown): WireFleetInspectionCouncilTurn {
+	if (!isRecord(value) || !exactKeys(value, ["round", "runId", "status", "outcome", "terminal"])) {
+		return councilError();
+	}
+	const round = count(value.round);
+	const runId = text(value.runId, 128);
+	if (
+		round === null || round < 1 || runId === null ||
+		!isOneOf(value.status, COUNCIL_RUN_STATUSES) ||
+		(value.outcome !== null && !isOneOf(value.outcome, COUNCIL_RUN_OUTCOMES)) ||
+		typeof value.terminal !== "boolean"
+	) return councilError();
+	// A run's outcome is written when it finalizes, so an unfinished turn cannot
+	// carry one.
+	if (value.outcome !== null && !value.terminal) {
+		return projectionError("Clio Coder reported a council outcome for a turn that has not finished.");
+	}
+	return {
+		round,
+		runId,
+		status: value.status,
+		outcome: value.outcome as WireFleetInspectionCouncilTurn["outcome"],
+		terminal: value.terminal,
+	};
+}
+
+function projectCouncilMember(value: unknown): WireFleetInspectionCouncilMember {
+	const keys = ["label", "agentId", "target", "model", "executionRole", "turns", "turnsTruncated"] as const;
+	if (!isRecord(value) || !exactKeys(value, keys)) return councilError();
+	const label = text(value.label, 64);
+	const agentId = text(value.agentId, 128);
+	const target = text(value.target, 128);
+	const model = text(value.model, 256);
+	if (
+		label === null || agentId === null || target === null || model === null ||
+		!COUNCIL_MEMBER_LABEL_PATTERN.test(label) ||
+		!isOneOf(value.executionRole, COUNCIL_EXECUTION_ROLES) ||
+		typeof value.turnsTruncated !== "boolean" ||
+		!Array.isArray(value.turns) || value.turns.length > MAX_WIRE_FLEET_INSPECTION_COUNCIL_TURNS
+	) return councilError();
+	const turns = value.turns.map(projectCouncilTurn);
+	let previous = 0;
+	for (const turn of turns) {
+		if (turn.round <= previous) {
+			return projectionError("Clio Coder returned a council member's turns out of round order.");
+		}
+		previous = turn.round;
+	}
+	return {
+		label,
+		agentId,
+		target,
+		model,
+		executionRole: value.executionRole,
+		turns,
+		turnsTruncated: value.turnsTruncated,
+	};
+}
+
+function projectCouncilJudge(value: unknown): WireFleetInspectionCouncilJudge {
+	const keys = ["runId", "agentId", "target", "model", "status", "outcome"] as const;
+	if (!isRecord(value) || !exactKeys(value, keys)) return councilError();
+	const runId = text(value.runId, 128);
+	const agentId = text(value.agentId, 128);
+	const target = text(value.target, 128);
+	const model = text(value.model, 256);
+	if (
+		runId === null || agentId === null || target === null || model === null ||
+		!isOneOf(value.status, COUNCIL_RUN_STATUSES) ||
+		(value.outcome !== null && !isOneOf(value.outcome, COUNCIL_RUN_OUTCOMES))
+	) return councilError();
+	return {
+		runId,
+		agentId,
+		target,
+		model,
+		status: value.status,
+		outcome: value.outcome as WireFleetInspectionCouncilJudge["outcome"],
+	};
+}
+
+function projectCouncil(value: unknown): WireFleetInspectionCouncil {
+	const keys = [
+		"group",
+		"startedAt",
+		"endedAt",
+		"running",
+		"roundsPlanned",
+		"roundsObserved",
+		"origin",
+		"approval",
+		"members",
+		"membersTruncated",
+		"membersRejected",
+		"synthesis",
+	] as const;
+	if (!isRecord(value) || !exactKeys(value, keys)) return councilError();
+	const group = text(value.group, 128);
+	const startedAt = timestamp(value.startedAt);
+	const endedAt = value.endedAt === null ? null : timestamp(value.endedAt);
+	const roundsObserved = count(value.roundsObserved);
+	const roundsPlanned = value.roundsPlanned === null ? null : count(value.roundsPlanned);
+	const membersRejected = count(value.membersRejected);
+	if (
+		group === null || startedAt === null || (value.endedAt !== null && endedAt === null) ||
+		roundsObserved === null || (value.roundsPlanned !== null && roundsPlanned === null) ||
+		membersRejected === null ||
+		typeof value.running !== "boolean" || typeof value.membersTruncated !== "boolean" ||
+		(value.origin !== null && !isOneOf(value.origin, COUNCIL_ORIGINS)) ||
+		(value.approval !== null && !isOneOf(value.approval, COUNCIL_APPROVALS)) ||
+		!Array.isArray(value.members) || value.members.length > MAX_WIRE_FLEET_INSPECTION_COUNCIL_MEMBERS
+	) return councilError();
+	// A council is running exactly while one of its rows has not ended.
+	if (value.running !== (endedAt === null)) {
+		return projectionError("Clio Coder returned a council whose end stamp contradicts its running state.");
+	}
+	const members = value.members.map(projectCouncilMember);
+	if (new Set(members.map((member) => member.label)).size !== members.length) {
+		return projectionError("Clio Coder returned duplicate council member labels.");
+	}
+	const highestTurn = members.reduce(
+		(highest, member) => member.turns.reduce((inner, turn) => Math.max(inner, turn.round), highest),
+		0,
+	);
+	if (roundsObserved !== highestTurn) {
+		return projectionError("Clio Coder returned a council round count its members do not account for.");
+	}
+	if (roundsPlanned !== null && (roundsPlanned < 1 || roundsObserved > roundsPlanned)) {
+		return projectionError("Clio Coder returned a council that observed more rounds than it planned.");
+	}
+	if (!isRecord(value.synthesis) || !exactKeys(value.synthesis, ["kind", "sealedRunId", "judge"])) {
+		return councilError();
+	}
+	const sealedRunId = nullableText(value.synthesis.sealedRunId, 128);
+	if (
+		sealedRunId === undefined ||
+		(value.synthesis.kind !== null && !isOneOf(value.synthesis.kind, COUNCIL_SYNTHESIS_KINDS))
+	) return councilError();
+	const kind = value.synthesis.kind as WireFleetInspectionCouncil["synthesis"]["kind"];
+	// The kind is read off the sealed record's own harness-minted task, so a kind
+	// without that record is a claim with no source behind it.
+	if (kind !== null && sealedRunId === null) {
+		return projectionError("Clio Coder named a council synthesis with no sealed record behind it.");
+	}
+	const judge = value.synthesis.judge === null ? null : projectCouncilJudge(value.synthesis.judge);
+	if (judge !== null) {
+		// A vote is tallied from the members' own answers and a `none` council
+		// synthesizes nothing. Only a judge synthesis dispatches a judge.
+		if (kind === "vote" || kind === "none") {
+			return projectionError("Clio Coder reported a judge run for a council that dispatches none.");
+		}
+		if (judge.runId === sealedRunId) {
+			return projectionError("Clio Coder reported one run as both a council's judge and its sealed record.");
+		}
+	}
+	return {
+		group,
+		startedAt,
+		endedAt,
+		running: value.running,
+		roundsPlanned,
+		roundsObserved,
+		origin: value.origin as WireFleetInspectionCouncil["origin"],
+		approval: value.approval as WireFleetInspectionCouncil["approval"],
+		members,
+		membersTruncated: value.membersTruncated,
+		membersRejected,
+		synthesis: { kind, sealedRunId, judge },
+	};
+}
+
 export function projectFleetInspection(
 	value: unknown,
 	inspectedAt: string,
@@ -314,6 +503,8 @@ export function projectFleetInspection(
 			"truncated",
 			"roots",
 			"rootsTruncated",
+			"councils",
+			"councilsTruncated",
 		])
 	) {
 		throw new ClioFleetProjectionError(
@@ -326,7 +517,9 @@ export function projectFleetInspection(
 		value.runs.length > MAX_WIRE_FLEET_INSPECTION_RUNS ||
 		typeof value.truncated !== "boolean" || !Array.isArray(value.roots) ||
 		value.roots.length > MAX_WIRE_FLEET_INSPECTION_ROOTS ||
-		typeof value.rootsTruncated !== "boolean"
+		typeof value.rootsTruncated !== "boolean" || !Array.isArray(value.councils) ||
+		value.councils.length > MAX_WIRE_FLEET_INSPECTION_COUNCILS ||
+		typeof value.councilsTruncated !== "boolean"
 	) {
 		throw new ClioFleetProjectionError(
 			"Clio Coder returned an invalid recent-run snapshot.",
@@ -344,6 +537,10 @@ export function projectFleetInspection(
 			"Clio Coder returned duplicate fleet root identities.",
 		);
 	}
+	const councils = value.councils.map(projectCouncil);
+	if (new Set(councils.map((council) => council.group)).size !== councils.length) {
+		throw new ClioFleetProjectionError("Clio Coder returned duplicate council identities.");
+	}
 	return {
 		scope: "installation",
 		inspectedAt,
@@ -352,6 +549,8 @@ export function projectFleetInspection(
 		truncated: value.truncated,
 		roots,
 		rootsTruncated: value.rootsTruncated,
+		councils,
+		councilsTruncated: value.councilsTruncated,
 	};
 }
 

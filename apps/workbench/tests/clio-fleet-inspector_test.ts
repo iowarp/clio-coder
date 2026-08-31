@@ -33,9 +33,129 @@ Deno.test("the fleet adapter invokes only the fixed recent-run projection", asyn
 		// The index points into the run window rather than carrying its own
 		// evidence, so no durable fleet-run location rides along with it.
 		ok(!JSON.stringify(inspection.roots).includes("/fleet-runs/"));
+		const council = inspection.councils[0];
+		ok(council !== undefined);
+		equal(council.group, "council-mfa2x1-7b3d0e");
+		deepStrictEqual(council.members.map((member) => member.label), ["architect", "skeptic"]);
+		equal(council.roundsPlanned, 2);
+		equal(council.synthesis.kind, "judge");
+		equal(council.synthesis.judge?.runId, "run-council-judge");
 	} finally {
 		await Deno.remove(root, { recursive: true });
 	}
+});
+
+Deno.test("council projection rejects contradictions the ledger cannot produce", () => {
+	const member = {
+		label: "architect",
+		agentId: "researcher",
+		target: "local-lmstudio",
+		model: "qwen3-coder",
+		executionRole: "researcher",
+		turns: [
+			{ round: 1, runId: "run-a1", status: "completed", outcome: "succeeded", terminal: true },
+			{ round: 2, runId: "run-a2", status: "completed", outcome: "succeeded", terminal: true },
+		],
+		turnsTruncated: false,
+	};
+	const council = {
+		group: "council-mfa2x1-7b3d0e",
+		startedAt: "2026-08-31T13:50:00.000Z",
+		endedAt: "2026-08-31T13:58:00.000Z",
+		running: false,
+		roundsPlanned: 2,
+		roundsObserved: 2,
+		origin: "user",
+		approval: "operator",
+		members: [member],
+		membersTruncated: false,
+		membersRejected: 0,
+		synthesis: { kind: "judge", sealedRunId: "run-sealed", judge: null },
+	};
+	const base = {
+		version: 1,
+		generatedAt: "2026-08-31T14:00:00.000Z",
+		runs: [],
+		truncated: false,
+		roots: [],
+		rootsTruncated: false,
+		councilsTruncated: false,
+	};
+	const project = (value: unknown) => projectFleetInspection({ ...base, councils: [value] }, base.generatedAt);
+	equal(project(council).councils[0]?.roundsObserved, 2);
+
+	// A member's answer is the one thing this boundary exists to keep out.
+	throws(() => project({ ...council, answer: "the schema should own it" }), /invalid council topology/u);
+	// The operator writes the label, so it is the one council string the harness
+	// did not mint. A label outside the shape both entry paths enforce means the
+	// host projection did not run.
+	throws(
+		() => project({ ...council, members: [{ ...member, label: "/etc/clio-coder/settings.yaml" }] }),
+		/invalid council topology/u,
+	);
+	throws(() => project({ ...council, members: [member, member] }), /duplicate council member labels/u);
+	throws(
+		() => project({ ...council, roundsObserved: 3, roundsPlanned: 3 }),
+		/round count its members do not account for/u,
+	);
+	throws(() => project({ ...council, roundsPlanned: 1 }), /observed more rounds than it planned/u);
+	throws(() => project({ ...council, running: true }), /end stamp contradicts its running state/u);
+	throws(
+		() => project({ ...council, synthesis: { kind: "judge", sealedRunId: null, judge: null } }),
+		/named a council synthesis with no sealed record/u,
+	);
+	// A vote is tallied from the members' own answers, so it dispatches nobody.
+	throws(
+		() =>
+			project({
+				...council,
+				synthesis: {
+					kind: "vote",
+					sealedRunId: "run-sealed",
+					judge: {
+						runId: "run-judge",
+						agentId: "verifier",
+						target: "local-lmstudio",
+						model: "qwen3-coder",
+						status: "completed",
+						outcome: "succeeded",
+					},
+				},
+			}),
+		/judge run for a council that dispatches none/u,
+	);
+	// An outcome is written at finalization, so a turn that has not ended has none.
+	throws(
+		() =>
+			project({
+				...council,
+				members: [{
+					...member,
+					turns: [{ round: 1, runId: "run-a1", status: "running", outcome: "succeeded", terminal: false }],
+				}],
+				roundsObserved: 1,
+				roundsPlanned: 1,
+			}),
+		/outcome for a turn that has not finished/u,
+	);
+	// A member speaks once per round; a repeated round folds two rows into one voice.
+	throws(
+		() =>
+			project({
+				...council,
+				members: [{
+					...member,
+					turns: [member.turns[0], { ...member.turns[0], runId: "run-a3" }],
+				}],
+				roundsObserved: 1,
+				roundsPlanned: 1,
+			}),
+		/turns out of round order/u,
+	);
+	throws(
+		() => projectFleetInspection({ ...base, councils: [council, council] }, base.generatedAt),
+		/duplicate council identities/u,
+	);
 });
 
 Deno.test("fleet projection rejects extra path fields and duplicate run identities", () => {
@@ -63,6 +183,8 @@ Deno.test("fleet projection rejects extra path fields and duplicate run identiti
 		truncated: false,
 		roots: [],
 		rootsTruncated: false,
+		councils: [],
+		councilsTruncated: false,
 	};
 	throws(
 		() =>
@@ -111,6 +233,8 @@ Deno.test("fleet root projection rejects durable paths, bad attribution, and dup
 		runs: [],
 		truncated: false,
 		rootsTruncated: false,
+		councils: [],
+		councilsTruncated: false,
 	};
 	const accepted = projectFleetInspection({ ...base, roots: [root] }, base.generatedAt);
 	equal(accepted.roots[0]?.steps[1]?.agentId, null);

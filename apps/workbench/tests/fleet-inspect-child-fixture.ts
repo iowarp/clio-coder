@@ -79,4 +79,57 @@ console.log(JSON.stringify({
 		},
 	],
 	rootsTruncated: false,
+	councils: [
+		{
+			group: "council-mfa2x1-7b3d0e",
+			startedAt: "2026-08-31T13:50:00.000Z",
+			endedAt: "2026-08-31T13:58:00.000Z",
+			running: false,
+			roundsPlanned: 2,
+			roundsObserved: 2,
+			origin: "user",
+			approval: "operator",
+			members: [
+				{
+					label: "architect",
+					agentId: "researcher",
+					target: "local-lmstudio",
+					model: "qwen3-coder",
+					executionRole: "researcher",
+					turns: [
+						{ round: 1, runId: "run-council-a1", status: "completed", outcome: "succeeded", terminal: true },
+						{ round: 2, runId: "run-council-a2", status: "completed", outcome: "succeeded", terminal: true },
+					],
+					turnsTruncated: false,
+				},
+				{
+					label: "skeptic",
+					agentId: "researcher",
+					target: "blade-gateway",
+					model: "glm-4.6",
+					executionRole: "researcher",
+					turns: [
+						{ round: 1, runId: "run-council-s1", status: "completed", outcome: "succeeded", terminal: true },
+						{ round: 2, runId: "run-council-s2", status: "failed", outcome: "timed_out", terminal: true },
+					],
+					turnsTruncated: false,
+				},
+			],
+			membersTruncated: false,
+			membersRejected: 0,
+			synthesis: {
+				kind: "judge",
+				sealedRunId: "run-council-sealed",
+				judge: {
+					runId: "run-council-judge",
+					agentId: "verifier",
+					target: "local-lmstudio",
+					model: "qwen3-coder",
+					status: "completed",
+					outcome: "succeeded",
+				},
+			},
+		},
+	],
+	councilsTruncated: false,
 }));

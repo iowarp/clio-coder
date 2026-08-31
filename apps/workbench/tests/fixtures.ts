@@ -117,6 +117,84 @@ export function fleetInspectionFixture(): WireFleetInspection {
 			stepsTruncated: false,
 		}],
 		rootsTruncated: false,
+		// A two-round judge council. One voice's final turn is `run-alpha`, which
+		// is inside the run window above, so the panel can link it; the other's is
+		// not, so the panel has to say so instead of offering a dead link.
+		councils: [{
+			group: "council-mfa2x1-7b3d0e",
+			startedAt: "2026-08-31T13:50:00.000Z",
+			endedAt: "2026-08-31T14:00:30.000Z",
+			running: false,
+			roundsPlanned: 2,
+			roundsObserved: 2,
+			origin: "user",
+			approval: "operator",
+			members: [
+				{
+					label: "architect",
+					agentId: "researcher",
+					target: "local-lmstudio",
+					model: "qwen3-coder",
+					executionRole: "researcher",
+					turns: [
+						{
+							round: 1,
+							runId: "run-council-a1",
+							status: "completed",
+							outcome: "succeeded",
+							terminal: true,
+						},
+						{
+							round: 2,
+							runId: "run-alpha",
+							status: "completed",
+							outcome: "succeeded",
+							terminal: true,
+						},
+					],
+					turnsTruncated: false,
+				},
+				{
+					label: "skeptic",
+					agentId: "researcher",
+					target: "blade-gateway",
+					model: "glm-4.6",
+					executionRole: "researcher",
+					turns: [
+						{
+							round: 1,
+							runId: "run-council-s1",
+							status: "completed",
+							outcome: "succeeded",
+							terminal: true,
+						},
+						{
+							round: 2,
+							runId: "run-council-s2",
+							status: "failed",
+							outcome: "timed_out",
+							terminal: true,
+						},
+					],
+					turnsTruncated: false,
+				},
+			],
+			membersTruncated: false,
+			membersRejected: 0,
+			synthesis: {
+				kind: "judge",
+				sealedRunId: "run-council-sealed",
+				judge: {
+					runId: "run-council-judge",
+					agentId: "verifier",
+					target: "local-lmstudio",
+					model: "qwen3-coder",
+					status: "completed",
+					outcome: "succeeded",
+				},
+			},
+		}],
+		councilsTruncated: false,
 	};
 }
 

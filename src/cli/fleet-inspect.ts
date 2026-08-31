@@ -8,7 +8,19 @@
  * already-sanitized view model fields a typed host adapter can further narrow.
  */
 
+import {
+	COUNCIL_TOPOLOGY_MAX_COUNCILS,
+	COUNCIL_TOPOLOGY_MAX_MEMBERS,
+	COUNCIL_TOPOLOGY_MAX_SCAN,
+	COUNCIL_TOPOLOGY_MAX_TURNS,
+	type CouncilApproval,
+	type CouncilOrigin,
+	type CouncilSynthesisKind,
+	councilTopologies,
+} from "../domains/dispatch/council-topology.js";
+import type { ExecutionRole } from "../domains/dispatch/execution-role.js";
 import { listFleetRuns, openLedger } from "../domains/dispatch/state.js";
+import type { RunOutcome, RunStatus } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth } from "../engine/tui-primitives.js";
 import { loadFleetRunViewModel, loadRunViewModel } from "./fleet-view.js";
@@ -17,6 +29,9 @@ export const FLEET_INSPECT_MAX_RUNS = 8;
 export const FLEET_INSPECT_MAX_EVENTS = 32;
 export const FLEET_INSPECT_MAX_ROOTS = 4;
 export const FLEET_INSPECT_MAX_STEPS = 24;
+export const FLEET_INSPECT_MAX_COUNCILS = COUNCIL_TOPOLOGY_MAX_COUNCILS;
+export const FLEET_INSPECT_MAX_COUNCIL_MEMBERS = COUNCIL_TOPOLOGY_MAX_MEMBERS;
+export const FLEET_INSPECT_MAX_COUNCIL_TURNS = COUNCIL_TOPOLOGY_MAX_TURNS;
 
 const IDENTITY_WIDTH = 128;
 const TASK_WIDTH = 400;
@@ -86,6 +101,63 @@ export interface FleetInspectRoot {
 	readonly stepsTruncated: boolean;
 }
 
+export interface FleetInspectCouncilTurn {
+	readonly round: number;
+	readonly runId: string;
+	readonly status: RunStatus;
+	readonly outcome: RunOutcome | null;
+	readonly terminal: boolean;
+}
+
+export interface FleetInspectCouncilMember {
+	readonly label: string;
+	readonly agentId: string;
+	readonly target: string;
+	readonly model: string;
+	readonly executionRole: ExecutionRole;
+	readonly turns: readonly FleetInspectCouncilTurn[];
+	readonly turnsTruncated: boolean;
+}
+
+export interface FleetInspectCouncilJudge {
+	readonly runId: string;
+	readonly agentId: string;
+	readonly target: string;
+	readonly model: string;
+	readonly status: RunStatus;
+	readonly outcome: RunOutcome | null;
+}
+
+/**
+ * One council's topology, reconstructed from the same ledger the run window
+ * reads.
+ *
+ * A council is not a fleet root and owns no record of its own: it is a set of
+ * ordinary runs sharing a group stamp. What this carries is the shape of that
+ * set. The members' answers, the judge's synthesis prose, and the vote tally are
+ * free model text inside receipt output and stay on the host permanently, so a
+ * council row says who was seated, where each voice ran, how many rounds it
+ * took, and whether a synthesis was reached, and nothing about what was said.
+ */
+export interface FleetInspectCouncil {
+	readonly group: string;
+	readonly startedAt: string;
+	readonly endedAt: string | null;
+	readonly running: boolean;
+	readonly roundsPlanned: number | null;
+	readonly roundsObserved: number;
+	readonly origin: CouncilOrigin | null;
+	readonly approval: CouncilApproval | null;
+	readonly members: readonly FleetInspectCouncilMember[];
+	readonly membersTruncated: boolean;
+	readonly membersRejected: number;
+	readonly synthesis: Readonly<{
+		kind: CouncilSynthesisKind | null;
+		sealedRunId: string | null;
+		judge: FleetInspectCouncilJudge | null;
+	}>;
+}
+
 export interface FleetInspectSnapshot {
 	readonly version: 1;
 	readonly generatedAt: string;
@@ -93,6 +165,8 @@ export interface FleetInspectSnapshot {
 	readonly truncated: boolean;
 	readonly roots: readonly FleetInspectRoot[];
 	readonly rootsTruncated: boolean;
+	readonly councils: readonly FleetInspectCouncil[];
+	readonly councilsTruncated: boolean;
 }
 
 function bounded(value: string, width: number): string {
@@ -133,6 +207,12 @@ function evidenceProjection(text: string): FleetInspectRun["evidence"] {
 export function fleetInspectSnapshot(now: () => number = Date.now): FleetInspectSnapshot {
 	const ledgerRows = openLedger().list();
 	const selected = ledgerRows.slice(0, FLEET_INSPECT_MAX_RUNS);
+	// The council window is deliberately wider than the run window. A single
+	// council is up to five members over three rounds plus a judge and its sealed
+	// report, so a council that finished an hour ago holds no row in the eight
+	// newest runs. Selecting it from the same already-open ledger costs nothing
+	// but the scan; a second child process reading the same file would not.
+	const topology = councilTopologies(ledgerRows.slice(0, COUNCIL_TOPOLOGY_MAX_SCAN));
 	const runs: FleetInspectRun[] = [];
 	for (const row of selected) {
 		const model = loadRunViewModel(row.id, { now });
@@ -190,6 +270,48 @@ export function fleetInspectSnapshot(now: () => number = Date.now): FleetInspect
 			stepsTruncated: model.steps.length > visibleSteps.length,
 		});
 	}
+	const councils: FleetInspectCouncil[] = topology.councils.map((council) => ({
+		group: bounded(council.group, IDENTITY_WIDTH),
+		startedAt: council.startedAt,
+		endedAt: council.endedAt,
+		running: council.running,
+		roundsPlanned: council.roundsPlanned,
+		roundsObserved: council.roundsObserved,
+		origin: council.origin,
+		approval: council.approval,
+		members: council.members.map((member) => ({
+			label: bounded(member.label, IDENTITY_WIDTH),
+			agentId: bounded(member.agentId, IDENTITY_WIDTH),
+			target: bounded(member.targetId, IDENTITY_WIDTH),
+			model: bounded(member.wireModelId, IDENTITY_WIDTH),
+			executionRole: member.executionRole,
+			turns: member.turns.map((turn) => ({
+				round: turn.round,
+				runId: bounded(turn.runId, IDENTITY_WIDTH),
+				status: turn.status,
+				outcome: turn.outcome,
+				terminal: turn.terminal,
+			})),
+			turnsTruncated: member.turnsTruncated,
+		})),
+		membersTruncated: council.membersTruncated,
+		membersRejected: council.membersRejected,
+		synthesis: {
+			kind: council.synthesis.kind,
+			sealedRunId: council.synthesis.sealedRunId === null ? null : bounded(council.synthesis.sealedRunId, IDENTITY_WIDTH),
+			judge:
+				council.synthesis.judge === null
+					? null
+					: {
+							runId: bounded(council.synthesis.judge.runId, IDENTITY_WIDTH),
+							agentId: bounded(council.synthesis.judge.agentId, IDENTITY_WIDTH),
+							target: bounded(council.synthesis.judge.targetId, IDENTITY_WIDTH),
+							model: bounded(council.synthesis.judge.wireModelId, IDENTITY_WIDTH),
+							status: council.synthesis.judge.status,
+							outcome: council.synthesis.judge.outcome,
+						},
+		},
+	}));
 	return {
 		version: 1,
 		generatedAt: new Date(now()).toISOString(),
@@ -197,6 +319,8 @@ export function fleetInspectSnapshot(now: () => number = Date.now): FleetInspect
 		truncated: ledgerRows.length > selected.length || runs.length !== selected.length,
 		roots,
 		rootsTruncated: rootRecords.length > selectedRoots.length || roots.length !== selectedRoots.length,
+		councils,
+		councilsTruncated: topology.truncated || ledgerRows.length > COUNCIL_TOPOLOGY_MAX_SCAN,
 	};
 }
 
