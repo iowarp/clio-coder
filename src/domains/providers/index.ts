@@ -30,13 +30,28 @@ export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligi
 export {
 	canonicalEndpointKey,
 	type EndpointCapacity,
+	type EndpointCapacityInput,
 	type EndpointCapacitySource,
+	type EndpointRuntimeIdentity,
+	type EndpointSlotPriors,
 	endpointCapacitiesForStatuses,
+	endpointCapacityFor,
 	endpointCapacityForStatus,
 	endpointLabel,
 	foregroundStreamUsage,
+	recordEndpointSlotsFromStatus,
 	registerForegroundStream,
+	resolveEndpointCapacities,
 } from "./endpoint-capacity.js";
+export {
+	DEFAULT_ENDPOINT_SLOTS_TTL_MS,
+	type DiscoveredEndpointSlots,
+	ENDPOINT_SLOTS_TTL_ENV_VAR,
+	endpointSlotsPath,
+	endpointSlotsTtlMs,
+	readDiscoveredEndpointSlots,
+	recordDiscoveredEndpointSlots,
+} from "./endpoint-slots-store.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";
