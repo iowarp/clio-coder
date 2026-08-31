@@ -173,11 +173,18 @@ describe("contracts/tool admission cost and concurrency", () => {
 		await Promise.all(tools.map((tool, index) => tool.execute(`call-${index}`, {})));
 		const elapsed = performance.now() - started;
 
-		// Serial execution would take BATCH * DELAY_MS. Allow generous slack for
-		// timer skew while still failing loudly on any serialization.
+		// Serial execution would take BATCH * DELAY_MS. The bound sits at two
+		// tools' worth of wall time: one delay for the overlapped batch itself
+		// plus one delay of scheduling slack, so anything that serializes even
+		// three of the five overshoots it. The old failure message quoted
+		// BATCH * DELAY_MS and read as if that were the budget, which made a
+		// 240ms bound look like a 600ms one and hid how little slack the case
+		// actually carries. Say both numbers.
+		const budgetMs = DELAY_MS * 2;
 		ok(
-			elapsed < DELAY_MS * 2,
-			`batch of ${BATCH} ${DELAY_MS}ms read tools took ${elapsed.toFixed(0)}ms; serial would be ~${BATCH * DELAY_MS}ms`,
+			elapsed < budgetMs,
+			`batch of ${BATCH} ${DELAY_MS}ms read tools took ${elapsed.toFixed(0)}ms, over the ${budgetMs}ms budget ` +
+				`(one delay overlapped plus ${DELAY_MS}ms of scheduling slack); serial would be ~${BATCH * DELAY_MS}ms`,
 		);
 	});
 });
