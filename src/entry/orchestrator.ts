@@ -97,6 +97,7 @@ import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-en
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
+import { createMuxDomainModule, type MuxContract } from "../domains/mux/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule, recordBackgroundMemoryStep } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -845,6 +846,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
 
+	// Panes are an interactive-surface projection. Headless, ACP, and worker boots
+	// gate detection off so they never resolve a socket path or open a descriptor.
+	// This mirrors the `interactive` predicate computed after the domains load.
+	const muxEnabled = !options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1";
+
 	const result = await loadDomains(
 		[
 			options.startupSettings ? createConfigDomainModule(options.startupSettings) : ConfigDomainModule,
@@ -874,6 +880,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			SessionDomainModule,
 			ObservabilityDomainModule,
 			SchedulingDomainModule,
+			createMuxDomainModule({
+				enabled: muxEnabled ? "auto" : "off",
+				cwd: process.cwd(),
+				log: (level, message) => {
+					if (level === "warning") bootStderr(`[mux] ${message}\n`);
+				},
+			}),
 			// Dispatch resolves worker targets through the session's effective
 			// settings view once it exists (assigned below, after the config
 			// contract loads); until then it falls back to the shared snapshot.
@@ -943,6 +956,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const resources = result.getContract<ResourcesContract>("resources");
 	const extensions = result.getContract<ExtensionsContract>("extensions");
 	const share = result.getContract<ShareContract>("share");
+	const mux = result.getContract<MuxContract>("mux");
 	const contextDomain = result.getContract<ContextContract>("context");
 	const interop = result.getContract<InteropContract>("interop");
 	// Boot detection resolves paths only: no `--version` subprocess and no skill
@@ -2016,6 +2030,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(extensions ? { extensions } : {}),
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
+		...(mux ? { mux } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),

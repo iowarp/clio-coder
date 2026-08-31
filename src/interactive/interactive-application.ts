@@ -12,6 +12,7 @@ import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
+import type { MuxContract } from "../domains/mux/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -130,6 +131,13 @@ export interface InteractiveDeps {
 	extensions?: ExtensionsContract;
 	interop?: InteropContract;
 	share?: ShareContract;
+	/**
+	 * Pane layer. Absent whenever the mux resolved to `none`, and best-effort even
+	 * when present: a mux failure degrades to `available() === false` and never
+	 * reaches a dispatch or a turn. The dispatch bridge that drives it lands in
+	 * phase 3.
+	 */
+	mux?: MuxContract;
 	/**
 	 * Shared tool registry. When wired, the permission overlay opens automatically
 	 * whenever a tool call is parked waiting for operator confirmation, and the
