@@ -1,9 +1,13 @@
 import { describeYaziProfile, inspectCurrentYaziProfile, resetYaziProfile } from "../domains/mux/index.js";
 import {
+	describeFloorRejection,
 	describeResolution,
 	findPinnedTool,
+	installedToolVersions,
+	installRemedy,
 	installTool,
 	PINNED_TOOLS,
+	removeTool,
 	type ToolStatus,
 	toolStatus,
 	toolStatuses,
@@ -21,8 +25,14 @@ Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
   clio-coder tools status <id> [--json] [--reset-profile]  one tool in detail
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
+  clio-coder tools remove <id> [--json]    delete every vendored version of a tool
 
 Downloads happen only here. Nothing on a startup path fetches anything.
+
+An install keeps one version directory per tool: once the pinned version is in
+place, versions it superseded are pruned. Removal touches nothing outside
+<data>/tools/<id> and needs no confirmation, since every byte under it is
+re-downloadable from the checksum-pinned registry.
 `;
 
 interface Parsed {
@@ -57,6 +67,9 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 		case "install":
 			if (parsed.resetProfile) return invalidResetProfile();
 			return installOne(parsed.positional[0], parsed.force, parsed.json);
+		case "remove":
+			if (parsed.resetProfile) return invalidResetProfile();
+			return removeOne(parsed.positional[0], parsed.json);
 		default:
 			printError(`unknown tools command: ${parsed.command}`);
 			process.stderr.write(HELP);
@@ -116,6 +129,18 @@ function invalidResetProfile(): number {
 	return 2;
 }
 
+/**
+ * The one refusal an unknown id gets, from every verb.
+ *
+ * It names the tools that do exist, because the whole error an operator makes
+ * here is a name: `tools remove herd` and `tools remove tmux` want different
+ * answers, and the registry list gives both of them one.
+ */
+function unknownTool(id: string): number {
+	printError(`unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`);
+	return 2;
+}
+
 function statusTool(id: string | undefined, json: boolean, resetProfile: boolean): number {
 	if (id === undefined) {
 		printError("usage: clio-coder tools status <id>");
@@ -123,8 +148,7 @@ function statusTool(id: string | undefined, json: boolean, resetProfile: boolean
 	}
 	const entry = findPinnedTool(id);
 	if (entry === null) {
-		printError(`unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`);
-		return 2;
+		return unknownTool(id);
 	}
 	if (resetProfile && id !== "yazi") return invalidResetProfile();
 	if (resetProfile) resetYaziProfile();
@@ -136,6 +160,8 @@ function statusTool(id: string | undefined, json: boolean, resetProfile: boolean
 		);
 		return 0;
 	}
+	const rejection = describeFloorRejection(status);
+	const installedVersions = installedToolVersions(entry.id);
 	const lines = [
 		`${entry.id} ${entry.version} (${entry.license})`,
 		`  ${entry.summary}`,
@@ -144,7 +170,17 @@ function statusTool(id: string | undefined, json: boolean, resetProfile: boolean
 		`  PATH floor  ${entry.minimumVersion}`,
 		`  platform    ${status.platform ?? `${process.platform}-${process.arch}`}${status.supported ? "" : " (no pinned asset)"}`,
 		`  vendor dir  ${status.installDir}${status.installed ? "" : " (not installed)"}`,
+		`  vendored    ${installedVersions.length === 0 ? "nothing" : installedVersions.join(", ")}`,
 		`  resolves to ${describeResolution(status)}`,
+		// Spelled out on its own line as well as inside the resolution sentence,
+		// because a rejected PATH copy is the one thing an operator reads this
+		// command to understand and the sentence above may be about something else.
+		...(rejection === null
+			? []
+			: [
+					`  floor       rejected: ${rejection}`,
+					...(status.resolution.source === "none" && status.supported ? [`  remedy      ${installRemedy(entry.id)}`] : []),
+				]),
 		...(profile
 			? [
 					`  profile     ${describeYaziProfile(profile)}`,
@@ -162,8 +198,7 @@ async function installOne(id: string | undefined, force: boolean, json: boolean)
 		return 2;
 	}
 	if (findPinnedTool(id) === null) {
-		printError(`unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`);
-		return 2;
+		return unknownTool(id);
 	}
 	const result = await installTool(id, {
 		force,
@@ -179,6 +214,37 @@ async function installOne(id: string | undefined, force: boolean, json: boolean)
 	}
 	printOk(result.message);
 	for (const path of result.documents) process.stdout.write(`  license  ${path}\n`);
+	for (const version of result.pruned) process.stdout.write(`  pruned   ${id} ${version}\n`);
+	return 0;
+}
+
+/**
+ * Delete a tool's vendored install.
+ *
+ * The two answers an operator can act on are "there was nothing there" and
+ * "these versions are gone", and both are exit 0: the state they asked for
+ * holds either way. Only an id the registry does not know is a usage error,
+ * because that is the one case where nothing was inspected at all.
+ */
+function removeOne(id: string | undefined, json: boolean): number {
+	if (id === undefined) {
+		printError("usage: clio-coder tools remove <id>");
+		return 2;
+	}
+	if (findPinnedTool(id) === null) return unknownTool(id);
+	const result = removeTool(id);
+	if (json) {
+		process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+		return result.ok ? 0 : 1;
+	}
+	if (!result.ok) {
+		printError(result.message);
+		return 1;
+	}
+	printOk(result.message);
+	if (result.removed.length > 0) {
+		process.stdout.write(`  reinstall with \`clio-coder tools install ${id}\`\n`);
+	}
 	return 0;
 }
 
@@ -197,6 +263,13 @@ function jsonShape(status: ToolStatus): Record<string, unknown> {
 		foundVersion: status.resolution.version,
 		minimumVersion: status.resolution.entry?.minimumVersion ?? null,
 		pathCandidate: status.resolution.pathCandidate,
+		// A script deciding whether to warn about a floor rejection should not have
+		// to parse `detail` for it, so the rejection and the command that answers
+		// it are their own fields. `remedy` is null exactly where installing would
+		// change nothing: already vendored, or no asset for this platform.
+		floorRejection: describeFloorRejection(status),
+		remedy: status.resolution.source === "none" && status.supported ? installRemedy(status.id) : null,
+		installedVersions: installedToolVersions(status.id),
 		detail: describeResolution(status),
 	};
 }

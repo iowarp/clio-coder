@@ -67,7 +67,7 @@ Usage:
   clio-coder skills               list, inspect, validate, or install skills
   clio-coder library              list, search, add, or sync agents, prompts, fleets, and skills from catalogs
   clio-coder verifiers            discover, author, validate, edit, or dry-run project checks
-  clio-coder tools list|status|install <id>  pinned external programs Clio can drive
+  clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder panes install        install the pane multiplexer (alias for 'tools install herdr')
   clio-coder docs [topic]         serve the HTML docs of a source checkout on 127.0.0.1 (--no-open to skip browser)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
