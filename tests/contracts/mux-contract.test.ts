@@ -103,6 +103,8 @@ describe("mux contract in none mode", () => {
 			await mux.closeRunPane("r1");
 			await mux.reportRunState("r1", { phase: "planning", agentState: "working" });
 			await mux.notify({ title: "done" });
+			strictEqual(await mux.worktreeCreate({ cwd: "/repo", branch: "candidate", base: "HEAD", path: "/repo/wt" }), null);
+			strictEqual(await mux.worktreeRemove("w2", { force: true }), false);
 			deepStrictEqual([...mux.list()], []);
 			await mux.shutdown();
 
@@ -404,6 +406,67 @@ describe("mux contract in guest mode", () => {
 });
 
 describe("mux contract phase 3 surfaces", () => {
+	it("round-trips the protocol-10 worktree lifecycle through the typed client", async () => {
+		const { fake, client } = await guest();
+		const created = await client.worktreeCreate({
+			cwd: "/repo",
+			branch: "clio/compete/group/1",
+			base: "HEAD",
+			path: "/repo/.clio-coder/worktrees/group/candidate-1",
+			label: "candidate one",
+			focus: false,
+		});
+		strictEqual(created.workspaceId, "w2");
+		strictEqual(created.worktree.branch, "clio/compete/group/1");
+		strictEqual(created.worktree.path, "/repo/.clio-coder/worktrees/group/candidate-1");
+		strictEqual(created.rootPane.workspaceId, "w2");
+
+		const listed = await client.worktreeList({ cwd: "/repo" });
+		strictEqual(listed.source.repoRoot, "/repo");
+		strictEqual(listed.worktrees.length, 1);
+		strictEqual(listed.worktrees[0]?.openWorkspaceId, "w2");
+
+		const opened = await client.worktreeOpen({ path: created.worktree.path, focus: false });
+		strictEqual(opened.alreadyOpen, true);
+		strictEqual(opened.workspaceId, created.workspaceId);
+
+		const removed = await client.worktreeRemove(created.workspaceId, { force: true });
+		strictEqual(removed.path, created.worktree.path);
+		strictEqual(removed.forced, true);
+		strictEqual(fake.worktrees().length, 0);
+		deepStrictEqual(
+			fake.requestsFor("worktree.create")[0]?.params,
+			{
+				cwd: "/repo",
+				branch: "clio/compete/group/1",
+				base: "HEAD",
+				path: "/repo/.clio-coder/worktrees/group/candidate-1",
+				label: "candidate one",
+				focus: false,
+			},
+			"the 0.8.2-only trust_repository option stays absent for 0.7.5 compatibility",
+		);
+	});
+
+	it("gates worktree mutation below protocol 10", async () => {
+		const fake = await startFakeHerdrServer({ protocol: 9, version: "0.3.0" });
+		servers.push(fake);
+		const detection = await detectMux({
+			env: { HERDR_ENV: "1", HERDR_SOCKET_PATH: fake.socketPath, HERDR_WORKSPACE_ID: "w1" },
+			openClient: (socketPath) => createMuxClient({ socketPath, requestTimeoutMs: 1_500, connectTimeoutMs: 500 }),
+		});
+		ok(detection.client);
+		const runtime = createMuxRuntime({ detection: detection.detection, client: detection.client });
+		runtimes.push(runtime);
+		strictEqual(
+			await runtime.contract.worktreeCreate({ cwd: "/repo", branch: "candidate", base: "HEAD", path: "/repo/wt" }),
+			null,
+		);
+		strictEqual(await runtime.contract.worktreeRemove("w2", { force: true }), false);
+		strictEqual(fake.requestsFor("worktree.create").length, 0);
+		strictEqual(fake.requestsFor("worktree.remove").length, 0);
+	});
+
 	it("falls back to tab.focus when agent.focus cannot resolve the pane", async () => {
 		const { fake, runtime } = await guest();
 		const mux = runtime.contract;

@@ -83,6 +83,12 @@ function fakeMux(): FakeMux {
 		},
 		async reportRunState(): Promise<void> {},
 		async notify(): Promise<void> {},
+		async worktreeCreate(): Promise<null> {
+			return null;
+		},
+		async worktreeRemove(): Promise<boolean> {
+			return false;
+		},
 		async adoptRunPanes(_runs: ReadonlyArray<MuxAdoptableRun>): Promise<ReadonlyArray<string>> {
 			return [];
 		},

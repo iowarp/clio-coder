@@ -34,7 +34,7 @@ import {
 } from "node:fs";
 import { hostname } from "node:os";
 import { join, relative, resolve } from "node:path";
-import type { RunKind } from "../domains/dispatch/types.js";
+import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
 import {
 	commitWorktreePath,
 	isCanonicalWorktreePathInside,
@@ -47,6 +47,24 @@ export interface CandidateWorktree {
 	index: number;
 	branch: string;
 	path: string;
+	provenance?: RunGateWorktreeProvenance;
+}
+
+/** Narrow mux surface used by compete; the native functions remain usable alone. */
+export interface CompeteMuxWorktrees {
+	available(): boolean;
+	worktreeCreate(request: {
+		cwd: string;
+		branch: string;
+		base: string;
+		path: string;
+		label: string;
+		focus: boolean;
+	}): Promise<{
+		workspaceId: string;
+		worktree: { path: string; branch: string | null };
+	} | null>;
+	worktreeRemove(workspaceId: string, options?: { force?: boolean }): Promise<boolean>;
 }
 
 export type CompeteGroupState = "active" | "cleanup-ready" | "winner-preserved";
@@ -547,6 +565,52 @@ export function createCandidateWorktree(
 }
 
 /**
+ * Prefer herdr's worktree lifecycle while preserving Git as the recovery
+ * authority. A failed or vanished mux is deliberately indistinguishable from
+ * no mux to the caller except for the receipt provenance returned here.
+ */
+export async function createCandidateWorktreeMapped(
+	ownership: CompeteGroupOwnership,
+	index: number,
+	baseline: string,
+	mux?: CompeteMuxWorktrees,
+): Promise<CandidateWorktree> {
+	assertOwnership(ownership);
+	const branch = competeBranch(ownership.group, index);
+	const path = join(ownership.directory, `candidate-${index}`);
+	if (!isCanonicalPathInside(ownership.directory, path)) {
+		throw new Error(`candidate ${index} path escapes compete group ${ownership.group}`);
+	}
+	let fallback: RunGateWorktreeProvenance["fallback"] = "mux-unavailable";
+	if (mux?.available()) {
+		const created = await mux
+			.worktreeCreate({
+				cwd: ownership.root,
+				branch,
+				base: baseline,
+				path,
+				label: `clio compete ${ownership.group} candidate ${index}`,
+				focus: false,
+			})
+			.catch(() => null);
+		if (created !== null) {
+			if (resolve(created.worktree.path) !== resolve(path) || created.worktree.branch !== branch) {
+				throw new Error(`herdr created candidate ${index} at an unexpected path or branch`);
+			}
+			return {
+				index,
+				branch,
+				path,
+				provenance: { backend: "herdr", path, branch, workspaceId: created.workspaceId },
+			};
+		}
+		fallback = "mux-operation-failed";
+	}
+	const native = createCandidateWorktree(ownership, index, baseline);
+	return { ...native, provenance: { backend: "native", path, branch, fallback } };
+}
+
+/**
  * Seal a candidate's work as one commit on its branch. Returns false when the
  * builder changed nothing (an empty candidate is a legitimate ranking fact).
  */
@@ -605,7 +669,7 @@ function removeRegisteredWorktree(root: string, path: string): void {
 	}
 }
 
-export function removeCandidateWorktree(
+function removeCandidateWorktree(
 	ownership: CompeteGroupOwnership,
 	worktree: CandidateWorktree,
 	deleteBranch: boolean,
@@ -631,6 +695,23 @@ export function removeCandidateWorktree(
 	if (stillRegistered || existsSync(worktree.path) || branchRemains) {
 		throw new Error(`failed to remove candidate ${worktree.index} from compete group ${ownership.group}`);
 	}
+}
+
+/** Remove through herdr when it owns the workspace, then verify with Git. */
+export async function removeCandidateWorktreeMapped(
+	ownership: CompeteGroupOwnership,
+	worktree: CandidateWorktree,
+	deleteBranch: boolean,
+	mux?: CompeteMuxWorktrees,
+): Promise<void> {
+	const workspaceId = worktree.provenance?.backend === "herdr" ? worktree.provenance.workspaceId : undefined;
+	if (workspaceId && mux?.available()) {
+		await mux.worktreeRemove(workspaceId, { force: true }).catch(() => false);
+	}
+	// This is both the native fallback after mux loss and the postcondition check
+	// after a successful RPC. It prunes an already-removed path harmlessly and
+	// removes the candidate branch, which worktree.remove does not promise to do.
+	removeCandidateWorktree(ownership, worktree, deleteBranch);
 }
 
 /**

@@ -57,7 +57,7 @@ import {
 	claimCompeteGroup,
 	cleanupCompeteGroup,
 	commitCandidateWork,
-	createCandidateWorktree,
+	createCandidateWorktreeMapped,
 	isGitRepository,
 	loadCompeteGroup,
 	markCompeteGroupCleanupReady,
@@ -66,7 +66,7 @@ import {
 	protectedPathsChangedByCompeteBranch,
 	recoverCleanupReadyCompeteGroups,
 	registerCompeteGroupRun,
-	removeCandidateWorktree,
+	removeCandidateWorktreeMapped,
 	settleCompeteGroupRun,
 	settleRecoveredCompeteDecision,
 } from "./compete-worktrees.js";
@@ -1256,10 +1256,14 @@ async function runCompete(
 			// every branch and worktree created below is covered by finalization.
 			ownership = claimCompeteGroup(requestedRoot, group);
 			const root = ownership.root;
-			const createCandidate = deps.competeWorktrees?.createCandidate ?? createCandidateWorktree;
 			for (let index = 1; index <= compete.candidates; index += 1) {
 				throwIfStopped();
-				worktrees.push(createCandidate(ownership, index, "HEAD"));
+				const customCreate = deps.competeWorktrees?.createCandidate;
+				worktrees.push(
+					await (customCreate
+						? customCreate(ownership, index, "HEAD")
+						: createCandidateWorktreeMapped(ownership, index, "HEAD", deps.competeWorktrees?.mux)),
+				);
 			}
 
 			if (timeoutMs !== undefined) {
@@ -1288,7 +1292,12 @@ async function runCompete(
 						executionRole: "builder",
 						cwd: worktree.path,
 						protectedArtifactRemap: { sourceRoot: root, workerRoot: worktree.path },
-						gate: { role: "candidate", group, cycle: worktree.index },
+						gate: {
+							role: "candidate",
+							group,
+							cycle: worktree.index,
+							...(worktree.provenance ? { worktree: worktree.provenance } : {}),
+						},
 						ledger,
 						competeStance: COMPETE_STANCES[(worktree.index - 1) % COMPETE_STANCES.length] as CompeteStance,
 					};
@@ -1524,7 +1533,7 @@ async function runCompete(
 				for (const worktree of worktrees) {
 					if (worktree.index === winnerAtFinalization.index) continue;
 					try {
-						removeCandidateWorktree(ownership, worktree, true);
+						await removeCandidateWorktreeMapped(ownership, worktree, true, deps.competeWorktrees?.mux);
 					} catch (err) {
 						finalizationErrors.push(err);
 					}
@@ -1541,8 +1550,13 @@ async function runCompete(
 				finalizationErrors.push(err);
 			}
 			try {
+				if (deps.competeWorktrees?.mux) {
+					for (const worktree of worktrees) {
+						await removeCandidateWorktreeMapped(ownership, worktree, true, deps.competeWorktrees.mux);
+					}
+				}
 				const cleanupGroup = deps.competeWorktrees?.cleanupGroup ?? cleanupCompeteGroup;
-				cleanupGroup(ownership);
+				await cleanupGroup(ownership);
 			} catch (err) {
 				finalizationErrors.push(err);
 			}

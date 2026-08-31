@@ -44,6 +44,8 @@ import {
 	type MuxServerInfo,
 	type MuxSnapshot,
 	type MuxTab,
+	type MuxWorktree,
+	type MuxWorktreeSource,
 	muxErrorKind,
 } from "./types.js";
 
@@ -134,6 +136,48 @@ export interface MuxNotificationResult {
 	reason: string;
 }
 
+export interface MuxWorktreeListRequest {
+	workspaceId?: string;
+	cwd?: string;
+}
+
+export interface MuxWorktreeCreateRequest extends MuxWorktreeListRequest {
+	branch?: string;
+	base?: string;
+	path?: string;
+	label?: string;
+	focus?: boolean;
+}
+
+export interface MuxWorktreeOpenRequest extends MuxWorktreeListRequest {
+	branch?: string;
+	path?: string;
+	label?: string;
+	focus?: boolean;
+}
+
+export interface MuxWorktreeListResult {
+	source: MuxWorktreeSource;
+	worktrees: ReadonlyArray<MuxWorktree>;
+}
+
+export interface MuxWorktreeCreatedResult {
+	workspaceId: string;
+	tab: MuxTab;
+	rootPane: MuxPane;
+	worktree: MuxWorktree;
+}
+
+export interface MuxWorktreeOpenedResult extends MuxWorktreeCreatedResult {
+	alreadyOpen: boolean;
+}
+
+export interface MuxWorktreeRemovedResult {
+	workspaceId: string;
+	path: string;
+	forced: boolean;
+}
+
 /**
  * The domain-facing surface. Phase 1 covers exactly the wire methods spec 4.3
  * lists for this phase, plus `pane.send_text`, `pane.report_agent`,
@@ -160,6 +204,10 @@ export interface MuxClient {
 	tabCreate(request: MuxTabCreateRequest): Promise<{ tab: MuxTab; rootPane: MuxPane }>;
 	tabList(workspaceId?: string): Promise<ReadonlyArray<MuxTab>>;
 	tabFocus(tabId: string): Promise<MuxTab>;
+	worktreeList(request?: MuxWorktreeListRequest): Promise<MuxWorktreeListResult>;
+	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult>;
+	worktreeOpen(request: MuxWorktreeOpenRequest): Promise<MuxWorktreeOpenedResult>;
+	worktreeRemove(workspaceId: string, options?: { force?: boolean }): Promise<MuxWorktreeRemovedResult>;
 	/**
 	 * Deliver a command line into a pane's shell. herdr has no argv parameter on
 	 * `pane.split`, so this is the only way an argv utility pane can run what it
@@ -324,6 +372,33 @@ function readTab(value: unknown): MuxTab {
 		focused: source.focused === true,
 		paneCount: typeof paneCount === "number" ? paneCount : 0,
 		agentState: readAgentState(source.agent_status),
+	};
+}
+
+function readWorktree(value: unknown): MuxWorktree {
+	const source = asRecord(value);
+	if (!source) throw new MuxError("protocol", "mux worktree response is not an object");
+	return {
+		path: requireString(source, "path", "worktree"),
+		branch: optionalString(source, "branch"),
+		isBare: source.is_bare === true,
+		isDetached: source.is_detached === true,
+		isPrunable: source.is_prunable === true,
+		isLinkedWorktree: source.is_linked_worktree === true,
+		openWorkspaceId: optionalString(source, "open_workspace_id"),
+		label: optionalString(source, "label") ?? "",
+	};
+}
+
+function readWorktreeSource(value: unknown): MuxWorktreeSource {
+	const source = asRecord(value);
+	if (!source) throw new MuxError("protocol", "mux worktree source response is not an object");
+	return {
+		repoKey: requireString(source, "repo_key", "worktree source"),
+		repoName: requireString(source, "repo_name", "worktree source"),
+		repoRoot: requireString(source, "repo_root", "worktree source"),
+		sourceCheckoutPath: requireString(source, "source_checkout_path", "worktree source"),
+		sourceWorkspaceId: optionalString(source, "source_workspace_id"),
 	};
 }
 
@@ -669,6 +744,65 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		async tabFocus(tabId: string): Promise<MuxTab> {
 			const result = await callObject("tab.focus", { tab_id: tabId });
 			return readTab(result.tab);
+		},
+		async worktreeList(request = {}): Promise<MuxWorktreeListResult> {
+			const result = await callObject("worktree.list", params({ workspace_id: request.workspaceId, cwd: request.cwd }));
+			return { source: readWorktreeSource(result.source), worktrees: readArray(result, "worktrees").map(readWorktree) };
+		},
+		async worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult> {
+			const result = await callObject(
+				"worktree.create",
+				params({
+					workspace_id: request.workspaceId,
+					cwd: request.cwd,
+					branch: request.branch,
+					base: request.base,
+					path: request.path,
+					label: request.label,
+					focus: request.focus ?? false,
+				}),
+			);
+			const workspace = asRecord(result.workspace);
+			if (!workspace) throw new MuxError("protocol", "mux worktree.create returned no workspace");
+			return {
+				workspaceId: requireString(workspace, "workspace_id", "workspace"),
+				tab: readTab(result.tab),
+				rootPane: readPane(result.root_pane),
+				worktree: readWorktree(result.worktree),
+			};
+		},
+		async worktreeOpen(request: MuxWorktreeOpenRequest): Promise<MuxWorktreeOpenedResult> {
+			const result = await callObject(
+				"worktree.open",
+				params({
+					workspace_id: request.workspaceId,
+					cwd: request.cwd,
+					branch: request.branch,
+					path: request.path,
+					label: request.label,
+					focus: request.focus ?? false,
+				}),
+			);
+			const workspace = asRecord(result.workspace);
+			if (!workspace) throw new MuxError("protocol", "mux worktree.open returned no workspace");
+			return {
+				workspaceId: requireString(workspace, "workspace_id", "workspace"),
+				tab: readTab(result.tab),
+				rootPane: readPane(result.root_pane),
+				worktree: readWorktree(result.worktree),
+				alreadyOpen: result.already_open === true,
+			};
+		},
+		async worktreeRemove(workspaceId: string, removeOptions = {}): Promise<MuxWorktreeRemovedResult> {
+			const result = await callObject("worktree.remove", {
+				workspace_id: workspaceId,
+				force: removeOptions.force ?? false,
+			});
+			return {
+				workspaceId: requireString(result, "workspace_id", "worktree.remove"),
+				path: requireString(result, "path", "worktree.remove"),
+				forced: result.forced === true,
+			};
 		},
 		async paneSendText(paneId: string, text: string): Promise<void> {
 			await call("pane.send_text", { pane_id: paneId, text });

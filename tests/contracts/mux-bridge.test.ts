@@ -121,6 +121,12 @@ function fakeMux(options: { available?: boolean } = {}): FakeMux {
 		async notify(request: MuxNotifyRequest): Promise<void> {
 			calls.push({ kind: "notify", request });
 		},
+		async worktreeCreate(): Promise<null> {
+			return null;
+		},
+		async worktreeRemove(): Promise<boolean> {
+			return false;
+		},
 		async adoptRunPanes(runs: ReadonlyArray<MuxAdoptableRun>): Promise<ReadonlyArray<string>> {
 			const claimed = runs.filter((run) => adoptable.has(run.runId));
 			calls.push({ kind: "adopt", runIds: claimed.map((run) => run.runId) });
