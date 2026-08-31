@@ -25,14 +25,15 @@ Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
   clio-coder tools status <id> [--json] [--reset-profile]  one tool in detail
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
-  clio-coder tools remove <id> [--json]    delete every vendored version of a tool
+  clio-coder tools remove <id>|--all [--json]  delete every vendored version of a tool
 
 Downloads happen only here. Nothing on a startup path fetches anything.
 
 An install keeps one version directory per tool: once the pinned version is in
-place, versions it superseded are pruned. Removal touches nothing outside
-<data>/tools/<id> and needs no confirmation, since every byte under it is
-re-downloadable from the checksum-pinned registry.
+place, versions it superseded are pruned, along with any staging directory left
+by an install that was killed. Removal touches nothing outside <data>/tools/<id>
+and needs no confirmation, since every byte under it is re-downloadable from the
+checksum-pinned registry. "remove --all" sweeps every tool in the table.
 `;
 
 interface Parsed {
@@ -40,6 +41,7 @@ interface Parsed {
 	positional: string[];
 	json: boolean;
 	force: boolean;
+	all: boolean;
 	resetProfile: boolean;
 	help: boolean;
 }
@@ -58,6 +60,13 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 		return parsed.help ? 0 : 2;
 	}
 
+	// `--all` belongs to `remove` alone. Silently ignoring it elsewhere would let
+	// `tools install --all` read as a request that was honored.
+	if (parsed.all && parsed.command !== "remove") {
+		printError("--all is only valid with `tools remove`");
+		return 2;
+	}
+
 	switch (parsed.command) {
 		case "list":
 			if (parsed.resetProfile) return invalidResetProfile();
@@ -69,7 +78,7 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			return installOne(parsed.positional[0], parsed.force, parsed.json);
 		case "remove":
 			if (parsed.resetProfile) return invalidResetProfile();
-			return removeOne(parsed.positional[0], parsed.json);
+			return parsed.all ? removeAll(parsed.positional[0], parsed.json) : removeOne(parsed.positional[0], parsed.json);
 		default:
 			printError(`unknown tools command: ${parsed.command}`);
 			process.stderr.write(HELP);
@@ -78,7 +87,7 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
-	const out: Parsed = { positional: [], json: false, force: false, resetProfile: false, help: false };
+	const out: Parsed = { positional: [], json: false, force: false, all: false, resetProfile: false, help: false };
 	for (const arg of argv) {
 		if (!out.command && !arg.startsWith("-")) {
 			out.command = arg;
@@ -91,6 +100,9 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 			case "--force":
 			case "-f":
 				out.force = true;
+				break;
+			case "--all":
+				out.all = true;
 				break;
 			case "--reset-profile":
 				out.resetProfile = true;
@@ -243,9 +255,43 @@ function removeOne(id: string | undefined, json: boolean): number {
 	}
 	printOk(result.message);
 	if (result.removed.length > 0) {
-		process.stdout.write(`  reinstall with \`clio-coder tools install ${id}\`\n`);
+		process.stdout.write(`  reinstall with \`${installRemedy(id)}\`\n`);
 	}
 	return 0;
+}
+
+/**
+ * Delete every pinned tool's vendored install.
+ *
+ * Each tool is swept independently and the exit code is the worst of them, so
+ * one directory that resists deletion does not hide the two that came off
+ * cleanly. Tools that had nothing installed are counted rather than listed:
+ * on the machine this verb is for, most of the registry is usually absent, and
+ * three lines of "nothing to remove" would bury the one line that matters.
+ */
+function removeAll(id: string | undefined, json: boolean): number {
+	if (id !== undefined) {
+		printError("`tools remove --all` takes no tool id; drop the id or drop --all");
+		return 2;
+	}
+	const results = PINNED_TOOLS.map((entry) => removeTool(entry.id));
+	if (json) {
+		process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
+		return results.every((result) => result.ok) ? 0 : 1;
+	}
+	for (const result of results) {
+		if (!result.ok) printError(result.message);
+		else if (result.removed.length > 0 || result.staleStaging.length > 0) printOk(result.message);
+	}
+	const touched = results.filter((result) => result.ok && result.removed.length > 0);
+	const untouched = results.filter((result) => result.ok && result.removed.length === 0);
+	if (touched.length > 0) {
+		process.stdout.write(`  reinstall with \`clio-coder tools install <id>\`\n`);
+	}
+	if (untouched.length > 0) {
+		process.stdout.write(`  ${untouched.length} of ${results.length} had nothing vendored\n`);
+	}
+	return results.every((result) => result.ok) ? 0 : 1;
 }
 
 /** The JSON surface, flattened so a script does not have to walk the resolution. */
