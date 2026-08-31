@@ -260,7 +260,14 @@ describe("contracts/list-overlay", () => {
 			requestRender: () => undefined,
 		} as unknown as TUI;
 
-		openListOverlay(tui, { title: "Memory", items, filterable: true, layout: "split", onClose: () => {} });
+		openListOverlay(tui, {
+			markerId: "memory",
+			title: "Memory",
+			items,
+			filterable: true,
+			layout: "split",
+			onClose: () => {},
+		});
 		if (mounted === null) throw new Error("the list overlay was not mounted");
 		const frame = mounted as Component;
 		const footer = (): string => stripAnsi(frame.render(73).at(-1) ?? "");
@@ -435,6 +442,7 @@ describe("contracts/list-overlay", () => {
 		} as unknown as TUI;
 
 		const handle = openListOverlay(tui, {
+			markerId: "test",
 			title: "Test",
 			items: [{ id: "1", label: "Apple" }],
 			filterable: true,

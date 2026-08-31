@@ -114,7 +114,7 @@ describe("contracts/overlay-frame row ownership", () => {
 			},
 		} as unknown as TUI;
 
-		showClioOverlayFrame(tui, bodyOf(["body"]), { anchor: "center", width: 44, title: "Memory" });
+		showClioOverlayFrame(tui, bodyOf(["body"]), { anchor: "center", width: 44, markerId: "memory", title: "Memory" });
 
 		strictEqual(seen?.width, "100%");
 		strictEqual(seen?.anchor, "center");
@@ -165,6 +165,7 @@ describe("contracts/overlay-frame row ownership", () => {
 			width: 40,
 			maxHeight: "50%",
 			margin: 1,
+			markerId: "settings",
 			title: "Settings",
 			footerHint: "[Esc] close",
 		});
@@ -229,6 +230,7 @@ describe("contracts/overlay-frame row ownership", () => {
 		showClioOverlayFrame(tui, createPermissionOverlayBody(view), {
 			...permissionOverlayPlacement(tui, editor, footer),
 			width: PERMISSION_OVERLAY_WIDTH,
+			markerId: "permission-confirm",
 			title: permissionOverlayTitle(view),
 			tone: permissionOverlayTone(view),
 			footerHint: permissionOverlayHint,
