@@ -17,14 +17,17 @@ import type { PinnedTool, ToolPlatform } from "./types.js";
  * machine already has, and the installer prunes it, so a tool holds exactly one
  * version directory.
  *
- * `minimumVersion` is the floor a copy already on PATH has to clear. The floors
- * stay conservative on purpose: the vendored pin is the supported path, and a
- * release Clio was never run against is not something to discover through a
- * failure that looks like a bug in the feature. The cost lands on an operator
- * whose own herdr or yazi is a release or two behind, so `describeResolution`
- * in `resolve.ts` is required to name what it found, the floor it missed, and
- * the command that fixes it. Lower a floor deliberately, naming a release whose
- * surface was actually exercised, not because a rejection was noisy.
+ * `minimumVersion` is the floor a copy already on PATH has to clear. A floor
+ * moves on evidence and on nothing else: name the older release, say which of
+ * its surfaces you exercised and how, and put that in the comment beside the
+ * number. A rejection that felt noisy is not evidence. Where no such
+ * measurement exists the floor sits at the pin, because a release Clio was
+ * never run against is not something to discover through a failure that reads
+ * as a bug in the feature.
+ *
+ * The cost of a floor lands on an operator whose own copy is a release or two
+ * behind, so `describeResolution` in `resolve.ts` is required to name what it
+ * found, the floor it missed, and the command that fixes it.
  */
 export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 	{
@@ -35,10 +38,16 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		license: "Apache-2.0",
 		binaries: ["herdr"],
 		primaryBinary: "herdr",
-		// The socket surface Clio's mux domain drives is only verified against
-		// the pin, so the pin is also the floor. Lower it deliberately, with a
-		// version whose `herdr api schema --json` was actually checked.
-		minimumVersion: "0.8.2",
+		// Lowered from the pin on evidence, which is the bar this file sets for
+		// moving a floor. `herdr api schema --json` was read from 0.7.5
+		// (protocol 17) and 0.8.2 (protocol 20): every method the mux domain
+		// sends exists in both, and the only two 0.8.2 adds, `workspace.move_block`
+		// and `workspace.reordered`, are ones Clio never sends. The two methods
+		// that are not universal are already gated at runtime by protocol number
+		// in `src/domains/mux/protocol.ts`, whose own floor is 17, so an operator's
+		// 0.7.5 takes the documented fallback rather than failing. 0.7.5 is the
+		// oldest release actually checked, not the oldest that might work.
+		minimumVersion: "0.7.5",
 		versionArgs: ["--version"],
 		downloads: {
 			"linux-x64": {
@@ -88,9 +97,15 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		license: "MIT",
 		binaries: ["yazi", "ya"],
 		primaryBinary: "yazi",
-		// Yazi versions by date and moves its plugin and DDS surfaces between
-		// releases, so the floor stays at the pin until a round trip pins the
-		// oldest release it actually works against.
+		// Stays at the pin, now for a measured reason rather than caution. On
+		// 26.1.22 the one command Clio sends, `ya emit-to <receiver> cd <path>`,
+		// has the same signature it has at the pin. What was never exercised
+		// there is the rest of the surface: the managed profile Clio generates
+		// (`yazi.toml`, `keymap.toml`, `init.lua`) and the DDS payload shapes a
+		// pick comes back in. A profile schema mismatch degrades quietly into a
+		// file manager that opens and does the wrong thing, which is worse than
+		// vendoring a second copy. Lower this once a pick round trip has been
+		// driven end to end on the older release.
 		minimumVersion: "26.8.15",
 		versionArgs: ["--version"],
 		downloads: {
