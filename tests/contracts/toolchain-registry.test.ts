@@ -44,6 +44,7 @@ import { resolveBinary } from "../../src/tools/executables.js";
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+const FOUR_NATIVE_PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
 
 describe("toolchain registry table", () => {
 	it("gives every entry a version, a license, binaries, and a PATH floor", () => {
@@ -68,7 +69,16 @@ describe("toolchain registry table", () => {
 		strictEqual(byId.get("croc")?.license, "MIT");
 	});
 
-	it("carries a sha256 for every declared platform and every side document", () => {
+	it("declares every native Linux and macOS platform published for the pins", () => {
+		const byId = new Map(PINNED_TOOLS.map((entry) => [entry.id, entry]));
+		for (const id of ["herdr", "yazi", "croc"]) {
+			const entry = byId.get(id);
+			ok(entry !== undefined, `${id} is pinned`);
+			deepStrictEqual(Object.keys(entry.downloads).sort(), FOUR_NATIVE_PLATFORMS, `${id} has all four assets`);
+		}
+	});
+
+	it("carries a well-formed url and sha256 for every declared platform and side document", () => {
 		for (const entry of PINNED_TOOLS) {
 			const platforms = Object.entries(entry.downloads);
 			ok(platforms.length > 0, `${entry.id} declares at least one platform`);
