@@ -40,6 +40,12 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	frameStrong: { rgb: [42, 171, 158], xterm: 37 },
 };
 
+/** The canonical lowercase `#rrggbb` value for one Clio theme token. */
+export function tokenHex(token: ClioToken): string {
+	const [red, green, blue] = TOKENS[token].rgb;
+	return `#${[red, green, blue].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export const SGR_RESET = "\u001b[0m";
 export const SGR_DIM = "\u001b[2m";
 

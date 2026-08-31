@@ -32,3 +32,11 @@ croc (https://schollz.com/software/croc6, https://github.com/schollz/croc)
   Copyright Zack Scholl and the croc authors.
   Licensed under the MIT License.
   Used as the relay file-transfer backend for machine-to-machine transfers.
+
+--------------------------------------------------------------------
+Vendored components
+
+git.yazi (https://github.com/yazi-rs/plugins/tree/main/git.yazi)
+  Copyright 2023 the yazi-rs authors.
+  Licensed under the MIT License.
+  Vendored as source with its LICENSE under the managed file-pane profile.

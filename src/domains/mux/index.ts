@@ -57,3 +57,20 @@ export {
 	muxErrorKind,
 } from "./types.js";
 export { clioCliEntryPath, runViewerCommand, type ViewerCommandOptions } from "./viewer-command.js";
+export {
+	describeYaziProfile,
+	ensureYaziProfile,
+	hashYaziAssetTree,
+	inspectCurrentYaziProfile,
+	inspectYaziProfile,
+	renderYaziKeymap,
+	resetYaziProfile,
+	userYaziConfigDir,
+	type YaziProfile,
+	type YaziProfileInspection,
+	type YaziProfileOptions,
+	type YaziProfileStamp,
+	type YaziProfileState,
+	yaziProfileDir,
+} from "./yazi/profile.js";
+export { renderYaziTheme } from "./yazi/theme.js";

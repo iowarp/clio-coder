@@ -1,3 +1,4 @@
+import { describeYaziProfile, inspectCurrentYaziProfile, resetYaziProfile } from "../domains/mux/index.js";
 import {
 	describeResolution,
 	findPinnedTool,
@@ -18,7 +19,7 @@ wins over Clio's own as long as it clears the pinned minimum.
 
 Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
-  clio-coder tools status <id> [--json]    one tool in detail
+  clio-coder tools status <id> [--json] [--reset-profile]  one tool in detail
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
 
 Downloads happen only here. Nothing on a startup path fetches anything.
@@ -29,6 +30,7 @@ interface Parsed {
 	positional: string[];
 	json: boolean;
 	force: boolean;
+	resetProfile: boolean;
 	help: boolean;
 }
 
@@ -48,10 +50,12 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 
 	switch (parsed.command) {
 		case "list":
+			if (parsed.resetProfile) return invalidResetProfile();
 			return listTools(parsed.json);
 		case "status":
-			return statusTool(parsed.positional[0], parsed.json);
+			return statusTool(parsed.positional[0], parsed.json, parsed.resetProfile);
 		case "install":
+			if (parsed.resetProfile) return invalidResetProfile();
 			return installOne(parsed.positional[0], parsed.force, parsed.json);
 		default:
 			printError(`unknown tools command: ${parsed.command}`);
@@ -61,7 +65,7 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
-	const out: Parsed = { positional: [], json: false, force: false, help: false };
+	const out: Parsed = { positional: [], json: false, force: false, resetProfile: false, help: false };
 	for (const arg of argv) {
 		if (!out.command && !arg.startsWith("-")) {
 			out.command = arg;
@@ -74,6 +78,9 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 			case "--force":
 			case "-f":
 				out.force = true;
+				break;
+			case "--reset-profile":
+				out.resetProfile = true;
 				break;
 			case "--help":
 			case "-h":
@@ -104,7 +111,12 @@ function listTools(json: boolean): number {
 	return 0;
 }
 
-function statusTool(id: string | undefined, json: boolean): number {
+function invalidResetProfile(): number {
+	printError("--reset-profile is only valid with `tools status yazi`");
+	return 2;
+}
+
+function statusTool(id: string | undefined, json: boolean, resetProfile: boolean): number {
 	if (id === undefined) {
 		printError("usage: clio-coder tools status <id>");
 		return 2;
@@ -114,9 +126,14 @@ function statusTool(id: string | undefined, json: boolean): number {
 		printError(`unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`);
 		return 2;
 	}
+	if (resetProfile && id !== "yazi") return invalidResetProfile();
+	if (resetProfile) resetYaziProfile();
 	const status = toolStatus(entry);
+	const profile = id === "yazi" ? inspectCurrentYaziProfile() : null;
 	if (json) {
-		process.stdout.write(`${JSON.stringify(jsonShape(status), null, 2)}\n`);
+		process.stdout.write(
+			`${JSON.stringify({ ...jsonShape(status), ...(profile ? { profile, profileReset: resetProfile } : {}) }, null, 2)}\n`,
+		);
 		return 0;
 	}
 	const lines = [
@@ -128,6 +145,12 @@ function statusTool(id: string | undefined, json: boolean): number {
 		`  platform    ${status.platform ?? `${process.platform}-${process.arch}`}${status.supported ? "" : " (no pinned asset)"}`,
 		`  vendor dir  ${status.installDir}${status.installed ? "" : " (not installed)"}`,
 		`  resolves to ${describeResolution(status)}`,
+		...(profile
+			? [
+					`  profile     ${describeYaziProfile(profile)}`,
+					...(resetProfile ? ["  profile reset; next open regenerates it"] : []),
+				]
+			: []),
 	];
 	process.stdout.write(`${lines.join("\n")}\n`);
 	return 0;
