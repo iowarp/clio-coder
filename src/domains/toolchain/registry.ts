@@ -13,7 +13,18 @@ import type { PinnedTool, ToolPlatform } from "./types.js";
  *
  * Bumping a version means re-downloading each listed asset and re-computing
  * each hash. The registry-shape contract test refuses an entry that carries a
- * platform without a checksum.
+ * platform without a checksum. A bump also supersedes whatever version the
+ * machine already has, and the installer prunes it, so a tool holds exactly one
+ * version directory.
+ *
+ * `minimumVersion` is the floor a copy already on PATH has to clear. The floors
+ * stay conservative on purpose: the vendored pin is the supported path, and a
+ * release Clio was never run against is not something to discover through a
+ * failure that looks like a bug in the feature. The cost lands on an operator
+ * whose own herdr or yazi is a release or two behind, so `describeResolution`
+ * in `resolve.ts` is required to name what it found, the floor it missed, and
+ * the command that fixes it. Lower a floor deliberately, naming a release whose
+ * surface was actually exercised, not because a rejection was noisy.
  */
 export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 	{
