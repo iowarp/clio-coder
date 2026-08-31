@@ -1,4 +1,5 @@
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
+import { describeYaziProfile, inspectCurrentYaziProfile } from "../domains/mux/index.js";
 import { describeResolution, toolStatuses } from "../domains/toolchain/index.js";
 
 /**
@@ -11,10 +12,20 @@ import { describeResolution, toolStatuses } from "../domains/toolchain/index.js"
  * panes has a healthy install without them.
  */
 export function toolchainFindings(): DoctorFinding[] {
-	return toolStatuses().map((status) => ({
+	const tools = toolStatuses().map((status) => ({
 		ok: true,
 		name: `external tool ${status.id}`,
 		detail: describeResolution(status),
 		level: status.resolution.source === "none" ? ("warn" as const) : ("ok" as const),
 	}));
+	const profile = inspectCurrentYaziProfile();
+	return [
+		...tools,
+		{
+			ok: true,
+			name: "yazi managed profile",
+			detail: describeYaziProfile(profile),
+			level: profile.state === "current" ? ("ok" as const) : ("warn" as const),
+		},
+	];
 }
