@@ -8,7 +8,9 @@
  * the strings is asserting what an operator sees.
  */
 
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	FLEET_INSPECT_MAX_EVENTS,
@@ -17,7 +19,9 @@ import {
 	FLEET_INSPECT_MAX_STEPS,
 	fleetInspectSnapshot,
 } from "../../src/cli/fleet-inspect.js";
+import { FleetVerifyUnknownRunError, fleetVerifySnapshot } from "../../src/cli/fleet-verify.js";
 import { loadRunViewModel, type RunViewModel, renderRunView, resolveRunId } from "../../src/cli/fleet-view.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { createRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { type Ledger, openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
@@ -426,6 +430,79 @@ describe("fleet view data sources", () => {
 			ok("candidates" in unknown);
 			strictEqual(unknown.candidates.length, 0);
 			strictEqual(loadRunViewModel("zzzz-no-such-run"), null);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("re-authenticates a sealed receipt now and classifies a failure without quoting it", async () => {
+		const isolated = await isolateClioEnv("clio-fleet-verify-");
+		try {
+			const fixture = await seedRun("verify the sealed receipt");
+			const at = () => Date.parse("2026-08-30T10:05:00.000Z");
+
+			const verified = fleetVerifySnapshot(fixture.runId, at);
+			strictEqual(verified.version, 1);
+			// The stamp is the moment the check ran, not the moment the run ended.
+			// That is the entire difference between this and the snapshot's report.
+			strictEqual(verified.verifiedAt, "2026-08-30T10:05:00.000Z");
+			strictEqual(verified.runId, fixture.runId);
+			strictEqual(verified.state, "verified");
+			strictEqual(verified.reason, null);
+			strictEqual(verified.axes.artifactIntegrity, "verified");
+
+			// Tamper with the sealed bytes. The snapshot taken before this still says
+			// verified; asking again is the only way to find out that it no longer is.
+			const receiptPath = join(clioStateDir(), "receipts", `${fixture.runId}.json`);
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
+			receipt.task = "a task the seal does not cover";
+			writeFileSync(receiptPath, JSON.stringify(receipt));
+
+			const failed = fleetVerifySnapshot(fixture.runId, at);
+			strictEqual(failed.state, "failed");
+			// The receipt no longer agrees with its ledger envelope.
+			strictEqual(failed.reason, "ledger-mismatch");
+			// The harness composes some reasons by interpolating a thrown message, so
+			// the reason is classified rather than quoted and no prose escapes.
+			strictEqual(JSON.stringify(failed).includes(clioStateDir()), false);
+			strictEqual(JSON.stringify(failed).includes("a task the seal does not cover"), false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("separates a run that never sealed from one whose receipt cannot be read, and refuses an unknown run", async () => {
+		const isolated = await isolateClioEnv("clio-fleet-verify-states-");
+		try {
+			const ledger = openLedger({ maxRuns: 20 });
+			const open = ledger.create({
+				agentId: "tester",
+				executionRole: "builder",
+				task: "still running",
+				targetId: "local-lmstudio",
+				wireModelId: "qwen3-coder",
+				runtimeId: "lmstudio",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/fleet-verify",
+			});
+			await ledger.persist();
+			const at = () => Date.parse("2026-08-30T10:05:00.000Z");
+
+			// Nothing to authenticate yet is not a failure to authenticate.
+			const pending = fleetVerifySnapshot(open.id, at);
+			strictEqual(pending.state, "pending");
+			strictEqual(pending.reason, null);
+
+			// A finalized run whose receipt file is gone is a missing artifact, which
+			// is again not the same as a receipt that failed its check.
+			const fixture = await seedRun("lose the receipt");
+			rmSync(join(clioStateDir(), "receipts", `${fixture.runId}.json`));
+			const missing = fleetVerifySnapshot(fixture.runId, at);
+			strictEqual(missing.state, "unavailable");
+			strictEqual(missing.reason, "receipt-unreadable");
+
+			throws(() => fleetVerifySnapshot("nosuchrun", at), FleetVerifyUnknownRunError);
 		} finally {
 			isolated.restore();
 		}

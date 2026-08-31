@@ -841,6 +841,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runStatus(args.slice(1));
 		case "inspect":
 			return (await import("./fleet-inspect.js")).runFleetInspect(args.slice(1));
+		case "verify":
+			return (await import("./fleet-verify.js")).runFleetVerify(args.slice(1));
 		case "view":
 			return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 		case "drain":

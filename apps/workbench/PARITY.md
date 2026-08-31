@@ -14,8 +14,8 @@ the main application.
 
 | Verdict | Count |
 | ------- | ----: |
-| Present |    19 |
-| Partial |    57 |
+| Present |    20 |
+| Partial |    56 |
 | Absent  |    36 |
 | Total   |   112 |
 
@@ -80,7 +80,7 @@ the main application.
 | Decision ledger                   | `/decisions`                                        | **Absent**  | No typed decision-board projection reaches the GUI.                                                                                                                                 |
 | Task ledger                       | `/tasks`, add/hand/done/drop                        | **Absent**  | No user-task board or reviewed task mutations reach the GUI.                                                                                                                        |
 | Memory                            | `/memory [seed]`                                    | **Partial** | Configuration presence is visible, but lesson/bank/activity inspection and seeding are absent.                                                                                      |
-| Fleet run board and verification  | `/view [filter]`, `/view verify <runId>`            | **Partial** | Recent durable runs, journals, sealed receipt trust, and the fleet-root step index are present; filters and on-demand host verification are absent.                                 |
+| Fleet run board and verification  | `/view [filter]`, `/view verify <runId>`            | **Partial** | Recent durable runs, journals, sealed receipt trust, the fleet-root step index, and on-demand verification are present; filters are absent.                                         |
 | Panes and mux                     | `/panes`, show/open/close                           | **Absent**  | No pane host health, inventory, presets, viewer focus, or close controls exist; status parity is **blocked-on-phase4** because the owning surface has no public typed read command. |
 | Reasoning level                   | `/thinking [level]`                                 | **Present** | The Settings instrument edits the safe next-turn thinking level.                                                                                                                    |
 | Output verbosity                  | `/output [verbosity]`                               | **Absent**  | Terminal transcript verbosity is presentation-specific and should not become a dead ACP setting.                                                                                    |
@@ -113,7 +113,7 @@ the main application.
 | Fleet root inspection           | Planned step index and terminal run ids                               | **Present** | Runs indexes recent roots to their planned step order, terminal run ids, attribution, and failure reason, and links steps into the window.          |
 | Council                         | Roster preview, approval, rounds, member grid, synthesis              | **Absent**  | Generic dispatch activity is insufficient to reconstruct council topology or voices.                                                                |
 | Compete                         | Parallel candidates, judge/gate decision, winner, cleanup evidence    | **Absent**  | No typed compete topology, candidate result, gate, or cleanup projection reaches ACP.                                                               |
-| Receipt trust and verify        | Sealed receipt status and `/view verify` host check                   | **Partial** | Runs projects sealed receipt trust and per-bundle evidence trust verdicts without native paths; on-demand host verification is absent.              |
+| Receipt trust and verify        | Sealed receipt status and `/view verify` host check                   | **Partial** | Runs projects sealed receipt trust, per-bundle evidence verdicts, and an on-demand re-check of the sealed bytes, all without native paths.          |
 | Task and decision boards        | Inspect and mutate session ledgers                                    | **Absent**  | Neither ledger is part of protocol v4.                                                                                                              |
 | Memory overlay                  | Lessons, task bank, activity, promotion                               | **Absent**  | Memory configuration facts do not expose records or mutations.                                                                                      |
 | Resource overlays               | Agents, skills, prompts, extensions, library                          | **Partial** | Agents, installed skills/extensions, and library inventories are present; prompts and reviewed mutations are incomplete.                            |
@@ -163,8 +163,9 @@ the main application.
    retain `blocked-on-phase4` and do not reach into mux state, terminal environment, or process inspection.
 4. **Implemented:** fleet-root step indexes inside the same fixed run inspection, ordered newest first, bounded to four
    roots and twenty-four steps, linking a step only to a run inside the same window. Council membership and synthesis
-   facts, compete candidate and gate outcomes, and receipt verification remain and still need an authenticated bounded
-   projection each.
+   facts and compete candidate and gate outcomes remain and still need an authenticated bounded projection each. Receipt
+   verification is done: `fleet verify <runId> --json` re-authenticates the sealed bytes on demand, reached through the
+   host-served-id allowlist.
 5. **Partly implemented:** durable trace runs and phases now reach the GUI through the fixed `trace inspect --json`
    read, bounded to eight runs and sixteen phases, carrying no request text, description, error prose, or database path;
    and durable evidence bundles reach it through the fixed `evidence inventory --json` read, bounded to twelve bundles,

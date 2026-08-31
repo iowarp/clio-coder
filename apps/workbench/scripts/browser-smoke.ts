@@ -31,6 +31,7 @@ import {
 	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	fleetInspectionFixture,
+	fleetVerificationFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
@@ -111,6 +112,7 @@ const running = await startWorkbenchServer({
 	} satisfies ClioDispatchInspector,
 	fleetInspector: {
 		inspect: () => Promise.resolve(fleetInspectionFixture()),
+		verify: (_cwd, runId) => Promise.resolve({ ...fleetVerificationFixture(), runId }),
 	} satisfies ClioFleetInspector,
 	traceInspector: {
 		inspect: () => Promise.resolve(traceInspectionFixture()),
@@ -482,6 +484,18 @@ try {
 	await tracePhases.getByText("errored", { exact: true }).waitFor();
 	for (const forbidden of ["the prompt text", "trace.sqlite", "phase_id"]) {
 		equal(await traceAccounting.getByText(forbidden, { exact: false }).count(), 0);
+	}
+
+	// Verifying re-reads the sealed bytes, so its verdict is stated separately from
+	// the trust state the snapshot recorded rather than replacing it.
+	await fleetJournal.getByRole("button", { name: "Check this receipt now", exact: true }).click();
+	const receiptCheck = fleetJournal.getByLabel("Receipt check for run run-alpha");
+	await receiptCheck.getByText("Receipt did not authenticate", { exact: true }).waitFor();
+	await receiptCheck.getByText(/no longer agrees with its ledger entry/u).waitFor();
+	// The snapshot's own verdict is still on screen and still says what it said.
+	await fleetJournal.getByText("Receipt verified", { exact: true }).waitFor();
+	for (const forbidden of ["/home/", "receipts/", "sha256"]) {
+		equal(await receiptCheck.getByText(forbidden, { exact: false }).count(), 0);
 	}
 
 	// The evidence inventory links a bundle back into the run window and says so
@@ -1474,6 +1488,7 @@ try {
 			traceAccountingCarriesNoRequestTextOrPath: true,
 			evidenceInventoryCarriesShapeAndTrustOnly: true,
 			artifactsAreReferencedOnlyByHostServedIds: true,
+			receiptVerificationIsSeparateFromTheSnapshotVerdict: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,

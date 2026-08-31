@@ -28,6 +28,7 @@ import {
 	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireFleetRun,
+	type WireFleetVerification,
 	type WireProjectPath,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
@@ -119,6 +120,8 @@ export interface AppState {
 	readonly evidenceInspection: WireEvidenceInspection | null;
 	/** The one bundle the operator opened, if any. */
 	readonly evidenceDetail: WireEvidenceDetail | null;
+	/** The most recent on-demand receipt check, if any. */
+	readonly fleetVerification: WireFleetVerification | null;
 	readonly recoveryInspection: WireRecoveryInspection | null;
 	readonly browse: ProjectBrowseListingPayload | null;
 	readonly leftDrawerOpen: boolean;
@@ -153,6 +156,8 @@ export interface AppState {
 	readonly pendingEvidenceInspect: string | null;
 	/** The bundle id whose trust record is being read, if any. */
 	readonly pendingEvidenceRead: string | null;
+	/** The run id whose receipt is being re-authenticated, if any. */
+	readonly pendingFleetVerify: string | null;
 	/** Request id of the redacted Clio Coder doctor/paths sweep. */
 	readonly pendingRecoveryInspect: string | null;
 	/**
@@ -199,6 +204,11 @@ export type AppAction =
 		readonly requestId: string;
 		readonly evidenceId: string;
 	}
+	| {
+		readonly type: "fleet.verify.submitted";
+		readonly requestId: string;
+		readonly runId: string;
+	}
 	| { readonly type: "recovery.inspect.submitted"; readonly requestId: string }
 	| {
 		readonly type: "project.select.submitted";
@@ -226,6 +236,7 @@ export const initialAppState: AppState = {
 	traceInspection: null,
 	evidenceInspection: null,
 	evidenceDetail: null,
+	fleetVerification: null,
 	recoveryInspection: null,
 	browse: null,
 	leftDrawerOpen: false,
@@ -244,6 +255,7 @@ export const initialAppState: AppState = {
 	pendingTraceInspect: null,
 	pendingEvidenceInspect: null,
 	pendingEvidenceRead: null,
+	pendingFleetVerify: null,
 	pendingRecoveryInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
@@ -680,6 +692,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				traceInspection: action.payload.traceInspection,
 				evidenceInspection: action.payload.evidenceInspection,
 				evidenceDetail: null,
+				fleetVerification: null,
 				pendingConfigInspect: null,
 				pendingCatalogInspect: null,
 				pendingUsageInspect: null,
@@ -690,6 +703,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				pendingTraceInspect: null,
 				pendingEvidenceInspect: null,
 				pendingEvidenceRead: null,
+				pendingFleetVerify: null,
 				announcement: open === null
 					? `${PRODUCT_NAME} is ready. Open a project folder to begin.`
 					: `${open.project.displayName} is open`,
@@ -752,6 +766,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingEvidenceInspect: action.requestId };
 		case "evidence.read.submitted":
 			return { ...state, pendingEvidenceRead: action.evidenceId };
+		case "fleet.verify.submitted":
+			return { ...state, pendingFleetVerify: action.runId };
 		case "recovery.inspect.submitted":
 			return { ...state, pendingRecoveryInspect: action.requestId };
 		case "project.select.submitted":
@@ -803,6 +819,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingTraceInspect: null,
 						pendingEvidenceInspect: null,
 						pendingEvidenceRead: null,
+						pendingFleetVerify: null,
 						pendingRecoveryInspect: null,
 					};
 				case "command.error": {
@@ -864,6 +881,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 							? null
 							: state.pendingEvidenceInspect,
 						pendingEvidenceRead: null,
+						pendingFleetVerify: null,
 						pendingRecoveryInspect: event.payload.requestId === undefined ||
 								event.payload.requestId === state.pendingRecoveryInspect
 							? null
@@ -884,7 +902,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 					return {
 						...sequenced,
 						fleetInspection: event.payload.inspection,
+						// A new window can retire the run that was checked, and the host
+						// will refuse it from here on, so a verdict about a run that is no
+						// longer shown is dropped rather than left standing.
+						fleetVerification: event.payload.inspection.runs.some(
+								(run) => run.runId === state.fleetVerification?.runId,
+							)
+							? state.fleetVerification
+							: null,
 						pendingFleetInspect: null,
+						pendingFleetVerify: null,
 						announcement: "Recent durable run record updated",
 					};
 				case "toolchain.state":
@@ -923,6 +950,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						evidenceDetail: event.payload.detail,
 						pendingEvidenceRead: null,
 						announcement: `Trust record for ${event.payload.detail.evidenceId}`,
+					};
+				case "fleet.verification.state":
+					return {
+						...sequenced,
+						fleetVerification: event.payload.verification,
+						pendingFleetVerify: null,
+						announcement:
+							`Receipt for ${event.payload.verification.runId} checked: ${event.payload.verification.state}`,
 					};
 				case "recovery.state":
 					return {

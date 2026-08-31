@@ -136,7 +136,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" ||
 				kind === "toolchain.state" || kind === "trace.state" || kind === "evidence.state" ||
-				kind === "evidence.detail.state" ||
+				kind === "evidence.detail.state" || kind === "fleet.verification.state" ||
 				kind === "recovery.state"
 		? {}
 		: { projectId: "project-alpha" };
@@ -186,6 +186,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"trace.inspect",
 		"evidence.inspect",
 		"evidence.read",
+		"fleet.verify",
 		"recovery.inspect",
 		"targets.list",
 		"targets.probe",
@@ -509,6 +510,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"trace.inspect": {},
 		"evidence.inspect": {},
 		"evidence.read": { evidenceId: "run-alpha-bundle" },
+		"fleet.verify": { runId: "run-alpha" },
 		"recovery.inspect": {},
 		"targets.list": { projectId: "project-alpha" },
 		"targets.probe": { projectId: "project-alpha", targetId: "lmstudio" },
@@ -1997,5 +1999,53 @@ Deno.test("an evidence trust record validates every axis against its own state s
 		]
 	) {
 		expectProtocolError(() => serverEvent("evidence.detail.state", { detail: broken }));
+	}
+});
+
+Deno.test("a receipt verification states what it checked and cannot contradict itself", () => {
+	const axes = {
+		artifactIntegrity: "failed",
+		validationGrounding: "absent",
+		independentReview: "absent",
+		contextProvenance: "absent",
+		autonomyEnforcement: "absent",
+		completionEvidence: "absent",
+	};
+	const verification = {
+		runId: "run-alpha",
+		verifiedAt: "2026-08-31T14:05:00.000Z",
+		state: "failed",
+		reason: "ledger-mismatch",
+		axes,
+	};
+	const event = serverEvent("fleet.verification.state", { verification });
+	equal(event.projectId, undefined);
+	equal(event.payload.verification.reason, "ledger-mismatch");
+
+	// A run that has not sealed yet has nothing to give a reason about.
+	const pending = serverEvent("fleet.verification.state", {
+		verification: { ...verification, state: "pending", reason: null, axes: { ...axes, artifactIntegrity: "absent" } },
+	});
+	equal(pending.payload.verification.reason, null);
+
+	for (
+		const broken of [
+			// A verdict without a reason, and a reason without a verdict.
+			{ ...verification, reason: null },
+			{ ...verification, state: "verified", reason: "ledger-mismatch" },
+			// The two states meaning "nothing readable to check" are exactly the two
+			// reasons that say so.
+			{ ...verification, state: "unavailable", reason: "ledger-mismatch" },
+			{ ...verification, reason: "receipt-unreadable" },
+			// A receipt that authenticated cannot report its integrity as failed.
+			{ ...verification, state: "verified", reason: null },
+			// The reason vocabulary is closed, and so is each axis.
+			{ ...verification, reason: "it looked wrong" },
+			{ ...verification, axes: { ...axes, contextProvenance: "validated" } },
+			// Nothing from the receipt itself belongs on this record.
+			{ ...verification, receiptPath: "/private/receipts/run-alpha.json" },
+		]
+	) {
+		expectProtocolError(() => serverEvent("fleet.verification.state", { verification: broken }));
 	}
 });

@@ -757,6 +757,9 @@ class WorkbenchRuntime implements HostSink {
 		if (command.kind === "evidence.read") {
 			return this.#serializeRead(() => this.#dispatchEvidenceRead(session, command));
 		}
+		if (command.kind === "fleet.verify") {
+			return this.#serializeRead(() => this.#dispatchFleetVerify(session, command));
+		}
 		if (command.kind === "recovery.inspect") {
 			return this.#serializeRead(() => this.#dispatchRecoveryInspect(session, command));
 		}
@@ -926,6 +929,9 @@ class WorkbenchRuntime implements HostSink {
 			);
 			if (this.#closed || session.closed) return;
 			this.#fleetInspection = inspection;
+			// The same act as the evidence window: the browser may verify exactly
+			// the runs it is about to be shown, and nothing that has aged out.
+			this.#artifacts.serve("run", inspection.runs.map((run) => run.runId));
 			this.#broadcast("fleet.inspection.state", {}, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
@@ -995,6 +1001,27 @@ class WorkbenchRuntime implements HostSink {
 			// reference exactly the ids it is about to be shown, and nothing older.
 			this.#artifacts.serve("evidence", inspection.artifacts.map((artifact) => artifact.evidenceId));
 			this.#broadcast("evidence.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
+		}
+	}
+
+	async #dispatchFleetVerify(
+		session: SocketSession,
+		command: ClientCommandOf<"fleet.verify">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			const runId = this.#artifacts.admit("run", command.payload.runId);
+			const verification = await this.#fleetInspector.verify(this.#state.homePath, runId);
+			if (this.#closed || session.closed) return;
+			this.#broadcast("fleet.verification.state", {}, { verification });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send("command.error", {}, {

@@ -10,6 +10,7 @@ import {
 	type WireEvidenceDetail,
 	type WireEvidenceInspection,
 	type WireFleetInspection,
+	type WireFleetVerification,
 	type WireProjectWorkspace,
 	type WireRecoveryInspection,
 	type WireRoutingInspection,
@@ -116,6 +117,23 @@ export function fleetInspectionFixture(): WireFleetInspection {
 			stepsTruncated: false,
 		}],
 		rootsTruncated: false,
+	};
+}
+
+export function fleetVerificationFixture(): WireFleetVerification {
+	return {
+		runId: "run-alpha",
+		verifiedAt: "2026-08-31T14:05:00.000Z",
+		state: "failed",
+		reason: "ledger-mismatch",
+		axes: {
+			artifactIntegrity: "failed",
+			validationGrounding: "absent",
+			independentReview: "absent",
+			contextProvenance: "absent",
+			autonomyEnforcement: "absent",
+			completionEvidence: "absent",
+		},
 	};
 }
 

@@ -10,8 +10,12 @@ import { resolve } from "node:path";
 import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
 import {
 	type CommandErrorCode,
+	EVIDENCE_AXES,
+	EVIDENCE_AXIS_STATES,
 	FLEET_EVIDENCE_STATES,
 	FLEET_JOURNAL_STATES,
+	FLEET_VERIFY_REASONS,
+	FLEET_VERIFY_STATES,
 	MAX_WIRE_FLEET_INSPECTION_EVENTS,
 	MAX_WIRE_FLEET_INSPECTION_ROOTS,
 	MAX_WIRE_FLEET_INSPECTION_RUNS,
@@ -21,6 +25,7 @@ import {
 	type WireFleetInspectionRoot,
 	type WireFleetInspectionRun,
 	type WireFleetInspectionStep,
+	type WireFleetVerification,
 } from "./src/protocol.ts";
 
 export const DEFAULT_FLEET_INSPECT_TIMEOUT_MS = 8_000;
@@ -30,6 +35,11 @@ const encoder = new TextEncoder();
 
 export interface ClioFleetInspector {
 	inspect(cwd: string): Promise<WireFleetInspection>;
+	/**
+	 * Re-authenticate one run's receipt. `runId` must already have been admitted
+	 * by the host's artifact allowlist; this adapter never widens that decision.
+	 */
+	verify(cwd: string, runId: string): Promise<WireFleetVerification>;
 }
 
 export interface ClioCliFleetInspectorOptions {
@@ -345,6 +355,46 @@ export function projectFleetInspection(
 	};
 }
 
+export function projectFleetVerification(value: unknown, requestedRunId: string): WireFleetVerification {
+	if (!isRecord(value) || !exactKeys(value, ["version", "verifiedAt", "runId", "state", "reason", "axes"])) {
+		throw new ClioFleetProjectionError("Clio Coder returned an invalid receipt verification.");
+	}
+	const verifiedAt = timestamp(value.verifiedAt);
+	const runId = text(value.runId, 128);
+	if (
+		value.version !== 1 || verifiedAt === null || runId === null ||
+		!isOneOf(value.state, FLEET_VERIFY_STATES) ||
+		(value.reason !== null && !isOneOf(value.reason, FLEET_VERIFY_REASONS)) ||
+		!isRecord(value.axes) || !exactKeys(value.axes, EVIDENCE_AXES)
+	) {
+		throw new ClioFleetProjectionError("Clio Coder returned an invalid receipt verification.");
+	}
+	// The host asked about one run. A verdict for a different one means the
+	// process checked something other than what the allowlist admitted.
+	if (runId !== requestedRunId) {
+		throw new ClioFleetProjectionError("Clio Coder verified a different run than the one requested.");
+	}
+	const reason = value.reason as WireFleetVerification["reason"];
+	if ((reason === null) !== (value.state === "verified" || value.state === "pending")) {
+		throw new ClioFleetProjectionError("Clio Coder returned a verification whose reason contradicts its state.");
+	}
+	const axes: Record<string, string> = {};
+	for (const axis of EVIDENCE_AXES) {
+		const state = value.axes[axis];
+		if (!isOneOf(state, EVIDENCE_AXIS_STATES[axis])) {
+			throw new ClioFleetProjectionError("Clio Coder returned an invalid receipt trust axis.");
+		}
+		axes[axis] = state;
+	}
+	return {
+		runId,
+		verifiedAt,
+		state: value.state,
+		reason,
+		axes: axes as WireFleetVerification["axes"],
+	};
+}
+
 export class ClioCliFleetInspector implements ClioFleetInspector {
 	readonly #runner: ClioReadCommandRunner;
 	readonly #now: () => number;
@@ -415,6 +465,46 @@ export class ClioCliFleetInspector implements ClioFleetInspector {
 			throw new ClioFleetInspectError(
 				"internal",
 				"Clio Coder's durable run view is not compatible with this GUI build.",
+			);
+		}
+	}
+
+	async verify(cwd: string, runId: string): Promise<WireFleetVerification> {
+		let parsed: unknown;
+		try {
+			// The run id is the sole variable argument, and only ever one the
+			// allowlist already admitted.
+			parsed = await this.#runner.runJson(resolve(cwd), ["fleet", "verify", runId, "--json"]);
+		} catch (error) {
+			if (!(error instanceof ClioReadCommandError)) throw error;
+			if (error.code === "spawn") {
+				throw new ClioFleetInspectError("not-ready", "The GUI could not start Clio Coder's receipt verifier.");
+			}
+			if (error.code === "timeout") {
+				throw new ClioFleetInspectError("not-ready", "Clio Coder's receipt verification did not finish in time.");
+			}
+			if (error.code === "exit") {
+				// A run can be pruned from the ledger between the snapshot and the
+				// check, which is an ordinary race rather than a broken installation.
+				const missing = /unknown run/iu.test(error.diagnostic);
+				this.#log(`Clio Coder receipt verifier exited with code ${error.exitCode ?? "unknown"}.`);
+				throw new ClioFleetInspectError(
+					missing ? "not-found" : "not-ready",
+					missing
+						? "Clio Coder no longer has a ledger record for that run."
+						: "Clio Coder could not verify that run's receipt.",
+				);
+			}
+			throw new ClioFleetInspectError("internal", "Clio Coder returned an invalid or oversized verification.");
+		}
+		try {
+			return projectFleetVerification(parsed, runId);
+		} catch (error) {
+			if (!(error instanceof ClioFleetProjectionError)) throw error;
+			this.#log("Clio Coder verification projection rejected an incompatible record.");
+			throw new ClioFleetInspectError(
+				"internal",
+				"Clio Coder's receipt verification is not compatible with this GUI build.",
 			);
 		}
 	}
