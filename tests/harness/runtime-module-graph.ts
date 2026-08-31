@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { scaleWatchdog } from "./load.js";
 
 export interface CoveredRun {
 	code: number | null;
@@ -110,7 +111,12 @@ export async function runCliWithCoverage(input: {
 	const code = await new Promise<number | null>((resolve, reject) => {
 		let timedOut = false;
 		let reapDeadline: ReturnType<typeof setTimeout> | undefined;
-		const timeoutMs = input.timeoutMs ?? 30_000;
+		// A watchdog on a spawned, coverage-instrumented CLI. Callers assert on
+		// the module graph the run touched, never on how long it took, so the
+		// budget widens with the shard load the run carries. Coverage makes this
+		// child several times slower than a plain one before contention is even
+		// counted, which is why 30s and 45s were both reached in a 24-lane run.
+		const timeoutMs = scaleWatchdog(input.timeoutMs ?? 30_000);
 		const timeout = setTimeout(() => {
 			timedOut = true;
 			void terminateProcessTree(child).finally(() => {
