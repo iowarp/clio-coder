@@ -358,6 +358,7 @@ export function openMemoryOverlay(
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
 		width: MEMORY_OVERLAY_WIDTH,
+		markerId: "memory",
 		title: () => "Memory",
 		footerHint: () => view.getHint(),
 	});

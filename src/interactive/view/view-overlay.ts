@@ -764,6 +764,7 @@ export function openViewOverlay(
 		width: VIEW_OVERLAY_WIDTH,
 		maxHeight: VIEW_OVERLAY_MAX_HEIGHT,
 		margin: VIEW_OVERLAY_MARGIN,
+		markerId: "view",
 		title: "View",
 		footerHint: (innerWidth) => view.getHint(innerWidth),
 	});

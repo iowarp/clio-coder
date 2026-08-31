@@ -60,6 +60,7 @@ export function openAgentsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: (
 	const items = [...fleetItems, ...delegationItems];
 
 	return openListOverlay(tui, {
+		markerId: "agents",
 		title: "Agents Reference",
 		items,
 		filterable: true,

@@ -374,6 +374,8 @@ export function openCostOverlay(
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: COST_OVERLAY_WIDTH,
+		// Not derived from the title: that one carries the session id.
+		markerId: "cost",
 		title: sessionId && sessionId.length > 0 ? `Session usage (${sessionId})` : "Session usage",
 		footerHint: buildHint([]),
 	});

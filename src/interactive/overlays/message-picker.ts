@@ -149,6 +149,7 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
+		markerId: "message-picker",
 		title: "Fork",
 		footerHint: rows.length > 0 ? buildHint([{ key: "Enter", verb: "select" }]) : buildHint([]),
 	});

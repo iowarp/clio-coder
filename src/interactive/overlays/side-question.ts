@@ -112,6 +112,7 @@ export function openSideQuestionOverlay(tui: TUI, options: OpenSideQuestionOverl
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: sideQuestionOverlayWidth(options.columns),
+		markerId: "side-question",
 		title: SIDE_QUESTION_OVERLAY_TITLE,
 		// Esc means two things here and the footer names the live one: it aborts a
 		// round that is still streaming, and it closes one that has settled.

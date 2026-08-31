@@ -163,6 +163,7 @@ export function openHandoffReviewOverlay(
 	const handle = showClioOverlayFrame(tui, focus, {
 		anchor: "center",
 		width: handoffReviewOverlayWidth(options.columns),
+		markerId: "handoff-review",
 		title: HANDOFF_REVIEW_OVERLAY_TITLE,
 		footerHint: buildResponsiveHint(
 			[

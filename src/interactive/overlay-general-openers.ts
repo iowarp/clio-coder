@@ -334,6 +334,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "dispatch-board";
 		deps.dispatchBoard.resetSelection();
 		deps.transitions.handle = showOverlayFrameFactory(deps.tui, deps.dispatchBoard, {
+			markerId: "dispatch-board",
 			title: "Fleet Runs",
 			footerHint: dispatchBoardHint,
 			anchor: "center",

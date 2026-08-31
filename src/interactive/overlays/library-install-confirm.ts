@@ -137,6 +137,7 @@ export function openLibraryInstallConfirmOverlay(
 	const handle = showClioOverlayFrame(tui, focus, {
 		anchor: "center",
 		width: confirmOverlayWidth(options.columns),
+		markerId: "library-install",
 		title: LIBRARY_INSTALL_CONFIRM_TITLE,
 		footerHint: buildResponsiveHint([{ key: "Enter", verb: "install" }], { key: "Esc", verb: "cancel" }),
 	});

@@ -271,6 +271,7 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SESSION_OVERLAY_WIDTH,
+		markerId: "resume",
 		title: "Sessions",
 		footerHint: buildHint([FILTER_HINT, { key: "Enter", verb: "resume" }]),
 	});

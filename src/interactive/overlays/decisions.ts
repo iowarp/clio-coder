@@ -296,6 +296,7 @@ export function openDecisionsOverlay(
 	return showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: DECISIONS_OVERLAY_WIDTH,
+		markerId: "decisions",
 		title: () => "Decisions",
 		footerHint: () => body.footerHint(),
 	});

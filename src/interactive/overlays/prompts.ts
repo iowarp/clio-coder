@@ -67,6 +67,7 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 	const allItems = [...items, ...diagnosticItems];
 
 	return openListOverlay(tui, {
+		markerId: "prompts",
 		title: "Prompt Templates",
 		items: allItems,
 		filterable: true,

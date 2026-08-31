@@ -742,11 +742,20 @@ export interface ListOverlayHandle extends OverlayHandle {
 	activeTabId(): string;
 }
 
-export function openListOverlay(tui: TUI, options: ListOverlayOptions): ListOverlayHandle {
+/**
+ * The marker id rides on the opener rather than on `ListOverlayOptions` because
+ * it belongs to the mounted modal, not to the view: the view renders the same
+ * rows whether it is a modal or a body inside something else. It is named by
+ * the surface rather than derived from `title`, because a tabbed overlay's
+ * rendered title names the active tab while the modal holding the keyboard has
+ * not changed hands.
+ */
+export function openListOverlay(tui: TUI, options: ListOverlayOptions & { markerId: string }): ListOverlayHandle {
 	const view = new ListOverlayView(options, () => tui.requestRender());
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
 		width: 100,
+		markerId: options.markerId,
 		// A function, not the string: on a tabbed overlay the title names the tab
 		// and must be re-read after every switch.
 		title: () => view.title(),

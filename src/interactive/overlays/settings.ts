@@ -3725,6 +3725,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			margin.right = side;
 			return true;
 		},
+		markerId: "settings",
 		title: "Settings",
 		footerHint: (innerWidth) =>
 			innerWidth < WIDE_LAYOUT_MIN_WIDTH

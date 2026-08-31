@@ -276,6 +276,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			overlayTransitions.handle = showOverlayFrame(tui, body, {
 				...permissionOverlayPlacement(tui, editor, footer.view),
 				width: PERMISSION_OVERLAY_WIDTH,
+				// Not derived from the title: that one is classified per decision
+				// axis and is one of five strings for the same modal.
+				markerId: "permission-confirm",
 				title: permissionOverlayTitle(view),
 				tone: permissionOverlayTone(view),
 				// Read per frame: the footer names what Enter does right now, and
