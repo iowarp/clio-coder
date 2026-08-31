@@ -160,6 +160,15 @@ describe("contracts/worker run commands", () => {
 		strictEqual((r.requests[0] as { requestOrigin?: string }).requestOrigin, "user");
 	});
 
+	it("names an operator-canceled run as aborted instead of failed", async () => {
+		const r = recorder({
+			receipt: receipt({ outcome: "canceled", outcomeDetail: "operator abort", exitCode: 1 }),
+		});
+		dispatchSlashCommand(parseSlashCommand("/run coder stop here"), r.ctx);
+		await flushAsync();
+		deepStrictEqual(r.notices, ["warn:run aborted: operator abort"]);
+	});
+
 	it("hands the receipt's answer to the main agent when --share asked for it", async () => {
 		const r = recorder();
 		dispatchSlashCommand(parseSlashCommand("/run --share coder say hello"), r.ctx);
