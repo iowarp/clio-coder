@@ -133,32 +133,33 @@ function isChatLoopTurnModule(filePath: string): boolean {
 const STAGE_0_OWNER = path.join("src", "interactive", "terminal-lease.ts");
 
 /**
- * The only modules `src/cli/**` may reach inside `src/interactive/**` and
+ * Modules an external runtime reacher may enter inside `src/interactive/**` or
  * `src/engine/**`.
  *
- * Twice in one release cycle a CLI command grew an ordinary-looking import into
- * one of those trees and broke the Stage 0 budget without anyone noticing until
- * a full build ran: `src/cli/fleet-view.ts` reached `src/engine/tui.ts`, and
- * `src/cli/run.ts` dynamically imported `src/interactive/slash-commands.ts`.
- * Neither edge is wrong on its own. What breaks is the bundle: esbuild gives a
- * module its own chunk when the set of entry points reaching it stops matching
- * its neighbours', so a CLI path that reaches part of the interactive graph
- * becomes a second, disjoint reacher and splits the one merged chunk the Stage 0
- * closure sits on. A dynamic `await import` does it harder, since a dynamically
- * imported module is a split point by itself.
+ * The first two Stage 0 splits came from `src/cli/**`; the third came from
+ * `src/domains/mux/**`. Esbuild responds to both identically: when a module in
+ * the instant shell's closure gains a second, disjoint reacher, it peels that
+ * module out of the neighbours it used to share a chunk with. Rule 6 therefore
+ * guards every value importer outside the computed Stage 0 closure and the two
+ * protected trees, not one directory that happened to contain earlier bugs.
  *
- * So the edge itself is what gets declared, not the symptom. Every entry names a
- * module that is either a leaf by construction or already inside the closure,
- * and says why that is safe.
+ * Every existing edge is declared here with its architectural reason. A seam
+ * still fails the closure walk unless it stays off Stage 0. The only explicit
+ * overlap exceptions are the Stage 1 composition-root edges that assemble the
+ * complete interactive application and already own those dependencies.
  */
-interface CliSeam {
+interface Stage0Seam {
 	/** Project-relative module path, POSIX-separated. */
 	module: string;
-	/** Why `src/cli/**` reaching this module does not add a reacher to the render graph. */
+	/** Why an external runtime reacher legitimately enters through this module. */
 	reason: string;
+	/** Existing composition roots allowed to overlap Stage 0 through this seam. */
+	allowStage0OverlapFrom?: readonly string[];
 }
 
-const CLI_SEAMS: ReadonlyArray<CliSeam> = [
+const ORCHESTRATOR = "src/entry/orchestrator.ts";
+
+const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 	{
 		module: "src/interactive/terminal-lease.ts",
 		reason:
@@ -171,8 +172,8 @@ const CLI_SEAMS: ReadonlyArray<CliSeam> = [
 	},
 	{
 		module: "src/interactive/chat-loop.ts",
-		reason:
-			"type-only: the event and loop shapes the --json and print modes project. Types erase, so no chunk edge exists.",
+		reason: "the Stage 1 composition root creates the chat loop; CLI event-shape imports are type-only and erase.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
 	{
 		module: "src/interactive/chat-loop-messages.ts",
@@ -196,11 +197,121 @@ const CLI_SEAMS: ReadonlyArray<CliSeam> = [
 	},
 	{
 		module: "src/engine/session.ts",
-		reason: "cwdHash, the session-directory key `usage` reads. A pure path helper.",
+		reason:
+			"the canonical session path, atomic-write, and JSONL persistence substrate shared by lifecycle, dispatch, session domains, the CLI, and the Stage 1 composition root; its closure stays off terminal rendering.",
+	},
+	{
+		module: "src/engine/pi-mono-names.ts",
+		reason: "the dependency-name table package-root and lifecycle version reporting inspect; a constant-only leaf.",
+	},
+	{
+		module: "src/engine/truncate.ts",
+		reason: "surface-neutral byte and display truncation shared by context markers and tools.",
+	},
+	{
+		module: "src/engine/acp/adapter.ts",
+		reason: "dispatch translates worker results through the engine-owned ACP protocol adapter.",
+	},
+	{
+		module: "src/engine/acp/server.ts",
+		reason: "the Stage 1 composition root owns the ACP server surface.",
+	},
+	{
+		module: "src/engine/acp/transport.ts",
+		reason: "the Stage 1 composition root owns ACP stdio transport construction.",
+	},
+	{
+		module: "src/engine/antigravity/subprocess-runtime.ts",
+		reason: "dispatch maps autonomy policy into the engine-owned Antigravity subprocess runtime.",
+	},
+	{
+		module: "src/engine/claude/subprocess-runtime.ts",
+		reason: "dispatch maps autonomy policy into the engine-owned Claude subprocess runtime.",
+	},
+	{
+		module: "src/engine/claude/tool-safety.ts",
+		reason: "dispatch classifies Claude's canonical tool names through the engine adapter that owns them.",
+	},
+	{
+		module: "src/engine/worker-runtime-capabilities.ts",
+		reason: "dispatch reads the engine worker's static mediation capability contract.",
+	},
+	{
+		module: "src/engine/env-api-keys.ts",
+		reason: "provider authentication uses the engine's environment-key lookup ladder.",
+	},
+	{
+		module: "src/engine/ai.ts",
+		reason:
+			"provider, session, and tool surfaces use the engine-owned model bridge and error classifiers; its closure is deliberately terminal-free.",
+	},
+	{
+		module: "src/engine/apis/index.ts",
+		reason: "the provider extension registers engine API implementations at the domain composition boundary.",
+	},
+	{
+		module: "src/engine/api-registry.ts",
+		reason: "the provider plugin loader activates the engine-owned external API bridge.",
+	},
+	{
+		module: "src/engine/prompt-templates.ts",
+		reason: "resource loaders share the engine's argument parser and substitution semantics.",
+	},
+	{
+		module: "src/engine/strip-tokenizer-sentinels.ts",
+		reason: "session previews reuse the engine's pure tokenizer-sentinel normalizer.",
+	},
+	{
+		module: "src/engine/apis/residency.ts",
+		reason: "the orchestrator and worker entry points share engine model-residency policy.",
+	},
+	{
+		module: "src/engine/loop-guard.ts",
+		reason: "the Stage 1 composition root wires the engine-owned loop guard.",
+	},
+	{
+		module: "src/engine/worker-runtime.ts",
+		reason: "the worker entry point boots the engine-owned worker runtime.",
+	},
+	{
+		module: "src/engine/worker-tools.ts",
+		reason: "the worker entry point installs the engine-owned worker tool bridge.",
+	},
+	{
+		module: "src/interactive/index.ts",
+		reason: "the Stage 1 composition root assembles the complete interactive application.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
+	},
+	{
+		module: "src/interactive/keybinding-manager.ts",
+		reason: "the Stage 1 composition root supplies the keybinding manager to the application it assembles.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
+	},
+	{
+		module: "src/interactive/loop-guard-interrupt.ts",
+		reason: "the Stage 1 composition root connects engine loop-guard stops to interactive cancellation.",
+	},
+	{
+		module: "src/interactive/model-session-replay.ts",
+		reason: "the Stage 1 composition root projects persisted turns back into interactive model messages.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
+	},
+	{
+		module: "src/interactive/panes-runtime.ts",
+		reason: "the Stage 1 composition root creates the optional interactive panes runtime.",
+	},
+	{
+		module: "src/interactive/tool-prose-registration.ts",
+		reason: "the Stage 1 composition root registers interactive prose renderers for tool results.",
+	},
+	{
+		module: "src/interactive/watchdog-run.ts",
+		reason: "the Stage 1 composition root wires watchdog review into the complete interactive application.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
 ];
 
-const CLI_SEAM_MODULES = new Set(CLI_SEAMS.map((seam) => seam.module));
+const STAGE0_SEAMS_BY_MODULE = new Map(STAGE0_SEAMS.map((seam) => [seam.module, seam]));
 
 /**
  * The value-import closure of `entry`. Type-only imports are skipped because
@@ -263,10 +374,12 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *   5. The chat loop's turn modules (src/interactive/turn-*.ts, chat-loop.ts)
  *      never import src/entry/**. Composition flows one way: the entry point
  *      composes the loop, never the reverse.
- *   6. src/cli/** reaches src/interactive/** and src/engine/** only through the
- *      declared seams in CLI_SEAMS, and a seam some CLI file value-imports may
- *      not reach the Stage 0 closure. Both halves protect one budget: the
- *      instant shell's cold-start chunk graph, pinned by
+ *   6. Any value importer outside the computed Stage 0 closure and its
+ *      src/interactive/** and src/engine/** trees reaches those trees only
+ *      through a declared seam in STAGE0_SEAMS. A seam may not lead back into
+ *      Stage 0 unless that existing composition-root overlap is explicitly
+ *      declared. CLI type edges retain the older declaration requirement.
+ *      Both halves protect the instant shell's cold-start chunk graph, pinned by
  *      tests/contracts/instant-shell-import-graph.test.ts.
  */
 export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
@@ -280,10 +393,11 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const entryRoot = path.join(srcRoot, "entry");
 	const cliRoot = path.join(srcRoot, "cli");
 	const stage0Owner = path.join(projectRoot, STAGE_0_OWNER);
+	const stage0Closure = valueImportClosure(stage0Owner);
 
 	const violations: string[] = [];
-	/** Seams a src/cli file reaches with a value import, so their closures are worth walking. */
-	const valueReachedSeams = new Set<string>();
+	/** Runtime importers by declared seam, so rule 6b can disposition each reacher. */
+	const valueReachedSeams = new Map<string, Set<string>>();
 
 	for (const filePath of walk(srcRoot)) {
 		const source = readFileSync(filePath, "utf8");
@@ -291,11 +405,13 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const references = extractReferenceDirectives(source);
 
 		const inEngine = isWithin(filePath, engineRoot);
+		const inInteractive = isWithin(filePath, interactiveRoot);
 		const inWorker = isWithin(filePath, workerRoot);
 		const fromDomain = domainOf(filePath, domainsRoot);
 		const inTools = isWithin(filePath, toolsRoot);
-		const isChatLoopModule = isWithin(filePath, interactiveRoot) && isChatLoopTurnModule(filePath);
+		const isChatLoopModule = inInteractive && isChatLoopTurnModule(filePath);
 		const inCli = isWithin(filePath, cliRoot);
+		const inStage0Closure = stage0Closure.has(filePath);
 
 		const evaluate = (specifier: string, typeOnly: boolean, kind: "import" | "reference") => {
 			if (specifier.startsWith(piPackagePrefix)) {
@@ -332,15 +448,20 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 				return;
 			}
 
-			if (inCli && (isWithin(resolved, interactiveRoot) || isWithin(resolved, engineRoot))) {
-				const seam = path.relative(projectRoot, resolved).split(path.sep).join("/");
-				if (!CLI_SEAM_MODULES.has(seam)) {
+			const protectedTarget = isWithin(resolved, interactiveRoot) || isWithin(resolved, engineRoot);
+			const externalRuntimeReacher = !typeOnly && !inInteractive && !inEngine && !inStage0Closure;
+			if (protectedTarget && (inCli || externalRuntimeReacher)) {
+				const seamPath = path.relative(projectRoot, resolved).split(path.sep).join("/");
+				const seam = STAGE0_SEAMS_BY_MODULE.get(seamPath);
+				if (seam === undefined) {
 					const qualifier = typeOnly ? " (type-only)" : "";
 					violations.push(
-						`rule6: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves to ${seam}; src/cli/** reaches src/interactive/** and src/engine/** only through a seam declared in CLI_SEAMS (tests/boundaries/check-boundaries.ts). A new CLI edge into either tree makes the CLI a second, disjoint reacher of the interactive module graph, and esbuild answers by splitting the merged chunk the instant shell's Stage 0 closure sits on. That closure is held to 6 chunks and 110,000 bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Add a leaf seam module or route through an existing one, then declare it with its reason.`,
+						`rule6: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves to ${seamPath}; runtime importers outside the computed Stage 0 closure and its src/interactive/** and src/engine/** trees may enter those protected trees only through a seam declared in STAGE0_SEAMS (tests/boundaries/check-boundaries.ts). A new disjoint reacher makes esbuild split the merged chunk the instant shell's Stage 0 closure sits on. That closure is held to 6 chunks and 110,000 bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the needed value into a leaf seam, route through an existing seam, or declare a legitimate edge with its reason.`,
 					);
 				} else if (!typeOnly) {
-					valueReachedSeams.add(resolved);
+					const importers = valueReachedSeams.get(resolved) ?? new Set<string>();
+					importers.add(filePath);
+					valueReachedSeams.set(resolved, importers);
 				}
 				return;
 			}
@@ -378,15 +499,14 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		}
 	}
 
-	// rule6, second half. Declaring a seam is not enough: the module the CLI
-	// value-imports drags its own closure along, and that is how the split
-	// actually happened both times. A seam may reach domains, core, and the
+	// rule6, second half. Declaring a seam is not enough: the imported module
+	// drags its own closure along, and that is how the first CLI splits happened.
+	// A seam may reach domains, core, and the
 	// non-terminal half of the engine freely; what it may not reach is anything
 	// the Stage 0 owner already reaches, because that is precisely the set whose
 	// chunk membership the instant shell is measured on. The owner itself is the
 	// reference point, so its own seam edge is skipped rather than special-cased.
-	const stage0Closure = valueReachedSeams.size > 0 ? valueImportClosure(stage0Owner) : new Set<string>();
-	for (const seam of [...valueReachedSeams].sort()) {
+	for (const seam of [...valueReachedSeams.keys()].sort()) {
 		if (seam === stage0Owner) continue;
 		const reached = [...valueImportClosure(seam)]
 			.filter((file) => file !== seam && stage0Closure.has(file))
@@ -394,8 +514,16 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			.map((file) => path.relative(projectRoot, file).split(path.sep).join("/"))
 			.sort();
 		if (reached.length === 0) continue;
+		const seamPath = path.relative(projectRoot, seam).split(path.sep).join("/");
+		const declaration = STAGE0_SEAMS_BY_MODULE.get(seamPath);
+		const allowedOverlapImporters = new Set(declaration?.allowStage0OverlapFrom ?? []);
+		const importers = [...(valueReachedSeams.get(seam) ?? [])]
+			.map((file) => path.relative(projectRoot, file).split(path.sep).join("/"))
+			.filter((file) => !allowedOverlapImporters.has(file))
+			.sort();
+		if (importers.length === 0) continue;
 		violations.push(
-			`rule6: seam ${path.relative(projectRoot, seam).split(path.sep).join("/")} value-imports its way into the Stage 0 closure (${reached.join(", ")}); a seam src/cli/** value-imports must stay off the modules ${STAGE_0_OWNER} already reaches, or the CLI becomes a second reacher of them and esbuild splits their merged chunk. That closure is held to 6 chunks and 110,000 bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the value the seam needs into a leaf module instead of importing the render module that happens to hold it.`,
+			`rule6: seam ${seamPath}, reached by ${importers.join(", ")}, value-imports its way into the Stage 0 closure (${reached.join(", ")}); an external seam must stay off the modules ${STAGE_0_OWNER} already reaches, or its importer becomes a second reacher and esbuild splits their merged chunk. That closure is held to 6 chunks and 110,000 bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the value the seam needs into a leaf module instead of importing the render module that happens to hold it.`,
 		);
 	}
 

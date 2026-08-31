@@ -229,9 +229,54 @@ function checkBoundaries(): void {
 				expectRule: "rule6",
 			},
 			{
+				name: "domain making the yazi theme a second reacher of interactive tokens",
+				files: {
+					"src/domains/mux/yazi/theme.ts":
+						'import { tokenHex } from "../../../interactive/theme/tokens.js";\nexport const accent = tokenHex("accent");',
+					"src/interactive/theme/tokens.ts": 'export function tokenHex(_token: string) { return "#46e5d0"; }',
+					"src/interactive/terminal-lease.ts":
+						'import { tokenHex } from "./theme/tokens.js";\nexport const lease = tokenHex("accent");',
+				},
+				expectRule: "rule6",
+			},
+			{
+				name: "domain using a declared terminal-free engine seam (allowed)",
+				files: {
+					"src/domains/dispatch/state.ts":
+						'import { atomicWrite } from "../../engine/session.js";\nexport const persist = atomicWrite;',
+					"src/engine/session.ts": "export function atomicWrite() {}",
+					"src/interactive/terminal-lease.ts": "export const lease = {};",
+				},
+				expectRule: null,
+			},
+			{
+				name: "module already in the Stage 0 closure importing its render dependency (allowed)",
+				files: {
+					"src/interactive/terminal-lease.ts":
+						'import { bindings } from "../domains/config/keybindings.js";\nexport const lease = bindings;',
+					"src/domains/config/keybindings.ts": 'import { tui } from "../../engine/tui.js";\nexport const bindings = tui;',
+					"src/engine/tui.ts": "export const tui = {};",
+				},
+				expectRule: null,
+			},
+			{
 				name: "cli seam whose own closure reaches the Stage 0 closure",
 				files: {
 					"src/cli/run.ts": 'export const load = () => import("../interactive/slash-commands.js");',
+					"src/interactive/slash-commands.ts":
+						'import { SECTIONS } from "./overlays/settings.js";\nexport const parseSlashCommand = () => SECTIONS;',
+					"src/interactive/overlays/settings.ts":
+						'import { theme } from "../theme/index.js";\nexport const SECTIONS = [theme];',
+					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
+					"src/interactive/theme/index.ts": "export const theme = {};",
+				},
+				expectRule: "rule6",
+			},
+			{
+				name: "domain seam whose own closure reaches the Stage 0 closure",
+				files: {
+					"src/domains/mux/yazi/theme.ts":
+						'import { parseSlashCommand } from "../../../interactive/slash-commands.js";\nexport const parse = parseSlashCommand;',
 					"src/interactive/slash-commands.ts":
 						'import { SECTIONS } from "./overlays/settings.js";\nexport const parseSlashCommand = () => SECTIONS;',
 					"src/interactive/overlays/settings.ts":
