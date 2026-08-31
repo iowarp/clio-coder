@@ -26,14 +26,15 @@ import { installTmpGitGuard } from "./tmp-git-guard.js";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 
-// Node's test runner sets FORCE_COLOR=1 in every test child when its own
-// stdout is a terminal, so the reporter's colours survive the round trip.
-// Tests that spawn the CLI inherit it, and eight of them assert uncoloured
-// text, so `npm test` from an interactive shell (and `npm publish`, whose
-// prepublishOnly runs the suite) failed on output that ci and a piped run
-// never see. Every test child loads this file first; dropping the variable
-// here gives a spawned CLI the same environment in a terminal as in ci.
+// Color-control variables inherited from the shell must not choose the shared
+// theme every styling contract sees. Node's test runner can inject FORCE_COLOR
+// for its reporter, while developer and agent shells commonly carry NO_COLOR;
+// either one otherwise enters every lane before clioTheme() is cached. Tests
+// for a color mode opt into it locally with createClioTheme or a fresh child
+// environment. Every test child loads this file first, so clearing both here
+// gives the suite one deterministic default without changing product behavior.
 delete process.env.FORCE_COLOR;
+delete process.env.NO_COLOR;
 /** Names every root this harness makes, and the only names it will remove. */
 export const TEST_TMP_ROOT_PREFIX = "clio-tests-";
 

@@ -33,6 +33,11 @@ describe("contracts/test scratch root", () => {
 		for (const stray of strays) rmSync(stray, { recursive: true, force: true });
 	});
 
+	it("normalizes ambient color controls before shared themes are cached", () => {
+		strictEqual(process.env.FORCE_COLOR, undefined);
+		strictEqual(process.env.NO_COLOR, undefined);
+	});
+
 	it("resolves every mkdtemp in this run inside one removable root", () => {
 		// The suite is started with --import tmp-root.ts, so this holds in the
 		// runner and in every test child without any test opting in.
