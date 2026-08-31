@@ -66,11 +66,15 @@ export async function runAcpCommand(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
-	if (args.includes("--help") || args.includes("-h")) {
+	// The top-level argv parser normally rewrites --acp to the `acp` command
+	// sentinel. Keep the command boundary tolerant too, so another dispatcher
+	// can pass the flag spelling through without changing ACP option semantics.
+	const normalizedArgs = args[0] === "--acp" ? args.slice(1) : args;
+	if (normalizedArgs.includes("--help") || normalizedArgs.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const flags = parseAcpFlags(args);
+	const flags = parseAcpFlags(normalizedArgs);
 	if (typeof flags === "string") {
 		printError(flags);
 		process.stderr.write(HELP);

@@ -4,13 +4,14 @@
  * agreement: the usage line in the doc is the usage line the command prints.
  */
 
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { resolveAcpCwd, runAcpCommand } from "../../src/cli/acp.js";
 import { MAX_TIMER_DELAY_MS } from "../../src/core/timers.js";
+import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 async function captureAcp(args: ReadonlyArray<string>): Promise<{ code: number; stdout: string; stderr: string }> {
 	const originalOut = process.stdout.write.bind(process.stdout);
@@ -41,13 +42,63 @@ function documentedUsage(): string {
 	return line.trim();
 }
 
+function parseInitializeStdout(stdout: string): Record<string, unknown> {
+	const lines = stdout.split("\n").filter(Boolean);
+	strictEqual(lines.length, 1, `ACP stdout must contain exactly one JSON-RPC frame, got: ${stdout}`);
+	const frame: unknown = JSON.parse(lines[0] ?? "");
+	ok(typeof frame === "object" && frame !== null && !Array.isArray(frame));
+	return frame as Record<string, unknown>;
+}
+
+function normalizeWorkspaceInstance(frame: Record<string, unknown>): Record<string, unknown> {
+	const normalized = structuredClone(frame);
+	const result = normalized.result as Record<string, unknown>;
+	const capabilities = result.agentCapabilities as Record<string, unknown>;
+	const meta = capabilities._meta as Record<string, unknown>;
+	const events = meta["clio-coder/events"] as Record<string, unknown>;
+	events.workspaceInstanceId = "<process-instance>";
+	return normalized;
+}
+
 describe("contracts/acp cli flags", () => {
+	const scratch = makeScratchHome("clio-acp-alias-");
+	after(() => scratch.cleanup());
+
 	it("prints the usage line docs/acp.md documents", async () => {
 		const { code, stdout } = await captureAcp(["--help"]);
 		strictEqual(code, 0);
 		strictEqual(stdout.split("\n")[0], documentedUsage());
 		ok(stdout.includes("--cwd PATH"));
 		ok(stdout.includes("--permission-timeout MS"));
+	});
+
+	it("accepts a leading --acp at the command boundary", async () => {
+		const { code, stdout } = await captureAcp(["--acp", "--help"]);
+		strictEqual(code, 0);
+		strictEqual(stdout.split("\n")[0], documentedUsage());
+	});
+
+	it("routes --acp through the same stdout-pure server path as the acp subcommand", async () => {
+		const input = `${JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: {
+				protocolVersion: 1,
+				clientInfo: { name: "contract-client", version: "1" },
+				clientCapabilities: { terminal: true },
+			},
+		})}\n`;
+		const positional = await runCli(["acp"], { env: scratch.env, input });
+		const globalFlag = await runCli(["--acp"], { env: scratch.env, input });
+
+		strictEqual(positional.code, 0, positional.stderr);
+		strictEqual(globalFlag.code, 0, globalFlag.stderr);
+		strictEqual(positional.stdout.endsWith("\n"), true);
+		strictEqual(globalFlag.stdout.endsWith("\n"), true);
+		const positionalFrame = parseInitializeStdout(positional.stdout);
+		const globalFlagFrame = parseInitializeStdout(globalFlag.stdout);
+		deepStrictEqual(normalizeWorkspaceInstance(globalFlagFrame), normalizeWorkspaceInstance(positionalFrame));
 	});
 
 	it("refuses a permission timeout that is not a positive whole number", async () => {
