@@ -113,6 +113,31 @@ export function toolStatuses(): ToolStatus[] {
 	return PINNED_TOOLS.map((entry) => toolStatus(entry));
 }
 
+/** The one command that fixes a tool Clio cannot resolve. */
+export function installRemedy(id: string): string {
+	return `clio-coder tools install ${id}`;
+}
+
+/**
+ * What a rejected PATH copy was, and which floor it failed. Null when there is
+ * no PATH copy or when the one there was accepted.
+ *
+ * The floors are deliberately conservative: they sit at the pin for herdr and
+ * yazi because Clio drives socket and plugin surfaces verified against only
+ * that release. That is a defensible choice and a costly one, since it rejects
+ * binaries an operator installed themselves and that mostly work. The cost is
+ * only payable if the rejection is legible, so every renderer of a rejection
+ * names the path, the version found, and the floor it missed, and never reports
+ * a rejected copy as an absent one.
+ */
+export function describeFloorRejection(status: ToolStatus): string | null {
+	const candidate = status.resolution.pathCandidate;
+	if (candidate === null || candidate.satisfiesMinimum) return null;
+	const floor = status.resolution.entry?.minimumVersion ?? status.version;
+	const found = candidate.version === null ? "an unreadable version" : candidate.version;
+	return `PATH copy ${candidate.path} is ${found}, below the ${floor} floor`;
+}
+
 /**
  * One sentence describing where a tool resolved and how its version compares to
  * the pin. Shared by `clio-coder tools status` and the doctor rows so the two
@@ -120,25 +145,29 @@ export function toolStatuses(): ToolStatus[] {
  */
 export function describeResolution(status: ToolStatus): string {
 	const { resolution } = status;
+	const rejection = describeFloorRejection(status);
 	if (resolution.source === "path") {
 		const version = resolution.version ?? "unreadable version";
 		return `PATH ${resolution.binaryPath} (${version}, pin ${status.version})`;
 	}
 	if (resolution.source === "vendored") {
-		const rejected =
-			resolution.pathCandidate === null
-				? ""
-				: `; PATH copy ${resolution.pathCandidate.path} is ${resolution.pathCandidate.version ?? "unreadable"}, below the ${status.resolution.entry?.minimumVersion ?? status.version} floor`;
+		// The remedy is deliberately absent here. The rejection cost the operator
+		// nothing: Clio has a copy at the pin and is running it, and printing an
+		// install command that would change nothing is its own kind of dishonesty.
+		const rejected = rejection === null ? "" : `; ${rejection}, so Clio runs the vendored copy`;
 		return `vendored ${resolution.binaryPath} (${status.version})${rejected}`;
 	}
 	if (!status.supported) {
-		return `not installed and no pinned asset for this platform (${status.platform ?? `${process.platform}-${process.arch}`})`;
+		const platform = status.platform ?? `${process.platform}-${process.arch}`;
+		// No remedy either: there is no asset to install on this machine, so the
+		// rejection is the whole story and naming a command would be a dead end.
+		const rejected = rejection === null ? "" : `; ${rejection}`;
+		return `not installed and no pinned asset for this platform (${platform})${rejected}`;
 	}
-	const rejected =
-		resolution.pathCandidate === null
-			? ""
-			: `; PATH copy ${resolution.pathCandidate.path} is ${resolution.pathCandidate.version ?? "unreadable"}, below the ${status.resolution.entry?.minimumVersion ?? status.version} floor`;
-	return `not found${rejected} (install with \`clio-coder tools install ${status.id}\`)`;
+	if (rejection !== null) {
+		return `${rejection}, and nothing is vendored (install with \`${installRemedy(status.id)}\`)`;
+	}
+	return `not found (install with \`${installRemedy(status.id)}\`)`;
 }
 
 function probePathCandidate(entry: PinnedTool, binary: string): ToolPathCandidate | null {
