@@ -49,7 +49,7 @@ import {
 	type SlashCommandDispatchResult,
 	type TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
-import { verifyReceiptFile } from "./view/artifacts.js";
+import { verifyReceiptFileReport } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 const EXPORT_RENDER_WIDTH = 100;
@@ -638,7 +638,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				})
 				.finally(deps.requestRender);
 		},
-		verifyReceipt: (runId) => verifyReceiptFile(deps.stateDir, runId),
+		verifyReceipt: (runId) => verifyReceiptFileReport(deps.stateDir, runId),
 		...(deps.listWorkerRuns ? { listWorkerRuns: deps.listWorkerRuns } : {}),
 		// The user-turn path, minus expansion. A worker's answer is literal text:
 		// running it through the prompt, skill, and @file expanders would let a

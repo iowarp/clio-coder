@@ -5,12 +5,14 @@ import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
-import { formatTrustSummaryLine } from "../../domains/evidence/trust-projection.js";
+import { formatTrustSummaryLine, trustStateWord } from "../../domains/evidence/trust-projection.js";
 import {
 	inspectRunReceiptTrustStatus,
 	type ReceiptIntegrityOutcome,
 	retiredReceiptIntegrity,
 	retiredReceiptIntegrityReason,
+	TRUST_STATUS_AXES,
+	type TrustStatusAxis,
 } from "../../domains/evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
 import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
@@ -112,6 +114,20 @@ export const VIEW_ARTIFACT_LINE_CAP = 50_000;
 const JSON_PRETTY_MAX_BYTES = 10 * 1024 * 1024;
 
 export type ReceiptVerifyResult = ReceiptIntegrityOutcome;
+
+export interface ReceiptVerificationCheck {
+	name: string;
+	ok: boolean;
+	evidence: string;
+}
+
+export type ReceiptVerificationReport = ReceiptIntegrityOutcome & {
+	receiptPath: string;
+	sealedDigest: string | null;
+	trustSummary: string | null;
+	compromised: boolean;
+	checks: ReceiptVerificationCheck[];
+};
 
 /**
  * What a verify action reports. `retired` marks a seal this build does not
@@ -433,6 +449,98 @@ export function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerif
 	const ledger = readRunEnvelope(stateDir, runId);
 	if (!ledger.ok) return ledger;
 	return verifyReceiptIntegrity(r as unknown as RunReceipt, ledger.envelope);
+}
+
+const RECEIPT_FILE_FAILURE = /^(?:receipt file not found|read error:)/u;
+const RECEIPT_CONTRACT_FAILURE =
+	/^(?:invalid json:|receipt is not an object|missing field:|runId invalid:|runId mismatch:|agentId invalid:|task invalid:|targetId invalid:|wireModelId invalid:|runtimeId invalid:|runtimeKind invalid:|exitCode out of range:|tokenCount out of range:|inputTokenCount out of range:|outputTokenCount out of range:|cacheReadTokenCount out of range:|cacheWriteTokenCount out of range:|costUsd out of range:|reasoningTokenCount out of range:|startedAt not ISO-8601:|endedAt not ISO-8601:|clioVersion empty|piMonoVersion invalid:|platform invalid:|nodeVersion invalid:|toolCalls out of range:|toolStats\[|compiledPromptHash invalid:|staticCompositionHash invalid:|sessionId invalid:|integrity invalid|execution role invalid|routing intent invalid|route decision invalid)/u;
+const LEDGER_FAILURE = /^(?:run ledger not found|run not found in ledger|ledger mismatch:)/u;
+
+function receiptIntegrityDigest(value: unknown): string | null {
+	if (!isRecord(value) || value.algorithm !== "sha256" || !isNonEmptyString(value.digest)) return null;
+	return `sha256:${value.digest}`;
+}
+
+function trustCheckEvidence(status: ReturnType<typeof inspectRunReceiptTrustStatus>["status"], axis: string): string {
+	const entry = status[axis as keyof typeof status];
+	if (typeof entry !== "object" || entry === null || !("state" in entry)) return "canonical trust projection";
+	if (entry.state === "absent") return `reason=${entry.reason}`;
+	const refs = entry.artifacts.map((artifact) => `${artifact.kind}:${artifact.id}`);
+	return refs.length > 0 ? refs.join(", ") : `${entry.authority.kind}:${entry.authority.id}`;
+}
+
+function compromisedTrustAxes(status: ReturnType<typeof inspectRunReceiptTrustStatus>["status"]): TrustStatusAxis[] {
+	return TRUST_STATUS_AXES.filter((axis) => {
+		const state = status[axis].state;
+		if (axis === "artifactIntegrity") return state === "failed";
+		if (axis === "validationGrounding") return state === "failed" || state === "ungrounded";
+		if (axis === "independentReview") return state === "failed" || state === "not_independent";
+		if (axis === "contextProvenance") return state === "invalid";
+		if (axis === "autonomyEnforcement") return state === "bypassed";
+		return false;
+	});
+}
+
+/** Actionable `/view verify` report without changing the low-level verifier contract. */
+export function verifyReceiptFileReport(stateDir: string, runId: string): ReceiptVerificationReport {
+	const receiptPath = receiptFilePath(stateDir, runId);
+	const result = verifyReceiptFile(stateDir, runId);
+	let receipt: RunReceipt | null = null;
+	try {
+		receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as RunReceipt;
+	} catch {
+		// The verifier's named file or JSON check below retains the actionable error.
+	}
+	const sealedDigest = receiptIntegrityDigest(receipt?.integrity);
+	const ledger = readRunEnvelope(stateDir, runId);
+	const inspection = receipt === null ? null : inspectRunReceiptTrustStatus(receipt, ledger.ok ? ledger.envelope : null);
+	const trustSummary = inspection === null ? null : formatTrustSummaryLine(inspection.status);
+	const compromiseAxes = inspection === null ? [] : compromisedTrustAxes(inspection.status);
+	const checks: ReceiptVerificationCheck[] = [];
+
+	if (!result.ok && RECEIPT_FILE_FAILURE.test(result.reason)) {
+		checks.push({ name: "receipt file", ok: false, evidence: `${receiptPath}: ${result.reason}` });
+	} else {
+		checks.push({ name: "receipt file", ok: true, evidence: receiptPath });
+		if (!result.ok && (RECEIPT_CONTRACT_FAILURE.test(result.reason) || result.retired !== undefined)) {
+			checks.push({ name: "receipt contract", ok: false, evidence: result.reason });
+		} else {
+			checks.push({
+				name: "receipt contract",
+				ok: true,
+				evidence: `current integrity v${receipt?.integrity.version ?? "unknown"}`,
+			});
+			if (!result.ok && LEDGER_FAILURE.test(result.reason)) {
+				checks.push({ name: "run ledger", ok: false, evidence: result.reason });
+			} else {
+				checks.push({ name: "run ledger", ok: true, evidence: `run ${runId} fields match` });
+				checks.push({
+					name: "sealed digest",
+					ok: result.ok,
+					evidence: result.ok ? `${sealedDigest ?? "digest unavailable"} matches receipt and ledger` : result.reason,
+				});
+			}
+		}
+	}
+
+	if (inspection !== null) {
+		for (const axis of compromiseAxes) {
+			checks.push({
+				name: `trust ${axis}`,
+				ok: false,
+				evidence: `${trustStateWord(axis, inspection.status[axis].state)}; ${trustCheckEvidence(inspection.status, axis)}`,
+			});
+		}
+	}
+
+	return {
+		...result,
+		receiptPath,
+		sealedDigest,
+		trustSummary,
+		compromised: compromiseAxes.length > 0,
+		checks,
+	};
 }
 
 function pushCapped(lines: string[], line: string, maxLines: number): boolean {
