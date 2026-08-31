@@ -9,6 +9,7 @@ import {
 	RESULT_CONTRACT_REPAIR_TOOL,
 	resultContractAuthorship,
 	resultContractRepairMessages,
+	resultContractShape,
 	validateRecipeResult,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
@@ -425,6 +426,52 @@ describe("contracts/agent result contract", () => {
 		strictEqual(reduceRouteQuality({ subject: { receipt, envelope }, receipts: [] }).label, "fail");
 	});
 
+	it("names every legal enum value in validator failures and repair prompts", () => {
+		const cases = [
+			{
+				contract: { kind: "debugger-report" } as const,
+				output: JSON.stringify({ diagnosis: "read the package", reproduction: "read", evidence: ["package.json:1"] }),
+				field: "reproduction",
+				legal: ["reproduced", "not-reproduced", "unknown"],
+			},
+			{
+				contract: { kind: "verifier-report" } as const,
+				output: JSON.stringify({ verdict: "maybe", checks: [{ name: "typecheck", passed: true, evidence: "exit 0" }] }),
+				field: "verdict",
+				legal: ["pass", "fail"],
+			},
+			{
+				contract: { kind: "research-report" } as const,
+				output: JSON.stringify({ source: "remote", findings: [{ claim: "Fact", evidence: "source" }] }),
+				field: "source",
+				legal: ["local", "external"],
+			},
+		];
+		for (const testCase of cases) {
+			const validation = contract({
+				contract: testCase.contract,
+				output: testCase.output,
+				cwd: "/repo",
+				networkAllowed: true,
+				filesystem,
+			});
+			strictEqual(validation.conformance, "fail");
+			const reason = validation.reason ?? "";
+			ok(reason.includes(testCase.field), `${testCase.contract.kind}: ${reason}`);
+			const shape = resultContractShape(testCase.contract);
+			const [, repair] = resultContractRepairMessages(
+				{ contract: testCase.contract, reason, attempt: 1, anchors: [] },
+				{ provider: "llamacpp", api: "openai-completions", model: "small-local" },
+			);
+			const repairText = repair.content[0].text;
+			for (const legal of testCase.legal) {
+				ok(reason.includes(legal), `${testCase.contract.kind} validator omitted ${legal}: ${reason}`);
+				ok(shape.includes(legal), `${testCase.contract.kind} shape omitted ${legal}: ${shape}`);
+				ok(repairText.includes(legal), `${testCase.contract.kind} repair omitted ${legal}: ${repairText}`);
+			}
+		}
+	});
+
 	it("a result fenced as a json code block conforms, and a non-object still does not", () => {
 		const payload = { verdict: "pass", checks: [{ name: "typecheck", passed: true, evidence: "tsc clean" }] };
 		const fenced = contract({
@@ -444,7 +491,7 @@ describe("contracts/agent result contract", () => {
 			filesystem,
 		});
 		strictEqual(fencedArray.conformance, "fail");
-		strictEqual(fencedArray.reason, "result must be a JSON object");
+		strictEqual(fencedArray.reason, "Verifier result payload failed: result must be a JSON object");
 	});
 
 	it("a fenced code report the validator accepted round-trips through parseCodeReport", () => {

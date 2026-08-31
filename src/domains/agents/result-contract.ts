@@ -939,14 +939,57 @@ function groundDegradedScout(
 
 function validateVerifier(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
-	if (!parsed.ok) return failure(contract, "fail", parsed.reason);
+	if (!parsed.ok) return failure(contract, "fail", `Verifier result payload failed: ${parsed.reason}`);
 	const value = parsed.value;
-	if (!hasOnlyKeys(value, ["verdict", "checks"]) || (value.verdict !== "pass" && value.verdict !== "fail")) {
-		return failure(contract, "fail", "Verifier result must carry pass or fail verdict and checks");
+	const unknown = Object.keys(value).filter((key) => key !== "verdict" && key !== "checks");
+	if (unknown.length > 0) {
+		return failure(
+			contract,
+			"fail",
+			`Verifier result field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not legal; legal top-level fields are verdict and checks`,
+		);
 	}
-	const checks = parseChecks(value.checks);
-	if (checks === null || (value.verdict === "pass") !== checks.every((check) => check.passed)) {
-		return failure(contract, "fail", "Verifier verdict must agree with every typed check");
+	if (value.verdict !== "pass" && value.verdict !== "fail") {
+		return failure(contract, "fail", 'Verifier field "verdict" must be one of: pass | fail');
+	}
+	if (!Array.isArray(value.checks) || value.checks.length === 0) {
+		return failure(
+			contract,
+			"fail",
+			'Verifier field "checks" must be a non-empty array of {name, passed, evidence}; each checks[].passed value must be one of: true | false',
+		);
+	}
+	const checks: VerifierCheck[] = [];
+	for (const [index, raw] of value.checks.entries()) {
+		if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+			return failure(contract, "fail", `Verifier field "checks[${index}]" must be an object`);
+		}
+		const check = raw as Record<string, unknown>;
+		const checkUnknown = Object.keys(check).filter((key) => key !== "name" && key !== "passed" && key !== "evidence");
+		if (checkUnknown.length > 0) {
+			return failure(
+				contract,
+				"fail",
+				`Verifier field "checks[${index}].${checkUnknown[0]}" is not legal; legal check fields are name, passed, and evidence`,
+			);
+		}
+		if (!string(check.name)) {
+			return failure(contract, "fail", `Verifier field "checks[${index}].name" must be a non-empty string`);
+		}
+		if (typeof check.passed !== "boolean") {
+			return failure(contract, "fail", `Verifier field "checks[${index}].passed" must be one of: true | false`);
+		}
+		if (!string(check.evidence)) {
+			return failure(contract, "fail", `Verifier field "checks[${index}].evidence" must be a non-empty string`);
+		}
+		checks.push({ name: check.name, passed: check.passed, evidence: check.evidence });
+	}
+	if ((value.verdict === "pass") !== checks.every((check) => check.passed)) {
+		return failure(
+			contract,
+			"fail",
+			'Verifier field "verdict" must agree with every checks[].passed value; verdict legal values are pass | fail and checks[].passed legal values are true | false',
+		);
 	}
 	const verifier: VerifierResult = { verdict: value.verdict, checks };
 	return success(contract, value.verdict, verifier, { verifier });
@@ -1137,22 +1180,38 @@ export function resultContractAuthorship(contract: ResultContract, output: strin
 
 function validateDebugger(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
-	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	if (!parsed.ok) return failure(contract, "unmeasured", `Debugger result payload failed: ${parsed.reason}`);
 	const value = parsed.value;
+	const unknown = Object.keys(value).filter(
+		(key) => key !== "diagnosis" && key !== "reproduction" && key !== "evidence",
+	);
+	if (unknown.length > 0) {
+		return failure(
+			contract,
+			"unmeasured",
+			`Debugger result field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not legal; legal top-level fields are diagnosis, reproduction, and evidence`,
+		);
+	}
+	if (!string(value.diagnosis)) {
+		return failure(contract, "unmeasured", 'Debugger field "diagnosis" must be a non-empty string');
+	}
 	if (
-		!hasOnlyKeys(value, ["diagnosis", "reproduction", "evidence"]) ||
-		!string(value.diagnosis) ||
-		(value.reproduction !== "reproduced" &&
-			value.reproduction !== "not-reproduced" &&
-			value.reproduction !== "unknown") ||
-		!Array.isArray(value.evidence) ||
-		value.evidence.some((entry) => !string(entry))
+		value.reproduction !== "reproduced" &&
+		value.reproduction !== "not-reproduced" &&
+		value.reproduction !== "unknown"
 	) {
 		return failure(
 			contract,
 			"unmeasured",
-			"Debugger result must carry diagnosis, reproduction status, and evidence without a verdict",
+			'Debugger field "reproduction" must be one of: reproduced | not-reproduced | unknown',
 		);
+	}
+	if (!Array.isArray(value.evidence)) {
+		return failure(contract, "unmeasured", 'Debugger field "evidence" must be an array of strings');
+	}
+	const malformedEvidence = value.evidence.findIndex((entry) => !string(entry));
+	if (malformedEvidence >= 0) {
+		return failure(contract, "unmeasured", `Debugger field "evidence[${malformedEvidence}]" must be a non-empty string`);
 	}
 	return success(contract, "unmeasured", value);
 }
@@ -1163,29 +1222,47 @@ function validateResearch(
 	networkAllowed: boolean,
 ): ResultContractValidation {
 	const parsed = parseJson(output);
-	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	if (!parsed.ok) return failure(contract, "unmeasured", `Research result payload failed: ${parsed.reason}`);
 	const value = parsed.value;
-	if (
-		!hasOnlyKeys(value, ["source", "findings"]) ||
-		(value.source !== "local" && value.source !== "external") ||
-		!Array.isArray(value.findings)
-	) {
+	const unknown = Object.keys(value).filter((key) => key !== "source" && key !== "findings");
+	if (unknown.length > 0) {
 		return failure(
 			contract,
 			"unmeasured",
-			"Research result must distinguish local or external sources and carry findings",
+			`Research result field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not legal; legal top-level fields are source and findings`,
 		);
 	}
-	if (value.source === "external" && !networkAllowed) {
-		return failure(contract, "unmeasured", "external research requires an allowed network posture");
+	if (value.source !== "local" && value.source !== "external") {
+		return failure(contract, "unmeasured", 'Research field "source" must be one of: local | external');
 	}
-	for (const finding of value.findings) {
+	if (!Array.isArray(value.findings)) {
+		return failure(contract, "unmeasured", 'Research field "findings" must be an array of {claim, evidence} objects');
+	}
+	if (value.source === "external" && !networkAllowed) {
+		return failure(
+			contract,
+			"unmeasured",
+			'Research field "source" is external but the run has no allowed network posture; legal values are local | external, and use local for workspace-only evidence',
+		);
+	}
+	for (const [index, finding] of value.findings.entries()) {
 		if (finding === null || typeof finding !== "object" || Array.isArray(finding)) {
-			return failure(contract, "unmeasured", "Research findings must be objects");
+			return failure(contract, "unmeasured", `Research field "findings[${index}]" must be an object`);
 		}
 		const record = finding as Record<string, unknown>;
-		if (!hasOnlyKeys(record, ["claim", "evidence"]) || !string(record.claim) || !string(record.evidence)) {
-			return failure(contract, "unmeasured", "Research findings must carry claim and evidence");
+		const findingUnknown = Object.keys(record).filter((key) => key !== "claim" && key !== "evidence");
+		if (findingUnknown.length > 0) {
+			return failure(
+				contract,
+				"unmeasured",
+				`Research field "findings[${index}].${findingUnknown[0]}" is not legal; legal finding fields are claim and evidence`,
+			);
+		}
+		if (!string(record.claim)) {
+			return failure(contract, "unmeasured", `Research field "findings[${index}].claim" must be a non-empty string`);
+		}
+		if (!string(record.evidence)) {
+			return failure(contract, "unmeasured", `Research field "findings[${index}].evidence" must be a non-empty string`);
 		}
 	}
 	return success(contract, "unmeasured", value);
@@ -1480,15 +1557,15 @@ export function resultContractShape(contract: ResultContract): string {
 			// run already failed twice, so it is told the cheaper exit as well.
 			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]} or, if you cannot produce a citation you are sure of, at least {"findings":[{"claim":"what you observed"}]}, which is accepted as an ungrounded lead rather than losing the run';
 		case "verifier-report":
-			return '{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}';
+			return 'one of {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]} or {"verdict":"fail","checks":[{"name":"npm run typecheck","passed":false,"evidence":"exit 1"}]}; verdict legal values are pass | fail and checks[].passed legal values are true | false';
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "council-ballot":
 			return COUNCIL_BALLOT_SHAPE;
 		case "debugger-report":
-			return '{"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}';
+			return 'one of {"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}, {"diagnosis":"...","reproduction":"not-reproduced","evidence":["..."]}, or {"diagnosis":"...","reproduction":"unknown","evidence":["..."]}; reproduction legal values are reproduced | not-reproduced | unknown';
 		case "research-report":
-			return '{"source":"local","findings":[{"claim":"...","evidence":"..."}]}';
+			return 'one of {"source":"local","findings":[{"claim":"...","evidence":"..."}]} or {"source":"external","findings":[{"claim":"...","evidence":"..."}]}; source legal values are local | external';
 		case "mutation-report":
 			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"commitMessage":"optional: the commit message for this change","summary":"optional: one line"}';
 		case "provenance-report":
