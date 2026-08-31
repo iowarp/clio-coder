@@ -9,6 +9,14 @@
  * push. Encoding them here is deliberate. When the pinned herdr version moves
  * and a shape changes, these fixtures fail in CI rather than in a live session.
  *
+ * The connection model is transcribed too, and it is the part that matters
+ * most. herdr's `handle_connection` (`src/api/server.rs:172`) reads exactly one
+ * request line per connection and closes after writing the response;
+ * `events.subscribe` and `pane.graphics.stream` are the only methods that keep
+ * the socket open. An earlier version of this fixture kept reading lines, which
+ * made a client that reused a connection pass in CI and fail with EPIPE against
+ * a real server on its second call. The fixture now closes like the real one.
+ *
  * Handlers are scriptable per method so a test can inject an error code, hang a
  * request to exercise the timeout path, or drop connections mid-stream.
  */
@@ -258,6 +266,14 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 		connection.socket.write(`${JSON.stringify(payload)}\n`);
 	};
 
+	/**
+	 * Closes the connection the way herdr does once a non-streaming request is
+	 * answered. `end` rather than `destroy` so the response line is flushed first.
+	 */
+	const closeAfterResponse = (connection: Connection): void => {
+		connection.socket.end();
+	};
+
 	const onLine = (connection: Connection, line: string): void => {
 		let parsed: unknown;
 		try {
@@ -278,13 +294,20 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 		};
 		requests.push(request);
 		const outcome = (handlers.get(method) ?? defaultHandler)(request, server);
+		// A hung request leaves the connection open with no response, which is what
+		// a wedged server looks like until its own write timeout fires.
 		if ("hang" in outcome) return;
 		if ("error" in outcome) {
 			write(connection, { id, error: outcome.error });
+			closeAfterResponse(connection);
 			return;
 		}
 		write(connection, { id, result: outcome.result });
-		if (method === "events.subscribe") connection.subscribed = true;
+		if (method === "events.subscribe") {
+			connection.subscribed = true;
+			return;
+		}
+		closeAfterResponse(connection);
 	};
 
 	const listener = net.createServer((socket) => {
