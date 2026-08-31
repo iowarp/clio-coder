@@ -30,6 +30,3 @@ If the suite comes back red you will receive its output as input data. Repair
 exactly what it reported. Do not restate the failure, do not weaken or delete a
 test to make it pass, and do not widen the change beyond the repair. You get at
 most two repair attempts before the run fails with the suite still red.
-
-Answer with your `mutation-report`. Include `commitMessage`: one imperative
-subject line describing this change, as you would write it in the log.
