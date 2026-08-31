@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ScopeSpec } from "../safety/scope.js";
+import { AdmissionCanceledError } from "./admission-error.js";
 import { createAdmissionQueue } from "./admission-queue.js";
 import {
 	acquireCapacityLease,
@@ -278,18 +279,18 @@ export function createCapacityAdmissionController(options: {
 				pumpNow();
 				const outcome = await outcomePromise;
 				if (outcome.state !== "admitted") {
-					throw new Error(
-						describeAdmissionFailure({
-							state: outcome.state,
-							nodeId: input.nodeId,
-							...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-							waitedMs: now() - queuedAt,
-							overdueAtQueueMs: queuedAt - input.deadlineAt,
-							queueDepth: queue.size(),
-							limits: options.limits(),
-							usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),
-						}),
-					);
+					const detail = describeAdmissionFailure({
+						state: outcome.state,
+						nodeId: input.nodeId,
+						...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
+						waitedMs: now() - queuedAt,
+						overdueAtQueueMs: queuedAt - input.deadlineAt,
+						queueDepth: queue.size(),
+						limits: options.limits(),
+						usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),
+					});
+					if (outcome.state === "canceled") throw new AdmissionCanceledError(detail);
+					throw new Error(detail);
 				}
 				const lease = acquired.get(input.assignmentId);
 				if (!lease) throw new Error("dispatch: admitted request has no capacity lease");

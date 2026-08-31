@@ -7,6 +7,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { AdmissionCanceledError } from "../../src/domains/dispatch/admission-error.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
@@ -59,7 +60,9 @@ function workerEntry(overrides: Partial<WorkerEntryState> = {}): WorkerEntryStat
 	};
 }
 
-function recorder(options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState[] } = {}): Recorder {
+function recorder(
+	options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState[]; dispatchError?: Error } = {},
+): Recorder {
 	const echoed: string[] = [];
 	const submitted: string[] = [];
 	const notes: string[] = [];
@@ -70,6 +73,7 @@ function recorder(options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState
 		ownsProgressBus: () => true,
 		dispatch: async (request: unknown) => {
 			requests.push(request);
+			if (options.dispatchError) throw options.dispatchError;
 			return {
 				runId: "r1",
 				events: (async function* () {})(),
@@ -167,6 +171,13 @@ describe("contracts/worker run commands", () => {
 		dispatchSlashCommand(parseSlashCommand("/run coder stop here"), r.ctx);
 		await flushAsync();
 		deepStrictEqual(r.notices, ["warn:run aborted: operator abort"]);
+	});
+
+	it("names a canceled queued admission as aborted instead of failed", async () => {
+		const r = recorder({ dispatchError: new AdmissionCanceledError() });
+		dispatchSlashCommand(parseSlashCommand("/run coder stop while queued"), r.ctx);
+		await flushAsync();
+		deepStrictEqual(r.notices, ["warn:run aborted: admission canceled before a capacity slot opened"]);
 	});
 
 	it("hands the receipt's answer to the main agent when --share asked for it", async () => {

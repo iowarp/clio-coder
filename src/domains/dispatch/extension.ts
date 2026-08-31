@@ -114,6 +114,7 @@ import {
 	routeValidationProjection,
 } from "./active-route-planner.js";
 import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
+import { AdmissionCanceledError } from "./admission-error.js";
 import { agentRouteCandidates } from "./agent-candidates.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, renderAgentLedger } from "./agent-ledger.js";
 import { publishAgentLedgerEntry, subscribeAgentLedger } from "./agent-ledger-hub.js";
@@ -2615,11 +2616,12 @@ export function createDispatchBundle(
 		error: unknown,
 	): void {
 		const detail = error instanceof Error ? error.message : String(error);
-		const outcome: RunOutcome = /admission canceled/u.test(detail)
-			? "canceled"
-			: /admission timed out/u.test(detail)
-				? "timed_out"
-				: "denied_by_policy";
+		const outcome: RunOutcome =
+			error instanceof AdmissionCanceledError
+				? "canceled"
+				: /admission timed out/u.test(detail)
+					? "timed_out"
+					: "denied_by_policy";
 		context.bus.emit(BusChannels.DispatchFailed, {
 			...identity,
 			outcome,
