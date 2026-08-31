@@ -118,7 +118,16 @@ export function attachRunEventJournalBridge(
 			const entry = runTailEntryFromEvent(payload.event);
 			if (entry === null) return;
 			ensureOpen(identity.runId, identity.agentId);
-			journal.append(identity.runId, entry);
+			// Route resolution warnings use `message`, while worker transcript
+			// events generally project their text through `detail`. Preserve the
+			// warning at this dispatch-owned durability seam so fleet view does not
+			// render a content-free `route_warning` line.
+			const message =
+				isRecord(payload.event) && typeof payload.event.message === "string" ? payload.event.message : undefined;
+			journal.append(
+				identity.runId,
+				entry.detail === undefined && message !== undefined ? { ...entry, detail: message } : entry,
+			);
 		}),
 		bus.on(BusChannels.DispatchCompleted, (payload: DispatchCompletedPayload) => {
 			seal(payload.outcome, payload.outcomeDetail, payload);
