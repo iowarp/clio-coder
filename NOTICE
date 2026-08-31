@@ -7,3 +7,28 @@ Illinois Institute of Technology.
 
 Licensed under the Apache License, Version 2.0. See the LICENSE file
 distributed with this work for the full license text.
+
+--------------------------------------------------------------------
+Pinned external tools
+
+Clio Coder does not bundle the programs below. `clio-coder tools install
+<id>` downloads a pinned upstream release on request, verifies it against
+the checksum recorded in src/domains/toolchain/registry.ts, and places the
+upstream license text beside the binary under the Clio data directory. Each
+program remains under its own license and copyright; Clio neither modifies
+nor redistributes it.
+
+herdr (https://herdr.dev, https://github.com/herdrdev/herdr)
+  Copyright the herdr authors.
+  Licensed under the Apache License, Version 2.0.
+  Used as the terminal multiplexer behind Clio panes.
+
+yazi (https://yazi-rs.github.io, https://github.com/sxyazi/yazi)
+  Copyright the yazi authors.
+  Licensed under the MIT License.
+  Used as the terminal file manager behind the file-picker pane.
+
+croc (https://schollz.com/software/croc6, https://github.com/schollz/croc)
+  Copyright Zack Scholl and the croc authors.
+  Licensed under the MIT License.
+  Used as the relay file-transfer backend for machine-to-machine transfers.

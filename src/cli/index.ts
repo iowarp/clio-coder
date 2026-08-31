@@ -67,6 +67,8 @@ Usage:
   clio-coder skills               list, inspect, validate, or install skills
   clio-coder library              list, search, add, or sync agents, prompts, fleets, and skills from catalogs
   clio-coder verifiers            discover, author, validate, edit, or dry-run project checks
+  clio-coder tools list|status|install <id>  pinned external programs Clio can drive
+  clio-coder panes install        install the pane multiplexer (alias for 'tools install herdr')
   clio-coder docs [topic]         serve the HTML docs of a source checkout on 127.0.0.1 (--no-open to skip browser)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
   clio-coder --help, -h           this message
@@ -261,6 +263,8 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		},
 	],
+	["tools", async (subArgs) => (await import("./tools.js")).runToolsCommand(subArgs)],
+	["panes", async (subArgs) => (await import("./panes.js")).runPanesCommand(subArgs)],
 	["doctor", async (subArgs) => (await import("./doctor.js")).runDoctorCommand(subArgs)],
 	["paths", async (subArgs) => (await import("./paths.js")).runPathsCommand(subArgs)],
 	["reset", async (subArgs) => (await import("./reset.js")).runResetCommand(subArgs)],
