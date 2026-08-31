@@ -316,6 +316,24 @@ describe("mux contract in guest mode", () => {
 		strictEqual(record?.runId, null);
 	});
 
+	it("redirects utility stdout exactly once only when the caller names a path", async () => {
+		const { fake, runtime } = await guest();
+		await runtime.contract.openUtilityPane({
+			argv: ["yazi", "--local-events", "cd,clio-pick"],
+			cwd: "/work",
+			label: "yazi",
+			stdoutPath: "/cache/yazi/session one.stream",
+		});
+		strictEqual(
+			fake.requestsFor("pane.send_text")[0]?.params.text,
+			"exec 'yazi' '--local-events' 'cd,clio-pick' > '/cache/yazi/session one.stream'\n",
+		);
+		strictEqual((String(fake.requestsFor("pane.send_text")[0]?.params.text).match(/ > /g) ?? []).length, 1);
+
+		await runtime.contract.openUtilityPane({ argv: ["bash", "-l"], cwd: "/work", label: "shell" });
+		strictEqual(fake.requestsFor("pane.send_text")[1]?.params.text, "exec 'bash' '-l'\n");
+	});
+
 	it("reports Clio's own pane state through HERDR_PANE_ID", async () => {
 		const { fake, runtime } = await guest();
 		strictEqual(
