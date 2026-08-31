@@ -359,7 +359,10 @@ async function emitWeights(files) {
 		entries.push(await timeFile(file));
 	}
 	entries.sort((left, right) => left.file.localeCompare(right.file));
-	process.stdout.write(`${JSON.stringify(entries, null, 1)}\n`);
+	// Tabs, because the redirect in the documented command writes straight into
+	// the repository and `npm run lint` formats JSON with tabs. One-space indent
+	// meant the regeneration command produced a file that failed the next lint.
+	process.stdout.write(`${JSON.stringify(entries, null, "\t")}\n`);
 	return 0;
 }
 
