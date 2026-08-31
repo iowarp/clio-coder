@@ -43,7 +43,18 @@ describe("instant-shell built import graph", () => {
 		const source = closure.map((file) => readFileSync(join(DIST, file), "utf8")).join("\n");
 
 		strictEqual(closure.length <= 6, true, `Stage 0 closure grew to ${closure.length} chunks: ${closure.join(", ")}`);
-		strictEqual(bytes <= 110_000, true, `Stage 0 closure grew to ${bytes} bytes`);
+		// 113 KB, raised from 110 KB for the modal marker (src/interactive/modal-marker.ts
+		// plus the handle wrapper in showClioOverlayFrame, 2.7 KB together).
+		//
+		// The cap measures chunk co-location, not what Stage 0 actually executes.
+		// The bundler already groups `src/interactive/overlay-frame.ts`, the editor,
+		// and the keybinding manager into the same chunk as `src/engine/tui.ts`, and
+		// Stage 0 pulls that chunk whole, so overlay code lands in this number
+		// whether or not the instant shell can reach it. The forbidden-graph checks
+		// below are the part that pins what Stage 0 must never drag in; they are
+		// unchanged. Ratchet this back down if the overlay surfaces ever get their
+		// own chunk.
+		strictEqual(bytes <= 113_000, true, `Stage 0 closure grew to ${bytes} bytes`);
 		for (const forbidden of [
 			"src/entry/orchestrator.ts",
 			"@earendil-works/pi-ai",
