@@ -23,6 +23,7 @@ current source, tests, and `CHANGELOG.md`.
 | Safety posture, default-deny Bash, project policy, damage-control rules, and typed validation | [safety-model.md](safety-model.md) ([Interactive Blueprint](html/safety_blueprint.html)) |
 | Source layout, compile-time boundaries, domain loading, and runtime data flow | [architecture.md](architecture.md) ([Interactive Blueprint](html/architecture_blueprint.html)) |
 | Why the dispatch domain is not split, which invariants cross the obvious seams, and why direct subpath imports are permitted | [dispatch-architecture-rationale.md](dispatch-architecture-rationale.md) ([Interactive Blueprint](html/dispatch_rationale_blueprint.html)) |
+| Typed dispatch intent: the producer and persisted-contract compatibility tables, refusal reason codes, and the legacy-inference retirement criterion | [dispatch-typed-intent.md](dispatch-typed-intent.md) |
 | Prompt envelope reuse, provider tool delivery, and bounded tool results | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) ([Interactive Blueprints: prompt_envelope](html/prompt_envelope_blueprint.html), [tools](html/tools_blueprint.html)) |
 | In-depth reference for all 20 worker tools: parameters, typical payloads, and error examples | [tool-usage.md](tool-usage.md) ([Interactive Blueprint](html/tool_usage_blueprint.html)) |
 | Developer guide to implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](provider-adapter-cookbook.md) ([Interactive Blueprint](html/provider_adapter_blueprint.html)) |

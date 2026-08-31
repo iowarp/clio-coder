@@ -80,7 +80,7 @@ const DispatchIntentSchema = Type.Object(
 	{
 		additionalProperties: false,
 		description:
-			"Typed repository-relative path and output intent. Verification checks are declared ids from package scripts or .clio-coder/verifiers.yaml, not shell commands.",
+			"Typed repository-relative path and output intent. Declare it on every dispatch: declared paths select the project rules that apply to them and pin worker context, and omitting it falls back to reading path-like tokens out of your task and briefing text, which can miss an applicable rule. Verification checks are declared ids from package scripts or .clio-coder/verifiers.yaml, not shell commands. In a batch, per-task intent narrows the top-level intent and is refused if it reaches outside it.",
 	},
 );
 

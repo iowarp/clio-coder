@@ -216,6 +216,27 @@ concurrent. Waiting writers follow the plan's declared step order and then the
 request order. Agent ledger claims remain advisory and do not enforce the
 token.
 
+### Declared step scope
+
+A v4+ contract's per-step `writes:` declaration has two consumers. The
+write-boundary enforcer verifies the step window afterwards, which is where the
+boundary is enforced; pre-emptive confinement for declared commands would need a
+command sandbox that does not exist. The same declaration also compiles into the
+step's typed dispatch intent as `relevant_paths`, so the paths the contract
+already named select the project rules that apply to them and pin the worker's
+context instead of being reconstructed from path-like tokens in the rendered
+prompt.
+
+It is carried as declared scope rather than as intent `write_roots` on purpose.
+Intent write roots become the enforced boundary at the per-tool worker seam,
+which refuses outright on the subprocess and ACP runtimes a fleet may
+legitimately route a step to, so restating the contract's boundary there would
+mint a second grant in a second place and fail closed on contracts that run
+correctly today. A pre-v4 contract and every readonly step declare nothing and
+keep the legacy inference path. See
+[dispatch-typed-intent.md](dispatch-typed-intent.md) for the full producer
+table and the refusal reason codes.
+
 The first checkout writer acquires a process-owned lease under the Clio state
 directory. Its key is the canonical checkout path, and its record contains the
 owner pid, process birth token, and acquisition time. A live sibling process

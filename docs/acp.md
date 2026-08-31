@@ -263,6 +263,19 @@ name only the protocol it was reached through, so its header reads `◇ codex
 token usage, the count of mediated tool calls in place of a token count; a peer
 that does report usage gets the same `tok` unit a local worker does.
 
+### Typed intent on a delegated dispatch
+
+A dispatch to a delegation agent accepts typed intent and renders the declared
+scope into the plan approval artifact, so an operator sees what the peer was
+told to work on before it starts. The declaration grants nothing on this
+transport: the peer runs its own tool surface and Clio mediates no per-tool
+call, so a resolved write boundary would be a claim nothing enforces and is
+refused outright rather than accepted and left unenforced. Declare `read_roots`
+and `relevant_paths` to bound what the peer is asked to look at; run the writing
+half of the work on a native or `claude-sdk` worker. The compatibility rules and
+reason codes are the same as for any other producer; see
+[dispatch-typed-intent.md](dispatch-typed-intent.md).
+
 ---
 
 ## 8. Error Taxonomy

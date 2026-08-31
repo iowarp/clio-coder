@@ -199,6 +199,30 @@ IDs must be lowercase and may include numbers, dots, underscores, and hyphens; t
 
 `compatibility.clio` is optional. When present, it must be a valid SemVer range such as `>=0.3.8`, `^0.3.8`, or `0.3.x`. Installation refuses a package whose range excludes the running Clio version and names the extension, its declared range, and that running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio version change stays visible in `extensions list` with its diagnostic but contributes no resources. An incompatible project package does not hide a compatible user package with the same ID. A manifest without `compatibility.clio` keeps the existing unrestricted behavior.
 
+### Extensions that dispatch
+
+An extension that builds a `DispatchRequest` against the `DispatchContract` is a
+dispatch producer and is bound by the typed-intent compatibility rules like any
+other. Build the declaration with `declaredScopeIntent()` from the dispatch
+domain rather than assembling the normalized object by hand: it runs the same
+path grammar, caps, deduplication, and provenance construction the dispatch tool
+uses, so an extension cannot mint an intent shape the tool could not.
+
+```ts
+import { declaredScopeIntent } from "../domains/dispatch/index.js";
+
+const built = declaredScopeIntent({ readRoots: ["src/"], writeRoots: ["src/generated/"] });
+if (!built.ok) throw new Error(`${built.reason}: ${built.message}`);
+await dispatch.dispatch({ agentId: "coder", executionRole: "builder", task, intent: built.intent });
+```
+
+An extension that declares nothing keeps working: scope falls back to legacy
+inference over its task and briefing text, and the request is refused only when
+it states a contradiction, such as a legacy `writeRoots` disagreeing with a
+declared `write_roots`. Declaring is what stops an applicable project rule from
+being missed because the task text happened not to spell a path. See
+[dispatch-typed-intent.md](dispatch-typed-intent.md).
+
 ---
 
 ## Extension CLI
