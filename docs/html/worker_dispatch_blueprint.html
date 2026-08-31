@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Worker Dispatch Mechanics Blueprint (v0.3.9)</title>
+  <title>Worker Dispatch Mechanics Blueprint (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Custom protocol simulator styles */
@@ -30,7 +30,7 @@
     .dir-in { color: #bd00ff; }
     .dir-out { color: #00d4db; }
     .dir-sys { color: #6a7a85; }
-    
+
     .btn-group-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -61,7 +61,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -101,7 +101,7 @@
               <div class="glass-card">
                 <h3>Sequence Controls</h3>
                 <p>Simulate parent-child messages:</p>
-                
+
                 <div class="btn-group-grid">
                   <button type="button" class="tab-btn" onclick="logEvent('spawn')">1. Spawn Worker</button>
                   <button type="button" class="tab-btn" onclick="logEvent('spec')">2. Send Spec</button>
@@ -110,7 +110,7 @@
                   <button type="button" class="tab-btn" onclick="logEvent('decision')">5. Decision Stdin</button>
                   <button type="button" class="tab-btn" onclick="logEvent('finish')">6. Finish Run</button>
                 </div>
-                
+
                 <button type="button" class="tab-btn" style="margin-top:1.5rem; width:100%; border-color:var(--color-rose); color:var(--color-rose);" onclick="clearStream()">Reset Log</button>
               </div>
             </div>
@@ -119,7 +119,7 @@
               <div class="glass-card">
                 <h3>Live NDJSON Timeline</h3>
                 <p>Scroll down to see lines written to standard streams:</p>
-                
+
                 <div class="protocol-scroller" id="scroller">
                   <div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Process idle. Click Spawn Worker to begin.</div>
                 </div>
@@ -133,7 +133,7 @@
           <div class="glass-card">
             <h3>Worker Exit Codes Specs</h3>
             <p>Parent checks exit codes when child process terminates:</p>
-            
+
             <table class="env-table" style="margin-top:1rem;">
               <thead>
                 <tr>
@@ -183,7 +183,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Worker Dispatch Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Worker Dispatch Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -198,7 +198,7 @@
       const scr = document.getElementById("scroller");
       const stamp = Date.now();
       let html = "";
-      
+
       if (type === 'spawn') {
         html = `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> node dist/worker/entry.js (pid 48123) spawned with scrubbed process.env</div>`;
       } else if (type === 'spec') {
@@ -216,7 +216,7 @@
 
       scr.innerHTML += html;
       scr.scrollTop = scr.scrollHeight;
-      
+
       if (window.initTableOfContents) window.initTableOfContents();
     }
 

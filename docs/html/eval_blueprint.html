@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Evaluation Runner Blueprint (v0.3.9)</title>
-  
+  <title>Clio Coder Evaluation Runner Blueprint (v0.4.0)</title>
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -16,7 +16,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dim: #6b7280;
-      
+
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -27,12 +27,12 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      
+
       --glass-blur: blur(12px);
     }
 
@@ -44,7 +44,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -422,7 +422,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -444,7 +444,7 @@
     <!-- TAB 1: INTERACTIVE -->
     <main class="tab-pane active" id="pane-interactive">
       <div class="blueprint-layout">
-        
+
         <!-- Left: Task Suite Editor & Run -->
         <div class="specs-col">
           <div class="glass-card">
@@ -453,7 +453,7 @@
               Task YAML validator &amp; runner
             </h2>
             <p>Paste or edit task suite YAML files. Run the validator or simulate execution sweeps.</p>
-            
+
             <div class="presets-list">
               <span class="preset-btn" onclick="loadTaskPreset('valid')">Valid Task YAML</span>
               <span class="preset-btn" onclick="loadTaskPreset('invalid')">Invalid Task Cwd escape</span>
@@ -482,7 +482,7 @@
               Baseline vs Candidate Compare
             </h2>
             <p>Select Baselines and Candidate records to calculate deltas.</p>
-            
+
             <div class="form-row">
               <div class="form-group">
                 <label for="baselineSelect">Baseline Run (Before change)</label>
@@ -511,7 +511,7 @@
                 <span>Wall Time Delta</span>
               </div>
             </div>
-            
+
             <div id="compareDetails" style="margin-top:1.5rem; font-size:0.875rem; color:var(--text-muted)">
               Candidate #1 outperformed Baseline #1. Typecheck and verifier commands run cold speeds decreased.
             </div>
@@ -526,7 +526,7 @@
       <div class="glass-card">
         <h2>Clio Coder Eval Runner Specifications</h2>
         <p>The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows without requiring the runner itself to call a model.</p>
-        
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">CLI and Report Formats</h3>
         <p>Run task suites, build reports, and compare evaluation results across runs:</p>
         <pre><code>clio-coder eval run --task-file tasks.yaml [--repeat &lt;n&gt;]
@@ -547,6 +547,16 @@ tasks:
       - npm run build
       - node dist/cli/index.js --help
     timeoutMs: 60000</code></pre>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Serial-Lane Test Infrastructure &amp; Sharding</h3>
+        <p>The repository test suite utilizes <code>scripts/shard-tests.mjs</code> to distribute contract and evaluation tests across weighted parallel shards (configured in <code>scripts/shard-weights.json</code>) followed by an isolated serial lane:</p>
+        <pre><code># Run parallel sharded test lanes
+node scripts/shard-tests.mjs --shard 1/4
+node scripts/shard-tests.mjs --shard 2/4
+
+# Run isolated serial lane (strict CLIO_TEST_CONCURRENCY=1)
+node scripts/shard-tests.mjs --shard serial</code></pre>
+        <p>Timing-sensitive benchmarks, port-binding tests, and heavy disk I/O suites run exclusively in the <code>serial</code> lane after parallel lanes drain to prevent concurrency contention. Harness watchdogs in <code>tests/harness/load.ts</code> dynamically scale timeouts proportional to active concurrency.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Failure Classes</h3>
         <table class="ref-table">
@@ -579,7 +589,7 @@ tasks:
     </main>
 
     <footer>
-      <p>Clio Coder Eval Runner spec &bull; Version 0.3.7</p>
+      <p>Clio Coder Eval Runner spec &bull; Version 0.4.0</p>
     </footer>
   </div>
 
@@ -588,7 +598,7 @@ tasks:
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
       document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-      
+
       if (tabId === 'interactive') {
         document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
         document.getElementById('pane-interactive').classList.add('active');
@@ -663,7 +673,7 @@ tasks:
 
       if (errors.length > 0) {
         output.className = 'status-panel error';
-        output.innerHTML = `<strong>Schema Errors:</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` + 
+        output.innerHTML = `<strong>Schema Errors:</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` +
           errors.map(e => `<li>${e}</li>`).join('') + `</ul>`;
         document.getElementById('runBtn').disabled = true;
       } else {
@@ -676,7 +686,7 @@ tasks:
     function runSimulatedEval() {
       const consoleEl = document.getElementById('runConsole');
       consoleEl.innerHTML = `[EVAL] Launching eval tasks suite runner...`;
-      
+
       setTimeout(() => {
         consoleEl.innerHTML += `\n[RUN] Resolving Task: cli-json-smoke`;
         consoleEl.innerHTML += `\n[FS] Resolved cwd: fixtures/cli-smoke`;
@@ -684,7 +694,7 @@ tasks:
 
       setTimeout(() => {
         consoleEl.innerHTML += `\n[SH] Running verifier: node dist/cli/index.js --version`;
-        consoleEl.innerHTML += `\n[SH] stdout: Clio Coder v0.3.9`;
+        consoleEl.innerHTML += `\n[SH] stdout: Clio Coder v0.4.0`;
         consoleEl.innerHTML += `\n[SH] exit code: 0`;
       }, 900);
 
@@ -697,7 +707,7 @@ tasks:
     function runCompare() {
       const b = document.getElementById('baselineSelect').value;
       const c = document.getElementById('candidateSelect').value;
-      
+
       const rateEl = document.getElementById('deltaPassRate');
       const timeEl = document.getElementById('deltaWallTime');
       const descEl = document.getElementById('compareDetails');

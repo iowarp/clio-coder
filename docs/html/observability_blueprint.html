@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Observability & Receipt Viewer</title>
-  
+
   <!-- Fonts -->
-  
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -15,7 +15,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dark: #4b5563;
-      
+
       /* Glowing Neon Colors */
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
@@ -40,7 +40,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 90% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
@@ -382,20 +382,20 @@
         </a>
         <div class="version-tag">
           <div class="version-dot"></div>
-          Clio Coder v0.3.9
+          Clio Coder v0.4.0
         </div>
       </div>
     </header>
 
     <!-- Split Viewer Panel -->
     <div class="split-viewer">
-      
+
       <!-- Left Panel: Lists -->
       <div class="left-panel">
         <div class="panel-header">
           <input type="text" class="filter-input" id="filter-box" placeholder="Type to filter artifacts..." oninput="filterArtifacts()">
         </div>
-        
+
         <div style="flex: 1; overflow-y: auto;">
           <div class="category-group" id="group-Receipts">
             <div class="category-title">Receipts</div>
@@ -448,7 +448,7 @@
             <span id="backing-path-display">~/.local/state/clio-coder/receipts/run-9a3c9f28.json</span>
             <span style="font-size:0.7rem; color:var(--text-dark);" id="capped-indicator">Lines: 12</span>
           </div>
-          
+
           <div class="verification-status-panel" id="verification-panel">
           </div>
 
@@ -459,7 +459,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.3.9. Designed with high-performance dark aesthetics.</p>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.4.0. Designed with high-performance dark aesthetics.</p>
     </footer>
   </div>
 
@@ -608,7 +608,7 @@
       document.getElementById("viewer-badge").innerText = art.badge;
       document.getElementById("viewer-badge").className = `status-badge ${art.badgeClass}`;
       document.getElementById("backing-path-display").innerText = art.path;
-      
+
       const codeEl = document.getElementById("artifact-content-pre");
       codeEl.textContent = art.content;
 
@@ -619,7 +619,7 @@
       const panel = document.getElementById("verification-panel");
       panel.style.display = "none";
       panel.className = "verification-status-panel";
-      
+
       // Toggle verify button visibility based on category
       const verifyBtn = document.getElementById("verify-btn");
       if (art.category === "Receipts") {
@@ -632,10 +632,10 @@
     function runIntegrityVerification() {
       const art = ARTIFACTS[activeKey];
       const panel = document.getElementById("verification-panel");
-      
+
       panel.style.display = "block";
       panel.textContent = art.verifyLog;
-      
+
       if (art.verifySuccess) {
         panel.className = "verification-status-panel success";
       } else {
@@ -650,7 +650,7 @@
 
     function filterArtifacts() {
       const q = document.getElementById("filter-box").value.toLowerCase();
-      
+
       Object.keys(ARTIFACTS).forEach(key => {
         const art = ARTIFACTS[key];
         const row = document.getElementById(`item-${key}`);

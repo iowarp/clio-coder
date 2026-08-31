@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ALCF Inference Provider Blueprint (v0.3.9)</title>
+  <title>ALCF Inference Provider Blueprint (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Flow diagram custom styles */
@@ -60,7 +60,7 @@
       color: var(--text-muted);
       margin: 0;
     }
-    
+
     .oauth-btn {
       background: var(--color-cyan);
       color: #090d16;
@@ -98,7 +98,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -141,7 +141,7 @@
               <div class="glass-card">
                 <h3>Select Gateway Target</h3>
                 <p>Choose an ALCF supercomputing cluster to generate configure commands.</p>
-                
+
                 <div class="form-group">
                   <label for="clusterSelect">Cluster Gateway</label>
                   <select id="clusterSelect" onchange="updateConfigSim()">
@@ -175,7 +175,7 @@
               <div class="glass-card">
                 <h3>Generated Configuration Commands</h3>
                 <p>Run these commands inside your Clio Coder session to login and save the target profile:</p>
-                
+
                 <pre><code id="generatedCommand1">clio-coder auth login alcf</code></pre>
                 <pre><code id="generatedCommand2">clio-coder configure ...</code></pre>
                 <pre><code id="generatedCommand3">clio-coder targets use alcf-sophia</code></pre>
@@ -189,7 +189,7 @@
           <div class="glass-card">
             <h3>Globus OAuth Paste-Code Login</h3>
             <p>Clio's interactive SSH-friendly OAuth PKCE loop sequence:</p>
-            
+
             <div class="flow-diagram">
               <div class="flow-step active" id="step1">
                 <span class="step-number">1</span>
@@ -229,7 +229,7 @@
           <div class="glass-card">
             <h3>Configure Details</h3>
             <p>Sophia currently maps to <code>/resource_server/sophia/vllm/v1</code> and Metis maps to <code>/resource_server/metis/api/v1</code>. Wire model IDs must be exact; Metis uses bare names while Sophia uses <code>openai/</code> prefixes.</p>
-            
+
             <h3>Implementation files</h3>
             <ul>
               <li><code>src/engine/alcf-oauth.ts</code>: PKCE pasting flows</li>
@@ -256,7 +256,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder ALCF Inference Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder ALCF Inference Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -266,7 +266,7 @@
       const cluster = document.getElementById("clusterSelect").value;
       const modelMode = document.getElementById("modelSelect").value;
       const customModelGroup = document.getElementById("customModelGroup");
-      
+
       let modelId = modelMode;
       if (modelMode === "custom") {
         customModelGroup.style.display = "block";
@@ -282,16 +282,16 @@
           modelId = "gpt-oss-120b";
         }
       }
-      
+
       const tokens = document.getElementById("maxTokens").value;
       const targetId = `alcf-${cluster}`;
-      const url = cluster === "sophia" 
+      const url = cluster === "sophia"
         ? "https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1"
         : "https://inference-api.alcf.anl.gov/resource_server/metis/api/v1";
 
       document.getElementById("generatedCommand2").innerText = `clio-coder configure \\\n  --id ${targetId} \\\n  --runtime alcf \\\n  --url ${url} \\\n  --model ${modelId} \\\n  --max-tokens ${tokens}`;
       document.getElementById("generatedCommand3").innerText = `clio-coder targets use ${targetId}`;
-      
+
       // Update TOC just in case
       if (window.initTableOfContents) window.initTableOfContents();
     }
@@ -299,7 +299,7 @@
     let currentSimStep = 1;
     function simulateOAuthStep(step) {
       document.querySelectorAll(".flow-step").forEach(s => s.classList.remove("active"));
-      
+
       if (step === 2) {
         document.getElementById("step2").classList.add("active");
       } else if (step === 3) {

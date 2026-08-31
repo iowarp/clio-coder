@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Context Engine Blueprint (v0.3.9)</title>
-  
+  <title>Clio Coder Context Engine Blueprint (v0.4.0)</title>
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -16,7 +16,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dim: #6b7280;
-      
+
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -27,12 +27,12 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      
+
       --glass-blur: blur(12px);
     }
 
@@ -44,7 +44,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -381,7 +381,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -403,7 +403,7 @@
     <!-- TAB 1: INTERACTIVE -->
     <main class="tab-pane active" id="pane-interactive">
       <div class="blueprint-layout">
-        
+
         <!-- Left: Sliders inputs -->
         <div class="specs-col">
           <div class="glass-card">
@@ -412,7 +412,7 @@
               Context Parameters
             </h2>
             <p>Set token counts to estimate context window pressure and determine compaction behavior.</p>
-            
+
             <div class="form-group">
               <label for="windowSize">Context Window Limit</label>
               <select id="windowSize" onchange="recalculate()">
@@ -456,7 +456,7 @@
               Context Pressure Gauge
             </h2>
             <p>Visual representation of model context window space.</p>
-            
+
             <div class="stack-meter">
               <div class="stack-seg seg-sys" id="segSys" style="width: 10%"></div>
               <div class="stack-seg seg-msg" id="segMsg" style="width: 40%"></div>
@@ -492,7 +492,7 @@
       <div class="glass-card">
         <h2>Clio Coder Context Engine Specification</h2>
         <p>Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.</p>
-        
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Token Estimator</h3>
         <p>Accounting is hot-path optimized. Instead of querying a remote model tokenizer on every keypress or display refresh, the engine uses a 4 characters-per-token heuristic. This allows instant calculations of messages size, tools payloads, and system scopes.</p>
 
@@ -509,7 +509,7 @@
     </main>
 
     <footer>
-      <p>Clio Coder Context Engine spec &bull; Version 0.3.7</p>
+      <p>Clio Coder Context Engine spec &bull; Version 0.4.0</p>
     </footer>
   </div>
 
@@ -518,7 +518,7 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
       document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-      
+
       if (tabId === 'interactive') {
         document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
         document.getElementById('pane-interactive').classList.add('active');
@@ -543,7 +543,7 @@
 
       // clamp sum to windowSize
       const total = sys + msg + tools;
-      
+
       const pctSys = (sys / windowSize) * 100;
       const pctMsg = (msg / windowSize) * 100;
       const pctTools = (tools / windowSize) * 100;
@@ -582,7 +582,7 @@
           vBox.className = "verdict-box warn";
           vTitle.innerText = "LOCAL MASKING TRIGGERED";
           vDesc.innerText = `Pressure (${pressure.toFixed(2)}) crossed threshold. Masking stale observations and dropping stale thinking recovered ${Math.round(savedByMasking).toLocaleString()} tokens, dropping pressure to ${pressureAfterMasking.toFixed(2)} and avoiding LLM compaction.`;
-          
+
           previewBox.style.display = 'block';
           document.getElementById('maskedPreviewText').innerText = `[Observation masked: read output was 320 lines, 12800 chars - contents masked to save context. Re-run tool for current contents.] Preview: export default class ConfigResolver { ... }\n[Stale thinking dropped from assistant replay]`;
         } else {

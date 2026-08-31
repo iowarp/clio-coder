@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Documentation Hub (v0.3.9)</title>
+  <title>Clio Coder Documentation Hub (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Unique homepage layouts */
@@ -55,7 +55,7 @@
       max-width: 750px;
       margin: 0 auto 1.5rem auto;
     }
-    
+
     /* Category Filter Grid */
     .filter-section {
       margin-bottom: 2rem;
@@ -142,7 +142,7 @@
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 1.5rem;
     }
-    
+
     /* Document Cards */
     .doc-card {
       background: var(--bg-card);
@@ -265,11 +265,11 @@
       </div>
       <h1 class="hub-title">Clio Coder Documentation Hub</h1>
       <p class="subtitle">Interactive technical blueprints and specifications for IOWarp's terminal-first agentic computing orchestrator</p>
-      
+
       <div class="meta-badges">
         <span class="meta-badge version">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          v0.3.9
+          v0.4.0
         </span>
         <span class="meta-badge" style="border-color: rgba(255,255,255,0.08); color: var(--text-muted);">
           CLI command: <code style="color: var(--color-orange); margin-left: 0.35rem;">clio-coder docs [topic]</code>
@@ -370,7 +370,7 @@
 
     <!-- Hub Grid -->
     <main class="hub-grid" id="hubGrid">
-      
+
       <!-- Card: Safety Model -->
       <a href="safety_blueprint.html" class="doc-card flagship" data-categories="safety,start" data-title="Safety Model" data-tags="safety security autonomy block rules gate bash rollback">
         <div class="card-top">
@@ -437,12 +437,12 @@
       </a>
 
       <!-- Card: Prompt Envelope & Tools -->
-      <a href="tools_blueprint.html" class="doc-card" data-categories="safety,operate" data-title="Prompt Envelope &amp; Tools" data-tags="tools envelope registry envelope results truncate adapter">
+      <a href="tools_blueprint.html" class="doc-card" data-categories="safety,operate" data-title="Prompt Envelope &amp; Tools" data-tags="tools envelope registry envelope results truncate adapter panes toolchain">
         <div class="card-top">
           <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
           <span class="card-badge badge-ref">Ref</span>
         </div>
-        <p class="card-desc">Envelopes structure, twenty tools grouped into seven planes via single agent-tools.ts adapter, observation budgets, and safety checks.</p>
+        <p class="card-desc">Envelopes structure, 21 tools grouped into seven planes via single agent-tools.ts adapter, pinned toolchain management, observation budgets, and safety checks.</p>
         <div class="card-footer">
           <span class="path">prompt-envelope-and-tools.md</span>
           <span class="feature">Tool Inspector</span>
@@ -911,7 +911,7 @@ clio-coder docs --no-open</code></pre>
     </div>
 
     <footer>
-      <p>Clio Coder Visual Documentation Center &bull; Version 0.3.7</p>
+      <p>Clio Coder Visual Documentation Center &bull; Version 0.4.0</p>
       <p>Maintainer: Illinois Institute of Technology / Gnosis Research Center &bull; iowarp.ai</p>
     </footer>
   </div>
@@ -921,7 +921,7 @@ clio-coder docs --no-open</code></pre>
 
     function setCategory(catId) {
       activeCategory = catId;
-      
+
       // Update buttons
       document.querySelectorAll('.filter-tag').forEach(btn => {
         btn.classList.remove('active');
@@ -946,10 +946,10 @@ clio-coder docs --no-open</code></pre>
         const path = card.querySelector('.path').textContent.toLowerCase();
         const categories = card.getAttribute('data-categories').split(',');
 
-        const matchesQuery = !query || 
-                             title.includes(query) || 
-                             tags.includes(query) || 
-                             desc.includes(query) || 
+        const matchesQuery = !query ||
+                             title.includes(query) ||
+                             tags.includes(query) ||
+                             desc.includes(query) ||
                              path.includes(query);
 
         const matchesCategory = activeCategory === 'all' || categories.includes(activeCategory);

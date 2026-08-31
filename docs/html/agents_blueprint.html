@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Agent Fleet Blueprint (v0.3.9)</title>
-  
+  <title>Clio Coder Agent Fleet Blueprint (v0.4.0)</title>
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -16,7 +16,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dim: #6b7280;
-      
+
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -27,12 +27,12 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      
+
       --glass-blur: blur(12px);
     }
 
@@ -44,7 +44,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -439,7 +439,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -461,7 +461,7 @@
     <!-- TAB 1: INTERACTIVE -->
     <main class="tab-pane active" id="pane-interactive">
       <div class="blueprint-layout">
-        
+
         <!-- Left: Form inputs -->
         <div class="specs-col">
           <div class="glass-card">
@@ -470,7 +470,7 @@
               Agent Recipe Editor
             </h2>
             <p>Load a template or edit the YAML frontmatter. The validator compiles this into an AgentSpec.</p>
-            
+
             <div class="presets-list">
               <span class="preset-btn" onclick="loadAgentPreset('coder')">Coder</span>
               <span class="preset-btn" onclick="loadAgentPreset('architect')">Architect</span>
@@ -524,7 +524,7 @@
               Dispatch Admission Gates
             </h2>
             <p>Clio's dispatch engine evaluates three core gates before deploying workers.</p>
-            
+
             <!-- Gate 1 -->
             <div class="gate-row">
               <div class="gate-info">
@@ -579,7 +579,7 @@
       <div class="glass-card">
         <h2>Clio Coder Agent Registry Specifications</h2>
         <p>Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files containing YAML frontmatter declarations and an instruction body.</p>
-        
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Shipped Base Agents</h3>
         <table class="ref-table">
           <thead>
@@ -701,7 +701,7 @@
     </main>
 
     <footer>
-      <p>Clio Coder Agent Catalog spec &bull; Version 0.3.7</p>
+      <p>Clio Coder Agent Catalog spec &bull; Version 0.4.0</p>
     </footer>
   </div>
 
@@ -710,7 +710,7 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
       document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-      
+
       if (tabId === 'interactive') {
         document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
         document.getElementById('pane-interactive').classList.add('active');
@@ -799,7 +799,7 @@ You are Scout. Map symbols and indices...`
             if (index !== -1) {
               const key = trimmed.substring(0, index).trim();
               const val = trimmed.substring(index + 1).trim().replace(/['"[\]]/g, '');
-              
+
               if (key === 'name') parsed.name = val;
               if (key === 'audience') parsed.audience = val;
               if (key === 'capabilityClass') parsed.capabilityClass = val;
@@ -846,8 +846,8 @@ You are Scout. Map symbols and indices...`
       const g1Status = document.getElementById('gate1Status');
       g1Status.innerText = gate1Pass ? 'PASS' : 'FAIL';
       g1Status.className = `gate-status ${gate1Pass ? 'pass' : 'fail'}`;
-      document.getElementById('gate1Desc').innerText = gate1Pass ? 
-        'All recipe tools are supported by target capabilities.' : 
+      document.getElementById('gate1Desc').innerText = gate1Pass ?
+        'All recipe tools are supported by target capabilities.' :
         `Unsupported tools: [${unsupported.join(', ')}]`;
 
       // ------------------------------------------------
@@ -881,8 +881,8 @@ You are Scout. Map symbols and indices...`
       const g3Status = document.getElementById('gate3Status');
       g3Status.innerText = gate3Pass ? 'PASS' : 'FAIL';
       g3Status.className = `gate-status ${gate3Pass ? 'pass' : 'fail'}`;
-      document.getElementById('gate3Desc').innerText = gate3Pass ? 
-        "Worker scope resides inside orchestrator scope bounds." : 
+      document.getElementById('gate3Desc').innerText = gate3Pass ?
+        "Worker scope resides inside orchestrator scope bounds." :
         `Worker scope escapes orchestrator bounds: [${invalidScopes.join(', ')}]`;
 
       // ------------------------------------------------
@@ -895,8 +895,8 @@ You are Scout. Map symbols and indices...`
       const g4Status = document.getElementById('gate4Status');
       g4Status.innerText = gate4Pass ? 'PASS' : 'FAIL';
       g4Status.className = `gate-status ${gate4Pass ? 'pass' : 'fail'}`;
-      document.getElementById('gate4Desc').innerText = gate4Pass ? 
-        "No shadow/internal delegation conflicts detected." : 
+      document.getElementById('gate4Desc').innerText = gate4Pass ?
+        "No shadow/internal delegation conflicts detected." :
         "Security Error: Shadow/internal agents cannot run on external ACP workers.";
 
       // ------------------------------------------------
@@ -918,7 +918,7 @@ You are Scout. Map symbols and indices...`
         vCard.style.borderColor = 'rgba(239, 68, 68, 0.3)';
         vTitle.innerText = "DISPATCH REJECTED";
         vTitle.style.color = 'var(--color-rose)';
-        
+
         let details = "Failure summary: ";
         if (!gate1Pass) details += "Missing target capabilities. ";
         if (!gate3Pass) details += "Worker scope escapes orchestrator bounds. ";

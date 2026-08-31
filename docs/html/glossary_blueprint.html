@@ -56,7 +56,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.3.9</span>
+        <span class="version-badge">v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -91,7 +91,7 @@
           <div class="glass-card">
             <h2>Core Architectural Concepts</h2>
             <p>Filter terms across the 40 definitions:</p>
-            
+
             <div style="margin-bottom: 1.25rem;">
               <input type="text" id="termSearchInput" placeholder="Filter terms (e.g. assignment, receipt, ledger, route)..." oninput="filterTerms()" style="width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--border-card); padding:0.75rem 1rem; border-radius:8px; color:#fff; font-family:var(--font-sans);">
             </div>
@@ -226,7 +226,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Glossary Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Glossary Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -235,15 +235,15 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-      
+
       const pane = document.getElementById(`pane-${tabId}`);
       if (pane) pane.classList.add('active');
-      
+
       const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
         return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
       });
       if (activeBtn) activeBtn.classList.add('active');
-      
+
       if (window.initTableOfContents) window.initTableOfContents();
     }
 

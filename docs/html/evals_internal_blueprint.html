@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Internal Eval Suites Blueprint (v0.3.9)</title>
+  <title>Internal Eval Suites Blueprint (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     .internal-warning {
@@ -38,7 +38,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge" style="color: var(--color-rose); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.08);">Clio Coder v0.3.9 (Internal)</span>
+        <span class="version-badge" style="color: var(--color-rose); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.08);">Clio Coder v0.4.0 (Internal)</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -82,7 +82,7 @@
               <div class="glass-card">
                 <h3>Regression Seed Selector</h3>
                 <p>Select a seed pattern to view its YAML specification template:</p>
-                
+
                 <div class="form-group">
                   <label for="seedSelect">YAML Seed</label>
                   <select id="seedSelect" onchange="updateSeedYaml()">
@@ -107,7 +107,7 @@
           <div class="glass-card">
             <h3>Internal Sanitization Gates</h3>
             <p>Ensure these checks are satisfied before publishing a sanitized report outside the repository:</p>
-            
+
             <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
               <label class="checkbox-item"><input type="checkbox"> No secret tokens or private keys in target parameters.</label>
               <label class="checkbox-item"><input type="checkbox"> Output logs are stripped of internal file path structures.</label>
@@ -132,7 +132,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Internal Evals Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Internal Evals Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 

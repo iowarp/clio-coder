@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Environment Variables Blueprint (v0.3.9)</title>
+  <title>Environment Variables Blueprint (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Environment resolver custom styling */
@@ -23,7 +23,7 @@
       font-size: 0.8rem;
       color: var(--color-cyan);
     }
-    
+
     /* Env table custom styling */
     .env-table {
       width: 100%;
@@ -76,7 +76,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -114,7 +114,7 @@
           <div class="glass-card">
             <h3>Variables Matrix</h3>
             <p>Filter or search process environment variables:</p>
-            
+
             <div class="form-group" style="margin-top: 1rem;">
               <input type="text" id="envSearch" placeholder="Search variables (e.g. CLIO_CODER_HOME, turn, budget)..." oninput="filterEnvTable()" style="padding: 0.65rem 0.85rem; font-size: 0.9rem;">
             </div>
@@ -250,7 +250,7 @@
               <div class="glass-card">
                 <h3>Directory Resolver Calculator</h3>
                 <p>Input variables to see where Clio resolves session and configuration folders:</p>
-                
+
                 <div class="form-group">
                   <label for="osSelect">Operating System</label>
                   <select id="osSelect" onchange="resolvePaths()">
@@ -276,7 +276,7 @@
               <div class="glass-card">
                 <h3>Effective Resolved Paths</h3>
                 <p>Resolution order: <code>per-role env var &gt; CLIO_CODER_HOME &gt; platform default</code></p>
-                
+
                 <div class="path-row">
                   <span class="path-label">Config Folder</span>
                   <span class="path-value" id="valConfig">/home/user/.config/clio-coder</span>
@@ -313,7 +313,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Env Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Env Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 

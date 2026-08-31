@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Lifecycle Operations Blueprint (v0.3.9)</title>
-  
+  <title>Clio Coder Lifecycle Operations Blueprint (v0.4.0)</title>
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -16,7 +16,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dim: #6b7280;
-      
+
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -27,12 +27,12 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      
+
       --glass-blur: blur(12px);
     }
 
@@ -44,7 +44,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -414,7 +414,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -436,7 +436,7 @@
     <!-- TAB 1: INTERACTIVE -->
     <main class="tab-pane active" id="pane-interactive">
       <div class="blueprint-layout">
-        
+
         <!-- Left: Path Resolver inputs -->
         <div class="specs-col">
           <div class="glass-card">
@@ -445,7 +445,7 @@
               Platform path overrides
             </h2>
             <p>Simulate how environment variables redirect config, data, state, and cache folders.</p>
-            
+
             <div class="form-group">
               <label for="platformSelect">Target OS</label>
               <select id="platformSelect" onchange="resolvePaths()">
@@ -511,7 +511,7 @@
               Bootstrap Initialization Simulator
             </h2>
             <p>Run the initialization sequence to test directory trees creation and credentials file permission locks.</p>
-            
+
             <button type="button" class="action-btn" onclick="runBootstrapSim()">Run initializeClioHome() Simulation</button>
 
             <div class="boot-console" id="bootConsole">Console ready. Click button to bootstrap.</div>
@@ -525,7 +525,7 @@
     <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
         <h2>Clio Coder Platform Specifications</h2>
-        
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Platform Path Defaults</h3>
         <table class="ref-table">
           <thead>
@@ -603,13 +603,14 @@
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
         <p><code>clio-coder doctor</code> is read-only. <code>clio-coder doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
 
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Upgrading to Version 0.3.3</h3>
-        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.3.9:</p>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Upgrading to Version 0.4.0</h3>
+        <p>Upgrades run via <code>clio-coder upgrade</code> or <code>npm install -g @iowarp/clio-coder@latest</code>. In v0.4.0:</p>
         <ul>
-          <li><strong>Engine SDK 0.84.0:</strong> Upgrades provider integrations and adds signal-aware OAuth token cancellation.</li>
-          <li><strong>Migration Resilience (#121):</strong> Damaged <code>credentials.yaml</code> files do not fail upgrade when no provider renames are needed; <code>--skip-migrations</code> is supported.</li>
-          <li><strong>Turn Settlement (#114):</strong> Session switches (<code>/new</code>, <code>/resume</code>, <code>/tree</code>, <code>/fork</code>) cleanly settle and commit in-flight turns before writer handover.</li>
-          <li><strong>Fullscreen Mode:</strong> Settings → Terminal provides opt-in <code>terminal.tuiMode: "fullscreen"</code>.</li>
+          <li><strong>Guest Panes Mode:</strong> First-class <code>--with-panes</code> guest mode with operator-pulled watch pane (<code>fleet view --watch</code>) powered by <code>herdr</code>.</li>
+          <li><strong>External Toolchain Management:</strong> <code>clio-coder tools list|status|install|remove</code> and <code>clio-coder panes install</code> manage pinned, checksum-verified external binaries (herdr, yazi, croc) with zero network fetches on startup.</li>
+          <li><strong>Typed-Intent Dispatch v2:</strong> Robust path scopes (read/write roots, relevant paths) and verification gates with integrity-sealed provenance.</li>
+          <li><strong>LiteLLM Gateway Runtime:</strong> Real capability discovery via <code>/v1/model/info</code> and routed-deployment attribution from <code>x-litellm-*</code> headers.</li>
+          <li><strong>ACP Protocol &amp; Workbench:</strong> Expanded JSON-RPC 2.0 stdio server, non-stall permissions, session management, and localhost desktop client support.</li>
         </ul>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
@@ -625,7 +626,7 @@ clio-coder --version</code></pre>
     </main>
 
     <footer>
-      <p>Clio Coder Lifecycle spec &bull; Version 0.3.7</p>
+      <p>Clio Coder Lifecycle spec &bull; Version 0.4.0</p>
     </footer>
   </div>
 
@@ -634,7 +635,7 @@ clio-coder --version</code></pre>
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
       document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-      
+
       if (tabId === 'interactive') {
         document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
         document.getElementById('pane-interactive').classList.add('active');
@@ -694,7 +695,7 @@ clio-coder --version</code></pre>
       const cache = document.getElementById('resolvedCache').innerText;
 
       consoleEl.innerHTML = `[BOOT] Calling initializeClioHome()...`;
-      
+
       setTimeout(() => {
         consoleEl.innerHTML += `\n[BOOT] Resolving config root: ${conf}`;
         consoleEl.innerHTML += `\n[BOOT] Resolving data root: ${data}`;
@@ -718,7 +719,7 @@ clio-coder --version</code></pre>
       }, 1000);
 
       setTimeout(() => {
-        consoleEl.innerHTML += `\n[METADATA] Writing ${state}/install.json: { version: "0.3.7", node: "v22.19.0" }`;
+        consoleEl.innerHTML += `\n[METADATA] Writing ${state}/install.json: { version: "0.4.0", node: "v22.19.0" }`;
         consoleEl.innerHTML += `\n[BOOT] initializeClioHome() completed successfully.`;
       }, 1400);
     }
