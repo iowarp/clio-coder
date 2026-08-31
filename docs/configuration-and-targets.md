@@ -669,6 +669,10 @@ Every one of these has an environment override for a single process; see [enviro
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |
 | `prewarm.enabled` | `true` | boolean | next turn |
+| `panes.enabled` | `auto` | `auto`, `embedded`, or `off` | restart |
+| `panes.agents` | `auto` | `auto`, `all`, or `off` | next dispatch |
+| `panes.keepFailed` | `true` | boolean | next dispatch |
+| `panes.notifications` | `failures` | `failures`, `all`, or `off` | next dispatch |
 | `panes.journal` | `true` | boolean | next dispatch |
 | `defaults.maxTokens` | `32768` | integer ≥ 0 | next turn |
 | `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |

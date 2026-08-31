@@ -356,6 +356,40 @@ describe("contracts/config", () => {
 		strictEqual(bad.settings.guardrails.turnToolCallBudget, DEFAULT_SETTINGS.guardrails.turnToolCallBudget);
 	});
 
+	it("validates the panes section strictly and keeps the shipped defaults for unset keys", () => {
+		const accepted = validateSettings({
+			panes: { enabled: "off", agents: "all", keepFailed: false, notifications: "all", journal: false },
+		});
+		deepStrictEqual(accepted.issues, []);
+		deepStrictEqual(accepted.settings.panes, {
+			enabled: "off",
+			agents: "all",
+			keepFailed: false,
+			notifications: "all",
+			journal: false,
+		});
+
+		const partial = validateSettings({ panes: { agents: "off" } });
+		deepStrictEqual(partial.issues, []);
+		strictEqual(partial.settings.panes.agents, "off");
+		strictEqual(partial.settings.panes.enabled, DEFAULT_SETTINGS.panes.enabled);
+		strictEqual(partial.settings.panes.keepFailed, DEFAULT_SETTINGS.panes.keepFailed);
+
+		const bad = validateSettings({
+			panes: { enabled: "guest", agents: "sometimes", keepFailed: "yes", notifications: 1, mode: "auto" },
+		});
+		deepStrictEqual(bad.issues.map((issue) => issue.path).sort(), [
+			"panes.agents",
+			"panes.enabled",
+			"panes.keepFailed",
+			"panes.mode",
+			"panes.notifications",
+		]);
+		// Every rejected value falls back to the shipped default rather than being
+		// half-applied; a pane rung Clio cannot honor must not survive validation.
+		deepStrictEqual(bad.settings.panes, DEFAULT_SETTINGS.panes);
+	});
+
 	it("validates defaults.maxTokens and rejects bad values and unknown subkeys", () => {
 		const ok = validateSettings({ defaults: { maxTokens: 16384 } });
 		deepStrictEqual(ok.issues, []);

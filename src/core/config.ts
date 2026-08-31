@@ -1612,7 +1612,23 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.panes)) {
 			issues.add("panes", `expected a map, got ${describe(raw.panes)}`);
 		} else {
-			issues.unknownKeys("panes", raw.panes, ["journal"]);
+			issues.unknownKeys("panes", raw.panes, ["enabled", "agents", "keepFailed", "notifications", "journal"]);
+			if ("enabled" in raw.panes) {
+				const v = expectEnum(issues, "panes.enabled", raw.panes.enabled, ["auto", "embedded", "off"] as const);
+				if (v !== undefined) settings.panes.enabled = v;
+			}
+			if ("agents" in raw.panes) {
+				const v = expectEnum(issues, "panes.agents", raw.panes.agents, ["auto", "all", "off"] as const);
+				if (v !== undefined) settings.panes.agents = v;
+			}
+			if ("keepFailed" in raw.panes) {
+				const v = expectBoolean(issues, "panes.keepFailed", raw.panes.keepFailed);
+				if (v !== undefined) settings.panes.keepFailed = v;
+			}
+			if ("notifications" in raw.panes) {
+				const v = expectEnum(issues, "panes.notifications", raw.panes.notifications, ["failures", "all", "off"] as const);
+				if (v !== undefined) settings.panes.notifications = v;
+			}
 			if ("journal" in raw.panes) {
 				const v = expectBoolean(issues, "panes.journal", raw.panes.journal);
 				if (v !== undefined) settings.panes.journal = v;

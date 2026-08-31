@@ -901,6 +901,31 @@ describe("contracts/settings center", () => {
 				value: "90000",
 				assert: (s) => strictEqual(s.delegation.defaults.permissionTimeoutMs, 90000),
 			},
+			{
+				id: "panes.enabled",
+				value: "off",
+				assert: (s) => strictEqual(s.panes.enabled, "off"),
+			},
+			{
+				id: "panes.agents",
+				value: "all",
+				assert: (s) => strictEqual(s.panes.agents, "all"),
+			},
+			{
+				id: "panes.keepFailed",
+				value: "false",
+				assert: (s) => strictEqual(s.panes.keepFailed, false),
+			},
+			{
+				id: "panes.notifications",
+				value: "off",
+				assert: (s) => strictEqual(s.panes.notifications, "off"),
+			},
+			{
+				id: "panes.journal",
+				value: "false",
+				assert: (s) => strictEqual(s.panes.journal, false),
+			},
 		];
 
 		for (const testCase of cases) {
@@ -908,6 +933,51 @@ describe("contracts/settings center", () => {
 			applySettingChange(settings, testCase.id, testCase.value);
 			testCase.assert(settings);
 		}
+	});
+
+	it("groups the pane knobs under Fleet with the shipped defaults and a restart-scoped rung", () => {
+		const settings = settingsWithTargets();
+		const byId = new Map(buildSettingItems(settings).map((item) => [item.id, item]));
+		const header = byId.get("fleet.group.panes");
+		ok(header !== undefined);
+		strictEqual(header.presentationKind, "group-header");
+		strictEqual(header.section, "fleet");
+
+		const paneRowIds = [
+			"panes.enabled",
+			"panes.agents",
+			"panes.keepFailed",
+			"panes.notifications",
+			"panes.journal",
+		] as const satisfies ReadonlyArray<EditableSettingId>;
+		for (const id of paneRowIds) {
+			const row = byId.get(id);
+			ok(row !== undefined, id);
+			strictEqual(row.section, "fleet", id);
+			strictEqual(row.readOnly, false, id);
+			ok(row.values, id);
+		}
+		deepStrictEqual(byId.get("panes.enabled")?.values, ["auto", "embedded", "off"]);
+		deepStrictEqual(byId.get("panes.agents")?.values, ["auto", "all", "off"]);
+		deepStrictEqual(byId.get("panes.notifications")?.values, ["failures", "all", "off"]);
+		strictEqual(byId.get("panes.enabled")?.currentValue, "auto");
+		strictEqual(byId.get("panes.keepFailed")?.currentValue, "true");
+		strictEqual(byId.get("panes.notifications")?.defaultValue, "failures");
+
+		// The mux runs its detection ladder once, at boot, so a mid-session change
+		// of the rung cannot take effect and the row must not claim otherwise.
+		strictEqual(byId.get("panes.enabled")?.scope, "restart");
+		strictEqual(byId.get("panes.agents")?.scope, "live");
+	});
+
+	it("refuses a pane value outside its enum instead of storing it", () => {
+		const settings = settingsWithTargets();
+		applySettingChange(settings, "panes.agents", "everything");
+		strictEqual(settings.panes.agents, "auto");
+		applySettingChange(settings, "panes.notifications", "sometimes");
+		strictEqual(settings.panes.notifications, "failures");
+		applySettingChange(settings, "panes.enabled", "guest");
+		strictEqual(settings.panes.enabled, "auto");
 	});
 
 	it("does not let the settings UI store unschedulable ACP request bounds", () => {
@@ -2126,6 +2196,12 @@ describe("contracts/settings center", () => {
 				"workers.agentBindings.scout",
 				"workers.agentBindings",
 				"fleet.group.placement",
+				"fleet.group.panes",
+				"panes.enabled",
+				"panes.agents",
+				"panes.keepFailed",
+				"panes.notifications",
+				"panes.journal",
 			],
 		);
 		deepStrictEqual(
