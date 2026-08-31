@@ -1,7 +1,7 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.3.9).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.4.0).
 
 
 Clio Coder is a terminal-first alpha harness. This page keeps the command
@@ -46,11 +46,18 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
 | `clio-coder doctor [--fix] [--json]` | Diagnose state; with `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict and are not migrated. |
+| `clio-coder tools list [--json]` | List the pinned external tool registry and whether each program resolves from `PATH`, Clio's vendored data directory, or nowhere. |
+| `clio-coder tools status <id> [--json] [--reset-profile]` | Inspect one registered tool. `--reset-profile` applies only to yazi's generated profile. |
+| `clio-coder tools install <id> [--force] [--json]` | Download the platform asset, verify every declared checksum, and atomically vendor it. |
+| `clio-coder tools remove <id>\|--all [--json]` | Remove Clio-vendored copies without touching a program found on `PATH`. |
+| `clio-coder panes install` | Alias for `clio-coder tools install herdr`. |
 | `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
 | `clio-coder uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
 | `clio-coder agents [--json] [--all]` | List discovered agent specs. |
-| `clio-coder fleet list\|run\|status\|drain\|resume` | List `.clio-coder/fleets/*.md` contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]` and `[--json]`; `status`, `drain`, and `resume` each take `[--json]`. |
+| `clio-coder fleet list\|run\|status\|drain\|resume` | List fleet contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]` and `[--json]`; `status`, `drain`, and `resume` each take `[--json]`. |
+| `clio-coder fleet view <runId\|fleetRootId> [--follow]` | Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. `--follow` requires an interactive terminal and one run id. |
+| `clio-coder fleet view --watch <selection-file>` | Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface used by the pane integration. |
 | `clio-coder dev components [list] [--json]` | List behavior-affecting harness components. |
 | `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
@@ -105,6 +112,15 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
 | `--steer-channel <path>` | Read live steering lines from a FIFO or an appended regular file to steer the active run. |
+| `--with-panes` | Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. It overrides `panes.enabled`. |
+| `--no-panes` | Disable pane integration for this invocation. It overrides `panes.enabled`. |
+
+`--with-panes` is an explicit first-class launch mode, not permission to start a
+pane server. Clio confirms `HERDR_ENV=1`, connects to an existing socket, and
+pings it before registering pane tools. The fleet watch pane runs
+`fleet view --watch` against a selection file. Clio writes only the selected run
+id, while the viewer reads journals itself, so dispatch remains independent of
+the pane host and a second terminal can use the same journal surface directly.
 
 ### Headless Session Continuity
 

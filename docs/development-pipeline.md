@@ -56,6 +56,25 @@ commit the dependency pins, snapshot, boundary notes, and proving contracts
 together. `npm run lint` invokes the surface check automatically when the
 installed Pi versions differ from the checked-in snapshot.
 
+## Test lanes
+
+`npm test` runs `scripts/shard-tests.mjs`. Contract and smoke files are assigned
+deterministically to weighted parallel lanes, with timings from
+`scripts/shard-weights.json`; `--list` shows the assignment and `--shard <n>`
+reproduces one numbered lane. Tests whose assertion is itself sensitive to
+wall-clock scheduling live in the explicit serial set. The runner waits for all
+parallel lanes to drain, then runs that set alone with
+`CLIO_TEST_CONCURRENCY=1`. Reproduce it with:
+
+```bash
+node scripts/shard-tests.mjs --shard serial
+```
+
+Do not repair a timing-measurement failure by widening its product bound or by
+moving ordinary watchdog tests into the serial set. `tests/harness/load.ts`
+scales watchdogs by the parallel lane count; the serial lane is reserved for
+claims that cease to mean the same thing under contention.
+
 ## Issue conventions
 
 - **Title**: conventional tag plus imperative summary (`fix: memory overlay

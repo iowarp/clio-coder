@@ -1,6 +1,6 @@
 # Agent Client Protocol (ACP) Server
 
-This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.3.7`.
+This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in `v0.4.0`.
 
 Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 
@@ -11,7 +11,11 @@ Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
 Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (`src/engine/acp/transport.ts`).
 
 The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
-An example localhost client lives in `apps/workbench` and is unreleased.
+The source tree includes the `apps/workbench` localhost desktop client. Its ACP
+adapter supports session browsing and deletion, safe settings, target probes,
+usage, recovery, evaluation inventory, routing and dispatch inspection, toolchain
+status, agent attribution, and the live fleet event strip. The workbench is a
+source application and is not included in the published CLI package.
 
 ```mermaid
 graph LR
@@ -59,7 +63,7 @@ These are every method the server answers (`src/engine/acp/server.ts`). Anything
 | `clio-coder/targets/list` | Client → Server | Lists bounded, credential-free target/model summaries from configuration and the in-memory cache without network traffic. |
 | `clio-coder/targets/probe` | Client → Server | Explicitly probes one configured target through the provider domain and returns only a closed health result. |
 | `session/request_permission` | Server → Client | Requests permission from the client for a gated tool operation. |
-| `clio-coder/event` | Server → Client | Sends a versioned extension event only to a client that opted into a recognized kind. The only v1 kind is `safety.loopBlocked`. |
+| `clio-coder/event` | Server → Client | Sends a versioned extension event only to a client that opted into a recognized kind. The v1 allowlist is `safety.loopBlocked` plus `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, and `dispatch.failed`. |
 
 `agentCapabilities.loadSession` is `true`. All non-standard methods are advertised only under `agentCapabilities._meta`; a strict generic ACP v1 client sees the standard new/load/prompt/cancel/permission surface, ignores namespaced result metadata, and receives no non-standard notification unless it explicitly opts into a recognized event kind.
 

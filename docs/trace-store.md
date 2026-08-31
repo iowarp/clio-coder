@@ -1,7 +1,7 @@
 # Trace store contract
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive trace database viewer, schema inspector, and SQL query validator simulator is located at [docs/html/trace_blueprint.html](html/trace_blueprint.html) (Version: 0.3.9).
+> **Interactive Spec Available:** An interactive trace database viewer, schema inspector, and SQL query validator simulator is located at [docs/html/trace_blueprint.html](html/trace_blueprint.html) (Version: 0.4.0).
 
 Clio's trace database is a rebuildable, queryable mirror. Receipts, session
 ledgers, gate artifacts, and evidence remain the source of truth. Removing

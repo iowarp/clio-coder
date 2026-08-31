@@ -1,7 +1,7 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.3.9).
+> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.4.0).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
@@ -161,6 +161,15 @@ The Context Engine evaluates thinking mechanisms per model target and manages li
 
 - **Ollama Native (`ollama-native`):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
 - **LM Studio (`lmstudio`):** Chat uses the OpenAI-compatible `/v1/chat/completions` surface, including its `reasoning` stream field. Clio controls thinking only with `reasoning_effort` and never sends `chat_template_kwargs` to LM Studio. See <https://lmstudio.ai/docs/developer/openai-compat/chat-completions>.
+- **LiteLLM (`litellm`):** This is a gateway runtime, not an `openai-compat`
+  alias. Discovery checks `/health/liveliness`, reads aliases and capability
+  metadata from `/v1/model/info`, and records the physical deployment reported
+  by `x-litellm-*` response headers. Defaults stay conservative when metadata is
+  absent: tools, vision, and reasoning are not inferred. The runtime advertises
+  standard `json_schema` structured output and treats schema-plus-tools as a
+  conflict because the gateway alias does not identify one stable upstream.
+  Residency is observe-only because LiteLLM owns loading and eviction behind the
+  alias.
 - **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the `reasoning_content` parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.
 - **Anthropic OAuth / API (`anthropic-max`):** Uses the `anthropic-extended` thinking format. The engine supports Anthropic's native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.
 - **Reasoning-Never Models (`thinking.mechanism: none`):** When a model is configured or cataloged with `thinking.mechanism: none`, it is treated as a reasoning-never model. For these models, Clio must not send any thinking fields or parameters in requests, must not replay thinking blocks, must not surface thinking events to the TUI, and must not preserve or log reasoning token usage in metrics.
