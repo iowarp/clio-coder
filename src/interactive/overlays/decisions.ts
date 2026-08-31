@@ -94,22 +94,21 @@ function decisionLines(decision: DecisionRecord, selected: boolean, expanded: bo
 	const label = decision.status === "superseded" ? theme.fg("dim", labelText) : theme.fg("muted", labelText);
 	const value = decision.status === "superseded" ? theme.fg("dim", decision.value) : decision.value;
 	const lines = [fitLine(`${cursor} ${status} ${label}${theme.fg("dim", ":")} ${value}`, width)];
+	// The indent belongs to the container, so this text wraps inside what is left
+	// of the row. Wrapping to the full width and then indenting cost every line
+	// its last six columns to a cut that landed mid-sentence.
+	const indent = "      ";
+	const indented = Math.max(1, width - indent.length);
+	const wrapIndented = (text: string): string[] =>
+		wrapTextWithAnsi(text, indented).map((line) => fitLine(`${indent}${line}`, width));
 	if (decision.status === "superseded" && decision.correction) {
-		lines.push(fitLine(`      ${theme.fg("dim", "correction")} ${theme.fg("muted", decision.correction)}`, width));
+		lines.push(...wrapIndented(`${theme.fg("dim", "correction")} ${theme.fg("muted", decision.correction)}`));
 	}
 	if (selected && expanded) {
 		if (decision.source_question) {
-			lines.push(
-				...wrapTextWithAnsi(`${theme.fg("dim", "question")} ${theme.fg("muted", decision.source_question)}`, width).map(
-					(line) => fitLine(`      ${line}`, width),
-				),
-			);
+			lines.push(...wrapIndented(`${theme.fg("dim", "question")} ${theme.fg("muted", decision.source_question)}`));
 		}
-		lines.push(
-			...wrapTextWithAnsi(`${theme.fg("dim", "answer")} ${theme.fg("muted", decision.value)}`, width).map((line) =>
-				fitLine(`      ${line}`, width),
-			),
-		);
+		lines.push(...wrapIndented(`${theme.fg("dim", "answer")} ${theme.fg("muted", decision.value)}`));
 	}
 	return lines;
 }
