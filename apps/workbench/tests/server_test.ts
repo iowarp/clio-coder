@@ -9,6 +9,7 @@ import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
 import type { ClioDecisionsInspector } from "../clio-decisions-inspector.ts";
+import type { ClioInteropInspector } from "../clio-interop-inspector.ts";
 import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
 import type { ClioEvidenceInspector } from "../clio-evidence-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
@@ -32,6 +33,7 @@ import {
 	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireGateDecisions,
+	type WireInteropInspection,
 	type WireRecoveryInspection,
 	type WireRoutingInspection,
 	type WireToolchainInspection,
@@ -46,6 +48,7 @@ import {
 	fleetInspectionFixture,
 	fleetVerificationFixture,
 	gateDecisionsFixture,
+	interopInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
@@ -126,6 +129,7 @@ interface FixtureOptions {
 	readonly toolchainInspector?: ClioToolchainInspector;
 	readonly traceInspector?: ClioTraceInspector;
 	readonly decisionsInspector?: ClioDecisionsInspector;
+	readonly interopInspector?: ClioInteropInspector;
 	readonly evidenceInspector?: ClioEvidenceInspector;
 	readonly recoveryInspector?: ClioRecoveryInspector;
 	readonly disconnectGraceMs?: number;
@@ -173,6 +177,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.toolchainInspector === undefined ? {} : { toolchainInspector: options.toolchainInspector }),
 			...(options.traceInspector === undefined ? {} : { traceInspector: options.traceInspector }),
 			...(options.decisionsInspector === undefined ? {} : { decisionsInspector: options.decisionsInspector }),
+			...(options.interopInspector === undefined ? {} : { interopInspector: options.interopInspector }),
 			...(options.evidenceInspector === undefined ? {} : { evidenceInspector: options.evidenceInspector }),
 			...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
@@ -1714,6 +1719,37 @@ Deno.test("sealed gate decisions are global, use the configured home, and surviv
 			gateDecisions: WireGateDecisions;
 		};
 		deepStrictEqual(bootstrap.gateDecisions, gateDecisionsFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("external agent detection is global, uses the configured home, and survives browser reload", async () => {
+	let inspectedCwd: string | null = null;
+	const interopInspector: ClioInteropInspector = {
+		inspect(cwd) {
+			inspectedCwd = cwd;
+			return Promise.resolve(interopInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ interopInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		// What is installed on this machine is not a fact about any one project.
+		await sendCommand(socket, "request-interop", "interop.inspect", {});
+		const interop = (await collectThrough(socket, "interop.state")).at(-1);
+		ok(interop?.kind === "interop.state");
+		equal(interop.projectId, undefined);
+		equal(inspectedCwd, fixture.homePath);
+		deepStrictEqual(interop.payload.inspection, interopInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			interopInspection: WireInteropInspection;
+		};
+		deepStrictEqual(bootstrap.interopInspection, interopInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

@@ -43,6 +43,8 @@ import type {
 	WireFleetVerifyState,
 	WireGateDecision,
 	WireGateDecisions,
+	WireInteropAgent,
+	WireInteropInspection,
 	WirePendingPermission,
 	WireProjectSummary,
 	WireRecoveryCheckLevel,
@@ -118,6 +120,7 @@ export interface WorkbenchActions {
 	inspectToolchain(): void;
 	inspectTrace(): void;
 	inspectGateDecisions(): void;
+	inspectInterop(): void;
 	inspectEvidence(): void;
 	readEvidence(evidenceId: string): void;
 	verifyRun(runId: string): void;
@@ -6417,6 +6420,174 @@ function toolchainResolution(item: WireToolchainItem): { label: string; tone: "s
 	return { label: "Not available", tone: "warning" };
 }
 
+const INTEROP_PRESENCE_LABELS: Readonly<Record<string, string>> = {
+	present: "installed",
+	absent: "not installed",
+	unknown: "could not be determined",
+};
+
+function interopPresenceTone(presence: string): string {
+	if (presence === "present") return "success";
+	return presence === "unknown" ? "warning" : "neutral";
+}
+
+/**
+ * How far one detected agent is wired, in one sentence.
+ *
+ * The four states are genuinely different and the panel must not collapse them:
+ * wired as a delegation peer, offered and waiting for an answer, settled by a
+ * standing answer, or not a peer this Clio Coder can speak to at all.
+ */
+function interopWiringText(agent: WireInteropAgent): string {
+	if (agent.configured) return "wired as a delegation peer";
+	if (!agent.acp) return "speaks no ACP; Clio Coder cannot delegate to it";
+	if (agent.proposed) {
+		return agent.decisionStale
+			? "offered again; the facts moved since you last answered"
+			: "offered, and never answered";
+	}
+	if (agent.decision === "declined") return "declined; Clio Coder stays quiet about it";
+	if (agent.decision === "accepted") return "accepted, but no delegation entry names it";
+	return "detected, and not offered";
+}
+
+/**
+ * External coding agents this machine has, and how far each one is wired.
+ *
+ * The read behind this runs no foreign executable. Detection can probe
+ * `<bin> --version` and the fixed command deliberately does not, so opening
+ * this panel cannot become "execute every coding agent installed on this
+ * machine"; the version shown is the last one Clio Coder recorded.
+ *
+ * Wiring an agent as a delegation peer is an explicit review at the terminal.
+ * This panel says what the review would offer and never offers it.
+ */
+export const InteropInventory = memo(function InteropInventory({
+	inspection,
+	pending,
+	onInspect,
+}: {
+	inspection: WireInteropInspection | null;
+	pending: boolean;
+	onInspect(): void;
+}) {
+	const proposals = inspection?.agents.filter((agent) => agent.proposed).length ?? 0;
+	const wired = inspection?.agents.filter((agent) => agent.configured).length ?? 0;
+	return (
+		<section className="settings__interop" aria-labelledby="settings-interop-title" aria-busy={pending}>
+			<div className="settings__section-heading">
+				<div>
+					<div className="eyebrow">EXTERNAL CODING AGENTS · INSTALLATION-WIDE</div>
+					<h3 id="settings-interop-title">Agents Clio Coder can see</h3>
+				</div>
+				<p>
+					Which coding agents are on this machine and how far each one is wired as a delegation peer. Detection reads
+					files only: it starts no agent, and the version shown is the last one Clio Coder recorded.
+				</p>
+			</div>
+
+			{inspection === null
+				? (
+					<div className="interop-empty">
+						<p>
+							Read the external coding agents installed here, whether Clio Coder can speak ACP to each one, and which
+							ones it would offer to wire.
+						</p>
+						<button type="button" className="button button--quiet" onClick={onInspect} disabled={pending}>
+							{pending ? "Detecting agents…" : "Detect agents"}
+						</button>
+					</div>
+				)
+				: (
+					<>
+						<dl className="interop-summary" aria-label="Detected agent summary">
+							<div>
+								<dt>Detected</dt>
+								<dd>{inspection.agents.length} of {inspection.knownKinds} known kinds</dd>
+							</div>
+							<div>
+								<dt>Wired as peers</dt>
+								<dd>{wired}</dd>
+							</div>
+							<div>
+								<dt>Would be offered</dt>
+								<dd>{proposals}</dd>
+							</div>
+							<div>
+								<dt>Detected</dt>
+								<dd>
+									<time dateTime={inspection.detectedAt}>{formatTimestamp(inspection.detectedAt)}</time>
+								</dd>
+							</div>
+						</dl>
+						{inspection.agents.length === 0
+							? <p className="settings__note">Clio Coder found no external coding agents on this machine.</p>
+							: (
+								<ul className="interop-list">
+									{inspection.agents.map((agent) => (
+										<li key={agent.id}>
+											<header>
+												<div>
+													<strong>{agent.label}</strong>
+													<code>{agent.id}</code>
+												</div>
+												<StatusMark
+													tone={interopPresenceTone(agent.presence)}
+													label={INTEROP_PRESENCE_LABELS[agent.presence] ?? agent.presence}
+												/>
+											</header>
+											<dl>
+												<div>
+													<dt>Version</dt>
+													<dd>{agent.version ?? "not recorded"}</dd>
+												</div>
+												<div>
+													<dt>Owns a directory here</dt>
+													<dd>{agent.hasUserDirectory ? "yes" : "no"}</dd>
+												</div>
+												<div>
+													<dt>ACP adapter</dt>
+													<dd>
+														{agent.adapter === null
+															? "no recipe"
+															: agent.adapter === "present"
+															? "installed locally"
+															: agent.adapter === "unknown"
+															? "could not be determined"
+															: "would be fetched on first use"}
+													</dd>
+												</div>
+												<div>
+													<dt>Answered</dt>
+													<dd>
+														{agent.decidedAt === null ? "never" : (
+															<time dateTime={agent.decidedAt}>
+																{formatTimestamp(agent.decidedAt)}
+															</time>
+														)}
+													</dd>
+												</div>
+											</dl>
+											<p className="interop-list__wiring">{interopWiringText(agent)}</p>
+										</li>
+									))}
+								</ul>
+							)}
+						<p className="settings__note">
+							Wiring an agent as a delegation peer is an explicit review. Run{" "}
+							<code>clio-coder configure --interop</code> in a terminal; this panel changes nothing.
+						</p>
+						<div className="interop-summary__actions">
+							<button type="button" className="button button--quiet" onClick={onInspect} disabled={pending}>
+								{pending ? "Detecting agents…" : "Detect again"}
+							</button>
+						</div>
+					</>
+				)}
+		</section>
+	);
+});
+
 export const ToolchainInventory = memo(function ToolchainInventory({
 	inspection,
 	pending,
@@ -6913,6 +7084,12 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 					inspection={state.toolchainInspection}
 					pending={state.pendingToolchainInspect !== null}
 					onInspect={actions.inspectToolchain}
+				/>
+
+				<InteropInventory
+					inspection={state.interopInspection}
+					pending={state.pendingInteropInspect !== null}
+					onInspect={actions.inspectInterop}
 				/>
 
 				<RecoveryPanel

@@ -1,0 +1,57 @@
+const separator = Deno.args.indexOf("--");
+const commandArgs = separator < 0 ? Deno.args : Deno.args.slice(separator + 1);
+if (commandArgs.join(" ") !== "interop inspect --json") Deno.exit(73);
+
+console.log(JSON.stringify({
+	version: 1,
+	generatedAt: "2026-08-31T15:01:58.000Z",
+	detectedAt: "2026-08-31T15:01:57.900Z",
+	knownKinds: 8,
+	agents: [
+		{
+			id: "claude-code",
+			label: "Claude Code",
+			presence: "present",
+			version: "2.1.237",
+			hasUserDirectory: true,
+			acp: true,
+			adapter: "absent",
+			configured: true,
+			decision: "accepted",
+			decidedAt: "2026-08-20T20:31:58.391Z",
+			decisionStale: false,
+			proposed: false,
+			needsNetworkInstall: true,
+		},
+		{
+			id: "codex",
+			label: "Codex",
+			presence: "present",
+			version: "0.144.1",
+			hasUserDirectory: true,
+			acp: true,
+			adapter: "present",
+			configured: false,
+			decision: "declined",
+			decidedAt: "2026-08-18T03:26:34.796Z",
+			decisionStale: true,
+			proposed: true,
+			needsNetworkInstall: false,
+		},
+		{
+			id: "copilot",
+			label: "GitHub Copilot",
+			presence: "present",
+			version: "1.0.79",
+			hasUserDirectory: true,
+			acp: false,
+			adapter: null,
+			configured: false,
+			decision: null,
+			decidedAt: null,
+			decisionStale: false,
+			proposed: false,
+			needsNetworkInstall: false,
+		},
+	],
+}));

@@ -260,6 +260,12 @@ function App() {
 					dispatch({ type: "fleet.decisions.submitted", requestId });
 				}
 			},
+			inspectInterop() {
+				const requestId = send("interop.inspect", {});
+				if (requestId !== null) {
+					dispatch({ type: "interop.inspect.submitted", requestId });
+				}
+			},
 			inspectEvidence() {
 				const requestId = send("evidence.inspect", {});
 				if (requestId !== null) {

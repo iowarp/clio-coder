@@ -65,6 +65,7 @@ const inertActions: WorkbenchActions = {
 	inspectToolchain() {},
 	inspectTrace() {},
 	inspectGateDecisions() {},
+	inspectInterop() {},
 	inspectEvidence() {},
 	readEvidence() {},
 	verifyRun() {},

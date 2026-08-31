@@ -19,6 +19,7 @@ import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
 import type { ClioDecisionsInspector } from "../clio-decisions-inspector.ts";
+import type { ClioInteropInspector } from "../clio-interop-inspector.ts";
 import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
 import type { ClioEvidenceInspector } from "../clio-evidence-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
@@ -34,6 +35,7 @@ import {
 	fleetInspectionFixture,
 	fleetVerificationFixture,
 	gateDecisionsFixture,
+	interopInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
@@ -1098,6 +1100,9 @@ try {
 		toolchainInspector: {
 			inspect: () => Promise.resolve(toolchainInspectionFixture()),
 		} satisfies ClioToolchainInspector,
+		interopInspector: {
+			inspect: () => Promise.resolve(interopInspectionFixture()),
+		} satisfies ClioInteropInspector,
 		acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 	});
 	let settingsBlockingViolations: Array<{ id: string; impact: string | null | undefined; nodes: unknown[] }> = [];
@@ -1128,6 +1133,28 @@ try {
 		}
 		await toolchainInventory.scrollIntoViewIfNeeded();
 		await settingsPage.screenshot({ path: new URL("settings-toolchain.png", artifactDirectory).pathname });
+
+		// External agent detection says how far each agent is wired, in words that
+		// keep "wired", "offered again", and "cannot speak to it" distinct.
+		await settingsDialog.getByRole("button", { name: "Detect agents", exact: true }).click();
+		const interopInventory = settingsDialog.locator(".settings__interop");
+		await interopInventory.getByText("3 of 8 known kinds", { exact: true }).waitFor();
+		await interopInventory.getByText("wired as a delegation peer", { exact: true }).waitFor();
+		await interopInventory.getByText("offered again; the facts moved since you last answered", { exact: true })
+			.waitFor();
+		await interopInventory.getByText("speaks no ACP; Clio Coder cannot delegate to it", { exact: true }).waitFor();
+		await interopInventory.getByText("would be fetched on first use", { exact: true }).waitFor();
+		// The panel states that wiring is a terminal review and offers no control
+		// that would do it.
+		await interopInventory.getByText(/Wiring an agent as a delegation peer is an explicit review/u).waitFor();
+		equal(await interopInventory.getByRole("button", { name: /wire|connect|add/iu }).count(), 0);
+		// The resolved binary, the agent's own directory, and the keying
+		// fingerprint are all host-side facts.
+		for (const forbidden of ["/home/", "/usr/", ".claude", "sha256", "installDir", "binary"]) {
+			equal(await interopInventory.getByText(forbidden, { exact: false }).count(), 0);
+		}
+		await interopInventory.scrollIntoViewIfNeeded();
+		await settingsPage.screenshot({ path: new URL("settings-interop.png", artifactDirectory).pathname });
 		await settingsDialog.getByRole("button", { name: "Run diagnostics", exact: true }).click();
 		const recoveryRecord = settingsDialog.getByLabel("Clio Coder diagnostic summary");
 		await recoveryRecord.getByText("ATTENTION REQUIRED", { exact: true }).waitFor();
@@ -1556,6 +1583,7 @@ try {
 			recoveryUsesRedactedDoctorAndPathsAdapters: true,
 			recoveryNamesEachCheckWithoutItsDetail: true,
 			toolchainUsesPathFreeFixedAdapter: true,
+			interopDetectionRunsNoForeignExecutableAndNamesNoPath: true,
 			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
@@ -1630,6 +1658,7 @@ try {
 				"session-delete.png",
 				"settings-options.png",
 				"settings-toolchain.png",
+				"settings-interop.png",
 				"settings-targets.png",
 				"settings-recovery.png",
 				"settings-routing.png",
