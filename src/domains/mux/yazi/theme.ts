@@ -1,4 +1,4 @@
-import { tokenHex } from "../../../interactive/theme/tokens.js";
+import { tokenHex } from "../../../core/theme-token-hex.js";
 
 /** Render the deliberately small Clio overlay on Yazi's pinned preset theme. */
 export function renderYaziTheme(): string {
