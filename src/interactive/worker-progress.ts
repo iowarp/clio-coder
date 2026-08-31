@@ -261,6 +261,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	const toolNames: string[] = [];
 	let settled = false;
 	let durable = "";
+	/** True after one assistant message ended and before the next message emits prose. */
+	let betweenAssistantMessages = false;
 	/** Starts still awaiting a finish, oldest first. */
 	const pendingActions: WorkerAction[] = [];
 	/** New streams resolve exact starts through this index. */
@@ -340,7 +342,9 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			const delta = workerTextDelta(event);
 			if (delta.length > 0) {
-				changed = appendTail(admitDelta(delta, nowMs)) || changed;
+				const separator = betweenAssistantMessages && tailText.length > 0 && !tailText.endsWith("\n") ? "\n\n" : "";
+				betweenAssistantMessages = false;
+				changed = appendTail(admitDelta(`${separator}${delta}`, nowMs)) || changed;
 				changed = setPhase("writing") || changed;
 			} else if (isThinkingEvent(event)) {
 				// The phase moves and nothing else: reasoning content is never kept.
@@ -355,6 +359,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				if (delta.length === 0 && tailText.trim().length === 0) {
 					changed = appendTail(durableText) || changed;
 				}
+				betweenAssistantMessages = true;
 			}
 
 			const action = toolEventAction(event);
@@ -412,6 +417,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			pendingActions.length = 0;
 			pendingActionsById.clear();
 			durable = "";
+			betweenAssistantMessages = false;
 			settled = false;
 			phase = "starting";
 			touch();

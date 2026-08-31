@@ -478,7 +478,15 @@ describe("worker receipt projection", () => {
 			startedAt: "2026-08-16T00:00:00.000Z",
 			endedAt: "2026-08-16T00:00:09.600Z",
 			output: { state: "final", text: "hello", bytes: 5, truncated: false },
-			quality: { version: 1, typedValidations: [], responseSchema: {}, resultContract: { conformance: "pass" } },
+			quality: {
+				version: 1,
+				typedValidations: [],
+				responseSchema: {},
+				resultContract: {
+					conformance: "pass",
+					sourceId: "agent-result-contract:debugger-report:validator-digest",
+				},
+			},
 		});
 		deepStrictEqual(facts, {
 			outcome: "succeeded",
@@ -487,6 +495,7 @@ describe("worker receipt projection", () => {
 			durationMs: 9600,
 			toolCalls: 3,
 			contract: "pass",
+			contractKind: "debugger-report",
 			text: "hello",
 		});
 	});
@@ -497,6 +506,21 @@ describe("worker receipt projection", () => {
 			quality: { version: 1, typedValidations: [], responseSchema: {}, resultContract: null },
 		});
 		strictEqual(facts?.contract, "unmeasured");
+	});
+
+	it("derives every dedicated presentation kind from current receipt provenance", () => {
+		for (const kind of ["debugger-report", "verifier-report", "research-report", "scout-report"] as const) {
+			const facts = workerReceiptFacts({
+				outcome: "succeeded",
+				quality: {
+					version: 1,
+					typedValidations: [],
+					responseSchema: {},
+					resultContract: { conformance: "pass", sourceId: `agent-result-contract:${kind}:validator-digest` },
+				},
+			});
+			strictEqual(facts?.contractKind, kind);
+		}
 	});
 
 	it("refuses a payload that seals no outcome", () => {

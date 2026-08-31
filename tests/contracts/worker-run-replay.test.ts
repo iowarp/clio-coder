@@ -199,6 +199,89 @@ describe("worker block replay", () => {
 		ok(!rendered.includes('{"mutatedPaths"'), rendered);
 	});
 
+	it("renders a debugger report as an answer, citations, and footer status", () => {
+		const report = {
+			diagnosis: "The declared version is 0.4.0.",
+			reproduction: "not-reproduced",
+			evidence: ["package.json:3", "package.json:41"],
+		};
+		const rendered = replay([workerRunEntry({ agentId: "debugger" })], () => ({
+			outcome: "succeeded",
+			contract: "pass",
+			contractKind: "debugger-report",
+			text: JSON.stringify(report),
+		}));
+		ok(rendered.includes("│ The declared version is 0.4.0."), rendered);
+		ok(rendered.includes("│ Evidence:"), rendered);
+		ok(rendered.includes("│ - package.json:3"), rendered);
+		ok(rendered.includes("contract pass · reproduction not-reproduced"), rendered);
+		ok(!rendered.includes('"diagnosis"'), rendered);
+	});
+
+	it("keeps a structured worker result on the existing one-line minimal card", () => {
+		const panel = createChatPanel({ getOutputVerbosity: () => "minimal", getToolExpandKey: () => "Ctrl+O" });
+		rehydrateChatPanelFromTurns(panel, [workerRunEntry({ agentId: "debugger" })], {
+			readWorkerReceipt: () => ({
+				outcome: "succeeded",
+				contract: "pass",
+				contractKind: "debugger-report",
+				text: JSON.stringify({
+					diagnosis: "The declared version is 0.4.0.",
+					reproduction: "not-reproduced",
+					evidence: ["package.json:3"],
+				}),
+			}),
+		});
+		const rendered = panel.render(96).join("\n").replace(ANSI, "");
+		ok(rendered.includes(`${GLYPH.workerHuman} debugger · mini/Nemo-3.5-Lightning · run run-1 ${GLYPH.ok}`), rendered);
+		ok(!rendered.includes("The declared version"), rendered);
+		ok(!rendered.includes("reproduction not-reproduced"), rendered);
+	});
+
+	it("semantically renders verifier, research, and scout report envelopes", () => {
+		const cases = [
+			{
+				agentId: "verifier",
+				contractKind: "verifier-report" as const,
+				report: { verdict: "pass", checks: [{ name: "npm run typecheck", passed: true, evidence: "exit 0" }] },
+				body: `${GLYPH.ok} npm run typecheck: exit 0`,
+				footer: "verdict pass",
+				rawKey: '"verdict"',
+			},
+			{
+				agentId: "researcher",
+				contractKind: "research-report" as const,
+				report: { source: "external", findings: [{ claim: "The API is stable.", evidence: "https://example.test" }] },
+				body: "citation: https://example.test",
+				footer: "source external",
+				rawKey: '"source"',
+			},
+			{
+				agentId: "scout",
+				contractKind: "scout-report" as const,
+				report: {
+					findings: [{ claim: "The renderer is shared.", path: "src/interactive/renderers/worker-entry.ts", line: 1 }],
+					needsSplit: false,
+					proposedSubtasks: [],
+				},
+				body: "The renderer is shared. — src/interactive/renderers/worker-entry.ts:1",
+				footer: "no split needed",
+				rawKey: '"findings"',
+			},
+		];
+		for (const testCase of cases) {
+			const rendered = replay([workerRunEntry({ agentId: testCase.agentId })], () => ({
+				outcome: "succeeded",
+				contract: "pass",
+				contractKind: testCase.contractKind,
+				text: JSON.stringify(testCase.report),
+			}));
+			ok(rendered.includes(testCase.body), `${testCase.contractKind}:\n${rendered}`);
+			ok(rendered.includes(testCase.footer), `${testCase.contractKind}:\n${rendered}`);
+			ok(!rendered.includes(testCase.rawKey), `${testCase.contractKind}:\n${rendered}`);
+		}
+	});
+
 	it("pretty-prints any other structured answer under the rail", () => {
 		const rendered = replay([workerRunEntry()], () => ({
 			outcome: "succeeded",

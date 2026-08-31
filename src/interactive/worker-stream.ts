@@ -61,6 +61,9 @@ export interface WorkerAttempt {
 
 export type WorkerResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
+/** Result kinds whose parsed envelopes have a dedicated transcript presentation. */
+export type WorkerPresentedResultContract = "debugger-report" | "verifier-report" | "research-report" | "scout-report";
+
 /**
  * Terminal facts a worker block reports. Sealed by the receipt when it can be
  * read, carried by the terminal event otherwise. Every unit is optional and
@@ -76,6 +79,8 @@ export interface WorkerReceiptSummary {
 	durationMs?: number;
 	toolCalls?: number;
 	contract?: WorkerResultContract;
+	/** Parsed from the receipt's result-contract source id; absent on legacy and untyped receipts. */
+	contractKind?: WorkerPresentedResultContract;
 	/** From an abort marker rather than a sealed terminal event; a later DispatchCompleted/DispatchFailed replaces it. */
 	provisional?: boolean;
 	/** The run is over, but no receipt could be read for it, and the ledger row could not explain why either. */

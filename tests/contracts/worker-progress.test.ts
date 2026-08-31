@@ -269,6 +269,14 @@ describe("worker progress settlement and attempts", () => {
 		strictEqual(fold.snapshot().tailText, "durable answer");
 	});
 
+	it("separates a repair response from the prose of the rejected assistant message", () => {
+		const fold = createWorkerProgressFold();
+		fold.observe(textDelta("The answer is 5."));
+		fold.observe(messageEnd("The answer is 5."));
+		fold.observe(textDelta('{"diagnosis":"Read src/core/defaults.ts"'));
+		strictEqual(fold.snapshot().tailText, 'The answer is 5.\n\n{"diagnosis":"Read src/core/defaults.ts"');
+	});
+
 	it("keeps the live tail when the run produced no durable answer at all", () => {
 		const fold = createWorkerProgressFold();
 		fold.observe(textDelta("all it ever said"));
