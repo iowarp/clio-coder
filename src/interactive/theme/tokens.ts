@@ -1,17 +1,6 @@
-export type ClioToken =
-	| "accent"
-	| "accentDeep"
-	| "action"
-	| "success"
-	| "warning"
-	| "error"
-	| "info"
-	| "reason"
-	| "dim"
-	| "muted"
-	| "title"
-	| "frame"
-	| "frameStrong";
+import type { ClioToken } from "../../core/theme-token-hex.js";
+
+export type { ClioToken } from "../../core/theme-token-hex.js";
 
 interface TokenColor {
 	rgb: readonly [number, number, number];
@@ -39,12 +28,6 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	frame: { rgb: [47, 93, 90], xterm: 23 },
 	frameStrong: { rgb: [42, 171, 158], xterm: 37 },
 };
-
-/** The canonical lowercase `#rrggbb` value for one Clio theme token. */
-export function tokenHex(token: ClioToken): string {
-	const [red, green, blue] = TOKENS[token].rgb;
-	return `#${[red, green, blue].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
 
 export const SGR_RESET = "\u001b[0m";
 export const SGR_DIM = "\u001b[2m";
