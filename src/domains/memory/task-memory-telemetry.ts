@@ -226,6 +226,7 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"no_client",
 	"no_consumer",
 	"step_in_flight",
+	"llm_timeout_backoff",
 	"no_repeated_failure",
 	"bank_empty",
 ]);

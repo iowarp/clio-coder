@@ -17,15 +17,7 @@ export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
  * test pins the pair. Two numbers for one setting means any path that misses
  * the settings object silently gets the one nobody chose.
  */
-export const TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS = 30_000;
-/**
- * The envelope itself needs a few hundred tokens. The rest is headroom for a
- * model that reasons despite thinking being requested off: measured preambles on
- * a 9B local route ran past 1,800 tokens before the first `<operations>` byte,
- * and a budget that runs out mid-thought yields an empty response, no bank
- * writes, and no way for the operator to tell that from a deliberate silence.
- */
-export const TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS = 4_000;
+export const TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS = 60_000;
 
 export interface TaskMemoryTrajectoryStep {
 	step: number;
@@ -142,6 +134,8 @@ export type TaskMemoryPolicyReason =
 	| "no_consumer"
 	/** A step was already in flight, so this boundary's triggers stayed pending. */
 	| "step_in_flight"
+	/** Consecutive model deadlines degraded this session to the free rules tier. */
+	| "llm_timeout_backoff"
 	/** Rules tier: the turn ended with no repeated failure worth reporting. */
 	| "no_repeated_failure"
 	/** Rules tier: compaction reactivation found no knowledge entries to restore. */
@@ -171,6 +165,8 @@ export interface TaskMemoryPolicyInput {
 	trajectory: ReadonlyArray<TaskMemoryTrajectoryStep>;
 	deterministicTrigger: boolean;
 	maxTokens: number;
+	/** Capability-derived completion budget; defaults to the visible reminder budget. */
+	modelMaxTokens?: number;
 	timeoutMs?: number;
 	/** Phase one still applies; phase two is suppressed when another memory reminder already won this boundary. */
 	suppressIntervention?: boolean;
@@ -297,7 +293,7 @@ export async function runTaskMemoryPolicy(
 		const completion = client.complete({
 			systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
 			userPrompt,
-			maxTokens: TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS,
+			maxTokens: positiveInteger(input.modelMaxTokens, input.maxTokens),
 			signal: controller.signal,
 		});
 		const timeout = new Promise<typeof timeoutMarker>((resolve) => {

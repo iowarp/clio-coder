@@ -178,6 +178,38 @@ export function harmonyReasoningEffort(level: string | undefined): HarmonyReason
  */
 export type ReasoningClass = "never" | "switchable" | "always";
 
+/**
+ * Minimum completion room for a memory envelope on an always-on-thinking
+ * model. A 9B local route has been measured reasoning for more than 1,800
+ * tokens before its first `<operations>` byte, while an always-on 35B spent a
+ * 400-token allowance entirely on reasoning and ended at length. Four thousand
+ * leaves the configured 2,000-token content budget after that preamble.
+ */
+export const MEMORY_ALWAYS_ON_MODEL_MIN_OUTPUT_TOKENS = 4_000;
+
+/**
+ * Derive the memory step's request budget from the resolved model capability.
+ * Switchable models are requested with thinking off and need only the normal
+ * content budget. An always-on mechanism cannot honor that request, so it gets
+ * explicit reasoning headroom. The runtime's known cap remains authoritative.
+ */
+export function memoryInterventionModelMaxTokens(input: {
+	configuredMaxTokens: number;
+	thinkingMechanism: ThinkingMechanism;
+	modelMaxTokens?: number;
+}): number {
+	const configured =
+		Number.isSafeInteger(input.configuredMaxTokens) && input.configuredMaxTokens > 0 ? input.configuredMaxTokens : 1;
+	const requested =
+		input.thinkingMechanism === "always-on"
+			? Math.max(configured * 2, MEMORY_ALWAYS_ON_MODEL_MIN_OUTPUT_TOKENS)
+			: configured;
+	const modelCap = input.modelMaxTokens;
+	return typeof modelCap === "number" && Number.isSafeInteger(modelCap) && modelCap > 0
+		? Math.min(requested, modelCap)
+		: requested;
+}
+
 export function reasoningClassForMechanism(mechanism: ThinkingMechanism | null | undefined): ReasoningClass {
 	if (mechanism === "none") return "never";
 	if (mechanism === "always-on") return "always";

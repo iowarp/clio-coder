@@ -62,6 +62,37 @@ function promptedTrajectory(userPrompt: string): ReadonlyArray<Record<string, un
 const SILENT_MODEL_RESPONSE = "<operations>[]</operations>\n<no_intervention/>";
 
 describe("contracts/memory intervention rules tier", () => {
+	it("degrades to rules after two consecutive LLM timeouts and records the backoff", async () => {
+		const telemetryRows: TaskMemoryTelemetryStep[] = [];
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank: new TaskMemoryBank(),
+			telemetry: { record: (row) => telemetryRows.push(row) },
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					const error = new Error("fixture transport timed out");
+					error.name = "TimeoutError";
+					throw error;
+				},
+			}),
+		});
+
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			await registration.runPromptedStep({ deterministicTrigger: false, triggerReasons: ["interval"] });
+		}
+
+		strictEqual(calls, 2, "the third interval must not spend another model deadline");
+		deepStrictEqual(
+			telemetryRows.map((row) => [row.tier, row.decision, row.reason]),
+			[
+				["llm", "timeout", "timed_out"],
+				["llm", "timeout", "timed_out"],
+				["rules", "silent", "llm_timeout_backoff"],
+			],
+		);
+	});
+
 	it("writes one idempotent procedural record and annotates the repeated failure mid-turn", () => {
 		const bank = new TaskMemoryBank();
 		const registration = createMemoryInterventionRegistration({ bank });
