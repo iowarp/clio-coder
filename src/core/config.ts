@@ -1612,7 +1612,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.panes)) {
 			issues.add("panes", `expected a map, got ${describe(raw.panes)}`);
 		} else {
-			issues.unknownKeys("panes", raw.panes, ["enabled", "agents", "keepFailed", "notifications", "journal"]);
+			issues.unknownKeys("panes", raw.panes, ["enabled", "agents", "keepFailed", "notifications", "journal", "yazi"]);
 			if ("enabled" in raw.panes) {
 				const v = expectEnum(issues, "panes.enabled", raw.panes.enabled, ["auto", "embedded", "off"] as const);
 				if (v !== undefined) settings.panes.enabled = v;
@@ -1632,6 +1632,30 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("journal" in raw.panes) {
 				const v = expectBoolean(issues, "panes.journal", raw.panes.journal);
 				if (v !== undefined) settings.panes.journal = v;
+			}
+			if ("yazi" in raw.panes) {
+				if (!isPlainObject(raw.panes.yazi)) {
+					issues.add("panes.yazi", `expected a map, got ${describe(raw.panes.yazi)}`);
+				} else {
+					const yazi = raw.panes.yazi;
+					issues.unknownKeys("panes.yazi", yazi, ["enabled", "mode", "profile", "followCwd"]);
+					if ("enabled" in yazi) {
+						const v = expectBoolean(issues, "panes.yazi.enabled", yazi.enabled);
+						if (v !== undefined) settings.panes.yazi.enabled = v;
+					}
+					if ("mode" in yazi) {
+						const v = expectEnum(issues, "panes.yazi.mode", yazi.mode, ["companion", "chooser"] as const);
+						if (v !== undefined) settings.panes.yazi.mode = v;
+					}
+					if ("profile" in yazi) {
+						const v = expectEnum(issues, "panes.yazi.profile", yazi.profile, ["managed", "user"] as const);
+						if (v !== undefined) settings.panes.yazi.profile = v;
+					}
+					if ("followCwd" in yazi) {
+						const v = expectBoolean(issues, "panes.yazi.followCwd", yazi.followCwd);
+						if (v !== undefined) settings.panes.yazi.followCwd = v;
+					}
+				}
 			}
 		}
 	}

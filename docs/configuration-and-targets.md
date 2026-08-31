@@ -674,6 +674,10 @@ Every one of these has an environment override for a single process; see [enviro
 | `panes.keepFailed` | `true` | boolean | next dispatch |
 | `panes.notifications` | `failures` | `failures`, `all`, or `off` | next dispatch |
 | `panes.journal` | `true` | boolean | next dispatch |
+| `panes.yazi.enabled` | `true` | boolean | immediately, on the next files-pane open |
+| `panes.yazi.mode` | `companion` | `companion` or `chooser` | immediately, on the next files-pane open |
+| `panes.yazi.profile` | `managed` | `managed` or `user` | immediately, on the next files-pane open |
+| `panes.yazi.followCwd` | `true` | boolean | immediately, on the next explicit files-pane open |
 | `defaults.maxTokens` | `32768` | integer ≥ 0 | next turn |
 | `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |
 | `budget.concurrency` | `auto` | `auto` or integer ≥ 1 | next dispatch |

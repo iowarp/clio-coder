@@ -26,10 +26,16 @@ import {
 	PANES_PRESET_IDS,
 	type PanesOperations,
 	type PanesStatus,
+	type PanesYaziController,
 } from "../../src/domains/mux/operations.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
-import { formatPanesStatus, parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import {
+	BUILTIN_SLASH_COMMANDS,
+	formatPanesStatus,
+	parseSlashCommand,
+	type SlashCommandContext,
+} from "../../src/interactive/slash-commands.js";
 import { createPanesTool } from "../../src/tools/panes.js";
 import { TOOL_PLANES } from "../../src/tools/policy.js";
 
@@ -121,10 +127,15 @@ const EMPTY_SNAPSHOT = {
 
 function runtimeFor(
 	mux: StubMux,
-	options: { binaries?: ReadonlyArray<string>; newestRun?: string | null; snapshot?: DispatchSnapshot } = {},
+	options: {
+		binaries?: ReadonlyArray<string>;
+		newestRun?: string | null;
+		snapshot?: DispatchSnapshot;
+		onYaziOpen?: (options?: { once?: boolean }) => ReturnType<PanesYaziController["open"]>;
+	} = {},
 ): PanesOperations {
 	const available = new Set(options.binaries ?? ["yazi", "tail", "bash"]);
-	return createPanesRuntime({
+	const runtime = createPanesRuntime({
 		mux: mux.contract,
 		getSettings: () => DEFAULT_SETTINGS,
 		getDispatchSnapshot: () => options.snapshot ?? EMPTY_SNAPSHOT,
@@ -133,6 +144,27 @@ function runtimeFor(
 		journalRoot: () => "/state/runs",
 		newestJournalRunId: () => (options.newestRun === undefined ? "run-newest" : options.newestRun),
 	});
+	runtime.attachYazi({
+		open: (openOptions) =>
+			options.onYaziOpen?.(openOptions) ??
+			Promise.resolve(
+				available.has("yazi")
+					? ({ status: "opened", mode: "companion", paneId: "w1:pYazi", existing: false } as const)
+					: ({
+							status: "missing-binary",
+							binary: "yazi",
+							detail: "not found (install with `clio-coder tools install yazi`)",
+						} as const),
+			),
+		status: () => ({
+			mode: "closed",
+			paneId: null,
+			paneCwd: null,
+			lastLineAt: null,
+			droppedLines: 0,
+		}),
+	});
+	return runtime;
 }
 
 describe("contracts/panes slash parsing", () => {
@@ -140,6 +172,11 @@ describe("contracts/panes slash parsing", () => {
 		deepStrictEqual(parseSlashCommand("/panes"), { kind: "panes" });
 		deepStrictEqual(parseSlashCommand("/panes show tester"), { kind: "panes-show", target: "tester" });
 		deepStrictEqual(parseSlashCommand("/panes open yazi"), { kind: "panes-open", preset: "yazi" });
+		deepStrictEqual(parseSlashCommand("/panes open yazi --once"), {
+			kind: "panes-open",
+			preset: "yazi",
+			once: true,
+		});
 		deepStrictEqual(parseSlashCommand("/panes open logs"), { kind: "panes-open", preset: "logs" });
 		// Anything that is not exactly one preset name is operator argv, which the
 		// tool surface has no way to ask for.
@@ -180,7 +217,15 @@ describe("contracts/panes slash parsing", () => {
 			reason: "guest mode on /tmp/h.sock (herdr 0.7.5, protocol 17)",
 			socketPath: "/tmp/h.sock",
 			server: { version: "0.7.5", protocol: 17 },
-			settings: { enabled: "auto", agents: "auto", keepFailed: true, notifications: "failures", journal: true },
+			settings: {
+				enabled: "auto",
+				agents: "auto",
+				keepFailed: true,
+				notifications: "failures",
+				journal: true,
+				yazi: { enabled: true, mode: "companion", profile: "managed", followCwd: true },
+			},
+			yazi: { mode: "companion", paneId: "w1:p8", paneCwd: "/work/src", lastLineAt: 1_700_000_000_000, droppedLines: 2 },
 			panes: [
 				{
 					paneId: "w1:p9",
@@ -199,11 +244,33 @@ describe("contracts/panes slash parsing", () => {
 		match(lines, /protocol 17/);
 		match(lines, /socket \/tmp\/h\.sock/);
 		match(lines, /agents=auto keepFailed=true notifications=failures journal=true/);
+		match(lines, /files: enabled=true mode=companion profile=managed followCwd=true/);
+		match(lines, /file pane: mode=companion pane=w1:p8 cwd=\/work\/src .* dropped=2/);
 		match(lines, /w1:p9 run tester: run the suite run=run-1 outcome=failed adopted/);
 		match(lines, /presets: yazi .*, logs .*, shell /);
 
 		const empty = formatPanesStatus({ ...status, panes: [] }).join("\n");
 		match(empty, /no Clio-owned panes/);
+	});
+
+	it("renders the exact missing-Yazi resolution sentence on the slash surface", async () => {
+		const mux = stubMux();
+		const output: string[] = [];
+		let renders = 0;
+		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
+		ok(entry);
+		entry.handle(parseSlashCommand("/panes open yazi"), {
+			panes: runtimeFor(mux, { binaries: ["tail", "bash"] }),
+			io: { stdout: (text: string) => output.push(text) },
+			render: () => {
+				renders += 1;
+			},
+			notice: () => {},
+		} as unknown as SlashCommandContext);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		deepStrictEqual(output, ["not found (install with `clio-coder tools install yazi`)\n"]);
+		strictEqual(renders, 1);
+		deepStrictEqual(mux.opened, []);
 	});
 });
 
@@ -216,6 +283,7 @@ describe("contracts/panes operations", () => {
 		if (result.status === "missing-binary") {
 			strictEqual(result.binary, "yazi");
 			strictEqual(result.installHint, "clio-coder tools install yazi");
+			strictEqual(result.detail, "not found (install with `clio-coder tools install yazi`)");
 		}
 		deepStrictEqual(mux.opened, [], "a pane must not be split for a program that is not there");
 	});
@@ -226,13 +294,25 @@ describe("contracts/panes operations", () => {
 		strictEqual((await panes.open({ preset: "yazi" })).status, "opened");
 		strictEqual((await panes.open({ preset: "shell" })).status, "opened");
 		strictEqual((await panes.open({ preset: "logs" })).status, "opened");
-		deepStrictEqual(mux.opened[0], { argv: ["/usr/bin/yazi", "/work"], cwd: "/work", label: "yazi" });
-		deepStrictEqual(mux.opened[1], { argv: ["/usr/bin/bash", "-l"], cwd: "/work", label: "shell" });
-		deepStrictEqual(mux.opened[2], {
+		deepStrictEqual(mux.opened[0], { argv: ["/usr/bin/bash", "-l"], cwd: "/work", label: "shell" });
+		deepStrictEqual(mux.opened[1], {
 			argv: ["/usr/bin/tail", "-n", "200", "-F", "/state/runs/run-newest/events.ndjson"],
 			cwd: "/work",
 			label: "logs",
 		});
+	});
+
+	it("passes --once to the attached files-pane controller", async () => {
+		const mux = stubMux();
+		const seen: Array<{ once?: boolean } | undefined> = [];
+		const panes = runtimeFor(mux, {
+			onYaziOpen: (options) => {
+				seen.push(options);
+				return Promise.resolve({ status: "opened", mode: "chooser", paneId: "w1:pOnce", existing: false });
+			},
+		});
+		strictEqual((await panes.open({ preset: "yazi", once: true })).status, "opened");
+		deepStrictEqual(seen, [{ once: true }]);
 	});
 
 	it("refuses the logs preset when no run has a journal yet", async () => {

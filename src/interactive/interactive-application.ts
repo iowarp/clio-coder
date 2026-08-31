@@ -135,9 +135,9 @@ export interface InteractiveDeps {
 	interop?: InteropContract;
 	share?: ShareContract;
 	/**
-	 * Pane layer. Absent whenever the mux resolved to `none`, and best-effort even
-	 * when present: a mux failure degrades to `available() === false` and never
-	 * reaches a dispatch or a turn. The bridge in `mux-bridge.ts` drives it.
+	 * Pane layer. A `none` contract still reaches the interactive surface so the
+	 * files preset can use its terminal chooser; every mux operation remains
+	 * best-effort and never reaches a dispatch or a turn.
 	 */
 	mux?: MuxContract;
 	/**
@@ -591,17 +591,27 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatRenderer,
 		io,
 	} = presentation;
-	const yaziBridge =
-		deps.mux && deps.mux.mode !== "none"
-			? (deps.createYaziBridge ?? createYaziBridge)({
-					mux: deps.mux,
-					getDraft: () => editor.getText(),
-					setDraft: (text) => editor.setText(text),
-					requestRender: () => tui.requestRender(),
-					notice: (level, text) => notify(level, text, `yazi:${level}`),
-					getCwd: () => process.cwd(),
-				})
-			: null;
+	const yaziBridge = deps.panes
+		? (deps.createYaziBridge ?? createYaziBridge)({
+				...(deps.mux ? { mux: deps.mux } : {}),
+				getDraft: () => editor.getText(),
+				setDraft: (text) => editor.setText(text),
+				requestRender: () => tui.requestRender(),
+				notice: (level, text) => notify(level, text, `yazi:${level}`),
+				getCwd: () => process.cwd(),
+				getSettings: () =>
+					deps.getSettings?.().panes.yazi ?? {
+						mode: "companion",
+						profile: "managed",
+						followCwd: true,
+					},
+				stopUi: () => tui.stop(),
+				startUi: () => {
+					tui.start();
+					tui.requestRender(true);
+				},
+			})
+		: null;
 	const detachYaziBridge = yaziBridge ? deps.attachYaziBridge?.(yaziBridge) : undefined;
 	refreshPresentationFooter = () => footer.refresh();
 	const agentProgress = createAgentProgress(terminal);

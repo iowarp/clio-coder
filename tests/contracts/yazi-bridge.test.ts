@@ -27,6 +27,7 @@ import {
 import {
 	createYaziBridge,
 	formatYaziMentions,
+	runYaziTerminalChooser,
 	type YaziBridge,
 	type YaziBridgeSettings,
 } from "../../src/interactive/yazi-bridge.js";
@@ -268,6 +269,103 @@ describe("contracts/yazi interactive bridge", () => {
 		strictEqual(harness.renders.count, 0);
 		deepStrictEqual(harness.notices, []);
 		harness.bridge.dispose();
+	});
+
+	it("borrows and restores the TUI for the no-mux chooser, then inserts its chooser file", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-yazi-terminal-"));
+		try {
+			const lifecycle: string[] = [];
+			const draft = { value: "review" };
+			const seen: {
+				file?: string;
+				args?: ReadonlyArray<string>;
+				profile: string | undefined;
+			} = { profile: undefined };
+			const bridge = createYaziBridge({
+				getDraft: () => draft.value,
+				setDraft: (text) => {
+					draft.value = text;
+				},
+				requestRender: () => lifecycle.push("render"),
+				notice: () => {},
+				getCwd: () => "/work",
+				getSettings: () => ({ mode: "companion", profile: "managed", followCwd: true }),
+				stopUi: () => lifecycle.push("stop"),
+				startUi: () => lifecycle.push("start"),
+				statPath: () => "file",
+				runTerminalChooser: (options) =>
+					runYaziTerminalChooser({
+						...options,
+						stopUi: () => lifecycle.push("stop"),
+						startUi: () => lifecycle.push("start"),
+						requestRender: () => lifecycle.push("render"),
+						cacheDir: scratch,
+						sessionId: "terminal",
+						resolveBinaries: () => ({
+							yaziPath: "/tools/yazi",
+							yaPath: "/tools/ya",
+							missingYaziDetail: "not found",
+						}),
+						ensureProfile: () => ({
+							dir: "/cache/yazi/profile",
+							stamp: {
+								yaziVersion: "26.8.15",
+								clioVersion: "0.4.0",
+								yaPath: "/tools/ya",
+								assetSha256: "a",
+								themeSha256: "b",
+							},
+						}),
+						spawnYazi: (file, args, spawnOptions) => {
+							seen.file = file;
+							seen.args = args;
+							seen.profile = spawnOptions.env.YAZI_CONFIG_HOME;
+							writeFileSync(join(scratch, "yazi", "sessions", "terminal.chooser"), "/work/src/a.ts\n");
+							writeFileSync(join(scratch, "yazi", "sessions", "terminal.cwd"), "/work/src");
+							return {};
+						},
+					}),
+			});
+
+			const opened = await bridge.open();
+			deepStrictEqual(opened, { status: "opened", mode: "chooser", paneId: null, existing: false });
+			deepStrictEqual(lifecycle.slice(0, 3), ["stop", "start", "render"]);
+			strictEqual(seen.file, "/tools/yazi");
+			deepStrictEqual(seen.args, [
+				"/work",
+				"--chooser-file",
+				join(scratch, "yazi", "sessions", "terminal.chooser"),
+				"--cwd-file",
+				join(scratch, "yazi", "sessions", "terminal.cwd"),
+			]);
+			strictEqual(seen.profile, "/cache/yazi/profile");
+			strictEqual(draft.value, "review @a.ts");
+			bridge.dispose();
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("returns the shared missing-binary sentence before releasing the TUI", async () => {
+		const lifecycle: string[] = [];
+		const result = await runYaziTerminalChooser({
+			cwd: "/work",
+			profileMode: "managed",
+			stopUi: () => lifecycle.push("stop"),
+			startUi: () => lifecycle.push("start"),
+			requestRender: () => lifecycle.push("render"),
+			resolveBinaries: () => ({
+				yaziPath: null,
+				yaPath: null,
+				missingYaziDetail: "not found (install with `clio-coder tools install yazi`)",
+			}),
+		});
+		deepStrictEqual(result, {
+			status: "missing-binary",
+			binary: "yazi",
+			detail: "not found (install with `clio-coder tools install yazi`)",
+		});
+		deepStrictEqual(lifecycle, []);
 	});
 });
 

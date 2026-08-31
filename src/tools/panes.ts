@@ -80,14 +80,17 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				if (result.status === "opened") {
 					return {
 						kind: "ok",
-						output: `opened the ${result.label} pane (${result.paneId}).`,
+						output:
+							result.paneId === null
+								? `completed the ${result.label} chooser.`
+								: `opened the ${result.label} pane (${result.paneId}).`,
 						details: { action: "open", preset, paneId: result.paneId },
 					};
 				}
 				if (result.status === "missing-binary") {
 					return {
 						kind: "error",
-						message: `panes: preset '${result.preset}' needs ${result.binary}, which is not installed. Tell the operator: ${result.installHint}`,
+						message: `panes: ${result.detail}`,
 					};
 				}
 				return { kind: "error", message: `panes: ${result.reason}` };

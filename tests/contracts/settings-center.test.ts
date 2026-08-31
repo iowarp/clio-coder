@@ -926,6 +926,26 @@ describe("contracts/settings center", () => {
 				value: "false",
 				assert: (s) => strictEqual(s.panes.journal, false),
 			},
+			{
+				id: "panes.yazi.enabled",
+				value: "false",
+				assert: (s) => strictEqual(s.panes.yazi.enabled, false),
+			},
+			{
+				id: "panes.yazi.mode",
+				value: "chooser",
+				assert: (s) => strictEqual(s.panes.yazi.mode, "chooser"),
+			},
+			{
+				id: "panes.yazi.profile",
+				value: "user",
+				assert: (s) => strictEqual(s.panes.yazi.profile, "user"),
+			},
+			{
+				id: "panes.yazi.followCwd",
+				value: "false",
+				assert: (s) => strictEqual(s.panes.yazi.followCwd, false),
+			},
 		];
 
 		for (const testCase of cases) {
@@ -933,6 +953,28 @@ describe("contracts/settings center", () => {
 			applySettingChange(settings, testCase.id, testCase.value);
 			testCase.assert(settings);
 		}
+	});
+
+	it("groups the files-pane controls under Terminal with the shipped defaults", () => {
+		const byId = new Map(buildSettingItems(settingsWithTargets()).map((item) => [item.id, item]));
+		const header = byId.get("terminal.group.files-pane");
+		ok(header);
+		strictEqual(header.presentationKind, "group-header");
+		strictEqual(header.section, "terminal");
+
+		for (const id of [
+			"panes.yazi.enabled",
+			"panes.yazi.mode",
+			"panes.yazi.profile",
+			"panes.yazi.followCwd",
+		] as const satisfies ReadonlyArray<EditableSettingId>) {
+			strictEqual(byId.get(id)?.section, "terminal", id);
+			strictEqual(byId.get(id)?.scope, "live", id);
+		}
+		strictEqual(byId.get("panes.yazi.enabled")?.currentValue, "true");
+		deepStrictEqual(byId.get("panes.yazi.mode")?.values, ["companion", "chooser"]);
+		deepStrictEqual(byId.get("panes.yazi.profile")?.values, ["managed", "user"]);
+		strictEqual(byId.get("panes.yazi.followCwd")?.defaultValue, "true");
 	});
 
 	it("groups the pane knobs under Fleet with the shipped defaults and a restart-scoped rung", () => {
@@ -978,6 +1020,10 @@ describe("contracts/settings center", () => {
 		strictEqual(settings.panes.notifications, "failures");
 		applySettingChange(settings, "panes.enabled", "guest");
 		strictEqual(settings.panes.enabled, "auto");
+		applySettingChange(settings, "panes.yazi.mode", "sidecar");
+		strictEqual(settings.panes.yazi.mode, "companion");
+		applySettingChange(settings, "panes.yazi.profile", "mine");
+		strictEqual(settings.panes.yazi.profile, "managed");
 	});
 
 	it("does not let the settings UI store unschedulable ACP request bounds", () => {

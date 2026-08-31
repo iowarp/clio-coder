@@ -148,7 +148,7 @@ type SlashCommandVariant =
 	| { kind: "panes" }
 	| { kind: "panes-show"; target: string }
 	/** A preset the model may also ask for, or operator-only argv. Never both. */
-	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string> }
+	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string>; once?: boolean }
 	| { kind: "panes-close"; target: string }
 	| { kind: "panes-usage"; reason?: string }
 	| { kind: "thinking-set"; level: string }
@@ -665,9 +665,9 @@ export interface SlashCommandContext {
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	/**
-	 * The pane layer's operator surface. Absent whenever the mux resolved to
-	 * `none` or no host wired it, in which case `/panes` says so rather than
-	 * pretending the feature is missing.
+	 * The pane layer's operator surface. It remains present when mux resolves to
+	 * `none` because the Yazi preset can borrow the terminal for one selection;
+	 * absent only when the host did not compose pane operations at all.
 	 */
 	panes?: PanesOperations;
 	/**
@@ -842,6 +842,8 @@ export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 		`  ${status.reason}`,
 		...(status.socketPath ? [`  socket ${status.socketPath}`] : []),
 		`  settings: enabled=${status.settings.enabled} agents=${status.settings.agents} keepFailed=${status.settings.keepFailed} notifications=${status.settings.notifications} journal=${status.settings.journal}`,
+		`  files: enabled=${status.settings.yazi.enabled} mode=${status.settings.yazi.mode} profile=${status.settings.yazi.profile} followCwd=${status.settings.yazi.followCwd}`,
+		`  file pane: mode=${status.yazi.mode} pane=${status.yazi.paneId ?? "none"} cwd=${status.yazi.paneCwd ?? "unknown"} lastLine=${status.yazi.lastLineAt === null ? "never" : new Date(status.yazi.lastLineAt).toISOString()} dropped=${status.yazi.droppedLines}`,
 	];
 	if (status.panes.length === 0) {
 		lines.push("  no Clio-owned panes");
@@ -1643,6 +1645,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				// A bare preset name is a preset; anything else is operator argv,
 				// which the tool surface deliberately cannot ask for.
 				if (argv.length === 1 && isPanesPresetId(first)) return { kind: "panes-open", preset: first };
+				if (argv.length === 2 && first === "yazi" && argv[1] === "--once") {
+					return { kind: "panes-open", preset: "yazi", once: true };
+				}
 				return { kind: "panes-open", argv };
 			}
 			if (parsed.subcommand === "close") {
@@ -1687,12 +1692,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					.open({
 						...(command.preset ? { preset: command.preset } : {}),
 						...(command.argv ? { argv: command.argv } : {}),
+						...(command.once ? { once: true } : {}),
 					})
 					.then((result) => {
 						if (result.status === "opened") {
-							ctx.notice("success", `opened pane ${result.label} (${result.paneId})`);
+							// The in-terminal chooser has already restored the TUI by the
+							// time this resolves. A pick emitted its composer notice; an empty
+							// chooser was cancellation and deliberately stays silent.
+							if (result.paneId !== null) ctx.notice("success", `opened pane ${result.label} (${result.paneId})`);
 						} else if (result.status === "missing-binary") {
-							ctx.notice("warn", `${result.preset} needs ${result.binary}; install it with: ${result.installHint}`);
+							// This is a synchronous slash-surface line, not a transient pane-host
+							// notification. It remains visible when no pane was ever created and
+							// reuses the exact doctor/tools diagnostic including the install hint.
+							ctx.io.stdout(`${result.detail}\n`);
+							ctx.render();
 						} else {
 							ctx.notice("warn", result.reason);
 						}

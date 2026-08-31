@@ -27,6 +27,8 @@ import {
 	type PanesOperations,
 	type PanesShowResult,
 	type PanesStatus,
+	type PanesYaziController,
+	type PanesYaziStatus,
 } from "../domains/mux/operations.js";
 import { resolveBinary } from "../tools/executables.js";
 
@@ -62,6 +64,14 @@ function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesIn
 export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	const probe = deps.resolveBinaryPath ?? resolveBinary;
 	const journalRoot = deps.journalRoot ?? runEventJournalRoot;
+	let yaziController: PanesYaziController | null = null;
+	const closedYaziStatus = (): PanesYaziStatus => ({
+		mode: "closed",
+		paneId: null,
+		paneCwd: null,
+		lastLineAt: null,
+		droppedLines: 0,
+	});
 
 	/**
 	 * Resolve one operator- or model-supplied target to a run pane Clio owns.
@@ -84,7 +94,6 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 
 	/** argv for one preset, once its binary has been found. */
 	const presetArgv = (presetId: string, binaryPath: string): ReadonlyArray<string> | null => {
-		if (presetId === "yazi") return [binaryPath, deps.getCwd()];
 		if (presetId === "shell") return [binaryPath, "-l"];
 		if (presetId === "logs") {
 			const runId = (deps.newestJournalRunId ?? (() => newestRunEventJournalRunId(journalRoot())))();
@@ -113,7 +122,9 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					keepFailed: panes.keepFailed,
 					notifications: panes.notifications,
 					journal: panes.journal,
+					yazi: { ...panes.yazi },
 				},
+				yazi: yaziController?.status() ?? closedYaziStatus(),
 				panes: inventory(deps.mux.list()),
 			};
 		},
@@ -135,14 +146,36 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			return { status: "focused", runId: match.runId, agentId: match.agentId, label: match.label };
 		},
 
-		async open(request: { preset?: string; argv?: ReadonlyArray<string> }): Promise<PanesOpenResult> {
-			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+		async open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult> {
 			const cwd = deps.getCwd();
 			if (request.preset !== undefined) {
 				const preset = PANES_PRESETS.find((entry) => entry.id === request.preset);
 				if (!preset) {
 					return { status: "refused", reason: `unknown preset: ${request.preset}` };
 				}
+				if (preset.id === "yazi") {
+					if (!deps.getSettings().panes.yazi.enabled) {
+						return { status: "refused", reason: "the files pane is disabled by panes.yazi.enabled" };
+					}
+					if (!yaziController) {
+						return { status: "unavailable", reason: "the files-pane return path is not ready" };
+					}
+					const result = await yaziController.open(request.once ? { once: true } : undefined);
+					if (result.status === "opened") {
+						return { status: "opened", label: preset.id, paneId: result.paneId };
+					}
+					if (result.status === "missing-binary") {
+						return {
+							status: "missing-binary",
+							preset: preset.id,
+							binary: result.binary,
+							installHint: preset.installHint,
+							detail: result.detail,
+						};
+					}
+					return { status: result.status === "profile-error" ? "refused" : "unavailable", reason: result.reason };
+				}
+				if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
 				const binaryPath = probe(preset.binary);
 				if (binaryPath === null) {
 					return {
@@ -150,6 +183,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 						preset: preset.id,
 						binary: preset.binary,
 						installHint: preset.installHint,
+						detail: `${preset.binary} was not found (install with \`${preset.installHint}\`)`,
 					};
 				}
 				const argv = presetArgv(preset.id, binaryPath);
@@ -160,6 +194,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${preset.id}` };
 				return { status: "opened", label: preset.id, paneId: ref.paneId };
 			}
+			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
 			const argv = request.argv ?? [];
 			if (argv.length === 0) return { status: "refused", reason: "nothing to run" };
 			const label = argv[0] ?? "pane";
@@ -188,6 +223,13 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			if (!match) return { status: "not-found", target };
 			const closed = await deps.mux.closePane(match.ref.paneId);
 			return closed ? { status: "closed", closed: 1, labels: [match.label] } : { status: "not-found", target };
+		},
+
+		attachYazi(controller: PanesYaziController): () => void {
+			yaziController = controller;
+			return () => {
+				if (yaziController === controller) yaziController = null;
+			};
 		},
 	};
 }

@@ -171,8 +171,9 @@ export interface PrewarmSettings {
  *
  * `journal` is the durable half: the run event journal, which every other pane
  * surface reads and which the standalone run viewer needs whether or not a pane
- * host is installed. The other four govern the live projection, and every one
- * of them is inert when no pane host answered detection.
+ * host is installed. The run-view settings govern the live projection. The
+ * Yazi chooser remains useful without a pane host because it can borrow the
+ * terminal for one selection.
  */
 export interface PanesSettings {
 	/**
@@ -193,6 +194,13 @@ export interface PanesSettings {
 	/** Which terminal run states raise a pane-host toast. */
 	notifications: "failures" | "all" | "off";
 	journal: boolean;
+	/** File-pane round-trip settings read live for each explicit open. */
+	yazi: {
+		enabled: boolean;
+		mode: "companion" | "chooser";
+		profile: "managed" | "user";
+		followCwd: boolean;
+	};
 }
 
 /**
@@ -523,6 +531,12 @@ export const DEFAULT_SETTINGS = {
 		 * present; turning it off costs the viewer its transcript and nothing else.
 		 */
 		journal: true,
+		yazi: {
+			enabled: true,
+			mode: "companion",
+			profile: "managed",
+			followCwd: true,
+		},
 	} as PanesSettings,
 	retry: {
 		enabled: true,
@@ -856,6 +870,14 @@ panes:
   keepFailed: true
   notifications: failures
   journal: true
+  # The files pane uses a managed, reproducible Yazi profile by default.
+  # profile: user preserves the operator's Yazi configuration and therefore
+  # forces one-shot chooser mode, since that profile has no Clio pick chord.
+  yazi:
+    enabled: true
+    mode: companion
+    profile: managed
+    followCwd: true
 
 # Transient provider/stream retry controls for interactive chat.
 # Retryable errors include overloads, rate limits, 5xx responses, network

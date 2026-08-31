@@ -68,7 +68,7 @@ export interface YaziSessionOptions {
 	runYa?: (file: string, args: ReadonlyArray<string>, env: Readonly<NodeJS.ProcessEnv>) => Promise<boolean>;
 }
 
-function resolveBinaries(): YaziResolvedBinaries {
+export function resolveYaziBinaries(): YaziResolvedBinaries {
 	const entry = findPinnedTool("yazi");
 	const status = entry ? toolStatus(entry) : null;
 	return {
@@ -96,7 +96,7 @@ function readOptional(path: string): string {
 
 /** Open one mux-hosted Yazi process and own its DDS or chooser-file transport. */
 export async function createYaziSession(options: YaziSessionOptions): Promise<YaziSessionOpenResult> {
-	const binaries = (options.resolveBinaries ?? resolveBinaries)();
+	const binaries = (options.resolveBinaries ?? resolveYaziBinaries)();
 	if (!binaries.yaziPath) {
 		return { status: "missing-binary", binary: "yazi", detail: binaries.missingYaziDetail };
 	}

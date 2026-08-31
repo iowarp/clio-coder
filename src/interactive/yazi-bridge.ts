@@ -1,11 +1,16 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { clioCacheDir } from "../core/xdg.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { YaziEvent } from "../domains/mux/yazi/event-stream.js";
+import { ensureYaziProfile, yaziProfileDir } from "../domains/mux/yazi/profile.js";
 import {
 	createYaziSession,
+	resolveYaziBinaries,
 	type YaziProfileMode,
+	type YaziResolvedBinaries,
 	type YaziSession,
 	type YaziSessionMode,
 	type YaziSessionOpenResult,
@@ -40,7 +45,7 @@ export interface YaziBridgeStatus {
 }
 
 export type YaziBridgeOpenResult =
-	| { status: "opened"; mode: YaziSessionMode; paneId: string; existing: boolean }
+	| { status: "opened"; mode: YaziSessionMode; paneId: string | null; existing: boolean }
 	| Exclude<YaziSessionOpenResult, { status: "opened" }>;
 
 export interface YaziBridge {
@@ -50,7 +55,7 @@ export interface YaziBridge {
 }
 
 export interface YaziBridgeDeps {
-	mux: MuxContract;
+	mux?: MuxContract;
 	getDraft: () => string;
 	setDraft: (text: string) => void;
 	requestRender: () => void;
@@ -58,9 +63,111 @@ export interface YaziBridgeDeps {
 	getCwd: () => string;
 	getSettings?: () => Readonly<YaziBridgeSettings>;
 	openSession?: (options: YaziSessionOptions) => Promise<YaziSessionOpenResult>;
+	/** TUI lease used only by the no-mux, in-terminal chooser. */
+	stopUi?: () => void;
+	startUi?: () => void;
+	runTerminalChooser?: (options: { cwd: string; profileMode: YaziProfileMode }) => Promise<YaziTerminalChooserResult>;
 	statPath?: (path: string) => "file" | "directory" | "other";
 	livenessMs?: number;
 	pickToken?: () => string;
+}
+
+export type YaziTerminalChooserResult =
+	| { status: "chosen"; choice: { paths: ReadonlyArray<string>; cwd: string } }
+	| { status: "cancelled" }
+	| { status: "missing-binary"; binary: "yazi" | "ya"; detail: string }
+	| { status: "profile-error"; reason: string }
+	| { status: "unavailable"; reason: string };
+
+export interface YaziTerminalChooserOptions {
+	cwd: string;
+	profileMode: YaziProfileMode;
+	stopUi: () => void;
+	startUi: () => void;
+	requestRender: () => void;
+	cacheDir?: string;
+	sessionId?: string;
+	resolveBinaries?: () => YaziResolvedBinaries;
+	ensureProfile?: typeof ensureYaziProfile;
+	spawnYazi?: (
+		file: string,
+		args: ReadonlyArray<string>,
+		options: { cwd: string; env: Readonly<NodeJS.ProcessEnv> },
+	) => { error?: Error };
+}
+
+function readOptional(path: string): string {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Run Yazi as a full-screen chooser when no pane host is usable.
+ *
+ * Resolution, profile generation, and chooser-file truncation all happen
+ * before the TUI lease is released. A missing or below-floor binary therefore
+ * leaves the screen intact and returns the shared doctor sentence verbatim.
+ */
+export async function runYaziTerminalChooser(options: YaziTerminalChooserOptions): Promise<YaziTerminalChooserResult> {
+	const binaries = (options.resolveBinaries ?? resolveYaziBinaries)();
+	if (!binaries.yaziPath) {
+		return { status: "missing-binary", binary: "yazi", detail: binaries.missingYaziDetail };
+	}
+	if (options.profileMode === "managed" && !binaries.yaPath) {
+		return {
+			status: "missing-binary",
+			binary: "ya",
+			detail: "the Yazi helper `ya` is not available; install the complete pinned Yazi tool",
+		};
+	}
+
+	const cacheDir = options.cacheDir ?? clioCacheDir();
+	const sessionsDir = join(cacheDir, "yazi", "sessions");
+	mkdirSync(sessionsDir, { recursive: true });
+	const sessionId = options.sessionId ?? randomUUID();
+	const chooserPath = join(sessionsDir, `${sessionId}.chooser`);
+	const cwdPath = join(sessionsDir, `${sessionId}.cwd`);
+	const profile =
+		options.profileMode === "managed"
+			? (options.ensureProfile ?? ensureYaziProfile)({
+					yaPath: binaries.yaPath as string,
+					profileDir: yaziProfileDir(cacheDir),
+				})
+			: null;
+	if (options.profileMode === "managed" && !profile) {
+		return { status: "profile-error", reason: "Clio could not generate a valid managed Yazi profile" };
+	}
+	writeFileSync(chooserPath, "");
+	writeFileSync(cwdPath, "");
+
+	const args = [options.cwd, "--chooser-file", chooserPath, "--cwd-file", cwdPath] as const;
+	const env = { ...process.env, ...(profile ? { YAZI_CONFIG_HOME: profile.dir } : {}) };
+	let processError: Error | undefined;
+	options.stopUi();
+	try {
+		const result = options.spawnYazi
+			? options.spawnYazi(binaries.yaziPath, args, { cwd: options.cwd, env })
+			: spawnSync(binaries.yaziPath, args, { cwd: options.cwd, env, stdio: "inherit" });
+		processError = result.error;
+	} catch (error) {
+		processError = error instanceof Error ? error : new Error(String(error));
+	} finally {
+		options.startUi();
+		options.requestRender();
+	}
+	if (processError) return { status: "unavailable", reason: `yazi chooser failed: ${processError.message}` };
+
+	const paths = readOptional(chooserPath)
+		.split("\n")
+		.filter((path) => path.length > 0);
+	if (paths.length === 0) return { status: "cancelled" };
+	return {
+		status: "chosen",
+		choice: { paths, cwd: readOptional(cwdPath).trim() || options.cwd },
+	};
 }
 
 function containsAsciiWhitespace(value: string): boolean {
@@ -221,13 +328,15 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 	};
 
 	const start = async (mode: YaziSessionMode, profileMode: YaziProfileMode): Promise<YaziBridgeOpenResult> => {
+		const mux = deps.mux;
+		if (!mux?.available()) return { status: "unavailable", reason: "the pane layer is not available" };
 		generation += 1;
 		const ownGeneration = generation;
 		const token = (deps.pickToken ?? randomUUID)();
 		sawLine = false;
 		paneCwd = deps.getCwd();
 		const result = await openSession({
-			mux: deps.mux,
+			mux,
 			mode,
 			profileMode,
 			cwd: deps.getCwd(),
@@ -289,6 +398,26 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 				return { status: "opened", mode: active.mode, paneId: active.pane.paneId, existing: true };
 			}
 			const mode = options.once || settings.profile === "user" ? "chooser" : settings.mode;
+			if (!deps.mux?.available()) {
+				const result = await (
+					deps.runTerminalChooser ??
+					((choiceOptions) =>
+						runYaziTerminalChooser({
+							...choiceOptions,
+							stopUi: deps.stopUi ?? (() => {}),
+							startUi: deps.startUi ?? (() => {}),
+							requestRender: deps.requestRender,
+						}))
+				)({ cwd: deps.getCwd(), profileMode: settings.profile });
+				if (result.status === "chosen") {
+					paneCwd = result.choice.cwd;
+					insert(result.choice.paths, result.choice.cwd);
+				}
+				if (result.status === "chosen" || result.status === "cancelled") {
+					return { status: "opened", mode: "chooser", paneId: null, existing: false };
+				}
+				return result;
+			}
 			return await start(mode, settings.profile);
 		},
 		status(): Readonly<YaziBridgeStatus> {
