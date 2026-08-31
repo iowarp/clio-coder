@@ -51,6 +51,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"trace.inspect",
 	"evidence.inspect",
 	"evidence.read",
+	"fleet.verify",
 	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
@@ -271,6 +272,11 @@ export interface EvidenceReadPayload {
 	readonly evidenceId: string;
 }
 
+/** The second and last command that names a durable artifact. Same rule. */
+export interface FleetVerifyPayload {
+	readonly runId: string;
+}
+
 export type RecoveryInspectPayload = Readonly<Record<string, never>>;
 
 export interface TargetsListPayload {
@@ -319,6 +325,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "trace.inspect": TraceInspectPayload;
 	readonly "evidence.inspect": EvidenceInspectPayload;
 	readonly "evidence.read": EvidenceReadPayload;
+	readonly "fleet.verify": FleetVerifyPayload;
 	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
@@ -357,6 +364,7 @@ export const SERVER_EVENT_KINDS = [
 	"trace.state",
 	"evidence.state",
 	"evidence.detail.state",
+	"fleet.verification.state",
 	"recovery.state",
 	"targets.state",
 	"targets.probed",
@@ -1231,6 +1239,43 @@ export interface WireEvidenceDetail {
 	readonly runsTruncated: boolean;
 }
 
+export const FLEET_VERIFY_STATES = ["pending", "verified", "failed", "unavailable"] as const;
+export type WireFleetVerifyState = (typeof FLEET_VERIFY_STATES)[number];
+
+/**
+ * Why a receipt did not authenticate, classified rather than quoted.
+ *
+ * The harness builds some of these by interpolating a thrown message or a field
+ * name, so the reason arrives as a member of this set and never as prose.
+ */
+export const FLEET_VERIFY_REASONS = [
+	"integrity-mismatch",
+	"ledger-mismatch",
+	"integrity-invalid",
+	"execution-role-invalid",
+	"routing-intent-invalid",
+	"route-decision-invalid",
+	"receipt-unreadable",
+	"envelope-unavailable",
+	"unclassified",
+] as const;
+export type WireFleetVerifyReason = (typeof FLEET_VERIFY_REASONS)[number];
+
+/**
+ * One receipt re-authenticated on demand.
+ *
+ * `fleet.inspection.state` reports trust as of the snapshot. This reports it as
+ * of `verifiedAt`, which is the only way to learn that a receipt trusted when
+ * the window was read no longer verifies against the bytes on disk.
+ */
+export interface WireFleetVerification {
+	readonly runId: string;
+	readonly verifiedAt: string;
+	readonly state: WireFleetVerifyState;
+	readonly reason: WireFleetVerifyReason | null;
+	readonly axes: Readonly<Record<WireEvidenceAxis, string>>;
+}
+
 export const MAX_WIRE_TRACE_RUNS = 8;
 export const MAX_WIRE_TRACE_PHASES = 16;
 
@@ -1515,6 +1560,10 @@ export interface EvidenceDetailStatePayload {
 	readonly detail: WireEvidenceDetail;
 }
 
+export interface FleetVerificationStatePayload {
+	readonly verification: WireFleetVerification;
+}
+
 export interface RecoveryStatePayload {
 	readonly inspection: WireRecoveryInspection;
 }
@@ -1706,6 +1755,7 @@ export interface ServerEventPayloadByKind {
 	readonly "trace.state": TraceStatePayload;
 	readonly "evidence.state": EvidenceStatePayload;
 	readonly "evidence.detail.state": EvidenceDetailStatePayload;
+	readonly "fleet.verification.state": FleetVerificationStatePayload;
 	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
@@ -2069,6 +2119,12 @@ function validateClientPayload<K extends ClientCommandKind>(
 			const record = expectExactKeys(value, label, ["evidenceId"]);
 			return {
 				evidenceId: expectArtifactId(record.evidenceId, `${label}.evidenceId`),
+			} as ClientCommandPayloadByKind[K];
+		}
+		case "fleet.verify": {
+			const record = expectExactKeys(value, label, ["runId"]);
+			return {
+				runId: expectArtifactId(record.runId, `${label}.runId`),
 			} as ClientCommandPayloadByKind[K];
 		}
 		case "project.browse": {
@@ -4414,6 +4470,41 @@ function expectIdentityList(value: unknown, label: string): readonly string[] {
 	return list;
 }
 
+export function validateFleetVerification(
+	value: unknown,
+	label = "fleet verification",
+): WireFleetVerification {
+	const record = expectExactKeys(value, label, ["runId", "verifiedAt", "state", "reason", "axes"]);
+	const state = expectEnum(record.state, `${label}.state`, FLEET_VERIFY_STATES);
+	const reason = record.reason === null ? null : expectEnum(record.reason, `${label}.reason`, FLEET_VERIFY_REASONS);
+	// A receipt that authenticated, or that has not been sealed yet, has no
+	// reason to give; one that did not authenticate always has one.
+	if ((reason === null) !== (state === "verified" || state === "pending")) {
+		invalid(`${label}.reason contradicts its state`);
+	}
+	// The two states that mean "there was nothing readable to check" are exactly
+	// the two reasons that say so.
+	if ((state === "unavailable") !== (reason === "receipt-unreadable" || reason === "envelope-unavailable")) {
+		invalid(`${label}.state contradicts its reason`);
+	}
+	const axesRecord = expectExactKeys(record.axes, `${label}.axes`, EVIDENCE_AXES);
+	const axes: Record<string, string> = {};
+	for (const axis of EVIDENCE_AXES) {
+		axes[axis] = expectEnum(axesRecord[axis], `${label}.axes.${axis}`, EVIDENCE_AXIS_STATES[axis]);
+	}
+	// A receipt that authenticated cannot report its own integrity as failed.
+	if (state === "verified" && axes.artifactIntegrity === "failed") {
+		invalid(`${label} verified a receipt whose integrity axis failed`);
+	}
+	return {
+		runId: expectPresentationText(record.runId, `${label}.runId`, 128),
+		verifiedAt: expectTimestamp(record.verifiedAt, `${label}.verifiedAt`),
+		state,
+		reason,
+		axes: axes as WireFleetVerification["axes"],
+	};
+}
+
 export function validateEvidenceDetail(
 	value: unknown,
 	label = "evidence detail",
@@ -5341,6 +5432,10 @@ function validateServerPayload(
 			const record = expectExactKeys(value, label, ["detail"]);
 			return { detail: validateEvidenceDetail(record.detail, `${label}.detail`) };
 		}
+		case "fleet.verification.state": {
+			const record = expectExactKeys(value, label, ["verification"]);
+			return { verification: validateFleetVerification(record.verification, `${label}.verification`) };
+		}
 		case "recovery.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -5682,6 +5777,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"trace.state",
 	"evidence.state",
 	"evidence.detail.state",
+	"fleet.verification.state",
 	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([

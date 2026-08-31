@@ -42,6 +42,7 @@ import {
 	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	fleetInspectionFixture,
+	fleetVerificationFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
@@ -906,6 +907,7 @@ Deno.test("dispatch inspection is global, uses the configured home, and survives
 Deno.test("fleet inspection is global, uses the configured home, and survives browser reload", async () => {
 	let inspectedCwd: string | null = null;
 	const fleetInspector: ClioFleetInspector = {
+		verify: () => Promise.reject(new Error("this fixture never verifies a receipt")),
 		inspect(cwd) {
 			inspectedCwd = cwd;
 			return Promise.resolve(fleetInspectionFixture());
@@ -1765,6 +1767,64 @@ Deno.test("a bundle may be read only by an id the host served in its current win
 		ok(stale?.kind === "command.error");
 		equal(stale.payload.code, "refused");
 		deepStrictEqual(reads, ["run-alpha-bundle"]);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("a receipt may be re-authenticated only for a run the host served in its current window", async () => {
+	const verified: string[] = [];
+	let served = fleetInspectionFixture();
+	const fleetInspector: ClioFleetInspector = {
+		inspect: () => Promise.resolve(served),
+		verify(_cwd, runId) {
+			verified.push(runId);
+			return Promise.resolve({ ...fleetVerificationFixture(), runId });
+		},
+	};
+	const fixture = await startFixture({ fleetInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+
+		// The run window is served by the snapshot, so before one is read the host
+		// has nothing to admit against and must not spawn a verifier.
+		await sendCommand(socket, "request-early", "fleet.verify", { runId: "run-alpha" });
+		const early = (await collectThrough(socket, "command.error")).at(-1);
+		ok(early?.kind === "command.error");
+		equal(early.payload.code, "refused");
+		deepStrictEqual(verified, []);
+
+		await sendCommand(socket, "request-runs", "fleet.inspect", {});
+		equal((await collectThrough(socket, "fleet.inspection.state")).at(-1)?.kind, "fleet.inspection.state");
+
+		await sendCommand(socket, "request-verify", "fleet.verify", { runId: "run-alpha" });
+		const verification = (await collectThrough(socket, "fleet.verification.state")).at(-1);
+		ok(verification?.kind === "fleet.verification.state");
+		equal(verification.projectId, undefined);
+		equal(verification.payload.verification.runId, "run-alpha");
+		deepStrictEqual(verified, ["run-alpha"]);
+
+		// `run-beta` appears inside the fleet-root step index but is not a row in
+		// the run window, so it is not referenceable: being shown a run id is not
+		// the same as the host serving it.
+		await sendCommand(socket, "request-step", "fleet.verify", { runId: "run-beta" });
+		const step = (await collectThrough(socket, "command.error")).at(-1);
+		ok(step?.kind === "command.error");
+		equal(step.payload.code, "refused");
+		deepStrictEqual(verified, ["run-alpha"]);
+
+		// A refreshed window that no longer lists the run retires it.
+		served = { ...served, runs: [] };
+		await sendCommand(socket, "request-refresh", "fleet.inspect", {});
+		equal((await collectThrough(socket, "fleet.inspection.state")).at(-1)?.kind, "fleet.inspection.state");
+		await sendCommand(socket, "request-stale", "fleet.verify", { runId: "run-alpha" });
+		const stale = (await collectThrough(socket, "command.error")).at(-1);
+		ok(stale?.kind === "command.error");
+		equal(stale.payload.code, "refused");
+		deepStrictEqual(verified, ["run-alpha"]);
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

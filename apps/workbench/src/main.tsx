@@ -266,6 +266,12 @@ function App() {
 					dispatch({ type: "evidence.read.submitted", requestId, evidenceId });
 				}
 			},
+			verifyRun(runId) {
+				const requestId = send("fleet.verify", { runId });
+				if (requestId !== null) {
+					dispatch({ type: "fleet.verify.submitted", requestId, runId });
+				}
+			},
 			inspectRecovery() {
 				const requestId = send("recovery.inspect", {});
 				if (requestId !== null) {

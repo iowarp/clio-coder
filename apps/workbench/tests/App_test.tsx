@@ -22,6 +22,7 @@ import {
 	evidenceInspectionFixture,
 	FIXTURE_PROJECT_ID,
 	fleetInspectionFixture,
+	fleetVerificationFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	serverEventFixture,
@@ -64,6 +65,7 @@ const inertActions: WorkbenchActions = {
 	inspectTrace() {},
 	inspectEvidence() {},
 	readEvidence() {},
+	verifyRun() {},
 	inspectRecovery() {},
 	listTargets() {},
 	probeTarget() {},
@@ -290,7 +292,10 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 			evidence={evidenceInspectionFixture()}
 			evidenceDetail={evidenceDetailFixture()}
 			pendingEvidenceRead={null}
+			verification={fleetVerificationFixture()}
+			pendingVerifyRunId={null}
 			onReadEvidence={() => undefined}
+			onVerifyRun={() => undefined}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -328,7 +333,10 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 			evidence={evidenceInspectionFixture()}
 			evidenceDetail={evidenceDetailFixture()}
 			pendingEvidenceRead={null}
+			verification={fleetVerificationFixture()}
+			pendingVerifyRunId={null}
 			onReadEvidence={() => undefined}
+			onVerifyRun={() => undefined}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -364,6 +372,12 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 	match(html, /Validation grounding/u);
 	match(html, /Autonomy enforcement/u);
 	match(html, /Open trust record/u);
+	// Verifying a receipt is offered beside the trust state the snapshot recorded,
+	// and the result says what it checked rather than repeating that state.
+	match(html, /Check this receipt now/u);
+	match(html, /Receipt check for run run-alpha/u);
+	match(html, /Receipt did not authenticate/u);
+	match(html, /no longer agrees with its ledger entry/u);
 	// A historical bundle records no axes, so its button is not offered.
 	match(html, /disabled/u);
 	for (const forbidden of ["tasks", "cwds", "transcript.md", "sessionEntries"]) {
@@ -402,7 +416,10 @@ Deno.test("an unread and an unavailable trace database are told apart, and neith
 				evidence={null}
 				evidenceDetail={null}
 				pendingEvidenceRead={null}
+				verification={null}
+				pendingVerifyRunId={null}
 				onReadEvidence={() => undefined}
+				onVerifyRun={() => undefined}
 				pending={false}
 				onRefresh={() => undefined}
 				onBack={() => undefined}

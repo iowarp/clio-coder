@@ -36,6 +36,9 @@ import type {
 	WireFleetInspection,
 	WireFleetInspectionRun,
 	WireFleetInspectionStep,
+	WireFleetVerification,
+	WireFleetVerifyReason,
+	WireFleetVerifyState,
 	WirePendingPermission,
 	WireProjectSummary,
 	WireRecoveryCheckLevel,
@@ -112,6 +115,7 @@ export interface WorkbenchActions {
 	inspectTrace(): void;
 	inspectEvidence(): void;
 	readEvidence(evidenceId: string): void;
+	verifyRun(runId: string): void;
 	inspectRecovery(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
@@ -4035,26 +4039,80 @@ export const EvidenceInventory = memo(function EvidenceInventory({
 	);
 });
 
+const FLEET_VERIFY_PRESENTATION: Record<
+	WireFleetVerifyState,
+	{ readonly label: string; readonly tone: string }
+> = {
+	pending: { label: "Not sealed yet", tone: "neutral" },
+	verified: { label: "Receipt authenticates", tone: "success" },
+	failed: { label: "Receipt did not authenticate", tone: "error" },
+	unavailable: { label: "Nothing to authenticate", tone: "warning" },
+};
+
+const FLEET_VERIFY_REASON_TEXT: Record<WireFleetVerifyReason, string> = {
+	"integrity-mismatch": "The receipt's own seal does not cover its current contents.",
+	"ledger-mismatch": "The receipt no longer agrees with its ledger entry.",
+	"integrity-invalid": "The receipt's integrity record is not readable.",
+	"execution-role-invalid": "The receipt records an execution role Clio Coder does not recognise.",
+	"routing-intent-invalid": "The receipt records a routing intent Clio Coder does not recognise.",
+	"route-decision-invalid": "The receipt records a route decision Clio Coder does not recognise.",
+	"receipt-unreadable": "Clio Coder could not read the stored receipt.",
+	"envelope-unavailable": "Clio Coder has no ledger entry to check the receipt against.",
+	unclassified: "Clio Coder refused the receipt for a reason this build does not classify.",
+};
+
+function FleetVerification({ verification }: { verification: WireFleetVerification }) {
+	return (
+		<div
+			className={`fleet-verification is-${verification.state}`}
+			aria-label={`Receipt check for run ${verification.runId}`}
+		>
+			<header>
+				<StatusMark
+					tone={FLEET_VERIFY_PRESENTATION[verification.state].tone}
+					label={FLEET_VERIFY_PRESENTATION[verification.state].label}
+				/>
+				<time dateTime={verification.verifiedAt}>Checked {formatTimestamp(verification.verifiedAt)}</time>
+			</header>
+			{verification.reason !== null && <p>{FLEET_VERIFY_REASON_TEXT[verification.reason]}</p>}
+			<dl>
+				{(Object.keys(EVIDENCE_AXIS_LABEL) as WireEvidenceAxis[]).map((axis) => (
+					<div key={axis} className={`is-${evidenceAxisTone(verification.axes[axis])}`}>
+						<dt>{EVIDENCE_AXIS_LABEL[axis]}</dt>
+						<dd>{verification.axes[axis].replaceAll("_", " ")}</dd>
+					</div>
+				))}
+			</dl>
+		</div>
+	);
+}
+
 export const FleetJournal = memo(function FleetJournal({
 	inspection,
 	trace,
 	evidence,
 	evidenceDetail,
 	pendingEvidenceRead,
+	verification,
+	pendingVerifyRunId,
 	pending,
 	onRefresh,
 	onBack,
 	onReadEvidence,
+	onVerifyRun,
 }: {
 	inspection: WireFleetInspection | null;
 	trace: WireTraceInspection | null;
 	evidence: WireEvidenceInspection | null;
 	evidenceDetail: WireEvidenceDetail | null;
 	pendingEvidenceRead: string | null;
+	verification: WireFleetVerification | null;
+	pendingVerifyRunId: string | null;
 	pending: boolean;
 	onRefresh(): void;
 	onBack(): void;
 	onReadEvidence(evidenceId: string): void;
+	onVerifyRun(runId: string): void;
 }) {
 	const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 	const firstRunId = inspection?.runs[0]?.runId ?? null;
@@ -4357,7 +4415,21 @@ export const FleetJournal = memo(function FleetJournal({
 											.label}
 									/>
 									<p>{selected.evidence.summary}</p>
+									<div className="fleet-run-evidence__verify">
+										<button
+											type="button"
+											className="button button--quiet"
+											disabled={pendingVerifyRunId !== null}
+											onClick={() => onVerifyRun(selected.runId)}
+										>
+											{pendingVerifyRunId === selected.runId ? "Checking receipt…" : "Check this receipt now"}
+										</button>
+										<small>
+											The state above is what the snapshot recorded. Checking re-reads the sealed bytes.
+										</small>
+									</div>
 								</section>
+								{verification?.runId === selected.runId && <FleetVerification verification={verification} />}
 								{(() => {
 									const traced = trace?.runs.find((run) => run.runId === selected.runId) ?? null;
 									if (traced !== null) return <TraceAccounting run={traced} />;
@@ -5170,7 +5242,10 @@ function ConversationCanvas({
 							evidence={state.evidenceInspection}
 							evidenceDetail={state.evidenceDetail}
 							pendingEvidenceRead={state.pendingEvidenceRead}
+							verification={state.fleetVerification}
+							pendingVerifyRunId={state.pendingFleetVerify}
 							onReadEvidence={actions.readEvidence}
+							onVerifyRun={actions.verifyRun}
 							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null ||
 								state.pendingEvidenceInspect !== null}
 							onRefresh={onRefreshFleet}
