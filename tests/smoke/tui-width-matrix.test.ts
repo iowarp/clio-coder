@@ -118,7 +118,15 @@ describe("TUI width matrix", { concurrency: false, skip: ptySupported ? false : 
 			try {
 				const result = await launch(scratch, cols, rows);
 
-				strictEqual(result.timedOut, false, "two Ctrl-C inside the double-tap window exits");
+				// The tail matters here: a timeout is either "the TUI never reached
+				// the ready banner, so the keystrokes were never sent" or "it did,
+				// and the double tap missed the product's 500ms window". The bare
+				// "true !== false" this used to print separates neither.
+				strictEqual(
+					result.timedOut,
+					false,
+					`two Ctrl-C inside the double-tap window exits; output tail: ${stripAnsi(result.output).slice(-400)}`,
+				);
 				strictEqual(result.exitCode, 0, `clean exit; output tail: ${stripAnsi(result.output).slice(-400)}`);
 
 				const lines = visibleLines(result.output);

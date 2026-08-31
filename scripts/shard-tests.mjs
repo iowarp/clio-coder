@@ -80,13 +80,17 @@ const DEFAULT_PATTERNS = ["tests/contracts/**/*.test.ts", "tests/smoke/**/*.test
  * have drained.
  *
  * Everything else in this suite treats a timeout as a watchdog, so the sharded
- * runner can widen it (tests/harness/load.ts) and lose nothing. These four
- * cannot: the number each one compares against is the claim. "The batch beat
- * serial" stops meaning anything if the bound is raised past serial, and
- * "SIGKILL followed the 2s grace" stops meaning anything if the grace is
- * scaled. Their only honest fix is a quiet box, so they get one.
+ * runner can widen it (tests/harness/load.ts) and lose nothing. These cannot:
+ * the number each one compares against is the claim. "The batch beat serial"
+ * stops meaning anything if the bound is raised past serial, and "SIGKILL
+ * followed the 2s grace" stops meaning anything if the grace is scaled. The
+ * TUI double-tap is the same in different clothes: the 500ms window belongs to
+ * the product, and the test's only job is to deliver two keystrokes inside it
+ * and one outside it, which starving the box makes impossible to do reliably
+ * no matter how the test is written. Their only honest fix is a quiet box, so
+ * they get one.
  *
- * Cost is about 10s of wall clock added to a ~130s run, and every entry is
+ * Cost is about 40s of wall clock added to a ~120s run, and every entry is
  * here because it failed under 24-way load and passed alone. Keep the list
  * short: a file belongs here only when widening its margin would weaken what
  * it proves. Anything that merely waits for something belongs in the parallel
@@ -101,6 +105,8 @@ const SERIAL_FILES = [
 	"tests/contracts/autonomy.test.ts",
 	// a timed-out child dies to SIGTERM before the 2s grace, or to SIGKILL after it
 	"tests/contracts/live-spawn.test.ts",
+	// two Ctrl-C inside the TUI's 500ms double-tap window exit, one outside it does not
+	"tests/smoke/tui-width-matrix.test.ts",
 ];
 const SERIAL_LANE_NAME = "lane-serial";
 const RUNNER_ARGS = [
