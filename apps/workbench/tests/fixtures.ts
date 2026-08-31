@@ -7,6 +7,7 @@ import {
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireDispatchInspection,
+	type WireEvidenceDetail,
 	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireProjectWorkspace,
@@ -199,6 +200,43 @@ export function traceInspectionFixture(): WireTraceInspection {
 			phasesTruncated: false,
 		}],
 		truncated: false,
+	};
+}
+
+export function evidenceDetailFixture(): WireEvidenceDetail {
+	return {
+		evidenceId: "run-alpha-bundle",
+		sourceKind: "run",
+		inspectedAt: "2026-08-31T14:03:00.000Z",
+		generatedAt: "2026-08-31T14:00:40.000Z",
+		canonical: true,
+		runs: [
+			{
+				runId: "run-alpha",
+				verdict: "compromised",
+				axes: {
+					artifactIntegrity: "verified",
+					validationGrounding: "failed",
+					independentReview: "absent",
+					contextProvenance: "recorded",
+					autonomyEnforcement: "enforced",
+					completionEvidence: "absent",
+				},
+			},
+			{
+				runId: "run-beta",
+				verdict: "grounded",
+				axes: {
+					artifactIntegrity: "verified",
+					validationGrounding: "validated",
+					independentReview: "absent",
+					contextProvenance: "recorded",
+					autonomyEnforcement: "enforced",
+					completionEvidence: "evidenced",
+				},
+			},
+		],
+		runsTruncated: false,
 	};
 }
 

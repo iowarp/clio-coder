@@ -29,6 +29,8 @@ import type {
 	WireDeleteChallenge,
 	WireDispatchInspection,
 	WireEventSource,
+	WireEvidenceAxis,
+	WireEvidenceDetail,
 	WireEvidenceInspection,
 	WireEvidenceTrustVerdict,
 	WireFleetInspection,
@@ -109,6 +111,7 @@ export interface WorkbenchActions {
 	inspectToolchain(): void;
 	inspectTrace(): void;
 	inspectEvidence(): void;
+	readEvidence(evidenceId: string): void;
 	inspectRecovery(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
@@ -3821,14 +3824,87 @@ const EVIDENCE_VERDICT_PRESENTATION: Record<
 	unknown: { label: "Trust unknown", tone: "neutral" },
 };
 
+const EVIDENCE_AXIS_LABEL: Record<WireEvidenceAxis, string> = {
+	artifactIntegrity: "Artifact integrity",
+	validationGrounding: "Validation grounding",
+	independentReview: "Independent review",
+	contextProvenance: "Context provenance",
+	autonomyEnforcement: "Autonomy enforcement",
+	completionEvidence: "Completion evidence",
+};
+
+/** States that are a stated negative rather than a stated absence. */
+const EVIDENCE_AXIS_FAULTS = new Set([
+	"failed",
+	"ungrounded",
+	"not_independent",
+	"invalid",
+	"bypassed",
+	"incomplete",
+]);
+
+function evidenceAxisTone(state: string): string {
+	if (EVIDENCE_AXIS_FAULTS.has(state)) return "error";
+	if (state === "absent" || state === "unknown" || state === "not_applicable") return "neutral";
+	if (state === "approximated" || state === "limited" || state === "inconclusive") return "warning";
+	return "success";
+}
+
+function EvidenceTrustRecord({ detail }: { detail: WireEvidenceDetail }) {
+	return (
+		<div className="evidence-trust" aria-label={`Trust record for ${detail.evidenceId}`}>
+			{detail.canonical === false
+				? (
+					<p className="evidence-list__note">
+						This bundle predates the canonical trust projection, so it records no axes to open.
+					</p>
+				)
+				: detail.runs.length === 0
+				? <p className="evidence-list__note">The bundle records no per-run trust status.</p>
+				: (
+					<ul>
+						{detail.runs.map((run) => (
+							<li key={run.runId}>
+								<header>
+									<code>{run.runId}</code>
+									<StatusMark
+										tone={EVIDENCE_VERDICT_PRESENTATION[run.verdict].tone}
+										label={EVIDENCE_VERDICT_PRESENTATION[run.verdict].label}
+									/>
+								</header>
+								<dl>
+									{(Object.keys(EVIDENCE_AXIS_LABEL) as WireEvidenceAxis[]).map((axis) => (
+										<div key={axis} className={`is-${evidenceAxisTone(run.axes[axis])}`}>
+											<dt>{EVIDENCE_AXIS_LABEL[axis]}</dt>
+											<dd>{run.axes[axis].replaceAll("_", " ")}</dd>
+										</div>
+									))}
+								</dl>
+							</li>
+						))}
+					</ul>
+				)}
+			{detail.runsTruncated && (
+				<p className="evidence-inventory__bound">Later runs in this bundle are outside the bounded record.</p>
+			)}
+		</div>
+	);
+}
+
 export const EvidenceInventory = memo(function EvidenceInventory({
 	inspection,
+	detail,
+	pendingReadId,
 	knownRunIds,
 	onSelectRun,
+	onReadBundle,
 }: {
 	inspection: WireEvidenceInspection | null;
+	detail: WireEvidenceDetail | null;
+	pendingReadId: string | null;
 	knownRunIds: readonly string[];
 	onSelectRun(runId: string): void;
+	onReadBundle(evidenceId: string): void;
 }) {
 	return (
 		<section className="evidence-inventory" aria-labelledby="evidence-inventory-title">
@@ -3914,6 +3990,22 @@ export const EvidenceInventory = memo(function EvidenceInventory({
 										})}
 										{artifact.runIdsTruncated && <span>and more</span>}
 									</div>
+									<div className="evidence-list__open">
+										<button
+											type="button"
+											className="button button--quiet"
+											disabled={artifact.trust.historical || pendingReadId !== null}
+											aria-expanded={detail?.evidenceId === artifact.evidenceId}
+											onClick={() => onReadBundle(artifact.evidenceId)}
+										>
+											{pendingReadId === artifact.evidenceId
+												? "Reading trust record…"
+												: detail?.evidenceId === artifact.evidenceId
+												? "Trust record open"
+												: "Open trust record"}
+										</button>
+									</div>
+									{detail?.evidenceId === artifact.evidenceId && <EvidenceTrustRecord detail={detail} />}
 									<p className="evidence-list__note">
 										{artifact.trust.historical
 											? "Built before the canonical trust projection, so it carries no verdict of its own."
@@ -3947,16 +4039,22 @@ export const FleetJournal = memo(function FleetJournal({
 	inspection,
 	trace,
 	evidence,
+	evidenceDetail,
+	pendingEvidenceRead,
 	pending,
 	onRefresh,
 	onBack,
+	onReadEvidence,
 }: {
 	inspection: WireFleetInspection | null;
 	trace: WireTraceInspection | null;
 	evidence: WireEvidenceInspection | null;
+	evidenceDetail: WireEvidenceDetail | null;
+	pendingEvidenceRead: string | null;
 	pending: boolean;
 	onRefresh(): void;
 	onBack(): void;
+	onReadEvidence(evidenceId: string): void;
 }) {
 	const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 	const firstRunId = inspection?.runs[0]?.runId ?? null;
@@ -4163,8 +4261,11 @@ export const FleetJournal = memo(function FleetJournal({
 
 			<EvidenceInventory
 				inspection={evidence}
+				detail={evidenceDetail}
+				pendingReadId={pendingEvidenceRead}
 				knownRunIds={inspection.runs.map((run) => run.runId)}
 				onSelectRun={setSelectedRunId}
+				onReadBundle={onReadEvidence}
 			/>
 
 			{inspection.runs.length === 0
@@ -5067,6 +5168,9 @@ function ConversationCanvas({
 							inspection={state.fleetInspection}
 							trace={state.traceInspection}
 							evidence={state.evidenceInspection}
+							evidenceDetail={state.evidenceDetail}
+							pendingEvidenceRead={state.pendingEvidenceRead}
+							onReadEvidence={actions.readEvidence}
 							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null ||
 								state.pendingEvidenceInspect !== null}
 							onRefresh={onRefreshFleet}

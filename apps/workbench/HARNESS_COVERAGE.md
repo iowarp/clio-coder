@@ -60,26 +60,43 @@ extensions. The GUI must never import root harness modules or infer those facts 
 
 ## Current GUI protocol footprint
 
-GUI protocol v4 currently validates 34 client commands:
+GUI protocol v4 currently validates 35 client commands:
 
 `project.browse`, `project.open`, `project.select`, `project.forget`, `fs.refresh`, `fs.create-file`,
 `fs.create-folder`, `fs.move`, `fs.delete.prepare`, `fs.delete.confirm`, `session.new`, `session.load`, `session.close`,
 `session.list`, `session.label`, `session.delete`, `turn.start`, `turn.cancel`, `permission.resolve`, `settings.get`,
 `settings.patch`, `targets.list`, `targets.probe`, `autonomy.set`, `config.inspect`, `catalog.inspect`, `usage.inspect`,
-`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, `trace.inspect`, `evidence.inspect`, and
-`recovery.inspect`.
+`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, `trace.inspect`, `evidence.inspect`,
+`evidence.read`, and `recovery.inspect`.
 
-It validates 33 server event kinds:
+It validates 34 server event kinds:
 
 `connection.ready`, `project.browse.listing`, `project.opened`, `project.forgotten`, `project.snapshot`, `fs.changed`,
 `fs.delete.challenge`, `clio.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
 `config.state`, `catalog.state`, `usage.state`, `routing.state`, `dispatch.state`, `fleet.inspection.state`,
-`toolchain.state`, `trace.state`, `evidence.state`, `recovery.state`, `turn.started`, `turn.text`, `turn.thought`,
-`turn.tool`, `turn.loop`, `turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `fleet.activity`,
-`protocol.error`, and `command.error`.
+`toolchain.state`, `trace.state`, `evidence.state`, `evidence.detail.state`, `recovery.state`, `turn.started`,
+`turn.text`, `turn.thought`, `turn.tool`, `turn.loop`, `turn.permission.requested`, `turn.permission.resolved`,
+`turn.terminal`, `fleet.activity`, `protocol.error`, and `command.error`.
 
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
 “render JSON” escape hatch.
+
+Thirty-four of the thirty-five client commands carry no artifact identity at all, which is the property that makes this
+boundary auditable: a host adapter with fixed argv cannot be steered anywhere by anything a frame says. The one
+exception is `evidence.read`, and it is less an exception to the rule than the rule stated for a harder case.
+
+The browser never introduces an identifier. It may only echo one the host itself served, inside the snapshot the host is
+currently showing, and `apps/workbench/artifact-allowlist.ts` is the single place that decides. The window is replaced
+wholesale on each new snapshot rather than accumulated, so an artifact that has aged out stops being referenceable: the
+browser is asking about something the host no longer claims exists, and being told so is more truthful than a lookup. A
+reference outside the window is refused rather than searched for, which is why it answers `refused` and not `not-found`.
+Serving an id a projection could not have produced is treated as a host bug and refused outright, because an allowlist
+filled from a broken projection is worse than no allowlist at all. The admitted value is the caller's only licence to
+build argv, and every consumer uses the return rather than its own input.
+
+This is deliberately not a capability token, a session, or a cache. It is the smallest thing that makes "the browser may
+only point at what it was shown" checkable in one place, so no future adapter has to re-derive it, and so the operations
+that need an identifier do not each invent their own answer.
 
 Redaction is a decision about which field, not about which record. A doctor finding is the clearest case: its detail is
 free prose that routinely quotes native paths, endpoint URLs, socket paths, model ids, and session ids, and no version

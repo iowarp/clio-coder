@@ -18,6 +18,7 @@ import {
 	clioSnapshotFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	FIXTURE_PROJECT_ID,
 	fleetInspectionFixture,
@@ -62,6 +63,7 @@ const inertActions: WorkbenchActions = {
 	inspectToolchain() {},
 	inspectTrace() {},
 	inspectEvidence() {},
+	readEvidence() {},
 	inspectRecovery() {},
 	listTargets() {},
 	probeTarget() {},
@@ -286,6 +288,9 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 			inspection={fleetInspectionFixture()}
 			trace={traceInspectionFixture()}
 			evidence={evidenceInspectionFixture()}
+			evidenceDetail={evidenceDetailFixture()}
+			pendingEvidenceRead={null}
+			onReadEvidence={() => undefined}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -321,6 +326,9 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 			inspection={fleetInspectionFixture()}
 			trace={traceInspectionFixture()}
 			evidence={evidenceInspectionFixture()}
+			evidenceDetail={evidenceDetailFixture()}
+			pendingEvidenceRead={null}
+			onReadEvidence={() => undefined}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -350,6 +358,14 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 	match(html, /3 secret-shaped values were redacted/u);
 	match(html, /1 protected artifact event recorded/u);
 	match(html, /no verdict of its own/u);
+	// The drill-down names the axis that produced the verdict, which is the whole
+	// point of reading one bundle rather than listing them all.
+	match(html, /Trust record for run-alpha-bundle/u);
+	match(html, /Validation grounding/u);
+	match(html, /Autonomy enforcement/u);
+	match(html, /Open trust record/u);
+	// A historical bundle records no axes, so its button is not offered.
+	match(html, /disabled/u);
 	for (const forbidden of ["tasks", "cwds", "transcript.md", "sessionEntries"]) {
 		ok(!html.includes(forbidden), `evidence inventory leaked ${forbidden}`);
 	}
@@ -384,6 +400,9 @@ Deno.test("an unread and an unavailable trace database are told apart, and neith
 				inspection={fleetInspectionFixture()}
 				trace={trace}
 				evidence={null}
+				evidenceDetail={null}
+				pendingEvidenceRead={null}
+				onReadEvidence={() => undefined}
 				pending={false}
 				onRefresh={() => undefined}
 				onBack={() => undefined}

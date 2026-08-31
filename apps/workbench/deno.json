@@ -10,8 +10,8 @@
 		"smoke:browser": "deno task build && deno run -A scripts/browser-smoke.ts",
 		"format": "deno fmt --check .",
 		"format:write": "deno fmt .",
-		"lint": "deno lint acp-client.ts clio-host.ts clio-dispatch-inspector.ts clio-fleet-inspector.ts clio-toolchain-inspector.ts clio-trace-inspector.ts clio-evidence-inspector.ts clio-recovery-inspector.ts main.ts project-store.ts workbench-state.ts scripts src tests vite.config.ts",
-		"check": "deno check acp-client.ts clio-host.ts clio-dispatch-inspector.ts clio-fleet-inspector.ts clio-toolchain-inspector.ts clio-trace-inspector.ts clio-evidence-inspector.ts clio-recovery-inspector.ts main.ts project-store.ts workbench-state.ts scripts src/main.tsx tests",
+		"lint": "deno lint acp-client.ts artifact-allowlist.ts clio-host.ts clio-dispatch-inspector.ts clio-fleet-inspector.ts clio-toolchain-inspector.ts clio-trace-inspector.ts clio-evidence-inspector.ts clio-recovery-inspector.ts main.ts project-store.ts workbench-state.ts scripts src tests vite.config.ts",
+		"check": "deno check acp-client.ts artifact-allowlist.ts clio-host.ts clio-dispatch-inspector.ts clio-fleet-inspector.ts clio-toolchain-inspector.ts clio-trace-inspector.ts clio-evidence-inspector.ts clio-recovery-inspector.ts main.ts project-store.ts workbench-state.ts scripts src/main.tsx tests",
 		"test": "deno test --no-prompt --allow-env=NODE_ENV --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=deno,kill tests",
 		"test:clio-real": "deno test --no-prompt --allow-env=CLIO_WORKBENCH_CLI_ENTRY --allow-read --allow-write --allow-net=127.0.0.1 --allow-run=node,kill,git tests/clio-real-integration.ts",
 		"verify": "deno task format && deno task lint && deno task check && deno task test && deno task build",
@@ -40,6 +40,7 @@
 	"lint": {
 		"include": [
 			"acp-client.ts",
+			"artifact-allowlist.ts",
 			"clio-host.ts",
 			"clio-dispatch-inspector.ts",
 			"clio-fleet-inspector.ts",

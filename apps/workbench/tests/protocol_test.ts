@@ -136,6 +136,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" ||
 				kind === "toolchain.state" || kind === "trace.state" || kind === "evidence.state" ||
+				kind === "evidence.detail.state" ||
 				kind === "recovery.state"
 		? {}
 		: { projectId: "project-alpha" };
@@ -184,6 +185,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"toolchain.inspect",
 		"trace.inspect",
 		"evidence.inspect",
+		"evidence.read",
 		"recovery.inspect",
 		"targets.list",
 		"targets.probe",
@@ -506,6 +508,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"toolchain.inspect": {},
 		"trace.inspect": {},
 		"evidence.inspect": {},
+		"evidence.read": { evidenceId: "run-alpha-bundle" },
 		"recovery.inspect": {},
 		"targets.list": { projectId: "project-alpha" },
 		"targets.probe": { projectId: "project-alpha", targetId: "lmstudio" },
@@ -1927,4 +1930,72 @@ Deno.test("evidence inventory validates trust, tool counts, and identity without
 	expectProtocolError(() =>
 		serverEvent("evidence.state", { inspection: { ...inspection, artifacts: [artifact, artifact] } })
 	);
+});
+
+Deno.test("an artifact reference is an identifier, never a path, a flag, or a traversal", () => {
+	deepStrictEqual(
+		parseCommand("evidence.read", { evidenceId: "run-alpha-bundle" }).payload,
+		{ evidenceId: "run-alpha-bundle" },
+	);
+	for (
+		const hostile of [
+			"../../etc/passwd",
+			"run/../other",
+			"run..alpha",
+			"/absolute/run",
+			"--force",
+			"run alpha",
+			"",
+			"a".repeat(129),
+			42,
+			null,
+		]
+	) {
+		expectProtocolError(() => parseCommand("evidence.read", { evidenceId: hostile }));
+	}
+	// The frame carries the reference and nothing else: no path, no depth, no
+	// alternate store to read it from.
+	expectProtocolError(() => parseCommand("evidence.read", {}));
+	expectProtocolError(() => parseCommand("evidence.read", { evidenceId: "run-alpha", dataDir: "/private" }));
+});
+
+Deno.test("an evidence trust record validates every axis against its own state set", () => {
+	const axes = {
+		artifactIntegrity: "verified",
+		validationGrounding: "failed",
+		independentReview: "absent",
+		contextProvenance: "recorded",
+		autonomyEnforcement: "enforced",
+		completionEvidence: "absent",
+	};
+	const detail = {
+		evidenceId: "run-alpha-bundle",
+		sourceKind: "run",
+		inspectedAt: "2026-08-31T14:03:00.000Z",
+		generatedAt: "2026-08-31T14:00:40.000Z",
+		canonical: true,
+		runs: [{ runId: "run-alpha", verdict: "compromised", axes }],
+		runsTruncated: false,
+	};
+	const event = serverEvent("evidence.detail.state", { detail });
+	equal(event.projectId, undefined);
+	equal(event.payload.detail.runs[0]?.axes.validationGrounding, "failed");
+	for (
+		const broken of [
+			// `validated` is a validationGrounding state and not a contextProvenance one.
+			{
+				...detail,
+				runs: [{ runId: "run-alpha", verdict: "compromised", axes: { ...axes, contextProvenance: "validated" } }],
+			},
+			// Every axis is always reported.
+			{ ...detail, runs: [{ runId: "run-alpha", verdict: "compromised", axes: { artifactIntegrity: "verified" } }] },
+			// A non-canonical bundle has no axes to report.
+			{ ...detail, canonical: false },
+			{ ...detail, runs: [detail.runs[0], detail.runs[0]] },
+			// Nothing from the bundle's prose surfaces belongs on this record.
+			{ ...detail, transcript: "the model said" },
+		]
+	) {
+		expectProtocolError(() => serverEvent("evidence.detail.state", { detail: broken }));
+	}
 });

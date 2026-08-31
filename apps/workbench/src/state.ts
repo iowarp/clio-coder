@@ -24,6 +24,7 @@ import {
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
+	type WireEvidenceDetail,
 	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireFleetRun,
@@ -116,6 +117,8 @@ export interface AppState {
 	readonly toolchainInspection: WireToolchainInspection | null;
 	readonly traceInspection: WireTraceInspection | null;
 	readonly evidenceInspection: WireEvidenceInspection | null;
+	/** The one bundle the operator opened, if any. */
+	readonly evidenceDetail: WireEvidenceDetail | null;
 	readonly recoveryInspection: WireRecoveryInspection | null;
 	readonly browse: ProjectBrowseListingPayload | null;
 	readonly leftDrawerOpen: boolean;
@@ -148,6 +151,8 @@ export interface AppState {
 	readonly pendingTraceInspect: string | null;
 	/** Request id of the installation-wide durable evidence inventory. */
 	readonly pendingEvidenceInspect: string | null;
+	/** The bundle id whose trust record is being read, if any. */
+	readonly pendingEvidenceRead: string | null;
 	/** Request id of the redacted Clio Coder doctor/paths sweep. */
 	readonly pendingRecoveryInspect: string | null;
 	/**
@@ -189,6 +194,11 @@ export type AppAction =
 	| { readonly type: "toolchain.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "trace.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "evidence.inspect.submitted"; readonly requestId: string }
+	| {
+		readonly type: "evidence.read.submitted";
+		readonly requestId: string;
+		readonly evidenceId: string;
+	}
 	| { readonly type: "recovery.inspect.submitted"; readonly requestId: string }
 	| {
 		readonly type: "project.select.submitted";
@@ -215,6 +225,7 @@ export const initialAppState: AppState = {
 	toolchainInspection: null,
 	traceInspection: null,
 	evidenceInspection: null,
+	evidenceDetail: null,
 	recoveryInspection: null,
 	browse: null,
 	leftDrawerOpen: false,
@@ -232,6 +243,7 @@ export const initialAppState: AppState = {
 	pendingToolchainInspect: null,
 	pendingTraceInspect: null,
 	pendingEvidenceInspect: null,
+	pendingEvidenceRead: null,
 	pendingRecoveryInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
@@ -667,6 +679,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				toolchainInspection: action.payload.toolchainInspection,
 				traceInspection: action.payload.traceInspection,
 				evidenceInspection: action.payload.evidenceInspection,
+				evidenceDetail: null,
 				pendingConfigInspect: null,
 				pendingCatalogInspect: null,
 				pendingUsageInspect: null,
@@ -676,6 +689,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				pendingToolchainInspect: null,
 				pendingTraceInspect: null,
 				pendingEvidenceInspect: null,
+				pendingEvidenceRead: null,
 				announcement: open === null
 					? `${PRODUCT_NAME} is ready. Open a project folder to begin.`
 					: `${open.project.displayName} is open`,
@@ -736,6 +750,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingTraceInspect: action.requestId };
 		case "evidence.inspect.submitted":
 			return { ...state, pendingEvidenceInspect: action.requestId };
+		case "evidence.read.submitted":
+			return { ...state, pendingEvidenceRead: action.evidenceId };
 		case "recovery.inspect.submitted":
 			return { ...state, pendingRecoveryInspect: action.requestId };
 		case "project.select.submitted":
@@ -786,6 +802,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingToolchainInspect: null,
 						pendingTraceInspect: null,
 						pendingEvidenceInspect: null,
+						pendingEvidenceRead: null,
 						pendingRecoveryInspect: null,
 					};
 				case "command.error": {
@@ -846,6 +863,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 								event.payload.requestId === state.pendingEvidenceInspect
 							? null
 							: state.pendingEvidenceInspect,
+						pendingEvidenceRead: null,
 						pendingRecoveryInspect: event.payload.requestId === undefined ||
 								event.payload.requestId === state.pendingRecoveryInspect
 							? null
@@ -887,8 +905,24 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 					return {
 						...sequenced,
 						evidenceInspection: event.payload.inspection,
+						// A new window can retire the bundle that was open, and the host
+						// will refuse it from here on, so the stale record is dropped
+						// rather than left on screen as if it were still referenceable.
+						evidenceDetail: event.payload.inspection.artifacts.some(
+								(artifact) => artifact.evidenceId === state.evidenceDetail?.evidenceId,
+							)
+							? state.evidenceDetail
+							: null,
 						pendingEvidenceInspect: null,
+						pendingEvidenceRead: null,
 						announcement: "Durable evidence inventory updated",
+					};
+				case "evidence.detail.state":
+					return {
+						...sequenced,
+						evidenceDetail: event.payload.detail,
+						pendingEvidenceRead: null,
+						announcement: `Trust record for ${event.payload.detail.evidenceId}`,
 					};
 				case "recovery.state":
 					return {

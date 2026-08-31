@@ -12,11 +12,16 @@ import { resolve } from "node:path";
 import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
 import {
 	type CommandErrorCode,
+	EVIDENCE_AXES,
+	EVIDENCE_AXIS_STATES,
 	EVIDENCE_SOURCE_KINDS,
 	EVIDENCE_TRUST_VERDICTS,
 	MAX_WIRE_EVIDENCE_ARTIFACTS,
+	MAX_WIRE_EVIDENCE_DETAIL_RUNS,
 	MAX_WIRE_EVIDENCE_IDS,
 	type WireEvidenceArtifact,
+	type WireEvidenceDetail,
+	type WireEvidenceDetailRun,
 	type WireEvidenceInspection,
 } from "./src/protocol.ts";
 
@@ -30,6 +35,11 @@ const encoder = new TextEncoder();
 
 export interface ClioEvidenceInspector {
 	inspect(cwd: string): Promise<WireEvidenceInspection>;
+	/**
+	 * Read one bundle. `evidenceId` must already have been admitted by the
+	 * host's artifact allowlist; this adapter never widens that decision.
+	 */
+	read(cwd: string, evidenceId: string): Promise<WireEvidenceDetail>;
 }
 
 export interface ClioCliEvidenceInspectorOptions {
@@ -233,6 +243,73 @@ export function projectEvidenceInspection(value: unknown, inspectedAt: string): 
 	return { scope: "installation", inspectedAt, generatedAt, artifacts, truncated: value.truncated };
 }
 
+function projectDetailRun(value: unknown): WireEvidenceDetailRun {
+	if (!isRecord(value) || !exactKeys(value, ["runId", "verdict", "axes"])) {
+		return projectionError("Clio Coder returned an invalid evidence trust run.");
+	}
+	const runId = text(value.runId, 128);
+	if (runId === null || !isOneOf(value.verdict, EVIDENCE_TRUST_VERDICTS) || !isRecord(value.axes)) {
+		return projectionError("Clio Coder returned an invalid evidence trust run.");
+	}
+	if (!exactKeys(value.axes, EVIDENCE_AXES)) {
+		return projectionError("Clio Coder returned an incomplete evidence axis record.");
+	}
+	const axes: Record<string, string> = {};
+	for (const axis of EVIDENCE_AXES) {
+		const state = value.axes[axis];
+		// Each axis has its own closed state set, so a state that is legal on one
+		// axis is still a rejection on another.
+		if (!isOneOf(state, EVIDENCE_AXIS_STATES[axis])) {
+			return projectionError("Clio Coder returned an invalid evidence axis state.");
+		}
+		axes[axis] = state;
+	}
+	return { runId, verdict: value.verdict, axes: axes as WireEvidenceDetailRun["axes"] };
+}
+
+export function projectEvidenceDetail(value: unknown, inspectedAt: string, requestedId: string): WireEvidenceDetail {
+	if (
+		!isRecord(value) ||
+		!exactKeys(value, ["version", "generatedAt", "evidenceId", "sourceKind", "canonical", "runs", "runsTruncated"])
+	) {
+		throw new ClioEvidenceProjectionError("Clio Coder returned an invalid evidence record.");
+	}
+	const generatedAt = timestamp(value.generatedAt);
+	const evidenceId = text(value.evidenceId, 128);
+	if (
+		value.version !== 1 || generatedAt === null || evidenceId === null ||
+		!isOneOf(value.sourceKind, EVIDENCE_SOURCE_KINDS) || typeof value.canonical !== "boolean" ||
+		typeof value.runsTruncated !== "boolean" || !Array.isArray(value.runs) ||
+		value.runs.length > MAX_WIRE_EVIDENCE_DETAIL_RUNS
+	) {
+		throw new ClioEvidenceProjectionError("Clio Coder returned an invalid evidence record.");
+	}
+	// The host asked about one bundle. A record for a different one means the
+	// process read something other than what the allowlist admitted, which is
+	// the single failure this whole boundary exists to prevent.
+	if (evidenceId !== requestedId) {
+		throw new ClioEvidenceProjectionError("Clio Coder returned a record for a different evidence artifact.");
+	}
+	const runs = value.runs.map(projectDetailRun);
+	if (new Set(runs.map((run) => run.runId)).size !== runs.length) {
+		throw new ClioEvidenceProjectionError("Clio Coder returned duplicate evidence trust runs.");
+	}
+	// A bundle with no canonical projection has no axes to report, and one that
+	// reported axes is not in the historical format.
+	if (!value.canonical && (runs.length > 0 || value.runsTruncated)) {
+		throw new ClioEvidenceProjectionError("Clio Coder returned contradictory evidence projection facts.");
+	}
+	return {
+		evidenceId,
+		sourceKind: value.sourceKind,
+		inspectedAt,
+		generatedAt,
+		canonical: value.canonical,
+		runs,
+		runsTruncated: value.runsTruncated,
+	};
+}
+
 export class ClioCliEvidenceInspector implements ClioEvidenceInspector {
 	readonly #runner: ClioReadCommandRunner;
 	readonly #now: () => number;
@@ -284,6 +361,46 @@ export class ClioCliEvidenceInspector implements ClioEvidenceInspector {
 			throw new ClioEvidenceInspectError(
 				"internal",
 				"Clio Coder's evidence inventory is not compatible with this GUI build.",
+			);
+		}
+	}
+
+	async read(cwd: string, evidenceId: string): Promise<WireEvidenceDetail> {
+		let parsed: unknown;
+		try {
+			// The id is the sole variable argument this host ever passes, and it is
+			// only ever one the allowlist already admitted.
+			parsed = await this.#runner.runJson(resolve(cwd), ["evidence", "inspect", evidenceId, "--json"]);
+		} catch (error) {
+			if (!(error instanceof ClioReadCommandError)) throw error;
+			if (error.code === "spawn") {
+				throw new ClioEvidenceInspectError("not-ready", "The GUI could not start Clio Coder's evidence reader.");
+			}
+			if (error.code === "timeout") {
+				throw new ClioEvidenceInspectError("not-ready", "Clio Coder's evidence read did not finish in time.");
+			}
+			if (error.code === "exit") {
+				// A bundle can be removed between the inventory and the read, which is
+				// an ordinary race and not a failure of the installation.
+				const missing = /not found|no such|missing/iu.test(error.diagnostic);
+				this.#log(`Clio Coder evidence reader exited with code ${error.exitCode ?? "unknown"}.`);
+				throw new ClioEvidenceInspectError(
+					missing ? "not-found" : "not-ready",
+					missing
+						? "Clio Coder no longer has that evidence bundle."
+						: "Clio Coder could not read that evidence bundle.",
+				);
+			}
+			throw new ClioEvidenceInspectError("internal", "Clio Coder returned an invalid or oversized evidence record.");
+		}
+		try {
+			return projectEvidenceDetail(parsed, new Date(this.#now()).toISOString(), evidenceId);
+		} catch (error) {
+			if (!(error instanceof ClioEvidenceProjectionError)) throw error;
+			this.#log("Clio Coder evidence projection rejected an incompatible record.");
+			throw new ClioEvidenceInspectError(
+				"internal",
+				"Clio Coder's evidence record is not compatible with this GUI build.",
 			);
 		}
 	}

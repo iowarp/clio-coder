@@ -260,6 +260,12 @@ function App() {
 					dispatch({ type: "evidence.inspect.submitted", requestId });
 				}
 			},
+			readEvidence(evidenceId) {
+				const requestId = send("evidence.read", { evidenceId });
+				if (requestId !== null) {
+					dispatch({ type: "evidence.read.submitted", requestId, evidenceId });
+				}
+			},
 			inspectRecovery() {
 				const requestId = send("recovery.inspect", {});
 				if (requestId !== null) {
