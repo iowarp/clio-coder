@@ -134,6 +134,7 @@ export async function runYaziTerminalChooser(options: YaziTerminalChooserOptions
 		options.profileMode === "managed"
 			? (options.ensureProfile ?? ensureYaziProfile)({
 					yaPath: binaries.yaPath as string,
+					yaziPath: binaries.yaziPath,
 					profileDir: yaziProfileDir(cacheDir),
 				})
 			: null;
