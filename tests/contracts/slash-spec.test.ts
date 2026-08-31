@@ -719,6 +719,7 @@ describe("contracts/slash-spec", () => {
 			"tasks",
 			"memory",
 			"view",
+			"panes",
 			"thinking",
 			"output",
 			"model",
