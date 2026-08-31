@@ -34,6 +34,8 @@ import type {
 	WireEvidenceInspection,
 	WireEvidenceTrustVerdict,
 	WireFleetInspection,
+	WireFleetInspectionCouncil,
+	WireFleetInspectionCouncilTurn,
 	WireFleetInspectionRun,
 	WireFleetInspectionStep,
 	WireFleetVerification,
@@ -3749,6 +3751,245 @@ function fleetStepTone(step: WireFleetInspectionStep): string {
 	return "action";
 }
 
+function councilTurnTone(turn: WireFleetInspectionCouncilTurn): string {
+	if (!turn.terminal) return "action";
+	if (turn.outcome === "succeeded") return "success";
+	return turn.outcome === null ? "neutral" : "error";
+}
+
+/** The closed outcome taxonomy, said the way an operator reads it. */
+const COUNCIL_OUTCOME_LABELS: Readonly<Record<string, string>> = {
+	succeeded: "answered",
+	failed: "failed",
+	timed_out: "timed out",
+	stalled: "stalled",
+	canceled: "canceled",
+	denied_by_policy: "denied",
+	spawn_failed: "never started",
+};
+
+function councilTurnLabel(turn: WireFleetInspectionCouncilTurn): string {
+	if (!turn.terminal) return `round ${turn.round} · in flight`;
+	const outcome = turn.outcome === null ? "no outcome recorded" : COUNCIL_OUTCOME_LABELS[turn.outcome] ?? turn.outcome;
+	return `round ${turn.round} · ${outcome}`;
+}
+
+const COUNCIL_ORIGIN_LABELS: Readonly<Record<string, string>> = {
+	user: "the operator asked for it",
+	agent: "Clio Coder asked for it",
+	internal: "the runtime started it",
+};
+
+const COUNCIL_SYNTHESIS_LABELS: Readonly<Record<string, string>> = {
+	none: "none; the members' answers stand alone",
+	vote: "a majority over the members' own verdicts",
+	judge: "a judge dispatched to synthesize the answers",
+};
+
+/**
+ * The sealed council report as a reference, linkable only inside the run window.
+ *
+ * The record is an ordinary ledger row, so it can be selected like any other run
+ * while it is still in the window and has to say so plainly once it is not. Its
+ * sealed text, which is the whole council report, never crosses.
+ */
+function councilSealedReference(
+	sealedRunId: string | null,
+	inWindow: ReadonlySet<string>,
+	onSelectRun: (runId: string) => void,
+) {
+	if (sealedRunId === null) return "none sealed";
+	if (!inWindow.has(sealedRunId)) return `${sealedRunId} · outside this run window`;
+	return (
+		<button type="button" className="council-topology__link" onClick={() => onSelectRun(sealedRunId)}>
+			{sealedRunId}
+		</button>
+	);
+}
+
+/**
+ * Council topology, projected from the same ledger the run window reads.
+ *
+ * The parity this closes is the roster and the rounds, not the debate. Member
+ * answers, the judge's synthesis, and the vote tally are free model prose living
+ * in receipt output and never cross, so the panel says so on screen rather than
+ * leaving the absence to be inferred. A round links into the run window when
+ * that run is still inside it, on the same terms as the fleet step index.
+ */
+function CouncilTopology(
+	{ councils, truncated, knownRunIds, selectedRunId, onSelectRun }: {
+		councils: readonly WireFleetInspectionCouncil[];
+		truncated: boolean;
+		knownRunIds: readonly string[];
+		selectedRunId: string | null;
+		onSelectRun: (runId: string) => void;
+	},
+) {
+	const inWindow = new Set(knownRunIds);
+	return (
+		<section className="council-topology" aria-labelledby="council-topology-title">
+			<div className="council-topology__heading">
+				<div>
+					<div className="eyebrow">COUNCIL TOPOLOGY · SEATED VOICES AND ROUNDS</div>
+					<h3 id="council-topology-title">Councils that ran through this ledger</h3>
+				</div>
+				<p>
+					A council writes no record of its own; it is a set of ordinary runs sharing one group stamp. This is who was
+					seated, where each voice ran, and how many rounds it took. What each member said and how the synthesis read
+					stay on the host.
+				</p>
+			</div>
+			{councils.length === 0
+				? (
+					<p className="council-topology__empty">
+						Clio Coder reports no councils in this ledger window. Councils dispatched longer ago than the scanned window
+						are not indexed here.
+					</p>
+				)
+				: (
+					<ul className="council-topology__list">
+						{councils.map((council) => (
+							<li key={council.group}>
+								<header>
+									<div>
+										<strong>{council.members.length.toLocaleString()} seated voices</strong>
+										<code>{council.group}</code>
+									</div>
+									<StatusMark
+										tone={council.running ? "action" : "success"}
+										label={council.running ? "In session" : "Settled"}
+									/>
+								</header>
+								<dl>
+									<div>
+										<dt>Started</dt>
+										<dd>
+											<time dateTime={council.startedAt}>{formatTimestamp(council.startedAt)}</time>
+										</dd>
+									</div>
+									<div>
+										<dt>Rounds</dt>
+										<dd>
+											{council.roundsPlanned === null
+												? `${council.roundsObserved.toLocaleString()} observed; no configured count recorded`
+												: `${council.roundsObserved.toLocaleString()} of ${council.roundsPlanned.toLocaleString()}`}
+										</dd>
+									</div>
+									<div>
+										<dt>Origin</dt>
+										<dd>
+											{council.origin === null
+												? "not recorded"
+												: COUNCIL_ORIGIN_LABELS[council.origin] ?? council.origin}
+										</dd>
+									</div>
+									<div>
+										<dt>Plan approval</dt>
+										<dd>
+											{council.approval === null
+												? "no plan record"
+												: council.approval === "operator"
+												? "operator approved the plan"
+												: "full-auto logged the plan"}
+										</dd>
+									</div>
+								</dl>
+								{council.members.length === 0
+									? (
+										<p className="council-topology__bound">
+											This council's member rows have aged out of the ledger. Only its synthesis record remains.
+										</p>
+									)
+									: (
+										<ul className="council-grid" aria-label={`Seated voices for council ${council.group}`}>
+											{council.members.map((member) => (
+												<li key={member.label}>
+													<div className="council-grid__voice">
+														<strong>{member.label}</strong>
+														<span>{member.agentId} · {member.target}/{member.model}</span>
+													</div>
+													<ol className="council-grid__rounds">
+														{member.turns.map((turn) => {
+															const linkable = inWindow.has(turn.runId);
+															return (
+																<li key={turn.runId}>
+																	<button
+																		type="button"
+																		disabled={!linkable}
+																		aria-current={linkable && selectedRunId === turn.runId ? "true" : undefined}
+																		onClick={() => onSelectRun(turn.runId)}
+																	>
+																		<StatusMark tone={councilTurnTone(turn)} label={councilTurnLabel(turn)} />
+																		<span className="council-grid__run">
+																			{linkable ? turn.runId : "outside this run window"}
+																		</span>
+																	</button>
+																</li>
+															);
+														})}
+													</ol>
+													{member.turnsTruncated && (
+														<p className="council-topology__bound">
+															Later rounds for this voice are outside the bounded index.
+														</p>
+													)}
+												</li>
+											))}
+										</ul>
+									)}
+								<div className="council-topology__synthesis">
+									<dl>
+										<div>
+											<dt>Synthesis</dt>
+											<dd>
+												{council.synthesis.kind === null
+													? "no synthesis record; this council did not seal one"
+													: COUNCIL_SYNTHESIS_LABELS[council.synthesis.kind] ?? council.synthesis.kind}
+											</dd>
+										</div>
+										{council.synthesis.judge !== null && (
+											<div>
+												<dt>Judge</dt>
+												<dd>
+													{council.synthesis.judge.agentId} · {council.synthesis.judge.target}/
+													{council.synthesis.judge.model}
+												</dd>
+											</div>
+										)}
+										<div>
+											<dt>Sealed report</dt>
+											<dd>{councilSealedReference(council.synthesis.sealedRunId, inWindow, onSelectRun)}</dd>
+										</div>
+									</dl>
+									<p className="council-topology__bound">
+										The council's report is sealed on the host. Member answers, the judge's text, and the vote tally are
+										model prose and do not cross into this GUI.
+									</p>
+								</div>
+								{council.membersTruncated && (
+									<p className="council-topology__bound">
+										This council seated more voices than the bounded roster names.
+									</p>
+								)}
+								{council.membersRejected > 0 && (
+									<p className="council-topology__bound">
+										{council.membersRejected.toLocaleString()}{" "}
+										row(s) carried a seat label Clio Coder would not repeat, and are counted rather than named.
+									</p>
+								)}
+							</li>
+						))}
+					</ul>
+				)}
+			{truncated && (
+				<p className="council-topology__bound">
+					Older councils are outside this bounded ledger scan.
+				</p>
+			)}
+		</section>
+	);
+}
+
 /** Whole tokens with thousands separators, or an explicit absence. */
 function formatTokens(value: number | null): string {
 	return value === null ? "not recorded" : value.toLocaleString("en-US");
@@ -4360,6 +4601,14 @@ export const FleetJournal = memo(function FleetJournal({
 					</p>
 				)}
 			</section>
+
+			<CouncilTopology
+				councils={inspection.councils}
+				truncated={inspection.councilsTruncated}
+				knownRunIds={inspection.runs.map((run) => run.runId)}
+				selectedRunId={selected?.runId ?? null}
+				onSelectRun={setSelectedRunId}
+			/>
 
 			<EvidenceInventory
 				inspection={evidence}

@@ -15,13 +15,14 @@ the main application.
 | Verdict | Count |
 | ------- | ----: |
 | Present |    20 |
-| Partial |    56 |
-| Absent  |    36 |
+| Partial |    57 |
+| Absent  |    35 |
 | Total   |   112 |
 
 **host-only-by-design** marks a payload this GUI will not carry in any form, as distinct from one it has not carried
-yet. Event payloads, event names, and process command lines are the current members: bounded aggregates over them cross,
-the rows themselves never will, and the panel says so on screen rather than leaving the absence to be inferred.
+yet. Event payloads, event names, process command lines, and a council's deliberation are the current members: bounded
+aggregates and topologies over them cross, the rows and the prose themselves never will, and the panel says so on screen
+rather than leaving the absence to be inferred.
 
 **deferred-by-design** marks a row whose remaining gap is a mutation rather than a missing read. The GUI is read-only by
 decision, not by omission: every adapter it has runs a fixed, argument-free command and changes nothing, and that is the
@@ -83,7 +84,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Delegation                        | `/delegate <agent> <task>`                          | **Partial** | Delegated tool calls are attributed when Clio Coder creates them; there is no direct operator control.                                                                              |
 | Side question                     | `/btw <question>`                                   | **Absent**  | The GUI has no isolated, non-transcript side-question round.                                                                                                                        |
 | Oracle advisory                   | `/oracle <question>`                                | **Absent**  | No read-only record-briefed advisory operation exists.                                                                                                                              |
-| Council                           | `/council <task>`                                   | **Partial** | Council dispatch activity can appear as attributed fleet rows, but roster, approval, rounds, voices, synthesis, and sharing are absent.                                             |
+| Council                           | `/council <task>`                                   | **Partial** | Runs reconstructs the roster, plan approval, rounds, and synthesis shape from the ledger. Member voices are **host-only-by-design**; starting and sharing a council are absent.     |
 | Agent reference                   | `/agents`                                           | **Present** | Capability atlas provides the graphical recipe reference.                                                                                                                           |
 | Cost record                       | `/cost`                                             | **Partial** | Exact tokens and historical reported cost exist, but live session cost, budget provenance, and provider-normalized totals are incomplete.                                           |
 | Context family                    | `/context view                                      | compact     | recall                                                                                                                                                                              |
@@ -122,7 +123,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Dispatch board                  | Filterable run rows, progress, receipts, steering                     | **Partial** | ACP fleet activity, installation aggregate, durable run detail, journal, receipt trust, and root step index exist; filters and steering are absent. |
 | Run-event journal               | Durable per-run NDJSON transcript and follow                          | **Present** | Runs renders a bounded event spine for the eight newest runs and refreshes while displayed work remains nonterminal.                                |
 | Fleet root inspection           | Planned step index and terminal run ids                               | **Present** | Runs indexes recent roots to their planned step order, terminal run ids, attribution, and failure reason, and links steps into the window.          |
-| Council                         | Roster preview, approval, rounds, member grid, synthesis              | **Absent**  | Generic dispatch activity is insufficient to reconstruct council topology or voices.                                                                |
+| Council                         | Roster preview, approval, rounds, member grid, synthesis              | **Partial** | Runs groups the ledger into councils and renders the seated grid, each voice's route and rounds, and the synthesis shape. The voices are **host-only-by-design**.  |
 | Compete                         | Parallel candidates, judge/gate decision, winner, cleanup evidence    | **Absent**  | No typed compete topology, candidate result, gate, or cleanup projection reaches ACP.                                                               |
 | Receipt trust and verify        | Sealed receipt status and `/view verify` host check                   | **Partial** | Runs projects sealed receipt trust, per-bundle evidence verdicts, and an on-demand re-check of the sealed bytes, all without native paths.          |
 | Task and decision boards        | Inspect and mutate session ledgers                                    | **Absent**  | Neither ledger is part of protocol v4.                                                                                                              |
@@ -160,7 +161,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Observability  | Usage, cost, durable trace, run facts                             | **Present** | Visible tokens, historical usage, trace accounting to the phase, and event and process shapes all cross through bounded fixed reads.                       |
 | Scheduling     | Capacity, admission, worker placement                             | **Partial** | Aggregate admission and heartbeat counts are present; capacity, placement, and controls are absent.                                                        |
 | Mux            | Pane host, pane inventory, viewer presets, Yazi bridge            | **Absent**  | **blocked-on-phase4** until the owning work exposes a fixed typed status read.                                                                             |
-| Dispatch       | Worker runs, fleets, councils, compete, journals, receipts        | **Partial** | Live lifecycle, aggregate status, run journals, receipt trust, and fleet-root step indexes exist; council, compete, verification, and steering are absent. |
+| Dispatch       | Worker runs, fleets, councils, compete, journals, receipts        | **Partial** | Live lifecycle, aggregate status, run journals, receipt trust, fleet-root step indexes, on-demand verification, and council topology exist; compete and steering are absent. |
 | Lifecycle      | Boot, diagnostics, version, upgrade, reset, shutdown              | **Partial** | Process state and recovery inspection exist; version/about and reviewed mutations are incomplete.                                                          |
 
 ## Ordered implementation plan
@@ -173,10 +174,13 @@ unmarked, so the read half stays visible as work this GUI can still do.
 3. Add pane/mux mode, health, inventory, and status only after the phase-4 owner publishes a fixed structured read;
    retain `blocked-on-phase4` and do not reach into mux state, terminal environment, or process inspection.
 4. **Implemented:** fleet-root step indexes inside the same fixed run inspection, ordered newest first, bounded to four
-   roots and twenty-four steps, linking a step only to a run inside the same window. Council membership and synthesis
-   facts and compete candidate and gate outcomes remain and still need an authenticated bounded projection each. Receipt
-   verification is done: `fleet verify <runId> --json` re-authenticates the sealed bytes on demand, reached through the
-   host-served-id allowlist.
+   roots and twenty-four steps, linking a step only to a run inside the same window. Receipt verification is done:
+   `fleet verify <runId> --json` re-authenticates the sealed bytes on demand, reached through the host-served-id
+   allowlist. Council topology is done too, and by grouping rather than by a new command: a council owns no durable
+   record, so the same fixed read scans a wider slice of the same ledger and groups rows by their council provenance
+   into at most four councils of five voices and three rounds each, carrying the roster, routes, rounds, plan approval,
+   and synthesis shape but never a member's answer. Compete candidate and gate outcomes remain and still need their own
+   bounded projection.
 5. **Partly implemented:** durable trace runs and phases now reach the GUI through the fixed `trace inspect --json`
    read, bounded to eight runs and sixteen phases, carrying no request text, description, error prose, or database path;
    and durable evidence bundles reach it through the fixed `evidence inventory --json` read, bounded to twelve bundles,

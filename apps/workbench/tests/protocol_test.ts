@@ -1489,6 +1489,8 @@ Deno.test("durable run inspection validates bounded journal and receipt trust fa
 		truncated: false,
 		roots: [],
 		rootsTruncated: false,
+		councils: [],
+		councilsTruncated: false,
 	};
 	const event = serverEvent("fleet.inspection.state", { inspection });
 	equal(event.projectId, undefined);
@@ -1535,6 +1537,8 @@ Deno.test("the fleet root index validates step counts, attribution, and identity
 		truncated: false,
 		roots: [root],
 		rootsTruncated: false,
+		councils: [],
+		councilsTruncated: false,
 	};
 	const event = serverEvent("fleet.inspection.state", { inspection });
 	equal(event.payload.inspection.roots[0]?.steps[1]?.runId, null);
@@ -1558,6 +1562,116 @@ Deno.test("the fleet root index validates step counts, attribution, and identity
 	}
 	expectProtocolError(() =>
 		serverEvent("fleet.inspection.state", { inspection: { ...inspection, roots: [root, root] } })
+	);
+});
+
+Deno.test("council topology validates seated labels, rounds, and the synthesis it claims", () => {
+	const member = {
+		label: "architect",
+		agentId: "researcher",
+		target: "local-lmstudio",
+		model: "qwen3-coder",
+		executionRole: "researcher",
+		turns: [
+			{ round: 1, runId: "run-a1", status: "completed", outcome: "succeeded", terminal: true },
+			{ round: 2, runId: "run-a2", status: "completed", outcome: "succeeded", terminal: true },
+		],
+		turnsTruncated: false,
+	};
+	const council = {
+		group: "council-mfa2x1-7b3d0e",
+		startedAt: "2026-08-31T13:50:00.000Z",
+		endedAt: "2026-08-31T13:58:00.000Z",
+		running: false,
+		roundsPlanned: 2,
+		roundsObserved: 2,
+		origin: "user",
+		approval: "operator",
+		members: [member],
+		membersTruncated: false,
+		membersRejected: 0,
+		synthesis: { kind: "judge", sealedRunId: "run-sealed", judge: null },
+	};
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:28.728Z",
+		runs: [],
+		truncated: false,
+		roots: [],
+		rootsTruncated: false,
+		councils: [council],
+		councilsTruncated: false,
+	};
+	const event = serverEvent("fleet.inspection.state", { inspection });
+	equal(event.payload.inspection.councils[0]?.members[0]?.turns[1]?.round, 2);
+	equal(event.payload.inspection.councils[0]?.synthesis.kind, "judge");
+	for (
+		const broken of [
+			// A member's answer is what this boundary exists to keep host-side.
+			{ ...council, members: [{ ...member, answer: "the ledger should own it" }] },
+			// The operator writes the label; a label outside the shape both entry
+			// paths enforce means the host projection did not run.
+			{ ...council, members: [{ ...member, label: "~/notes/council brief.md" }] },
+			// One voice cannot be seated twice.
+			{ ...council, members: [member, member] },
+			// The observed count is folded from the same turns this frame carries.
+			{ ...council, roundsObserved: 3, roundsPlanned: 3 },
+			{ ...council, roundsPlanned: 1 },
+			// A council is running exactly while one of its rows has not ended.
+			{ ...council, running: true },
+			// The kind is read off the sealed record's own task.
+			{ ...council, synthesis: { kind: "vote", sealedRunId: null, judge: null } },
+			// A vote is tallied from the members' answers and dispatches nobody.
+			{
+				...council,
+				synthesis: {
+					kind: "vote",
+					sealedRunId: "run-sealed",
+					judge: {
+						runId: "run-judge",
+						agentId: "verifier",
+						target: "local-lmstudio",
+						model: "qwen3-coder",
+						status: "completed",
+						outcome: "succeeded",
+					},
+				},
+			},
+			// The sealed record is written by the ledger; the judge consumed a model.
+			{
+				...council,
+				synthesis: {
+					kind: "judge",
+					sealedRunId: "run-sealed",
+					judge: {
+						runId: "run-sealed",
+						agentId: "verifier",
+						target: "local-lmstudio",
+						model: "qwen3-coder",
+						status: "completed",
+						outcome: "succeeded",
+					},
+				},
+			},
+			// An outcome is written at finalization.
+			{
+				...council,
+				roundsObserved: 1,
+				roundsPlanned: 1,
+				members: [{
+					...member,
+					turns: [{ round: 1, runId: "run-a1", status: "running", outcome: "succeeded", terminal: false }],
+				}],
+			},
+		]
+	) {
+		expectProtocolError(() =>
+			serverEvent("fleet.inspection.state", { inspection: { ...inspection, councils: [broken] } })
+		);
+	}
+	expectProtocolError(() =>
+		serverEvent("fleet.inspection.state", { inspection: { ...inspection, councils: [council, council] } })
 	);
 });
 
