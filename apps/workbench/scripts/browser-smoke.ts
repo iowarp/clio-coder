@@ -17,6 +17,7 @@ import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
+import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -28,6 +29,7 @@ import {
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
+	toolchainInspectionFixture,
 	usageInspectionFixture,
 } from "../tests/fixtures.ts";
 
@@ -922,6 +924,9 @@ try {
 		recoveryInspector: {
 			inspect: (_cwd, projectContext) => Promise.resolve({ ...recoveryInspectionFixture(), projectContext }),
 		} satisfies ClioRecoveryInspector,
+		toolchainInspector: {
+			inspect: () => Promise.resolve(toolchainInspectionFixture()),
+		} satisfies ClioToolchainInspector,
 		acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 	});
 	let settingsBlockingViolations: Array<{ id: string; impact: string | null | undefined; nodes: unknown[] }> = [];
@@ -942,6 +947,16 @@ try {
 		const settingsDialog = settingsPage.getByRole("dialog", { name: "Clio Coder settings" });
 		await settingsDialog.waitFor();
 		await settingsPage.screenshot({ path: new URL("settings-options.png", artifactDirectory).pathname });
+		await settingsDialog.getByRole("button", { name: "Inspect toolchain", exact: true }).click();
+		const toolchainInventory = settingsDialog.locator(".settings__toolchain");
+		await toolchainInventory.getByText("Apache-2.0", { exact: true }).waitFor();
+		await toolchainInventory.getByText("Using pinned copy", { exact: true }).waitFor();
+		await toolchainInventory.getByText(/does not clear the 26\.8\.15 floor/u).waitFor();
+		for (const forbidden of ["/home/", "/native/", "installDir", "binaryPath"]) {
+			equal(await toolchainInventory.getByText(forbidden, { exact: false }).count(), 0);
+		}
+		await toolchainInventory.scrollIntoViewIfNeeded();
+		await settingsPage.screenshot({ path: new URL("settings-toolchain.png", artifactDirectory).pathname });
 		await settingsDialog.getByRole("button", { name: "Run diagnostics", exact: true }).click();
 		const recoveryRecord = settingsDialog.getByLabel("Clio Coder diagnostic summary");
 		await recoveryRecord.getByText("ATTENTION REQUIRED", { exact: true }).waitFor();
@@ -1356,6 +1371,7 @@ try {
 			unavailableProjectExplainedAndRemovable: true,
 			bothTargetsProbedBeforeAnyHealthClaim: true,
 			recoveryUsesRedactedDoctorAndPathsAdapters: true,
+			toolchainUsesPathFreeFixedAdapter: true,
 			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
@@ -1421,6 +1437,7 @@ try {
 				"recent-project-gone.png",
 				"session-delete.png",
 				"settings-options.png",
+				"settings-toolchain.png",
 				"settings-targets.png",
 				"settings-recovery.png",
 				"settings-routing.png",

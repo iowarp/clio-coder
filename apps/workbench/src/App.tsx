@@ -41,6 +41,8 @@ import type {
 	WireSettingsPatch,
 	WireTarget,
 	WireTimelineItem,
+	WireToolchainInspection,
+	WireToolchainItem,
 	WireTreeNode,
 	WireUsage,
 	WireUsageInspection,
@@ -98,6 +100,7 @@ export interface WorkbenchActions {
 	inspectRouting(projectId: string): void;
 	inspectDispatch(): void;
 	inspectFleet(): void;
+	inspectToolchain(): void;
 	inspectRecovery(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
@@ -5351,6 +5354,167 @@ export const RoutingInventory = memo(function RoutingInventory({
 	);
 });
 
+function toolchainResolution(item: WireToolchainItem): { label: string; tone: "success" | "warning" | "neutral" } {
+	if (!item.supported) return { label: "Platform unsupported", tone: "neutral" };
+	if (item.source === "path") return { label: "Using PATH", tone: "success" };
+	if (item.source === "vendored") return { label: "Using pinned copy", tone: "success" };
+	return { label: "Not available", tone: "warning" };
+}
+
+export const ToolchainInventory = memo(function ToolchainInventory({
+	inspection,
+	pending,
+	onInspect,
+}: {
+	inspection: WireToolchainInspection | null;
+	pending: boolean;
+	onInspect(): void;
+}) {
+	const [query, setQuery] = useState("");
+	const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("en-US"));
+	const visible = inspection?.tools.filter((item) =>
+		deferredQuery.length === 0 || [
+			item.id,
+			item.pinnedVersion,
+			item.license,
+			item.platform ?? "unsupported",
+			item.source,
+			item.foundVersion ?? "missing",
+		].some((value) => value.toLocaleLowerCase("en-US").includes(deferredQuery))
+	) ?? [];
+	const resolved = inspection?.tools.filter((item) => item.source !== "none").length ?? 0;
+	const vendored = inspection?.tools.filter((item) => item.installed).length ?? 0;
+	const unsupported = inspection?.tools.filter((item) => !item.supported).length ?? 0;
+
+	return (
+		<section
+			className="settings__toolchain"
+			aria-labelledby="settings-toolchain-title"
+			aria-busy={pending}
+		>
+			<div className="settings__section-heading settings__toolchain-heading">
+				<div>
+					<div className="eyebrow">OPTIONAL PROGRAMS · INSTALLATION-WIDE</div>
+					<h3 id="settings-toolchain-title">Clio Coder toolchain</h3>
+				</div>
+				<p>
+					Pinned versions, license, platform support, and path-free resolution facts from Clio Coder. Inspection never
+					downloads or installs a program.
+				</p>
+			</div>
+
+			{inspection === null
+				? (
+					<div className="toolchain-empty">
+						<p>
+							Read the optional programs this Clio Coder build knows how to drive and whether this installation can
+							resolve them.
+						</p>
+						<button type="button" className="button button--quiet" onClick={onInspect} disabled={pending}>
+							{pending ? "Inspecting toolchain…" : "Inspect toolchain"}
+						</button>
+					</div>
+				)
+				: (
+					<>
+						<div className="toolchain-summary">
+							<dl aria-label="Pinned toolchain summary">
+								<div>
+									<dt>Pinned tools</dt>
+									<dd>{inspection.tools.length}</dd>
+								</div>
+								<div>
+									<dt>Resolved</dt>
+									<dd>{resolved}</dd>
+								</div>
+								<div>
+									<dt>Vendored copies</dt>
+									<dd>{vendored}</dd>
+								</div>
+								<div>
+									<dt>Unsupported here</dt>
+									<dd>{unsupported}</dd>
+								</div>
+							</dl>
+							<div className="toolchain-summary__actions">
+								<label>
+									<span>Filter tools</span>
+									<input
+										type="search"
+										value={query}
+										onChange={(event) => setQuery(event.target.value)}
+										placeholder="Name, license, platform, source"
+									/>
+								</label>
+								<button type="button" className="button button--quiet" onClick={onInspect} disabled={pending}>
+									{pending ? "Refreshing…" : "Refresh inventory"}
+								</button>
+							</div>
+						</div>
+
+						{visible.length === 0
+							? <p className="toolchain-no-match">No pinned tools match this filter.</p>
+							: (
+								<ul className="toolchain-list">
+									{visible.map((item) => {
+										const resolution = toolchainResolution(item);
+										return (
+											<li key={item.id}>
+												<header>
+													<div>
+														<strong>{item.id}</strong>
+														<code>{item.license}</code>
+													</div>
+													<StatusMark tone={resolution.tone} label={resolution.label} />
+												</header>
+												<dl>
+													<div>
+														<dt>Pinned</dt>
+														<dd>{item.pinnedVersion}</dd>
+													</div>
+													<div>
+														<dt>PATH floor</dt>
+														<dd>{item.minimumVersion}</dd>
+													</div>
+													<div>
+														<dt>Found</dt>
+														<dd>{item.foundVersion ?? "not resolved"}</dd>
+													</div>
+													<div>
+														<dt>Platform</dt>
+														<dd>{item.platform ?? "no pinned asset"}</dd>
+													</div>
+												</dl>
+												<p className="toolchain-list__note">
+													{item.source === "path"
+														? "A compatible system copy wins over Clio Coder's pinned copy."
+														: item.source === "vendored"
+														? "Clio Coder resolves its checksum-verified pinned copy."
+														: item.pathCandidate === null
+														? "No compatible program was resolved."
+														: `A PATH copy reports ${
+															item.pathCandidate.version ?? "no readable version"
+														} and does not clear the ${item.minimumVersion} floor.`}
+												</p>
+												<span className="toolchain-list__installed">
+													{item.installed ? "Pinned copy installed" : "Pinned copy not installed"}
+												</span>
+											</li>
+										);
+									})}
+								</ul>
+							)}
+						{inspection.truncated && <p className="toolchain-bound">The tool inventory reached the GUI row bound.</p>}
+					</>
+				)}
+			<p className="toolchain-boundary">
+				Native install paths, executable paths, rejected PATH locations, and raw resolution prose remain on the host.
+				The fixed read invokes only <code>tools list --json</code>; installation remains an explicit terminal operation.
+			</p>
+		</section>
+	);
+});
+
 const RECOVERY_SECTION_PRESENTATION: Record<
 	WireRecoverySectionId,
 	{ readonly label: string; readonly description: string }
@@ -5628,6 +5792,12 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 				<ApprovalNotificationSetting
 					enabled={state.desktopNotifications}
 					onChange={onNotificationsChange}
+				/>
+
+				<ToolchainInventory
+					inspection={state.toolchainInspection}
+					pending={state.pendingToolchainInspect !== null}
+					onInspect={actions.inspectToolchain}
 				/>
 
 				<RecoveryPanel

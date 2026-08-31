@@ -242,6 +242,12 @@ function App() {
 					dispatch({ type: "fleet.inspect.submitted", requestId });
 				}
 			},
+			inspectToolchain() {
+				const requestId = send("toolchain.inspect", {});
+				if (requestId !== null) {
+					dispatch({ type: "toolchain.inspect.submitted", requestId });
+				}
+			},
 			inspectRecovery() {
 				const requestId = send("recovery.inspect", {});
 				if (requestId !== null) {

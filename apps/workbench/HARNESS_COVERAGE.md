@@ -60,21 +60,22 @@ extensions. The GUI must never import root harness modules or infer those facts 
 
 ## Current GUI protocol footprint
 
-GUI protocol v4 currently validates 31 client commands:
+GUI protocol v4 currently validates 32 client commands:
 
 `project.browse`, `project.open`, `project.select`, `project.forget`, `fs.refresh`, `fs.create-file`,
 `fs.create-folder`, `fs.move`, `fs.delete.prepare`, `fs.delete.confirm`, `session.new`, `session.load`, `session.close`,
 `session.list`, `session.label`, `session.delete`, `turn.start`, `turn.cancel`, `permission.resolve`, `settings.get`,
 `settings.patch`, `targets.list`, `targets.probe`, `autonomy.set`, `config.inspect`, `catalog.inspect`, `usage.inspect`,
-`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, and `recovery.inspect`.
+`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, and `recovery.inspect`.
 
-It validates 30 server event kinds:
+It validates 31 server event kinds:
 
 `connection.ready`, `project.browse.listing`, `project.opened`, `project.forgotten`, `project.snapshot`, `fs.changed`,
 `fs.delete.challenge`, `clio.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
 `config.state`, `catalog.state`, `usage.state`, `routing.state`, `dispatch.state`, `fleet.inspection.state`,
-`recovery.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`, `turn.loop`, `turn.permission.requested`,
-`turn.permission.resolved`, `turn.terminal`, `fleet.activity`, `protocol.error`, and `command.error`.
+`toolchain.state`, `recovery.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`, `turn.loop`,
+`turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `fleet.activity`, `protocol.error`, and
+`command.error`.
 
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
 “render JSON” escape hatch.

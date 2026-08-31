@@ -6,6 +6,7 @@ import {
 	EffectiveClioMap,
 	FleetJournal,
 	RoutingInventory,
+	ToolchainInventory,
 	UsageNotebook,
 	type WorkbenchActions,
 	WorkbenchView,
@@ -23,6 +24,7 @@ import {
 	routingInspectionFixture,
 	serverEventFixture,
 	sessionSummaryFixture,
+	toolchainInspectionFixture,
 	usageInspectionFixture,
 	workspaceFixture,
 } from "./fixtures.ts";
@@ -55,6 +57,7 @@ const inertActions: WorkbenchActions = {
 	inspectRouting() {},
 	inspectDispatch() {},
 	inspectFleet() {},
+	inspectToolchain() {},
 	inspectRecovery() {},
 	listTargets() {},
 	probeTarget() {},
@@ -303,6 +306,26 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 		]
 	) {
 		ok(!html.includes(forbidden), `durable run surface leaked ${forbidden}`);
+	}
+});
+
+Deno.test("the toolchain inventory renders pins, resolution, and license without native paths", () => {
+	const html = renderToStaticMarkup(
+		<ToolchainInventory
+			inspection={toolchainInspectionFixture()}
+			pending={false}
+			onInspect={() => undefined}
+		/>,
+	);
+	match(html, /Clio Coder toolchain/u);
+	match(html, /Apache-2\.0/u);
+	match(html, /Using pinned copy/u);
+	match(html, /PATH floor/u);
+	match(html, /26\.8\.15/u);
+	match(html, /does not clear the 26\.8\.15 floor/u);
+	match(html, /tools list --json/u);
+	for (const forbidden of ["installDir", "binaryPath", "/home/", "/native/", "Install now"]) {
+		ok(!html.includes(forbidden), `toolchain surface leaked or offered ${forbidden}`);
 	}
 });
 

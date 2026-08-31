@@ -135,6 +135,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "command.error" ||
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" ||
+				kind === "toolchain.state" ||
 				kind === "recovery.state"
 		? {}
 		: { projectId: "project-alpha" };
@@ -180,6 +181,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"routing.inspect",
 		"dispatch.inspect",
 		"fleet.inspect",
+		"toolchain.inspect",
 		"recovery.inspect",
 		"targets.list",
 		"targets.probe",
@@ -499,6 +501,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"routing.inspect": { projectId: "project-alpha" },
 		"dispatch.inspect": {},
 		"fleet.inspect": {},
+		"toolchain.inspect": {},
 		"recovery.inspect": {},
 		"targets.list": { projectId: "project-alpha" },
 		"targets.probe": { projectId: "project-alpha", targetId: "lmstudio" },
@@ -1493,6 +1496,50 @@ Deno.test("durable run inspection validates bounded journal and receipt trust fa
 				...inspection,
 				runs: [...inspection.runs, inspection.runs[0]],
 			},
+		})
+	);
+});
+
+Deno.test("toolchain events retain version policy while rejecting native paths and contradictions", () => {
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T15:02:00.000Z",
+		tools: [{
+			id: "herdr",
+			pinnedVersion: "0.8.2",
+			license: "Apache-2.0",
+			platform: "linux-x64",
+			supported: true,
+			installed: true,
+			source: "vendored",
+			foundVersion: "0.8.2",
+			minimumVersion: "0.8.2",
+			pathCandidate: { version: "0.7.5", satisfiesMinimum: false },
+		}],
+		truncated: false,
+	};
+	const event = serverEvent("toolchain.state", { inspection });
+	equal(event.projectId, undefined);
+	equal(event.payload.inspection.tools[0]?.license, "Apache-2.0");
+	expectProtocolError(() =>
+		serverEvent("toolchain.state", {
+			inspection: {
+				...inspection,
+				tools: [{ ...inspection.tools[0], binaryPath: "/private/herdr" }],
+			},
+		})
+	);
+	expectProtocolError(() =>
+		serverEvent("toolchain.state", {
+			inspection: {
+				...inspection,
+				tools: [{ ...inspection.tools[0], source: "none" }],
+			},
+		})
+	);
+	expectProtocolError(() =>
+		serverEvent("toolchain.state", {
+			inspection: { ...inspection, tools: [...inspection.tools, inspection.tools[0]] },
 		})
 	);
 });
