@@ -7,6 +7,7 @@ import type { ClioCatalogInspector } from "../clio-catalog-inspector.ts";
 import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
+import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -28,6 +29,7 @@ import {
 	type WireFleetInspection,
 	type WireRecoveryInspection,
 	type WireRoutingInspection,
+	type WireToolchainInspection,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
 import {
@@ -36,6 +38,7 @@ import {
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
+	toolchainInspectionFixture,
 	usageInspectionFixture,
 } from "./fixtures.ts";
 
@@ -109,6 +112,7 @@ interface FixtureOptions {
 	readonly routingInspector?: ClioRoutingInspector;
 	readonly dispatchInspector?: ClioDispatchInspector;
 	readonly fleetInspector?: ClioFleetInspector;
+	readonly toolchainInspector?: ClioToolchainInspector;
 	readonly recoveryInspector?: ClioRecoveryInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
@@ -152,6 +156,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.routingInspector === undefined ? {} : { routingInspector: options.routingInspector }),
 			...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
 			...(options.fleetInspector === undefined ? {} : { fleetInspector: options.fleetInspector }),
+			...(options.toolchainInspector === undefined ? {} : { toolchainInspector: options.toolchainInspector }),
 			...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
@@ -911,6 +916,36 @@ Deno.test("fleet inspection is global, uses the configured home, and survives br
 			fleetInspection: WireFleetInspection;
 		};
 		deepStrictEqual(bootstrap.fleetInspection, fleetInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("toolchain inspection is global, path-free, and survives browser reload", async () => {
+	let inspectedCwd: string | null = null;
+	const toolchainInspector: ClioToolchainInspector = {
+		inspect(cwd) {
+			inspectedCwd = cwd;
+			return Promise.resolve(toolchainInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ toolchainInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-toolchain", "toolchain.inspect", {});
+		const toolchain = (await collectThrough(socket, "toolchain.state")).at(-1);
+		ok(toolchain?.kind === "toolchain.state");
+		equal(toolchain.projectId, undefined);
+		equal(inspectedCwd, fixture.homePath);
+		deepStrictEqual(toolchain.payload.inspection, toolchainInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			toolchainInspection: WireToolchainInspection;
+		};
+		deepStrictEqual(bootstrap.toolchainInspection, toolchainInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

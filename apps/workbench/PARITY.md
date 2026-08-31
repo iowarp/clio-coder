@@ -14,9 +14,9 @@ the main application.
 
 | Verdict | Count |
 | ------- | ----: |
-| Present |    15 |
-| Partial |    55 |
-| Absent  |    42 |
+| Present |    16 |
+| Partial |    57 |
+| Absent  |    39 |
 | Total   |   112 |
 
 ## Command-line surface
@@ -47,7 +47,7 @@ the main application.
 | Skills                          | `skills` list/search/inspect/validate/install/update/sync/eval                | **Partial** | Installed skill inventory and provenance are present; search, inspection, validation, installation, update, and evaluation are absent.                               |
 | Resource library                | `library` list/search/add/use/sync/push/remote-confirm                        | **Partial** | Bounded available-resource inventory is present; search across remotes and reviewed lifecycle operations are absent.                                                 |
 | Verifiers                       | `verifiers` discover/author/validate/dry-run/add/edit/rename/remove           | **Absent**  | Capability atlas names the missing typed interface but cannot inspect or drive verifier workflows.                                                                   |
-| External toolchain              | `tools` list/status/install                                                   | **Absent**  | The pinned tool inventory, resolution source, version floor, platform support, and install state have zero GUI coverage.                                             |
+| External toolchain              | `tools` list/status/install                                                   | **Partial** | Settings renders a path-free pinned inventory with resolution and platform facts; per-tool status detail and reviewed installation are absent.                       |
 | Pane installation               | `panes install`                                                               | **Absent**  | Installation is a consequential toolchain mutation and has no GUI operation.                                                                                         |
 | Documentation server            | `docs [topic]`                                                                | **Absent**  | There is no contextual documentation launcher or embedded operator reference.                                                                                        |
 | Effective configuration command | `config inspect --json`                                                       | **Present** | Effective Clio Coder uses its bounded projection for settings, sources, precedence, reload timing, and issues.                                                       |
@@ -124,7 +124,7 @@ the main application.
 | Notifications and retry         | Notices, provider retry, stall and watchdog state                     | **Partial** | Command errors and operation states are visible; structured retry/watchdog/runtime notices are not public ACP facts.                        |
 | Panes and mux inventory         | Host detection, health, pane list, focus/open/close                   | **Absent**  | **blocked-on-phase4**: no public fixed JSON read exists and this pane must not change `src/domains/mux` or `src/interactive`.               |
 | Yazi round trip                 | File picker pane, picked path return, focused context                 | **Absent**  | The new terminal/mux round trip is not an ACP operation and is also **blocked-on-phase4** for GUI parity.                                   |
-| Toolchain inventory             | Pinned versions, license, platform, source, resolution, install state | **Absent**  | `tools list --json` is GUI-ready but has no host projection or Settings panel.                                                              |
+| Toolchain inventory             | Pinned versions, license, platform, source, resolution, install state | **Present** | Settings renders the fixed listing with version floors, found versions, licenses, platform support, resolution source, and install state.   |
 | Doctor and recovery             | Categorized diagnostic sweep and repair                               | **Partial** | Bounded category/severity counts are present; raw detail and confirmed repair remain intentionally separate.                                |
 | Usage and routing               | Historical Usage, offline models, profiles, agent bindings            | **Present** | Project scoping, independent failures, provenance, and missing-store states are explicit.                                                   |
 | Catalog and config              | Agent/skill/extension/library inventory and effective configuration   | **Present** | Bounded projections and direct paths back to the conversation are present.                                                                  |
@@ -140,7 +140,7 @@ the main application.
 | Share          | Project/resource archives and worker-result sharing               | **Absent**  | No bounded preview or confirmed operation exists.                                                                                                           |
 | Context        | Project context, codewiki, working set, recall, compaction inputs | **Partial** | Effective context sources and replay are present; live accounting and mutations are absent.                                                                 |
 | Providers      | Targets, models, auth, capability and residency                   | **Partial** | Target probe, model selection, and offline inventory exist; auth, authoring, and live runtime notices are absent.                                           |
-| Toolchain      | Pinned optional external programs                                 | **Absent**  | Machine-readable inventory exists at `tools list --json` but is not adapted.                                                                                |
+| Toolchain      | Pinned optional external programs                                 | **Partial** | The machine-readable inventory is adapted without native paths; status detail, installation, and Yazi profile reset remain terminal workflows.              |
 | Safety         | Autonomy, permissions, loop guard, budgets, protected artifacts   | **Partial** | Autonomy, mediated approval, and loop blocks are present; wider policy and budget facts are absent.                                                         |
 | Prompts        | Saved prompt discovery and expansion                              | **Absent**  | Effective roots alone do not provide prompt listing or invocation.                                                                                          |
 | Agents         | Recipe discovery and execution identity                           | **Partial** | Reference inventory and observed attribution exist; direct execution and status are absent.                                                                 |
@@ -156,9 +156,9 @@ the main application.
 
 1. **Implemented:** bounded fixed-argv fleet-run inspection, recent durable event journals, receipt trust, explicit
    truncation, manual refresh, and automatic refresh while a displayed run remains active.
-2. Add the fixed `tools list --json` projection and a searchable Toolchain instrument inside Settings, including pinned
-   version, license, platform support, resolution source, found version, minimum version, and install state without
-   exposing binary or install paths.
+2. **Implemented:** fixed `tools list --json` projection and searchable Toolchain Settings instrument with pinned
+   version, license, platform support, source, found and minimum versions, install state, and no native binary or
+   install paths.
 3. Add pane/mux mode, health, inventory, and status only after the phase-4 owner publishes a fixed structured read;
    retain `blocked-on-phase4` and do not reach into mux state, terminal environment, or process inspection.
 4. Extend durable run inspection with fleet-root step indexes, council membership and synthesis facts, compete candidate

@@ -13,6 +13,7 @@ import {
 	type WireRoutingInspection,
 	type WireSessionSummary,
 	type WireTimelineItem,
+	type WireToolchainInspection,
 	type WireTreeNode,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
@@ -76,6 +77,40 @@ export function fleetInspectionFixture(): WireFleetInspection {
 			outcomeDetail: null,
 			terminal: true,
 		}],
+		truncated: false,
+	};
+}
+
+export function toolchainInspectionFixture(): WireToolchainInspection {
+	return {
+		scope: "installation",
+		inspectedAt: "2026-08-31T15:02:00.000Z",
+		tools: [
+			{
+				id: "herdr",
+				pinnedVersion: "0.8.2",
+				license: "Apache-2.0",
+				platform: "linux-x64",
+				supported: true,
+				installed: true,
+				source: "vendored",
+				foundVersion: "0.8.2",
+				minimumVersion: "0.8.2",
+				pathCandidate: { version: "0.7.5", satisfiesMinimum: false },
+			},
+			{
+				id: "yazi",
+				pinnedVersion: "26.8.15",
+				license: "MIT",
+				platform: "linux-x64",
+				supported: true,
+				installed: false,
+				source: "none",
+				foundVersion: null,
+				minimumVersion: "26.8.15",
+				pathCandidate: { version: "26.1.22", satisfiesMinimum: false },
+			},
+		],
 		truncated: false,
 	};
 }
@@ -502,6 +537,7 @@ export function bootstrapFixture(
 		securityNote: "The desktop app enforces the project boundary in its own code; Deno grants are broad.",
 		dispatchInspection: null,
 		fleetInspection: null,
+		toolchainInspection: null,
 		...overrides,
 	};
 }

@@ -17,6 +17,7 @@ import {
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	serverEventFixture,
+	toolchainInspectionFixture,
 	usageInspectionFixture,
 	workspaceFixture,
 } from "./fixtures.ts";
@@ -331,7 +332,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, fleet, recovery, and target events land correctly", () => {
+Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, fleet, toolchain, recovery, and target events land correctly", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -444,10 +445,19 @@ Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, 
 	equal(state.fleetInspection?.runs[0]?.runId, "run-alpha");
 	equal(state.pendingFleetInspect, null);
 
+	state = appReducer(state, { type: "toolchain.inspect.submitted", requestId: "request-toolchain" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("toolchain.state", { inspection: toolchainInspectionFixture() }, { sequence: 12 }),
+	});
+	equal(state.toolchainInspection?.scope, "installation");
+	equal(state.toolchainInspection?.tools[0]?.id, "herdr");
+	equal(state.pendingToolchainInspect, null);
+
 	state = appReducer(state, { type: "recovery.inspect.submitted", requestId: "request-recovery" });
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("recovery.state", { inspection: recoveryInspectionFixture() }, { sequence: 12 }),
+		event: serverEventFixture("recovery.state", { inspection: recoveryInspectionFixture() }, { sequence: 13 }),
 	});
 	equal(state.recoveryInspection?.scope, "installation");
 	equal(state.recoveryInspection?.summary.failures, 2);

@@ -47,6 +47,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"routing.inspect",
 	"dispatch.inspect",
 	"fleet.inspect",
+	"toolchain.inspect",
 	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
@@ -250,6 +251,8 @@ export type DispatchInspectPayload = Readonly<Record<string, never>>;
 
 export type FleetInspectPayload = Readonly<Record<string, never>>;
 
+export type ToolchainInspectPayload = Readonly<Record<string, never>>;
+
 export type RecoveryInspectPayload = Readonly<Record<string, never>>;
 
 export interface TargetsListPayload {
@@ -294,6 +297,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "routing.inspect": RoutingInspectPayload;
 	readonly "dispatch.inspect": DispatchInspectPayload;
 	readonly "fleet.inspect": FleetInspectPayload;
+	readonly "toolchain.inspect": ToolchainInspectPayload;
 	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
@@ -328,6 +332,7 @@ export const SERVER_EVENT_KINDS = [
 	"routing.state",
 	"dispatch.state",
 	"fleet.inspection.state",
+	"toolchain.state",
 	"recovery.state",
 	"targets.state",
 	"targets.probed",
@@ -1059,6 +1064,36 @@ export interface WireFleetInspection {
 	readonly truncated: boolean;
 }
 
+export const TOOLCHAIN_SOURCES = ["path", "vendored", "none"] as const;
+export type WireToolchainSource = (typeof TOOLCHAIN_SOURCES)[number];
+export const MAX_WIRE_TOOLCHAIN_ITEMS = 32;
+
+export interface WireToolchainItem {
+	readonly id: string;
+	readonly pinnedVersion: string;
+	readonly license: string;
+	readonly platform: string | null;
+	readonly supported: boolean;
+	readonly installed: boolean;
+	readonly source: WireToolchainSource;
+	readonly foundVersion: string | null;
+	readonly minimumVersion: string;
+	readonly pathCandidate:
+		| Readonly<{
+			version: string | null;
+			satisfiesMinimum: boolean;
+		}>
+		| null;
+}
+
+/** Path-free inventory of Clio Coder's pinned optional external programs. */
+export interface WireToolchainInspection {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly tools: readonly WireToolchainItem[];
+	readonly truncated: boolean;
+}
+
 export const RECOVERY_SECTION_IDS = [
 	"runtime",
 	"storage",
@@ -1203,6 +1238,10 @@ export interface DispatchStatePayload {
 
 export interface FleetInspectionStatePayload {
 	readonly inspection: WireFleetInspection;
+}
+
+export interface ToolchainStatePayload {
+	readonly inspection: WireToolchainInspection;
 }
 
 export interface RecoveryStatePayload {
@@ -1392,6 +1431,7 @@ export interface ServerEventPayloadByKind {
 	readonly "routing.state": RoutingStatePayload;
 	readonly "dispatch.state": DispatchStatePayload;
 	readonly "fleet.inspection.state": FleetInspectionStatePayload;
+	readonly "toolchain.state": ToolchainStatePayload;
 	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
@@ -1746,6 +1786,7 @@ function validateClientPayload<K extends ClientCommandKind>(
 	switch (kind) {
 		case "dispatch.inspect":
 		case "fleet.inspect":
+		case "toolchain.inspect":
 		case "recovery.inspect":
 			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
 		case "project.browse": {
@@ -3971,6 +4012,102 @@ export function validateFleetInspection(
 	};
 }
 
+function expectToolVersion(value: unknown, label: string, nullable = false): string | null {
+	const text = nullable ? expectNullablePresentationText(value, label, 64) : expectPresentationText(value, label, 64);
+	if (text !== null && !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(text)) {
+		invalid(`${label} must be a semantic version`);
+	}
+	return text;
+}
+
+export function validateToolchainInspection(
+	value: unknown,
+	label = "toolchain inspection",
+): WireToolchainInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"tools",
+		"truncated",
+	]);
+	if (record.scope !== "installation") {
+		invalid(`${label}.scope must be installation`);
+	}
+	const seen = new Set<string>();
+	const tools = expectArray(
+		record.tools,
+		`${label}.tools`,
+		MAX_WIRE_TOOLCHAIN_ITEMS,
+		(value, itemLabel): WireToolchainItem => {
+			const item = expectExactKeys(value, itemLabel, [
+				"id",
+				"pinnedVersion",
+				"license",
+				"platform",
+				"supported",
+				"installed",
+				"source",
+				"foundVersion",
+				"minimumVersion",
+				"pathCandidate",
+			]);
+			const id = expectPresentationText(item.id, `${itemLabel}.id`, 64);
+			if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(id) || seen.has(id)) {
+				invalid(`${itemLabel}.id must be unique and tool-shaped`);
+			}
+			seen.add(id);
+			const source = expectEnum(item.source, `${itemLabel}.source`, TOOLCHAIN_SOURCES);
+			const foundVersion = expectToolVersion(item.foundVersion, `${itemLabel}.foundVersion`, true);
+			if ((source === "none") !== (foundVersion === null)) {
+				invalid(`${itemLabel} has contradictory resolution facts`);
+			}
+			const platform = expectNullablePresentationText(item.platform, `${itemLabel}.platform`, 64);
+			if (platform !== null && !/^[a-z0-9]+-[a-z0-9_]+$/u.test(platform)) {
+				invalid(`${itemLabel}.platform is invalid`);
+			}
+			const license = expectPresentationText(item.license, `${itemLabel}.license`, 64);
+			if (!/^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/u.test(license)) {
+				invalid(`${itemLabel}.license is invalid`);
+			}
+			let pathCandidate: WireToolchainItem["pathCandidate"] = null;
+			if (item.pathCandidate !== null) {
+				const candidate = expectExactKeys(item.pathCandidate, `${itemLabel}.pathCandidate`, [
+					"version",
+					"satisfiesMinimum",
+				]);
+				pathCandidate = {
+					version: expectToolVersion(candidate.version, `${itemLabel}.pathCandidate.version`, true),
+					satisfiesMinimum: expectBoolean(
+						candidate.satisfiesMinimum,
+						`${itemLabel}.pathCandidate.satisfiesMinimum`,
+					),
+				};
+				if (pathCandidate.satisfiesMinimum && source !== "path") {
+					invalid(`${itemLabel} has contradictory PATH candidate facts`);
+				}
+			}
+			return {
+				id,
+				pinnedVersion: expectToolVersion(item.pinnedVersion, `${itemLabel}.pinnedVersion`) as string,
+				license,
+				platform,
+				supported: expectBoolean(item.supported, `${itemLabel}.supported`),
+				installed: expectBoolean(item.installed, `${itemLabel}.installed`),
+				source,
+				foundVersion,
+				minimumVersion: expectToolVersion(item.minimumVersion, `${itemLabel}.minimumVersion`) as string,
+				pathCandidate,
+			};
+		},
+	);
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		tools,
+		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+	};
+}
+
 function validateRecoveryCounts(
 	value: unknown,
 	label: string,
@@ -4442,6 +4579,15 @@ function validateServerPayload(
 				),
 			};
 		}
+		case "toolchain.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return {
+				inspection: validateToolchainInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
+		}
 		case "recovery.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -4779,6 +4925,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"project.browse.listing",
 	"dispatch.state",
 	"fleet.inspection.state",
+	"toolchain.state",
 	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
