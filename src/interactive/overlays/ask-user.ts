@@ -18,7 +18,13 @@ import {
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-user.js";
-import { buildHint, DEFAULT_SELECT_THEME, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	buildHint,
+	DEFAULT_SELECT_THEME,
+	type HintEntry,
+	type OverlayEscVerb,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import { type ClioToken, clioTheme, dotSep, GLYPH, screenTitle } from "../theme/index.js";
 import { nextContentScrollOffset, type ViewScrollAction } from "../view/view-overlay.js";
 
@@ -511,16 +517,24 @@ class AskUserOverlayView implements Component {
 			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
 			"record answer";
 		if (state.mode === "text") {
+			// Esc means two different things depending on what is behind the field.
+			// A question with options has a list to fall back to, so the key goes
+			// back; a question without one has nothing behind it and the key still
+			// leaves the interview. The footer says which one this is.
+			const escapeVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
 			return this.questions.length > 1
-				? this.withScrollHint([
-						{ key: "Enter", verb: recordAnswer },
-						{ key: "Alt+Left/Right", verb: "question" },
-					])
-				: this.withScrollHint([{ key: "Enter", verb: recordAnswer }]);
+				? this.withScrollHint(
+						[
+							{ key: "Enter", verb: recordAnswer },
+							{ key: "Alt+Left/Right", verb: "question" },
+						],
+						escapeVerb,
+					)
+				: this.withScrollHint([{ key: "Enter", verb: recordAnswer }], escapeVerb);
 		}
 		// The classified action label distinguishes recording an answer from
-		// granting authority. Esc keeps the product's one word for the way out,
-		// since it closes the prompt and the interview together.
+		// granting authority. Esc on the option list is the way out of the whole
+		// interview, which is the one place the product spells `close`.
 		// `t` is on every select footer because the operator cannot tell from a
 		// label whether the option needs a figure attached until they read it.
 		const addText: HintEntry = { key: "t", verb: "add text", short: "text" };
@@ -558,9 +572,9 @@ class AskUserOverlayView implements Component {
 	 * scroll. A footer that always advertised PgUp would be advertising a key that
 	 * does nothing on most rounds.
 	 */
-	private withScrollHint(entries: ReadonlyArray<HintEntry>): string {
-		if (this.surface !== "interview" || !this.contentOverflows) return buildHint(entries);
-		return buildHint([...entries, { key: "PgUp/PgDn", verb: "scroll" }]);
+	private withScrollHint(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb = "close"): string {
+		if (this.surface !== "interview" || !this.contentOverflows) return buildHint(entries, esc);
+		return buildHint([...entries, { key: "PgUp/PgDn", verb: "scroll" }], esc);
 	}
 
 	private setSurface(next: AskUserSurface): void {
@@ -889,7 +903,7 @@ class AskUserOverlayView implements Component {
 			state.answer = questionHasOptions(question) ? answerText(question, state.selected, state.customAnswer) : answer;
 			this.finishIfCompleteOrAdvance();
 		};
-		activeInput.onEscape = () => this.cancel();
+		activeInput.onEscape = () => this.escapeFromTextInput(question, state);
 		this.input = activeInput;
 		this.list = null;
 	}
@@ -958,6 +972,53 @@ class AskUserOverlayView implements Component {
 			if (other >= 0) return other;
 		}
 		return 0;
+	}
+
+	/**
+	 * Esc in the text field.
+	 *
+	 * The field used to resolve the whole round as cancelled, which made a typed
+	 * draft unrecoverable: a single-question round had no other question to answer
+	 * first, so the only way off `t` was to abandon the interview (issue #260). A
+	 * question with options has a surface behind the field, so Esc goes back to it
+	 * and drops the draft. A question with no options has nothing behind it, so Esc
+	 * keeps its old meaning and leaves the interview; the footer says which.
+	 *
+	 * The draft is dropped rather than parked because Esc is the discard gesture.
+	 * It never reached `answer`, `options`, or `value` in the first place, since
+	 * only a submit writes those, so #228's clearing rule holds either way.
+	 */
+	private escapeFromTextInput(question: AskUserQuestion, state: QuestionState): void {
+		if (!questionHasOptions(question)) {
+			this.cancel();
+			return;
+		}
+		state.inputValue = "";
+		state.mode = "select";
+		this.status = "";
+		this.rebuildSelectList(question, state);
+		this.deps.requestRender();
+	}
+
+	/**
+	 * Leave a question the operator is walking away from on its option list.
+	 *
+	 * The mode used to belong to the question for the rest of the round, so a
+	 * question opened with `t` came back as a prefilled field however the operator
+	 * returned to it, and the option list was gone for good. Navigating away is not
+	 * the discard gesture, so the draft stays in `inputValue` and `t` finds it
+	 * again; what does not survive is the field being the thing that greets them.
+	 *
+	 * A question whose value was actually submitted keeps its field, because
+	 * coming back to a recorded figure is how it gets revised (issue #228).
+	 */
+	private parkTextMode(): void {
+		const question = this.currentQuestion();
+		const state = this.currentState();
+		if (!question || !state) return;
+		if (state.mode !== "text" || !questionHasOptions(question)) return;
+		if (state.rawValue.length > 0) return;
+		state.mode = "select";
 	}
 
 	private openTextInput(nextStatus: string): void {
@@ -1077,6 +1138,7 @@ class AskUserOverlayView implements Component {
 	private goToRelativeQuestion(delta: -1 | 1): void {
 		if (this.questions.length <= 1) return;
 		this.syncActiveControl();
+		this.parkTextMode();
 		this.index = (this.index + delta + this.questions.length) % this.questions.length;
 		this.status = "";
 		this.resetContentScroll();
