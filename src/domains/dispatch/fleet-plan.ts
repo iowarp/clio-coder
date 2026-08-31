@@ -32,6 +32,7 @@ import {
 	type ExecutionPlanStepInput,
 } from "./execution-plan.js";
 import type { ExecutionRole } from "./execution-role.js";
+import { renderFleetNodeTask } from "./fleet-node-prompt.js";
 
 /** Where an agent node sits, so the caller can resolve its role and authority. */
 export interface FleetPlanAgentContext {
@@ -58,7 +59,11 @@ export interface FleetPlanAgentResolution {
 
 export interface CompileFleetPlanInput {
 	contract: FleetContract;
-	/** Rendered prompt body; every agent node carries it as its task. */
+	/**
+	 * Rendered prompt body. It describes the whole chain, so every agent node
+	 * carries it, followed by that node's own answer directive: the nodes hold
+	 * different result contracts and the body can only ever name one of them.
+	 */
 	task: string;
 	resolveAgent(context: FleetPlanAgentContext): FleetPlanAgentResolution;
 }
@@ -143,7 +148,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			agentId: context.agentId,
 			scope: context.scope,
 			dependencies: [...dependencies],
-			task,
+			task: renderFleetNodeTask(task, resolved.expectedResultContract),
 			expectedResultContract: resolved.expectedResultContract,
 			requestedAuthority: resolved.requestedAuthority,
 			approvedAuthority: resolved.approvedAuthority,

@@ -29,6 +29,3 @@ task above. Nothing you write here persuades it.
 
 If it fails you, you receive its failed checks as input data and get exactly one
 revision. Close the findings it reported and nothing else.
-
-Answer with your `mutation-report`. Include `commitMessage`: one imperative
-subject line describing this change, as you would write it in the log.
