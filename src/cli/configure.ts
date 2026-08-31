@@ -103,6 +103,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 	lemonade: 8000,
 	"anthropic-compat": 8000,
 	"openai-compat": 8000,
+	litellm: 4000,
 };
 
 interface ParsedArgs {

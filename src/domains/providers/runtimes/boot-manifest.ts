@@ -42,6 +42,7 @@ export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> =
 	{ id: "lmstudio", aliases: ["lmstudio-native"], kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "ollama-native", kind: "http", tier: "local-native", auth: "none" },
 	{ id: "anthropic-compat", kind: "http", tier: "protocol", auth: "api-key" },
+	{ id: "litellm", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "openai-compat", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "sglang", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "vllm", kind: "http", tier: "local-native", auth: "api-key" },

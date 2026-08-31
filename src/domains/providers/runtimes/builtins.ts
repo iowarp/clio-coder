@@ -36,6 +36,7 @@ import ollamaNative from "./local-native/ollama-native.js";
 import sglang from "./local-native/sglang.js";
 import vllm from "./local-native/vllm.js";
 import anthropicCompat from "./protocol/anthropic-compat.js";
+import litellm from "./protocol/litellm.js";
 import openaiCompat from "./protocol/openai-compat.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
@@ -60,6 +61,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	lmstudio,
 	ollamaNative,
 	anthropicCompat,
+	litellm,
 	openaiCompat,
 	sglang,
 	vllm,
