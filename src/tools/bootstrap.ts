@@ -36,7 +36,11 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const registration = registerCoreTools(registry, deps);
 	if (deps.dispatch) {
 		const dispatch = deps.dispatch;
-		const dispatchRunEvents = createDispatchRunEventRegistry();
+		// Display tail only. In a composed process the dispatch domain writes the
+		// durable journal off its own progress channel, which covers every run
+		// rather than only the ones the model dispatched through this tool, so a
+		// second sink here would transcribe a tool-path run twice.
+		const dispatchRunEvents = createDispatchRunEventRegistry({ journal: null });
 		const dispatchToolDeps = {
 			dispatch,
 			runEvents: dispatchRunEvents,

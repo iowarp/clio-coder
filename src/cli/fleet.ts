@@ -53,13 +53,14 @@ import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispa
 import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import {
-	DispatchDomainModule,
+	createDispatchDomainModule,
 	type ExecuteFleetRunInput,
 	executeFleetRun,
 	type FleetRunOutcome,
 	planFleetResume,
 	readFleetRun,
 } from "../domains/dispatch/index.js";
+import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
@@ -317,7 +318,10 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		MiddlewareDomainModule,
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
-		DispatchDomainModule,
+		// A fleet step is dispatched by executeFleetRun, which drains the handle
+		// itself and never builds a dispatch event registry, so the domain is the
+		// only thing that can write each step's durable transcript.
+		createDispatchDomainModule({ journalRunEvents: true }),
 		SessionDomainModule,
 		LifecycleDomainModule,
 	]);
@@ -330,12 +334,17 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		await loaded.stop();
 		return fail("required domains unavailable (dispatch/agents/safety)");
 	}
+	const fleetSettings = config?.get() ?? readSettings();
+	// Install `panes.journal` the same way the interactive composition root
+	// does, so a fleet run honours the setting without the journal ever reading
+	// settings.yaml from the dispatch event path.
+	configureRunEventJournal(fleetSettings.panes.journal);
 	const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
 	const preflightError = preflightFleet(contract, {
 		agents,
 		safety,
 		scheduling,
-		settings: config?.get() ?? readSettings(),
+		settings: fleetSettings,
 	});
 	if (preflightError !== null) {
 		await loaded.stop();

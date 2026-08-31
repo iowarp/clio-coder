@@ -78,6 +78,25 @@ function eventDetail(event: unknown): string | undefined {
 	return undefined;
 }
 
+/**
+ * Project one worker/ACP event into the display tail, or null when the event is
+ * not tail-visible. Heartbeats and streaming `message_update` increments are
+ * noise on a transcript: the tail keeps message boundaries, not deltas.
+ *
+ * The durable journal writes exactly this projection, so a transcript read back
+ * by `clio-coder fleet view` and the monitor's live peek cannot disagree about
+ * what a run did. Both the registry below and the domain-owned journal bridge
+ * (src/domains/dispatch/run-event-journal-bridge.ts) call it.
+ */
+export function runTailEntryFromEvent(event: unknown, at: string = new Date().toISOString()): RunTailEntry | null {
+	const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
+	if (type === "heartbeat" || type === "message_update") return null;
+	const entry: RunTailEntry = { at, type };
+	const detail = eventDetail(event);
+	if (detail !== undefined) entry.detail = detail;
+	return entry;
+}
+
 export interface DispatchRunEventRegistryOptions {
 	/**
 	 * Durable tee for the display tail. Omitted takes the process-wide default
@@ -164,13 +183,10 @@ export function createDispatchRunEventRegistry(
 	};
 
 	const recordRunEvent = (runId: string, agentId: string, event: unknown): void => {
-		const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
-		if (type === "heartbeat" || type === "message_update") return;
+		const entry = runTailEntryFromEvent(event);
+		if (entry === null) return;
 		const state = runTails.get(runId) ?? { agentId, entries: [], lastSeenAt: Date.now() };
 		state.lastSeenAt = Date.now();
-		const entry: RunTailEntry = { at: new Date().toISOString(), type };
-		const detail = eventDetail(event);
-		if (detail !== undefined) entry.detail = detail;
 		state.entries.push(entry);
 		if (state.entries.length > RUN_TAIL_ENTRY_LIMIT) {
 			state.entries.splice(0, state.entries.length - RUN_TAIL_ENTRY_LIMIT);

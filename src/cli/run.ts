@@ -11,6 +11,7 @@ import { createContextDomainModule } from "../domains/context/runtime.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import {
@@ -362,11 +363,20 @@ async function runDispatch(
 		createDispatchDomainModule({
 			getSettings: () => effectiveSettings,
 			autonomyOverride: parsed.autonomy !== undefined,
+			// This path iterates `handle.events` itself and builds no dispatch
+			// event registry, so the domain is the only thing that can write the
+			// run's durable transcript.
+			journalRunEvents: true,
 		}),
 		LifecycleDomainModule,
 	]);
 	const config = loaded.getContract<ConfigContract>("config");
 	const baseSettings = config?.get() ?? readSettings();
+	// Install `panes.journal` the same way the interactive composition root
+	// does. The journal never reads settings.yaml itself: it sits on the
+	// dispatch event path, where a settings read would be both a cost and a
+	// throw site.
+	configureRunEventJournal(baseSettings.panes.journal);
 	effectiveSettings =
 		parsed.autonomy === undefined ? baseSettings : { ...structuredClone(baseSettings), autonomy: parsed.autonomy };
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");

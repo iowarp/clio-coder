@@ -895,6 +895,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 				autonomyOverride: options.headless?.autonomy !== undefined,
+				// The domain owns the durable journal here, not the dispatch
+				// tool's event registry: `/run`, a watchdog run, and a model
+				// dispatch all have to leave the same transcript behind, and only
+				// the last of the three ever reaches that registry.
+				journalRunEvents: true,
 			}),
 			LifecycleDomainModule,
 		],
