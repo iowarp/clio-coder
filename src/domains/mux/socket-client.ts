@@ -189,6 +189,8 @@ export interface MuxClient {
 	paneCurrent(callerPaneId?: string): Promise<MuxPane>;
 	paneList(workspaceId?: string): Promise<ReadonlyArray<MuxPane>>;
 	paneSplit(request: MuxSplitRequest): Promise<MuxPane>;
+	/** Set the pane's operator-facing label. Available on herdr protocol 17. */
+	paneRename(paneId: string, label: string): Promise<void>;
 	paneClose(paneId: string): Promise<void>;
 	/** Pane ids sharing a tab with `paneId`, read off the tab's layout snapshot. */
 	paneLayout(paneId?: string): Promise<ReadonlyArray<string>>;
@@ -684,6 +686,9 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 				}),
 			);
 			return readPane(result.pane);
+		},
+		async paneRename(paneId: string, label: string): Promise<void> {
+			await call("pane.rename", { pane_id: paneId, label });
 		},
 		async paneClose(paneId: string): Promise<void> {
 			await call("pane.close", { pane_id: paneId });

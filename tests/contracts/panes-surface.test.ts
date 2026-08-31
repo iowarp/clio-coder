@@ -529,7 +529,12 @@ describe("contracts/panes watch flow against the pane host", () => {
 			strictEqual(split.length, 1);
 			strictEqual(split[0]?.params.focus, false, "the watch pane must not steal the keyboard");
 			const sent = String(fake.requestsFor("pane.send_text")[0]?.params.text);
-			ok(sent.includes("'fleet' 'view' '--watch'"), sent);
+			ok(sent.includes("'fleet' 'view' '--config-dir'"), sent);
+			for (const flag of ["--data-dir", "--state-dir", "--cache-dir", "--watch"]) {
+				ok(sent.includes(`'${flag}'`), `${flag}: ${sent}`);
+			}
+			strictEqual(fake.requestsFor("pane.rename")[0]?.params.label, "clio watch");
+			strictEqual(fake.requestsFor("pane.report_metadata")[0]?.params.title, "clio watch");
 			strictEqual(readFileSync(selectionPath, "utf8"), "run-2\n");
 
 			// The tool retargets the same pane: a file write, no second split.

@@ -19,7 +19,7 @@
 
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { clioStateDir } from "../core/xdg.js";
+import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult } from "../domains/mux/operations.js";
 import { watchViewerCommand } from "../domains/mux/viewer-command.js";
@@ -39,8 +39,10 @@ export interface WatchPaneDeps {
 	getCwd: () => string;
 	/** Selection-file override for tests. */
 	selectionPath?: string;
+	/** Resolved-layout override for tests. Production pins this process's four cached roots. */
+	dirs?: Readonly<ClioDirs>;
 	/** Command override for tests; production runs this install's own CLI. */
-	command?: (selectionPath: string) => ReadonlyArray<string>;
+	command?: (selectionPath: string, dirs: Readonly<ClioDirs>) => ReadonlyArray<string>;
 	writeFile?: (path: string, content: string) => void;
 }
 
@@ -54,7 +56,15 @@ function atomicWrite(path: string, content: string): void {
 
 export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchController {
 	const selectionPath = deps.selectionPath ?? watchSelectionPath();
-	const command = deps.command ?? watchViewerCommand;
+	const dirs =
+		deps.dirs ??
+		Object.freeze({
+			config: clioConfigDir(),
+			data: clioDataDir(),
+			state: clioStateDir(),
+			cache: clioCacheDir(),
+		});
+	const command = deps.command ?? ((path, layout) => watchViewerCommand(path, { dirs: layout }));
 	const write = deps.writeFile ?? atomicWrite;
 
 	let paneId: string | null = null;
@@ -83,9 +93,10 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 				return { status: "watching", runId, paneId, opened: false };
 			}
 			const opened = await deps.mux.openUtilityPane({
-				argv: command(selectionPath),
+				argv: command(selectionPath, dirs),
 				cwd: deps.getCwd(),
 				label: "watch",
+				title: "clio watch",
 				purpose: "watch",
 				direction: "right",
 			});

@@ -16,6 +16,7 @@
 
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { ClioDirs } from "../../core/xdg.js";
 
 /** Built CLI entry point, matching the `bin` field in `package.json`. */
 export function clioCliEntryPath(): string {
@@ -27,15 +28,31 @@ export interface ViewerCommandOptions {
 	entryPath?: string;
 	/** Node binary to run it with; defaults to the one running this process. */
 	execPath?: string;
+	/** Exact parent-process layout; pinned on argv so a new pane cannot re-resolve it. */
+	dirs?: Readonly<ClioDirs>;
 }
 
 /** The argv the watch pane executes: one viewer process following a selection file. */
 export function watchViewerCommand(selectionPath: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
+	const layout =
+		options.dirs === undefined
+			? []
+			: [
+					"--config-dir",
+					options.dirs.config,
+					"--data-dir",
+					options.dirs.data,
+					"--state-dir",
+					options.dirs.state,
+					"--cache-dir",
+					options.dirs.cache,
+				];
 	return [
 		options.execPath ?? process.execPath,
 		options.entryPath ?? clioCliEntryPath(),
 		"fleet",
 		"view",
+		...layout,
 		"--watch",
 		selectionPath,
 	];

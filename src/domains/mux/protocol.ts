@@ -22,6 +22,7 @@ import type { MuxServerInfo } from "./types.js";
 /** Wire methods this file gates. Phase 1 methods are unconditional and absent here. */
 export type MuxGatedMethod =
 	| "notification.show"
+	| "pane.rename"
 	| "worktree.list"
 	| "worktree.create"
 	| "worktree.open"
@@ -29,6 +30,7 @@ export type MuxGatedMethod =
 
 export const MUX_METHOD_MIN_PROTOCOL: Readonly<Record<MuxGatedMethod, number>> = {
 	"notification.show": 17,
+	"pane.rename": 17,
 	"worktree.list": 10,
 	"worktree.create": 10,
 	"worktree.open": 10,

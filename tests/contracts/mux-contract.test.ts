@@ -122,6 +122,7 @@ describe("mux contract in guest mode", () => {
 			argv: ["yazi", "--cwd", "/some dir"],
 			cwd: "/work",
 			label: "files",
+			title: "clio files",
 			env: { CLIO_PANE: "1" },
 		});
 		ok(ref);
@@ -131,10 +132,12 @@ describe("mux contract in guest mode", () => {
 		strictEqual(split?.params.focus, false, "opening a utility pane must not move focus off Clio");
 		strictEqual(split?.params.cwd, "/work");
 		deepStrictEqual(split?.params.env, { CLIO_PANE: "1" });
+		deepStrictEqual(fake.requestsFor("pane.rename")[0]?.params, { pane_id: ref.paneId, label: "clio files" });
 
 		const metadata = fake.requestsFor("pane.report_metadata")[0];
 		strictEqual(metadata?.params.pane_id, ref.paneId);
 		strictEqual(metadata?.params.source, "clio:mux");
+		strictEqual(metadata?.params.title, "clio files");
 		deepStrictEqual(metadata?.params.tokens, { clio_owner: "clio:mux", role: "utility" });
 
 		const sent = fake.requestsFor("pane.send_text")[0];
@@ -439,6 +442,27 @@ describe("mux gated wire surfaces", () => {
 		runtimes.push(runtime);
 		await runtime.contract.notify({ title: "done" });
 		strictEqual(fake.requestsFor("notification.show").length, 0, "a gated method is not attempted below its floor");
+	});
+
+	it("skips pane.rename below protocol 17 without refusing the utility pane", async () => {
+		const fake = await startFakeHerdrServer({ protocol: 16, version: "0.6.0" });
+		servers.push(fake);
+		const detection = await detectMux({
+			env: { HERDR_ENV: "1", HERDR_SOCKET_PATH: fake.socketPath, HERDR_WORKSPACE_ID: "w1", HERDR_PANE_ID: "w1:p1" },
+			openClient: (socketPath) => createMuxClient({ socketPath, requestTimeoutMs: 1_500, connectTimeoutMs: 500 }),
+		});
+		ok(detection.client);
+		const runtime = createMuxRuntime({ detection: detection.detection, client: detection.client });
+		runtimes.push(runtime);
+		const opened = await runtime.contract.openUtilityPane({
+			argv: ["bash"],
+			cwd: "/work",
+			label: "watch",
+			title: "clio watch",
+		});
+		ok(opened);
+		strictEqual(fake.requestsFor("pane.rename").length, 0, "a gated method is not attempted below its floor");
+		strictEqual(fake.requestsFor("pane.report_metadata")[0]?.params.title, undefined);
 	});
 
 	it("shows a toast, and accepts a suppressed one without degrading", async () => {

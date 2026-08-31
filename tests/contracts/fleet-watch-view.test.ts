@@ -5,7 +5,8 @@
  */
 
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -44,10 +45,84 @@ describe("fleet view --watch renderer", () => {
 		match(lines, /Alt\+W/);
 	});
 
-	it("holds a placeholder for a selected run the ledger has not seen", () => {
-		const lines = renderWatchView("run-queued", null).join("\n");
-		match(lines, /run run-queued is not in the run ledger yet/);
-		match(lines, /appears here the moment it starts/);
+	it("names the searched ledger and separates queued from wrong-ledger cases", () => {
+		const ledgerRoot = "/isolated/state/whose/full/path/must/survive/a/narrow/watch/pane";
+		const rendered = renderWatchView("run-queued", null, 40, ledgerRoot);
+		const lines = rendered.join("\n");
+		ok(rendered.join("").includes(ledgerRoot), rendered.join("\n"));
+		match(rendered.join(""), /run run-queued is not in the run ledger under \/isolated\/state/);
+		match(lines, /queued, it has not started yet/);
+		match(lines, /already started or finished, it was not found in this ledger/);
+	});
+
+	it("reads the exact resolved layout passed on argv even when the child environment points elsewhere", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-fleet-watch-layout-"));
+		dirs.push(root);
+		const layout = {
+			config: join(root, "resolved", "config"),
+			data: join(root, "resolved", "data"),
+			state: join(root, "resolved", "state"),
+			cache: join(root, "resolved", "cache"),
+		};
+		mkdirSync(layout.state, { recursive: true });
+		const runId = "run-layout";
+		writeFileSync(
+			join(layout.state, "runs.json"),
+			`${JSON.stringify([
+				{
+					id: runId,
+					agentId: "layout-tester",
+					task: "prove resolved layout",
+					targetId: "target-1",
+					wireModelId: "model-1",
+					status: "running",
+					outcome: null,
+					outcomeDetail: null,
+					startedAt: "2026-08-31T10:00:00.000Z",
+					endedAt: null,
+					receiptPath: null,
+				},
+			])}\n`,
+			"utf8",
+		);
+		const selection = join(root, "watch-selection");
+		writeFileSync(selection, `${runId}\n`, "utf8");
+		const wrongHome = join(root, "wrong-home");
+		const result = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				join(process.cwd(), "src/cli/index.ts"),
+				"fleet",
+				"view",
+				"--config-dir",
+				layout.config,
+				"--data-dir",
+				layout.data,
+				"--state-dir",
+				layout.state,
+				"--cache-dir",
+				layout.cache,
+				"--watch",
+				selection,
+			],
+			{
+				cwd: process.cwd(),
+				encoding: "utf8",
+				env: {
+					...process.env,
+					CLIO_CODER_HOME: wrongHome,
+					CLIO_CODER_CONFIG_DIR: join(wrongHome, "config"),
+					CLIO_CODER_DATA_DIR: join(wrongHome, "data"),
+					CLIO_CODER_STATE_DIR: join(wrongHome, "state"),
+					CLIO_CODER_CACHE_DIR: join(wrongHome, "cache"),
+				},
+			},
+		);
+		strictEqual(result.status, 0, result.stderr);
+		match(result.stdout, /run run-layout {2}layout-tester/);
+		ok(!result.stdout.includes("not in the run ledger"), result.stdout);
 	});
 
 	it("renders the selected run through the same pure run view as --follow", () => {
