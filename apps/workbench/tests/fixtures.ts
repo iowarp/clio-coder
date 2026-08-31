@@ -14,6 +14,7 @@ import {
 	type WireSessionSummary,
 	type WireTimelineItem,
 	type WireToolchainInspection,
+	type WireTraceInspection,
 	type WireTreeNode,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
@@ -146,6 +147,56 @@ export function toolchainInspectionFixture(): WireToolchainInspection {
 				pathCandidate: { version: "26.1.22", satisfiesMinimum: false },
 			},
 		],
+		truncated: false,
+	};
+}
+
+export function traceInspectionFixture(): WireTraceInspection {
+	return {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:30.000Z",
+		available: true,
+		runs: [{
+			runId: "run-alpha",
+			agent: "builder",
+			target: "local-lmstudio",
+			model: "qwen3-coder",
+			runtime: "lmstudio",
+			node: null,
+			status: "success",
+			startedAt: "2026-08-31T14:00:00.000Z",
+			elapsedMs: 30_000,
+			totalTokens: 28_665,
+			totalCostUsd: 0.4213,
+			phases: [
+				{
+					name: "builder",
+					kind: "agent",
+					owner: "builder",
+					status: "success",
+					attempt: 1,
+					retries: 0,
+					failed: false,
+					elapsedMs: 21_000,
+					totalTokens: 20_120,
+					totalCostUsd: 0.31,
+				},
+				{
+					name: "gate",
+					kind: "verifier",
+					owner: "verifier",
+					status: "fail",
+					attempt: 2,
+					retries: 1,
+					failed: true,
+					elapsedMs: 9_000,
+					totalTokens: 8_545,
+					totalCostUsd: 0.1113,
+				},
+			],
+			phasesTruncated: false,
+		}],
 		truncated: false,
 	};
 }
@@ -598,6 +649,7 @@ export function bootstrapFixture(
 		dispatchInspection: null,
 		fleetInspection: null,
 		toolchainInspection: null,
+		traceInspection: null,
 		...overrides,
 	};
 }

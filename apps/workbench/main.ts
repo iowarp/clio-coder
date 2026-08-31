@@ -12,6 +12,7 @@ import {
 	ClioToolchainInspectError,
 	type ClioToolchainInspector,
 } from "./clio-toolchain-inspector.ts";
+import { ClioCliTraceInspector, ClioTraceInspectError, type ClioTraceInspector } from "./clio-trace-inspector.ts";
 import {
 	ClioCliRecoveryInspector,
 	ClioRecoveryInspectError,
@@ -52,6 +53,7 @@ import {
 	type WireProjectWorkspace,
 	type WireRoutingInspection,
 	type WireToolchainInspection,
+	type WireTraceInspection,
 	type WireTreeNode,
 	type WireUsageInspection,
 } from "./src/protocol.ts";
@@ -174,6 +176,8 @@ export interface WorkbenchServerOptions {
 	fleetInspector?: ClioFleetInspector;
 	/** Overrides the fixed installation-wide pinned tool adapter (tests). */
 	toolchainInspector?: ClioToolchainInspector;
+	/** Overrides the fixed installation-wide durable trace adapter (tests). */
+	traceInspector?: ClioTraceInspector;
 	/** Overrides the redacted Clio Coder doctor/paths adapter (tests). */
 	recoveryInspector?: ClioRecoveryInspector;
 	/** Overrides the Workbench state directory (tests). */
@@ -372,6 +376,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #dispatchInspector: ClioDispatchInspector;
 	readonly #fleetInspector: ClioFleetInspector;
 	readonly #toolchainInspector: ClioToolchainInspector;
+	readonly #traceInspector: ClioTraceInspector;
 	readonly #recoveryInspector: ClioRecoveryInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
@@ -389,6 +394,7 @@ class WorkbenchRuntime implements HostSink {
 	#dispatchInspection: WireDispatchInspection | null = null;
 	#fleetInspection: WireFleetInspection | null = null;
 	#toolchainInspection: WireToolchainInspection | null = null;
+	#traceInspection: WireTraceInspection | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
 	#readCommandQueue: Promise<void> = Promise.resolve();
@@ -415,6 +421,7 @@ class WorkbenchRuntime implements HostSink {
 				| "dispatchInspector"
 				| "fleetInspector"
 				| "toolchainInspector"
+				| "traceInspector"
 				| "recoveryInspector"
 				| "permissionEscalateMs"
 				| "permissionBudgetMs"
@@ -454,6 +461,10 @@ class WorkbenchRuntime implements HostSink {
 			new ClioCliToolchainInspector({
 				log: options.quiet ? () => undefined : (message) => console.error(message),
 			});
+		this.#traceInspector = options.traceInspector ??
+			new ClioCliTraceInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
 		this.#recoveryInspector = options.recoveryInspector ??
 			new ClioCliRecoveryInspector({
 				log: options.quiet ? () => undefined : (message) => console.error(message),
@@ -490,11 +501,12 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, durable run, toolchain, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, durable run, toolchain, trace, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
 			securityNote: SECURITY_NOTE,
 			dispatchInspection: this.#dispatchInspection,
 			fleetInspection: this.#fleetInspection,
 			toolchainInspection: this.#toolchainInspection,
+			traceInspection: this.#traceInspection,
 		};
 	}
 
@@ -714,6 +726,9 @@ class WorkbenchRuntime implements HostSink {
 		if (command.kind === "toolchain.inspect") {
 			return this.#serializeRead(() => this.#dispatchToolchainInspect(session, command));
 		}
+		if (command.kind === "trace.inspect") {
+			return this.#serializeRead(() => this.#dispatchTraceInspect(session, command));
+		}
 		if (command.kind === "recovery.inspect") {
 			return this.#serializeRead(() => this.#dispatchRecoveryInspect(session, command));
 		}
@@ -907,6 +922,27 @@ class WorkbenchRuntime implements HostSink {
 			if (this.#closed || session.closed) return;
 			this.#toolchainInspection = inspection;
 			this.#broadcast("toolchain.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
+		}
+	}
+
+	async #dispatchTraceInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"trace.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			const inspection = await this.#traceInspector.inspect(this.#state.homePath);
+			if (this.#closed || session.closed) return;
+			this.#traceInspection = inspection;
+			this.#broadcast("trace.state", {}, { inspection });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send("command.error", {}, {
@@ -1434,6 +1470,9 @@ class WorkbenchRuntime implements HostSink {
 		if (error instanceof ClioToolchainInspectError) {
 			return { code: error.code, message: error.message };
 		}
+		if (error instanceof ClioTraceInspectError) {
+			return { code: error.code, message: error.message };
+		}
 		if (error instanceof ClioRecoveryInspectError) {
 			return { code: error.code, message: error.message };
 		}
@@ -1586,6 +1625,7 @@ export async function startWorkbenchServer(
 		...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
 		...(options.fleetInspector === undefined ? {} : { fleetInspector: options.fleetInspector }),
 		...(options.toolchainInspector === undefined ? {} : { toolchainInspector: options.toolchainInspector }),
+		...(options.traceInspector === undefined ? {} : { traceInspector: options.traceInspector }),
 		...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
 		...(options.permissionBudgetMs === undefined ? {} : { permissionBudgetMs: options.permissionBudgetMs }),

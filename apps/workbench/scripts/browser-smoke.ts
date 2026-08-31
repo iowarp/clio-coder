@@ -18,6 +18,7 @@ import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
+import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -30,6 +31,7 @@ import {
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
+	traceInspectionFixture,
 	usageInspectionFixture,
 } from "../tests/fixtures.ts";
 
@@ -107,6 +109,9 @@ const running = await startWorkbenchServer({
 	fleetInspector: {
 		inspect: () => Promise.resolve(fleetInspectionFixture()),
 	} satisfies ClioFleetInspector,
+	traceInspector: {
+		inspect: () => Promise.resolve(traceInspectionFixture()),
+	} satisfies ClioTraceInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -461,6 +466,17 @@ try {
 	for (const forbidden of ["receiptPath", "events.ndjson", "/receipts/"]) {
 		equal(await fleetJournal.getByText(forbidden, { exact: false }).count(), 0);
 	}
+	// The same refresh reads the trace database, so the selected run carries its
+	// durable accounting beside its event spine.
+	const traceAccounting = fleetJournal.getByRole("region", { name: "Durable accounting for run run-alpha" });
+	await traceAccounting.getByText("28,665", { exact: true }).waitFor();
+	await traceAccounting.getByText("$0.42", { exact: true }).waitFor();
+	const tracePhases = traceAccounting.getByRole("list", { name: "Phases for run run-alpha" });
+	await tracePhases.getByText("errored", { exact: true }).waitFor();
+	for (const forbidden of ["the prompt text", "trace.sqlite", "phase_id"]) {
+		equal(await traceAccounting.getByText(forbidden, { exact: false }).count(), 0);
+	}
+
 	// The fleet root index names the planned steps and only offers a selection
 	// for a step whose run is actually in this bounded window.
 	const fleetRoots = fleetJournal.getByRole("region", { name: "Fleets that dispatched these runs" });
@@ -1411,6 +1427,7 @@ try {
 			dispatchUsesInstallationWideBoundedAdapter: true,
 			fleetRunsUseDurableBoundedAdapter: true,
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
+			traceAccountingCarriesNoRequestTextOrPath: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,

@@ -6839,6 +6839,119 @@ kbd {
 	line-height: 1.35;
 }
 
+.trace-accounting {
+	display: grid;
+	gap: 10px;
+	min-width: 0;
+	padding: 12px;
+	border: 1px solid var(--hairline);
+	border-left: 2px solid var(--info);
+	background: rgb(255 255 255 / 1.5%);
+}
+
+.trace-accounting > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.trace-accounting__totals {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	border: 1px solid var(--hairline);
+}
+
+.trace-accounting__totals > div {
+	min-width: 0;
+	padding: 8px 10px;
+	border-left: 1px solid var(--hairline);
+}
+
+.trace-accounting__totals > div:first-child {
+	border-left: 0;
+}
+
+.trace-accounting__totals dt {
+	color: var(--dim);
+	font-size: 0.52rem;
+}
+
+.trace-accounting__totals dd {
+	margin-top: 3px;
+	color: var(--paper-strong);
+	font-family: var(--font-mono);
+	font-size: 0.68rem;
+	overflow-wrap: anywhere;
+}
+
+.trace-accounting__none,
+.trace-accounting__bound,
+.trace-accounting__absent {
+	color: var(--dim);
+	font-size: 0.6rem;
+	line-height: 1.4;
+}
+
+.trace-accounting__absent {
+	padding-left: 10px;
+	border-left: 2px solid var(--hairline);
+}
+
+.trace-phases {
+	display: grid;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.trace-phases > li {
+	display: grid;
+	grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.4fr) auto;
+	gap: 10px;
+	align-items: center;
+	min-width: 0;
+	padding: 7px 9px;
+	border-left: 2px solid var(--hairline);
+	background: rgb(10 16 22 / 68%);
+}
+
+.trace-phases > li.is-failed {
+	border-left-color: var(--danger);
+}
+
+.trace-phases__name {
+	color: var(--paper);
+	font-family: var(--font-mono);
+	font-size: 0.6rem;
+	overflow-wrap: anywhere;
+}
+
+.trace-phases__kind,
+.trace-phases__numbers {
+	color: var(--dim);
+	font-family: var(--font-mono);
+	font-size: 0.52rem;
+	overflow-wrap: anywhere;
+}
+
+@media (width <= 900px) {
+	.trace-accounting__totals,
+	.trace-phases > li {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.trace-accounting__totals > div {
+		border-top: 1px solid var(--hairline);
+		border-left: 0;
+	}
+
+	.trace-accounting__totals > div:first-child {
+		border-top: 0;
+	}
+}
+
 .fleet-roots {
 	display: grid;
 	gap: 12px;

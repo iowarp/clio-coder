@@ -48,6 +48,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"dispatch.inspect",
 	"fleet.inspect",
 	"toolchain.inspect",
+	"trace.inspect",
 	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
@@ -253,6 +254,8 @@ export type FleetInspectPayload = Readonly<Record<string, never>>;
 
 export type ToolchainInspectPayload = Readonly<Record<string, never>>;
 
+export type TraceInspectPayload = Readonly<Record<string, never>>;
+
 export type RecoveryInspectPayload = Readonly<Record<string, never>>;
 
 export interface TargetsListPayload {
@@ -298,6 +301,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "dispatch.inspect": DispatchInspectPayload;
 	readonly "fleet.inspect": FleetInspectPayload;
 	readonly "toolchain.inspect": ToolchainInspectPayload;
+	readonly "trace.inspect": TraceInspectPayload;
 	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
@@ -333,6 +337,7 @@ export const SERVER_EVENT_KINDS = [
 	"dispatch.state",
 	"fleet.inspection.state",
 	"toolchain.state",
+	"trace.state",
 	"recovery.state",
 	"targets.state",
 	"targets.probed",
@@ -1098,6 +1103,57 @@ export interface WireFleetInspection {
 	readonly rootsTruncated: boolean;
 }
 
+export const MAX_WIRE_TRACE_RUNS = 8;
+export const MAX_WIRE_TRACE_PHASES = 16;
+
+export interface WireTracePhase {
+	readonly name: string;
+	readonly kind: string;
+	readonly owner: string;
+	readonly status: string;
+	readonly attempt: number;
+	readonly retries: number;
+	/** Whether the phase recorded an error, without the error text itself. */
+	readonly failed: boolean;
+	readonly elapsedMs: number | null;
+	readonly totalTokens: number | null;
+	readonly totalCostUsd: number | null;
+}
+
+export interface WireTraceRun {
+	readonly runId: string;
+	readonly agent: string;
+	readonly target: string;
+	readonly model: string;
+	readonly runtime: string;
+	readonly node: string | null;
+	readonly status: string;
+	readonly startedAt: string;
+	readonly elapsedMs: number | null;
+	readonly totalTokens: number | null;
+	readonly totalCostUsd: number | null;
+	readonly phases: readonly WireTracePhase[];
+	readonly phasesTruncated: boolean;
+}
+
+/**
+ * Where a durable run's wall time and tokens went, from the trace database.
+ *
+ * Deliberately accounting only. The trace store also holds the request text an
+ * operator typed, per-phase descriptions, and error prose that can quote a
+ * path, a URL, or a model reply; none of it crosses. `available` is false on an
+ * installation whose trace database was never written, which is a different
+ * fact from a database that holds no runs.
+ */
+export interface WireTraceInspection {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	readonly available: boolean;
+	readonly runs: readonly WireTraceRun[];
+	readonly truncated: boolean;
+}
+
 export const TOOLCHAIN_SOURCES = ["path", "vendored", "none"] as const;
 export type WireToolchainSource = (typeof TOOLCHAIN_SOURCES)[number];
 export const MAX_WIRE_TOOLCHAIN_ITEMS = 32;
@@ -1319,6 +1375,10 @@ export interface ToolchainStatePayload {
 	readonly inspection: WireToolchainInspection;
 }
 
+export interface TraceStatePayload {
+	readonly inspection: WireTraceInspection;
+}
+
 export interface RecoveryStatePayload {
 	readonly inspection: WireRecoveryInspection;
 }
@@ -1507,6 +1567,7 @@ export interface ServerEventPayloadByKind {
 	readonly "dispatch.state": DispatchStatePayload;
 	readonly "fleet.inspection.state": FleetInspectionStatePayload;
 	readonly "toolchain.state": ToolchainStatePayload;
+	readonly "trace.state": TraceStatePayload;
 	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
@@ -1862,6 +1923,7 @@ function validateClientPayload<K extends ClientCommandKind>(
 		case "dispatch.inspect":
 		case "fleet.inspect":
 		case "toolchain.inspect":
+		case "trace.inspect":
 		case "recovery.inspect":
 			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
 		case "project.browse": {
@@ -4166,6 +4228,117 @@ export function validateFleetInspection(
 	};
 }
 
+function expectNullableDispatchNumber(
+	value: unknown,
+	label: string,
+	integer: boolean,
+): number | null {
+	return value === null ? null : expectDispatchNumber(value, label, integer);
+}
+
+export function validateTraceInspection(
+	value: unknown,
+	label = "trace inspection",
+): WireTraceInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"available",
+		"runs",
+		"truncated",
+	]);
+	if (record.scope !== "installation") {
+		invalid(`${label}.scope must be installation`);
+	}
+	const available = expectBoolean(record.available, `${label}.available`);
+	const truncated = expectBoolean(record.truncated, `${label}.truncated`);
+	const seen = new Set<string>();
+	const runs = expectArray(
+		record.runs,
+		`${label}.runs`,
+		MAX_WIRE_TRACE_RUNS,
+		(value, runLabel): WireTraceRun => {
+			const run = expectExactKeys(value, runLabel, [
+				"runId",
+				"agent",
+				"target",
+				"model",
+				"runtime",
+				"node",
+				"status",
+				"startedAt",
+				"elapsedMs",
+				"totalTokens",
+				"totalCostUsd",
+				"phases",
+				"phasesTruncated",
+			]);
+			const runId = expectPresentationText(run.runId, `${runLabel}.runId`, 128);
+			if (seen.has(runId)) invalid(`${label}.runs repeats ${runId}`);
+			seen.add(runId);
+			return {
+				runId,
+				agent: expectPresentationText(run.agent, `${runLabel}.agent`, 128),
+				target: expectPresentationText(run.target, `${runLabel}.target`, 128),
+				model: expectPresentationText(run.model, `${runLabel}.model`, 256),
+				runtime: expectPresentationText(run.runtime, `${runLabel}.runtime`, 128),
+				node: expectNullablePresentationText(run.node, `${runLabel}.node`, 128),
+				status: expectPresentationText(run.status, `${runLabel}.status`, 64),
+				startedAt: expectTimestamp(run.startedAt, `${runLabel}.startedAt`),
+				elapsedMs: expectNullableDispatchNumber(run.elapsedMs, `${runLabel}.elapsedMs`, true),
+				totalTokens: expectNullableDispatchNumber(run.totalTokens, `${runLabel}.totalTokens`, true),
+				totalCostUsd: expectNullableDispatchNumber(run.totalCostUsd, `${runLabel}.totalCostUsd`, false),
+				phases: expectArray(
+					run.phases,
+					`${runLabel}.phases`,
+					MAX_WIRE_TRACE_PHASES,
+					(phase, phaseLabel): WireTracePhase => {
+						const entry = expectExactKeys(phase, phaseLabel, [
+							"name",
+							"kind",
+							"owner",
+							"status",
+							"attempt",
+							"retries",
+							"failed",
+							"elapsedMs",
+							"totalTokens",
+							"totalCostUsd",
+						]);
+						return {
+							name: expectPresentationText(entry.name, `${phaseLabel}.name`, 128),
+							kind: expectPresentationText(entry.kind, `${phaseLabel}.kind`, 64),
+							owner: expectPresentationText(entry.owner, `${phaseLabel}.owner`, 128),
+							status: expectPresentationText(entry.status, `${phaseLabel}.status`, 64),
+							attempt: expectDispatchNumber(entry.attempt, `${phaseLabel}.attempt`, true),
+							retries: expectDispatchNumber(entry.retries, `${phaseLabel}.retries`, true),
+							failed: expectBoolean(entry.failed, `${phaseLabel}.failed`),
+							elapsedMs: expectNullableDispatchNumber(entry.elapsedMs, `${phaseLabel}.elapsedMs`, true),
+							totalTokens: expectNullableDispatchNumber(entry.totalTokens, `${phaseLabel}.totalTokens`, true),
+							totalCostUsd: expectNullableDispatchNumber(entry.totalCostUsd, `${phaseLabel}.totalCostUsd`, false),
+						};
+					},
+				),
+				phasesTruncated: expectBoolean(run.phasesTruncated, `${runLabel}.phasesTruncated`),
+			};
+		},
+	);
+	// A trace database that was never written has nothing to have read, so rows
+	// or a truncation alongside that claim describe two different installations.
+	if (!available && (runs.length > 0 || truncated)) {
+		invalid(`${label} reports rows from an unavailable trace database`);
+	}
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		available,
+		runs,
+		truncated,
+	};
+}
+
 function expectToolVersion(value: unknown, label: string, nullable = false): string | null {
 	const text = nullable ? expectNullablePresentationText(value, label, 64) : expectPresentationText(value, label, 64);
 	if (text !== null && !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(text)) {
@@ -4803,6 +4976,15 @@ function validateServerPayload(
 				),
 			};
 		}
+		case "trace.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return {
+				inspection: validateTraceInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
+		}
 		case "recovery.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -5141,6 +5323,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"dispatch.state",
 	"fleet.inspection.state",
 	"toolchain.state",
+	"trace.state",
 	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([

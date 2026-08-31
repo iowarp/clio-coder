@@ -8,6 +8,7 @@ import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
+import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -30,6 +31,7 @@ import {
 	type WireRecoveryInspection,
 	type WireRoutingInspection,
 	type WireToolchainInspection,
+	type WireTraceInspection,
 	type WireUsageInspection,
 } from "../src/protocol.ts";
 import {
@@ -39,6 +41,7 @@ import {
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
+	traceInspectionFixture,
 	usageInspectionFixture,
 } from "./fixtures.ts";
 
@@ -113,6 +116,7 @@ interface FixtureOptions {
 	readonly dispatchInspector?: ClioDispatchInspector;
 	readonly fleetInspector?: ClioFleetInspector;
 	readonly toolchainInspector?: ClioToolchainInspector;
+	readonly traceInspector?: ClioTraceInspector;
 	readonly recoveryInspector?: ClioRecoveryInspector;
 	readonly disconnectGraceMs?: number;
 	readonly permissionEscalateMs?: number;
@@ -157,6 +161,7 @@ async function startFixture(options: FixtureOptions = {}): Promise<ServerFixture
 			...(options.dispatchInspector === undefined ? {} : { dispatchInspector: options.dispatchInspector }),
 			...(options.fleetInspector === undefined ? {} : { fleetInspector: options.fleetInspector }),
 			...(options.toolchainInspector === undefined ? {} : { toolchainInspector: options.toolchainInspector }),
+			...(options.traceInspector === undefined ? {} : { traceInspector: options.traceInspector }),
 			...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 			...(options.disconnectGraceMs === undefined ? {} : { disconnectGraceMs: options.disconnectGraceMs }),
 			...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
@@ -1634,6 +1639,36 @@ Deno.test("a shortened target list reaches the client as truncated", async () =>
 		const opened = (await collectThrough(socket, "project.opened")).at(-1);
 		ok(opened?.kind === "project.opened");
 		equal(opened.payload.workspace.targetsTruncated, true);
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("trace inspection is global, uses the configured home, and survives browser reload", async () => {
+	let inspectedCwd: string | null = null;
+	const traceInspector: ClioTraceInspector = {
+		inspect(cwd) {
+			inspectedCwd = cwd;
+			return Promise.resolve(traceInspectionFixture());
+		},
+	};
+	const fixture = await startFixture({ traceInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+		await sendCommand(socket, "request-trace", "trace.inspect", {});
+		const trace = (await collectThrough(socket, "trace.state")).at(-1);
+		ok(trace?.kind === "trace.state");
+		equal(trace.projectId, undefined);
+		equal(inspectedCwd, fixture.homePath);
+		deepStrictEqual(trace.payload.inspection, traceInspectionFixture());
+
+		const bootstrap = await (await fetch(new URL("/api/bootstrap", fixture.running.url))).json() as {
+			traceInspection: WireTraceInspection;
+		};
+		deepStrictEqual(bootstrap.traceInspection, traceInspectionFixture());
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();
