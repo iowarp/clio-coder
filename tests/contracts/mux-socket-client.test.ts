@@ -192,6 +192,20 @@ describe("mux detection ladder", () => {
 });
 
 describe("mux socket client", () => {
+	it("uses one connection per request, because herdr closes after answering", async () => {
+		// herdr's handle_connection (src/api/server.rs:172) reads exactly one
+		// request line and closes. A client that reuses the socket gets EPIPE on
+		// its second call, which is how this was found against a live session.
+		const fake = await server();
+		const live = client(fake.socketPath);
+		await live.ping();
+		await live.paneList();
+		await live.paneGet("w1:p1");
+		const connectionIds = fake.requests.map((request) => request.connectionId);
+		strictEqual(new Set(connectionIds).size, connectionIds.length, "each request must get its own connection");
+		strictEqual(live.connected(), true);
+	});
+
 	it("round-trips the phase 1 wire surface", async () => {
 		const fake = await server();
 		const live = client(fake.socketPath);
@@ -246,7 +260,8 @@ describe("mux socket client", () => {
 				return true;
 			},
 		);
-		// The connection survives a timeout: the next call still resolves.
+		// A timed-out call takes its own connection down with it and leaves the
+		// client usable: the next call opens a fresh connection and resolves.
 		fake.setHandler("pane.list", null);
 		strictEqual((await live.paneList()).length, 1);
 	});

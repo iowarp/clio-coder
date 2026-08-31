@@ -3,18 +3,25 @@
  *
  * Two connection kinds, because the server treats them differently:
  *
- *   1. One persistent request/response connection. Every call gets a monotonic
- *      id, lands in a pending map, and is settled by the response line carrying
- *      that id. A call with no response inside its budget rejects with
- *      {@link MuxRequestTimeout}.
- *   2. One dedicated connection per `events.subscribe` stream. herdr holds a
- *      subscription connection open, acknowledges once, and then pushes event
- *      lines on it forever, so it cannot share the request connection.
+ *   1. One connection per request. herdr's `handle_connection` reads exactly one
+ *      request line, writes the response, and closes
+ *      (`src/api/server.rs:172`, verified against herdr 0.7.5 / protocol 17), so
+ *      a second request written to the same socket dies with EPIPE. Spec 4.3
+ *      describes a persistent request/response connection with a pending map;
+ *      that is not what the pinned binary does. Each call still gets a monotonic
+ *      id and still checks the echoed id, which catches a server answering
+ *      something other than what was asked. A call with no response inside its
+ *      budget rejects with {@link MuxRequestTimeout}.
+ *   2. One dedicated connection per `events.subscribe` stream. This is one of
+ *      the two methods that keep a connection open (the other is
+ *      `pane.graphics.stream`): herdr acknowledges once and then pushes event
+ *      lines forever.
  *
- * Both reconnect with capped exponential backoff. After a subscription
- * reconnect the client refetches `session.snapshot` and hands it to the resync
- * handler: herdr's documented pattern is snapshot once and then trust events,
- * and events missed while the socket was down are simply gone.
+ * Connect failures back off with a capped exponential delay, so a dead socket
+ * is not hammered once per call. After a subscription reconnect the client
+ * refetches `session.snapshot` and hands it to the resync handler: herdr's
+ * documented pattern is snapshot once and then trust events, and events missed
+ * while the socket was down are simply gone.
  *
  * The interactive app never shells out to the `herdr` CLI. CLI wrappers exist
  * for humans, doctor, and scripts.
@@ -117,7 +124,7 @@ export interface MuxSubscribeOptions {
  */
 export interface MuxClient {
 	readonly socketPath: string;
-	/** True while the request connection is up. */
+	/** Whether the most recent request reached the server. Requests are one per connection. */
 	connected(): boolean;
 	/** Protocol/version recorded from the most recent successful ping or snapshot. */
 	server(): MuxServerInfo | null;
@@ -153,13 +160,6 @@ export interface MuxClient {
 	): Promise<MuxSubscription>;
 
 	close(): Promise<void>;
-}
-
-interface PendingCall {
-	method: string;
-	resolve: (value: unknown) => void;
-	reject: (error: unknown) => void;
-	timer: NodeJS.Timeout;
 }
 
 /** Opens one socket, or rejects with a typed transport error. */
@@ -360,105 +360,97 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 	const log = options.log ?? ((): void => undefined);
 
 	let disposed = false;
-	let requestSocket: net.Socket | null = null;
-	let connecting: Promise<net.Socket> | null = null;
 	let nextId = 0;
-	const pending = new Map<string, PendingCall>();
+	let reachable = false;
 	let serverInfo: MuxServerInfo | null = null;
 	let snapshotCache: MuxSnapshot | null = null;
 
-	/** Consecutive failed connect attempts on the request channel. */
-	let requestFailures = 0;
-	/** Wall clock before which a new request-channel connect is refused. */
-	let requestRetryAt = 0;
+	/** Consecutive failed connect attempts. */
+	let connectFailures = 0;
+	/** Wall clock before which a new connect is refused. */
+	let retryAt = 0;
 
 	const delayFor = (failures: number): number =>
 		Math.min(backoff.maxDelayMs, backoff.initialDelayMs * backoff.factor ** Math.max(0, failures - 1));
 
-	const failPending = (error: MuxError): void => {
-		for (const call of pending.values()) {
-			clearTimeout(call.timer);
-			call.reject(error);
-		}
-		pending.clear();
-	};
-
-	const dropRequestSocket = (reason: string): void => {
-		const socket = requestSocket;
-		requestSocket = null;
-		if (socket) socket.destroy();
-		failPending(new MuxError("transport", `mux request connection lost: ${reason}`));
-	};
-
-	const handleResponseLine = (line: Record<string, unknown>): void => {
-		const id = line.id;
-		if (typeof id !== "string") return;
-		const call = pending.get(id);
-		if (!call) return;
-		pending.delete(id);
-		clearTimeout(call.timer);
-		const error = asRecord(line.error);
-		if (error) {
-			const code = typeof error.code === "string" ? error.code : "unknown";
-			const message = typeof error.message === "string" ? error.message : code;
-			call.reject(new MuxError(muxErrorKind(code), message, { wireCode: code, method: call.method }));
-			return;
-		}
-		call.resolve(line.result);
-	};
-
-	const ensureRequestSocket = async (): Promise<net.Socket> => {
+	/**
+	 * One request, one connection.
+	 *
+	 * The id counter and the response-id check survive from the pending-map
+	 * design because they still catch a server answering something other than
+	 * what was asked, but there is no pending map: a connection carries exactly
+	 * one outstanding call and is destroyed as soon as it settles.
+	 */
+	const call = async (method: string, callParams: Record<string, unknown>, timeoutMs?: number): Promise<unknown> => {
 		if (disposed) throw new MuxError("transport", "mux client is closed");
-		if (requestSocket && !requestSocket.destroyed) return requestSocket;
-		if (connecting) return connecting;
-		const waitMs = requestRetryAt - Date.now();
+		const waitMs = retryAt - Date.now();
 		if (waitMs > 0) {
 			throw new MuxError("transport", `mux socket ${socketPath} is in backoff for another ${waitMs}ms`);
 		}
-		connecting = (async () => {
-			try {
-				const socket = await connectSocket(socketPath, connectTimeoutMs);
-				readJsonLines(socket, handleResponseLine, () => dropRequestSocket("oversized response line"));
-				socket.on("error", (error: Error) => dropRequestSocket(error.message));
-				socket.on("close", () => {
-					if (requestSocket === socket) dropRequestSocket("closed by peer");
-				});
-				requestSocket = socket;
-				requestFailures = 0;
-				requestRetryAt = 0;
-				return socket;
-			} catch (error) {
-				requestFailures += 1;
-				requestRetryAt = Date.now() + delayFor(requestFailures);
-				throw error;
-			} finally {
-				connecting = null;
-			}
-		})();
-		return connecting;
-	};
-
-	const call = async (method: string, callParams: Record<string, unknown>, timeoutMs?: number): Promise<unknown> => {
-		const socket = await ensureRequestSocket();
+		let socket: net.Socket;
+		try {
+			socket = await connectSocket(socketPath, connectTimeoutMs);
+		} catch (error) {
+			connectFailures += 1;
+			retryAt = Date.now() + delayFor(connectFailures);
+			reachable = false;
+			throw error;
+		}
+		connectFailures = 0;
+		retryAt = 0;
 		nextId += 1;
 		const id = `clio-${nextId}`;
 		const budget = timeoutMs ?? requestTimeoutMs;
-		return await new Promise<unknown>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				pending.delete(id);
-				reject(new MuxRequestTimeout(method, budget));
-			}, budget);
-			timer.unref?.();
-			pending.set(id, { method, resolve, reject, timer });
-			socket.write(`${JSON.stringify({ id, method, params: callParams })}\n`, (error) => {
-				if (!error) return;
-				const inflight = pending.get(id);
-				if (!inflight) return;
-				pending.delete(id);
-				clearTimeout(inflight.timer);
-				reject(new MuxError("transport", `mux request ${method} failed to write: ${error.message}`, { method }));
+		try {
+			const result = await new Promise<unknown>((resolve, reject) => {
+				let settled = false;
+				const finish = (settle: () => void): void => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					socket.destroy();
+					settle();
+				};
+				const timer = setTimeout(() => finish(() => reject(new MuxRequestTimeout(method, budget))), budget);
+				timer.unref?.();
+				readJsonLines(
+					socket,
+					(line) => {
+						const responseId = line.id;
+						if (typeof responseId !== "string") return;
+						const error = asRecord(line.error);
+						// herdr answers a request it could not even parse with an empty id,
+						// so an empty-id error line on this connection is still ours.
+						if (responseId !== id && !(responseId === "" && error)) return;
+						if (error) {
+							const code = typeof error.code === "string" ? error.code : "unknown";
+							const message = typeof error.message === "string" ? error.message : code;
+							finish(() => reject(new MuxError(muxErrorKind(code), message, { wireCode: code, method })));
+							return;
+						}
+						finish(() => resolve(line.result));
+					},
+					() => finish(() => reject(new MuxError("protocol", `mux ${method} response line was oversized`, { method }))),
+				);
+				socket.on("error", (error: Error) =>
+					finish(() => reject(new MuxError("transport", `mux request ${method} failed: ${error.message}`, { method }))),
+				);
+				socket.on("close", () =>
+					finish(() => reject(new MuxError("transport", `mux request ${method} lost its connection`, { method }))),
+				);
+				socket.write(`${JSON.stringify({ id, method, params: callParams })}\n`, (error) => {
+					if (!error) return;
+					finish(() =>
+						reject(new MuxError("transport", `mux request ${method} failed to write: ${error.message}`, { method })),
+					);
+				});
 			});
-		});
+			reachable = true;
+			return result;
+		} catch (error) {
+			if (error instanceof MuxError && error.kind === "transport") reachable = false;
+			throw error;
+		}
 	};
 
 	const callObject = async (
@@ -571,7 +563,7 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 	return {
 		socketPath,
 		connected(): boolean {
-			return requestSocket !== null && !requestSocket.destroyed;
+			return reachable;
 		},
 		server(): MuxServerInfo | null {
 			return serverInfo;
@@ -682,7 +674,7 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		subscribe,
 		async close(): Promise<void> {
 			disposed = true;
-			dropRequestSocket("client closed");
+			reachable = false;
 		},
 	};
 }
