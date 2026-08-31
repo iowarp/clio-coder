@@ -271,12 +271,16 @@ export async function installPinnedTool(
  */
 function prune(root: string, entry: PinnedTool): { pruned: string[]; note: string } {
 	const outcome = pruneSupersededVersions(entry.id, entry.version, { root });
-	if (outcome.failed.length > 0) {
-		const trouble = outcome.failed.map((item) => `${item.version} (${item.error})`).join(", ");
-		return { pruned: outcome.removed, note: `; could not prune ${trouble}` };
+	const parts: string[] = [];
+	if (outcome.removed.length > 0) parts.push(`pruned ${outcome.removed.join(", ")}`);
+	if (outcome.staleStaging.length > 0) {
+		const count = outcome.staleStaging.length;
+		parts.push(`swept ${count} abandoned install ${count === 1 ? "directory" : "directories"}`);
 	}
-	if (outcome.removed.length === 0) return { pruned: [], note: "" };
-	return { pruned: outcome.removed, note: `; pruned ${outcome.removed.join(", ")}` };
+	if (outcome.failed.length > 0) {
+		parts.push(`could not prune ${outcome.failed.map((item) => `${item.version} (${item.error})`).join(", ")}`);
+	}
+	return { pruned: outcome.removed, note: parts.length === 0 ? "" : `; ${parts.join("; ")}` };
 }
 
 function unpack(bytes: Buffer, download: PinnedToolDownload): Map<string, ArchiveEntry> {

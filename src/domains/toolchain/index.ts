@@ -15,7 +15,7 @@ export { ToolchainManifest } from "./manifest.js";
 export { toolchainRoot, toolVersionDir, vendoredBinaryPath } from "./paths.js";
 export { currentToolPlatform, findPinnedTool, findPinnedToolByBinary, PINNED_TOOLS } from "./registry.js";
 export type { ToolRemoveOptions, ToolRemoveResult } from "./remove.js";
-export { installedToolVersions, pruneSupersededVersions, removeTool } from "./remove.js";
+export { installedToolVersions, pruneSupersededVersions, removeTool, STALE_STAGING_MS } from "./remove.js";
 export {
 	describeFloorRejection,
 	describeResolution,
