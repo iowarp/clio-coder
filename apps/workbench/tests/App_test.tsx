@@ -18,6 +18,7 @@ import {
 	clioSnapshotFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	evalInventoryFixture,
 	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	FIXTURE_PROJECT_ID,
@@ -66,6 +67,7 @@ const inertActions: WorkbenchActions = {
 	inspectTrace() {},
 	inspectGateDecisions() {},
 	inspectInterop() {},
+	inspectEvalReports() {},
 	inspectEvidence() {},
 	readEvidence() {},
 	verifyRun() {},
@@ -296,6 +298,7 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 			trace={traceInspectionFixture()}
 			evidence={evidenceInspectionFixture()}
 			decisions={gateDecisionsFixture()}
+			evalInventory={evalInventoryFixture()}
 			evidenceDetail={evidenceDetailFixture()}
 			pendingEvidenceRead={null}
 			verification={fleetVerificationFixture()}
@@ -338,6 +341,7 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 			trace={traceInspectionFixture()}
 			evidence={evidenceInspectionFixture()}
 			decisions={gateDecisionsFixture()}
+			evalInventory={evalInventoryFixture()}
 			evidenceDetail={evidenceDetailFixture()}
 			pendingEvidenceRead={null}
 			verification={fleetVerificationFixture()}
@@ -428,6 +432,7 @@ Deno.test("an unread and an unavailable trace database are told apart, and neith
 				trace={trace}
 				evidence={null}
 				decisions={null}
+				evalInventory={null}
 				evidenceDetail={null}
 				pendingEvidenceRead={null}
 				verification={null}

@@ -30,6 +30,37 @@ export function parseEvalServingConfigurationV1(value: unknown, source: string):
 	};
 }
 
+/**
+ * The serving facts an artifact was produced under.
+ *
+ * An artifact written before the observation existed has no record of its own,
+ * so the matrix it declared is the best available reading and the missing
+ * fields stay null rather than being invented. This lives beside
+ * `sameEvalServingConfiguration` because the two are one rule: what a
+ * comparison reads, and when it decides two readings agree. Anything asking
+ * whether two eval runs are comparable must go through both, or it is answering
+ * a different question from the one `eval compare` answers.
+ *
+ * The parameter is structural rather than `EvalArtifactV4` so this module stays
+ * free of an import cycle through `schema/artifact.ts`.
+ */
+export function evalServingConfigurationOf(artifact: {
+	readonly servingConfiguration?: EvalServingConfigurationV1;
+	readonly matrix: { readonly target: string; readonly model: string | null; readonly thinking: string | null };
+}): EvalServingConfigurationV1 {
+	return (
+		artifact.servingConfiguration ?? {
+			targetId: artifact.matrix.target,
+			runtimeId: null,
+			modelId: artifact.matrix.model,
+			serverBuild: null,
+			total_slots: null,
+			thinkingLevel: artifact.matrix.thinking,
+			compiledPromptHash: null,
+		}
+	);
+}
+
 export function sameEvalServingConfiguration(
 	left: EvalServingConfigurationV1,
 	right: EvalServingConfigurationV1,

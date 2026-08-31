@@ -27,6 +27,13 @@ Commands:
   clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
 	  clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--format text|json|md|junit] [--allow-config-drift]
   clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
+  clio-coder eval inventory --json
+
+inventory is the fixed machine-readable read a GUI host may run. Unlike report
+and compare it names no eval id, so the process it starts cannot be steered to a
+different report or a wider window. It carries each stored report's identity,
+provenance, serving facts, accounting, and per-scenario outcomes, and none of
+the runner attachments a report holds.
 `;
 
 type EvalCommand = "validate" | "run" | "report" | "compare" | "gate";
@@ -194,6 +201,12 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 }
 
 export async function runEvalCommand(args: ReadonlyArray<string>): Promise<number> {
+	// Routed before the shared parser so the fixed read stays exactly fixed: no
+	// eval flag can reach it, and no flag it does not name can be spent on it.
+	if (args[0] === "inventory") {
+		const { runEvalInventory } = await import("./eval-inventory.js");
+		return runEvalInventory(args.slice(1));
+	}
 	let parsed: ParsedEvalArgs;
 	try {
 		parsed = parseEvalArgs(args);
