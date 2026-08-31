@@ -2051,6 +2051,15 @@ setInterval(() => {}, 1000);
 
 		strictEqual(init.protocolVersion, 1);
 		strictEqual((init.agentInfo as { name?: string }).name, "clio-coder");
+		deepStrictEqual(init.authMethods, [
+			{
+				id: "clio-login",
+				name: "Clio Target Auth & Setup",
+				description: "Configure models, API keys, and target endpoints in terminal",
+				type: "terminal",
+				args: ["auth", "login"],
+			},
+		]);
 
 		// AgentCapabilities must match the ACP v1 schema, which has no
 		// sessionCapabilities / streaming / tools fields.
