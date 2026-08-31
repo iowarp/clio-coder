@@ -97,6 +97,8 @@ const MIN_VISIBLE_OPTIONS = 3;
 /** Interview rows spent on chrome before an option row: strip, header, blanks, status, one question row. */
 const INTERVIEW_CHROME_ROWS = 7;
 const MAX_VISIBLE_OPTIONS = 12;
+/** Below this the second column is too narrow to wrap a sentence into. */
+const MIN_DESCRIPTION_COLUMN = 28;
 const ELLIPSIS = "…";
 
 /**
@@ -798,17 +800,29 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		const visibleCount = Math.min(this.maxVisibleOptions(), Math.max(1, items.length));
+		const primaryColumnWidth = this.primaryColumnWidth(items, width);
+		const acceptKey = question.multi_select === true ? "Space" : "Enter";
+		// The focused option's description wraps in full, so the rows it needs come
+		// out of the list rather than out of the sentence. Options the operator
+		// cannot currently read are what a windowed list is for, and one arrow key
+		// brings any of them back; a cut explanation has no such recovery.
+		const focusedRows = this.renderOptionRow(
+			items[selectedIndex] as SelectItem,
+			true,
+			width,
+			primaryColumnWidth,
+			acceptKey,
+		).length;
+		const budget = Math.max(1, this.maxVisibleOptions() - (focusedRows - 1));
+		const visibleCount = Math.min(budget, Math.max(1, items.length));
 		const start = Math.max(0, Math.min(selectedIndex - Math.floor(visibleCount / 2), items.length - visibleCount));
 		const end = Math.min(items.length, start + visibleCount);
-		const primaryColumnWidth = this.primaryColumnWidth(items, width);
 		const lines: string[] = [];
 
-		const acceptKey = question.multi_select === true ? "Space" : "Enter";
 		for (let index = start; index < end; index += 1) {
 			const item = items[index];
 			if (!item) continue;
-			lines.push(this.renderOptionRow(item, index === selectedIndex, width, primaryColumnWidth, acceptKey));
+			lines.push(...this.renderOptionRow(item, index === selectedIndex, width, primaryColumnWidth, acceptKey));
 		}
 
 		if (start > 0 || end < items.length) {
@@ -823,13 +837,22 @@ class AskUserOverlayView implements Component {
 		return Math.max(1, Math.min(bounded, Math.max(1, width - 4)));
 	}
 
+	/**
+	 * One option, as the rows it needs.
+	 *
+	 * The focused option's description wraps under its own column and is never
+	 * cut: a description is what the operator is choosing between, and half of
+	 * one reads as the whole thing. An unfocused row stays a one-line table cell
+	 * whose ellipsis says there is more, which the operator reads by moving to
+	 * it.
+	 */
 	private renderOptionRow(
 		item: SelectItem,
 		selected: boolean,
 		width: number,
 		primaryColumnWidth: number,
 		acceptKey: string,
-	): string {
+	): string[] {
 		const theme = clioTheme();
 		const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 		// The key that answers rides on the focused row. An operator whose eyes are
@@ -839,22 +862,40 @@ class AskUserOverlayView implements Component {
 		const available = Math.max(1, width - 2 - visibleWidth(affordance));
 		const description = item.description?.replace(/[\r\n]+/g, " ").trim();
 
-		let body: string;
-		if (description && width > 40) {
-			const labelWidth = Math.max(1, Math.min(primaryColumnWidth - 2, available - 4));
-			const label = truncateToWidth(item.label, labelWidth, ELLIPSIS, false);
-			const spacing = " ".repeat(Math.max(1, primaryColumnWidth - visibleWidth(label)));
-			const descriptionWidth = Math.max(1, available - visibleWidth(label) - visibleWidth(spacing));
-			const desc = truncateToWidth(description, descriptionWidth, ELLIPSIS, false);
-			body = selected
-				? theme.style("accent", `${label}${spacing}${desc}`, { bold: true })
-				: `${label}${theme.fg("muted", `${spacing}${desc}`)}`;
-		} else {
+		if (!description || width <= 40) {
 			const label = truncateToWidth(item.label, available, ELLIPSIS, false);
-			body = selected ? theme.style("accent", label, { bold: true }) : label;
+			const body = selected ? theme.style("accent", label, { bold: true }) : label;
+			return [fitLine(`${prefix}${body}${affordance}`, width)];
 		}
 
-		return fitLine(`${prefix}${body}${affordance}`, width);
+		const labelWidth = Math.max(1, Math.min(primaryColumnWidth - 2, available - 4));
+		const label = truncateToWidth(item.label, labelWidth, ELLIPSIS, false);
+		const spacing = " ".repeat(Math.max(1, primaryColumnWidth - visibleWidth(label)));
+		const descriptionWidth = Math.max(1, available - visibleWidth(label) - visibleWidth(spacing));
+		if (!selected) {
+			const desc = truncateToWidth(description, descriptionWidth, ELLIPSIS, false);
+			return [fitLine(`${prefix}${label}${theme.fg("muted", `${spacing}${desc}`)}`, width)];
+		}
+		// A gutter this narrow wraps a sentence into slivers and breaks words, so
+		// below the floor the description drops to its own full-width lines under
+		// the label instead of squeezing into the second column.
+		if (descriptionWidth < MIN_DESCRIPTION_COLUMN) {
+			const indent = "    ";
+			const body = theme.style("accent", label, { bold: true });
+			return [
+				fitLine(`${prefix}${body}${affordance}`, width),
+				...wrapTextWithAnsi(description, Math.max(1, width - indent.length)).map((line) =>
+					fitLine(`${indent}${theme.style("accent", line, { bold: true })}`, width),
+				),
+			];
+		}
+		const wrapped = wrapTextWithAnsi(description, descriptionWidth);
+		const head = wrapped[0] ?? "";
+		const indent = " ".repeat(visibleWidth(prefix) + visibleWidth(label) + visibleWidth(spacing));
+		return [
+			fitLine(`${prefix}${theme.style("accent", `${label}${spacing}${head}`, { bold: true })}${affordance}`, width),
+			...wrapped.slice(1).map((line) => fitLine(`${indent}${theme.style("accent", line, { bold: true })}`, width)),
+		];
 	}
 
 	private ensureControl(): void {

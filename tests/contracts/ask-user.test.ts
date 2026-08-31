@@ -387,7 +387,8 @@ describe("contracts/ask-user overlay", () => {
 		}
 	});
 
-	it("uses an ellipsis for long option rows and keeps validation hints dim", async () => {
+	it("wraps the focused option's description, ellipsizes the rest, and keeps validation hints dim", async () => {
+		const focusedDescription = "Run typecheck, focused contracts, render audit, and full continuous integration.";
 		const mounted = askOverlay();
 		const pending = mounted.session.ask([
 			{
@@ -395,18 +396,29 @@ describe("contracts/ask-user overlay", () => {
 				options: [
 					{
 						label: "Run the complete repository gate",
-						description: "Run typecheck, focused contracts, render audit, and full continuous integration.",
+						description: focusedDescription,
+					},
+					{
+						label: "Run the fast gate",
+						description: "Run typecheck and the focused contract tests only, skipping the render audit.",
 					},
 				],
 			},
 		]);
 		try {
-			const optionLines = mounted.child().render(52);
-			const option = optionLines.find((line) => stripAnsi(line).includes("Run the complete")) ?? "";
-			ok(
-				stripAnsi(option).includes("…"),
-				`long option row should end its truncation with an ellipsis: ${stripAnsi(option)}`,
-			);
+			const optionLines = mounted
+				.child()
+				.render(52)
+				.map((line) => stripAnsi(line));
+			// The focused option is what the operator is reading, so its whole
+			// sentence is on screen across as many rows as it needs.
+			const collapsed = optionLines.join(" ").replace(/\s+/g, " ");
+			ok(collapsed.includes(focusedDescription), `the focused description must not be cut: ${collapsed}`);
+			ok(!collapsed.includes("integration.…"), collapsed);
+			// The unfocused row stays a one-line cell, and its ellipsis says so.
+			const unfocused = optionLines.find((line) => line.includes("Run the fast gate")) ?? "";
+			ok(unfocused.includes("…"), `an unfocused option row is a cell that marks its cut: ${unfocused}`);
+			for (const line of optionLines) strictEqual(visibleWidth(line) <= 52, true, `line overflows: ${line}`);
 		} finally {
 			mounted.session.cancel();
 			await pending;

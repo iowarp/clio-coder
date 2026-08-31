@@ -77,6 +77,40 @@ function fakeTui(): {
 }
 
 describe("contracts/decisions-overlay", () => {
+	it("wraps an expanded question, answer, and correction inside the indent instead of cutting them", () => {
+		const question =
+			"Which runtime should receive this feature, given that the dispatch path and the interactive path resolve their settings differently?";
+		const correction = "Run the complete contract suite, including the render audit that the focused run skips.";
+		const entry = interview({
+			decisions: [
+				{
+					key: "scope",
+					label: "Scope",
+					value: "Only the interactive session, and only for operators who opted in",
+					source_question: question,
+					status: "active",
+					decidedAt: "2026-08-19T10:01:00.000Z",
+				},
+				{
+					key: "release_gate",
+					value: "Focused contracts",
+					status: "superseded",
+					decidedAt: "2026-08-19T10:02:00.000Z",
+					revisedAt: "2026-08-19T10:04:00.000Z",
+					correction,
+				},
+			],
+		});
+		const width = 60;
+		const lines = formatDecisionsOverlayBodyLines([entry], 0, "interview-1:scope", width).map(stripAnsi);
+		const collapsed = lines.join(" ").replace(/\s+/g, " ");
+		// The indent used to be spent after wrapping, so every continuation line
+		// lost its last six columns to a cut that landed mid-sentence.
+		ok(collapsed.includes(question), `the expanded question must not be cut: ${collapsed}`);
+		ok(collapsed.includes(correction), `the correction must not be cut: ${collapsed}`);
+		for (const line of lines) strictEqual(visibleWidth(line) <= width, true, `line overflows: ${line}`);
+	});
+
 	it("formats the attributed correction turn exactly", () => {
 		strictEqual(
 			formatDecisionCorrectionTurn(
