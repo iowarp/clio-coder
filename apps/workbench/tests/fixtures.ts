@@ -7,6 +7,7 @@ import {
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireDispatchInspection,
+	type WireFleetInspection,
 	type WireProjectWorkspace,
 	type WireRecoveryInspection,
 	type WireRoutingInspection,
@@ -38,6 +39,47 @@ export function dispatchInspectionFixture(): WireDispatchInspection {
 	};
 }
 
+export function fleetInspectionFixture(): WireFleetInspection {
+	return {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:28.728Z",
+		runs: [{
+			runId: "run-alpha",
+			agentId: "builder",
+			model: "qwen3-coder",
+			target: "local-lmstudio",
+			node: "local",
+			phase: "succeeded",
+			startedAt: "2026-08-31T14:00:00.000Z",
+			elapsedMs: 30_000,
+			task: "Inspect the durable event boundary",
+			journal: "available",
+			events: [
+				{
+					at: "2026-08-31T14:00:00.000Z",
+					label: "run opened (builder)",
+					detail: null,
+				},
+				{
+					at: "2026-08-31T14:00:02.000Z",
+					label: "tool completed",
+					detail: "read project files",
+				},
+			],
+			eventsTruncated: false,
+			evidence: {
+				state: "verified",
+				summary: "trust v1: receipt integrity verified",
+			},
+			outcome: "succeeded",
+			outcomeDetail: null,
+			terminal: true,
+		}],
+		truncated: false,
+	};
+}
+
 export function recoveryInspectionFixture(): WireRecoveryInspection {
 	return {
 		scope: "installation",
@@ -53,7 +95,13 @@ export function recoveryInspectionFixture(): WireRecoveryInspection {
 			{ id: "configuration", checks: 2, passed: 1, warnings: 0, failures: 1 },
 			{ id: "history", checks: 1, passed: 1, warnings: 0, failures: 0 },
 			{ id: "models", checks: 2, passed: 0, warnings: 1, failures: 1 },
-			{ id: "interoperability", checks: 1, passed: 0, warnings: 1, failures: 0 },
+			{
+				id: "interoperability",
+				checks: 1,
+				passed: 0,
+				warnings: 1,
+				failures: 0,
+			},
 			{ id: "fleet", checks: 1, passed: 0, warnings: 1, failures: 0 },
 		],
 	};
@@ -63,10 +111,30 @@ export function configInspectionFixture(): WireConfigInspection {
 	return {
 		inspectedAt: "2026-08-29T12:00:00.000Z",
 		settings: [
-			{ key: "autonomy", source: "project", value: "suggest", valueKind: "exact" },
-			{ key: "orchestrator.model", source: "project", value: "qwen3.8-27b", valueKind: "exact" },
-			{ key: "retry.maxRetries", source: "user", value: "3", valueKind: "exact" },
-			{ key: "targets", source: "user", value: "4 items", valueKind: "collection" },
+			{
+				key: "autonomy",
+				source: "project",
+				value: "suggest",
+				valueKind: "exact",
+			},
+			{
+				key: "orchestrator.model",
+				source: "project",
+				value: "qwen3.8-27b",
+				valueKind: "exact",
+			},
+			{
+				key: "retry.maxRetries",
+				source: "user",
+				value: "3",
+				valueKind: "exact",
+			},
+			{
+				key: "targets",
+				source: "user",
+				value: "4 items",
+				valueKind: "collection",
+			},
 		],
 		settingsTruncated: false,
 		entries: [
@@ -100,7 +168,10 @@ export function configInspectionFixture(): WireConfigInspection {
 				trust: "untrusted",
 				precedence: "winner",
 				reloadClass: "restart",
-				facts: [{ label: "Version", value: "1.2.0" }, { label: "Effective", value: "yes" }],
+				facts: [{ label: "Version", value: "1.2.0" }, {
+					label: "Effective",
+					value: "yes",
+				}],
 			},
 			{
 				category: "memory",
@@ -109,7 +180,10 @@ export function configInspectionFixture(): WireConfigInspection {
 				trust: "trusted",
 				precedence: "single",
 				reloadClass: "hot",
-				facts: [{ label: "Present", value: "yes" }, { label: "Records", value: "7" }],
+				facts: [{ label: "Present", value: "yes" }, {
+					label: "Records",
+					value: "7",
+				}],
 			},
 		],
 		entriesTruncated: false,
@@ -405,7 +479,9 @@ export function workspaceFixture(
 	};
 }
 
-export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBootstrap {
+export function bootstrapFixture(
+	overrides: Partial<WireBootstrap> = {},
+): WireBootstrap {
 	return {
 		protocolVersion: PROTOCOL_VERSION,
 		appName: "Clio Coder" as const,
@@ -425,6 +501,7 @@ export function bootstrapFixture(overrides: Partial<WireBootstrap> = {}): WireBo
 		stateDirNote: "The desktop app keeps only its recent-project list under /tmp/workbench-fixture/state.",
 		securityNote: "The desktop app enforces the project boundary in its own code; Deno grants are broad.",
 		dispatchInspection: null,
+		fleetInspection: null,
 		...overrides,
 	};
 }
@@ -492,9 +569,11 @@ export function serverEventFixture<K extends ServerEventKind>(
 		: {};
 	return {
 		protocolVersion: PROTOCOL_VERSION,
-		workspaceInstanceId: options.workspaceInstanceId ?? "workspace-fixture-0001",
+		workspaceInstanceId: options.workspaceInstanceId ??
+			"workspace-fixture-0001",
 		sequence,
-		eventId: options.eventId ?? `event-${kind.replaceAll(".", "-")}-${sequence}`,
+		eventId: options.eventId ??
+			`event-${kind.replaceAll(".", "-")}-${sequence}`,
 		kind,
 		...context,
 		terminal: kind === "turn.terminal" || kind === "protocol.error",

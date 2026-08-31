@@ -10,13 +10,19 @@
 
 import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { FLEET_INSPECT_MAX_EVENTS, FLEET_INSPECT_MAX_RUNS, fleetInspectSnapshot } from "../../src/cli/fleet-inspect.js";
 import { loadRunViewModel, type RunViewModel, renderRunView, resolveRunId } from "../../src/cli/fleet-view.js";
 import { createRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { type Ledger, openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-const lineage: RunLineage = { parentRunId: null, rootRunId: "view-root", attempt: 0, depth: 0 };
+const lineage: RunLineage = {
+	parentRunId: null,
+	rootRunId: "view-root",
+	attempt: 0,
+	depth: 0,
+};
 const identity = { host: "view-host", user: "view-user", hpc: null };
 
 function receiptDraft(runId: string, task: string, startedAt: string, endedAt: string): RunReceiptDraft {
@@ -34,7 +40,12 @@ function receiptDraft(runId: string, task: string, startedAt: string, endedAt: s
 		quality: {
 			version: 1,
 			typedValidations: [],
-			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			responseSchema: {
+				sourceId: null,
+				schemaDigest: null,
+				runtimeEnforceable: false,
+				enforcementPassed: null,
+			},
 			resultContract: null,
 		},
 		costProvenance: "unknown",
@@ -70,10 +81,22 @@ function receiptDraft(runId: string, task: string, startedAt: string, endedAt: s
 		nodeVersion: process.version,
 		toolCalls: 0,
 		toolStats: [],
-		toolActivity: { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false },
+		toolActivity: {
+			calls: 0,
+			succeeded: 0,
+			failed: 0,
+			blocked: 0,
+			mutatingSucceeded: false,
+		},
 		reproducibility: {
 			cwd: "/tmp/fleet-view",
-			git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
+			git: {
+				branch: null,
+				commit: null,
+				dirty: null,
+				dirtyEntries: null,
+				statusHash: null,
+			},
 			safetyPolicy: {
 				version: 1,
 				rulePackHash: null,
@@ -108,8 +131,16 @@ async function seedRun(task: string): Promise<Fixture> {
 	});
 	const journal = createRunEventJournal({});
 	journal.open(run.id, "tester");
-	journal.append(run.id, { at: "2026-08-30T10:00:00.000Z", type: "message_end", detail: "read src/index.ts" });
-	journal.append(run.id, { at: "2026-08-30T10:00:01.000Z", type: "clio_tool_finish", detail: "read ok" });
+	journal.append(run.id, {
+		at: "2026-08-30T10:00:00.000Z",
+		type: "message_end",
+		detail: "read src/index.ts",
+	});
+	journal.append(run.id, {
+		at: "2026-08-30T10:00:01.000Z",
+		type: "clio_tool_finish",
+		detail: "read ok",
+	});
 	// Both stamps are fixed so the header's elapsed is a deterministic 30s.
 	const startedAt = "2026-08-30T10:00:00.000Z";
 	const endedAt = "2026-08-30T10:00:30.000Z";
@@ -133,7 +164,11 @@ async function seedRun(task: string): Promise<Fixture> {
 		costUsd: 0,
 	});
 	const receipt = ledger.recordReceipt(run.id, receiptDraft(run.id, task, startedAt, endedAt));
-	journal.receipt(run.id, { outcome: receipt.outcome, exitCode: receipt.exitCode, digest: receipt.integrity.digest });
+	journal.receipt(run.id, {
+		outcome: receipt.outcome,
+		exitCode: receipt.exitCode,
+		digest: receipt.integrity.digest,
+	});
 	journal.terminal(run.id, receipt.outcome);
 	journal.flush();
 	await ledger.persist();
@@ -147,6 +182,29 @@ function line(model: RunViewModel, prefix: string): string {
 }
 
 describe("fleet view data sources", () => {
+	it("projects a fixed bounded recent-run window without receipt or journal paths", async () => {
+		const isolated = await isolateClioEnv("clio-fleet-inspect-");
+		try {
+			const fixture = await seedRun("inspect the durable boundary");
+			const snapshot = fleetInspectSnapshot(() => Date.parse("2026-08-30T10:01:00.000Z"));
+			strictEqual(snapshot.version, 1);
+			strictEqual(snapshot.generatedAt, "2026-08-30T10:01:00.000Z");
+			strictEqual(snapshot.runs.length, 1);
+			const run = snapshot.runs[0];
+			ok(run !== undefined);
+			strictEqual(run.runId, fixture.runId);
+			strictEqual(run.journal, "available");
+			strictEqual(run.evidence.state, "verified");
+			strictEqual(run.terminal, true);
+			strictEqual(run.events.length <= FLEET_INSPECT_MAX_EVENTS, true);
+			strictEqual(snapshot.runs.length <= FLEET_INSPECT_MAX_RUNS, true);
+			strictEqual(JSON.stringify(snapshot).includes("/receipts/"), false);
+			strictEqual(JSON.stringify(snapshot).includes("events.ndjson"), false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
 	it("renders a header, transcript, verified evidence, and outcome from ledger + journal + receipt", async () => {
 		const isolated = await isolateClioEnv("clio-fleet-view-");
 		try {

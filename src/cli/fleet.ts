@@ -7,6 +7,7 @@
  *   clio-coder fleet commands init             draft a repository command registry
  *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
  *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
+ *   clio-coder fleet inspect --json             bounded recent run and journal projection
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
@@ -102,6 +103,7 @@ Subcommands:
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
+  inspect --json                emit a bounded recent-run and event-journal projection
   view <runId> [--follow]       read one run's ledger entry, event journal, and receipt
   view <fleetRootId>            list a fleet run's steps and the run id to view for each
   drain [--json]                deny new execution starts for up to one hour
@@ -146,7 +148,9 @@ function parseVars(args: ReadonlyArray<string>): { vars: Record<string, string>;
 		const eq = pair.indexOf("=");
 		const key = pair.slice(0, eq).trim();
 		const value = pair.slice(eq + 1);
-		if (key.length === 0) return { vars, rest, error: "--var requires a non-empty key" };
+		if (key.length === 0) {
+			return { vars, rest, error: "--var requires a non-empty key" };
+		}
 		vars[key] = value;
 	}
 	return { vars, rest };
@@ -164,7 +168,9 @@ function renderStep(step: FleetContractStep): string {
 	if (step.kind === "code") return `code:${step.command}[${step.scope}]`;
 	if (step.kind === "agent") return `${step.agent}[${step.scope}]`;
 	if (step.kind === "gate") return `gate:${step.path}[${step.run}]`;
-	if (step.kind === "plan") return `plan:${step.agent}[${step.roster.join(",")}; max ${step.maxTasks}]`;
+	if (step.kind === "plan") {
+		return `plan:${step.agent}[${step.roster.join(",")}; max ${step.maxTasks}]`;
+	}
 	const check =
 		step.check.kind === "code"
 			? `code:${step.check.command}`
@@ -231,16 +237,28 @@ function contractAgents(
 ): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
 	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
 	for (const step of contract.steps) {
-		if (step.kind === "agent") agents.push({ id: step.id, agent: step.agent, scope: step.scope });
-		else if (step.kind === "gate") agents.push({ id: step.id, agent: step.agent, scope: "workspace" });
-		else if (step.kind === "plan") {
+		if (step.kind === "agent") {
 			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
-			for (const agent of step.roster) agents.push({ id: `${step.id}.roster`, agent, scope: "readonly" });
+		} else if (step.kind === "gate") {
+			agents.push({ id: step.id, agent: step.agent, scope: "workspace" });
+		} else if (step.kind === "plan") {
+			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
+			for (const agent of step.roster) {
+				agents.push({ id: `${step.id}.roster`, agent, scope: "readonly" });
+			}
 		} else if (step.kind === "loop") {
 			if (step.check.kind === "agent") {
-				agents.push({ id: `${step.id}.check`, agent: step.check.agent, scope: step.check.scope });
+				agents.push({
+					id: `${step.id}.check`,
+					agent: step.check.agent,
+					scope: step.check.scope,
+				});
 			}
-			agents.push({ id: `${step.id}.repair`, agent: step.repair.agent, scope: step.repair.scope });
+			agents.push({
+				id: `${step.id}.repair`,
+				agent: step.repair.agent,
+				scope: step.repair.scope,
+			});
 		}
 	}
 	return agents;
@@ -250,10 +268,12 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 	const targets = new Set(deps.settings.targets.map((target) => target.id));
 	const profiles = new Set(Object.keys(deps.settings.workers?.profiles ?? {}));
 	const checkRoute = (id: string, route: { target?: string; profile?: string }): string | null => {
-		if (route.target !== undefined && !targets.has(route.target))
+		if (route.target !== undefined && !targets.has(route.target)) {
 			return `unknown target '${route.target}' at step '${id}'`;
-		if (route.profile !== undefined && !profiles.has(route.profile))
+		}
+		if (route.profile !== undefined && !profiles.has(route.profile)) {
 			return `unknown profile '${route.profile}' at step '${id}'`;
+		}
 		return null;
 	};
 	for (const step of contract.steps) {
@@ -299,10 +319,13 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	const json = rest.includes("--json");
 	const resumeIndex = rest.indexOf("--resume");
 	const resumeId = resumeIndex === -1 ? undefined : rest[resumeIndex + 1];
-	if (resumeIndex !== -1 && (resumeId === undefined || resumeId.startsWith("-")))
+	if (resumeIndex !== -1 && (resumeId === undefined || resumeId.startsWith("-"))) {
 		return fail("--resume requires a run id");
+	}
 	const name = rest.find((arg) => !arg.startsWith("-"));
-	if (!name) return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]");
+	if (!name) {
+		return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]");
+	}
 
 	let contract: FleetContract;
 	let prompt: string;
@@ -484,30 +507,43 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			...(resume !== undefined ? { resume } : {}),
 			onStepSettled(step) {
 				if (step.replayed === true && step.result !== undefined) {
-					if (json)
+					if (json) {
 						process.stdout.write(
-							`${JSON.stringify({ stepId: step.stepId, status: "replayed", receipt: { runId: step.result.terminalRunId, digest: step.result.receiptDigest } })}\n`,
+							`${JSON.stringify({
+								stepId: step.stepId,
+								status: "replayed",
+								receipt: {
+									runId: step.result.terminalRunId,
+									digest: step.result.receiptDigest,
+								},
+							})}\n`,
 						);
-					else
+					} else {
 						process.stdout.write(
 							`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
 						);
+					}
 					return;
 				}
 				if (step.receipt !== undefined) {
 					if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
-					else
+					else {
 						process.stdout.write(
 							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance)}\n`,
 						);
+					}
 					return;
 				}
 				if (step.codeStep !== undefined) {
-					if (json) process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
-					else
+					if (json) {
+						process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
+					} else {
 						process.stdout.write(
-							`step ${step.stepId} code:${step.commandId}: ${step.succeeded ? "passed" : "failed"} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
+							`step ${step.stepId} code:${step.commandId}: ${
+								step.succeeded ? "passed" : "failed"
+							} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
 						);
+					}
 				}
 			},
 			onNotice(text, kind) {
@@ -541,15 +577,21 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		process.stdout.write(
 			`fleet ${contract.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderCostAggregate(outcome.totalCost)}\n`,
 		);
-		for (const loop of outcome.result.loops)
+		for (const loop of outcome.result.loops) {
 			process.stdout.write(
 				`  loop ${loop.loopId}: ${loop.reason} after ${loop.attempts} verification(s) and ${loop.repairs} repair(s)\n`,
 			);
-		if (outcome.result.revalidated.length > 0)
+		}
+		if (outcome.result.revalidated.length > 0) {
 			process.stdout.write(
-				`  staleness: re-ran ${outcome.result.revalidated.join(", ")} because a workspace step landed after the last green\n`,
+				`  staleness: re-ran ${outcome.result.revalidated.join(
+					", ",
+				)} because a workspace step landed after the last green\n`,
 			);
-		for (const message of outcome.result.needsDecision) process.stdout.write(`  needs operator decision: ${message}\n`);
+		}
+		for (const message of outcome.result.needsDecision) {
+			process.stdout.write(`  needs operator decision: ${message}\n`);
+		}
 		for (const boundary of outcome.result.writeBoundaries) {
 			if (!boundary.violated) continue;
 			process.stdout.write(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
@@ -590,7 +632,10 @@ function receiptTokenSplit(row: RunEnvelope): { input: number; output: number } 
 	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RunReceipt>;
-		return { input: finiteCount(parsed.inputTokenCount), output: finiteCount(parsed.outputTokenCount) };
+		return {
+			input: finiteCount(parsed.inputTokenCount),
+			output: finiteCount(parsed.outputTokenCount),
+		};
 	} catch {
 		return null;
 	}
@@ -603,7 +648,10 @@ function receiptTokenSplit(row: RunEnvelope): { input: number; output: number } 
  */
 function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
 	if (row.inputTokenCount !== undefined || row.outputTokenCount !== undefined) {
-		return { input: finiteCount(row.inputTokenCount), output: finiteCount(row.outputTokenCount) };
+		return {
+			input: finiteCount(row.inputTokenCount),
+			output: finiteCount(row.outputTokenCount),
+		};
 	}
 	if (row.endedAt !== null) {
 		return receiptTokenSplit(row) ?? { input: 0, output: 0 };
@@ -613,7 +661,12 @@ function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
 
 export type FleetAdmissionStatus =
 	| { state: "open" }
-	| { state: "draining"; requestedByPid: number; requestedAt: string; expiresAt: string };
+	| {
+			state: "draining";
+			requestedByPid: number;
+			requestedAt: string;
+			expiresAt: string;
+	  };
 
 function admissionStatus(drain: CapacityDrain | null): FleetAdmissionStatus {
 	if (drain === null) return { state: "open" };
@@ -786,6 +839,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runFleet(args.slice(1));
 		case "status":
 			return runStatus(args.slice(1));
+		case "inspect":
+			return (await import("./fleet-inspect.js")).runFleetInspect(args.slice(1));
 		case "view":
 			return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 		case "drain":
