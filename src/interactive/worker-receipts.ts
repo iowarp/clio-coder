@@ -19,7 +19,7 @@ import { clioStateDir } from "../core/xdg.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { receiptFilePath } from "./view/artifacts.js";
-import type { WorkerReceiptFacts, WorkerResultContract } from "./worker-stream.js";
+import type { WorkerPresentedResultContract, WorkerReceiptFacts, WorkerResultContract } from "./worker-stream.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,6 +55,22 @@ function contractFrom(receipt: Record<string, unknown>): WorkerResultContract | 
 	return conformance === "pass" || conformance === "fail" || conformance === "not-reached" ? conformance : undefined;
 }
 
+const PRESENTED_RESULT_CONTRACTS: ReadonlyArray<WorkerPresentedResultContract> = [
+	"debugger-report",
+	"verifier-report",
+	"research-report",
+	"scout-report",
+];
+
+/** The kind is integrity-covered inside the validator source id on current receipts. */
+function contractKindFrom(receipt: Record<string, unknown>): WorkerPresentedResultContract | undefined {
+	const quality = isRecord(receipt.quality) ? receipt.quality : null;
+	const fact = quality !== null && isRecord(quality.resultContract) ? quality.resultContract : null;
+	const sourceId = optionalString(fact?.sourceId);
+	if (sourceId === undefined) return undefined;
+	return PRESENTED_RESULT_CONTRACTS.find((kind) => sourceId.startsWith(`agent-result-contract:${kind}:`));
+}
+
 /**
  * Project a parsed receipt onto the facts a worker block renders. The input is
  * whatever JSON the file held, not a typed {@link RunReceipt}: receipts written
@@ -66,6 +82,7 @@ export function workerReceiptFacts(receipt: Record<string, unknown>): WorkerRece
 	if (outcome === undefined) return null;
 	const output = isRecord(receipt.output) ? receipt.output : null;
 	const contract = contractFrom(receipt);
+	const contractKind = contractKindFrom(receipt);
 	const text = optionalString(output?.text);
 	const failureMessage = optionalString(receipt.failureMessage);
 	const outcomeCode = optionalString(receipt.outcomeCode);
@@ -82,6 +99,7 @@ export function workerReceiptFacts(receipt: Record<string, unknown>): WorkerRece
 		...(durationMs !== undefined ? { durationMs } : {}),
 		...(toolCalls !== undefined ? { toolCalls } : {}),
 		...(contract !== undefined ? { contract } : {}),
+		...(contractKind !== undefined ? { contractKind } : {}),
 		...(text !== undefined ? { text } : {}),
 	};
 }

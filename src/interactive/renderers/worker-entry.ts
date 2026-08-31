@@ -21,10 +21,16 @@
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
 
+import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { type ClioToken, clioTheme, fitUnits, formatCompactMs, GLYPH } from "../theme/index.js";
-import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
+import {
+	type WorkerEntryState,
+	type WorkerPresentedResultContract,
+	type WorkerReceiptSummary,
+	workerAskedByModel,
+} from "../worker-stream.js";
 
 const theme = clioTheme();
 const dim = (text: string): string => theme.fg("dim", text);
@@ -110,7 +116,7 @@ function isPending(entry: WorkerEntryState): boolean {
  * rendered as zero: an ACP peer reports no tokens at all, so its footer names
  * the tool calls it mediated instead of claiming it spent nothing.
  */
-function footerUnits(receipt: WorkerReceiptSummary): string[] {
+function footerUnits(entry: WorkerEntryState, receipt: WorkerReceiptSummary): string[] {
 	const units = [outcomeUnit(receipt, true)];
 	if (receipt.exitCode !== undefined && receipt.exitCode !== 0) {
 		units.push(theme.fg("error", `exit=${receipt.exitCode}`));
@@ -122,6 +128,8 @@ function footerUnits(receipt: WorkerReceiptSummary): string[] {
 	}
 	if (receipt.durationMs !== undefined) units.push(dim(formatCompactMs(receipt.durationMs)));
 	if (receipt.contract !== undefined) units.push(dim(`contract ${receipt.contract}`));
+	const presentation = presentedContractAnswer(entry);
+	if (presentation?.footer !== undefined) units.push(dim(presentation.footer));
 	if (receipt.abandonedDetail !== undefined) units.push(theme.fg("warning", receipt.abandonedDetail));
 	else if (receipt.receiptUnavailable === true) units.push(theme.fg("warning", "receipt unavailable"));
 	return units;
@@ -133,22 +141,119 @@ function railLines(text: string, token: ClioToken, width: number): string[] {
 	return wrapTextWithAnsi(text, contentWidth).map((row) => `${dim(RAIL)}${theme.fg(token, row)}`);
 }
 
-/** A worker's terminal answer when it is one JSON object, as a structured result contract asks for. */
+/** A worker's terminal JSON payload, using the same tolerant reader as its result contract. */
 function structuredAnswer(text: string): Record<string, unknown> | null {
-	const trimmed = text.trim();
-	if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
-	try {
-		const parsed: unknown = JSON.parse(trimmed);
-		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: null;
-	} catch {
-		return null;
-	}
+	const parsed = parseJsonObjectPayload(text);
+	return parsed.ok ? parsed.value : null;
 }
 
 const isStringArray = (value: unknown): value is string[] =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string");
+
+function reportString(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+interface PresentedContractAnswer {
+	lines: string[];
+	footer?: string;
+}
+
+function debuggerReport(value: Record<string, unknown>): PresentedContractAnswer | null {
+	const diagnosis = reportString(value.diagnosis);
+	const reproduction = value.reproduction;
+	if (
+		diagnosis === null ||
+		(reproduction !== "reproduced" && reproduction !== "not-reproduced" && reproduction !== "unknown") ||
+		!isStringArray(value.evidence)
+	) {
+		return null;
+	}
+	return {
+		lines: [
+			diagnosis,
+			...(value.evidence.length === 0 ? ["Evidence: none"] : ["Evidence:", ...value.evidence.map((item) => `- ${item}`)]),
+		],
+		footer: `reproduction ${reproduction}`,
+	};
+}
+
+function verifierReport(value: Record<string, unknown>): PresentedContractAnswer | null {
+	if ((value.verdict !== "pass" && value.verdict !== "fail") || !Array.isArray(value.checks)) return null;
+	const lines: string[] = [];
+	for (const raw of value.checks) {
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+		const check = raw as Record<string, unknown>;
+		const name = reportString(check.name);
+		const evidence = reportString(check.evidence);
+		if (name === null || evidence === null || typeof check.passed !== "boolean") return null;
+		lines.push(`${check.passed ? GLYPH.ok : GLYPH.error} ${name}: ${evidence}`);
+	}
+	return { lines: lines.length === 0 ? ["No checks reported."] : lines, footer: `verdict ${value.verdict}` };
+}
+
+function researchReport(value: Record<string, unknown>): PresentedContractAnswer | null {
+	if ((value.source !== "local" && value.source !== "external") || !Array.isArray(value.findings)) return null;
+	const lines: string[] = [];
+	for (const raw of value.findings) {
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+		const finding = raw as Record<string, unknown>;
+		const claim = reportString(finding.claim);
+		const evidence = reportString(finding.evidence);
+		if (claim === null || evidence === null) return null;
+		lines.push(`- ${claim}`, `  citation: ${evidence}`);
+	}
+	return { lines: lines.length === 0 ? ["No findings reported."] : lines, footer: `source ${value.source}` };
+}
+
+function scoutReport(value: Record<string, unknown>): PresentedContractAnswer | null {
+	if (!Array.isArray(value.findings) || typeof value.needsSplit !== "boolean") return null;
+	const lines: string[] = [];
+	for (const raw of value.findings) {
+		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+		const finding = raw as Record<string, unknown>;
+		const claim = reportString(finding.claim);
+		if (claim === null) return null;
+		const path = reportString(finding.path);
+		const line = typeof finding.line === "number" && Number.isSafeInteger(finding.line) ? finding.line : null;
+		lines.push(path !== null && line !== null ? `- ${claim} — ${path}:${line}` : `- ${claim} (ungrounded lead)`);
+	}
+	if (value.needsSplit) {
+		if (!Array.isArray(value.proposedSubtasks)) return null;
+		lines.push("Split recommended:");
+		for (const raw of value.proposedSubtasks) {
+			if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+			const subtask = raw as Record<string, unknown>;
+			const task = reportString(subtask.task);
+			const id = reportString(subtask.id);
+			if (task === null || id === null) return null;
+			lines.push(`- ${id}: ${task}`);
+		}
+	}
+	return {
+		lines: lines.length === 0 ? ["No findings reported."] : lines,
+		footer: value.needsSplit ? "split needed" : "no split needed",
+	};
+}
+
+function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
+	if (entry.receipt?.contract !== "pass" || entry.receipt.contractKind === undefined || entry.droppedLines !== 0) {
+		return null;
+	}
+	const value = structuredAnswer(entry.text);
+	if (value === null) return null;
+	const kind: WorkerPresentedResultContract = entry.receipt.contractKind;
+	switch (kind) {
+		case "debugger-report":
+			return debuggerReport(value);
+		case "verifier-report":
+			return verifierReport(value);
+		case "research-report":
+			return researchReport(value);
+		case "scout-report":
+			return scoutReport(value);
+	}
+}
 
 /**
  * A mutation report as prose: the paths it changed, each validation with its
@@ -184,6 +289,8 @@ function mutationReportLines(value: Record<string, unknown>): string[] | null {
 function bodySourceLines(entry: WorkerEntryState): string[] {
 	const structured = entry.droppedLines === 0 ? structuredAnswer(entry.text) : null;
 	if (structured === null) return entry.text.split("\n");
+	const presented = presentedContractAnswer(entry);
+	if (presented !== null) return presented.lines;
 	return mutationReportLines(structured) ?? JSON.stringify(structured, null, 2).split("\n");
 }
 
@@ -236,7 +343,8 @@ function failureLines(entry: WorkerEntryState, width: number): string[] {
 
 /** The receipt line, whole units only; a unit that would not fit is dropped behind a dim ellipsis. */
 function footerLine(entry: WorkerEntryState, width: number): string {
-	const units = isPending(entry) || entry.receipt === undefined ? [pendingUnit(entry)] : footerUnits(entry.receipt);
+	const units =
+		isPending(entry) || entry.receipt === undefined ? [pendingUnit(entry)] : footerUnits(entry, entry.receipt);
 	return fitUnits(theme, dim(FOOTER), units, width);
 }
 
