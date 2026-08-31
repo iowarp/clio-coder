@@ -5571,6 +5571,11 @@ kbd {
 	color: var(--muted);
 }
 
+.catalog-chips--tools span.is-denied {
+	border-color: rgb(255 92 102 / 30%);
+	color: var(--error);
+}
+
 .catalog-card__details summary {
 	cursor: pointer;
 }

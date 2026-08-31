@@ -23,6 +23,7 @@ import {
 	CATALOG_LIBRARY_KINDS,
 	CATALOG_LIBRARY_ORIGINS,
 	CATALOG_RESOURCE_SCOPES,
+	CATALOG_SKILL_INVALID_REASONS,
 	CATALOG_SKILL_SOURCES,
 	CATALOG_VERIFIER_AUTHORITIES,
 	CATALOG_VERIFIER_BLOCKS,
@@ -35,6 +36,7 @@ import {
 	MAX_WIRE_CATALOG_EXTENSIONS,
 	MAX_WIRE_CATALOG_LABELS,
 	MAX_WIRE_CATALOG_LIBRARY_ENTRIES,
+	MAX_WIRE_CATALOG_SKILL_TOOLS,
 	MAX_WIRE_CATALOG_SKILLS,
 	MAX_WIRE_CATALOG_VERIFIER_TAGS,
 	MAX_WIRE_CATALOG_VERIFIERS,
@@ -49,6 +51,7 @@ import {
 	type WireCatalogSkillCollection,
 	type WireCatalogVerifier,
 	type WireCatalogVerifierCollection,
+	type WireResourceDiagnosticCounts,
 } from "./src/protocol.ts";
 
 export const DEFAULT_CATALOG_INSPECT_TIMEOUT_MS = 12_000;
@@ -227,44 +230,133 @@ function diagnosticCount(value: unknown): number | null {
 	return Array.isArray(value) && value.length <= MAX_CATALOG_NUMBER ? value.length : null;
 }
 
+const SKILL_TOOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+function diagnosticCounts(value: unknown): WireResourceDiagnosticCounts | null {
+	if (!isRecord(value)) return null;
+	const errors = integer(value.errors);
+	const warnings = integer(value.warnings);
+	const collisions = integer(value.collisions);
+	if (errors === null || warnings === null || collisions === null) return null;
+	return { errors, warnings, collisions };
+}
+
+function skillTools(value: unknown): readonly string[] | null {
+	if (!Array.isArray(value) || value.length > MAX_WIRE_CATALOG_SKILL_TOOLS) return null;
+	const tools: string[] = [];
+	for (const entry of value) {
+		const tool = exactText(entry, 64);
+		if (tool === null || !SKILL_TOOL_PATTERN.test(tool) || tools.includes(tool)) return null;
+		tools.push(tool);
+	}
+	return tools;
+}
+
+function isoTimestamp(value: unknown): string | null | undefined {
+	if (value === null) return null;
+	const text = exactText(value, 64);
+	if (text === null) return undefined;
+	const parsed = Date.parse(text);
+	return Number.isFinite(parsed) && new Date(parsed).toISOString() === text ? text : undefined;
+}
+
 function projectSkill(value: unknown): WireCatalogSkill | null {
 	if (!isRecord(value)) return null;
 	const name = exactText(value.name, 128);
 	const summary = description(value.description);
 	const precedence = integer(value.precedence);
-	const issueCount = diagnosticCount(value.diagnostics);
+	const diagnostics = diagnosticCounts(value.diagnostics);
+	const allowedTools = skillTools(value.allowedTools);
+	const disallowedTools = skillTools(value.disallowedTools);
+	const installedAt = isoTimestamp(value.installedAt);
+	const updatedAt = isoTimestamp(value.updatedAt);
 	if (
-		name === null || summary === null || precedence === null || issueCount === null ||
+		name === null || summary === null || precedence === null || diagnostics === null || allowedTools === null ||
+		disallowedTools === null || installedAt === undefined || updatedAt === undefined ||
 		!isOneOf(value.scope, CATALOG_RESOURCE_SCOPES) || !isOneOf(value.source, CATALOG_SKILL_SOURCES) ||
-		typeof value.trusted !== "boolean" || typeof value.disableModelInvocation !== "boolean"
+		!isOneOf(value.audit, CATALOG_AUDIT_STATES) || typeof value.trusted !== "boolean" ||
+		typeof value.modelInvocable !== "boolean" || typeof value.modelVisible !== "boolean" ||
+		typeof value.installedByWorker !== "boolean" || typeof value.updatable !== "boolean"
 	) return null;
+	// Visibility is trust and invocation together and nothing else, so a payload
+	// claiming otherwise is refused rather than believed.
+	if (value.modelVisible !== (value.trusted && value.modelInvocable)) return null;
 	return {
 		name,
 		description: summary,
 		scope: value.scope,
 		source: value.source,
 		trusted: value.trusted,
+		modelInvocable: value.modelInvocable,
+		modelVisible: value.modelVisible,
 		precedence,
-		modelInvocable: !value.disableModelInvocation,
-		issueCount,
+		diagnostics,
+		allowedTools,
+		disallowedTools,
+		installedByWorker: value.installedByWorker,
+		updatable: value.updatable,
+		audit: value.audit,
+		installedAt,
+		updatedAt,
 	};
 }
 
+/**
+ * Project the fixed skill inventory.
+ *
+ * Like the verifier plane and unlike the agent catalog, a refused row fails the
+ * whole snapshot. A skill catalog is a small set the operator installed, and one
+ * quietly missing from a surface reporting how many the model can reach would
+ * make the count it reports wrong.
+ */
 export function projectSkillCatalog(value: unknown): WireCatalogSkillCollection {
-	if (!isRecord(value) || !Array.isArray(value.skills) || value.skills.length > MAX_RAW_CATALOG_ITEMS) {
-		throw new ClioCatalogProjectionError("Clio Coder returned an invalid skill catalog.");
+	if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.skills)) {
+		throw new ClioCatalogProjectionError("Clio Coder returned an invalid skill inventory.");
 	}
-	const issues = diagnosticCount(value.diagnostics);
-	if (issues === null) throw new ClioCatalogProjectionError("Clio Coder returned invalid skill catalog diagnostics.");
-	const candidates = value.skills.map(projectSkill).filter((entry): entry is WireCatalogSkill => entry !== null);
-	const projected = uniqueBy(candidates, (entry) => entry.name);
-	const items = projected.slice(0, MAX_WIRE_CATALOG_SKILLS);
+	if (value.skills.length > MAX_RAW_CATALOG_ITEMS) {
+		throw new ClioCatalogProjectionError("Clio Coder returned too many skills.");
+	}
+	const diagnostics = diagnosticCounts(value.diagnostics);
+	const total = integer(value.total);
+	const modelVisible = integer(value.modelVisible);
+	if (
+		diagnostics === null || total === null || modelVisible === null || typeof value.valid !== "boolean" ||
+		typeof value.skillsTruncated !== "boolean" ||
+		(value.invalidReason !== null && !isOneOf(value.invalidReason, CATALOG_SKILL_INVALID_REASONS))
+	) throw new ClioCatalogProjectionError("Clio Coder returned an invalid skill inventory.");
+	if (value.valid === (value.invalidReason !== null)) {
+		throw new ClioCatalogProjectionError("Clio Coder contradicted its own skill catalog verdict.");
+	}
+	const projected = value.skills.map(projectSkill);
+	if (projected.some((skill) => skill === null)) {
+		throw new ClioCatalogProjectionError("Clio Coder returned a skill the boundary refuses.");
+	}
+	const items = (projected as WireCatalogSkill[]).slice(0, MAX_WIRE_CATALOG_SKILLS);
 	return {
 		availability: "available",
 		items,
-		truncated: candidates.length !== value.skills.length || projected.length !== candidates.length ||
-			projected.length > items.length,
-		issueCount: issues,
+		truncated: value.skillsTruncated || items.length < total,
+		valid: value.valid,
+		invalidReason: value.invalidReason,
+		total,
+		modelVisible,
+		diagnostics,
+	};
+}
+
+function failedSkillCollection(): WireCatalogSkillCollection {
+	// A failed adapter knows nothing about the catalog, so it claims nothing. It
+	// is reported invalid because the surface must not read as a clean bill of
+	// health, and `load-error` is the honest reason: the read did not complete.
+	return {
+		availability: "failed",
+		items: [],
+		truncated: false,
+		valid: false,
+		invalidReason: "load-error",
+		total: 0,
+		modelVisible: 0,
+		diagnostics: { errors: 0, warnings: 0, collisions: 0 },
 	};
 }
 
@@ -536,6 +628,15 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 		}
 	}
 
+	async #skills(root: string): Promise<WireCatalogSkillCollection> {
+		try {
+			return projectSkillCatalog(await this.#runner.runJson(root, ["skills", "inventory", "--json"]));
+		} catch (error) {
+			this.#log(`Clio Coder skill inventory inspection failed (${failureCode(error)}).`);
+			return failedSkillCollection();
+		}
+	}
+
 	async #verifiers(root: string): Promise<WireCatalogVerifierCollection> {
 		try {
 			return projectVerifierCatalog(await this.#runner.runJson(root, ["verifiers", "inspect", "--json"]));
@@ -549,7 +650,7 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 		const root = resolve(trustedRoot);
 		const [agents, skills, library, extensions, verifiers] = await Promise.all([
 			this.#collection(root, "agent", ["agents", "--json"], projectAgentCatalog),
-			this.#collection(root, "skill", ["skills", "list", "--json"], projectSkillCatalog),
+			this.#skills(root),
 			this.#collection(root, "library", ["library", "list", "--json"], projectLibraryCatalog),
 			this.#collection(root, "extension", ["extensions", "list", "--all", "--json"], projectExtensionCatalog),
 			this.#verifiers(root),

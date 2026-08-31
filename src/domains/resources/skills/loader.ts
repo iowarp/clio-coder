@@ -893,6 +893,39 @@ export function modelVisibleSkills(skills: ReadonlyArray<Skill>): Skill[] {
 	return skills.filter((skill) => skill.trusted && !skill.disableModelInvocation);
 }
 
+/** Why a loaded skill catalog is not valid. Ordered by which failure to report first. */
+export type SkillCatalogInvalidReason = "load-error" | "collision" | "unloadable-file" | "no-skills";
+
+export interface SkillCatalogValidity {
+	ok: boolean;
+	reason: SkillCatalogInvalidReason | null;
+}
+
+/**
+ * The rule `clio-coder skills validate` applies, in one place.
+ *
+ * A scanned file that produced no loaded skill is malformed, and a collision
+ * drops a skill: both make the catalog invalid, as does any hard error. Benign
+ * warnings (name/path mismatch, name format, description length) attach to a
+ * file that still loaded, so their path is among the loaded skills and they do
+ * not fail validation.
+ *
+ * Lives here rather than in the CLI because two callers now need the same
+ * answer, and a verdict that drifts between the terminal and a GUI is worse
+ * than no verdict at all.
+ */
+export function skillCatalogValidity(list: SkillList): SkillCatalogValidity {
+	if (list.diagnostics.some((diag) => diag.type === "error")) return { ok: false, reason: "load-error" };
+	if (list.diagnostics.some((diag) => diag.type === "collision")) return { ok: false, reason: "collision" };
+	const loadedPaths = new Set(list.items.map((skill) => skill.filePath));
+	const unloadable = list.diagnostics.some(
+		(diag) => diag.type === "warning" && diag.path !== undefined && !loadedPaths.has(diag.path),
+	);
+	if (unloadable) return { ok: false, reason: "unloadable-file" };
+	if (list.items.length === 0) return { ok: false, reason: "no-skills" };
+	return { ok: true, reason: null };
+}
+
 export function parseSkillCommand(input: string): { name: string; args: string } | null {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/skill ")) return null;

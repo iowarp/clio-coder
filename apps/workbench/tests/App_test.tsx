@@ -212,15 +212,16 @@ Deno.test("the capability atlas renders bounded inventory facts including the de
 	match(html, /Tool-call budget/u);
 	match(html, /24–64/u);
 	match(html, /Installed skills/u);
-	match(html, /1 reported loader issue/u);
+	match(html, /1 model visible/u);
 	match(html, /Library resources/u);
 	match(html, /Extensions/u);
 	match(html, /mutate an extension package/u);
 	match(html, /Project checks/u);
 	match(html, /Catalog accepted/u);
+	match(html, /Installed skills/u);
 	match(
 		html,
-		/Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side/u,
+		/Bodies, hashes, native paths, source URLs, requirements, verifier argument vectors, and raw diagnostics stay\s+host-side/u,
 	);
 	ok(!html.includes("sourcePath"));
 	ok(!html.includes("sourceUrl"));

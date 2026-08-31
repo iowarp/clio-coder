@@ -335,6 +335,21 @@ try {
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "frontend-design" }).waitFor();
 	equal(await catalog.getByRole("tab", { name: /^Skills/u }).getAttribute("aria-selected"), "true");
+	// The previous read was filtered to the skills the model may load, so every
+	// card structurally said "trusted" and "allowed". A skill the operator kept
+	// for themselves is now on screen and says so.
+	await catalog.getByRole("heading", { name: "release-notes" }).waitFor();
+	await catalog.getByText("Its frontmatter reserves it for you", { exact: true }).waitFor();
+	await catalog.getByText("1 of 2 is yours alone; the model never sees them.", { exact: false }).waitFor();
+	await catalog.getByText("installed by a dispatched worker", { exact: false }).waitFor();
+	// The body, its location, and both hashes are what this read exists to drop.
+	for (const forbidden of ["/home/", "SKILL.md", "sha256", "https://"]) {
+		equal(
+			await catalog.getByText(forbidden, { exact: false }).count(),
+			0,
+			`the skill panel leaked ${forbidden}`,
+		);
+	}
 	await page.screenshot({ path: new URL("catalog-skills.png", artifactDirectory).pathname, fullPage: true });
 	await page.keyboard.press("ArrowRight");
 	await catalog.getByRole("heading", { name: "experiment-protocol" }).waitFor();
@@ -1608,6 +1623,7 @@ try {
 			toolchainUsesPathFreeFixedAdapter: true,
 			interopDetectionRunsNoForeignExecutableAndNamesNoPath: true,
 			verifierCheckPlaneCrossesWithoutItsArgv: true,
+			skillsTheModelCannotSeeAreOnScreenAndSaidSo: true,
 			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
