@@ -164,6 +164,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/tasks` | `/tasks add <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect, promote, or seed task memory |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
+| `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes close [target]` | Inspect the pane layer, focus a run's viewer pane, or open a utility pane |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
 | `/output` | `/output [verbosity]` | Set transcript detail (minimal, default, verbose), or open Settings → Terminal |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
