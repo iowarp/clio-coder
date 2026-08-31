@@ -105,6 +105,15 @@ export interface ResultContractFilesystem {
 	 * calling an unreadable path fabricated.
 	 */
 	pathExists?(path: string): boolean;
+	/**
+	 * Whether this location is a directory. Optional for the same reason as
+	 * `pathExists`: a contract that only needs a file's bytes never asks. A
+	 * Scout citation does, because a survey task cites directories, and a
+	 * directory has no bytes to read and no line to ground. Absent means the
+	 * distinction is unobservable here, so an unreadable location stays
+	 * unreadable rather than being assumed to be a directory.
+	 */
+	isDirectory?(path: string): boolean;
 }
 
 /**
@@ -792,6 +801,41 @@ function parseChecks(value: unknown): VerifierCheck[] | null {
 
 type ScoutCitationEvidence = ScoutCitation & { contentDigest: string };
 
+/**
+ * Where a citation lands relative to the workspace root, after the written form
+ * is normalized away.
+ *
+ * A model writes the same location six ways: `src`, `./src`, `src/`, `./src/`,
+ * and for the root itself `.` or `./`. `path.resolve` collapses every one of
+ * them, so the containment question is answered on the resolved pair and never
+ * on the string the model typed.
+ *
+ * The root is the case that broke. `path.relative(cwd, cwd)` is the empty
+ * string, and the check read empty as "not inside", which is exactly backwards:
+ * the workspace root is the one path guaranteed to be contained. A
+ * directory-survey Scout cites `.` because that is what it surveyed, and four
+ * runs died `result_contract_exhausted` on evidence that never left the
+ * workspace. Containment is unchanged for a real escape, which still resolves
+ * to a `..` segment or an absolute path outside the root.
+ */
+function citationWithinWorkspace(cwd: string, citedPath: string): boolean {
+	const relative = path.relative(cwd, citedPath);
+	if (relative === "") return true;
+	return !(relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative));
+}
+
+/**
+ * A directory citation carries no bytes and no line, so its evidence digest is
+ * bound to the location instead. Prefixed so it can never collide with the
+ * content digest of a file that happens to hold the same text.
+ */
+function directoryCitationDigest(cwd: string, citedPath: string): string {
+	const relative = path.relative(cwd, citedPath);
+	return createHash("sha256")
+		.update(`directory:${relative === "" ? "." : relative}`, "utf8")
+		.digest("hex");
+}
+
 /** One citation against the workspace and, where known, against this run's own reads. */
 function validateScoutCitation(
 	input: ResultContractValidationInput,
@@ -799,9 +843,16 @@ function validateScoutCitation(
 ): { ok: true; evidence: ScoutCitationEvidence } | { ok: false; reason: string } {
 	const cwd = path.resolve(input.cwd);
 	const citedPath = path.resolve(cwd, citation.path);
-	const relative = path.relative(cwd, citedPath);
-	if (relative === "" || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
+	if (!citationWithinWorkspace(cwd, citedPath)) {
 		return { ok: false, reason: `Scout citation path escapes the workspace: ${citation.path}` };
+	}
+	// A directory is a legal reconnaissance location. Existence is the whole
+	// check available: there is no content to digest, no line count to bound the
+	// cited line against, and no read span to ground it in, because a survey
+	// lists a directory rather than reading it. Requiring a live read here would
+	// reject the correct answer to every directory-survey task.
+	if (input.filesystem.isDirectory?.(citedPath) === true) {
+		return { ok: true, evidence: { ...citation, contentDigest: directoryCitationDigest(cwd, citedPath) } };
 	}
 	const content = input.filesystem.readFile(citedPath);
 	if (content === null) return { ok: false, reason: `Scout citation cannot be read: ${citation.path}` };

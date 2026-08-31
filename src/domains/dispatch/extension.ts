@@ -10,7 +10,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
@@ -58,6 +58,7 @@ import {
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import { validateRecipeResult } from "../agents/result-contract.js";
+import { nodeResultContractFilesystem } from "../agents/result-contract-filesystem.js";
 import {
 	type AgentAudience,
 	type AgentCapabilityClass,
@@ -5324,18 +5325,7 @@ export function createDispatchBundle(
 					cwd: lifecycle.cwd,
 					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
 					observedRunEffects,
-					filesystem: {
-						readFile(filePath) {
-							try {
-								return readFileSync(filePath, "utf8");
-							} catch {
-								return null;
-							}
-						},
-						pathExists(filePath) {
-							return existsSync(filePath);
-						},
-					},
+					filesystem: nodeResultContractFilesystem(),
 				});
 				const resultValidation = resultContract?.applicable === true ? resultContract.validation : null;
 				if (finalOutcome === "succeeded" && resultValidation?.conformance === "fail") {
