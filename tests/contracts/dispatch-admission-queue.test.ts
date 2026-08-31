@@ -8,7 +8,6 @@ import {
 } from "../../src/domains/dispatch/admission-queue.js";
 import { capacityDrain, listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import { deriveRunPhaseDurations } from "../../src/domains/dispatch/phase-timing.js";
-import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { createTestClock } from "../harness/clock.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -116,27 +115,32 @@ describe("bounded dispatch admission queue", () => {
 			isolated.restore();
 		}
 	});
-	it("endpoint saturation is refused immediately with the model-facing remedy", async () => {
+	it("endpoint saturation waits in the bounded queue and starts when its slot is released", async () => {
 		const isolated = await isolateClioEnv("clio-admit-");
 		const endpointKey = "http://127.0.0.1:8080";
-		const releaseForeground = registerForegroundStream(endpointKey);
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 4, nodes: { local: 4 }, endpoints: { [endpointKey]: 1 } }),
 		});
 		try {
-			await rejects(
-				controller.admit({
-					assignmentId: "blocked-by-chat",
-					nodeId: "local",
-					endpointKey,
-					deadlineAt: Date.now() + 60_000,
-				}),
-				/capacity reached \(1\/1 slots\).*1 foreground stream holds the slot/u,
-			);
-			strictEqual(listCapacityLeases().length, 0);
+			const deadlineAt = Date.now() + 10_000;
+			const held = await controller.admit({ assignmentId: "held", nodeId: "local", endpointKey, deadlineAt });
+			let queuedSettled = false;
+			const queued = controller
+				.admit({ assignmentId: "waiting", nodeId: "local", endpointKey, deadlineAt })
+				.then((value) => {
+					queuedSettled = true;
+					return value;
+				});
+			await new Promise((resolve) => setTimeout(resolve, 80));
+			strictEqual(queuedSettled, false, "saturation is waiting, not an admission error");
+			strictEqual(listCapacityLeases().length, 1);
+			controller.release(held.lease.leaseId);
+			const admitted = await queued;
+			strictEqual(admitted.lease.assignmentId, "waiting");
+			strictEqual(admitted.admittedAt >= admitted.queuedAt, true);
+			controller.release(admitted.lease.leaseId);
 		} finally {
 			controller.stop();
-			releaseForeground();
 			isolated.restore();
 		}
 	});

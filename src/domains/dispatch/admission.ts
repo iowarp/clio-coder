@@ -10,7 +10,6 @@ import {
 	capacityLeaseUsage,
 	describeEndpointCapacityHolders,
 	type EndpointCapacityHolders,
-	endpointCapacityRemedy,
 	heartbeatCapacityLease,
 	releaseCapacityLease,
 	renameCapacityLeaseAssignment,
@@ -132,7 +131,12 @@ function describeAdmissionFailure(input: {
 				holders === undefined
 					? "the supplied capacity snapshot does not attribute the occupied slots"
 					: describeEndpointCapacityHolders(holders);
-			return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity reached (${endpointActive}/${endpointLimit} slots): ${occupancy}; ${endpointCapacityRemedy()}`;
+			const queued = input.queueDepth > 0 ? `, ${input.queueDepth} more queued` : "";
+			return [
+				`dispatch: admission timed out after ${Math.round(input.waitedMs)}ms waiting for an endpoint slot`,
+				` on '${endpointLabel(input.endpointKey)}' (${endpointActive}/${endpointLimit} slots${queued}): ${occupancy}.`,
+				" Wait for the running request to settle or dispatch this work again.",
+			].join("");
 		}
 	}
 	const nodeLimit = input.limits.nodes[input.nodeId];
@@ -203,14 +207,9 @@ export function createCapacityAdmissionController(options: {
 					admittedLease = request.value();
 					return true;
 				} catch (error) {
-					// Endpoint saturation is a named refusal because waiting would keep a
-					// model request queued behind the same inference scheduler. Existing
-					// node and global admission retain their bounded wait behavior.
-					if (error instanceof Error && /endpoint '.*' capacity reached/u.test(error.message)) {
-						queue.fail(request.requestId, error);
-						return false;
-					}
-					// Node and global capacity can wait. Anything else fails the request.
+					// Saturation at any capacity dimension is transient and keeps its
+					// assignment in the one bounded admission queue. Unavailable capacity,
+					// draining, corrupt state, and every other error still fail immediately.
 					if (error instanceof Error && /capacity reached/.test(error.message)) return false;
 					queue.fail(request.requestId, error instanceof Error ? error : new Error(String(error)));
 					return false;

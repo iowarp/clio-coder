@@ -361,6 +361,12 @@ interface ActiveRun {
 	finalPromise: Promise<RunReceipt>;
 }
 
+interface PendingCapacityAdmission {
+	identity: DispatchRunIdentity & { requestOrigin: DispatchRequestOrigin };
+	timing: RunPhaseMarks;
+	node: RunNodeIdentity | null;
+}
+
 interface DispatchFinishContractSnapshot {
 	assessment: FinishContractAssessment;
 	rigor: Rigor;
@@ -2431,6 +2437,7 @@ export function createDispatchBundle(
 	let ledger: Ledger | null = null;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	const active = new Map<string, ActiveRun>();
+	const pendingCapacity = new Map<string, PendingCapacityAdmission>();
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 	const ownedReservations = new Set<string>();
 	/**
@@ -2594,6 +2601,33 @@ export function createDispatchBundle(
 		return scheduling.maxWorkers?.() ?? (configured === "auto" || configured === undefined ? 4 : Math.max(1, configured));
 	}
 
+	function publishCapacityQueued(
+		identity: DispatchRunIdentity & { requestOrigin: DispatchRequestOrigin },
+		timing: RunPhaseMarks,
+		node: RunNodeIdentity | null,
+	): void {
+		pendingCapacity.set(identity.runId, { identity, timing, node });
+		context.bus.emit(BusChannels.DispatchEnqueued, identity);
+	}
+
+	function publishCapacityAdmissionFailure(
+		identity: DispatchRunIdentity & { requestOrigin: DispatchRequestOrigin },
+		error: unknown,
+	): void {
+		const detail = error instanceof Error ? error.message : String(error);
+		const outcome: RunOutcome = /admission canceled/u.test(detail)
+			? "canceled"
+			: /admission timed out/u.test(detail)
+				? "timed_out"
+				: "denied_by_policy";
+		context.bus.emit(BusChannels.DispatchFailed, {
+			...identity,
+			outcome,
+			outcomeDetail: detail,
+			reason: outcome,
+		});
+	}
+
 	async function admitAssignmentCapacity(
 		req: DispatchRequest,
 		nodeId: string,
@@ -2602,7 +2636,8 @@ export function createDispatchBundle(
 	) {
 		const queuedAt = now();
 		timing.queuedAt = new Date(queuedAt).toISOString();
-		const assignmentId = req.lineage?.rootRunId ?? `pending-${queuedAt.toString(36)}-${randomBytes(6).toString("hex")}`;
+		const assignmentId =
+			req.lineage?.rootRunId ?? req.runIdHint ?? `pending-${queuedAt.toString(36)}-${randomBytes(6).toString("hex")}`;
 		const requestedAt = Date.parse(timing.requestedAt ?? timing.queuedAt);
 		const deadlineAt = req.assignmentDeadlineAt ?? requestedAt + (req.routingIntent?.deadlineMs ?? 60_000);
 		if (req.lineage === undefined) await registerAssignment(assignmentId);
@@ -2949,6 +2984,10 @@ export function createDispatchBundle(
 				depth: run.lineage.depth,
 			},
 		};
+		// A run-id hint names only the first attempt (and, for task worktrees,
+		// the worktree it created). A retry shares the assignment lineage but
+		// must receive its own ledger/run identity.
+		delete retryReq.runIdHint;
 		const reasonKey = retryReasonKey(run.lineage.rootRunId, attempt);
 		retryReasons.set(reasonKey, reason);
 		try {
@@ -3596,7 +3635,29 @@ export function createDispatchBundle(
 
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
-		const capacityLease = await admitAssignmentCapacity(req, "local", timing, null);
+		const queuedIdentity =
+			req.lineage === undefined && req.runIdHint !== undefined
+				? {
+						runId: req.runIdHint,
+						agentId: req.agentId,
+						task: req.task,
+						requestOrigin: lifecycle.requestOrigin,
+						targetId,
+						wireModelId,
+						runtimeId,
+						runtimeKind: "acp-delegation" as const,
+					}
+				: null;
+		if (queuedIdentity !== null) publishCapacityQueued(queuedIdentity, timing, null);
+		let capacityLease: Awaited<ReturnType<typeof admitAssignmentCapacity>>;
+		try {
+			capacityLease = await admitAssignmentCapacity(req, "local", timing, null);
+		} catch (error) {
+			if (queuedIdentity !== null) publishCapacityAdmissionFailure(queuedIdentity, error);
+			throw error;
+		} finally {
+			if (queuedIdentity !== null) pendingCapacity.delete(queuedIdentity.runId);
+		}
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
 
 		// Resolve the ledger before starting the ACP process: an external agent
@@ -3804,8 +3865,10 @@ export function createDispatchBundle(
 			runIdForPermissionAudit = envelope.id;
 			lineage = lineageFor(req, envelope.id);
 			if (req.lineage === undefined) {
-				capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
-				await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
+				if (capacityLease.assignmentId !== lineage.rootRunId) {
+					capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
+					await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
+				}
 				leaseSlot.transferToAssignment();
 			}
 			identity = detectRunIdentity();
@@ -3831,16 +3894,18 @@ export function createDispatchBundle(
 			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
 			await ledgerRef.persist();
-			context.bus.emit(BusChannels.DispatchEnqueued, {
-				runId: envelope.id,
-				agentId: req.agentId,
-				task: req.task,
-				requestOrigin: lifecycle.requestOrigin,
-				targetId,
-				wireModelId,
-				runtimeId,
-				runtimeKind: "acp-delegation",
-			});
+			if (req.lineage !== undefined) {
+				context.bus.emit(BusChannels.DispatchEnqueued, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					task: req.task,
+					requestOrigin: lifecycle.requestOrigin,
+					targetId,
+					wireModelId,
+					runtimeId,
+					runtimeKind: "acp-delegation",
+				});
+			}
 			context.bus.emit(BusChannels.DispatchStarted, {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -4298,6 +4363,10 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 		req = validation.restore(validated.spec);
+		// A top-level run needs its stable identity before it can wait for
+		// capacity. The board can then render the assignment as queued and the
+		// same id becomes the ledger row once its slot opens.
+		if (req.lineage === undefined && req.runIdHint === undefined) req = { ...req, runIdHint: newRunId() };
 		let activeRouteObservation: RouteObservationHandle | null = null;
 		if (req.delegationAgentId === undefined) {
 			const recipe = agents.get(req.agentId);
@@ -4425,7 +4494,41 @@ export function createDispatchBundle(
 			shadow: () => observeShadowRoute(req, placed, settings),
 		});
 
-		const capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing, endpoint);
+		const queuedIdentity =
+			req.lineage === undefined && req.runIdHint !== undefined
+				? {
+						runId: req.runIdHint,
+						agentId: req.agentId,
+						task: req.task,
+						agentAudience: lifecycle.agentAudience,
+						requestOrigin: lifecycle.requestOrigin,
+						targetId: lifecycle.target.target.id,
+						wireModelId: lifecycle.target.wireModelId,
+						runtimeId: lifecycle.target.runtime.id,
+						runtimeKind: lifecycle.runtimeKind,
+						budget: lifecycle.budgetEnvelope,
+						...(endpoint !== null ? { endpoint: { key: endpoint.key, label: endpoint.label, limit: endpoint.limit } } : {}),
+						...(placement !== null ? { node: placement.node.id } : {}),
+						...(req.gate !== undefined ? { gate: { role: req.gate.role, cycle: req.gate.cycle } } : {}),
+						...(req.council !== undefined ? { council: req.council } : {}),
+						...(req.reroutes !== undefined && req.reroutes.length > 0 ? { rerouteCount: req.reroutes.length } : {}),
+						...(lifecycle.target.modelCapabilities !== undefined &&
+						lifecycle.target.modelCapabilities !== null &&
+						lifecycle.target.modelCapabilities.contextWindow > 0
+							? { contextWindow: lifecycle.target.modelCapabilities.contextWindow }
+							: {}),
+					}
+				: null;
+		if (queuedIdentity !== null) publishCapacityQueued(queuedIdentity, timing, placement?.node ?? null);
+		let capacityLease: Awaited<ReturnType<typeof admitAssignmentCapacity>>;
+		try {
+			capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing, endpoint);
+		} catch (error) {
+			if (queuedIdentity !== null) publishCapacityAdmissionFailure(queuedIdentity, error);
+			throw error;
+		} finally {
+			if (queuedIdentity !== null) pendingCapacity.delete(queuedIdentity.runId);
+		}
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
 
 		const ledgerRef = (() => {
@@ -4823,8 +4926,10 @@ export function createDispatchBundle(
 			runIdForPermissionAudit = envelope.id;
 			lineage = lineageFor(req, envelope.id);
 			if (req.lineage === undefined) {
-				capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
-				await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
+				if (capacityLease.assignmentId !== lineage.rootRunId) {
+					capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
+					await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
+				}
 				leaseSlot.transferToAssignment();
 			}
 			if (agentLedgerId !== null) {
@@ -4885,18 +4990,20 @@ export function createDispatchBundle(
 					? { contextWindow: lifecycle.target.modelCapabilities.contextWindow }
 					: {}),
 			};
-			context.bus.emit(BusChannels.DispatchEnqueued, {
-				runId: envelope.id,
-				agentId: req.agentId,
-				task: req.task,
-				agentAudience: lifecycle.agentAudience,
-				requestOrigin: lifecycle.requestOrigin,
-				targetId: lifecycle.target.target.id,
-				wireModelId: lifecycle.target.wireModelId,
-				runtimeId: lifecycle.target.runtime.id,
-				runtimeKind: lifecycle.runtimeKind,
-				...fleetIdentity,
-			});
+			if (req.lineage !== undefined) {
+				context.bus.emit(BusChannels.DispatchEnqueued, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					task: req.task,
+					agentAudience: lifecycle.agentAudience,
+					requestOrigin: lifecycle.requestOrigin,
+					targetId: lifecycle.target.target.id,
+					wireModelId: lifecycle.target.wireModelId,
+					runtimeId: lifecycle.target.runtime.id,
+					runtimeKind: lifecycle.runtimeKind,
+					...fleetIdentity,
+				});
+			}
 			context.bus.emit(BusChannels.DispatchStarted, {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -6278,6 +6385,26 @@ export function createDispatchBundle(
 		const running: DispatchSnapshot["running"] = [];
 		const totals = { ...finalizedTotals };
 		const costAmounts = [...finalizedCosts];
+		for (const pending of pendingCapacity.values()) {
+			const startedAt = pending.timing.queuedAt ?? pending.timing.requestedAt ?? new Date(tickNow).toISOString();
+			running.push({
+				runId: pending.identity.runId,
+				agentId: pending.identity.agentId,
+				...(pending.identity.task !== undefined ? { task: pending.identity.task } : {}),
+				...(pending.identity.budget !== undefined ? { budget: pending.identity.budget } : {}),
+				runtimeKind: pending.identity.runtimeKind,
+				outcomePhase: "queued",
+				heartbeat: "n/a",
+				lineage: { parentRunId: null, rootRunId: pending.identity.runId, attempt: 0, depth: 0 },
+				startedAt,
+				elapsedMs: 0,
+				timing: deriveRunPhaseDurations(pending.timing, startedAt, new Date(tickNow).toISOString()),
+				tokens: { input: 0, output: 0, total: 0 },
+				costUsd: 0,
+				costProvenance: "unknown",
+				node: pending.node === null ? null : { ...pending.node },
+			});
+		}
 		for (const run of active.values()) {
 			let heartbeat: "alive" | "stale" | "dead" | "n/a" = "n/a";
 			if (run.heartbeatAt && Number.isFinite(heartbeatMonotonicAt(run.heartbeatAt))) {
@@ -6456,6 +6583,17 @@ export function createDispatchBundle(
 		},
 		abort(runId, reason) {
 			const rootRunId = assignmentRootFor(runId);
+			const queued = pendingCapacity.get(rootRunId);
+			if (queued !== undefined && capacityAdmission.cancel(rootRunId)) {
+				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel-queued`);
+				context.bus.emit(BusChannels.RunAborted, {
+					source: "dispatch_abort",
+					runId: rootRunId,
+					startedAt: null,
+					elapsedMs: null,
+					reason: reason?.detail ?? "operator abort while waiting for an endpoint slot",
+				});
+			}
 			const assignment = assignments.get(rootRunId);
 			if (assignment?.status === "running") {
 				assignments.cancel(assignment.id);
