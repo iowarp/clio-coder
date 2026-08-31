@@ -9,7 +9,6 @@
  * own worker runners before pi-agent model synthesis.
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { validateSettingsFile } from "../core/config.js";
 import {
@@ -29,6 +28,7 @@ import {
 	resultContractRepairMessages,
 	validateResultContract,
 } from "../domains/agents/result-contract.js";
+import { nodeResultContractFilesystem } from "../domains/agents/result-contract-filesystem.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
@@ -258,18 +258,7 @@ function terminalContractViolation(
 		// Repair rounds judge shape and grounding only. Network posture belongs to
 		// the orchestrator's sealed validation, which runs again on the receipt.
 		networkAllowed: true,
-		filesystem: {
-			readFile(filePath) {
-				try {
-					return readFileSync(filePath, "utf8");
-				} catch {
-					return null;
-				}
-			},
-			pathExists(filePath) {
-				return existsSync(filePath);
-			},
-		},
+		filesystem: nodeResultContractFilesystem(),
 	});
 	return validation.conformance === "pass" ? null : (validation.reason ?? "invalid result");
 }

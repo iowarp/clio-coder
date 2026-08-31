@@ -224,6 +224,64 @@ describe("contracts/agent result contract", () => {
 		);
 	});
 
+	it("accepts a scout citation of a directory inside the workspace, including its root", () => {
+		// Phase-3 manual gate finding 7: a directory-survey scout cites `.` for
+		// the workspace root, and the containment check read the empty relative
+		// path as an escape. Four runs died `result_contract_exhausted` on
+		// evidence that was never outside the workspace.
+		const directories = new Set(["/repo", "/repo/src"]);
+		const filesystem = {
+			readFile: (p: string): string | null => (p === "/repo/src/a.ts" ? "one\ntwo" : null),
+			pathExists: (p: string) => directories.has(p) || p === "/repo/src/a.ts",
+			isDirectory: (p: string) => directories.has(p),
+		};
+		const cited = (citedPath: string) =>
+			JSON.stringify({
+				findings: [{ claim: "the repository has one source tree", path: citedPath, line: 1 }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
+		// A survey lists directories; it never reads them, so the live-read
+		// grounding evidence carries no span for one and must not reject it.
+		const observedReadRanges = new Map([["/repo/src/a.ts", [[1, 2] as const]]]);
+		for (const citedPath of [".", "./", "./src", "src/", "src", "./src/"]) {
+			const validation = contract({
+				contract: { kind: "scout-report" },
+				output: cited(citedPath),
+				cwd: "/repo",
+				networkAllowed: false,
+				filesystem,
+				observedReadRanges,
+			});
+			strictEqual(validation.conformance, "pass", `${citedPath}: ${validation.reason ?? ""}`);
+		}
+		// Containment is unchanged: a genuine escape still refuses, whether it
+		// walks out relatively or names an absolute path outside the workspace.
+		for (const citedPath of ["..", "../", "../outside", "/etc", "../repo-sibling/src"]) {
+			const validation = contract({
+				contract: { kind: "scout-report" },
+				output: cited(citedPath),
+				cwd: "/repo",
+				networkAllowed: false,
+				filesystem,
+				observedReadRanges,
+			});
+			strictEqual(validation.conformance, "fail", citedPath);
+			ok(validation.reason?.includes("escapes the workspace"), `${citedPath}: ${validation.reason ?? ""}`);
+		}
+		// A directory that is not there is still a fabricated location.
+		const absent = contract({
+			contract: { kind: "scout-report" },
+			output: cited("does-not-exist"),
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+			observedReadRanges,
+		});
+		strictEqual(absent.conformance, "fail");
+		ok(absent.reason?.includes("cannot be read"));
+	});
+
 	it("rejects a mutation report naming a path the run never wrote and that does not exist", () => {
 		// Receipt 3queklvuxnmb: a git-master run answering a read-only question
 		// returned the shape example verbatim, and `src/file.ts` existed nowhere
