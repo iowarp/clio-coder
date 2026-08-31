@@ -57,6 +57,7 @@ import type {
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
 import type { TerminalLease } from "./terminal-lease.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
+import { createYaziBridge, type YaziBridge } from "./yazi-bridge.js";
 
 export {
 	IDLE_LEADER_STATE,
@@ -149,6 +150,10 @@ export interface InteractiveDeps {
 	 * it without a TUI. Production leaves it unset and gets `createMuxBridge`.
 	 */
 	createMuxBridge?: typeof createMuxBridge;
+	/** Bind the file-pane return path after the composer and TUI exist. */
+	attachYaziBridge?: (bridge: YaziBridge) => () => void;
+	/** Factory seam for contract tests; production uses `createYaziBridge`. */
+	createYaziBridge?: typeof createYaziBridge;
 	/**
 	 * Shared tool registry. When wired, the permission overlay opens automatically
 	 * whenever a tool call is parked waiting for operator confirmation, and the
@@ -586,6 +591,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatRenderer,
 		io,
 	} = presentation;
+	const yaziBridge =
+		deps.mux && deps.mux.mode !== "none"
+			? (deps.createYaziBridge ?? createYaziBridge)({
+					mux: deps.mux,
+					getDraft: () => editor.getText(),
+					setDraft: (text) => editor.setText(text),
+					requestRender: () => tui.requestRender(),
+					notice: (level, text) => notify(level, text, `yazi:${level}`),
+					getCwd: () => process.cwd(),
+				})
+			: null;
+	const detachYaziBridge = yaziBridge ? deps.attachYaziBridge?.(yaziBridge) : undefined;
 	refreshPresentationFooter = () => footer.refresh();
 	const agentProgress = createAgentProgress(terminal);
 	// Desktop notifications are a protocol write on the terminal owner, issued
@@ -1012,6 +1029,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			stopAgentProgress: agentProgress.stop,
 			disposeChat: () => deps.chat.dispose(),
 			disposeSubscriptions: () => {
+				detachYaziBridge?.();
+				yaziBridge?.dispose();
 				muxBridge?.dispose();
 				interactiveSubscriptions.dispose();
 			},

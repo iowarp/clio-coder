@@ -58,6 +58,19 @@ export {
 } from "./types.js";
 export { clioCliEntryPath, runViewerCommand, type ViewerCommandOptions } from "./viewer-command.js";
 export {
+	createYaziEventStream,
+	parseYaziEventLine,
+	YAZI_STREAM_MAX_BYTES,
+	YAZI_STREAM_POLL_MS,
+	type YaziCdEvent,
+	type YaziEvent,
+	type YaziEventStream,
+	type YaziEventStreamOptions,
+	type YaziEventStreamStats,
+	type YaziEventStreamStopReason,
+	type YaziPickEvent,
+} from "./yazi/event-stream.js";
+export {
 	describeYaziProfile,
 	ensureYaziProfile,
 	hashYaziAssetTree,
@@ -73,4 +86,15 @@ export {
 	type YaziProfileState,
 	yaziProfileDir,
 } from "./yazi/profile.js";
+export {
+	createYaziSession,
+	type YaziChooserResult,
+	type YaziProfileMode,
+	type YaziResolvedBinaries,
+	type YaziSession,
+	type YaziSessionMode,
+	type YaziSessionOpenResult,
+	type YaziSessionOptions,
+	type YaziSessionSnapshot,
+} from "./yazi/session.js";
 export { renderYaziTheme } from "./yazi/theme.js";

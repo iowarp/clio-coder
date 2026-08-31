@@ -59,6 +59,11 @@ export interface MuxOpenUtilityPaneRequest {
 	label: string;
 	direction?: "right" | "down";
 	env?: Readonly<Record<string, string>>;
+	/**
+	 * Absolute path the pane's stdout is redirected into. Full-screen programs
+	 * such as Yazi reopen `/dev/tty` for their interface when stdout is not a tty.
+	 */
+	stdoutPath?: string;
 }
 
 export interface MuxNotifyRequest {
@@ -421,7 +426,8 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						// herdr has no argv parameter on pane.split, so the command goes in
 						// through the pane's shell. `exec` replaces the shell so the pane
 						// exits with the program and emits pane.exited for reconciliation.
-						await live.paneSendText(pane.paneId, `exec ${shellQuote(request.argv)}\n`);
+						const redirect = request.stdoutPath ? ` > ${shellQuote([request.stdoutPath])}` : "";
+						await live.paneSendText(pane.paneId, `exec ${shellQuote(request.argv)}${redirect}\n`);
 					}
 					return ref;
 				},
