@@ -15,9 +15,11 @@ import {
 	TraceStore,
 	traceDatabasePath,
 } from "../domains/observability/trace-store.js";
+import { runTraceInspect } from "./trace-inspect.js";
 
 const HELP = `Usage:
   clio-coder trace runs [--db PATH] [--limit N] [--json]
+  clio-coder trace inspect --json         a fixed bounded window with no request text
   clio-coder trace phases <runId> [--db PATH]
   clio-coder trace tail <runId> [--follow] [--db PATH]
   clio-coder trace procs <runId> [--db PATH]
@@ -31,6 +33,9 @@ Pruning keeps ${DEFAULT_TRACE_RETENTION_POLICY.maxAgeDays} days and at most ${DE
 CLIO_CODER_TRACE_RETENTION_DAYS or CLIO_CODER_TRACE_MAX_BYTES to change the automatic
 policy; prune flags override those values for one command.
 `;
+
+/** Rows `trace runs` shows when the operator names no limit. */
+const DEFAULT_TRACE_LIMIT = 50;
 
 interface ParsedTraceArgs {
 	positional: string[];
@@ -50,7 +55,7 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 	let db = traceDatabasePath(clioStatePath());
 	let dbExplicit = false;
 	let follow = false;
-	let limit = 50;
+	let limit = DEFAULT_TRACE_LIMIT;
 	let port = 0;
 	let json = false;
 	let maxAgeDays: number | undefined;
@@ -91,7 +96,7 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 }
 
 /** Every subcommand `trace` answers to. Anything else is a usage error. */
-const TRACE_COMMANDS = new Set(["runs", "phases", "tail", "procs", "prune", "sql", "ui"]);
+const TRACE_COMMANDS = new Set(["runs", "inspect", "phases", "tail", "procs", "prune", "sql", "ui"]);
 
 /** The subcommands whose first positional is a run id. */
 const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
@@ -146,6 +151,22 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	}
 
 	if (command === "ui") return runTraceUi(parsed.db, parsed.port);
+
+	// `inspect` answers ahead of the no-database courtesy below, because its
+	// answer to a state tree nothing has written to is a JSON snapshot saying
+	// the trace database is unavailable, not a sentence on stdout.
+	if (command === "inspect") {
+		return runTraceInspect(
+			parsed.positional.length === 1 &&
+				parsed.json &&
+				!parsed.dbExplicit &&
+				!parsed.follow &&
+				parsed.limit === DEFAULT_TRACE_LIMIT &&
+				parsed.port === 0 &&
+				parsed.maxAgeDays === undefined &&
+				parsed.maxBytes === undefined,
+		);
+	}
 
 	// A database that was never written is the empty state, not a failure. Handing
 	// the absent path to node:sqlite produced "unable to open database file",

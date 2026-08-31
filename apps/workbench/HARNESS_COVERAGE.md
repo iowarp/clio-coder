@@ -60,22 +60,22 @@ extensions. The GUI must never import root harness modules or infer those facts 
 
 ## Current GUI protocol footprint
 
-GUI protocol v4 currently validates 32 client commands:
+GUI protocol v4 currently validates 33 client commands:
 
 `project.browse`, `project.open`, `project.select`, `project.forget`, `fs.refresh`, `fs.create-file`,
 `fs.create-folder`, `fs.move`, `fs.delete.prepare`, `fs.delete.confirm`, `session.new`, `session.load`, `session.close`,
 `session.list`, `session.label`, `session.delete`, `turn.start`, `turn.cancel`, `permission.resolve`, `settings.get`,
 `settings.patch`, `targets.list`, `targets.probe`, `autonomy.set`, `config.inspect`, `catalog.inspect`, `usage.inspect`,
-`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, and `recovery.inspect`.
+`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, `trace.inspect`, and `recovery.inspect`.
 
-It validates 31 server event kinds:
+It validates 32 server event kinds:
 
 `connection.ready`, `project.browse.listing`, `project.opened`, `project.forgotten`, `project.snapshot`, `fs.changed`,
 `fs.delete.challenge`, `clio.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
 `config.state`, `catalog.state`, `usage.state`, `routing.state`, `dispatch.state`, `fleet.inspection.state`,
-`toolchain.state`, `recovery.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`, `turn.loop`,
-`turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `fleet.activity`, `protocol.error`, and
-`command.error`.
+`toolchain.state`, `trace.state`, `recovery.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`,
+`turn.loop`, `turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `fleet.activity`,
+`protocol.error`, and `command.error`.
 
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
 “render JSON” escape hatch.
@@ -86,6 +86,13 @@ of it can safely cross. Its name is a fixed check label plus the subject the che
 kind of fact and is what separates “one models check failed” from “model zbook failed”. So the detail stays on the host
 and the name crosses, subject to a structural shape rule rather than a fixed vocabulary, so that a harness renaming a
 check costs that check its name and nothing else costs the sweep.
+
+The converse of that rule matters as much. Durable trace accounting is keyed by the same run ids the run journal already
+lists, which looks like the fleet-root case, but it is not: the ledger and the trace database are separate durable
+stores with separate failure modes, and an installation that never enabled tracing has no trace database at all. Folding
+that read into `fleet.inspect` would have made a missing trace file a failure of the run journal. It gets its own
+command, its own event, and an explicit `available` flag, because "tracing was never on" and "the database holds no
+runs" are different answers and an operator is entitled to both.
 
 A harness fact that is genuinely part of an existing family widens that family's DTO instead of claiming a new command
 kind. The fleet-root step index arrived that way: it is the parent of the durable runs `fleet.inspect` already reads, so

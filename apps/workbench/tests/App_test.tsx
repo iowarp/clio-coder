@@ -25,6 +25,7 @@ import {
 	serverEventFixture,
 	sessionSummaryFixture,
 	toolchainInspectionFixture,
+	traceInspectionFixture,
 	usageInspectionFixture,
 	workspaceFixture,
 } from "./fixtures.ts";
@@ -58,6 +59,7 @@ const inertActions: WorkbenchActions = {
 	inspectDispatch() {},
 	inspectFleet() {},
 	inspectToolchain() {},
+	inspectTrace() {},
 	inspectRecovery() {},
 	listTargets() {},
 	probeTarget() {},
@@ -280,6 +282,7 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 	const html = renderToStaticMarkup(
 		<FleetJournal
 			inspection={fleetInspectionFixture()}
+			trace={traceInspectionFixture()}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -313,6 +316,7 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 	const html = renderToStaticMarkup(
 		<FleetJournal
 			inspection={fleetInspectionFixture()}
+			trace={traceInspectionFixture()}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -333,8 +337,43 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 	match(html, /no run recorded/u);
 	match(html, /review gate produced no structured verdict/u);
 	ok(html.includes("disabled"), "steps outside the run window stay unselectable");
+	// The trace accounting for the selected run rides alongside its event spine.
+	match(html, /Durable accounting for run run-alpha/u);
+	match(html, /28,665/u);
+	match(html, /\$0\.42/u);
+	match(html, /1 retry/u);
+	match(html, /errored/u);
+	for (const forbidden of ["the prompt text", "phase_id", "trace.sqlite"]) {
+		ok(!html.includes(forbidden), `trace accounting leaked ${forbidden}`);
+	}
 	for (const forbidden of ["/fleet-runs/", "planHash", "planSteps", "receiptDigest"]) {
 		ok(!html.includes(forbidden), `fleet root index leaked ${forbidden}`);
+	}
+});
+
+Deno.test("an unread and an unavailable trace database are told apart, and neither is a claim about the run", () => {
+	for (
+		const [trace, expected] of [
+			[null, /Durable accounting has not been read in this session/u],
+			[
+				{ ...traceInspectionFixture(), available: false, runs: [], truncated: false },
+				/This installation has no trace database/u,
+			],
+			[{ ...traceInspectionFixture(), runs: [] }, /The trace database has no accounting for this run/u],
+		] as const
+	) {
+		const html = renderToStaticMarkup(
+			<FleetJournal
+				inspection={fleetInspectionFixture()}
+				trace={trace}
+				pending={false}
+				onRefresh={() => undefined}
+				onBack={() => undefined}
+			/>,
+		);
+		match(html, expected);
+		// None of the three says anything about whether the run itself succeeded.
+		ok(!html.includes("Durable accounting for run"));
 	}
 });
 

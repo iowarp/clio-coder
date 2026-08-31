@@ -45,6 +45,8 @@ import type {
 	WireTimelineItem,
 	WireToolchainInspection,
 	WireToolchainItem,
+	WireTraceInspection,
+	WireTraceRun,
 	WireTreeNode,
 	WireUsage,
 	WireUsageInspection,
@@ -103,6 +105,7 @@ export interface WorkbenchActions {
 	inspectDispatch(): void;
 	inspectFleet(): void;
 	inspectToolchain(): void;
+	inspectTrace(): void;
 	inspectRecovery(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
@@ -3736,13 +3739,83 @@ function fleetStepTone(step: WireFleetInspectionStep): string {
 	return "action";
 }
 
+/** Whole tokens with thousands separators, or an explicit absence. */
+function formatTokens(value: number | null): string {
+	return value === null ? "not recorded" : value.toLocaleString("en-US");
+}
+
+/**
+ * A recorded cost. Exactly zero is printed as `$0.00` rather than "free",
+ * because a local runtime that prices at zero and a run whose cost was never
+ * recorded are different facts and the second one is null.
+ */
+function formatCostUsd(value: number | null): string {
+	if (value === null) return "not recorded";
+	return `$${value.toFixed(value > 0 && value < 0.01 ? 4 : 2)}`;
+}
+
+function TraceAccounting({ run }: { run: WireTraceRun }) {
+	return (
+		<section className="trace-accounting" aria-label={`Durable accounting for run ${run.runId}`}>
+			<header>
+				<div className="eyebrow">DURABLE ACCOUNTING · TRACE DATABASE</div>
+				<StatusMark tone="neutral" label={run.status} />
+			</header>
+			<dl className="trace-accounting__totals">
+				<div>
+					<dt>Tokens</dt>
+					<dd>{formatTokens(run.totalTokens)}</dd>
+				</div>
+				<div>
+					<dt>Cost</dt>
+					<dd>{formatCostUsd(run.totalCostUsd)}</dd>
+				</div>
+				<div>
+					<dt>Wall time</dt>
+					<dd>{run.elapsedMs === null ? "still open" : formatDuration(Math.floor(run.elapsedMs / 1_000))}</dd>
+				</div>
+				<div>
+					<dt>Runtime</dt>
+					<dd>{run.runtime}</dd>
+				</div>
+			</dl>
+			{run.phases.length === 0
+				? <p className="trace-accounting__none">The trace database recorded no phases for this run.</p>
+				: (
+					<ol className="trace-phases" aria-label={`Phases for run ${run.runId}`}>
+						{run.phases.map((phase, index) => (
+							<li className={phase.failed ? "is-failed" : ""} key={`${phase.name}:${index}`}>
+								<span className="trace-phases__name">{phase.name}</span>
+								<span className="trace-phases__kind">
+									{phase.kind} · {phase.owner}
+								</span>
+								<span className="trace-phases__numbers">
+									{formatTokens(phase.totalTokens)} tok · {formatCostUsd(phase.totalCostUsd)}
+									{phase.elapsedMs === null ? "" : ` · ${formatDuration(Math.floor(phase.elapsedMs / 1_000))}`}
+									{phase.retries > 0 ? ` · ${phase.retries} retr${phase.retries === 1 ? "y" : "ies"}` : ""}
+								</span>
+								<StatusMark
+									tone={phase.failed ? "error" : phase.status === "success" ? "success" : "neutral"}
+									label={phase.failed ? "errored" : phase.status}
+								/>
+							</li>
+						))}
+					</ol>
+				)}
+			{run.phasesTruncated && <p className="trace-accounting__bound">Later phases are outside this bounded index.</p>}
+		</section>
+	);
+}
+
 export const FleetJournal = memo(function FleetJournal({
 	inspection,
+	trace,
 	pending,
 	onRefresh,
 	onBack,
 }: {
 	inspection: WireFleetInspection | null;
+	trace: WireTraceInspection | null;
 	pending: boolean;
 	onRefresh(): void;
 	onBack(): void;
@@ -4040,6 +4113,21 @@ export const FleetJournal = memo(function FleetJournal({
 									/>
 									<p>{selected.evidence.summary}</p>
 								</section>
+								{(() => {
+									const traced = trace?.runs.find((run) => run.runId === selected.runId) ?? null;
+									if (traced !== null) return <TraceAccounting run={traced} />;
+									// Tracing off and this run being outside the trace window are
+									// different facts, and neither is a claim about the run itself.
+									return (
+										<p className="trace-accounting__absent">
+											{trace === null
+												? "Durable accounting has not been read in this session."
+												: trace.available
+												? "The trace database has no accounting for this run."
+												: "This installation has no trace database, so no durable accounting was recorded."}
+										</p>
+									);
+								})()}
 								{selected.journal === "missing"
 									? (
 										<p className="fleet-run-record__missing">
@@ -4833,7 +4921,8 @@ function ConversationCanvas({
 					? (
 						<FleetJournal
 							inspection={state.fleetInspection}
-							pending={state.pendingFleetInspect !== null}
+							trace={state.traceInspection}
+							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null}
 							onRefresh={onRefreshFleet}
 							onBack={onConversationOpen}
 						/>
@@ -6569,6 +6658,17 @@ export function WorkbenchView(
 		) {
 			actions.inspectFleet();
 		}
+		// Durable accounting is finalized data, so unlike the journal it is read
+		// once when the canvas opens and again only when the operator asks. It is
+		// deliberately outside the one-second follow loop below: a settled run's
+		// tokens and cost do not change, and a sqlite open every second would buy
+		// nothing.
+		if (
+			view === "fleet-runs" && state.traceInspection === null &&
+			state.pendingTraceInspect === null
+		) {
+			actions.inspectTrace();
+		}
 	}, [
 		actions,
 		open?.project.id,
@@ -6576,6 +6676,8 @@ export function WorkbenchView(
 		open?.usageInspection,
 		state.pendingCatalogInspect,
 		state.pendingUsageInspect,
+		state.traceInspection,
+		state.pendingTraceInspect,
 		state.dispatchInspection,
 		state.pendingDispatchInspect,
 		state.fleetInspection,
@@ -6627,8 +6729,12 @@ export function WorkbenchView(
 		actions.inspectDispatch();
 	}, [actions]);
 
+	// One operator action, two independent durable reads: the ledger and journal
+	// on one side, the trace database on the other. Either can fail on its own
+	// and surface as a command error without emptying the other.
 	const refreshFleet = useCallback((): void => {
 		actions.inspectFleet();
+		actions.inspectTrace();
 	}, [actions]);
 
 	useEffect(() => {

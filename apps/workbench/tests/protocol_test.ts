@@ -135,7 +135,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "command.error" ||
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" ||
-				kind === "toolchain.state" ||
+				kind === "toolchain.state" || kind === "trace.state" ||
 				kind === "recovery.state"
 		? {}
 		: { projectId: "project-alpha" };
@@ -182,6 +182,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"dispatch.inspect",
 		"fleet.inspect",
 		"toolchain.inspect",
+		"trace.inspect",
 		"recovery.inspect",
 		"targets.list",
 		"targets.probe",
@@ -502,6 +503,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"dispatch.inspect": {},
 		"fleet.inspect": {},
 		"toolchain.inspect": {},
+		"trace.inspect": {},
 		"recovery.inspect": {},
 		"targets.list": { projectId: "project-alpha" },
 		"targets.probe": { projectId: "project-alpha", targetId: "lmstudio" },
@@ -1797,4 +1799,68 @@ Deno.test("the browser transport is loopback-only", () => {
 		throws(() => assertLocalWebSocketUrl(url));
 	}
 	match(WebSocketLocalTransport.name, /WebSocketLocalTransport/u);
+});
+
+Deno.test("trace accounting validates bounds and refuses rows from an unavailable database", () => {
+	const phase = {
+		name: "builder",
+		kind: "agent",
+		owner: "builder",
+		status: "success",
+		attempt: 1,
+		retries: 0,
+		failed: false,
+		elapsedMs: 21_000,
+		totalTokens: 20_120,
+		totalCostUsd: 0.31,
+	};
+	const run = {
+		runId: "run-alpha",
+		agent: "builder",
+		target: "local-lmstudio",
+		model: "qwen3-coder",
+		runtime: "lmstudio",
+		node: null,
+		status: "success",
+		startedAt: "2026-08-31T14:00:00.000Z",
+		elapsedMs: 30_000,
+		totalTokens: 28_665,
+		totalCostUsd: 0.4213,
+		phases: [phase],
+		phasesTruncated: false,
+	};
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:30.000Z",
+		available: true,
+		runs: [run],
+		truncated: false,
+	};
+	const event = serverEvent("trace.state", { inspection });
+	equal(event.projectId, undefined);
+	equal(event.payload.inspection.runs[0]?.phases[0]?.totalCostUsd, 0.31);
+	// A cost is a fraction, so the amount validator must not demand an integer.
+	equal(event.payload.inspection.runs[0]?.totalCostUsd, 0.4213);
+	for (
+		const broken of [
+			// The request text and the phase error text are the two fields that must
+			// never appear, so an unknown key is refused rather than ignored.
+			{ ...inspection, runs: [{ ...run, request: "the prompt text" }] },
+			{ ...inspection, runs: [{ ...run, phases: [{ ...phase, error: "boom" }] }] },
+			{ ...inspection, runs: [run, run] },
+			// A database that was never written cannot also have produced rows.
+			{ ...inspection, available: false },
+			{ ...inspection, available: false, runs: [], truncated: true },
+			// Negative accounting is not a smaller number, it is a broken store.
+			{ ...inspection, runs: [{ ...run, totalTokens: -1 }] },
+		]
+	) {
+		expectProtocolError(() => serverEvent("trace.state", { inspection: broken }));
+	}
+	// An unavailable database with nothing alongside it is the ordinary answer.
+	const empty = serverEvent("trace.state", {
+		inspection: { ...inspection, available: false, runs: [], truncated: false },
+	});
+	equal(empty.payload.inspection.available, false);
 });
