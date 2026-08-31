@@ -167,6 +167,15 @@ export interface PrewarmSettings {
 }
 
 /**
+ * The pane layer's settings block. Only the durable half exists so far: the
+ * run event journal, which every other pane surface reads and which the
+ * standalone run viewer needs whether or not a pane host is installed.
+ */
+export interface PanesSettings {
+	journal: boolean;
+}
+
+/**
  * Transient provider retry controls for the interactive chat loop. These are
  * intentionally small and mirror the session retry helper defaults. Dispatched
  * worker runs are governed by `workers.maxRetries` instead; the two never meet.
@@ -466,6 +475,16 @@ export const DEFAULT_SETTINGS = {
 	prewarm: {
 		enabled: true,
 	} as PrewarmSettings,
+	panes: {
+		/**
+		 * Tee every dispatched run's display event tail to
+		 * `<state>/runs/<runId>/events.ndjson`. The live tail is otherwise
+		 * in-process only, so this is what lets `clio-coder fleet view` follow a
+		 * run from a second terminal. Written regardless of any pane host being
+		 * present; turning it off costs the viewer its transcript and nothing else.
+		 */
+		journal: true,
+	} as PanesSettings,
 	retry: {
 		enabled: true,
 		maxRetries: 3,
@@ -780,6 +799,14 @@ context:
 # turn or a dispatch is running.
 prewarm:
   enabled: true
+
+# The pane layer. journal tees every dispatched run's event tail to
+# <state>/runs/<runId>/events.ndjson so \`clio-coder fleet view <runId> --follow\`
+# can watch a run from a second terminal. Journal directories are removed when
+# their run leaves the run ledger ring, and \`clio-coder reset --state\` clears
+# them with the rest of the state root.
+panes:
+  journal: true
 
 # Transient provider/stream retry controls for interactive chat.
 # Retryable errors include overloads, rate limits, 5xx responses, network

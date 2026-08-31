@@ -57,7 +57,7 @@ Usage:
   clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
   clio-coder agents               list discovered agent recipes
-  clio-coder fleet new|validate|graph|commands|run|status|drain|resume  fleet authoring, execution, status, and admission control
+  clio-coder fleet new|validate|graph|commands|run|status|view|drain|resume  fleet authoring, execution, status, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder eval                 run, report, or compare local eval task files
   clio-coder memory               list, propose, promote, approve, reject, or prune memory

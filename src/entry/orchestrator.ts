@@ -49,6 +49,7 @@ import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import {
@@ -1057,7 +1058,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Guardrail policy (tool-call budgets, tool byte caps, dispatch ledger cap)
 	// resolves settings-first with env as emergency override; install the
 	// settings section before any guard registration or tool reads it.
-	configureGuardrails((config?.get() ?? readSettings()).guardrails);
+	const resolvedSettings = config?.get() ?? readSettings();
+	configureGuardrails(resolvedSettings.guardrails);
+
+	// The run event journal resolves the same way for the same reason: the sink
+	// sits on the dispatch event path, where reading settings.yaml would be both
+	// a cost and a throw site, so the composition root installs the value once.
+	configureRunEventJournal(resolvedSettings.panes.journal);
 
 	// Guard registrations on the middleware contract, in order: loop guard,
 	// protected artifacts (last among guards so it absorbs protect_path effects
