@@ -135,6 +135,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "command.error" ||
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" || kind === "fleet.decisions.state" ||
+				kind === "interop.state" ||
 				kind === "toolchain.state" || kind === "trace.state" || kind === "evidence.state" ||
 				kind === "evidence.detail.state" || kind === "fleet.verification.state" ||
 				kind === "recovery.state"
@@ -184,6 +185,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"fleet.inspect",
 		"fleet.decisions",
 		"toolchain.inspect",
+		"interop.inspect",
 		"trace.inspect",
 		"evidence.inspect",
 		"evidence.read",
@@ -509,6 +511,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"fleet.inspect": {},
 		"fleet.decisions": {},
 		"toolchain.inspect": {},
+		"interop.inspect": {},
 		"trace.inspect": {},
 		"evidence.inspect": {},
 		"evidence.read": { evidenceId: "run-alpha-bundle" },
@@ -1565,6 +1568,58 @@ Deno.test("the fleet root index validates step counts, attribution, and identity
 	expectProtocolError(() =>
 		serverEvent("fleet.inspection.state", { inspection: { ...inspection, roots: [root, root] } })
 	);
+});
+
+Deno.test("external agent detection carries wiring state and no native path", () => {
+	const agent = {
+		id: "claude-code",
+		label: "Claude Code",
+		presence: "present",
+		version: "2.1.237",
+		hasUserDirectory: true,
+		acp: true,
+		adapter: "absent",
+		configured: false,
+		decision: "declined",
+		decidedAt: "2026-08-20T20:31:58.391Z",
+		decisionStale: false,
+		proposed: false,
+		needsNetworkInstall: true,
+	};
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T15:02:00.000Z",
+		generatedAt: "2026-08-31T15:01:58.000Z",
+		detectedAt: "2026-08-31T15:01:57.900Z",
+		knownKinds: 8,
+		agents: [agent],
+	};
+	const event = serverEvent("interop.state", { inspection });
+	equal(event.projectId, undefined);
+	equal(event.payload.inspection.agents[0]?.decision, "declined");
+	for (
+		const broken of [
+			// The resolved binary and the agent's home directory stay host-side.
+			{ ...agent, binary: "/usr/local/bin/claude" },
+			{ ...agent, installDir: "/home/operator/.claude" },
+			// Only a kind with an ACP recipe has an adapter to report on.
+			{ ...agent, acp: false },
+			{ ...agent, adapter: null },
+			// A decision and its stamp are written together.
+			{ ...agent, decidedAt: null },
+			{ ...agent, decision: null, decidedAt: null, decisionStale: true },
+			// Clio Coder offers only an installed ACP peer that is not already wired.
+			{ ...agent, configured: true, proposed: true },
+			{ ...agent, presence: "unknown", proposed: true },
+			// A kind with no recipe cannot need an adapter installed.
+			{ ...agent, acp: false, adapter: null, needsNetworkInstall: true },
+		]
+	) {
+		expectProtocolError(() => serverEvent("interop.state", { inspection: { ...inspection, agents: [broken] } }));
+	}
+	expectProtocolError(() => serverEvent("interop.state", { inspection: { ...inspection, agents: [agent, agent] } }));
+	// Detection walks the registry once and drops a kind with nothing to report.
+	expectProtocolError(() => serverEvent("interop.state", { inspection: { ...inspection, knownKinds: 0 } }));
 });
 
 Deno.test("gate decisions validate the verdict, the winner, and the independence they claim", () => {

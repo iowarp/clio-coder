@@ -3376,6 +3376,126 @@ kbd {
 	justify-self: start;
 }
 
+.settings__interop {
+	display: grid;
+	gap: 12px;
+	contain: layout paint;
+}
+
+.interop-empty,
+.interop-summary {
+	display: grid;
+	gap: 12px;
+	margin: 0;
+	padding: 13px 14px;
+	border: 1px solid var(--hairline);
+	background: rgb(255 255 255 / 1.5%);
+}
+
+.interop-empty {
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+}
+
+.interop-empty p {
+	color: var(--muted);
+	font-size: 0.7rem;
+	line-height: 1.45;
+}
+
+.interop-summary {
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.interop-summary dt {
+	color: var(--dim);
+	font-size: 0.52rem;
+}
+
+.interop-summary dd {
+	margin: 3px 0 0;
+	color: var(--paper-strong);
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	overflow-wrap: anywhere;
+}
+
+.interop-summary__actions {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.interop-list {
+	display: grid;
+	gap: 10px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.interop-list > li {
+	display: grid;
+	gap: 10px;
+	min-width: 0;
+	padding: 12px 13px;
+	border: 1px solid var(--hairline);
+	background: rgb(255 255 255 / 1.5%);
+}
+
+.interop-list header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.interop-list header strong {
+	display: block;
+	color: var(--paper);
+	font-family: var(--font-editorial);
+	font-size: 0.86rem;
+	font-variation-settings: "opsz" 20, "wght" 540;
+}
+
+.interop-list header code {
+	color: var(--dim);
+	font-family: var(--font-mono);
+	font-size: 0.5rem;
+	overflow-wrap: anywhere;
+}
+
+.interop-list > li > dl {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 8px;
+	margin: 0;
+}
+
+.interop-list dt {
+	color: var(--dim);
+	font-size: 0.52rem;
+}
+
+.interop-list dd {
+	margin: 3px 0 0;
+	color: var(--paper-strong);
+	font-family: var(--font-mono);
+	font-size: 0.6rem;
+	overflow-wrap: anywhere;
+}
+
+.interop-list__wiring {
+	color: var(--muted);
+	font-size: 0.68rem;
+	line-height: 1.45;
+}
+
+@media (width <= 900px) {
+	.interop-empty {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
 .settings__toolchain {
 	display: grid;
 	gap: 12px;

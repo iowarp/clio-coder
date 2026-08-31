@@ -15,8 +15,8 @@ the main application.
 | Verdict | Count |
 | ------- | ----: |
 | Present |    20 |
-| Partial |    58 |
-| Absent  |    34 |
+| Partial |    60 |
+| Absent  |    32 |
 | Total   |   112 |
 
 **host-only-by-design** marks a payload this GUI will not carry in any form, as distinct from one it has not carried
@@ -78,7 +78,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Resource library                  | `/library [kind]`                                   | **Partial** | Read-only library cards are present; install/use flows are absent.                                                                                                                  |
 | Saved prompts                     | `/prompts`                                          | **Partial** | Effective prompt roots are visible, but saved-prompt selection and expansion are absent.                                                                                            |
 | Extensions                        | `/extensions`                                       | **Partial** | **deferred-by-design**: Installed extensions are visible; interactive enablement and lifecycle controls are absent.                                                                 |
-| Interoperability                  | `/interop`                                          | **Absent**  | No compatibility detection or import guidance surface exists.                                                                                                                       |
+| Interoperability                  | `/interop`                                          | **Partial** | Settings names every detected coding agent, its version, its ACP adapter, and how far it is wired. Reviewing and wiring a peer stays an explicit terminal operation.                 |
 | Worker result and archive sharing | `/share [runId]`, `/share export                    | import`     | **Absent**                                                                                                                                                                          |
 | Attributed worker run             | `/run <agent> <task>`                               | **Partial** | ACP tools expose live attributed dispatch activity, but the operator cannot directly start an addressable worker run.                                                               |
 | Delegation                        | `/delegate <agent> <task>`                          | **Partial** | Delegated tool calls are attributed when Clio Coder creates them; there is no direct operator control.                                                                              |
@@ -124,7 +124,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Run-event journal               | Durable per-run NDJSON transcript and follow                          | **Present** | Runs renders a bounded event spine for the eight newest runs and refreshes while displayed work remains nonterminal.                                              |
 | Fleet root inspection           | Planned step index and terminal run ids                               | **Present** | Runs indexes recent roots to their planned step order, terminal run ids, attribution, and failure reason, and links steps into the window.                        |
 | Council                         | Roster preview, approval, rounds, member grid, synthesis              | **Partial** | Runs groups the ledger into councils and renders the seated grid, each voice's route and rounds, and the synthesis shape. The voices are **host-only-by-design**. |
-| Compete                         | Parallel candidates, judge/gate decision, winner, cleanup evidence    | **Partial** | Runs renders the sealed gate verdict, the graded candidates, the winner, and the judge's independence. Candidate diffs and the judge's reasoning are host-only.  |
+| Compete                         | Parallel candidates, judge/gate decision, winner, cleanup evidence    | **Partial** | Runs renders the sealed gate verdict, the graded candidates, the winner, and the judge's independence. Candidate diffs and the judge's reasoning are host-only.   |
 | Receipt trust and verify        | Sealed receipt status and `/view verify` host check                   | **Partial** | Runs projects sealed receipt trust, per-bundle evidence verdicts, and an on-demand re-check of the sealed bytes, all without native paths.                        |
 | Task and decision boards        | Inspect and mutate session ledgers                                    | **Absent**  | Neither ledger is part of protocol v4.                                                                                                                            |
 | Memory overlay                  | Lessons, task bank, activity, promotion                               | **Absent**  | Memory configuration facts do not expose records or mutations.                                                                                                    |
@@ -143,26 +143,26 @@ unmarked, so the read half stays visible as work this GUI can still do.
 
 ## Runtime domain roster
 
-| Harness domain | Operator-facing responsibility                                    | GUI verdict | Gap                                                                                                                                                                          |
-| -------------- | ----------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Config         | Layered settings, sources, reload class, safe edits               | **Partial** | Effective graph and four safe edits are present; most groups and live reload events are absent.                                                                              |
-| Extensions     | Package resources and precedence                                  | **Partial** | Inventory is present; lifecycle and runtime activation controls are absent.                                                                                                  |
-| Interop        | Compatibility detection and import hints                          | **Absent**  | No typed inspection reaches the GUI.                                                                                                                                         |
-| Resources      | Skills, prompts, library catalogs                                 | **Partial** | Skills and library inventories are present; prompts and lifecycle operations are incomplete.                                                                                 |
-| Share          | Project/resource archives and worker-result sharing               | **Absent**  | **deferred-by-design**: No bounded preview or confirmed operation exists.                                                                                                    |
-| Context        | Project context, codewiki, working set, recall, compaction inputs | **Partial** | Effective context sources and replay are present; live accounting and mutations are absent.                                                                                  |
-| Providers      | Targets, models, auth, capability and residency                   | **Partial** | Target probe, model selection, and offline inventory exist; auth, authoring, and live runtime notices are absent.                                                            |
-| Toolchain      | Pinned optional external programs                                 | **Partial** | The machine-readable inventory is adapted without native paths; status detail, installation, and Yazi profile reset remain terminal workflows.                               |
-| Safety         | Autonomy, permissions, loop guard, budgets, protected artifacts   | **Partial** | Autonomy, mediated approval, and loop blocks are present; wider policy and budget facts are absent.                                                                          |
-| Prompts        | Saved prompt discovery and expansion                              | **Absent**  | Effective roots alone do not provide prompt listing or invocation.                                                                                                           |
-| Agents         | Recipe discovery and execution identity                           | **Partial** | Reference inventory and observed attribution exist; direct execution and status are absent.                                                                                  |
-| Middleware     | Hooks, safety registrations, nudges, receipts, watchdog           | **Partial** | Effective hook configuration is visible; live failures, receipts, nudges, and watchdog state are absent.                                                                     |
-| Session        | Lifecycle, replay, branches, task and decision ledgers            | **Partial** | Core lifecycle and replay are present; branches and ledgers are absent.                                                                                                      |
-| Observability  | Usage, cost, durable trace, run facts                             | **Present** | Visible tokens, historical usage, trace accounting to the phase, and event and process shapes all cross through bounded fixed reads.                                         |
-| Scheduling     | Capacity, admission, worker placement                             | **Partial** | Aggregate admission and heartbeat counts are present; capacity, placement, and controls are absent.                                                                          |
-| Mux            | Pane host, pane inventory, viewer presets, Yazi bridge            | **Absent**  | **blocked-on-phase4** until the owning work exposes a fixed typed status read.                                                                                               |
+| Harness domain | Operator-facing responsibility                                    | GUI verdict | Gap                                                                                                                                                                                   |
+| -------------- | ----------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Config         | Layered settings, sources, reload class, safe edits               | **Partial** | Effective graph and four safe edits are present; most groups and live reload events are absent.                                                                                       |
+| Extensions     | Package resources and precedence                                  | **Partial** | Inventory is present; lifecycle and runtime activation controls are absent.                                                                                                           |
+| Interop        | Compatibility detection and import hints                          | **Partial** | Path-free detection, ACP adapter state, and standing accept/decline answers reach Settings; wiring a peer and adopting foreign context remain terminal operations.                     |
+| Resources      | Skills, prompts, library catalogs                                 | **Partial** | Skills and library inventories are present; prompts and lifecycle operations are incomplete.                                                                                          |
+| Share          | Project/resource archives and worker-result sharing               | **Absent**  | **deferred-by-design**: No bounded preview or confirmed operation exists.                                                                                                             |
+| Context        | Project context, codewiki, working set, recall, compaction inputs | **Partial** | Effective context sources and replay are present; live accounting and mutations are absent.                                                                                           |
+| Providers      | Targets, models, auth, capability and residency                   | **Partial** | Target probe, model selection, and offline inventory exist; auth, authoring, and live runtime notices are absent.                                                                     |
+| Toolchain      | Pinned optional external programs                                 | **Partial** | The machine-readable inventory is adapted without native paths; status detail, installation, and Yazi profile reset remain terminal workflows.                                        |
+| Safety         | Autonomy, permissions, loop guard, budgets, protected artifacts   | **Partial** | Autonomy, mediated approval, and loop blocks are present; wider policy and budget facts are absent.                                                                                   |
+| Prompts        | Saved prompt discovery and expansion                              | **Absent**  | Effective roots alone do not provide prompt listing or invocation.                                                                                                                    |
+| Agents         | Recipe discovery and execution identity                           | **Partial** | Reference inventory and observed attribution exist; direct execution and status are absent.                                                                                           |
+| Middleware     | Hooks, safety registrations, nudges, receipts, watchdog           | **Partial** | Effective hook configuration is visible; live failures, receipts, nudges, and watchdog state are absent.                                                                              |
+| Session        | Lifecycle, replay, branches, task and decision ledgers            | **Partial** | Core lifecycle and replay are present; branches and ledgers are absent.                                                                                                               |
+| Observability  | Usage, cost, durable trace, run facts                             | **Present** | Visible tokens, historical usage, trace accounting to the phase, and event and process shapes all cross through bounded fixed reads.                                                  |
+| Scheduling     | Capacity, admission, worker placement                             | **Partial** | Aggregate admission and heartbeat counts are present; capacity, placement, and controls are absent.                                                                                   |
+| Mux            | Pane host, pane inventory, viewer presets, Yazi bridge            | **Absent**  | **blocked-on-phase4** until the owning work exposes a fixed typed status read.                                                                                                        |
 | Dispatch       | Worker runs, fleets, councils, compete, journals, receipts        | **Partial** | Live lifecycle, aggregate status, run journals, receipt trust, fleet-root step indexes, on-demand verification, council topology, and sealed gate verdicts exist; steering is absent. |
-| Lifecycle      | Boot, diagnostics, version, upgrade, reset, shutdown              | **Partial** | Process state and recovery inspection exist; version/about and reviewed mutations are incomplete.                                                                            |
+| Lifecycle      | Boot, diagnostics, version, upgrade, reset, shutdown              | **Partial** | Process state and recovery inspection exist; version/about and reviewed mutations are incomplete.                                                                                     |
 
 ## Ordered implementation plan
 
@@ -191,7 +191,12 @@ unmarked, so the read half stays visible as work this GUI can still do.
    Still to come: trace event tails and process views, through fixed read commands rather than arbitrary SQL, native
    paths, or raw payloads. Building a bundle is a mutation and belongs with item 6.
 6. **Partly implemented:** every doctor check now crosses as its name, section, and verdict, so a failing check names
-   its subject instead of adding one to a category tally. Finding detail stays on the host permanently. Still to come:
+   its subject instead of adding one to a category tally. Finding detail stays on the host permanently. External coding
+   agent detection reaches Settings too, through the fixed `interop inspect --json` read: which agents this machine has,
+   the version Clio Coder last recorded for each, whether its ACP adapter can start offline, whether a delegation entry
+   already names it, and whether the operator's standing accept or decline still holds. The read runs no foreign
+   executable and carries no resolved binary or agent home directory, and wiring a peer stays an explicit terminal
+   review. Still to come:
    safe ACP settings and operations for target/auth lifecycle, memory review, resource installation, verifiers, share
    import/export, doctor repair, and fleet admission, each with preview, confirmation, progress, and recovery.
 7. Expand sanitized ACP events for context pressure and working-set activity, safety budgets and protected artifacts,

@@ -49,6 +49,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"fleet.inspect",
 	"fleet.decisions",
 	"toolchain.inspect",
+	"interop.inspect",
 	"trace.inspect",
 	"evidence.inspect",
 	"evidence.read",
@@ -256,6 +257,7 @@ export type DispatchInspectPayload = Readonly<Record<string, never>>;
 
 export type FleetInspectPayload = Readonly<Record<string, never>>;
 export type FleetDecisionsPayload = Readonly<Record<string, never>>;
+export type InteropInspectPayload = Readonly<Record<string, never>>;
 
 export type ToolchainInspectPayload = Readonly<Record<string, never>>;
 
@@ -325,6 +327,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "fleet.inspect": FleetInspectPayload;
 	readonly "fleet.decisions": FleetDecisionsPayload;
 	readonly "toolchain.inspect": ToolchainInspectPayload;
+	readonly "interop.inspect": InteropInspectPayload;
 	readonly "trace.inspect": TraceInspectPayload;
 	readonly "evidence.inspect": EvidenceInspectPayload;
 	readonly "evidence.read": EvidenceReadPayload;
@@ -365,6 +368,7 @@ export const SERVER_EVENT_KINDS = [
 	"fleet.inspection.state",
 	"fleet.decisions.state",
 	"toolchain.state",
+	"interop.state",
 	"trace.state",
 	"evidence.state",
 	"evidence.detail.state",
@@ -1578,6 +1582,58 @@ export interface WireGateDecisions {
 	readonly unverifiable: number;
 }
 
+export const INTEROP_AGENT_IDS = [
+	"claude-code",
+	"codex",
+	"opencode",
+	"gemini",
+	"copilot",
+	"cursor",
+	"antigravity",
+	"agents",
+] as const;
+export type WireInteropAgentId = (typeof INTEROP_AGENT_IDS)[number];
+export const INTEROP_PRESENCES = ["present", "absent", "unknown"] as const;
+export type WireInteropPresence = (typeof INTEROP_PRESENCES)[number];
+export const INTEROP_DECISIONS = ["accepted", "declined"] as const;
+export type WireInteropDecision = (typeof INTEROP_DECISIONS)[number];
+export const MAX_WIRE_INTEROP_AGENTS = 16;
+
+/**
+ * One external coding agent Clio Coder detected on this machine.
+ *
+ * The resolved binary and the directory the agent owns under the operator's
+ * home are native filesystem facts and stay host-side; whether a directory
+ * exists crosses, where it is does not. The keying fingerprint stays host-side
+ * too, and reaches the browser only as the derived `decisionStale`.
+ */
+export interface WireInteropAgent {
+	readonly id: WireInteropAgentId;
+	readonly label: string;
+	readonly presence: WireInteropPresence;
+	/** The last version Clio Coder observed for this binary; this read probes nothing. */
+	readonly version: string | null;
+	readonly hasUserDirectory: boolean;
+	readonly acp: boolean;
+	readonly adapter: WireInteropPresence | null;
+	readonly configured: boolean;
+	readonly decision: WireInteropDecision | null;
+	readonly decidedAt: string | null;
+	readonly decisionStale: boolean;
+	readonly proposed: boolean;
+	readonly needsNetworkInstall: boolean;
+}
+
+/** Every detected agent kind. Detection drops a kind with nothing to report, so this is never padded. */
+export interface WireInteropInspection {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	readonly detectedAt: string;
+	readonly knownKinds: number;
+	readonly agents: readonly WireInteropAgent[];
+}
+
 export const TOOLCHAIN_SOURCES = ["path", "vendored", "none"] as const;
 export type WireToolchainSource = (typeof TOOLCHAIN_SOURCES)[number];
 export const MAX_WIRE_TOOLCHAIN_ITEMS = 32;
@@ -1815,6 +1871,10 @@ export interface FleetDecisionsStatePayload {
 	readonly decisions: WireGateDecisions;
 }
 
+export interface InteropStatePayload {
+	readonly inspection: WireInteropInspection;
+}
+
 export interface FleetVerificationStatePayload {
 	readonly verification: WireFleetVerification;
 }
@@ -2008,6 +2068,7 @@ export interface ServerEventPayloadByKind {
 	readonly "fleet.inspection.state": FleetInspectionStatePayload;
 	readonly "fleet.decisions.state": FleetDecisionsStatePayload;
 	readonly "toolchain.state": ToolchainStatePayload;
+	readonly "interop.state": InteropStatePayload;
 	readonly "trace.state": TraceStatePayload;
 	readonly "evidence.state": EvidenceStatePayload;
 	readonly "evidence.detail.state": EvidenceDetailStatePayload;
@@ -2368,6 +2429,7 @@ function validateClientPayload<K extends ClientCommandKind>(
 		case "fleet.inspect":
 		case "fleet.decisions":
 		case "toolchain.inspect":
+		case "interop.inspect":
 		case "trace.inspect":
 		case "evidence.inspect":
 		case "recovery.inspect":
@@ -5009,6 +5071,99 @@ function validateGateDecision(value: unknown, label: string): WireGateDecision {
 	};
 }
 
+function validateInteropAgent(value: unknown, label: string): WireInteropAgent {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"label",
+		"presence",
+		"version",
+		"hasUserDirectory",
+		"acp",
+		"adapter",
+		"configured",
+		"decision",
+		"decidedAt",
+		"decisionStale",
+		"proposed",
+		"needsNetworkInstall",
+	]);
+	const presence = expectEnum(record.presence, `${label}.presence`, INTEROP_PRESENCES);
+	const acp = expectBoolean(record.acp, `${label}.acp`);
+	const adapter = record.adapter === null ? null : expectEnum(record.adapter, `${label}.adapter`, INTEROP_PRESENCES);
+	// Only a kind with an ACP recipe has an adapter to report on.
+	if (acp !== (adapter !== null)) invalid(`${label}.adapter does not track whether this kind speaks ACP`);
+	const decision = record.decision === null
+		? null
+		: expectEnum(record.decision, `${label}.decision`, INTEROP_DECISIONS);
+	const decidedAt = record.decidedAt === null ? null : expectTimestamp(record.decidedAt, `${label}.decidedAt`);
+	// A decision and its stamp are written together.
+	if ((decision === null) !== (decidedAt === null)) {
+		invalid(`${label} reports a decision stamp without the decision it belongs to`);
+	}
+	const decisionStale = expectBoolean(record.decisionStale, `${label}.decisionStale`);
+	if (decisionStale && decision === null) invalid(`${label} calls a decision stale that was never taken`);
+	const configured = expectBoolean(record.configured, `${label}.configured`);
+	const proposed = expectBoolean(record.proposed, `${label}.proposed`);
+	// Clio Coder offers only an installed ACP peer that is neither wired nor
+	// settled against the facts as they now stand.
+	if (proposed && (presence !== "present" || !acp || configured)) {
+		invalid(`${label} is offered as a proposal it does not qualify for`);
+	}
+	const needsNetworkInstall = expectBoolean(record.needsNetworkInstall, `${label}.needsNetworkInstall`);
+	if (needsNetworkInstall && !acp) invalid(`${label} cannot need an adapter it has no recipe for`);
+	return {
+		id: expectEnum(record.id, `${label}.id`, INTEROP_AGENT_IDS),
+		label: expectPresentationText(record.label, `${label}.label`, 64),
+		presence,
+		version: expectNullablePresentationText(record.version, `${label}.version`, 64),
+		hasUserDirectory: expectBoolean(record.hasUserDirectory, `${label}.hasUserDirectory`),
+		acp,
+		adapter,
+		configured,
+		decision,
+		decidedAt,
+		decisionStale,
+		proposed,
+		needsNetworkInstall,
+	};
+}
+
+export function validateInteropInspection(value: unknown, label = "interop inspection"): WireInteropInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"detectedAt",
+		"knownKinds",
+		"agents",
+	]);
+	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
+	const seen = new Set<string>();
+	const agents = expectArray(
+		record.agents,
+		`${label}.agents`,
+		MAX_WIRE_INTEROP_AGENTS,
+		(entry, entryLabel) => {
+			const agent = validateInteropAgent(entry, entryLabel);
+			if (seen.has(agent.id)) invalid(`${label}.agents repeats ${agent.id}`);
+			seen.add(agent.id);
+			return agent;
+		},
+	);
+	const knownKinds = expectDispatchNumber(record.knownKinds, `${label}.knownKinds`, true);
+	// Detection walks the registry once and drops a kind with nothing to report,
+	// so it can never return more agents than the registry knows.
+	if (agents.length > knownKinds) invalid(`${label} reports more agents than Clio Coder knows kinds`);
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		detectedAt: expectTimestamp(record.detectedAt, `${label}.detectedAt`),
+		knownKinds,
+		agents,
+	};
+}
+
 export function validateGateDecisions(value: unknown, label = "gate decisions"): WireGateDecisions {
 	const record = expectExactKeys(value, label, [
 		"scope",
@@ -6095,6 +6250,12 @@ function validateServerPayload(
 				decisions: validateGateDecisions(record.decisions, `${label}.decisions`),
 			};
 		}
+		case "interop.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return {
+				inspection: validateInteropInspection(record.inspection, `${label}.inspection`),
+			};
+		}
 		case "toolchain.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -6469,6 +6630,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"fleet.inspection.state",
 	"fleet.decisions.state",
 	"toolchain.state",
+	"interop.state",
 	"trace.state",
 	"evidence.state",
 	"evidence.detail.state",
