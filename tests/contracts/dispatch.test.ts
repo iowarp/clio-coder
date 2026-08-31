@@ -70,6 +70,7 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { createTestClock } from "../harness/clock.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { scaleWatchdog } from "../harness/load.js";
 import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/worker-attestation.js";
 
 interface Deferred<T> {
@@ -196,8 +197,13 @@ function pipelineInputBody(fromRunId: string | null, position: number, text: str
 	].join("\n");
 }
 
-async function waitFor(predicate: () => boolean, message: string, timeoutMs = 1000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
+/**
+ * A watchdog on a worker slot opening or a durable row landing. It asserts the
+ * event arrives, not that it arrives quickly, so the budget widens with the
+ * shard load the run carries; alone it stays the 1s it always was.
+ */
+async function waitFor(predicate: () => boolean, message: string, budgetMs = 1000): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(budgetMs);
 	while (Date.now() <= deadline) {
 		if (predicate()) return;
 		await new Promise((resolve) => setTimeout(resolve, 10));

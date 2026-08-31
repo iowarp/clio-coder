@@ -19,7 +19,21 @@ import { createCostTracker } from "../../src/domains/observability/cost.js";
 import { readOutOfTurnUsageRows, recordBackgroundMemoryStep } from "../../src/domains/observability/index.js";
 import { foregroundStreamUsage, registerForegroundStream } from "../../src/domains/providers/index.js";
 import { aggregateCostEntries } from "../../src/interactive/cost-overlay.js";
+import { scaleWatchdog } from "../harness/load.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
+
+/**
+ * Poll until a fire-and-forget store write has landed, or give up. Returns
+ * either way: the caller's own assertion is what reports the failure, so the
+ * message stays the one that names what was expected.
+ */
+async function waitForProposal(predicate: () => boolean): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(2_000);
+	while (Date.now() <= deadline) {
+		if (predicate()) return;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+}
 
 const BASE_INPUT = {
 	task: "Close the memory spend accounting gap.",
@@ -254,8 +268,12 @@ describe("contracts/proactive memory spend", { concurrency: false }, () => {
 
 			const result = await registration.runPromptedStep({ deterministicTrigger: true, task: "store" });
 			strictEqual(result.decision, "injected");
-			// The store write is a promise the step deliberately does not await.
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			// The store write is a promise the step deliberately does not await, so
+			// there is nothing to await here either. A fixed 50ms sleep stood in for
+			// it, which is a guess about how long an unawaited filesystem write
+			// takes and was wrong under 24-way shard load. Polling asserts the same
+			// thing, that the write lands, without guessing when.
+			await waitForProposal(() => proposed.length === 1);
 			strictEqual(proposed.length, 1, "an injected reminder proposes the entry it cited");
 
 			const listed = await runCli(["memory", "list"], { env: scratch.env });
