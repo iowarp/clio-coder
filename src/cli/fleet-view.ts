@@ -1,5 +1,8 @@
 /**
- * `clio-coder fleet view <runId> [--follow]`.
+ * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
+ *
+ * Given a fleet root id it renders a step index instead; see the fleet root
+ * index section below for why a root cannot be rendered as a run.
  *
  * A read-only viewer for one dispatched run, built from durable state only:
  * the run ledger envelope, the run event journal
@@ -29,22 +32,24 @@
  * instant-shell chunk budget.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
+import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
 import {
 	type RunEventJournalLine,
 	readRunEventJournal,
 	runEventJournalPath,
 } from "../domains/dispatch/run-event-journal.js";
-import { openLedger } from "../domains/dispatch/state.js";
+import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth } from "../engine/tui-primitives.js";
 
-const HELP = `clio-coder fleet view <runId> [--follow]
+const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
 run event journal, and the sealed receipt once it exists.
@@ -55,6 +60,10 @@ Without --follow the current snapshot is printed and the command exits.
 The transcript comes from <state>/runs/<runId>/events.ndjson, which the
 orchestrator writes when panes.journal is on (the default). A run dispatched
 with the journal off shows its ledger and receipt but no transcript.
+
+Given the fleet root id that \`fleet run\` prints (fleet-<hex>), this prints the
+run's step index instead: one line per step with its run id and outcome. Pass
+one of those run ids back to see that step.
 `;
 
 /** Journal poll cadence, matching WAIT_POLL_MS in src/tools/monitor.ts. */
@@ -307,6 +316,175 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 }
 
 // ---------------------------------------------------------------------------
+// Fleet root index
+// ---------------------------------------------------------------------------
+
+/**
+ * `fleet run` advertises a root id (`fleet-<hex>`) that names the whole run,
+ * while the ledger and this viewer are keyed by the 12-character run id of one
+ * dispatched step. An operator who copies the id off the end of `fleet run` was
+ * being told "unknown run".
+ *
+ * The root is not a run and has no ledger row, no receipt, and no journal of
+ * its own, so it cannot be rendered as one. What it does have is a durable
+ * record under `<state>/fleet-runs/<rootId>.json` listing the planned steps and,
+ * for each step that settled, the run id it terminated on. That is enough for an
+ * index: one line per step naming the run id to view next. Deliberately not a
+ * combined transcript. Steps interleave across waves, and splicing several runs
+ * into one scroll would invent an ordering the durable record does not have.
+ */
+
+/** Fleet root ids are `fleet-` plus hex; see newFleetRootId in src/cli/fleet.ts. */
+const FLEET_ROOT_PREFIX = "fleet-";
+/** Visible cap for one sanitized step name before the index elides it. */
+const STEP_ID_MAX_WIDTH = 32;
+
+export interface FleetRunStepRow {
+	stepId: string;
+	/** The run the step terminated on, or null when the step never ran. */
+	runId: string | null;
+	agentId: string | null;
+	outcome: string;
+	detail: string | undefined;
+}
+
+export interface FleetRunViewModel {
+	rootId: string;
+	fleet: string;
+	startedAt: string;
+	elapsedMs: number;
+	/** True while the record carries no end stamp. */
+	running: boolean;
+	resumedFrom: string | null;
+	plannedSteps: number;
+	recordedSteps: number;
+	steps: FleetRunStepRow[];
+}
+
+function fleetRunsDir(): string {
+	// Mirrors fleetRunPath() in src/domains/dispatch/state.ts, which is private
+	// to that module; only the directory is needed here, for prefix resolution
+	// and for naming the path in a "no such root" message.
+	return join(clioStateDir(), "fleet-runs");
+}
+
+/**
+ * Resolve a fleet root the way {@link resolveRunId} resolves a run: exact id
+ * first, then a unique prefix over the durable fleet-run records. An ambiguous
+ * prefix resolves to nothing so the caller can name what it matched.
+ */
+export function resolveFleetRootId(token: string): { rootId: string } | { candidates: string[] } {
+	if (readFleetRun(token) !== null) return { rootId: token };
+	let entries: string[];
+	try {
+		entries = readdirSync(fleetRunsDir());
+	} catch {
+		return { candidates: [] };
+	}
+	const candidates = entries
+		.filter((name) => name.endsWith(".json"))
+		.map((name) => name.slice(0, -".json".length))
+		.filter((id) => id.startsWith(token));
+	if (candidates.length === 1 && candidates[0] !== undefined) return { rootId: candidates[0] };
+	return { candidates };
+}
+
+/**
+ * Read defensively. A fleet-run record is written by an older or newer build
+ * than the one reading it, and a missing field must cost the index one column,
+ * never the whole listing.
+ */
+function stepResultOf(value: unknown): Partial<ExecutionStepResult> {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as ExecutionStepResult) : {};
+}
+
+export function loadFleetRunViewModel(rootId: string, options: { now?: () => number } = {}): FleetRunViewModel | null {
+	const record = readFleetRun(rootId);
+	if (record === null) return null;
+	const ledger = openLedger();
+	const now = options.now ?? (() => Date.now());
+	const settled = new Map<string, Partial<ExecutionStepResult>>();
+	for (const entry of record.steps ?? []) {
+		if (typeof entry?.stepId === "string") settled.set(entry.stepId, stepResultOf(entry.result));
+	}
+	// Planned order, not settle order: it is the order the operator wrote the
+	// fleet in, and a step that never ran still belongs on the index.
+	const stepIds = record.stepIds?.length > 0 ? record.stepIds : [...settled.keys()];
+	const steps: FleetRunStepRow[] = stepIds.map((stepId) => {
+		const result = settled.get(stepId);
+		const runId = typeof result?.terminalRunId === "string" ? result.terminalRunId : null;
+		if (result === undefined || runId === null) {
+			return { stepId, runId: null, agentId: null, outcome: "not run", detail: undefined };
+		}
+		const envelope = ledger.get(runId);
+		const outcome = envelope?.outcome ?? (result.succeeded === true ? "succeeded" : "failed");
+		const detail = result.boundaryViolated === true ? WRITE_BOUNDARY_VIOLATION_REASON : result.failureReason;
+		return {
+			stepId,
+			runId,
+			agentId: envelope?.agentId ?? null,
+			outcome,
+			detail: typeof detail === "string" && detail.length > 0 ? detail : undefined,
+		};
+	});
+	const startedMs = Date.parse(record.startedAt);
+	const endedMs = record.endedAt === null ? now() : Date.parse(record.endedAt);
+	return {
+		rootId: record.id,
+		fleet: record.fleet,
+		startedAt: record.startedAt,
+		elapsedMs: Number.isFinite(startedMs) && Number.isFinite(endedMs) ? Math.max(0, endedMs - startedMs) : 0,
+		running: record.endedAt === null,
+		resumedFrom: record.resumedFrom,
+		plannedSteps: stepIds.length,
+		recordedSteps: settled.size,
+		steps,
+	};
+}
+
+/**
+ * The step index as lines. Pure, for the same reason {@link renderRunView} is:
+ * asserting the strings is asserting what an operator sees.
+ */
+export function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WIDTH): string[] {
+	const columns = Math.max(MIN_WIDTH, width);
+	const rule = "─".repeat(columns);
+	const lines: string[] = [];
+	lines.push(truncateToWidth(`fleet ${sanitizeBounded(model.fleet, 64)}  root ${model.rootId}`, columns, "…", false));
+	const resumed = model.resumedFrom === null ? "" : `  resumed from ${sanitizeBounded(model.resumedFrom, 64)}`;
+	lines.push(
+		truncateToWidth(
+			`started ${model.startedAt}  elapsed ${formatElapsed(model.elapsedMs)}  ${model.recordedSteps} of ${model.plannedSteps} steps recorded${model.running ? "  (running)" : ""}${resumed}`,
+			columns,
+			"…",
+			false,
+		),
+	);
+	lines.push(rule);
+	if (model.steps.length === 0) {
+		lines.push("no steps recorded for this fleet run.");
+	} else {
+		const rows = model.steps.map((step) => ({
+			step: sanitizeBounded(step.stepId, STEP_ID_MAX_WIDTH),
+			runId: step.runId ?? "-",
+			outcome: sanitizeBounded(step.outcome, 32),
+			tail: [step.agentId, step.detail].filter((part) => part !== null && part !== undefined).join(": "),
+		}));
+		const stepWidth = Math.max(...rows.map((row) => row.step.length));
+		const runWidth = Math.max(...rows.map((row) => row.runId.length));
+		const outcomeWidth = Math.max(...rows.map((row) => row.outcome.length));
+		for (const row of rows) {
+			const head = `${row.step.padEnd(stepWidth)}  ${row.runId.padEnd(runWidth)}  ${row.outcome.padEnd(outcomeWidth)}`;
+			const text = row.tail.length === 0 ? head : `${head}  ${sanitizeBounded(row.tail, DETAIL_MAX_WIDTH)}`;
+			lines.push(truncateToWidth(text.trimEnd(), columns, "…", false));
+		}
+	}
+	lines.push(rule);
+	lines.push("clio-coder fleet view <run id> for one step's transcript, receipt, and ledger entry");
+	return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Command
 // ---------------------------------------------------------------------------
 
@@ -358,6 +536,24 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 	if (parsed.runId === undefined) {
 		process.stderr.write(HELP);
 		return 2;
+	}
+	// A fleet root names a whole run, not a dispatched one, so it renders as the
+	// step index rather than as a run. --follow has nothing to tail on a root:
+	// the index changes only when a step settles.
+	if (parsed.runId.startsWith(FLEET_ROOT_PREFIX)) {
+		const root = resolveFleetRootId(parsed.runId);
+		if (!("rootId" in root)) {
+			return root.candidates.length === 0
+				? fail(`unknown fleet run '${parsed.runId}' (no record under ${fleetRunsDir()})`)
+				: fail(`fleet root id '${parsed.runId}' is ambiguous: ${root.candidates.slice(0, 8).join(", ")}`);
+		}
+		const fleetModel = loadFleetRunViewModel(root.rootId);
+		if (fleetModel === null) return fail(`unknown fleet run '${root.rootId}'`);
+		if (parsed.follow) {
+			process.stderr.write("clio-coder fleet view: --follow applies to a run id, not a fleet root; printing the index\n");
+		}
+		process.stdout.write(`${renderFleetRunView(fleetModel, terminalWidth()).join("\n")}\n`);
+		return 0;
 	}
 	const resolved = resolveRunId(parsed.runId);
 	if (!("runId" in resolved)) {

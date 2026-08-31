@@ -7,7 +7,7 @@
  *   clio-coder fleet commands init             draft a repository command registry
  *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
  *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
- *   clio-coder fleet view <runId> [--follow]   read-only viewer for one dispatched run
+ *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
  * Fleet contracts are repo-owned policy (.clio-coder/fleets/<name>.md). Preflight
@@ -92,6 +92,7 @@ Subcommands:
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
   view <runId> [--follow]       read one run's ledger entry, event journal, and receipt
+  view <fleetRootId>            list a fleet run's steps and the run id to view for each
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
 
@@ -101,7 +102,8 @@ Notes:
   only available inside the process that owns the run.
   view is read-only and shares no memory with the orchestrator, so it follows a
   run from a second terminal or over SSH. Its transcript comes from the run
-  event journal, written when panes.journal is on (the default).
+  event journal, written when panes.journal is on (the default). Handed the
+  fleet-<hex> root id that run prints, it lists that run's steps instead.
   drain preserves running work. Repeat it to renew the one-hour expiry; resume
   clears it early. The expiry prevents an abandoned drain from wedging Clio.
 `;
@@ -541,6 +543,10 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			if (!boundary.violated) continue;
 			process.stdout.write(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
 		}
+		// The root id printed at the top is the only identifier this command
+		// advertises, so say what it is good for rather than leaving an operator
+		// to guess that the viewer wants a per-step run id.
+		process.stdout.write(`  clio-coder fleet view ${fleetRootId}   step index with each step's run id\n`);
 	}
 	return outcome.cleanRun ? 0 : 1;
 }
