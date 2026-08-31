@@ -145,6 +145,7 @@ const SCENARIOS = [
 	"event-tool-fields-invalid",
 	"event-count-invalid",
 	"event-interruption-invalid",
+	"dispatch-fleet",
 	"stream-workload",
 ] as const;
 
@@ -757,9 +758,19 @@ async function run(): Promise<void> {
 			"clio-coder/events": {
 				version: 1,
 				notification: "clio-coder/event",
-				kinds: ["safety.loopBlocked"],
+				kinds: scenario === "dispatch-fleet"
+					? [
+						"safety.loopBlocked",
+						"dispatch.enqueued",
+						"dispatch.started",
+						"dispatch.progress",
+						"dispatch.completed",
+						"dispatch.failed",
+					]
+					: ["safety.loopBlocked"],
 				workspaceInstanceId: "fixture-workspace-1",
 			},
+			...(scenario === "dispatch-fleet" ? { "clio-coder/agent": { version: 1, meta: "clio-coder/agent" } } : {}),
 			"clio-coder/tools": "mediated",
 		},
 	};
@@ -788,7 +799,9 @@ async function run(): Promise<void> {
 	// Support is advertised independently. Emission still requires client opt in.
 	let eventsOptedIn = false;
 	const readEventOptIn = (params: unknown): boolean => {
-		if (LOOP_SCENARIOS.has(scenario) === false || scenario === "seventeen-bash-quiet") return false;
+		if (scenario !== "dispatch-fleet" && (!LOOP_SCENARIOS.has(scenario) || scenario === "seventeen-bash-quiet")) {
+			return false;
+		}
 		if (!isRecord(params) || !isRecord(params.clientCapabilities)) return false;
 		const meta = params.clientCapabilities._meta;
 		if (!isRecord(meta)) return false;
@@ -1007,6 +1020,122 @@ async function run(): Promise<void> {
 			await emitCancelledTool(turn);
 		}
 		await settleTurn(turn, "cancelled");
+	};
+
+	/**
+	 * One turn whose tool call spawns a delegated agent. It exercises both
+	 * additive surfaces at once: the dispatch lifecycle on the opt-in event
+	 * stream, and per-frame agent attribution carried in `params._meta`. The
+	 * second run settles after the prompt has already returned, which is what a
+	 * detached worker does.
+	 */
+	const runDispatchFleetTurn = async (turn: ActiveTurn, waitMs: number): Promise<void> => {
+		if (waitMs > 0) await delay(waitMs);
+		if (turn.cancelled) {
+			await settleTurn(turn, "cancelled");
+			return;
+		}
+		const orchestrator = { version: 1, role: "orchestrator", agentId: "orchestrator" };
+		const worker = { version: 1, role: "worker", agentId: "explorer", runId: "run-1", node: "blade" };
+		const attributed = (update: JsonRpcRecord, agents: readonly JsonRpcRecord[]): JsonRpcRecord => ({
+			jsonrpc: "2.0",
+			method: "session/update",
+			params: { sessionId: turn.sessionId, update, _meta: { "clio-coder/agent": agents } },
+		});
+		const dispatchEvent = async (kind: string, terminal: boolean, payload: JsonRpcRecord): Promise<void> => {
+			extensionEventSequence += 1;
+			await emit({
+				jsonrpc: "2.0",
+				method: "clio-coder/event",
+				params: {
+					version: 1,
+					workspaceInstanceId: "fixture-workspace-1",
+					sessionId: turn.sessionId,
+					turnId: null,
+					sequence: extensionEventSequence,
+					kind,
+					terminal,
+					payload,
+				},
+			});
+		};
+		await emit(attributed({
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text: "Delegating the audit. " },
+		}, [orchestrator]));
+		turn.toolStarted = true;
+		await emit(attributed({
+			sessionUpdate: "tool_call",
+			toolCallId: turn.toolCallId,
+			title: "dispatch",
+			kind: "other",
+			status: "in_progress",
+			rawInput: { agent: "explorer" },
+		}, [orchestrator]));
+		await dispatchEvent("dispatch.enqueued", false, {
+			runId: "run-1",
+			agentId: "explorer",
+			taskPreview: "Audit the convergence study",
+			node: null,
+			origin: "agent",
+			attempt: null,
+		});
+		await dispatchEvent("dispatch.started", false, {
+			runId: "run-1",
+			agentId: "explorer",
+			taskPreview: "Audit the convergence study",
+			node: "blade",
+			origin: "agent",
+			attempt: 0,
+		});
+		await emit(attributed({
+			sessionUpdate: "tool_call_update",
+			toolCallId: turn.toolCallId,
+			title: "dispatch",
+			kind: "other",
+			status: "in_progress",
+		}, [orchestrator, worker]));
+		await dispatchEvent("dispatch.progress", false, {
+			runId: "run-1",
+			agentId: "explorer",
+			progressCount: 4,
+			truncated: false,
+		});
+		await dispatchEvent("dispatch.completed", true, {
+			runId: "run-1",
+			agentId: "explorer",
+			outcome: "succeeded",
+			outcomeCode: null,
+			durationMs: 1_200,
+			tokenCount: 640,
+		});
+		turn.toolTerminal = true;
+		await emit(attributed({
+			sessionUpdate: "tool_call_update",
+			toolCallId: turn.toolCallId,
+			title: "dispatch",
+			kind: "other",
+			status: "completed",
+			content: [{ type: "content", content: { type: "text", text: "the worker finished" } }],
+		}, [orchestrator, worker]));
+		await emit(attributed({
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text: "The worker reported back." },
+		}, [orchestrator]));
+		await settleTurn(turn, "end_turn");
+		// A detached run settles after the prompt has returned. The board must still
+		// receive it, so it is bound to the session rather than to the turn.
+		await dispatchEvent("dispatch.failed", true, {
+			runId: "run-2",
+			agentId: "reviewer",
+			outcome: "timed_out",
+			reason: "timed_out",
+			durationMs: 900,
+			taskPreview: null,
+			node: null,
+			origin: "agent",
+			attempt: 1,
+		});
 	};
 
 	const runOrderedTurn = async (turn: ActiveTurn, waitMs: number): Promise<void> => {
@@ -1603,6 +1732,10 @@ async function run(): Promise<void> {
 		}
 		if (LOOP_SCENARIOS.has(scenario)) {
 			await runSeventeenBashTurn(turn, waitMs);
+			return;
+		}
+		if (scenario === "dispatch-fleet") {
+			await runDispatchFleetTurn(turn, waitMs);
 			return;
 		}
 		if (scenario === "stream-workload") {

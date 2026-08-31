@@ -43,13 +43,13 @@ function readyState() {
 	});
 }
 
-Deno.test("bootstrap validation accepts only an exact, internally consistent v3 payload", () => {
+Deno.test("bootstrap validation accepts only an exact, internally consistent v4 payload", () => {
 	const bootstrap = bootstrapFixture();
 	deepStrictEqual(parseBootstrapPayload(structuredClone(bootstrap) as unknown), bootstrap);
 
 	const wrongVersion = structuredClone(bootstrap) as unknown as Record<string, unknown>;
 	wrongVersion.protocolVersion = 2;
-	throws(() => parseBootstrapPayload(wrongVersion), /protocolVersion must be 3/u);
+	throws(() => parseBootstrapPayload(wrongVersion), /protocolVersion must be 4/u);
 
 	const v2Alias = structuredClone(bootstrap) as unknown as Record<string, unknown>;
 	v2Alias.selectedProjectId = FIXTURE_PROJECT_ID;
@@ -154,7 +154,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("turn.text", { text: "Reading the notes.", source }, { sequence: 3 }),
+		event: serverEventFixture("turn.text", { text: "Reading the notes.", agents: [], source }, { sequence: 3 }),
 	});
 	state = appReducer(state, {
 		type: "host.event",
@@ -165,6 +165,7 @@ Deno.test("turn events fold into the projection and clear the pending submission
 			status: "in_progress",
 			summary: "reading",
 			locations: [{ segments: ["notes.md"] }],
+			agents: [],
 			source,
 		}, { sequence: 4 }),
 	});
@@ -198,12 +199,12 @@ Deno.test("a frame batch folds every validated event in sequence with one reduce
 	}, { sequence: 2 });
 	const first = serverEventFixture(
 		"turn.text",
-		{ text: "alpha ", source },
+		{ text: "alpha ", agents: [], source },
 		{ sequence: 3, eventId: "event-frame-alpha" },
 	);
 	const second = serverEventFixture(
 		"turn.text",
-		{ text: "beta", source },
+		{ text: "beta", agents: [], source },
 		{ sequence: 4, eventId: "event-frame-beta" },
 	);
 	const next = appReducer(state, { type: "host.events", events: [started, first, second] });
@@ -593,4 +594,39 @@ Deno.test("the desktop notification preference is in-memory only and defaults to
 		payload: parseBootstrapPayload(structuredClone(bootstrapFixture()) as unknown),
 	});
 	equal(bootstrapped.desktopNotifications, false);
+});
+
+Deno.test("fleet activity keys the strip by run and replaces a run's row in place", () => {
+	const run = (runId: string, state: "queued" | "running" | "done", sequence: number) =>
+		serverEventFixture("fleet.activity", {
+			run: {
+				runId,
+				agentId: "explorer",
+				state,
+				taskPreview: "Audit the convergence study",
+				node: null,
+				attempt: state === "queued" ? null : 0,
+				progressCount: 0,
+				progressTruncated: false,
+				outcome: state === "done" ? "succeeded" : null,
+				durationMs: state === "done" ? 900 : null,
+				tokenCount: state === "done" ? 640 : null,
+				updatedAt: "2026-08-18T12:00:00.000Z",
+			},
+			source: "reported-by-clio",
+		}, { sequence });
+
+	let state = readyState();
+	deepStrictEqual(state.open?.fleet, []);
+	state = appReducer(state, { type: "host.event", event: run("run-1", "queued", 2) });
+	state = appReducer(state, { type: "host.event", event: run("run-2", "running", 3) });
+	state = appReducer(state, { type: "host.event", event: run("run-1", "done", 4) });
+	deepStrictEqual(
+		state.open?.fleet.map((entry) => [entry.runId, entry.state]),
+		[["run-1", "done"], ["run-2", "running"]],
+		"a later fact about a run replaces its row rather than stacking a second one",
+	);
+	equal(state.open?.fleet[0]?.outcome, "succeeded");
+	// Fleet facts are not turn cards: the transcript must be untouched by them.
+	deepStrictEqual(state.open?.projection.timeline, []);
 });

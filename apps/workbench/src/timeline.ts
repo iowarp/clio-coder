@@ -14,6 +14,7 @@ import {
 	type ServerEventPayloadByKind,
 	type TurnOutcome,
 	type WireActiveTurn,
+	type WireAgentAttribution,
 	type WirePendingPermission,
 	type WireTimelineItem,
 } from "./protocol.ts";
@@ -213,6 +214,18 @@ function settleTurn(
 	);
 }
 
+/**
+ * The one label a card shows for who produced it. The last attribution is the
+ * most specific identity Clio Coder reported, so a delegated agent wins over
+ * the orchestrator that dispatched it. An empty list means nothing was
+ * reported, and the caller falls back to the product name.
+ */
+function agentLabel(agents: readonly WireAgentAttribution[]): string | null {
+	const last = agents.at(-1);
+	if (last === undefined || last.role !== "worker") return null;
+	return last.node === null ? last.agentId : `${last.agentId} · ${last.node}`;
+}
+
 function formatPath(path: Readonly<{ segments: readonly string[] }>): string {
 	return path.segments.length === 0 ? "/" : path.segments.join("/");
 }
@@ -266,13 +279,15 @@ export function applyTurnEvent(state: TurnProjection, event: TurnEventInput, now
 			const streamPrefix = `${itemId(event.turnId, streamKind)}:`;
 			const prior = state.timeline.at(-1);
 			const streamId = prior?.id.startsWith(streamPrefix) ? prior.id : `${streamPrefix}${state.ordinal + 1}`;
+			const label = agentLabel(event.payload.agents);
 			return upsert(state, {
 				id: streamId,
 				kind: isThought ? "thought" : "narrative",
-				title: isThought ? "Reasoning" : "Clio Coder",
+				title: isThought ? "Reasoning" : (label ?? "Clio Coder"),
 				summary: event.payload.text,
 				status: origin === "replay" ? "replayed" : "complete",
 				...base,
+				...(event.payload.agents.length === 0 ? {} : { agents: event.payload.agents }),
 				source: event.payload.source,
 			}, "append-summary");
 		}
@@ -303,6 +318,7 @@ export function applyTurnEvent(state: TurnProjection, event: TurnEventInput, now
 				status,
 				...base,
 				...(origin === "live" && status !== "active" ? { endedAt: now } : {}),
+				...(event.payload.agents.length === 0 ? {} : { agents: event.payload.agents }),
 				source: event.payload.source,
 			});
 		}

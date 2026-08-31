@@ -172,7 +172,7 @@ Deno.test("the transcript renders Markdown responses, compact activity, and the 
 	projection = applyTurnEvent(projection, {
 		kind: "turn.thought",
 		turnId: "turn-1",
-		payload: { text: "Plan first.", source: "observed-on-acp" },
+		payload: { text: "Plan first.", agents: [], source: "observed-on-acp" },
 	}, now);
 	for (const [id, status] of [["a", "completed"], ["b", "completed"], ["c", "failed"]] as const) {
 		projection = applyTurnEvent(projection, {
@@ -185,6 +185,7 @@ Deno.test("the transcript renders Markdown responses, compact activity, and the 
 				status,
 				summary: `Read ${id}.md`,
 				locations: [{ segments: [`${id}.md`] }],
+				agents: [],
 				source: "observed-on-acp",
 			},
 		}, now);
@@ -194,6 +195,7 @@ Deno.test("the transcript renders Markdown responses, compact activity, and the 
 		turnId: "turn-1",
 		payload: {
 			text: "## Findings\n\nThe **coarse** case stalls.\n\n```ts\nconst x = 1;\n```\n",
+			agents: [],
 			source: "observed-on-acp",
 		},
 	}, now);

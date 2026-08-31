@@ -56,7 +56,17 @@ const OUTBOUND_REQUEST_METHODS = new Set([
 const MAX_TOOLS_PER_PROMPT = 128;
 const MAX_TOOLS_PER_REPLAY = 8_192;
 export const ACP_MAX_PERMISSION_TIMEOUT_MS = 1_800_000;
-const EXTENSION_EVENT_KINDS = ["safety.loopBlocked"] as const;
+export const EXTENSION_EVENT_KINDS = [
+	"safety.loopBlocked",
+	"dispatch.enqueued",
+	"dispatch.started",
+	"dispatch.progress",
+	"dispatch.completed",
+	"dispatch.failed",
+] as const;
+/** Byte bounds for the identifiers and the sanitized task preview a dispatch event carries. */
+const ACP_MAX_DISPATCH_ID_BYTES = 128;
+const ACP_MAX_TASK_PREVIEW_BYTES = 512;
 const LOOP_DISPOSITIONS = ["block", "lockout", "stop"] as const;
 export const ACP_REMOTE_ERROR_CODES = [
 	"not_initialized",
@@ -105,11 +115,29 @@ export interface AcpRemoteErrorMeta {
 /** Present only on frames replayed by `session/load`; the 1-based user turn on the replayed branch. */
 export type AcpReplayMeta = Readonly<{ turn: number }>;
 
+export const ACP_AGENT_ROLES = ["orchestrator", "worker"] as const;
+/** Orchestrator plus the per-tool-call worker cap the peer enforces. */
+const ACP_MAX_AGENT_ATTRIBUTIONS = 17;
+
+/**
+ * One entry of the peer's `clio-coder/agent` attribution on a `session/update`.
+ * The list is ordered from the most general identity to the most specific; an
+ * absent or empty list means the peer reported no identity for the frame, which
+ * the client passes through as an empty list rather than guessing one.
+ */
+export interface AcpAgentAttribution {
+	readonly role: (typeof ACP_AGENT_ROLES)[number];
+	readonly agentId: string;
+	readonly runId: string | null;
+	readonly node: string | null;
+}
+
 export type ValidatedAcpUpdate =
 	| Readonly<{
 		type: "message" | "thought" | "user";
 		sessionId: string;
 		text: string;
+		agents: readonly AcpAgentAttribution[];
 		replay: AcpReplayMeta | null;
 	}>
 	| Readonly<{
@@ -121,6 +149,7 @@ export type ValidatedAcpUpdate =
 		kind: AcpToolKind;
 		status: AcpToolStatus;
 		locations: readonly string[];
+		agents: readonly AcpAgentAttribution[];
 		replay: AcpReplayMeta | null;
 	}>;
 
@@ -129,6 +158,7 @@ type ParsedAcpUpdate =
 		type: "message" | "thought" | "user";
 		sessionId: string;
 		text: string;
+		agents: readonly AcpAgentAttribution[];
 		replay: AcpReplayMeta | null;
 	}>
 	| Readonly<{
@@ -141,30 +171,61 @@ type ParsedAcpUpdate =
 		status: AcpToolStatus;
 		locations?: readonly string[];
 		rawInputSignature?: string;
+		agents: readonly AcpAgentAttribution[];
 		replay: AcpReplayMeta | null;
 	}>;
 
 export type AcpExtensionEventKind = (typeof EXTENSION_EVENT_KINDS)[number];
+export type AcpDispatchEventKind = Exclude<AcpExtensionEventKind, "safety.loopBlocked">;
 
-/** The `clio-coder/event` envelope, sent only after the client opted in at `initialize`. */
-export interface AcpExtensionEvent {
-	readonly kind: AcpExtensionEventKind;
+interface AcpExtensionEnvelope {
 	readonly workspaceInstanceId: string;
 	readonly sessionId: string;
 	readonly turnId: string | null;
 	readonly sequence: number;
-	readonly terminal: false;
-	readonly payload: Readonly<{
-		toolCallId: null;
-		tool: string;
-		repeatCount: number;
-		blocksThisTurn: number;
-		budget: number;
-		disposition: (typeof LOOP_DISPOSITIONS)[number];
-		interrupted: boolean;
-		shape: null;
-	}>;
+	readonly terminal: boolean;
 }
+
+/**
+ * One dispatch lifecycle fact. Every field is what Clio Coder reported: the
+ * client neither derives a state nor reconstructs a task. `taskPreview` is the
+ * peer's own sanitized, bounded prefix; the exact task never crosses ACP.
+ */
+export interface AcpDispatchEventPayload {
+	readonly runId: string;
+	readonly agentId: string;
+	readonly taskPreview: string | null;
+	readonly node: string | null;
+	readonly origin: string | null;
+	readonly attempt: number | null;
+	readonly progressCount: number | null;
+	readonly progressTruncated: boolean;
+	readonly outcome: string | null;
+	readonly reason: string | null;
+	readonly durationMs: number | null;
+	readonly tokenCount: number | null;
+}
+
+/** The `clio-coder/event` envelope, sent only after the client opted in at `initialize`. */
+export type AcpExtensionEvent =
+	| (
+		& AcpExtensionEnvelope
+		& Readonly<{
+			kind: "safety.loopBlocked";
+			terminal: false;
+			payload: Readonly<{
+				toolCallId: null;
+				tool: string;
+				repeatCount: number;
+				blocksThisTurn: number;
+				budget: number;
+				disposition: (typeof LOOP_DISPOSITIONS)[number];
+				interrupted: boolean;
+				shape: null;
+			}>;
+		}>
+	)
+	| (AcpExtensionEnvelope & Readonly<{ kind: AcpDispatchEventKind; payload: AcpDispatchEventPayload }>);
 
 export type AcpPermissionDecision = "allow_once" | "reject_once" | "cancelled";
 
@@ -580,12 +641,47 @@ function validateReplayMeta(paramsValue: Record<string, unknown>): AcpReplayMeta
 	return { turn: replay.turn as number };
 }
 
+/**
+ * Reads the peer's per-frame agent attribution. Absent is normal: a replayed
+ * frame carries no identity, and a peer that predates the extension sends
+ * none. Present but malformed is a protocol failure, because a client that
+ * quietly dropped a bad attribution would silently relabel a worker's work as
+ * the orchestrator's.
+ */
+function validateAgentMeta(paramsValue: Record<string, unknown>): readonly AcpAgentAttribution[] {
+	if (!isPlainRecord(paramsValue._meta)) return [];
+	const agents = paramsValue._meta["clio-coder/agent"];
+	if (agents === undefined) return [];
+	if (!Array.isArray(agents) || agents.length > ACP_MAX_AGENT_ATTRIBUTIONS) {
+		return protocolFailure("session/update agent attribution was invalid.");
+	}
+	return agents.map((entry) => {
+		if (!isPlainRecord(entry) || entry.version !== 1) {
+			return protocolFailure("session/update agent attribution was invalid.");
+		}
+		const role = exactEnum(entry.role, ACP_AGENT_ROLES, "session/update agent role");
+		const runId = entry.runId === undefined
+			? null
+			: boundedString(entry.runId, "session/update agent runId", ACP_MAX_ID_BYTES);
+		if ((role === "worker") !== (runId !== null)) {
+			return protocolFailure("session/update agent attribution did not bind a worker to a run.");
+		}
+		return {
+			role,
+			agentId: boundedString(entry.agentId, "session/update agentId", ACP_MAX_ID_BYTES),
+			runId,
+			node: entry.node === undefined ? null : boundedString(entry.node, "session/update agent node", ACP_MAX_ID_BYTES),
+		};
+	});
+}
+
 function validateUpdate(paramsValue: unknown): ParsedAcpUpdate {
 	if (!isPlainRecord(paramsValue) || !isPlainRecord(paramsValue.update)) {
 		return protocolFailure("session/update params were invalid.");
 	}
 	const sessionId = boundedString(paramsValue.sessionId, "session/update sessionId", ACP_MAX_ID_BYTES);
 	const replay = validateReplayMeta(paramsValue);
+	const agents = validateAgentMeta(paramsValue);
 	const update = paramsValue.update;
 	const updateKind = boundedString(update.sessionUpdate, "sessionUpdate", 64);
 	if (
@@ -602,6 +698,7 @@ function validateUpdate(paramsValue: unknown): ParsedAcpUpdate {
 				: "user",
 			sessionId,
 			text: boundedString(update.content.text, "ACP text delta", ACP_MAX_DELTA_BYTES, true),
+			agents,
 			replay,
 		};
 	}
@@ -625,7 +722,62 @@ function validateUpdate(paramsValue: unknown): ParsedAcpUpdate {
 		status: exactEnum(update.status, TOOL_STATUSES, "ACP tool status"),
 		...(update.locations === undefined ? {} : { locations: validateLocations(update.locations) }),
 		...(update.rawInput === undefined ? {} : { rawInputSignature: rawInputSignature(update.rawInput) }),
+		agents,
 		replay,
+	};
+}
+
+/** A non-negative reported count, or null when the peer omitted it. */
+function optionalCount(value: unknown, label: string): number | null {
+	if (value === null || value === undefined) return null;
+	if (!Number.isSafeInteger(value) || (value as number) < 0) return protocolFailure(`${label} was invalid.`);
+	return value as number;
+}
+
+function optionalBounded(value: unknown, label: string, maximumBytes: number): string | null {
+	return value === null || value === undefined ? null : boundedString(value, label, maximumBytes);
+}
+
+function validateDispatchPayload(
+	kind: AcpDispatchEventKind,
+	payload: Record<string, unknown>,
+): AcpDispatchEventPayload {
+	const runId = boundedString(payload.runId, "clio-coder/event runId", ACP_MAX_DISPATCH_ID_BYTES);
+	const agentId = boundedString(payload.agentId, "clio-coder/event agentId", ACP_MAX_DISPATCH_ID_BYTES);
+	if (kind === "dispatch.progress") {
+		const progressCount = optionalCount(payload.progressCount, "clio-coder/event progressCount");
+		if (progressCount === null) return protocolFailure("clio-coder/event progressCount was missing.");
+		if (typeof payload.truncated !== "boolean") {
+			return protocolFailure("clio-coder/event progress truncation was invalid.");
+		}
+		return {
+			runId,
+			agentId,
+			taskPreview: null,
+			node: null,
+			origin: null,
+			attempt: null,
+			progressCount,
+			progressTruncated: payload.truncated,
+			outcome: null,
+			reason: null,
+			durationMs: null,
+			tokenCount: null,
+		};
+	}
+	return {
+		runId,
+		agentId,
+		taskPreview: optionalBounded(payload.taskPreview, "clio-coder/event taskPreview", ACP_MAX_TASK_PREVIEW_BYTES),
+		node: optionalBounded(payload.node, "clio-coder/event node", ACP_MAX_DISPATCH_ID_BYTES),
+		origin: optionalBounded(payload.origin, "clio-coder/event origin", 64),
+		attempt: optionalCount(payload.attempt, "clio-coder/event attempt"),
+		progressCount: null,
+		progressTruncated: false,
+		outcome: optionalBounded(payload.outcome, "clio-coder/event outcome", 64),
+		reason: optionalBounded(payload.reason, "clio-coder/event reason", 64),
+		durationMs: optionalCount(payload.durationMs, "clio-coder/event durationMs"),
+		tokenCount: optionalCount(payload.tokenCount, "clio-coder/event tokenCount"),
 	};
 }
 
@@ -637,12 +789,27 @@ function validateExtensionEvent(paramsValue: unknown): AcpExtensionEvent {
 	if (!Number.isSafeInteger(paramsValue.sequence) || (paramsValue.sequence as number) < 1) {
 		return protocolFailure("clio-coder/event sequence was invalid.");
 	}
-	if (paramsValue.terminal !== false) return protocolFailure("clio-coder/event terminal was invalid.");
 	const turnId = paramsValue.turnId === null
 		? null
 		: boundedString(paramsValue.turnId, "clio-coder/event turnId", ACP_MAX_ID_BYTES);
 	const payload = paramsValue.payload;
 	if (!isPlainRecord(payload)) return protocolFailure("clio-coder/event payload was invalid.");
+	const envelope: AcpExtensionEnvelope = {
+		workspaceInstanceId: boundedString(paramsValue.workspaceInstanceId, "clio-coder/event workspace", ACP_MAX_ID_BYTES),
+		sessionId: boundedString(paramsValue.sessionId, "clio-coder/event sessionId", ACP_MAX_ID_BYTES),
+		turnId,
+		sequence: paramsValue.sequence as number,
+		terminal: paramsValue.terminal === true,
+	};
+	if (kind !== "safety.loopBlocked") {
+		// Only a settled run is terminal. A peer that marks a live run terminal has
+		// contradicted itself, and a board that believed it would stop drawing a
+		// run that is still going.
+		const settled = kind === "dispatch.completed" || kind === "dispatch.failed";
+		if (paramsValue.terminal !== settled) return protocolFailure("clio-coder/event terminal was invalid.");
+		return { ...envelope, kind, payload: validateDispatchPayload(kind, payload) };
+	}
+	if (paramsValue.terminal !== false) return protocolFailure("clio-coder/event terminal was invalid.");
 	const count = (value: unknown, label: string): number => {
 		if (!Number.isSafeInteger(value) || (value as number) < 1) return protocolFailure(`${label} was invalid.`);
 		return value as number;
@@ -656,11 +823,8 @@ function validateExtensionEvent(paramsValue: unknown): AcpExtensionEvent {
 		return protocolFailure("clio-coder/event interruption state was invalid.");
 	}
 	return {
+		...envelope,
 		kind,
-		workspaceInstanceId: boundedString(paramsValue.workspaceInstanceId, "clio-coder/event workspace", ACP_MAX_ID_BYTES),
-		sessionId: boundedString(paramsValue.sessionId, "clio-coder/event sessionId", ACP_MAX_ID_BYTES),
-		turnId,
-		sequence: paramsValue.sequence as number,
 		terminal: false,
 		payload: {
 			toolCallId: null,
@@ -675,13 +839,21 @@ function validateExtensionEvent(paramsValue: unknown): AcpExtensionEvent {
 	};
 }
 
-function extensionEventsOptedIn(params: unknown): boolean {
-	if (!isPlainRecord(params) || !isPlainRecord(params.clientCapabilities)) return false;
+/**
+ * The kinds this client asked for, which is also the only set it will accept.
+ * A peer that sends a kind nobody requested has exceeded the opt-in, and
+ * accepting it would let a future agent widen the stream unilaterally.
+ */
+function optedInEventKinds(params: unknown): ReadonlySet<AcpExtensionEventKind> {
+	const empty = new Set<AcpExtensionEventKind>();
+	if (!isPlainRecord(params) || !isPlainRecord(params.clientCapabilities)) return empty;
 	const meta = params.clientCapabilities._meta;
-	if (!isPlainRecord(meta)) return false;
+	if (!isPlainRecord(meta)) return empty;
 	const events = meta["clio-coder/events"];
-	return isPlainRecord(events) && events.version === 1 && Array.isArray(events.kinds) &&
-		events.kinds.includes("safety.loopBlocked");
+	if (!isPlainRecord(events) || events.version !== 1 || !Array.isArray(events.kinds)) return empty;
+	const requested: readonly unknown[] = events.kinds;
+	if (!requested.includes("safety.loopBlocked")) return empty;
+	return new Set(EXTENSION_EVENT_KINDS.filter((kind) => requested.includes(kind)));
 }
 
 function advertisedEventWorkspace(value: unknown): string | null {
@@ -817,9 +989,15 @@ export class AcpClient {
 	#exitStatus: Deno.CommandStatus | null = null;
 	#promptPromise: Promise<unknown> | null = null;
 	#promptMayBeActiveRemotely = false;
-	#extensionEventsOptedIn = false;
 	#eventWorkspaceInstanceId: string | null = null;
 	#lastEventSequence = 0;
+	#optedInEventKinds: ReadonlySet<AcpExtensionEventKind> = new Set();
+	/**
+	 * The session a dispatch fact may name. Unlike the prompt session it is not
+	 * cleared when a turn settles: a detached run legitimately reports its
+	 * outcome after the turn that started it returned.
+	 */
+	#boundSessionId: string | null = null;
 	#activePromptSessionId: string | null = null;
 	#activeEventTurnId: string | null | undefined;
 	#activePermission: ActivePermission | null = null;
@@ -898,7 +1076,7 @@ export class AcpClient {
 			throw new AcpClientError("unsupported-method", `Unsupported ACP request method: ${method}`);
 		}
 		validateDuration(timeoutMs, `${method} timeout`);
-		if (method === "initialize") this.#extensionEventsOptedIn = extensionEventsOptedIn(params);
+		if (method === "initialize") this.#optedInEventKinds = optedInEventKinds(params);
 		if (!internal && (this.#frozen || this.#failed)) {
 			throw new AcpClientError("client-closed", "The ACP child is closing.");
 		}
@@ -948,6 +1126,7 @@ export class AcpClient {
 			this.#activePromptSessionId = isPlainRecord(params)
 				? boundedString(params.sessionId, "ACP prompt sessionId", ACP_MAX_ID_BYTES)
 				: protocolFailure("ACP prompt params were invalid.");
+			this.#boundSessionId = this.#activePromptSessionId;
 			this.#activeEventTurnId = undefined;
 			this.#promptPromise = tracked;
 		} else if (method === "session/load") {
@@ -1075,22 +1254,36 @@ export class AcpClient {
 
 	#consumeNotification(method: string, params: unknown): void {
 		if (method === "clio-coder/event") {
-			if (!this.#extensionEventsOptedIn) {
+			if (this.#optedInEventKinds.size === 0) {
 				return protocolFailure("The ACP peer sent an extension event without client opt in.");
 			}
 			const event = validateExtensionEvent(params);
+			if (!this.#optedInEventKinds.has(event.kind)) {
+				return protocolFailure("The ACP peer sent an extension event kind this client did not request.");
+			}
 			if (this.#eventWorkspaceInstanceId === null || event.workspaceInstanceId !== this.#eventWorkspaceInstanceId) {
 				return protocolFailure("The ACP extension event named an unexpected workspace.");
 			}
 			if (event.sequence <= this.#lastEventSequence) {
 				return protocolFailure("The ACP extension event sequence was not process monotonic.");
 			}
-			if (this.#activePromptSessionId === null || event.sessionId !== this.#activePromptSessionId) {
-				return protocolFailure("The ACP extension event crossed its active session.");
-			}
-			if (this.#activeEventTurnId === undefined) this.#activeEventTurnId = event.turnId;
-			else if (event.turnId !== this.#activeEventTurnId) {
-				return protocolFailure("The ACP extension event crossed its active turn.");
+			if (event.kind === "safety.loopBlocked") {
+				// A loop block describes the turn that is running, so it is bound to the
+				// live prompt and to one turn identity.
+				if (this.#activePromptSessionId === null || event.sessionId !== this.#activePromptSessionId) {
+					return protocolFailure("The ACP extension event crossed its active session.");
+				}
+				if (this.#activeEventTurnId === undefined) this.#activeEventTurnId = event.turnId;
+				else if (event.turnId !== this.#activeEventTurnId) {
+					return protocolFailure("The ACP extension event crossed its active turn.");
+				}
+			} else {
+				if (this.#boundSessionId === null || event.sessionId !== this.#boundSessionId) {
+					return protocolFailure("The ACP extension event crossed its bound session.");
+				}
+				if (event.turnId !== null) {
+					return protocolFailure("A dispatch lifecycle event cannot claim a turn identity.");
+				}
 			}
 			this.#lastEventSequence = event.sequence;
 			try {
@@ -1140,6 +1333,7 @@ export class AcpClient {
 				kind: update.kind,
 				status: update.status,
 				locations,
+				agents: update.agents,
 				replay: update.replay,
 			};
 		}
@@ -1160,6 +1354,7 @@ export class AcpClient {
 			kind: observed.kind,
 			status: update.status,
 			locations: observed.locations,
+			agents: update.agents,
 			replay: update.replay,
 		};
 	}

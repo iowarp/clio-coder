@@ -15,29 +15,37 @@
 import {
 	ACP_MAX_PERMISSION_TIMEOUT_MS,
 	ACP_MAX_REQUEST_TIMEOUT_MS,
+	type AcpAgentAttribution,
 	AcpClient,
 	AcpClientError,
 	type AcpClientTiming,
+	type AcpDispatchEventKind,
+	type AcpDispatchEventPayload,
 	type AcpExtensionEvent,
 	type AcpFailure,
 	type AcpLaunchSpec,
 	type AcpPermissionRequest,
 	AcpRemoteError,
 	AcpTimeoutError,
+	EXTENSION_EVENT_KINDS,
 	localAcpLaunch,
 	type ValidatedAcpUpdate,
 } from "./acp-client.ts";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
 	AUTONOMY_LEVELS,
+	MAX_WIRE_FLEET_RUNS,
 	PRODUCT_NAME,
 	type ServerEventPayloadByKind,
 	THINKING_LEVELS,
+	type WireAgentAttribution,
 	type WireAutonomyLevel,
 	type WireBoundSession,
 	type WireClioCapabilities,
 	type WireClioSnapshot,
 	type WireEventSource,
+	type WireFleetRun,
+	type WireFleetRunState,
 	type WireLoopDisposition,
 	type WireSessionSummary,
 	type WireSettingsState,
@@ -100,7 +108,14 @@ export type HostEvent =
 		context: HostTurnContext;
 		payload: ServerEventPayloadByKind["turn.permission.resolved"];
 	}>
-	| Readonly<{ type: "turn.terminal"; context: HostTurnContext; payload: ServerEventPayloadByKind["turn.terminal"] }>;
+	| Readonly<{ type: "turn.terminal"; context: HostTurnContext; payload: ServerEventPayloadByKind["turn.terminal"] }>
+	| Readonly<{
+		type: "fleet.activity";
+		projectId: string;
+		generation: string;
+		sessionId: string;
+		payload: ServerEventPayloadByKind["fleet.activity"];
+	}>;
 
 export interface HostSink {
 	emit(event: HostEvent): void;
@@ -162,7 +177,13 @@ const SAFE_SETTING_KEYS = [
 ] as const;
 // Keep the machine identifier stable for ACP compatibility. The visible title is the product name.
 const CLIENT_INFO = { name: "clio-workbench", title: PRODUCT_NAME, version: "0.0.1" } as const;
-const EVENT_OPT_IN = { version: 1, kinds: ["safety.loopBlocked"] } as const;
+/**
+ * Every kind this host is prepared to project. Asking for a kind the peer does
+ * not know is harmless; the peer intersects the request with its own allowlist.
+ */
+const EVENT_OPT_IN = { version: 1, kinds: EXTENSION_EVENT_KINDS } as const;
+const MAX_AGENT_ID_BYTES = 128;
+const MAX_TASK_PREVIEW_BYTES = 512;
 
 function bytes(value: string): number {
 	return encoder.encode(value).byteLength;
@@ -264,6 +285,21 @@ export function projectLocations(
 	return result;
 }
 
+/**
+ * Projects Clio Coder's own attribution into the bounded wire shape. The host
+ * validates rather than repairs: an identity it cannot represent is a host
+ * error, because relabelling a worker's work as the orchestrator's would be a
+ * lie the operator has no way to notice.
+ */
+function projectAgents(agents: readonly AcpAgentAttribution[]): readonly WireAgentAttribution[] {
+	return agents.map((agent) => ({
+		role: agent.role,
+		agentId: boundedString(agent.agentId, "Clio Coder agent id", MAX_AGENT_ID_BYTES),
+		runId: agent.runId === null ? null : boundedString(agent.runId, "Clio Coder run id", MAX_AGENT_ID_BYTES),
+		node: agent.node === null ? null : boundedString(agent.node, "Clio Coder node", MAX_AGENT_ID_BYTES),
+	}));
+}
+
 export function safeToolTitle(kind: string): string {
 	const labels: Readonly<Record<string, string>> = {
 		read: "Read project content",
@@ -333,11 +369,21 @@ function validateInitialize(value: unknown): ValidatedInitialize {
 	const targetsMeta = meta["clio-coder/targets"];
 	const eventsMeta = meta["clio-coder/events"];
 	let loopBlocked = false;
+	let dispatchEvents = false;
 	let eventWorkspaceInstanceId: string | null = null;
 	if (isRecord(eventsMeta) && eventsMeta.version === 1 && Array.isArray(eventsMeta.kinds)) {
-		loopBlocked = eventsMeta.notification === "clio-coder/event" && eventsMeta.kinds.includes("safety.loopBlocked");
+		const kinds: readonly unknown[] = eventsMeta.kinds;
+		loopBlocked = eventsMeta.notification === "clio-coder/event" && kinds.includes("safety.loopBlocked");
+		// The board needs the whole lifecycle. A peer that forwards only part of it
+		// would leave runs stuck in a state nothing ever settles, so a partial
+		// advertisement counts as absent rather than as a degraded board.
+		dispatchEvents = loopBlocked &&
+			(["dispatch.enqueued", "dispatch.started", "dispatch.progress", "dispatch.completed", "dispatch.failed"] as const)
+				.every((kind) => kinds.includes(kind));
 		if (loopBlocked) eventWorkspaceInstanceId = boundedString(eventsMeta.workspaceInstanceId, "event workspace", 128);
 	}
+	const agentMeta = meta["clio-coder/agent"];
+	const agentAttribution = isRecord(agentMeta) && agentMeta.version === 1;
 	return {
 		agent: { name: "clio-coder", version },
 		capabilities: {
@@ -349,6 +395,8 @@ function validateInitialize(value: unknown): ValidatedInitialize {
 			settings: flag(settingsMeta, "get_safe") && flag(settingsMeta, "patch_safe"),
 			targets: flag(targetsMeta, "list") && flag(targetsMeta, "probe"),
 			loopBlocked,
+			dispatchEvents,
+			agentAttribution,
 		},
 		eventWorkspaceInstanceId,
 	};
@@ -656,6 +704,8 @@ interface Turn {
 	streamBytes: number;
 	streamTail: string;
 	streamTailType: "message" | "thought" | null;
+	/** Attribution reported on the frames feeding the open text buffer. */
+	streamAgents: readonly WireAgentAttribution[];
 	projectionClosed: boolean;
 	updateCount: number;
 	hasSubstantiveActivity: boolean;
@@ -700,6 +750,8 @@ interface Process {
 	replay: Replay | null;
 	transportFailure: AcpFailure | null;
 	lastExtensionSequence: number;
+	/** Dispatch runs Clio Coder has reported on this process, oldest first. */
+	readonly fleet: Map<string, WireFleetRun>;
 	retiring: boolean;
 	readonly retired: Promise<void>;
 	readonly resolveRetired: () => void;
@@ -789,6 +841,11 @@ export class ClioProjectHost {
 	/** True when Clio Coder's own byte budget dropped a target or model from the list. */
 	get targetsTruncated(): boolean {
 		return this.#targetsTruncated;
+	}
+
+	/** Dispatch runs reported on the live process, oldest first. Empty before a child exists. */
+	get fleet(): readonly WireFleetRun[] {
+		return this.#process === null ? [] : [...this.#process.fleet.values()];
 	}
 
 	get generation(): string | null {
@@ -1096,6 +1153,7 @@ export class ClioProjectHost {
 				streamBytes: 0,
 				streamTail: "",
 				streamTailType: null,
+				streamAgents: [],
 				projectionClosed: false,
 				updateCount: 0,
 				hasSubstantiveActivity: false,
@@ -1237,6 +1295,7 @@ export class ClioProjectHost {
 			replay: null,
 			transportFailure: null,
 			lastExtensionSequence: 0,
+			fleet: new Map(),
 			retiring: false,
 			retired: retired.promise,
 			resolveRetired: retired.resolve,
@@ -1679,6 +1738,7 @@ export class ClioProjectHost {
 						status: "failed",
 						summary: "Clio Coder ended before reporting a terminal tool status.",
 						locations: tool.locations.map((segments) => ({ segments })),
+						agents: [],
 						source: "observed-by-workbench",
 					},
 				});
@@ -1801,7 +1861,7 @@ export class ClioProjectHost {
 				return;
 			}
 			turn.streamBytes = nextStreamBytes;
-			if (update.text.length > 0) this.#emitText(turn, update.type, update.text);
+			if (update.text.length > 0) this.#emitText(turn, update.type, update.text, projectAgents(update.agents));
 			return;
 		}
 		this.#flushText(turn);
@@ -1838,6 +1898,7 @@ export class ClioProjectHost {
 				status: update.status === "pending" ? "in_progress" : update.status,
 				summary: presentableToolTitle(tool.rawTitle, this.project.trustedRoot, tool.kind),
 				locations: tool.locations.map((segments) => ({ segments })),
+				agents: projectAgents(update.agents),
 				source: "observed-on-acp",
 			},
 		});
@@ -1895,7 +1956,7 @@ export class ClioProjectHost {
 				this.#sink.emit({
 					type: update.type === "message" ? "turn.text" : "turn.thought",
 					context: replay.context,
-					payload: { text: projected.text, source: "replayed-from-clio" },
+					payload: { text: projected.text, agents: [], source: "replayed-from-clio" },
 				});
 			}
 			return;
@@ -1929,6 +1990,7 @@ export class ClioProjectHost {
 				status: update.status === "pending" ? "in_progress" : update.status,
 				summary: presentableToolTitle(tool.rawTitle, this.project.trustedRoot, tool.kind),
 				locations: tool.locations.map((segments) => ({ segments })),
+				agents: projectAgents(update.agents),
 				source: "replayed-from-clio",
 			},
 		});
@@ -1958,20 +2020,26 @@ export class ClioProjectHost {
 		this.#sink.emit({
 			type: type === "message" ? "turn.text" : "turn.thought",
 			context: replay.context,
-			payload: { text: projected.text, source: "replayed-from-clio" },
+			payload: { text: projected.text, agents: [], source: "replayed-from-clio" },
 		});
 	}
 
 	#handleExtensionEvent(process: Process, event: AcpExtensionEvent): void {
 		const turn = process.turn;
 		if (
-			turn === null || process.session === null || process.initialized === null ||
+			process.session === null || process.initialized === null ||
 			process.initialized.eventWorkspaceInstanceId === null ||
 			event.workspaceInstanceId !== process.initialized.eventWorkspaceInstanceId ||
 			event.sessionId !== process.session.rawSessionId || event.sequence <= process.lastExtensionSequence
-		) throw new HostError("internal", "A Clio Coder extension event crossed its process or turn boundary.");
-		if (event.kind !== "safety.loopBlocked") return;
+		) throw new HostError("internal", "A Clio Coder extension event crossed its process or session boundary.");
 		process.lastExtensionSequence = event.sequence;
+		if (event.kind !== "safety.loopBlocked") {
+			// A dispatch run legitimately settles after the turn that started it, so
+			// these facts are bound to the session rather than to a live turn.
+			this.#applyDispatchEvent(process, event.kind, event.payload);
+			return;
+		}
+		if (turn === null) throw new HostError("internal", "A Clio Coder loop block crossed its turn boundary.");
 		this.#sink.emit({
 			type: "turn.loop",
 			context: turn.context,
@@ -1986,6 +2054,76 @@ export class ClioProjectHost {
 				shape: null,
 				source: "reported-by-clio",
 			},
+		});
+	}
+
+	/**
+	 * Folds one reported dispatch fact into the run this process is tracking and
+	 * publishes the result. The host keeps the runs so a browser that reloads
+	 * mid-flight gets the same strip it would have built by watching the stream;
+	 * nothing is invented, and a run only leaves a state Clio Coder moved it out
+	 * of.
+	 */
+	#applyDispatchEvent(
+		process: Process,
+		kind: AcpDispatchEventKind,
+		payload: AcpDispatchEventPayload,
+	): void {
+		const runId = boundedString(payload.runId, "Clio Coder dispatch run id", MAX_AGENT_ID_BYTES);
+		const prior = process.fleet.get(runId);
+		const state: WireFleetRunState = kind === "dispatch.enqueued"
+			? "queued"
+			: kind === "dispatch.started"
+			? "running"
+			: kind === "dispatch.progress"
+			? "progress"
+			: kind === "dispatch.completed"
+			? "done"
+			: "failed";
+		const settled = state === "done" || state === "failed";
+		const run: WireFleetRun = {
+			runId,
+			agentId: boundedString(payload.agentId, "Clio Coder dispatch agent id", MAX_AGENT_ID_BYTES),
+			state,
+			taskPreview: payload.taskPreview === null
+				? (prior?.taskPreview ?? null)
+				: boundedString(payload.taskPreview, "Clio Coder dispatch task preview", MAX_TASK_PREVIEW_BYTES),
+			node: payload.node === null
+				? (prior?.node ?? null)
+				: boundedString(payload.node, "Clio Coder dispatch node", MAX_AGENT_ID_BYTES),
+			attempt: payload.attempt ?? prior?.attempt ?? null,
+			progressCount: payload.progressCount ?? prior?.progressCount ?? 0,
+			progressTruncated: payload.progressCount === null
+				? (prior?.progressTruncated ?? false)
+				: payload.progressTruncated,
+			outcome: settled
+				? boundedString(
+					payload.reason ?? payload.outcome ?? state,
+					"Clio Coder dispatch outcome",
+					MAX_AGENT_ID_BYTES,
+				)
+				: null,
+			durationMs: payload.durationMs ?? prior?.durationMs ?? null,
+			tokenCount: payload.tokenCount ?? prior?.tokenCount ?? null,
+			updatedAt: new Date(this.#now()).toISOString(),
+		};
+		if (prior === undefined && process.fleet.size >= MAX_WIRE_FLEET_RUNS) {
+			// Drop a run that has already settled before one that is still going: a
+			// live run is the one the operator can still act on.
+			const evictable = [...process.fleet.values()].find((candidate) =>
+				candidate.state === "done" || candidate.state === "failed"
+			) ?? [...process.fleet.values()][0];
+			if (evictable !== undefined) process.fleet.delete(evictable.runId);
+		}
+		process.fleet.delete(runId);
+		process.fleet.set(runId, run);
+		if (process.session === null) return;
+		this.#sink.emit({
+			type: "fleet.activity",
+			projectId: this.project.projectId,
+			generation: process.generation,
+			sessionId: process.session.publicId,
+			payload: { run, source: "reported-by-clio" },
 		});
 	}
 
@@ -2206,6 +2344,7 @@ export class ClioProjectHost {
 						status: "canceled",
 						summary: "This call did not finish before the turn ended.",
 						locations: tool.locations.map((segments) => ({ segments })),
+						agents: [],
 						source: "observed-by-workbench",
 					},
 				});
@@ -2236,9 +2375,10 @@ export class ClioProjectHost {
 		}
 	}
 
-	#emitText(turn: Turn, type: "message" | "thought", text: string): void {
+	#emitText(turn: Turn, type: "message" | "thought", text: string, agents: readonly WireAgentAttribution[]): void {
 		if (turn.streamTailType !== null && turn.streamTailType !== type) this.#flushText(turn);
 		turn.streamTailType = type;
+		turn.streamAgents = agents;
 		const projected = consumeProjectRedaction(turn.streamTail + text, this.project.trustedRoot, false);
 		turn.streamTail = projected.remainder;
 		if (projected.text.length === 0) return;
@@ -2246,7 +2386,7 @@ export class ClioProjectHost {
 		this.#sink.emit({
 			type: type === "message" ? "turn.text" : "turn.thought",
 			context: turn.context,
-			payload: { text: projected.text, source: "observed-on-acp" },
+			payload: { text: projected.text, agents: turn.streamAgents, source: "observed-on-acp" },
 		});
 	}
 
@@ -2261,7 +2401,7 @@ export class ClioProjectHost {
 		this.#sink.emit({
 			type: type === "message" ? "turn.text" : "turn.thought",
 			context: turn.context,
-			payload: { text: projected.text, source: "observed-on-acp" },
+			payload: { text: projected.text, agents: turn.streamAgents, source: "observed-on-acp" },
 		});
 	}
 }

@@ -8,6 +8,7 @@
 
 import {
 	type CommandErrorCode,
+	MAX_WIRE_FLEET_RUNS,
 	PRODUCT_NAME,
 	type ProjectBrowseListingPayload,
 	PROTOCOL_VERSION,
@@ -19,6 +20,7 @@ import {
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
+	type WireFleetRun,
 	type WireProjectPath,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
@@ -56,6 +58,8 @@ export interface OpenWorkspaceState {
 	readonly routingInspection: WireRoutingInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
+	/** Dispatch runs Clio Coder reported on this session, oldest first. */
+	readonly fleet: readonly WireFleetRun[];
 	readonly processGeneration: string | null;
 }
 
@@ -379,6 +383,7 @@ export function workspaceFromWire(workspace: WireProjectWorkspace): OpenWorkspac
 		routingInspection: workspace.routingInspection,
 		targets: workspace.targets,
 		targetsTruncated: workspace.targetsTruncated,
+		fleet: workspace.fleet,
 		processGeneration: workspace.processGeneration,
 	};
 }
@@ -422,6 +427,16 @@ function applyToOpen(open: OpenWorkspaceState, event: ServerEvent, now: string):
 			return { ...open, routingInspection: event.payload.inspection };
 		case "targets.state":
 			return { ...open, targets: event.payload.targets, targetsTruncated: event.payload.truncated };
+		case "fleet.activity": {
+			// Keyed by run: the strip shows one entry per run, and a later fact
+			// about a run replaces the earlier one in place rather than stacking.
+			const run = event.payload.run;
+			const index = open.fleet.findIndex((candidate) => candidate.runId === run.runId);
+			const fleet = index < 0
+				? [...open.fleet, run].slice(-MAX_WIRE_FLEET_RUNS)
+				: open.fleet.map((candidate, candidateIndex) => candidateIndex === index ? run : candidate);
+			return { ...open, fleet };
+		}
 		case "targets.probed": {
 			const targetId = event.payload.targetId;
 			const health = event.payload.health;

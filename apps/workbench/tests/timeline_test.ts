@@ -51,7 +51,7 @@ function text(
 	value: string,
 	source: "observed-on-acp" | "replayed-from-clio" = "observed-on-acp",
 ): TurnEventInput {
-	return { kind: "turn.text", turnId, payload: { text: value, source } };
+	return { kind: "turn.text", turnId, payload: { text: value, agents: [], source } };
 }
 
 function tool(
@@ -71,6 +71,7 @@ function tool(
 			status,
 			summary: `${toolCallId} ${status}`,
 			locations: [{ segments: ["notes.txt"] }],
+			agents: [],
 			source,
 		},
 	};
@@ -122,7 +123,7 @@ const conversation: readonly Stamped[] = [
 		event: {
 			kind: "turn.thought",
 			turnId: "turn-1",
-			payload: { text: "Considering.", source: "observed-on-acp" },
+			payload: { text: "Considering.", agents: [], source: "observed-on-acp" },
 		},
 		now: at(6),
 	},
@@ -363,7 +364,11 @@ Deno.test("interleaved text and reasoning become separate cards in arrival order
 		{ event: started("turn-1", "live", at(1)), now: at(1) },
 		{ event: text("turn-1", "First. "), now: at(2) },
 		{
-			event: { kind: "turn.thought", turnId: "turn-1", payload: { text: "Thinking.", source: "observed-on-acp" } },
+			event: {
+				kind: "turn.thought",
+				turnId: "turn-1",
+				payload: { text: "Thinking.", agents: [], source: "observed-on-acp" },
+			},
 			now: at(3),
 		},
 		{ event: text("turn-1", "Second."), now: at(4) },
@@ -390,6 +395,7 @@ Deno.test("the last tool title falls back to the kind label when Clio Coder name
 			status: "in_progress",
 			summary: "   ",
 			locations: [],
+			agents: [],
 			source: "observed-on-acp",
 		},
 	};

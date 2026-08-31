@@ -613,6 +613,8 @@ Deno.test("a Clio Coder that cannot list, label, or delete sessions hides those 
 				settings: false,
 				targets: false,
 				loopBlocked: false,
+				dispatchEvents: false,
+				agentAttribution: false,
 			},
 		}),
 	});
@@ -736,6 +738,8 @@ Deno.test("a Clio Coder without the targets capability says so instead of showin
 				settings: false,
 				targets: false,
 				loopBlocked: false,
+				dispatchEvents: false,
+				agentAttribution: false,
 			},
 		}),
 	});
