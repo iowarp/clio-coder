@@ -67,6 +67,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Steer]: FOLDED,
 	[ToolNames.Tasks]: FOLDED,
 	[ToolNames.Ledger]: FOLDED,
+	[ToolNames.Panes]: FOLDED,
 	[ToolNames.WebFetch]: FOLDED,
 	[ToolNames.AskUser]: FOLDED,
 	[ToolNames.Artifact]: FOLDED,
