@@ -141,6 +141,48 @@ describe("contracts/observation shared turn budget", () => {
 		}
 	});
 
+	// G2 from smoke pass 2: the exhausted path returned the same retryable notice
+	// forever, and a 9B local model spent about twenty identical calls on it
+	// before the unrelated tool-call budget stopped the turn.
+	it("fails terminally after a run of exhausted-pool notices, and starts over on the next turn", async () => {
+		const budget = 1024;
+		const previous = process.env[OBSERVATION_TURN_BUDGET_ENV];
+		process.env[OBSERVATION_TURN_BUDGET_ENV] = String(budget);
+		try {
+			const root = scratchTree(0);
+			const filler = join(root, "filler.txt");
+			const target = join(root, "target.txt");
+			writeFileSync(filler, `${"x".repeat(100)}\n`.repeat(200), "utf8");
+			writeFileSync(target, "target content\n", "utf8");
+
+			const sessionId = `s-exhausted-streak-${Date.now()}`;
+			const turnId = `turn-${Date.now()}`;
+			strictEqual((await readTool.run({ path: filler }, { sessionId, turnId })).kind, "ok");
+
+			for (let attempt = 1; attempt <= 3; attempt += 1) {
+				const result = await readTool.run({ path: target }, { sessionId, turnId });
+				strictEqual(result.kind, "ok", `attempt ${attempt} should still get the notice`);
+				if (result.kind === "ok") ok(result.output.includes("observation budget exhausted"));
+			}
+
+			const terminal = await readTool.run({ path: target }, { sessionId, turnId });
+			strictEqual(terminal.kind, "error", "the fourth consecutive exhausted call fails instead of inviting a retry");
+			if (terminal.kind === "error") {
+				ok(terminal.message.includes("observation budget exhausted"), terminal.message);
+				ok(terminal.message.includes("Do not retry this call"), terminal.message);
+				ok(terminal.message.includes("Re-plan"), terminal.message);
+			}
+
+			// The guard is per turn: the next turn's pool is fresh, so its first
+			// exhausted call (if any) starts the count over rather than inheriting it.
+			const nextTurn = { sessionId, turnId: `${turnId}-next` };
+			strictEqual((await readTool.run({ path: target }, nextTurn)).kind, "ok");
+		} finally {
+			if (previous === undefined) delete process.env[OBSERVATION_TURN_BUDGET_ENV];
+			else process.env[OBSERVATION_TURN_BUDGET_ENV] = previous;
+		}
+	});
+
 	it("recognizes only files inside the current session's scratch offload directory", async () => {
 		isolatedClioEnv = await isolateClioEnv("clio-offload-path-");
 		const sessionId = "session-A";

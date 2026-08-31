@@ -70,9 +70,29 @@ export const OBSERVATION_TURN_BUDGET_ENV = GUARDRAIL_ENV_VARS.observationTurnBud
 const MIN_BUDGET_SLICE_BYTES = 1024;
 const BUDGET_TRACK_LIMIT = 256;
 
+/**
+ * How many exhausted-pool notices one turn gets before the next such call fails
+ * terminally instead of returning a retryable notice.
+ *
+ * Smoke pass 2 (G2) watched a 9B local model re-issue the identical read about
+ * twenty times against the same 208-byte notice, until the unrelated tool-call
+ * budget stopped it. The notice cannot become un-retryable by wording alone: a
+ * `kind:"ok"` result is an invitation to try again.
+ *
+ * Three is the smallest count that still lets a model learn the shape from the
+ * notice itself. The pool is shared by six OBSERVE tools, so a model that reads,
+ * then greps narrower, then lists, has spent three honest attempts at the advice
+ * the notice gives. A fourth consecutive exhausted call is evidence the advice
+ * is not landing, and it fails. Waste is bounded at four calls out of the 60-call
+ * turn budget instead of twenty.
+ */
+const MAX_EXHAUSTED_NOTICES_PER_TURN = 3;
+
 interface TurnBudgetState {
 	usedBytes: number;
 	lastSeenAt: number;
+	/** Consecutive exhausted-pool short-circuits; reset by any call that got a slice. */
+	exhaustedStreak: number;
 }
 
 const turnBudgets = new Map<string, TurnBudgetState>();
@@ -156,7 +176,7 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 		};
 	}
 	const limitBytes = observationTurnBudgetLimit();
-	const state = turnBudgets.get(key) ?? { usedBytes: 0, lastSeenAt: Date.now() };
+	const state = turnBudgets.get(key) ?? { usedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(key, state);
 	pruneBudgetMap();
@@ -174,6 +194,9 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			settled: false,
 		};
 	}
+	// A call that got a slice is progress, so the exhausted streak starts over.
+	// Only an unbroken run of short-circuits reaches the terminal failure.
+	state.exhaustedStreak = 0;
 	const callCapBytes = Math.min(selfCapBytes, remaining);
 	return {
 		key,
@@ -203,6 +226,7 @@ export function commitObservationReservation(reservation: ObservationReservation
 	const state = turnBudgets.get(reservation.key) ?? {
 		usedBytes: reservation.usedBeforeBytes,
 		lastSeenAt: Date.now(),
+		exhaustedStreak: 0,
 	};
 	state.usedBytes += reservation.callCapBytes;
 	state.lastSeenAt = Date.now();
@@ -237,6 +261,7 @@ function recordSpentBytes(reservation: ObservationReservation, bytes: number): v
 	const state = turnBudgets.get(reservation.key) ?? {
 		usedBytes: reservation.usedBeforeBytes + committedBytes,
 		lastSeenAt: Date.now(),
+		exhaustedStreak: 0,
 	};
 	state.usedBytes = Math.max(0, state.usedBytes + bytes - committedBytes);
 	state.lastSeenAt = Date.now();
@@ -252,10 +277,26 @@ function budgetDetails(reservation: ObservationReservation): ObservationBudgetDe
 	};
 }
 
+/** Count this short-circuit against the turn's run of them. Untracked calls never escalate. */
+function bumpExhaustedStreak(key: string | null): number {
+	if (key === null) return 1;
+	const state = turnBudgets.get(key);
+	if (state === undefined) return 1;
+	state.exhaustedStreak += 1;
+	state.lastSeenAt = Date.now();
+	turnBudgets.set(key, state);
+	return state.exhaustedStreak;
+}
+
 /**
  * Structured result for a call that found the turn pool already spent.
  * `subject` names what the call was about (a path, a pattern); `hint` names
  * the narrowing arguments the tool supports.
+ *
+ * The first few such calls get the notice, which states the numbers and the
+ * narrowing advice. Past MAX_EXHAUSTED_NOTICES_PER_TURN the call fails instead:
+ * nothing this turn can return content, so an `ok` result is an invitation to a
+ * retry loop the pool can never satisfy.
  */
 export function observationBudgetExhausted(input: {
 	tool: string;
@@ -265,9 +306,18 @@ export function observationBudgetExhausted(input: {
 	hint: string;
 }): ToolResult {
 	const { tool, unit, reservation, subject, hint } = input;
-	const output = `[observation budget exhausted for this turn before ${tool} ${subject}: ${formatSize(
-		reservation.usedBeforeBytes,
-	)} already returned of ${formatSize(reservation.limitBytes)}. ${hint}]`;
+	const streak = bumpExhaustedStreak(reservation.key);
+	const spent = `${formatSize(reservation.usedBeforeBytes)} already returned of ${formatSize(reservation.limitBytes)}`;
+	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
+		const message =
+			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
+			`This is the ${streak}th call to hit it, so no observation tool can return content until the ` +
+			`next turn. Do not retry this call and do not substitute another one. Re-plan with what you ` +
+			`already have: say what you found, name what is still unread, and propose the next step.`;
+		recordSpentBytes(reservation, byteLength(message));
+		return { kind: "error", message };
+	}
+	const output = `[observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ${hint}]`;
 	const shownBytes = byteLength(output);
 	recordSpentBytes(reservation, shownBytes);
 	const budget = budgetDetails(reservation);
