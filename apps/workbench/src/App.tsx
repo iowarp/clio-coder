@@ -20,6 +20,7 @@ import type {
 	WireCatalogInspection,
 	WireCatalogLibraryEntry,
 	WireCatalogSkill,
+	WireCatalogSkillCollection,
 	WireCatalogVerifier,
 	WireCatalogVerifierCollection,
 	WireClioPhase,
@@ -2581,6 +2582,13 @@ function AgentCatalogCard({ agent }: { agent: WireCatalogAgent }) {
 }
 
 function SkillCatalogCard({ skill }: { skill: WireCatalogSkill }) {
+	const issues = skill.diagnostics.errors + skill.diagnostics.warnings +
+		skill.diagnostics.collisions;
+	const reach = skill.modelVisible
+		? "The model can load this by name"
+		: !skill.trusted
+		? "Its root is not trusted, so the model never sees it"
+		: "Its frontmatter reserves it for you";
 	return (
 		<article className="catalog-card catalog-card--skill">
 			<header className="catalog-card__header">
@@ -2591,9 +2599,9 @@ function SkillCatalogCard({ skill }: { skill: WireCatalogSkill }) {
 					<h3>{skill.name}</h3>
 				</div>
 				<span
-					className={`catalog-card__signal ${skill.trusted ? "is-trusted" : "is-untrusted"}`}
+					className={`catalog-card__signal ${skill.modelVisible ? "is-trusted" : "is-untrusted"}`}
 				>
-					{skill.trusted ? "Trusted" : "Not trusted"}
+					{skill.modelVisible ? "Model visible" : "Operator only"}
 				</span>
 			</header>
 			<p className="catalog-card__description">{skill.description}</p>
@@ -2603,19 +2611,71 @@ function SkillCatalogCard({ skill }: { skill: WireCatalogSkill }) {
 					<dd>{skill.precedence}</dd>
 				</div>
 				<div>
-					<dt>Model invocation</dt>
-					<dd>{skill.modelInvocable ? "Allowed" : "Operator only"}</dd>
+					<dt>Root trust</dt>
+					<dd>{skill.trusted ? "Trusted" : "Not trusted"}</dd>
 				</div>
 				<div>
-					<dt>Reported issues</dt>
-					<dd>{skill.issueCount}</dd>
+					<dt>Model invocation</dt>
+					<dd>{skill.modelInvocable ? "Allowed" : "Disabled"}</dd>
 				</div>
 			</dl>
+			{(skill.allowedTools.length > 0 || skill.disallowedTools.length > 0) && (
+				<div className="catalog-card__binding">
+					<strong>Declared tool policy</strong>
+					<div className="catalog-chips catalog-chips--tools">
+						{skill.allowedTools.map((tool) => <span key={`allow-${tool}`}>{tool}</span>)}
+						{skill.disallowedTools.map((tool) => (
+							<span className="is-denied" key={`deny-${tool}`}>
+								¬{tool}
+							</span>
+						))}
+					</div>
+				</div>
+			)}
 			<footer className="catalog-card__footer">
-				<span>Installed inventory only</span>
-				<span>Body and native location remain host-side</span>
+				<span>{reach}</span>
+				<span>
+					{issues} reported {issues === 1 ? "issue" : "issues"}
+					{skill.installedByWorker ? " · installed by a dispatched worker" : ""}
+					{skill.updatable ? " · has an upstream" : ""}
+				</span>
 			</footer>
 		</article>
+	);
+}
+
+const SKILL_INVALID_COPY: Record<
+	NonNullable<WireCatalogSkillCollection["invalidReason"]>,
+	string
+> = {
+	"load-error": "a skill file could not be read",
+	collision: "two skills of the same name were found and one lost",
+	"unloadable-file": "a scanned file produced no skill",
+	"no-skills": "no skill loaded at all",
+};
+
+function SkillCatalogSummary(
+	{ skills }: { skills: WireCatalogSkillCollection },
+) {
+	const hidden = skills.total - skills.modelVisible;
+	return (
+		<div className="catalog-verifier-state" role="note">
+			<div className="eyebrow">SKILL CATALOG</div>
+			<p>
+				{skills.valid
+					? "Clio Coder's loader accepts this installation's skills."
+					: `Clio Coder's loader does not consider this catalog valid, because ${
+						SKILL_INVALID_COPY[skills.invalidReason ?? "no-skills"]
+					}.`} {hidden === 0
+					? "The model can load every one of them by name."
+					: `${hidden} of ${skills.total} ${hidden === 1 ? "is" : "are"} yours alone; the model never sees them.`}
+			</p>
+			<p className="catalog-verifier-state__boundary">
+				Skill bodies, file paths, base directories, content hashes, install URLs, and the loader's own diagnostic text
+				stay on the host. Whether a skill has an upstream to update from crosses; where that upstream is does not.
+				Installing, updating, and evaluating a skill stay explicit terminal operations.
+			</p>
+		</div>
 	);
 }
 
@@ -2982,6 +3042,9 @@ export const ClioCatalog = memo(function ClioCatalog({
 		includesCatalogQuery(deferredQuery, [
 			skill.name,
 			skill.description,
+			skill.modelVisible ? "model visible" : "operator only",
+			...skill.allowedTools,
+			...skill.disallowedTools,
 			skill.scope,
 			skill.source,
 		])
@@ -3139,10 +3202,14 @@ export const ClioCatalog = memo(function ClioCatalog({
 				<div>
 					<dt>Installed skills</dt>
 					<dd>
-						{inspection.skills.availability === "available" ? inspection.skills.items.length : "—"}
+						{inspection.skills.availability === "available" ? inspection.skills.total : "—"}
 					</dd>
 					<dd className="catalog__summary-note">
-						{inspection.skills.issueCount} reported loader {inspection.skills.issueCount === 1 ? "issue" : "issues"}
+						{inspection.skills.availability === "failed"
+							? catalogLabel(inspection.skills.availability)
+							: inspection.skills.valid
+							? `${inspection.skills.modelVisible} model visible`
+							: `Catalog ${catalogLabel(inspection.skills.invalidReason ?? "invalid")}`}
 					</dd>
 				</div>
 				<div>
@@ -3245,6 +3312,9 @@ export const ClioCatalog = memo(function ClioCatalog({
 				role="tabpanel"
 				aria-labelledby={`catalog-tab-${tab}`}
 			>
+				{tab === "skills" && inspection.skills.availability === "available" && (
+					<SkillCatalogSummary skills={inspection.skills} />
+				)}
 				{tab === "verifiers" && inspection.verifiers.availability === "available" && (
 					<VerifierCatalogSummary verifiers={inspection.verifiers} />
 				)}
@@ -3298,10 +3368,10 @@ export const ClioCatalog = memo(function ClioCatalog({
 			<footer className="catalog__method">
 				<strong>Read-only boundary</strong>
 				<p>
-					Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side. This atlas can
-					explain discovered capability. It cannot run an agent directly, activate a skill, install a library resource,
-					or mutate an extension package because those operations need explicit review, progress, terminal outcomes, and
-					recovery semantics.
+					Bodies, hashes, native paths, source URLs, requirements, verifier argument vectors, and raw diagnostics stay
+					host-side. This atlas can explain discovered capability. It cannot run an agent directly, activate a skill,
+					install a library resource, mutate an extension package, or author a verification check because those
+					operations need explicit review, progress, terminal outcomes, and recovery semantics.
 				</p>
 			</footer>
 		</section>

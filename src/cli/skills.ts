@@ -8,6 +8,7 @@ import {
 	type ResourceDiagnostic,
 	type Skill,
 	type SkillUpdateReport,
+	skillCatalogValidity,
 	updateSkills,
 } from "../domains/resources/index.js";
 import { formatColumns, printError, printOk } from "./shared.js";
@@ -18,6 +19,7 @@ Manage local Clio and Agent Skills-compatible skills.
 
 Commands:
   clio-coder skills list [--json] [--all]
+  clio-coder skills inventory --json
   clio-coder skills search <query> [--json]
   clio-coder skills inspect <name> [--json]
   clio-coder skills validate [path] [--json]
@@ -26,6 +28,10 @@ Commands:
   clio-coder skills update <name> | --all [--force]
   clio-coder skills sync [--force]
   clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
+
+inventory is the fixed machine-readable read a GUI host may run. Unlike a bare
+list it reports every installed skill, not only the ones the model may load, and
+says which are which; it carries no body, path, hash, or install URL.
 
 search covers installed skills plus the local marketplace: CLIO_CODER_SKILL_CATALOG_DIR,
 a repo skills/ catalog, or the catalog and skill-marketplace.json index the
@@ -249,6 +255,12 @@ function validationLoad(pathArg: string | undefined): ReturnType<typeof loadSkil
 }
 
 export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<number> {
+	// Routed before the shared parser so the fixed read stays exactly fixed: no
+	// skills flag can reach it, and no flag it does not name can be spent on it.
+	if (argv[0] === "inventory") {
+		const { runSkillsInventory } = await import("./skills-inventory.js");
+		return runSkillsInventory(argv.slice(1));
+	}
 	let parsed: Parsed;
 	try {
 		parsed = parse(argv);
@@ -365,19 +377,10 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			const list = validationLoad(pathArg);
-			// A scanned file that produced no loaded skill is malformed, and a
-			// collision drops a skill: both make the catalog invalid, as does any
-			// hard error. Benign warnings (name/path mismatch, name format,
-			// description length) attach to a file that still loaded, so their path
-			// is among the loaded skills and they do not fail validation.
-			const loadedPaths = new Set(list.items.map((skill) => skill.filePath));
-			const hasInvalidDiagnostic = list.diagnostics.some(
-				(diag) =>
-					diag.type === "error" ||
-					diag.type === "collision" ||
-					(diag.type === "warning" && diag.path !== undefined && !loadedPaths.has(diag.path)),
-			);
-			const ok = list.items.length > 0 && !hasInvalidDiagnostic;
+			// The rule itself lives in the loader, because `skills inspect --json`
+			// reports the same verdict to a GUI host and a verdict that drifts
+			// between the terminal and the browser is worse than no verdict.
+			const { ok } = skillCatalogValidity(list);
 			if (parsed.json) {
 				process.stdout.write(`${JSON.stringify({ ok, skills: list.items, diagnostics: list.diagnostics }, null, 2)}\n`);
 			} else {

@@ -725,6 +725,15 @@ export const CATALOG_SKILL_SOURCES = [
 	"cli",
 ] as const;
 export type WireCatalogSkillSource = (typeof CATALOG_SKILL_SOURCES)[number];
+/** Why Clio Coder's skill loader does not consider the installed catalog valid. */
+export const CATALOG_SKILL_INVALID_REASONS = [
+	"load-error",
+	"collision",
+	"unloadable-file",
+	"no-skills",
+] as const;
+export type WireCatalogSkillInvalidReason = (typeof CATALOG_SKILL_INVALID_REASONS)[number];
+export const MAX_WIRE_CATALOG_SKILL_TOOLS = 32;
 export const CATALOG_LIBRARY_KINDS = [
 	"skill",
 	"agent",
@@ -876,15 +885,35 @@ export interface WireCatalogAgent {
 	readonly budget: WireCatalogAgentBudget;
 }
 
+export interface WireResourceDiagnosticCounts {
+	readonly errors: number;
+	readonly warnings: number;
+	readonly collisions: number;
+}
+
 export interface WireCatalogSkill {
 	readonly name: string;
 	readonly description: string;
 	readonly scope: WireCatalogResourceScope;
 	readonly source: WireCatalogSkillSource;
+	/** Whether the skill's root is trusted enough for the model to see it at all. */
 	readonly trusted: boolean;
-	readonly precedence: number;
+	/** Whether the skill's own frontmatter permits model invocation. */
 	readonly modelInvocable: boolean;
-	readonly issueCount: number;
+	/** Both of the above, which is the fact an operator is actually asking about. */
+	readonly modelVisible: boolean;
+	readonly precedence: number;
+	readonly diagnostics: WireResourceDiagnosticCounts;
+	/** Tools the skill narrows itself to. Identifiers only, as on an agent recipe. */
+	readonly allowedTools: readonly string[];
+	readonly disallowedTools: readonly string[];
+	/** True when a dispatched worker installed this rather than the operator. */
+	readonly installedByWorker: boolean;
+	/** True when provenance records an upstream. Where that upstream is stays host-side. */
+	readonly updatable: boolean;
+	readonly audit: WireCatalogAuditState;
+	readonly installedAt: string | null;
+	readonly updatedAt: string | null;
 }
 
 export interface WireCatalogLibraryEntry {
@@ -922,7 +951,14 @@ export interface WireCatalogSkillCollection {
 	readonly availability: WireCatalogAvailability;
 	readonly items: readonly WireCatalogSkill[];
 	readonly truncated: boolean;
-	readonly issueCount: number;
+	/** The verdict `skills validate` reaches over the same loaded catalog. */
+	readonly valid: boolean;
+	readonly invalidReason: WireCatalogSkillInvalidReason | null;
+	/** Every installed skill the loader resolved, before the wire bound. */
+	readonly total: number;
+	/** How many of those the model may actually load by name. */
+	readonly modelVisible: number;
+	readonly diagnostics: WireResourceDiagnosticCounts;
 }
 
 export interface WireCatalogLibraryCollection {
@@ -3731,6 +3767,36 @@ function validateCatalogAgent(value: unknown, label: string): WireCatalogAgent {
 	};
 }
 
+function validateResourceDiagnosticCounts(
+	value: unknown,
+	label: string,
+): WireResourceDiagnosticCounts {
+	const record = expectExactKeys(value, label, [
+		"errors",
+		"warnings",
+		"collisions",
+	]);
+	return {
+		errors: expectCatalogCount(record.errors, `${label}.errors`),
+		warnings: expectCatalogCount(record.warnings, `${label}.warnings`),
+		collisions: expectCatalogCount(record.collisions, `${label}.collisions`),
+	};
+}
+
+function validateCatalogSkillTools(
+	value: unknown,
+	label: string,
+): readonly string[] {
+	const tools = expectArray(
+		value,
+		label,
+		MAX_WIRE_CATALOG_SKILL_TOOLS,
+		(entry, entryLabel) => expectPresentationText(entry, entryLabel, 64),
+	);
+	if (new Set(tools).size !== tools.length) invalid(`${label} contains duplicate tools`);
+	return tools;
+}
+
 function validateCatalogSkill(value: unknown, label: string): WireCatalogSkill {
 	const record = expectExactKeys(value, label, [
 		"name",
@@ -3738,10 +3804,33 @@ function validateCatalogSkill(value: unknown, label: string): WireCatalogSkill {
 		"scope",
 		"source",
 		"trusted",
-		"precedence",
 		"modelInvocable",
-		"issueCount",
+		"modelVisible",
+		"precedence",
+		"diagnostics",
+		"allowedTools",
+		"disallowedTools",
+		"installedByWorker",
+		"updatable",
+		"audit",
+		"installedAt",
+		"updatedAt",
 	]);
+	const trusted = expectBoolean(record.trusted, `${label}.trusted`);
+	const modelInvocable = expectBoolean(
+		record.modelInvocable,
+		`${label}.modelInvocable`,
+	);
+	const modelVisible = expectBoolean(
+		record.modelVisible,
+		`${label}.modelVisible`,
+	);
+	// Model visibility is the conjunction and nothing else. Re-derived here so a
+	// listing that has already been filtered to visible skills cannot present
+	// that filter as a per-skill fact.
+	if (modelVisible !== (trusted && modelInvocable)) {
+		invalid(`${label}.modelVisible must be its trust and invocation together`);
+	}
 	return {
 		name: expectPresentationText(record.name, `${label}.name`, 128),
 		description: expectPresentationText(
@@ -3751,13 +3840,122 @@ function validateCatalogSkill(value: unknown, label: string): WireCatalogSkill {
 		),
 		scope: expectEnum(record.scope, `${label}.scope`, CATALOG_RESOURCE_SCOPES),
 		source: expectEnum(record.source, `${label}.source`, CATALOG_SKILL_SOURCES),
-		trusted: expectBoolean(record.trusted, `${label}.trusted`),
+		trusted,
+		modelInvocable,
+		modelVisible,
 		precedence: expectCatalogCount(record.precedence, `${label}.precedence`),
-		modelInvocable: expectBoolean(
-			record.modelInvocable,
-			`${label}.modelInvocable`,
+		diagnostics: validateResourceDiagnosticCounts(
+			record.diagnostics,
+			`${label}.diagnostics`,
 		),
-		issueCount: expectCatalogCount(record.issueCount, `${label}.issueCount`),
+		allowedTools: validateCatalogSkillTools(
+			record.allowedTools,
+			`${label}.allowedTools`,
+		),
+		disallowedTools: validateCatalogSkillTools(
+			record.disallowedTools,
+			`${label}.disallowedTools`,
+		),
+		installedByWorker: expectBoolean(
+			record.installedByWorker,
+			`${label}.installedByWorker`,
+		),
+		updatable: expectBoolean(record.updatable, `${label}.updatable`),
+		audit: expectEnum(record.audit, `${label}.audit`, CATALOG_AUDIT_STATES),
+		installedAt: record.installedAt === null ? null : expectTimestamp(record.installedAt, `${label}.installedAt`),
+		updatedAt: record.updatedAt === null ? null : expectTimestamp(record.updatedAt, `${label}.updatedAt`),
+	};
+}
+
+function validateCatalogSkillCollection(
+	value: unknown,
+	label: string,
+): WireCatalogSkillCollection {
+	const record = expectExactKeys(value, label, [
+		"availability",
+		"items",
+		"truncated",
+		"valid",
+		"invalidReason",
+		"total",
+		"modelVisible",
+		"diagnostics",
+	]);
+	const availability = expectEnum(
+		record.availability,
+		`${label}.availability`,
+		CATALOG_AVAILABILITY,
+	);
+	const items = expectArray(
+		record.items,
+		`${label}.items`,
+		MAX_WIRE_CATALOG_SKILLS,
+		validateCatalogSkill,
+	);
+	if (availability === "failed" && items.length > 0) {
+		invalid(`${label} cannot carry items when its adapter failed`);
+	}
+	if (new Set(items.map((item) => item.name)).size !== items.length) {
+		invalid(`${label}.items contains duplicate skill names`);
+	}
+	const truncated = expectBoolean(record.truncated, `${label}.truncated`);
+	const valid = expectBoolean(record.valid, `${label}.valid`);
+	const invalidReason = record.invalidReason === null ? null : expectEnum(
+		record.invalidReason,
+		`${label}.invalidReason`,
+		CATALOG_SKILL_INVALID_REASONS,
+	);
+	const total = expectCatalogCount(record.total, `${label}.total`);
+	const modelVisible = expectCatalogCount(
+		record.modelVisible,
+		`${label}.modelVisible`,
+	);
+	const diagnostics = validateResourceDiagnosticCounts(
+		record.diagnostics,
+		`${label}.diagnostics`,
+	);
+	// The verdict and its reason are the same fact stated twice.
+	if (valid === (invalidReason !== null)) {
+		invalid(`${label}.invalidReason exists exactly when the catalog is invalid`);
+	}
+	if (availability === "available") {
+		if (items.length > total) invalid(`${label} cannot show more skills than it loaded`);
+		if (truncated !== items.length < total) {
+			invalid(`${label}.truncated must say whether the loaded set outran the window`);
+		}
+		if (modelVisible > total) invalid(`${label}.modelVisible cannot exceed the loaded set`);
+		// A window holding every skill accounts for the visible count exactly; a
+		// truncated one can only account for part of it.
+		const visibleInWindow = items.filter((item) => item.modelVisible).length;
+		if (truncated ? visibleInWindow > modelVisible : visibleInWindow !== modelVisible) {
+			invalid(`${label}.modelVisible must agree with the skills it shows`);
+		}
+		// An empty catalog cannot be valid, and only an empty one is empty.
+		if (total === 0 && valid) invalid(`${label} cannot call an empty catalog valid`);
+		if (invalidReason === "no-skills" && total > 0) {
+			invalid(`${label} cannot report no skills while carrying a loaded count`);
+		}
+		// Each named reason requires the diagnostic that produced it, and a valid
+		// catalog produced neither.
+		if (invalidReason === "load-error" && diagnostics.errors === 0) {
+			invalid(`${label} cannot blame a load error it did not count`);
+		}
+		if (invalidReason === "collision" && diagnostics.collisions === 0) {
+			invalid(`${label} cannot blame a collision it did not count`);
+		}
+		if (valid && (diagnostics.errors > 0 || diagnostics.collisions > 0)) {
+			invalid(`${label} cannot be valid while reporting an error or a collision`);
+		}
+	}
+	return {
+		availability,
+		items,
+		truncated,
+		valid,
+		invalidReason,
+		total,
+		modelVisible,
+		diagnostics,
 	};
 }
 
@@ -4137,12 +4335,7 @@ function validateCatalogInspection(
 			MAX_WIRE_CATALOG_AGENTS,
 			validateCatalogAgent,
 		),
-		skills: validateCatalogCollection(
-			record.skills,
-			`${label}.skills`,
-			MAX_WIRE_CATALOG_SKILLS,
-			validateCatalogSkill,
-		),
+		skills: validateCatalogSkillCollection(record.skills, `${label}.skills`),
 		library: validateCatalogCollection(
 			record.library,
 			`${label}.library`,

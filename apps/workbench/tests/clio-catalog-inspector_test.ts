@@ -45,20 +45,32 @@ function agentFixture(): Record<string, unknown> {
 Deno.test("catalog projections retain useful inventory while dropping bodies, paths, URLs, hashes, and diagnostics", () => {
 	const agents = projectAgentCatalog([agentFixture()]);
 	const skills = projectSkillCatalog({
+		version: 1,
+		generatedAt: "2026-08-31T12:00:00.000Z",
+		valid: true,
+		invalidReason: null,
+		total: 1,
+		modelVisible: 1,
+		diagnostics: { errors: 0, warnings: 1, collisions: 0 },
 		skills: [{
 			name: "literature",
 			description: "Find papers.",
 			scope: "user",
 			source: "claude",
 			trusted: true,
+			modelInvocable: true,
+			modelVisible: true,
 			precedence: 20,
-			disableModelInvocation: false,
-			diagnostics: [{ type: "warning", message: "private /home/operator/SKILL.md" }],
-			content: "private skill body sk-skill-secret",
-			filePath: "/home/operator/SKILL.md",
-			hash: "private-hash",
+			diagnostics: { errors: 0, warnings: 1, collisions: 0 },
+			allowedTools: ["read"],
+			disallowedTools: [],
+			installedByWorker: false,
+			updatable: true,
+			audit: "pass",
+			installedAt: "2026-07-01T00:00:00.000Z",
+			updatedAt: null,
 		}],
-		diagnostics: [{ type: "warning", message: "private global diagnostic" }],
+		skillsTruncated: false,
 	});
 	const library = projectLibraryCatalog({
 		entries: [{
@@ -93,8 +105,10 @@ Deno.test("catalog projections retain useful inventory while dropping bodies, pa
 
 	equal(agents.items[0]?.budget.toolCalls, 24);
 	equal(agents.items[0]?.resultKind, "research-report");
-	equal(skills.items[0]?.issueCount, 1);
-	equal(skills.issueCount, 1);
+	equal(skills.items[0]?.diagnostics.warnings, 1);
+	equal(skills.items[0]?.updatable, true);
+	equal(skills.modelVisible, 1);
+	equal(skills.valid, true);
 	equal(library.items[0]?.audit, "warn");
 	equal(extensions.items[0]?.effective, false);
 	deepStrictEqual(extensions.items[0]?.resources, ["skills", "agents"]);
@@ -130,7 +144,14 @@ Deno.test("the catalog adapter invokes only the five fixed JSON listings", async
 		equal(inspection.agents.items[0]?.id, "fixture-agent");
 		equal(inspection.skills.availability, "available");
 		equal(inspection.skills.items[0]?.name, "fixture-skill");
-		equal(inspection.skills.truncated, true);
+		// The old `skills list --json` read was filtered to model-visible skills, so
+		// a surface built on it could not report an untrusted one at all.
+		equal(inspection.skills.items[1]?.modelVisible, false);
+		equal(inspection.skills.total, 2);
+		equal(inspection.skills.modelVisible, 1);
+		equal(inspection.skills.valid, false);
+		equal(inspection.skills.invalidReason, "unloadable-file");
+		equal(inspection.skills.truncated, false);
 		equal(inspection.library.items[0]?.name, "fixture-market-skill");
 		equal(inspection.extensions.availability, "available");
 		equal(inspection.extensions.items[0]?.id, "fixture-lab-pack");
@@ -156,6 +177,9 @@ Deno.test("one catalog command can fail without hiding the other typed collectio
 		equal(inspection.agents.availability, "available");
 		equal(inspection.skills.availability, "failed");
 		deepStrictEqual(inspection.skills.items, []);
+		// A failed read must not read as a clean bill of health.
+		equal(inspection.skills.valid, false);
+		equal(inspection.skills.total, 0);
 		equal(inspection.library.availability, "available");
 		equal(inspection.extensions.availability, "available");
 		ok(!JSON.stringify(inspection).includes("private diagnostic"));
@@ -269,4 +293,76 @@ Deno.test("a refused catalog blocks the check plane and names its schema locatio
 	} finally {
 		await Deno.remove(root, { recursive: true });
 	}
+});
+
+Deno.test("a skill inventory that contradicts its own visibility rule is refused outright", () => {
+	const snapshot = (skill: Record<string, unknown>): unknown => ({
+		version: 1,
+		generatedAt: "2026-08-31T12:00:00.000Z",
+		valid: true,
+		invalidReason: null,
+		total: 1,
+		modelVisible: 1,
+		diagnostics: { errors: 0, warnings: 0, collisions: 0 },
+		skills: [skill],
+		skillsTruncated: false,
+	});
+	const base = {
+		name: "literature",
+		description: "Find papers.",
+		scope: "user",
+		source: "claude",
+		trusted: true,
+		modelInvocable: true,
+		modelVisible: true,
+		precedence: 20,
+		diagnostics: { errors: 0, warnings: 0, collisions: 0 },
+		allowedTools: [],
+		disallowedTools: [],
+		installedByWorker: false,
+		updatable: false,
+		audit: "not-reported",
+		installedAt: null,
+		updatedAt: null,
+	};
+	for (
+		const broken of [
+			// Visibility is trust and invocation together; a listing already filtered
+			// to visible skills must not present that filter as a per-skill fact.
+			{ ...base, trusted: false },
+			{ ...base, modelInvocable: false },
+			{ ...base, allowedTools: ["a tool with spaces"] },
+			{ ...base, allowedTools: ["read", "read"] },
+			{ ...base, installedAt: "not-a-timestamp" },
+		]
+	) {
+		let threw = false;
+		try {
+			projectSkillCatalog(snapshot(broken));
+		} catch {
+			threw = true;
+		}
+		ok(threw, `the projection admitted ${JSON.stringify(broken)}`);
+	}
+	// The projection rebuilds each row from named fields, so a harness that grew a
+	// body, a path, or a hash never has it repeated rather than merely refused.
+	const withSecrets = projectSkillCatalog(
+		snapshot({
+			...base,
+			content: "private skill body sk-skill-secret",
+			filePath: "/home/operator/SKILL.md",
+			hash: "private-hash",
+		}),
+	);
+	for (const forbidden of ["sk-skill-secret", "/home/operator", "private-hash"]) {
+		ok(!JSON.stringify(withSecrets).includes(forbidden), `the projection repeated ${forbidden}`);
+	}
+	// The verdict and its reason are the same fact stated twice.
+	let contradicted = false;
+	try {
+		projectSkillCatalog({ ...(snapshot(base) as Record<string, unknown>), invalidReason: "collision" });
+	} catch {
+		contradicted = true;
+	}
+	ok(contradicted, "a valid catalog cannot also name why it is invalid");
 });

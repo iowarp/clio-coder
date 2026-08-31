@@ -4,7 +4,7 @@ const separator = Deno.args.indexOf("--");
 const commandArgs = separator < 0 ? [] : Deno.args.slice(separator + 1);
 const command = commandArgs.join(" ");
 
-if (scenario === "partial" && command === "skills list --json") {
+if (scenario === "partial" && command === "skills inventory --json") {
 	await Deno.stderr.write(new TextEncoder().encode("private diagnostic /home/operator/skill.md sk-secret"));
 	Deno.exit(19);
 }
@@ -30,25 +30,53 @@ if (command === "agents --json") {
 		filepath: "/home/operator/.clio-coder/agents/fixture.md",
 		body: "raw private agent instructions",
 	}];
-} else if (command === "skills list --json") {
+} else if (command === "skills inventory --json") {
 	payload = {
+		version: 1,
+		generatedAt: "2026-08-31T12:00:00.000Z",
+		valid: false,
+		invalidReason: "unloadable-file",
+		total: 2,
+		modelVisible: 1,
+		diagnostics: { errors: 0, warnings: 2, collisions: 0 },
 		skills: [{
 			name: "fixture-skill",
 			description: "A trusted project skill used only by the fixture.",
 			scope: "project",
 			source: "clio",
 			trusted: true,
+			modelInvocable: true,
+			modelVisible: true,
 			precedence: 30,
-			disableModelInvocation: false,
-			diagnostics: [{ type: "warning", message: "private /home/operator/path" }],
-			filePath: "/home/operator/project/.clio-coder/skills/fixture/SKILL.md",
-			baseDir: "/home/operator/project/.clio-coder/skills/fixture",
-			content: "raw private skill body sk-secret",
-			hash: "private-hash",
-			normalizedHash: "private-normalized-hash",
-			sourceInfo: { path: "/home/operator/project/.clio-coder/skills", scope: "project" },
-		}, { malformed: true }],
-		diagnostics: [{ type: "warning", message: "private global diagnostic sk-secret" }],
+			diagnostics: { errors: 0, warnings: 1, collisions: 0 },
+			allowedTools: ["read"],
+			disallowedTools: ["bash"],
+			installedByWorker: true,
+			updatable: true,
+			audit: "unknown",
+			installedAt: "2026-08-01T10:00:00.000Z",
+			updatedAt: null,
+		}, {
+			// Untrusted, so the model never sees it. The old listing could not have
+			// reported this row at all.
+			name: "fixture-compat-skill",
+			description: "A skill under a compatibility root the model may not load.",
+			scope: "project",
+			source: "codex",
+			trusted: false,
+			modelInvocable: true,
+			modelVisible: false,
+			precedence: 10,
+			diagnostics: { errors: 0, warnings: 0, collisions: 0 },
+			allowedTools: [],
+			disallowedTools: [],
+			installedByWorker: false,
+			updatable: false,
+			audit: "not-reported",
+			installedAt: null,
+			updatedAt: null,
+		}],
+		skillsTruncated: false,
 	};
 } else if (command === "library list --json") {
 	payload = {

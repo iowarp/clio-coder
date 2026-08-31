@@ -1155,12 +1155,24 @@ Deno.test("resource catalog events accept only bounded inventory fields", () => 
 					scope: "project",
 					source: "clio",
 					trusted: true,
-					precedence: 30,
 					modelInvocable: true,
-					issueCount: 0,
+					modelVisible: true,
+					precedence: 30,
+					diagnostics: { errors: 0, warnings: 1, collisions: 0 },
+					allowedTools: ["read", "web_fetch"],
+					disallowedTools: [],
+					installedByWorker: false,
+					updatable: true,
+					audit: "pass",
+					installedAt: "2026-07-01T00:00:00.000Z",
+					updatedAt: null,
 				}],
 				truncated: false,
-				issueCount: 0,
+				valid: true,
+				invalidReason: null,
+				total: 1,
+				modelVisible: 1,
+				diagnostics: { errors: 0, warnings: 1, collisions: 0 },
 			},
 			library: {
 				availability: "available",
@@ -1237,6 +1249,7 @@ Deno.test("resource catalog events accept only bounded inventory fields", () => 
 	equal(event.payload.inspection.agents.items[0]?.capability, "read-only");
 	equal(event.payload.inspection.library.items[0]?.audit, "pass");
 	equal(event.payload.inspection.extensions.items[0]?.overriddenBy, "project");
+	equal(event.payload.inspection.skills.items[0]?.modelVisible, true);
 	expectProtocolError(() =>
 		serverEvent("catalog.state", {
 			inspection: {
@@ -1247,6 +1260,60 @@ Deno.test("resource catalog events accept only bounded inventory fields", () => 
 						...event.payload.inspection.skills.items[0],
 						content: "raw skill body",
 					}],
+				},
+			},
+		})
+	);
+	// Model visibility is trust and invocation together and nothing else, so a
+	// listing already filtered to visible skills cannot present its filter as a
+	// per-skill fact.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				skills: {
+					...event.payload.inspection.skills,
+					items: [{ ...event.payload.inspection.skills.items[0], trusted: false }],
+				},
+			},
+		})
+	);
+	// The window must account for the visible count it claims.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				skills: { ...event.payload.inspection.skills, modelVisible: 0 },
+			},
+		})
+	);
+	// A count of loaded skills the window cannot hold must say it was truncated.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				skills: { ...event.payload.inspection.skills, total: 4 },
+			},
+		})
+	);
+	// The verdict and its reason are the same fact stated twice.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				skills: { ...event.payload.inspection.skills, invalidReason: "collision" },
+			},
+		})
+	);
+	// A named reason requires the diagnostic that produced it.
+	expectProtocolError(() =>
+		serverEvent("catalog.state", {
+			inspection: {
+				...event.payload.inspection,
+				skills: {
+					...event.payload.inspection.skills,
+					valid: false,
+					invalidReason: "collision",
 				},
 			},
 		})

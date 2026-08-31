@@ -68,11 +68,14 @@ export {
 	parsePendingSkillRequests,
 	parseSkillCommand,
 	type Skill,
+	type SkillCatalogInvalidReason,
+	type SkillCatalogValidity,
 	type SkillExpansion,
 	type SkillList,
 	type SkillProvenance,
 	type SkillRoot,
 	type SkillSource,
+	skillCatalogValidity,
 } from "./skills/loader.js";
 export {
 	type DiscoverMarketplaceOptions,
