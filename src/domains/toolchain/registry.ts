@@ -37,6 +37,27 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
+			"linux-arm64": {
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-linux-aarch64",
+				sha256: "f55610658e1c2e0d2aaef730b4b2ab885f7f8ba00285ab372bfb14f2e3d5b40d",
+				archive: "raw",
+				binaryMembers: { herdr: "" },
+				documentMembers: [],
+			},
+			"darwin-x64": {
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-macos-x86_64",
+				sha256: "ab50262c8190cd7aa9056d249d255c08c328c3e8716de9cfa29db4f131b8e2c1",
+				archive: "raw",
+				binaryMembers: { herdr: "" },
+				documentMembers: [],
+			},
+			"darwin-arm64": {
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-macos-aarch64",
+				sha256: "a5d4f4d504d8b309c91f811050559300faba31258425f53c50852fc96f6ae574",
+				archive: "raw",
+				binaryMembers: { herdr: "" },
+				documentMembers: [],
+			},
 		},
 		// The release asset is a bare executable, so the Apache-2.0 text comes
 		// from the repository at the pinned tag.
@@ -71,6 +92,36 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 					ya: "yazi-x86_64-unknown-linux-gnu/ya",
 				},
 				documentMembers: ["yazi-x86_64-unknown-linux-gnu/LICENSE"],
+			},
+			"linux-arm64": {
+				url: "https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-aarch64-unknown-linux-gnu.zip",
+				sha256: "f5a85771f06bb0e8c488136ae0aedaec8d341a7cee995549df391d7d852fe8d1",
+				archive: "zip",
+				binaryMembers: {
+					yazi: "yazi-aarch64-unknown-linux-gnu/yazi",
+					ya: "yazi-aarch64-unknown-linux-gnu/ya",
+				},
+				documentMembers: ["yazi-aarch64-unknown-linux-gnu/LICENSE"],
+			},
+			"darwin-x64": {
+				url: "https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-apple-darwin.zip",
+				sha256: "70bb2bcf57d8af862a54e2d12f2fddceefb9aa4ba3783e9a4dcbf2a8e64aacb3",
+				archive: "zip",
+				binaryMembers: {
+					yazi: "yazi-x86_64-apple-darwin/yazi",
+					ya: "yazi-x86_64-apple-darwin/ya",
+				},
+				documentMembers: ["yazi-x86_64-apple-darwin/LICENSE"],
+			},
+			"darwin-arm64": {
+				url: "https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-aarch64-apple-darwin.zip",
+				sha256: "3f54907ea08abe96506f4b22239340ed8923a6aeaeae78f33d59bce57daca4cd",
+				archive: "zip",
+				binaryMembers: {
+					yazi: "yazi-aarch64-apple-darwin/yazi",
+					ya: "yazi-aarch64-apple-darwin/ya",
+				},
+				documentMembers: ["yazi-aarch64-apple-darwin/LICENSE"],
 			},
 		},
 		documents: [],
