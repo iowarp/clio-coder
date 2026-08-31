@@ -135,7 +135,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "command.error" ||
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" ||
-				kind === "toolchain.state" || kind === "trace.state" ||
+				kind === "toolchain.state" || kind === "trace.state" || kind === "evidence.state" ||
 				kind === "recovery.state"
 		? {}
 		: { projectId: "project-alpha" };
@@ -183,6 +183,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"fleet.inspect",
 		"toolchain.inspect",
 		"trace.inspect",
+		"evidence.inspect",
 		"recovery.inspect",
 		"targets.list",
 		"targets.probe",
@@ -504,6 +505,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"fleet.inspect": {},
 		"toolchain.inspect": {},
 		"trace.inspect": {},
+		"evidence.inspect": {},
 		"recovery.inspect": {},
 		"targets.list": { projectId: "project-alpha" },
 		"targets.probe": { projectId: "project-alpha", targetId: "lmstudio" },
@@ -1863,4 +1865,66 @@ Deno.test("trace accounting validates bounds and refuses rows from an unavailabl
 		inspection: { ...inspection, available: false, runs: [], truncated: false },
 	});
 	equal(empty.payload.inspection.available, false);
+});
+
+Deno.test("evidence inventory validates trust, tool counts, and identity without bundle contents", () => {
+	const artifact = {
+		evidenceId: "run-alpha-bundle",
+		sourceKind: "run",
+		generatedAt: "2026-08-31T14:00:40.000Z",
+		startedAt: "2026-08-31T14:00:00.000Z",
+		endedAt: "2026-08-31T14:00:30.000Z",
+		runIds: ["run-alpha"],
+		runIdsTruncated: false,
+		agentIds: ["builder"],
+		statuses: ["completed"],
+		tags: ["audit-linked"],
+		totals: {
+			runs: 1,
+			receipts: 1,
+			toolCalls: 4,
+			toolErrors: 1,
+			blockedToolCalls: 1,
+			protectedArtifacts: 0,
+			tokens: 28_665,
+			costUsd: 0.4213,
+			wallTimeMs: 30_000,
+		},
+		redactionCount: 3,
+		trust: { verdict: "compromised", runsCovered: 1, historical: false },
+	};
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:40.000Z",
+		artifacts: [artifact],
+		truncated: false,
+	};
+	const event = serverEvent("evidence.state", { inspection });
+	equal(event.projectId, undefined);
+	equal(event.payload.inspection.artifacts[0]?.trust.verdict, "compromised");
+	// A cost is a fraction, so the amount check must not demand an integer.
+	equal(event.payload.inspection.artifacts[0]?.totals.costUsd, 0.4213);
+	for (
+		const broken of [
+			// The three fields a bundle carries that must never reach the browser.
+			{ ...artifact, tasks: ["rewrite the loader"] },
+			{ ...artifact, cwds: ["/private/code"] },
+			{ ...artifact, files: ["transcript.md"] },
+			// A historical bundle has no canonical runs and no verdict of its own.
+			{ ...artifact, trust: { verdict: "grounded", runsCovered: 0, historical: true } },
+			{ ...artifact, trust: { verdict: "unknown", runsCovered: 2, historical: true } },
+			// A failed call is a subset of the calls that were attempted.
+			{ ...artifact, totals: { ...artifact.totals, toolErrors: 9 } },
+			// A run may appear once in one bundle's index.
+			{ ...artifact, runIds: ["run-alpha", "run-alpha"] },
+			// The verdict vocabulary is closed.
+			{ ...artifact, trust: { verdict: "probably-fine", runsCovered: 1, historical: false } },
+		]
+	) {
+		expectProtocolError(() => serverEvent("evidence.state", { inspection: { ...inspection, artifacts: [broken] } }));
+	}
+	expectProtocolError(() =>
+		serverEvent("evidence.state", { inspection: { ...inspection, artifacts: [artifact, artifact] } })
+	);
 });

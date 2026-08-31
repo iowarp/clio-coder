@@ -29,6 +29,8 @@ import type {
 	WireDeleteChallenge,
 	WireDispatchInspection,
 	WireEventSource,
+	WireEvidenceInspection,
+	WireEvidenceTrustVerdict,
 	WireFleetInspection,
 	WireFleetInspectionRun,
 	WireFleetInspectionStep,
@@ -106,6 +108,7 @@ export interface WorkbenchActions {
 	inspectFleet(): void;
 	inspectToolchain(): void;
 	inspectTrace(): void;
+	inspectEvidence(): void;
 	inspectRecovery(): void;
 	listTargets(projectId: string): void;
 	probeTarget(projectId: string, targetId: string): void;
@@ -3807,15 +3810,150 @@ function TraceAccounting({ run }: { run: WireTraceRun }) {
 	);
 }
 
+const EVIDENCE_VERDICT_PRESENTATION: Record<
+	WireEvidenceTrustVerdict,
+	{ readonly label: string; readonly tone: string }
+> = {
+	reviewed: { label: "Reviewed", tone: "success" },
+	grounded: { label: "Grounded", tone: "success" },
+	unverified: { label: "Unverified", tone: "warning" },
+	compromised: { label: "Compromised", tone: "error" },
+	unknown: { label: "Trust unknown", tone: "neutral" },
+};
+
+export const EvidenceInventory = memo(function EvidenceInventory({
+	inspection,
+	knownRunIds,
+	onSelectRun,
+}: {
+	inspection: WireEvidenceInspection | null;
+	knownRunIds: readonly string[];
+	onSelectRun(runId: string): void;
+}) {
+	return (
+		<section className="evidence-inventory" aria-labelledby="evidence-inventory-title">
+			<div className="evidence-inventory__heading">
+				<div>
+					<div className="eyebrow">EVIDENCE BUNDLES · INSTALLATION-WIDE</div>
+					<h3 id="evidence-inventory-title">Durable evidence built from these runs</h3>
+				</div>
+				<p>
+					Each bundle's shape and how far it can be trusted. A bundle covering several runs takes the verdict of its
+					weakest run. Task text, working directories, and the files inside a bundle stay on the host.
+				</p>
+			</div>
+			{inspection === null
+				? (
+					<p className="evidence-inventory__empty">
+						The durable evidence inventory has not been read in this session.
+					</p>
+				)
+				: inspection.artifacts.length === 0
+				? (
+					<p className="evidence-inventory__empty">
+						Clio Coder has built no evidence bundles on this installation. This is an empty record, not a health claim.
+					</p>
+				)
+				: (
+					<ul className="evidence-list">
+						{inspection.artifacts.map((artifact) => {
+							const verdict = EVIDENCE_VERDICT_PRESENTATION[artifact.trust.verdict];
+							return (
+								<li key={artifact.evidenceId} className={`is-${artifact.trust.verdict}`}>
+									<header>
+										<div>
+											<strong>{artifact.evidenceId}</strong>
+											<code>
+												{artifact.sourceKind} · {formatTimestamp(artifact.generatedAt)}
+											</code>
+										</div>
+										<StatusMark tone={verdict.tone} label={verdict.label} />
+									</header>
+									<dl>
+										<div>
+											<dt>Runs</dt>
+											<dd>{artifact.totals.runs.toLocaleString()}</dd>
+										</div>
+										<div>
+											<dt>Tool calls</dt>
+											<dd>
+												{artifact.totals.toolCalls.toLocaleString()}
+												{artifact.totals.blockedToolCalls > 0
+													? ` · ${artifact.totals.blockedToolCalls.toLocaleString()} blocked`
+													: ""}
+											</dd>
+										</div>
+										<div>
+											<dt>Tokens</dt>
+											<dd>{artifact.totals.tokens.toLocaleString()}</dd>
+										</div>
+										<div>
+											<dt>Cost</dt>
+											<dd>{formatCostUsd(artifact.totals.costUsd)}</dd>
+										</div>
+									</dl>
+									{artifact.tags.length > 0 && (
+										<ul className="evidence-tags" aria-label={`Tags on ${artifact.evidenceId}`}>
+											{artifact.tags.map((tag) => <li key={tag}>{tag}</li>)}
+										</ul>
+									)}
+									<div className="evidence-list__runs">
+										{artifact.runIds.map((runId) => {
+											const inWindow = knownRunIds.includes(runId);
+											return (
+												<button
+													type="button"
+													key={runId}
+													disabled={!inWindow}
+													onClick={() => onSelectRun(runId)}
+													title={inWindow ? undefined : "This run is outside the current run window"}
+												>
+													{runId}
+												</button>
+											);
+										})}
+										{artifact.runIdsTruncated && <span>and more</span>}
+									</div>
+									<p className="evidence-list__note">
+										{artifact.trust.historical
+											? "Built before the canonical trust projection, so it carries no verdict of its own."
+											: `Trust recorded for ${artifact.trust.runsCovered.toLocaleString()} run${
+												artifact.trust.runsCovered === 1 ? "" : "s"
+											}.`}
+										{artifact.redactionCount > 0
+											? ` ${artifact.redactionCount.toLocaleString()} secret-shaped value${
+												artifact.redactionCount === 1 ? " was" : "s were"
+											} redacted at build time.`
+											: ""}
+										{artifact.totals.protectedArtifacts > 0
+											? ` ${artifact.totals.protectedArtifacts.toLocaleString()} protected artifact event${
+												artifact.totals.protectedArtifacts === 1 ? "" : "s"
+											} recorded.`
+											: ""}
+									</p>
+								</li>
+							);
+						})}
+					</ul>
+				)}
+			{inspection?.truncated === true && (
+				<p className="evidence-inventory__bound">Older evidence bundles are outside this bounded window.</p>
+			)}
+		</section>
+	);
+});
+
 export const FleetJournal = memo(function FleetJournal({
 	inspection,
 	trace,
+	evidence,
 	pending,
 	onRefresh,
 	onBack,
 }: {
 	inspection: WireFleetInspection | null;
 	trace: WireTraceInspection | null;
+	evidence: WireEvidenceInspection | null;
 	pending: boolean;
 	onRefresh(): void;
 	onBack(): void;
@@ -4022,6 +4160,12 @@ export const FleetJournal = memo(function FleetJournal({
 					</p>
 				)}
 			</section>
+
+			<EvidenceInventory
+				inspection={evidence}
+				knownRunIds={inspection.runs.map((run) => run.runId)}
+				onSelectRun={setSelectedRunId}
+			/>
 
 			{inspection.runs.length === 0
 				? (
@@ -4922,7 +5066,9 @@ function ConversationCanvas({
 						<FleetJournal
 							inspection={state.fleetInspection}
 							trace={state.traceInspection}
-							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null}
+							evidence={state.evidenceInspection}
+							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null ||
+								state.pendingEvidenceInspect !== null}
 							onRefresh={onRefreshFleet}
 							onBack={onConversationOpen}
 						/>
@@ -6669,6 +6815,12 @@ export function WorkbenchView(
 		) {
 			actions.inspectTrace();
 		}
+		if (
+			view === "fleet-runs" && state.evidenceInspection === null &&
+			state.pendingEvidenceInspect === null
+		) {
+			actions.inspectEvidence();
+		}
 	}, [
 		actions,
 		open?.project.id,
@@ -6678,6 +6830,8 @@ export function WorkbenchView(
 		state.pendingUsageInspect,
 		state.traceInspection,
 		state.pendingTraceInspect,
+		state.evidenceInspection,
+		state.pendingEvidenceInspect,
 		state.dispatchInspection,
 		state.pendingDispatchInspect,
 		state.fleetInspection,
@@ -6735,6 +6889,7 @@ export function WorkbenchView(
 	const refreshFleet = useCallback((): void => {
 		actions.inspectFleet();
 		actions.inspectTrace();
+		actions.inspectEvidence();
 	}, [actions]);
 
 	useEffect(() => {

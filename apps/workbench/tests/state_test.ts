@@ -12,6 +12,7 @@ import {
 	catalogInspectionFixture,
 	clioSnapshotFixture,
 	dispatchInspectionFixture,
+	evidenceInspectionFixture,
 	FIXTURE_PROJECT_ID,
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
@@ -333,7 +334,7 @@ Deno.test("opening a project replaces the workspace and updates the recent list"
 	deepStrictEqual(forgotten.recent.map((entry) => entry.id), [FIXTURE_PROJECT_ID]);
 });
 
-Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, fleet, toolchain, trace, recovery, and target events land correctly", () => {
+Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, fleet, toolchain, trace, evidence, recovery, and target events land correctly", () => {
 	let state = readyState();
 	state = appReducer(state, {
 		type: "host.event",
@@ -464,10 +465,18 @@ Deno.test("session, settings, configuration, catalog, usage, routing, dispatch, 
 	equal(state.traceInspection?.runs[0]?.totalTokens, 28_665);
 	equal(state.pendingTraceInspect, null);
 
+	state = appReducer(state, { type: "evidence.inspect.submitted", requestId: "request-evidence" });
+	state = appReducer(state, {
+		type: "host.event",
+		event: serverEventFixture("evidence.state", { inspection: evidenceInspectionFixture() }, { sequence: 14 }),
+	});
+	equal(state.evidenceInspection?.artifacts[0]?.trust.verdict, "compromised");
+	equal(state.pendingEvidenceInspect, null);
+
 	state = appReducer(state, { type: "recovery.inspect.submitted", requestId: "request-recovery" });
 	state = appReducer(state, {
 		type: "host.event",
-		event: serverEventFixture("recovery.state", { inspection: recoveryInspectionFixture() }, { sequence: 14 }),
+		event: serverEventFixture("recovery.state", { inspection: recoveryInspectionFixture() }, { sequence: 15 }),
 	});
 	equal(state.recoveryInspection?.scope, "installation");
 	equal(state.recoveryInspection?.summary.failures, 2);

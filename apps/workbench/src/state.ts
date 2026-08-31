@@ -14,6 +14,7 @@ import {
 	PROTOCOL_VERSION,
 	type ServerEvent,
 	validateDispatchInspection,
+	validateEvidenceInspection,
 	validateFleetInspection,
 	validateServerEvent,
 	validateToolchainInspection,
@@ -23,6 +24,7 @@ import {
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
+	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireFleetRun,
 	type WireProjectPath,
@@ -89,6 +91,7 @@ export interface WireBootstrap {
 	readonly fleetInspection: WireFleetInspection | null;
 	readonly toolchainInspection: WireToolchainInspection | null;
 	readonly traceInspection: WireTraceInspection | null;
+	readonly evidenceInspection: WireEvidenceInspection | null;
 }
 
 export interface Notice {
@@ -112,6 +115,7 @@ export interface AppState {
 	readonly fleetInspection: WireFleetInspection | null;
 	readonly toolchainInspection: WireToolchainInspection | null;
 	readonly traceInspection: WireTraceInspection | null;
+	readonly evidenceInspection: WireEvidenceInspection | null;
 	readonly recoveryInspection: WireRecoveryInspection | null;
 	readonly browse: ProjectBrowseListingPayload | null;
 	readonly leftDrawerOpen: boolean;
@@ -142,6 +146,8 @@ export interface AppState {
 	readonly pendingToolchainInspect: string | null;
 	/** Request id of the installation-wide durable trace accounting snapshot. */
 	readonly pendingTraceInspect: string | null;
+	/** Request id of the installation-wide durable evidence inventory. */
+	readonly pendingEvidenceInspect: string | null;
 	/** Request id of the redacted Clio Coder doctor/paths sweep. */
 	readonly pendingRecoveryInspect: string | null;
 	/**
@@ -182,6 +188,7 @@ export type AppAction =
 	| { readonly type: "fleet.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "toolchain.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "trace.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "evidence.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "recovery.inspect.submitted"; readonly requestId: string }
 	| {
 		readonly type: "project.select.submitted";
@@ -207,6 +214,7 @@ export const initialAppState: AppState = {
 	fleetInspection: null,
 	toolchainInspection: null,
 	traceInspection: null,
+	evidenceInspection: null,
 	recoveryInspection: null,
 	browse: null,
 	leftDrawerOpen: false,
@@ -223,6 +231,7 @@ export const initialAppState: AppState = {
 	pendingFleetInspect: null,
 	pendingToolchainInspect: null,
 	pendingTraceInspect: null,
+	pendingEvidenceInspect: null,
 	pendingRecoveryInspect: null,
 	pendingProjectSelect: null,
 	lastSequence: 0,
@@ -245,6 +254,7 @@ const BOOTSTRAP_KEYS = [
 	"fleetInspection",
 	"toolchainInspection",
 	"traceInspection",
+	"evidenceInspection",
 ] as const;
 
 function invalidBootstrap(detail: string): never {
@@ -491,6 +501,10 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 			record.traceInspection,
 			"bootstrap.traceInspection",
 		),
+		evidenceInspection: record.evidenceInspection === null ? null : validateEvidenceInspection(
+			record.evidenceInspection,
+			"bootstrap.evidenceInspection",
+		),
 	};
 }
 
@@ -652,6 +666,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				fleetInspection: action.payload.fleetInspection,
 				toolchainInspection: action.payload.toolchainInspection,
 				traceInspection: action.payload.traceInspection,
+				evidenceInspection: action.payload.evidenceInspection,
 				pendingConfigInspect: null,
 				pendingCatalogInspect: null,
 				pendingUsageInspect: null,
@@ -660,6 +675,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				pendingFleetInspect: null,
 				pendingToolchainInspect: null,
 				pendingTraceInspect: null,
+				pendingEvidenceInspect: null,
 				announcement: open === null
 					? `${PRODUCT_NAME} is ready. Open a project folder to begin.`
 					: `${open.project.displayName} is open`,
@@ -718,6 +734,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingToolchainInspect: action.requestId };
 		case "trace.inspect.submitted":
 			return { ...state, pendingTraceInspect: action.requestId };
+		case "evidence.inspect.submitted":
+			return { ...state, pendingEvidenceInspect: action.requestId };
 		case "recovery.inspect.submitted":
 			return { ...state, pendingRecoveryInspect: action.requestId };
 		case "project.select.submitted":
@@ -767,6 +785,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingFleetInspect: null,
 						pendingToolchainInspect: null,
 						pendingTraceInspect: null,
+						pendingEvidenceInspect: null,
 						pendingRecoveryInspect: null,
 					};
 				case "command.error": {
@@ -823,6 +842,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 								event.payload.requestId === state.pendingTraceInspect
 							? null
 							: state.pendingTraceInspect,
+						pendingEvidenceInspect: event.payload.requestId === undefined ||
+								event.payload.requestId === state.pendingEvidenceInspect
+							? null
+							: state.pendingEvidenceInspect,
 						pendingRecoveryInspect: event.payload.requestId === undefined ||
 								event.payload.requestId === state.pendingRecoveryInspect
 							? null
@@ -859,6 +882,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						traceInspection: event.payload.inspection,
 						pendingTraceInspect: null,
 						announcement: "Durable run accounting updated",
+					};
+				case "evidence.state":
+					return {
+						...sequenced,
+						evidenceInspection: event.payload.inspection,
+						pendingEvidenceInspect: null,
+						announcement: "Durable evidence inventory updated",
 					};
 				case "recovery.state":
 					return {

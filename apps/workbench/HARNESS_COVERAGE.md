@@ -60,21 +60,22 @@ extensions. The GUI must never import root harness modules or infer those facts 
 
 ## Current GUI protocol footprint
 
-GUI protocol v4 currently validates 33 client commands:
+GUI protocol v4 currently validates 34 client commands:
 
 `project.browse`, `project.open`, `project.select`, `project.forget`, `fs.refresh`, `fs.create-file`,
 `fs.create-folder`, `fs.move`, `fs.delete.prepare`, `fs.delete.confirm`, `session.new`, `session.load`, `session.close`,
 `session.list`, `session.label`, `session.delete`, `turn.start`, `turn.cancel`, `permission.resolve`, `settings.get`,
 `settings.patch`, `targets.list`, `targets.probe`, `autonomy.set`, `config.inspect`, `catalog.inspect`, `usage.inspect`,
-`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, `trace.inspect`, and `recovery.inspect`.
+`routing.inspect`, `dispatch.inspect`, `fleet.inspect`, `toolchain.inspect`, `trace.inspect`, `evidence.inspect`, and
+`recovery.inspect`.
 
-It validates 32 server event kinds:
+It validates 33 server event kinds:
 
 `connection.ready`, `project.browse.listing`, `project.opened`, `project.forgotten`, `project.snapshot`, `fs.changed`,
 `fs.delete.challenge`, `clio.state`, `session.list`, `settings.state`, `targets.state`, `targets.probed`,
 `config.state`, `catalog.state`, `usage.state`, `routing.state`, `dispatch.state`, `fleet.inspection.state`,
-`toolchain.state`, `trace.state`, `recovery.state`, `turn.started`, `turn.text`, `turn.thought`, `turn.tool`,
-`turn.loop`, `turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `fleet.activity`,
+`toolchain.state`, `trace.state`, `evidence.state`, `recovery.state`, `turn.started`, `turn.text`, `turn.thought`,
+`turn.tool`, `turn.loop`, `turn.permission.requested`, `turn.permission.resolved`, `turn.terminal`, `fleet.activity`,
 `protocol.error`, and `command.error`.
 
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
@@ -93,6 +94,11 @@ stores with separate failure modes, and an installation that never enabled traci
 that read into `fleet.inspect` would have made a missing trace file a failure of the run journal. It gets its own
 command, its own event, and an explicit `available` flag, because "tracing was never on" and "the database holds no
 runs" are different answers and an operator is entitled to both.
+
+A third case sits between the two. The evidence inventory is a separate store again, so it takes its own command and
+event, but what makes it worth having is a field the store held and the reader dropped: `redactionCount` was written to
+every bundle, declared on the overview type, and silently discarded by the parser that reads it back. Adding a GUI
+surface is a good way to find that, because a projection has to name every field it forwards.
 
 A harness fact that is genuinely part of an existing family widens that family's DTO instead of claiming a new command
 kind. The fleet-root step index arrived that way: it is the parent of the durable runs `fleet.inspect` already reads, so

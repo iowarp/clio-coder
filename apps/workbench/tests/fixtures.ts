@@ -7,6 +7,7 @@ import {
 	type WireClioSnapshot,
 	type WireConfigInspection,
 	type WireDispatchInspection,
+	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireProjectWorkspace,
 	type WireRecoveryInspection,
@@ -198,6 +199,67 @@ export function traceInspectionFixture(): WireTraceInspection {
 			phasesTruncated: false,
 		}],
 		truncated: false,
+	};
+}
+
+export function evidenceInspectionFixture(): WireEvidenceInspection {
+	return {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:40.000Z",
+		artifacts: [
+			{
+				evidenceId: "run-alpha-bundle",
+				sourceKind: "run",
+				generatedAt: "2026-08-31T14:00:40.000Z",
+				startedAt: "2026-08-31T14:00:00.000Z",
+				endedAt: "2026-08-31T14:00:30.000Z",
+				runIds: ["run-alpha", "run-beta"],
+				runIdsTruncated: true,
+				agentIds: ["builder", "debugger"],
+				statuses: ["completed"],
+				tags: ["audit-linked", "blocked-tool"],
+				totals: {
+					runs: 2,
+					receipts: 2,
+					toolCalls: 9,
+					toolErrors: 1,
+					blockedToolCalls: 2,
+					protectedArtifacts: 1,
+					tokens: 28_665,
+					costUsd: 0.4213,
+					wallTimeMs: 30_000,
+				},
+				redactionCount: 3,
+				trust: { verdict: "compromised", runsCovered: 2, historical: false },
+			},
+			{
+				evidenceId: "session-legacy-bundle",
+				sourceKind: "session",
+				generatedAt: "2026-08-30T09:00:00.000Z",
+				startedAt: null,
+				endedAt: null,
+				runIds: [],
+				runIdsTruncated: false,
+				agentIds: [],
+				statuses: [],
+				tags: [],
+				totals: {
+					runs: 1,
+					receipts: 0,
+					toolCalls: 0,
+					toolErrors: 0,
+					blockedToolCalls: 0,
+					protectedArtifacts: 0,
+					tokens: 0,
+					costUsd: 0,
+					wallTimeMs: 0,
+				},
+				redactionCount: 0,
+				trust: { verdict: "unknown", runsCovered: 0, historical: true },
+			},
+		],
+		truncated: true,
 	};
 }
 
@@ -650,6 +712,7 @@ export function bootstrapFixture(
 		fleetInspection: null,
 		toolchainInspection: null,
 		traceInspection: null,
+		evidenceInspection: null,
 		...overrides,
 	};
 }
