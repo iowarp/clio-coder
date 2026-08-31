@@ -159,6 +159,7 @@ import {
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import { ToolchainDomainModule } from "../domains/toolchain/index.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
@@ -863,6 +864,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			ShareDomainModule,
 			createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
 			ProvidersDomainModule,
+			ToolchainDomainModule,
 			SafetyDomainModule,
 			createPromptsDomainModule({
 				noContextFiles: options.noContextFiles === true,

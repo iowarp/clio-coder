@@ -8,6 +8,7 @@ import {
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
+import { toolchainFindings } from "./doctor-toolchain.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder doctor [--fix] [--json]
@@ -49,7 +50,19 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
 	const fleetChecks = untouched ? [] : await runDoctorFleetChecks();
-	const all = [...findings, ...storageChecks, ...runtimeChecks, ...modelChecks, ...interopChecks, ...fleetChecks];
+	// Resolution reads PATH and the vendor root and creates nothing, but on an
+	// untouched home there is no vendor root to look at and the answer would be
+	// "none" for every row regardless, so the sweep stays with the others.
+	const toolChecks = untouched ? [] : toolchainFindings();
+	const all = [
+		...findings,
+		...storageChecks,
+		...runtimeChecks,
+		...modelChecks,
+		...interopChecks,
+		...fleetChecks,
+		...toolChecks,
+	];
 	const ok = all.every((f) => f.ok);
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ ok, fix, findings: all }, null, 2)}\n`);
