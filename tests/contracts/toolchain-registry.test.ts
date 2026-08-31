@@ -94,6 +94,7 @@ describe("toolchain registry table", () => {
 	it("pins the three tools this cycle committed to, with their licenses", () => {
 		const byId = new Map(PINNED_TOOLS.map((entry) => [entry.id, entry]));
 		strictEqual(byId.get("herdr")?.license, "Apache-2.0");
+		strictEqual(byId.get("herdr")?.version, "0.8.2", "managed installs stay on the verified pin");
 		strictEqual(byId.get("yazi")?.license, "MIT");
 		strictEqual(byId.get("croc")?.license, "MIT");
 	});
