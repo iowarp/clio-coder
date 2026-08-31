@@ -69,6 +69,54 @@ const REFUSALS: ReadonlyArray<{ id: NumberSettingId; typed: string; reason: stri
 		reason: `Not applied: expected an integer <= ${MAX_TIMER_DELAY_MS}, got ${MAX_TIMER_DELAY_MS + 1}.`,
 		accepted: "90000",
 	},
+	{
+		id: "workers.escalation.timeoutMs",
+		typed: "0",
+		reason: "Not applied: expected an integer >= 1, got 0.",
+		accepted: "60000",
+	},
+	{
+		id: "workers.resilienceCooldownMs",
+		typed: "-1",
+		reason: "Not applied: expected an integer >= 0, got -1.",
+		accepted: "0",
+	},
+	{
+		id: "guardrails.turnToolCallBudget",
+		typed: "0",
+		reason: "Not applied: expected an integer >= 1, got 0.",
+		accepted: "120",
+	},
+	{
+		id: "guardrails.workerToolCallCap",
+		typed: "1.5",
+		reason: "Not applied: expected an integer, got 1.5.",
+		accepted: "300",
+	},
+	{
+		id: "guardrails.maxDispatchRuns",
+		typed: "0",
+		reason: "Not applied: expected an integer >= 1, got 0.",
+		accepted: "250",
+	},
+	{
+		id: "guardrails.readMaxBytes",
+		typed: "abc",
+		reason: 'Not applied: expected an integer, got "abc".',
+		accepted: "102400",
+	},
+	{
+		id: "guardrails.observationTurnBudgetBytes",
+		typed: "0",
+		reason: "Not applied: expected an integer >= 1, got 0.",
+		accepted: "262144",
+	},
+	{
+		id: "guardrails.internalDispatchTimeoutMs",
+		typed: "0",
+		reason: "Not applied: expected an integer >= 1, got 0.",
+		accepted: "300000",
+	},
 ];
 
 function baseSettings(): ClioSettings {
@@ -116,13 +164,21 @@ function openEditor(settings: ClioSettings, id: NumberSettingId): { center: Sett
 }
 
 describe("contracts/settings-center number editor refusals", () => {
-	it("serves exactly the five number rows through the shared editor", () => {
+	it("serves every number row through the shared editor", () => {
 		deepStrictEqual([...NUMBER_SETTING_IDS].sort(), [
 			"budget.sessionCeilingUsd",
 			"delegation.defaults.connectTimeoutMs",
 			"delegation.defaults.permissionTimeoutMs",
 			"delegation.defaults.turnTimeoutMs",
+			"guardrails.internalDispatchTimeoutMs",
+			"guardrails.maxDispatchRuns",
+			"guardrails.observationTurnBudgetBytes",
+			"guardrails.readMaxBytes",
+			"guardrails.turnToolCallBudget",
+			"guardrails.workerToolCallCap",
 			"watchdog.cadenceToolCalls",
+			"workers.escalation.timeoutMs",
+			"workers.resilienceCooldownMs",
 		]);
 		deepStrictEqual([...REFUSALS.map((entry) => entry.id)].sort(), [...NUMBER_SETTING_IDS].sort());
 		const byId = new Map(buildSettingItems(baseSettings()).map((item) => [item.id, item]));

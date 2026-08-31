@@ -6,7 +6,16 @@ import {
 	setFleetProfileInSettings,
 	useTargetInSettings,
 } from "../../core/config.js";
-import { DEFAULT_SETTINGS, THINKING_LEVELS } from "../../core/defaults.js";
+import {
+	ACTIVE_ROUTING_POSTURES,
+	ACTIVE_ROUTING_ROLES,
+	type ActiveRoutingPosture,
+	type ActiveRoutingRole,
+	DEFAULT_SETTINGS,
+	THINKING_LEVELS,
+	type WorkerEscalationSettings,
+} from "../../core/defaults.js";
+import type { GuardrailValues } from "../../core/guardrails.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
@@ -95,6 +104,16 @@ const ULTRA_NARROW_TERMINAL_WIDTH = 60;
 const FALLBACK_THINKING_VALUES: ReadonlyArray<string> = THINKING_LEVELS;
 const ROW_GAP = "  ";
 /**
+ * `workers.escalation` and `workers.resilienceCooldownMs` are optional keys, so
+ * the row that shows them and the mutation that writes them both need a
+ * definite shipped value to fall back to.
+ */
+const SHIPPED_ESCALATION: WorkerEscalationSettings = DEFAULT_SETTINGS.workers.escalation ?? {
+	timeoutMs: 120_000,
+	fallback: "deny",
+};
+const SHIPPED_RESILIENCE_COOLDOWN_MS = DEFAULT_SETTINGS.workers.resilienceCooldownMs ?? 15_000;
+/**
  * The product's cut marker, as the help center and every list overlay use it.
  *
  * A setting key is an identifier the operator types into settings.yaml, and the
@@ -136,17 +155,18 @@ const RESTART_REQUIRED_IDS = new Set<string>([
 export { SETTINGS_SECTIONS, type SettingsSectionId };
 
 const SETTINGS_SECTION_DESCRIPTIONS = {
-	safety: "How freely Clio acts, and how delegated agents' tools are governed.",
-	orchestrator: "Interactive chat routing and the optional proactive-memory model plane.",
-	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers, and where they run.",
+	safety: "How freely Clio acts, how a worker's approval ask resolves, and how delegated agents' tools are governed.",
+	orchestrator: "Interactive chat routing, prompt pre-warm, and the optional proactive-memory model plane.",
+	fleet: "Defaults, profiles, agent bindings, and route activation for dispatched workers, and where they run.",
 	targets: "Configured inference targets: which one chat and the fleet use, and whether each answers.",
 	models: "The /model picker, favorites, and Alt+J / Alt+K cycling.",
-	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
-	compaction: "When and how the context window is summarized under pressure.",
-	retry: "Automatic recovery from transient provider and network errors.",
+	budget: "Cost ceiling, per-turn output budget, worker concurrency, and the guardrail backstops.",
+	compaction: "When and how the context window is evicted and summarized under pressure.",
+	retry: "Automatic recovery from transient provider, network, and stalled-stream errors.",
 	terminal: "Terminal integration and the Clio color palette.",
 	watchdog: "The opt-in turn-end verifier run, where it is routed, and whether it also fires mid-turn.",
-	advanced: "Commit provenance, runtime plugins, delegation timeouts, and links to other surfaces.",
+	advanced:
+		"Commit provenance, runtime plugins, delegation timeouts, the resource library, and links to other surfaces.",
 } as const satisfies Record<SettingsSectionId, string>;
 
 export const SETTINGS_LABELS_BY_ID = {
@@ -156,6 +176,8 @@ export const SETTINGS_LABELS_BY_ID = {
 	// section headed Fleet whose rows read "Worker profiles" and "Worker
 	// retries" made one setting look like two subsystems.
 	"workers.onPermission": "Fleet approvals routing",
+	"workers.escalation.timeoutMs": "Escalation timeout (ms)",
+	"workers.escalation.fallback": "Escalation fallback",
 	"delegation.defaults.toolGovernance": "Delegation governance",
 	"skills.trustProjectCompatRoots": "Trust project skill roots",
 	"attribution.gitCommits": "Clio commit provenance",
@@ -171,12 +193,17 @@ export const SETTINGS_LABELS_BY_ID = {
 	"memory.intervention.windowSteps": "Memory trajectory steps",
 	"memory.intervention.maxTokens": "Memory reminder tokens",
 	"memory.intervention.timeoutMs": "Memory timeout (ms)",
+	"prewarm.enabled": "Prompt pre-warm",
 	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"workers.default.thinkingLevel": "Default thinking level",
 	"workers.profiles": "Add profile",
 	"workers.agentBindings": "Add agent route",
 	"workers.maxRetries": "Fleet retries",
+	"workers.resilienceCooldownMs": "Resilience cooldown (ms)",
+	"routing.activeRoles": "Active routing roles",
+	"routing.activePostures": "Active routing postures",
+	"routing.agentAutomation.activeAgentRoles": "Active agent routes",
 	"panes.enabled": "Panes",
 	"panes.notifications": "Pane notifications",
 	"panes.journal": "Run event journal",
@@ -190,13 +217,25 @@ export const SETTINGS_LABELS_BY_ID = {
 	"budget.sessionCeilingUsd": "Session ceiling (USD)",
 	"defaults.maxTokens": "Output budget (tokens)",
 	"budget.concurrency": "Fleet concurrency",
+	"guardrails.turnToolCallBudget": "Turn tool-call budget",
+	"guardrails.workerToolCallCap": "Worker tool-call cap",
+	"guardrails.maxDispatchRuns": "Run ledger retention",
+	"guardrails.readMaxBytes": "Read byte cap",
+	"guardrails.observationTurnBudgetBytes": "Observation byte pool",
+	"guardrails.internalDispatchTimeoutMs": "Internal dispatch timeout (ms)",
 	"compaction.auto": "Auto-compact",
 	"compaction.excludeLastTurns": "Protected recent turns",
 	"compaction.threshold": "Compaction threshold",
+	"context.workingSet.enabled": "Working-set eviction",
+	"context.workingSet.policy": "Eviction policy",
+	"context.workingSet.target": "Eviction target pressure",
+	"context.workingSet.protectLastTurns": "Turns protected from eviction",
+	"context.workingSet.minEvictableTokens": "Minimum evictable tokens",
 	"retry.enabled": "Retry transient errors",
 	"retry.maxRetries": "Max retries",
 	"retry.baseDelayMs": "Base delay (ms)",
 	"retry.maxDelayMs": "Max delay (ms)",
+	"retry.streamStallMs": "Stream stall timeout (ms)",
 	"terminal.showTerminalProgress": "Terminal progress badges",
 	"terminal.outputVerbosity": "Output detail",
 	"terminal.tuiMode": "TUI mode",
@@ -216,6 +255,10 @@ export const SETTINGS_LABELS_BY_ID = {
 	targets: "Configured targets",
 	keybindings: "Keybinding overrides",
 	"delegation.agents": "Delegation agents",
+	"library.catalog": "Library catalog path",
+	"library.remote": "Library remote",
+	"library.confirmedRemote": "Confirmed library remote",
+	"library.sync": "Library sync",
 } as const;
 
 /**
@@ -229,10 +272,20 @@ type EntrySettingId =
 	| `fleet.nodes.${string}`
 	| `fleet.endpoints.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
-type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement" | "panes"}`;
+type FleetGroupHeaderId =
+	`fleet.group.${"defaults" | "profiles" | "agent-routes" | "route-activation" | "placement" | "panes"}`;
 type TerminalGroupHeaderId = "terminal.group.files-pane";
+type BudgetGroupHeaderId = "budget.group.guardrails";
+type CompactionGroupHeaderId = "compaction.group.working-set";
+type AdvancedGroupHeaderId = "advanced.group.library";
+type GroupHeaderId =
+	| FleetGroupHeaderId
+	| TerminalGroupHeaderId
+	| BudgetGroupHeaderId
+	| CompactionGroupHeaderId
+	| AdvancedGroupHeaderId;
 type TargetsCtaId = "targets.add-cta";
-export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId | TerminalGroupHeaderId | TargetsCtaId;
+export type SettingsCenterRowId = EditableSettingId | GroupHeaderId | TargetsCtaId;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
 const AUTO_PLACEMENT_CHOICE = "(auto placement)";
@@ -243,6 +296,8 @@ export const SETTINGS_SECTION_ROWS = {
 	safety: [
 		"autonomy",
 		"workers.onPermission",
+		"workers.escalation.timeoutMs",
+		"workers.escalation.fallback",
 		"delegation.defaults.toolGovernance",
 		"skills.trustProjectCompatRoots",
 		"safetyNet",
@@ -259,22 +314,46 @@ export const SETTINGS_SECTION_ROWS = {
 		"memory.intervention.windowSteps",
 		"memory.intervention.maxTokens",
 		"memory.intervention.timeoutMs",
+		"prewarm.enabled",
 	],
 	fleet: [
 		"workers.default.target",
 		"workers.default.model",
 		"workers.default.thinkingLevel",
 		"workers.maxRetries",
+		"workers.resilienceCooldownMs",
 		"workers.profiles",
 		"workers.agentBindings",
+		"routing.activeRoles",
+		"routing.activePostures",
+		"routing.agentAutomation.activeAgentRoles",
 		"panes.enabled",
 		"panes.notifications",
 		"panes.journal",
 	],
 	models: ["scope", "modelSelector.recentLimit", "modelSelector.favorites"],
-	budget: ["budget.sessionCeilingUsd", "defaults.maxTokens", "budget.concurrency"],
-	compaction: ["compaction.auto", "compaction.threshold", "compaction.excludeLastTurns"],
-	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs"],
+	budget: [
+		"budget.sessionCeilingUsd",
+		"defaults.maxTokens",
+		"budget.concurrency",
+		"guardrails.turnToolCallBudget",
+		"guardrails.workerToolCallCap",
+		"guardrails.maxDispatchRuns",
+		"guardrails.readMaxBytes",
+		"guardrails.observationTurnBudgetBytes",
+		"guardrails.internalDispatchTimeoutMs",
+	],
+	compaction: [
+		"compaction.auto",
+		"compaction.threshold",
+		"compaction.excludeLastTurns",
+		"context.workingSet.enabled",
+		"context.workingSet.policy",
+		"context.workingSet.target",
+		"context.workingSet.protectLastTurns",
+		"context.workingSet.minEvictableTokens",
+	],
+	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs", "retry.streamStallMs"],
 	terminal: [
 		"terminal.showTerminalProgress",
 		"terminal.outputVerbosity",
@@ -299,6 +378,10 @@ export const SETTINGS_SECTION_ROWS = {
 		"delegation.defaults.permissionTimeoutMs",
 		"keybindings",
 		"delegation.agents",
+		"library.catalog",
+		"library.remote",
+		"library.confirmedRemote",
+		"library.sync",
 	],
 	targets: ["targets"],
 } as const satisfies Record<SettingsSectionId, readonly EditableSettingId[]>;
@@ -307,6 +390,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	autonomy: "How freely Clio acts; the safety net always applies.",
 	"workers.onPermission":
 		"How a worker resolves an approval ask: deny the call, fail the run, or escalate to this session.",
+	"workers.escalation.timeoutMs": "How long an escalated worker approval waits for you before the fallback applies.",
+	"workers.escalation.fallback": "What an escalated approval becomes when nobody answers inside the timeout.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	"skills.trustProjectCompatRoots": "Whether third-party project skill roots are loaded.",
 	"attribution.gitCommits":
@@ -323,12 +408,18 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"memory.intervention.windowSteps": "Recent completed tool steps visible to the memory policy.",
 	"memory.intervention.maxTokens": "Hard cap for one visible memory reminder.",
 	"memory.intervention.timeoutMs": "Hard deadline for one background-model memory call.",
+	"prewarm.enabled": "Send the next turn's known prefix ahead of time so a local server has already prefilled it.",
 	"workers.default.target": "Default /run target id.",
 	"workers.default.model": "Default /run wire model id.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
 	"workers.profiles": "Named target/model/thinking choices that native workers can use. Enter adds one.",
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
+	"workers.resilienceCooldownMs":
+		"How long a failing target, runtime, and model route is skipped before it is tried again.",
+	"routing.activeRoles": "Execution roles whose joint route selection may act instead of only shadowing.",
+	"routing.activePostures": "Route postures whose selection may act instead of only shadowing.",
+	"routing.agentAutomation.activeAgentRoles": "Exact agent and execution-role pairs whose agent choice may act.",
 	"panes.enabled": "Default panes activation for new sessions; `--with-panes` / `--no-panes` beat it.",
 	"panes.notifications": "Which terminal run states raise a pane-host toast.",
 	"panes.journal": "Whether every dispatched run's event tail is written to disk for `clio-coder fleet view`.",
@@ -342,13 +433,26 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
 	"defaults.maxTokens": "Output tokens requested per turn, applied to every target.",
 	"budget.concurrency": "Parallel workers allowed during dispatch.",
+	"guardrails.turnToolCallBudget": "Soft per-turn tool-call budget for this chat loop.",
+	"guardrails.workerToolCallCap": "Lifetime ceiling on tool calls one dispatched worker may execute.",
+	"guardrails.maxDispatchRuns": "How many finished runs the dispatch ledger keeps before the oldest are dropped.",
+	"guardrails.readMaxBytes": "Per-call byte cap for the read tool.",
+	"guardrails.observationTurnBudgetBytes": "Shared per-turn byte pool across every observation-producing tool.",
+	"guardrails.internalDispatchTimeoutMs": "Wall-clock cap for one internal generator dispatch.",
 	"compaction.auto": "Auto-compact before a turn when context crosses the threshold.",
 	"compaction.excludeLastTurns": "Recent user turns protected from observation masking.",
 	"compaction.threshold": "Pressure at which compaction masks stale observations, then summarizes.",
+	"context.workingSet.enabled": "Non-destructive eviction of stale tool results before a summary is ever needed.",
+	"context.workingSet.policy": "Which candidates the eviction pass selects.",
+	"context.workingSet.target": "Context pressure an applied eviction batch brings the session down to.",
+	"context.workingSet.protectLastTurns": "Recent user turns whose observations are never evicted.",
+	"context.workingSet.minEvictableTokens":
+		"Results below this token estimate stay; the marker would cost more than it saves.",
 	"retry.enabled": "Retry transient provider errors on the next submit.",
 	"retry.maxRetries": "Retry attempts after the initial failure.",
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
 	"retry.maxDelayMs": "Maximum retry delay in milliseconds.",
+	"retry.streamStallMs": "Silence on an in-flight stream past this long is treated as a wedged backend.",
 	"terminal.showTerminalProgress": "Emit OSC 9;4 progress badges during agent turns.",
 	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	"terminal.tuiMode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
@@ -369,6 +473,10 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
 	keybindings: "Custom key overrides layered on the defaults.",
 	"delegation.agents": "External ACP agents available to /delegate.",
+	"library.catalog": "Path to the private resource catalog; blank uses the one in your config directory.",
+	"library.remote": "Git remote the catalog syncs with; blank keeps the library entirely local.",
+	"library.confirmedRemote": "The remote you confirmed. Sync refuses until it matches library.remote.",
+	"library.sync": "Whether `clio-coder library sync` and `push` may talk to the remote at all.",
 } as const satisfies Record<EditableSettingId, string>;
 
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
@@ -379,6 +487,38 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"compaction.threshold":
 		"pressure = estimated tokens ÷ context window. Higher keeps more history but risks overflow before a summary runs.",
+	"context.workingSet.enabled":
+		"Eviction moves stale tool-result bodies and thinking blocks out of the model's working set and records a ledger entry; history is never rewritten. Off skips eviction and goes straight to summary compaction. Legal values: true, false · default: true.",
+	"context.workingSet.policy":
+		"structural-v1 selects by message structure; age-horizon is the older age-based rule. Legal values: structural-v1, age-horizon · default: structural-v1.",
+	"context.workingSet.target":
+		"An applied eviction batch keeps evicting until pressure reaches this ratio, so it sits below compaction.threshold. Greater than 0 and less than 1 · default: 0.6.",
+	"context.workingSet.protectLastTurns":
+		"Counted in user turns, the same unit compaction.excludeLastTurns uses. Whole number of at least 1 · default: 6.",
+	"context.workingSet.minEvictableTokens":
+		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
+	"guardrails.turnToolCallBudget":
+		"Crossing it blocks further calls in the turn with a stop-and-summarize directive, and the hard interrupt ceiling sits a fixed margin above. A backstop against a model spraying unproductive calls, not a routine ceiling: a repo-wide audit legitimately runs dozens. Whole number of at least 1 · default: 60. Env override CLIO_CODER_TURN_TOOL_CALL_BUDGET beats this value.",
+	"guardrails.workerToolCallCap":
+		"Bounds admitted calls, not attempts: a call the harness refuses never ran and never spends the cap. Dispatch takes the smaller of this and the agent recipe's own budget, so the recipe normally binds. Whole number of at least 1 · default: 150. Env override CLIO_CODER_WORKER_TOOL_CALL_CAP beats this value.",
+	"guardrails.maxDispatchRuns":
+		"Runs leaving the ring also lose their event journal directory. Whole number of at least 1 · default: 1000. Env override CLIO_CODER_MAX_DISPATCH_RUNS beats this value.",
+	"guardrails.readMaxBytes":
+		"Clamped up to a 1KB floor at use. Whole number of bytes, at least 1 · default: 51200 (50KB). Env override CLIO_CODER_READ_MAX_BYTES beats this value.",
+	"guardrails.observationTurnBudgetBytes":
+		"One pool shared by every observation-producing tool in a turn, so a single verbose tool cannot starve the rest. Whole number of bytes, at least 1 · default: 196608 (192KB). Env override CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES beats this value.",
+	"guardrails.internalDispatchTimeoutMs":
+		"Covers the wiki documenter and the bootstrap scout. Continuous output satisfies the heartbeat watchdog and a run mid-generation spends no tool calls, so this is the only guard that ends a degenerate generator. Healthy runs finish in minutes. Whole milliseconds of at least 1 · default: 900000 (15 minutes). Env override CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS beats this value.",
+	"retry.streamStallMs":
+		"Measured from the last token received, not from the request, so a slow-but-alive stream is never aborted. The retry then follows the same enabled/maxRetries/delay settings above. Whole milliseconds · default: 180000 (three minutes).",
+	"library.catalog":
+		"Absolute path, or blank for the catalog in your config directory. The catalog is the index `clio-coder library` reads; installed resources land in the usual skill and resource roots either way. Default: blank.",
+	"library.remote":
+		"A Git remote URL, or blank to keep the library local. Setting it is not enough to sync: the remote must also be confirmed, and library.sync must be true. Default: blank.",
+	"library.confirmedRemote":
+		"Written by the confirm flow, not by hand, because confirming a remote here would be the record confirming itself. Sync refuses with library_remote_unconfirmed until this equals library.remote. Default: blank.",
+	"library.sync":
+		"Off means `clio-coder library sync` and `push` refuse before touching the network, whatever the remote says. Legal values: true, false · default: false.",
 	"budget.concurrency": "auto sizes to your machine. A fixed number caps how many workers run at once.",
 	"skills.trustProjectCompatRoots":
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
@@ -386,6 +526,20 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"workers.onPermission":
 		"deny turns the ask into a tool denial and the run continues; fail stops the run as permission_required; escalate forwards the ask to you and falls back per workers.escalation on timeout.",
+	"workers.escalation.timeoutMs":
+		"Only the escalate posture reads it, and it is what keeps that posture non-stall: a headless session has no operator to answer, so the fallback always governs there. Whole milliseconds of at least 1; default: 120000 (two minutes).",
+	"workers.escalation.fallback":
+		"deny turns the unanswered ask into a tool denial and the run continues; fail ends the run as permission_required. Legal values: deny, fail · default: deny.",
+	"workers.resilienceCooldownMs":
+		"Applied per target, runtime, and wire model after a failure class that trips the breaker; a clean run clears it immediately. Whole milliseconds, 0 disables the cooldown; default: 15000.",
+	"routing.activeRoles":
+		"Joint route selection stays shadow-only, recording what it would have picked, unless both the execution role and the requested posture are named as active. Legal values: researcher, verifier, reviewer, judge · default: none active.",
+	"routing.activePostures":
+		"Manual pins are exact rather than adaptive, so manual is never an activated posture. Legal values: quality, balanced, latency, economy · default: none active.",
+	"routing.agentAutomation.activeAgentRoles":
+		"Exact agentId and executionRole pairs, because independent agent and role lists would authorize their whole cross-product. Execution roles: builder, researcher, verifier, reviewer, judge; the agentId `auto` is reserved. Edit the pairs in settings.yaml; default: none active.",
+	"prewarm.enabled":
+		"Fires at session start, after a resume rebuilds the message array, and after a compaction settles, never while a turn or dispatch is running. Local-native targets and interactive sessions only, whatever this says. Legal values: true, false · default: true.",
 	"workers.agentBindings":
 		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"delegation.defaults.toolGovernance":
@@ -420,6 +574,26 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 		fail: "the run ends immediately as permission_required",
 		escalate:
 			"the ask is forwarded to this session's operator; on timeout it falls back to deny or fail per workers.escalation",
+	},
+	"workers.escalation.fallback": {
+		deny: "an unanswered escalation becomes a tool denial and the run continues",
+		fail: "an unanswered escalation ends the run as permission_required",
+	},
+	"prewarm.enabled": {
+		true: "prefill the next turn's known prefix on local-native targets",
+		false: "never send a pre-warm request; the first turn pays the whole prefill",
+	},
+	"context.workingSet.enabled": {
+		true: "evict stale observations non-destructively before summarizing",
+		false: "skip eviction and go straight to summary compaction",
+	},
+	"context.workingSet.policy": {
+		"structural-v1": "select eviction candidates by message structure",
+		"age-horizon": "the older rule: select by age alone",
+	},
+	"library.sync": {
+		true: "allow `clio-coder library sync` and `push` to reach the confirmed remote",
+		false: "refuse every library network operation",
 	},
 	"delegation.defaults.toolGovernance": {
 		"clio-policy": "Clio's safety policy gates the delegated agent's tools",
@@ -746,6 +920,16 @@ const NUMBER_SETTING_RULES = {
 	"delegation.defaults.connectTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
 	"delegation.defaults.turnTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
 	"delegation.defaults.permissionTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
+	// The escalation deadline is armed as a timer, so it shares the delegation
+	// bounds; the rest mirror the config validator's own integer bounds.
+	"workers.escalation.timeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
+	"workers.resilienceCooldownMs": { min: 0, integer: true },
+	"guardrails.turnToolCallBudget": { min: 1, integer: true },
+	"guardrails.workerToolCallCap": { min: 1, integer: true },
+	"guardrails.maxDispatchRuns": { min: 1, integer: true },
+	"guardrails.readMaxBytes": { min: 1, integer: true },
+	"guardrails.observationTurnBudgetBytes": { min: 1, integer: true },
+	"guardrails.internalDispatchTimeoutMs": { min: 1, integer: true },
 } as const satisfies Partial<Record<EditableSettingId, NumberSettingRule>>;
 
 export type NumberSettingId = keyof typeof NUMBER_SETTING_RULES;
@@ -825,6 +1009,51 @@ function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBu
 			}
 			wrapper.setProblem(null);
 			done(outcome.value === null ? "" : val.trim());
+		};
+		input.onEscape = () => done();
+		return wrapper;
+	};
+}
+
+/**
+ * The comma-separated set an activation list holds, refused in place when an
+ * entry is not one of the legal values. Silently dropping the unknown entry
+ * would leave the operator looking at a list they thought they had activated,
+ * so the editor stays open and names both the entry and the vocabulary.
+ */
+function parseEnumListSetting(value: string, legal: readonly string[]): { values: string[] } | { refusal: string } {
+	const entries = value
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	const unknown = entries.find((entry) => !legal.includes(entry));
+	if (unknown !== undefined) {
+		return { refusal: `Not applied: '${unknown}' is not one of ${legal.join(", ")}.` };
+	}
+	const duplicate = entries.find((entry, index) => entries.indexOf(entry) !== index);
+	if (duplicate !== undefined) return { refusal: `Not applied: '${duplicate}' is listed twice.` };
+	return { values: entries };
+}
+
+function editEnumListSubmenu(title: string, legal: readonly string[]): SettingSubmenuBuilder {
+	return (currentValue: string, done: (val?: string) => void) => {
+		const input = new Input();
+		input.setValue(currentValue);
+		input.focused = true;
+		const wrapper = new SubmenuWrapper(
+			title,
+			input,
+			buildHint([{ key: "Enter", verb: "confirm" }], "back"),
+			`Comma-separated, from ${legal.join(", ")}; blank activates none.`,
+		);
+		input.onSubmit = (val) => {
+			const outcome = parseEnumListSetting(val, legal);
+			if ("refusal" in outcome) {
+				wrapper.setProblem(outcome.refusal);
+				return;
+			}
+			wrapper.setProblem(null);
+			done(outcome.values.join(", "));
 		};
 		input.onEscape = () => done();
 		return wrapper;
@@ -1301,13 +1530,23 @@ function settingItem(
 	return item;
 }
 
-function fleetGroupHeader(id: FleetGroupHeaderId, label: string): SettingsCenterItem {
+/**
+ * A heading row that names the block of settings under it. The id carries the
+ * section it belongs to, so one builder serves every section that groups its
+ * rows rather than a near-duplicate per section.
+ */
+function groupHeader(
+	id: GroupHeaderId,
+	section: SettingsSectionId,
+	label: string,
+	description: string,
+): SettingsCenterItem {
 	return {
 		id,
 		label,
 		currentValue: "",
-		description: `${label} in the Fleet workbench.`,
-		section: "fleet",
+		description,
+		section,
 		configPath: id,
 		affordance: "group heading",
 		scope: "live",
@@ -1317,20 +1556,12 @@ function fleetGroupHeader(id: FleetGroupHeaderId, label: string): SettingsCenter
 	};
 }
 
+function fleetGroupHeader(id: FleetGroupHeaderId, label: string): SettingsCenterItem {
+	return groupHeader(id, "fleet", label, `${label} in the Fleet workbench.`);
+}
+
 function terminalGroupHeader(id: TerminalGroupHeaderId, label: string): SettingsCenterItem {
-	return {
-		id,
-		label,
-		currentValue: "",
-		description: `${label} behavior in the terminal.`,
-		section: "terminal",
-		configPath: id,
-		affordance: "group heading",
-		scope: "live",
-		readOnly: true,
-		presentationKind: "group-header",
-		valueSegments: [],
-	};
+	return groupHeader(id, "terminal", label, `${label} behavior in the terminal.`);
 }
 
 function targetAddCta(): SettingsCenterItem {
@@ -1424,6 +1655,15 @@ export function buildSettingItems(
 	const backgroundModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().background.target ?? undefined)
 		: editTextSubmenu("Type memory model name");
+	// Both are optional in the settings type, so the row falls back to the
+	// shipped value rather than rendering a blank for a key that is in force.
+	const escalation = settings.workers.escalation ?? SHIPPED_ESCALATION;
+	const resilienceCooldownMs = settings.workers.resilienceCooldownMs ?? SHIPPED_RESILIENCE_COOLDOWN_MS;
+	const workingSet = settings.context.workingSet;
+	const guardrails = settings.guardrails;
+	const routing = settings.routing;
+	const library = settings.library;
+	const activeAgentRoles = routing.agentAutomation.activeAgentRoles;
 	const favorites = settings.modelSelector?.favorites ?? [];
 	const agents = settings.delegation?.agents ?? [];
 	const keybindingCount = Object.keys(settings.keybindings ?? {}).length;
@@ -1433,6 +1673,13 @@ export function buildSettingItems(
 		}),
 		settingItem("workers.onPermission", settings.workers.onPermission ?? "deny", {
 			values: ["deny", "fail", "escalate"],
+		}),
+		settingItem("workers.escalation.timeoutMs", String(escalation.timeoutMs), {
+			submenu: editNumberSubmenu("Edit escalation timeout (ms)", "workers.escalation.timeoutMs"),
+			affordance: "free text",
+		}),
+		settingItem("workers.escalation.fallback", escalation.fallback, {
+			values: ["deny", "fail"],
 		}),
 		settingItem("delegation.defaults.toolGovernance", settings.delegation.defaults.toolGovernance, {
 			values: ["clio-policy", "agent-managed", "deny-all"],
@@ -1481,6 +1728,9 @@ export function buildSettingItems(
 		settingItem("memory.intervention.timeoutMs", String(settings.memory.intervention.timeoutMs), {
 			values: ["5000", "10000", "20000", "30000", "60000"],
 		}),
+		settingItem("prewarm.enabled", String(settings.prewarm.enabled), {
+			values: ["true", "false"],
+		}),
 		fleetGroupHeader("fleet.group.defaults", "Defaults"),
 		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
 			submenu: targetSubmenu,
@@ -1495,6 +1745,10 @@ export function buildSettingItems(
 		}),
 		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],
+		}),
+		settingItem("workers.resilienceCooldownMs", String(resilienceCooldownMs), {
+			submenu: editNumberSubmenu("Edit resilience cooldown (ms)", "workers.resilienceCooldownMs"),
+			affordance: "free text",
 		}),
 		fleetGroupHeader("fleet.group.profiles", "Profiles"),
 		...fleetProfileRows(settings, live, options),
@@ -1514,6 +1768,28 @@ export function buildSettingItems(
 			presentationKind: profileCount > 0 ? "action" : "read-only-fact",
 			valueSegments: [],
 		}),
+		fleetGroupHeader("fleet.group.route-activation", "Route activation"),
+		settingItem("routing.activeRoles", routing.activeRoles.length > 0 ? routing.activeRoles.join(", ") : "(none)", {
+			submenu: editEnumListSubmenu("Edit active routing roles", ACTIVE_ROUTING_ROLES),
+			affordance: `free text from ${ACTIVE_ROUTING_ROLES.join(", ")}`,
+			editValue: routing.activeRoles.join(", "),
+		}),
+		settingItem(
+			"routing.activePostures",
+			routing.activePostures.length > 0 ? routing.activePostures.join(", ") : "(none)",
+			{
+				submenu: editEnumListSubmenu("Edit active routing postures", ACTIVE_ROUTING_POSTURES),
+				affordance: `free text from ${ACTIVE_ROUTING_POSTURES.join(", ")}`,
+				editValue: routing.activePostures.join(", "),
+			},
+		),
+		settingItem(
+			"routing.agentAutomation.activeAgentRoles",
+			activeAgentRoles.length > 0
+				? activeAgentRoles.map((pair) => `${pair.agentId}/${pair.executionRole}`).join(", ")
+				: "(none)",
+			{ affordance: "edit settings.yaml", readOnly: true },
+		),
 		fleetGroupHeader("fleet.group.placement", "Placement"),
 		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
 		...fleetEndpointRows(options?.providers),
@@ -1551,6 +1827,36 @@ export function buildSettingItems(
 		settingItem("budget.concurrency", String(settings.budget.concurrency), {
 			values: ["auto", "1", "2", "4", "8"],
 		}),
+		groupHeader(
+			"budget.group.guardrails",
+			"budget",
+			"Guardrails",
+			"Numeric backstops that bound runaway agent behavior.",
+		),
+		settingItem("guardrails.turnToolCallBudget", String(guardrails.turnToolCallBudget), {
+			submenu: editNumberSubmenu("Edit turn tool-call budget", "guardrails.turnToolCallBudget"),
+			affordance: "free text",
+		}),
+		settingItem("guardrails.workerToolCallCap", String(guardrails.workerToolCallCap), {
+			submenu: editNumberSubmenu("Edit worker tool-call cap", "guardrails.workerToolCallCap"),
+			affordance: "free text",
+		}),
+		settingItem("guardrails.maxDispatchRuns", String(guardrails.maxDispatchRuns), {
+			submenu: editNumberSubmenu("Edit run ledger retention", "guardrails.maxDispatchRuns"),
+			affordance: "free text",
+		}),
+		settingItem("guardrails.readMaxBytes", String(guardrails.readMaxBytes), {
+			submenu: editNumberSubmenu("Edit read byte cap", "guardrails.readMaxBytes"),
+			affordance: "free text",
+		}),
+		settingItem("guardrails.observationTurnBudgetBytes", String(guardrails.observationTurnBudgetBytes), {
+			submenu: editNumberSubmenu("Edit observation byte pool", "guardrails.observationTurnBudgetBytes"),
+			affordance: "free text",
+		}),
+		settingItem("guardrails.internalDispatchTimeoutMs", String(guardrails.internalDispatchTimeoutMs), {
+			submenu: editNumberSubmenu("Edit internal dispatch timeout (ms)", "guardrails.internalDispatchTimeoutMs"),
+			affordance: "free text",
+		}),
 		settingItem("compaction.auto", String(compaction.auto), {
 			values: ["true", "false"],
 		}),
@@ -1559,6 +1865,27 @@ export function buildSettingItems(
 		}),
 		settingItem("compaction.excludeLastTurns", String(compaction.excludeLastTurns), {
 			values: ["3", "6", "10", "15"],
+		}),
+		groupHeader(
+			"compaction.group.working-set",
+			"compaction",
+			"Working set",
+			"The non-destructive eviction layer that runs before a summary is needed.",
+		),
+		settingItem("context.workingSet.enabled", String(workingSet.enabled), {
+			values: ["true", "false"],
+		}),
+		settingItem("context.workingSet.policy", workingSet.policy, {
+			values: ["structural-v1", "age-horizon"],
+		}),
+		settingItem("context.workingSet.target", formatThreshold(workingSet.target, "0.6"), {
+			values: ["0.4", "0.5", "0.6", "0.7"],
+		}),
+		settingItem("context.workingSet.protectLastTurns", String(workingSet.protectLastTurns), {
+			values: ["3", "6", "10", "15"],
+		}),
+		settingItem("context.workingSet.minEvictableTokens", String(workingSet.minEvictableTokens), {
+			values: ["0", "100", "200", "500", "1000"],
 		}),
 		settingItem("retry.enabled", String(retry.enabled), {
 			values: ["true", "false"],
@@ -1571,6 +1898,9 @@ export function buildSettingItems(
 		}),
 		settingItem("retry.maxDelayMs", String(retry.maxDelayMs), {
 			values: ["10000", "30000", "60000", "120000", "300000"],
+		}),
+		settingItem("retry.streamStallMs", String(retry.streamStallMs), {
+			values: ["60000", "120000", "180000", "300000", "600000"],
 		}),
 		settingItem("terminal.showTerminalProgress", String(terminal.showTerminalProgress), {
 			values: ["false", "true"],
@@ -1655,6 +1985,31 @@ export function buildSettingItems(
 		}),
 		settingItem("delegation.agents", agents.length > 0 ? `${agents.length} agent(s)` : "(none)", {
 			...delegationAgentsAffordance(agents, options?.getInteropProposals?.() ?? []),
+		}),
+		groupHeader(
+			"advanced.group.library",
+			"advanced",
+			"Library",
+			"The private resource catalog and the remote it may sync with.",
+		),
+		settingItem("library.catalog", library.catalog ?? "(config directory)", {
+			submenu: editTextSubmenu("Edit library catalog path; blank uses the config directory"),
+			affordance: "free text",
+			editValue: library.catalog ?? "",
+		}),
+		settingItem("library.remote", library.remote ?? "(local only)", {
+			submenu: editTextSubmenu("Edit library remote URL; blank keeps the library local"),
+			affordance: "free text",
+			editValue: library.remote ?? "",
+		}),
+		// Confirming a remote from the settings row would be the trust record
+		// confirming itself, so this row reports what the confirm flow wrote.
+		settingItem("library.confirmedRemote", library.confirmedRemote ?? "(unconfirmed)", {
+			affordance: "set by `clio-coder library` on confirmation",
+			readOnly: true,
+		}),
+		settingItem("library.sync", String(library.sync), {
+			values: ["true", "false"],
 		}),
 	];
 }
@@ -1974,8 +2329,8 @@ function refreshSettingItemsInPlace(items: SettingsCenterItem[], next: readonly 
 	}
 }
 
-function formatThreshold(value: number): string {
-	return Number.isFinite(value) ? String(value) : "0.8";
+function formatThreshold(value: number, fallback = "0.8"): string {
+	return Number.isFinite(value) ? String(value) : fallback;
 }
 
 function applyNonNegativeInteger(value: string, set: (next: number) => void): void {
@@ -2259,6 +2614,83 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			applyNumberSetting("budget.sessionCeilingUsd", value, (next) => {
 				if (next !== null) settings.budget.sessionCeilingUsd = next;
 			});
+			return;
+		case "workers.escalation.timeoutMs":
+			applyNumberSetting("workers.escalation.timeoutMs", value, (next) => {
+				if (next === null) return;
+				settings.workers.escalation = { ...(settings.workers.escalation ?? SHIPPED_ESCALATION), timeoutMs: next };
+			});
+			return;
+		case "workers.escalation.fallback": {
+			if (value !== "deny" && value !== "fail") return;
+			settings.workers.escalation = { ...(settings.workers.escalation ?? SHIPPED_ESCALATION), fallback: value };
+			return;
+		}
+		case "workers.resilienceCooldownMs":
+			applyNumberSetting("workers.resilienceCooldownMs", value, (next) => {
+				if (next !== null) settings.workers.resilienceCooldownMs = next;
+			});
+			return;
+		case "routing.activeRoles": {
+			const outcome = parseEnumListSetting(value, ACTIVE_ROUTING_ROLES);
+			if ("values" in outcome) settings.routing.activeRoles = outcome.values as ActiveRoutingRole[];
+			return;
+		}
+		case "routing.activePostures": {
+			const outcome = parseEnumListSetting(value, ACTIVE_ROUTING_POSTURES);
+			if ("values" in outcome) settings.routing.activePostures = outcome.values as ActiveRoutingPosture[];
+			return;
+		}
+		case "prewarm.enabled":
+			if (value === "true" || value === "false") settings.prewarm.enabled = value === "true";
+			return;
+		case "guardrails.turnToolCallBudget":
+		case "guardrails.workerToolCallCap":
+		case "guardrails.maxDispatchRuns":
+		case "guardrails.readMaxBytes":
+		case "guardrails.observationTurnBudgetBytes":
+		case "guardrails.internalDispatchTimeoutMs":
+			applyNumberSetting(id, value, (next) => {
+				if (next !== null) settings.guardrails[id.slice("guardrails.".length) as keyof GuardrailValues] = next;
+			});
+			return;
+		case "context.workingSet.enabled":
+			if (value === "true" || value === "false") settings.context.workingSet.enabled = value === "true";
+			return;
+		case "context.workingSet.policy":
+			if (value === "structural-v1" || value === "age-horizon") settings.context.workingSet.policy = value;
+			return;
+		case "context.workingSet.target": {
+			// The validator's bound is exclusive at both ends, so an eviction target
+			// of 0 or 1 is refused here rather than written and rejected at boot.
+			const parsed = Number(value);
+			if (Number.isFinite(parsed) && parsed > 0 && parsed < 1) settings.context.workingSet.target = parsed;
+			return;
+		}
+		case "context.workingSet.protectLastTurns":
+			applyNonNegativeInteger(value, (next) => {
+				if (next >= 1) settings.context.workingSet.protectLastTurns = next;
+			});
+			return;
+		case "context.workingSet.minEvictableTokens":
+			applyNonNegativeInteger(value, (next) => {
+				settings.context.workingSet.minEvictableTokens = next;
+			});
+			return;
+		case "retry.streamStallMs":
+			applyNonNegativeInteger(value, (next) => {
+				settings.retry.streamStallMs = next;
+			});
+			return;
+		case "library.catalog":
+		case "library.remote": {
+			const key = id.slice("library.".length) as "catalog" | "remote";
+			const trimmed = value.trim();
+			settings.library[key] = trimmed.length > 0 ? trimmed : null;
+			return;
+		}
+		case "library.sync":
+			if (value === "true" || value === "false") settings.library.sync = value === "true";
 			return;
 	}
 }

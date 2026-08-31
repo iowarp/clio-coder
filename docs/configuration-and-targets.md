@@ -508,19 +508,19 @@ The Settings Center organizes all configuration under four non-selectable group 
 
 | Group | Section | Rows, in order |
 | --- | --- | --- |
-| **CORE** | Autonomy & Safety (`safety`) | `autonomy`, `workers.onPermission`, `delegation.defaults.toolGovernance`, `skills.trustProjectCompatRoots`, and the read-only safety-net fact. |
-| **CORE** | Orchestrator (`orchestrator`) | `orchestrator.thinkingLevel`, `orchestrator.target`, `orchestrator.model`, the memory plane (`background.target`, `background.model`, `background.thinkingLevel`), and the proactive-memory knobs (`memory.intervention.enabled`, `.everyNTools`, `.windowSteps`, `.maxTokens`, `.timeoutMs`). Changing target rebases model and thinking choices. |
-| **ROUTING** | Fleet (`fleet`) | `workers.default.target`, `workers.default.model`, `workers.default.thinkingLevel`, `workers.maxRetries`, `workers.profiles`, and `workers.agentBindings`, rendered under the group headers `Defaults`, `Profiles`, `Agent routes`, and `Placement`. Profile rows carry a `◆ Edit` drill-down and a destructive removal preflight; placement rows are read-only node status. |
+| **CORE** | Autonomy & Safety (`safety`) | `autonomy`, `workers.onPermission`, the escalation bounds that keep that posture non-stall (`workers.escalation.timeoutMs`, `workers.escalation.fallback`), `delegation.defaults.toolGovernance`, `skills.trustProjectCompatRoots`, and the read-only safety-net fact. |
+| **CORE** | Orchestrator (`orchestrator`) | `orchestrator.thinkingLevel`, `orchestrator.target`, `orchestrator.model`, the memory plane (`background.target`, `background.model`, `background.thinkingLevel`), and the proactive-memory knobs (`memory.intervention.enabled`, `.everyNTools`, `.windowSteps`, `.maxTokens`, `.timeoutMs`), and `prewarm.enabled`. Changing target rebases model and thinking choices. |
+| **ROUTING** | Fleet (`fleet`) | `workers.default.target`, `workers.default.model`, `workers.default.thinkingLevel`, `workers.maxRetries`, `workers.resilienceCooldownMs`, `workers.profiles`, `workers.agentBindings`, and the routing activation set (`routing.activeRoles`, `routing.activePostures`, and the read-only `routing.agentAutomation.activeAgentRoles`), rendered under the group headers `Defaults`, `Profiles`, `Agent routes`, `Route activation`, and `Placement`. Profile rows carry a `◆ Edit` drill-down and a destructive removal preflight; placement rows are read-only node status. |
 | **ROUTING** | Targets (`targets`) | The `targets` console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action and detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
 | **ROUTING** | Models (`models`) | `scope`, `modelSelector.recentLimit`, and `modelSelector.favorites`, rendered as a provider-backed checklist with target-level and target/model entries, `Space` toggle, capability inspector, and a preserved `Unavailable` group. Deep link `/scoped-models`. |
-| **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, and `budget.concurrency` (restart required). |
-| **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, and `compaction.excludeLastTurns`. |
-| **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, and `retry.maxDelayMs`. |
+| **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, `budget.concurrency` (restart required), and the six `guardrails.*` backstops under a `Guardrails` group header. |
+| **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, `compaction.excludeLastTurns`, and the five `context.workingSet.*` keys under a `Working set` group header. |
+| **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, `retry.maxDelayMs`, and `retry.streamStallMs`. |
 | **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), `terminal.notify`, and `theme`. |
 | **EXPERIENCE** | Watchdog (`watchdog`) | `watchdog.enabled`, `watchdog.target`, and `watchdog.cadenceToolCalls`. The two optional keys are editable text rows that render their absence as `(session target)` and `(turn end only)`; submitting an empty value removes the key from `settings.yaml` rather than storing a blank. |
-| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, and `delegation.agents`. |
+| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, `delegation.agents`, and the four `library.*` keys under a `Library` group header. `library.confirmedRemote` is read-only: the confirm flow writes it, because confirming a remote from its own row would be the trust record confirming itself. |
 
-`retry.streamStallMs` has no Settings Center row; edit it in `settings.yaml`.
+Every key `settings.yaml` accepts now has a row, except the ones the Center cannot edit as a nested structure: `workers.rosters` and `routing.agentAutomation.activeAgentRoles` are authored in `settings.yaml`, and the latter has a read-only row that reports the active pairs. `tests/contracts/settings-center.test.ts` enforces this against `DEFAULT_SETTINGS`.
 
 Label to config path mapping:
 
@@ -528,6 +528,8 @@ Label to config path mapping:
 | --- | --- |
 | Autonomy level | `autonomy` |
 | Fleet approvals routing | `workers.onPermission` |
+| Escalation timeout (ms) | `workers.escalation.timeoutMs` |
+| Escalation fallback | `workers.escalation.fallback` (`deny` or `fail`) |
 | Delegation governance | `delegation.defaults.toolGovernance` |
 | Trust project skill roots | `skills.trustProjectCompatRoots` |
 | Safety net | read-only fact, no config path |
@@ -542,10 +544,15 @@ Label to config path mapping:
 | Memory trajectory steps | `memory.intervention.windowSteps` |
 | Memory reminder tokens | `memory.intervention.maxTokens` |
 | Memory timeout (ms) | `memory.intervention.timeoutMs` |
+| Prompt pre-warm | `prewarm.enabled` |
 | Default target | `workers.default.target` |
 | Default model | `workers.default.model` |
 | Default thinking level | `workers.default.thinkingLevel` |
 | Fleet retries | `workers.maxRetries` |
+| Resilience cooldown (ms) | `workers.resilienceCooldownMs` (0 disables the cooldown) |
+| Active routing roles | `routing.activeRoles` (comma-separated from `researcher`, `verifier`, `reviewer`, `judge`) |
+| Active routing postures | `routing.activePostures` (comma-separated from `quality`, `balanced`, `latency`, `economy`) |
+| Active agent routes | `routing.agentAutomation.activeAgentRoles` (read-only; edit the pairs in `settings.yaml`) |
 | Add profile | `workers.profiles` |
 | Add agent route | `workers.agentBindings` |
 | Configured targets | `targets` |
@@ -555,13 +562,25 @@ Label to config path mapping:
 | Session ceiling (USD) | `budget.sessionCeilingUsd` |
 | Output budget (tokens) | `defaults.maxTokens` |
 | Fleet concurrency | `budget.concurrency` (restart required) |
+| Turn tool-call budget | `guardrails.turnToolCallBudget` |
+| Worker tool-call cap | `guardrails.workerToolCallCap` |
+| Run ledger retention | `guardrails.maxDispatchRuns` |
+| Read byte cap | `guardrails.readMaxBytes` |
+| Observation byte pool | `guardrails.observationTurnBudgetBytes` |
+| Internal dispatch timeout (ms) | `guardrails.internalDispatchTimeoutMs` |
 | Auto-compact | `compaction.auto` |
 | Compaction threshold | `compaction.threshold` |
 | Protected recent turns | `compaction.excludeLastTurns` |
+| Working-set eviction | `context.workingSet.enabled` |
+| Eviction policy | `context.workingSet.policy` (`structural-v1` or `age-horizon`) |
+| Eviction target pressure | `context.workingSet.target` (greater than 0, less than 1) |
+| Turns protected from eviction | `context.workingSet.protectLastTurns` |
+| Minimum evictable tokens | `context.workingSet.minEvictableTokens` |
 | Retry transient errors | `retry.enabled` |
 | Max retries | `retry.maxRetries` |
 | Base delay (ms) | `retry.baseDelayMs` |
 | Max delay (ms) | `retry.maxDelayMs` |
+| Stream stall timeout (ms) | `retry.streamStallMs` |
 | Terminal progress badges | `terminal.showTerminalProgress` |
 | Output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
 | TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
@@ -581,6 +600,10 @@ Label to config path mapping:
 | Delegate permission (ms) | `delegation.defaults.permissionTimeoutMs` |
 | Keybinding overrides | `keybindings` |
 | Delegation agents | `delegation.agents` |
+| Library catalog path | `library.catalog` (blank uses the config directory) |
+| Library remote | `library.remote` (blank keeps the library local) |
+| Confirmed library remote | `library.confirmedRemote` (read-only; written by the confirm flow) |
+| Library sync | `library.sync` |
 
 ---
 
