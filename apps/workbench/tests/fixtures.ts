@@ -78,6 +78,41 @@ export function fleetInspectionFixture(): WireFleetInspection {
 			terminal: true,
 		}],
 		truncated: false,
+		roots: [{
+			rootId: "fleet-345ea2e6c1ad",
+			fleet: "build-review",
+			startedAt: "2026-08-31T13:59:00.000Z",
+			elapsedMs: 210_000,
+			running: true,
+			resumedFrom: null,
+			plannedSteps: 3,
+			recordedSteps: 2,
+			steps: [
+				{
+					stepId: "build",
+					runId: "run-alpha",
+					agentId: "builder",
+					outcome: "succeeded",
+					detail: null,
+				},
+				{
+					stepId: "review",
+					runId: "run-beta",
+					agentId: "debugger",
+					outcome: "failed",
+					detail: "review gate produced no structured verdict",
+				},
+				{
+					stepId: "apply",
+					runId: null,
+					agentId: null,
+					outcome: "not run",
+					detail: null,
+				},
+			],
+			stepsTruncated: false,
+		}],
+		rootsTruncated: false,
 	};
 }
 

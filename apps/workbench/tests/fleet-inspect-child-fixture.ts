@@ -42,4 +42,41 @@ console.log(JSON.stringify({
 		},
 	],
 	truncated: false,
+	roots: [
+		{
+			rootId: "fleet-345ea2e6c1ad",
+			fleet: "build-review",
+			startedAt: "2026-08-31T13:59:00.000Z",
+			elapsedMs: 148_728,
+			running: true,
+			resumedFrom: null,
+			plannedSteps: 3,
+			recordedSteps: 1,
+			steps: [
+				{
+					stepId: "build",
+					runId: "run-alpha",
+					agentId: "builder",
+					outcome: "running",
+					detail: null,
+				},
+				{
+					stepId: "review",
+					runId: null,
+					agentId: null,
+					outcome: "not run",
+					detail: null,
+				},
+				{
+					stepId: "apply",
+					runId: null,
+					agentId: null,
+					outcome: "not run",
+					detail: null,
+				},
+			],
+			stepsTruncated: false,
+		},
+	],
+	rootsTruncated: false,
 }));

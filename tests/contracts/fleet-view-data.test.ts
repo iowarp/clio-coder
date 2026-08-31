@@ -8,12 +8,18 @@
  * the strings is asserting what an operator sees.
  */
 
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FLEET_INSPECT_MAX_EVENTS, FLEET_INSPECT_MAX_RUNS, fleetInspectSnapshot } from "../../src/cli/fleet-inspect.js";
+import {
+	FLEET_INSPECT_MAX_EVENTS,
+	FLEET_INSPECT_MAX_ROOTS,
+	FLEET_INSPECT_MAX_RUNS,
+	FLEET_INSPECT_MAX_STEPS,
+	fleetInspectSnapshot,
+} from "../../src/cli/fleet-inspect.js";
 import { loadRunViewModel, type RunViewModel, renderRunView, resolveRunId } from "../../src/cli/fleet-view.js";
 import { createRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
-import { type Ledger, openLedger } from "../../src/domains/dispatch/state.js";
+import { type Ledger, openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -200,6 +206,108 @@ describe("fleet view data sources", () => {
 			strictEqual(snapshot.runs.length <= FLEET_INSPECT_MAX_RUNS, true);
 			strictEqual(JSON.stringify(snapshot).includes("/receipts/"), false);
 			strictEqual(JSON.stringify(snapshot).includes("events.ndjson"), false);
+			// An installation with no fleet roots reports an empty, untruncated index
+			// rather than omitting the field: absence and unread are different facts.
+			deepStrictEqual(snapshot.roots, []);
+			strictEqual(snapshot.rootsTruncated, false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("indexes recent fleet roots to their planned steps and terminal run ids", async () => {
+		const isolated = await isolateClioEnv("clio-fleet-inspect-roots-");
+		try {
+			const fixture = await seedRun("dispatch one fleet step");
+			await writeFleetRun({
+				version: 1,
+				id: "fleet-345ea2e6c1ad",
+				fleet: "build-review",
+				planHash: "plan-hash",
+				stepIds: ["build", "apply"],
+				planSteps: [],
+				vars: {},
+				startedAt: "2026-08-30T10:00:00.000Z",
+				endedAt: null,
+				resumedFrom: null,
+				steps: [
+					{
+						stepId: "build",
+						result: {
+							stepId: "build",
+							assignmentId: "assignment-build",
+							terminalRunId: fixture.runId,
+							receiptDigest: "digest-build",
+							output: "build output",
+							succeeded: true,
+							integrityValid: true,
+						},
+					},
+				],
+			});
+
+			const snapshot = fleetInspectSnapshot(() => Date.parse("2026-08-30T10:01:00.000Z"));
+			strictEqual(snapshot.roots.length, 1);
+			strictEqual(snapshot.rootsTruncated, false);
+			const root = snapshot.roots[0];
+			ok(root !== undefined);
+			strictEqual(root.rootId, "fleet-345ea2e6c1ad");
+			strictEqual(root.fleet, "build-review");
+			// No end stamp means the fleet is still in flight, and elapsed is measured
+			// against the injected clock rather than the wall.
+			strictEqual(root.running, true);
+			strictEqual(root.elapsedMs, 60_000);
+			strictEqual(root.plannedSteps, 2);
+			strictEqual(root.recordedSteps, 1);
+			strictEqual(root.stepsTruncated, false);
+			deepStrictEqual(
+				root.steps.map((step) => [step.stepId, step.runId, step.outcome, step.agentId, step.detail]),
+				[
+					["build", fixture.runId, "succeeded", "tester", null],
+					// Planned but never reached: on the index, without a run id.
+					["apply", null, "not run", null, null],
+				],
+			);
+			strictEqual(root.steps.length <= FLEET_INSPECT_MAX_STEPS, true);
+			strictEqual(snapshot.roots.length <= FLEET_INSPECT_MAX_ROOTS, true);
+			// The root index is a pointer into the run window, not a second copy of
+			// its evidence, so no receipt or journal location rides along with it.
+			const framed = JSON.stringify(snapshot.roots);
+			strictEqual(framed.includes("/receipts/"), false);
+			strictEqual(framed.includes("/fleet-runs/"), false);
+			strictEqual(framed.includes("events.ndjson"), false);
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("orders fleet roots newest first and truncates beyond the fixed window", async () => {
+		const isolated = await isolateClioEnv("clio-fleet-inspect-roots-window-");
+		try {
+			// Written oldest-first so the ordering under test cannot be the write order.
+			for (let index = 0; index < FLEET_INSPECT_MAX_ROOTS + 2; index += 1) {
+				await writeFleetRun({
+					version: 1,
+					id: `fleet-00000000000${index}`,
+					fleet: `fleet-${index}`,
+					planHash: "plan-hash",
+					stepIds: [],
+					planSteps: [],
+					vars: {},
+					startedAt: `2026-08-2${index}T10:00:00.000Z`,
+					endedAt: null,
+					resumedFrom: null,
+					steps: [],
+				});
+			}
+
+			const snapshot = fleetInspectSnapshot(() => Date.parse("2026-09-05T10:00:00.000Z"));
+			strictEqual(snapshot.roots.length, FLEET_INSPECT_MAX_ROOTS);
+			strictEqual(snapshot.rootsTruncated, true);
+			deepStrictEqual(
+				snapshot.roots.map((root) => root.fleet),
+				["fleet-5", "fleet-4", "fleet-3", "fleet-2"],
+			);
 		} finally {
 			isolated.restore();
 		}

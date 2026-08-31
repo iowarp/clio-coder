@@ -1478,6 +1478,8 @@ Deno.test("durable run inspection validates bounded journal and receipt trust fa
 			terminal: false,
 		}],
 		truncated: false,
+		roots: [],
+		rootsTruncated: false,
 	};
 	const event = serverEvent("fleet.inspection.state", { inspection });
 	equal(event.projectId, undefined);
@@ -1497,6 +1499,56 @@ Deno.test("durable run inspection validates bounded journal and receipt trust fa
 				runs: [...inspection.runs, inspection.runs[0]],
 			},
 		})
+	);
+});
+
+Deno.test("the fleet root index validates step counts, attribution, and identity", () => {
+	const root = {
+		rootId: "fleet-345ea2e6c1ad",
+		fleet: "build-review",
+		startedAt: "2026-08-31T13:59:00.000Z",
+		elapsedMs: 210_000,
+		running: true,
+		resumedFrom: null,
+		plannedSteps: 2,
+		recordedSteps: 1,
+		steps: [
+			{ stepId: "build", runId: "run-alpha", agentId: "builder", outcome: "succeeded", detail: null },
+			{ stepId: "apply", runId: null, agentId: null, outcome: "not run", detail: null },
+		],
+		stepsTruncated: false,
+	};
+	const inspection = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:28.728Z",
+		runs: [],
+		truncated: false,
+		roots: [root],
+		rootsTruncated: false,
+	};
+	const event = serverEvent("fleet.inspection.state", { inspection });
+	equal(event.payload.inspection.roots[0]?.steps[1]?.runId, null);
+	equal(event.payload.inspection.roots[0]?.fleet, "build-review");
+	for (
+		const broken of [
+			// A durable fleet-run path is never a public fact.
+			{ ...root, recordPath: "/private/fleet-runs/fleet-345ea2e6c1ad.json" },
+			// A step that never ran cannot carry an agent.
+			{ ...root, steps: [{ ...root.steps[1], agentId: "builder" }] },
+			// More recorded than planned, and more indexed than planned.
+			{ ...root, recordedSteps: 3 },
+			{ ...root, plannedSteps: 1 },
+			// One step id may not appear twice in one index.
+			{ ...root, plannedSteps: 4, steps: [root.steps[0], root.steps[0]] },
+		]
+	) {
+		expectProtocolError(() =>
+			serverEvent("fleet.inspection.state", { inspection: { ...inspection, roots: [broken] } })
+		);
+	}
+	expectProtocolError(() =>
+		serverEvent("fleet.inspection.state", { inspection: { ...inspection, roots: [root, root] } })
 	);
 });
 

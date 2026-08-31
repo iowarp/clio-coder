@@ -80,6 +80,13 @@ It validates 31 server event kinds:
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
 “render JSON” escape hatch.
 
+A harness fact that is genuinely part of an existing family widens that family's DTO instead of claiming a new command
+kind. The fleet-root step index arrived that way: it is the parent of the durable runs `fleet.inspect` already reads, so
+it rides the same fixed read and the same `fleet.inspection.state` event rather than paying for a second child process
+and a second global cache. Widening a DTO is not free either, and the price is paid where it belongs: the host
+projection and the browser validator both grew the new keys as required, so a snapshot from a build on either side of
+the change is rejected rather than partly believed.
+
 ## Human workflow coverage
 
 | Harness area                               | Current GUI                                                                                                                                                                                            | Status                                                                                          | Real boundary and next honest step                                                                                                                                                                                                                                                                                                                                                                                                                                              |

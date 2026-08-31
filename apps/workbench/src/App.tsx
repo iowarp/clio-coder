@@ -31,6 +31,7 @@ import type {
 	WireEventSource,
 	WireFleetInspection,
 	WireFleetInspectionRun,
+	WireFleetInspectionStep,
 	WirePendingPermission,
 	WireProjectSummary,
 	WireRecoveryInspection,
@@ -3721,6 +3722,19 @@ function fleetRunLabel(run: WireFleetInspectionRun): string {
 	return run.terminal ? "terminal" : run.phase;
 }
 
+/**
+ * Outcome text on a step comes from the ledger, so it is open rather than an
+ * enum. Only the two words the scheduler writes for a settled step are given a
+ * verdict tone; everything else stays neutral rather than guessing a colour for
+ * a state this build has not seen.
+ */
+function fleetStepTone(step: WireFleetInspectionStep): string {
+	if (step.runId === null) return "neutral";
+	if (step.outcome === "succeeded") return "success";
+	if (step.outcome === "failed") return "error";
+	return "action";
+}
+
 export const FleetJournal = memo(function FleetJournal({
 	inspection,
 	pending,
@@ -3830,6 +3844,110 @@ export const FleetJournal = memo(function FleetJournal({
 					<dd>Clio Coder trust projection</dd>
 				</div>
 			</dl>
+
+			<section className="fleet-roots" aria-labelledby="fleet-roots-title">
+				<div className="fleet-roots__heading">
+					<div>
+						<div className="eyebrow">FLEET ROOTS · PLANNED STEP INDEX</div>
+						<h3 id="fleet-roots-title">Fleets that dispatched these runs</h3>
+					</div>
+					<p>
+						A fleet root owns no journal or receipt of its own. This is the step order the fleet was written in and the
+						run each step terminated on. Select a step to open that run's durable spine.
+					</p>
+				</div>
+				{inspection.roots.length === 0
+					? (
+						<p className="fleet-roots__empty">
+							Clio Coder reports no durable fleet roots. The runs above were dispatched individually, or their fleet
+							records are older than this bounded window.
+						</p>
+					)
+					: (
+						<ul className="fleet-roots__list">
+							{inspection.roots.map((root) => (
+								<li key={root.rootId}>
+									<header>
+										<div>
+											<strong>{root.fleet}</strong>
+											<code>{root.rootId}</code>
+										</div>
+										<StatusMark
+											tone={root.running ? "action" : "success"}
+											label={root.running ? "In flight" : "Settled"}
+										/>
+									</header>
+									<dl>
+										<div>
+											<dt>Started</dt>
+											<dd>
+												<time dateTime={root.startedAt}>
+													{formatTimestamp(root.startedAt)}
+												</time>
+											</dd>
+										</div>
+										<div>
+											<dt>Elapsed</dt>
+											<dd>{formatDuration(Math.floor(root.elapsedMs / 1_000))}</dd>
+										</div>
+										<div>
+											<dt>Steps recorded</dt>
+											<dd>
+												{root.recordedSteps.toLocaleString()} of {root.plannedSteps.toLocaleString()}
+											</dd>
+										</div>
+										<div>
+											<dt>Resumed from</dt>
+											<dd>{root.resumedFrom ?? "not a resume"}</dd>
+										</div>
+									</dl>
+									<ol
+										className="fleet-step-index"
+										aria-label={`Planned steps for fleet ${root.fleet}`}
+									>
+										{root.steps.map((step) => {
+											const inWindow = step.runId !== null &&
+												inspection.runs.some((run) => run.runId === step.runId);
+											return (
+												<li key={step.stepId}>
+													<button
+														type="button"
+														disabled={!inWindow}
+														aria-current={inWindow && selected?.runId === step.runId ? "true" : undefined}
+														onClick={() => {
+															if (step.runId !== null) setSelectedRunId(step.runId);
+														}}
+													>
+														<span className="fleet-step-index__id">{step.stepId}</span>
+														<StatusMark tone={fleetStepTone(step)} label={step.outcome} />
+														<span className="fleet-step-index__run">
+															{step.runId === null
+																? "no run recorded"
+																: `${step.agentId ?? "unattributed"} · ${
+																	inWindow ? step.runId : "outside this run window"
+																}`}
+														</span>
+													</button>
+													{step.detail !== null && <p>{step.detail}</p>}
+												</li>
+											);
+										})}
+									</ol>
+									{root.stepsTruncated && (
+										<p className="fleet-roots__bound">
+											Later planned steps are outside this bounded index.
+										</p>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				{inspection.rootsTruncated && (
+					<p className="fleet-roots__bound">
+						Older fleet roots are outside this bounded window.
+					</p>
+				)}
+			</section>
 
 			{inspection.runs.length === 0
 				? (

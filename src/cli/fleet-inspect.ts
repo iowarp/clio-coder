@@ -8,19 +8,22 @@
  * already-sanitized view model fields a typed host adapter can further narrow.
  */
 
-import { openLedger } from "../domains/dispatch/state.js";
+import { listFleetRuns, openLedger } from "../domains/dispatch/state.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth } from "../engine/tui-primitives.js";
-import { loadRunViewModel } from "./fleet-view.js";
+import { loadFleetRunViewModel, loadRunViewModel } from "./fleet-view.js";
 
 export const FLEET_INSPECT_MAX_RUNS = 8;
 export const FLEET_INSPECT_MAX_EVENTS = 32;
+export const FLEET_INSPECT_MAX_ROOTS = 4;
+export const FLEET_INSPECT_MAX_STEPS = 24;
 
 const IDENTITY_WIDTH = 128;
 const TASK_WIDTH = 400;
 const EVENT_LABEL_WIDTH = 96;
 const EVENT_DETAIL_WIDTH = 240;
 const OUTCOME_WIDTH = 160;
+const STEP_ID_WIDTH = 96;
 
 export type FleetInspectEvidenceState = "pending" | "verified" | "failed" | "unavailable";
 
@@ -52,11 +55,44 @@ export interface FleetInspectRun {
 	readonly terminal: boolean;
 }
 
+export interface FleetInspectRootStep {
+	readonly stepId: string;
+	/** The run the step terminated on, or null when the step never ran. */
+	readonly runId: string | null;
+	readonly agentId: string | null;
+	readonly outcome: string;
+	readonly detail: string | null;
+}
+
+/**
+ * One fleet root's step index.
+ *
+ * A root is not a run: it has no ledger row, receipt, or journal, so nothing
+ * here is a transcript. What it answers is the question the run window alone
+ * cannot, which is which planned steps a fleet had and which run each one
+ * terminated on. That turns the flat recent-run list into something an operator
+ * can trace back to the fleet that dispatched it.
+ */
+export interface FleetInspectRoot {
+	readonly rootId: string;
+	readonly fleet: string;
+	readonly startedAt: string;
+	readonly elapsedMs: number;
+	readonly running: boolean;
+	readonly resumedFrom: string | null;
+	readonly plannedSteps: number;
+	readonly recordedSteps: number;
+	readonly steps: readonly FleetInspectRootStep[];
+	readonly stepsTruncated: boolean;
+}
+
 export interface FleetInspectSnapshot {
 	readonly version: 1;
 	readonly generatedAt: string;
 	readonly runs: readonly FleetInspectRun[];
 	readonly truncated: boolean;
+	readonly roots: readonly FleetInspectRoot[];
+	readonly rootsTruncated: boolean;
 }
 
 function bounded(value: string, width: number): string {
@@ -125,11 +161,42 @@ export function fleetInspectSnapshot(now: () => number = Date.now): FleetInspect
 			terminal: model.terminal,
 		});
 	}
+	const rootRecords = listFleetRuns();
+	const selectedRoots = rootRecords.slice(0, FLEET_INSPECT_MAX_ROOTS);
+	const roots: FleetInspectRoot[] = [];
+	for (const record of selectedRoots) {
+		const model = loadFleetRunViewModel(record.id, { now });
+		if (model === null) continue;
+		// The planned order is the order the operator wrote the fleet in, so the
+		// index keeps its head rather than its tail: an operator reading a step
+		// index is looking for where the fleet got to, not where it ended.
+		const visibleSteps = model.steps.slice(0, FLEET_INSPECT_MAX_STEPS);
+		roots.push({
+			rootId: bounded(model.rootId, IDENTITY_WIDTH),
+			fleet: bounded(model.fleet, IDENTITY_WIDTH),
+			startedAt: model.startedAt,
+			elapsedMs: model.elapsedMs,
+			running: model.running,
+			resumedFrom: model.resumedFrom === null ? null : bounded(model.resumedFrom, IDENTITY_WIDTH),
+			plannedSteps: model.plannedSteps,
+			recordedSteps: model.recordedSteps,
+			steps: visibleSteps.map((step) => ({
+				stepId: bounded(step.stepId, STEP_ID_WIDTH),
+				runId: step.runId === null ? null : bounded(step.runId, IDENTITY_WIDTH),
+				agentId: step.agentId === null ? null : bounded(step.agentId, IDENTITY_WIDTH),
+				outcome: bounded(step.outcome, OUTCOME_WIDTH),
+				detail: step.detail === undefined ? null : bounded(step.detail, OUTCOME_WIDTH),
+			})),
+			stepsTruncated: model.steps.length > visibleSteps.length,
+		});
+	}
 	return {
 		version: 1,
 		generatedAt: new Date(now()).toISOString(),
 		runs,
 		truncated: ledgerRows.length > selected.length || runs.length !== selected.length,
+		roots,
+		rootsTruncated: rootRecords.length > selectedRoots.length || roots.length !== selectedRoots.length,
 	};
 }
 
