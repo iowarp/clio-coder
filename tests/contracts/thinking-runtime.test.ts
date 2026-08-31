@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	applyThinkingMechanism,
+	memoryInterventionModelMaxTokens,
 	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilities,
 	resolveModelRuntimeCapabilitiesForModel,
@@ -333,6 +334,21 @@ describe("contracts/thinking-runtime local reasoning classes", () => {
 		strictEqual(reasoningClassForMechanism("effort-levels"), "switchable");
 		strictEqual(reasoningClassForMechanism("budget-tokens"), "switchable");
 		strictEqual(reasoningClassForMechanism(null), "switchable");
+	});
+
+	it("derives the memory completion budget from the resolved thinking mechanism", () => {
+		strictEqual(memoryInterventionModelMaxTokens({ configuredMaxTokens: 2_000, thinkingMechanism: "none" }), 2_000);
+		strictEqual(memoryInterventionModelMaxTokens({ configuredMaxTokens: 2_000, thinkingMechanism: "on-off" }), 2_000);
+		strictEqual(memoryInterventionModelMaxTokens({ configuredMaxTokens: 2_000, thinkingMechanism: "always-on" }), 4_000);
+		strictEqual(
+			memoryInterventionModelMaxTokens({
+				configuredMaxTokens: 2_000,
+				thinkingMechanism: "always-on",
+				modelMaxTokens: 3_000,
+			}),
+			3_000,
+			"the model's known output cap remains authoritative",
+		);
 	});
 
 	it("reasoning-class-never models emit no thinking payload at any dial", () => {

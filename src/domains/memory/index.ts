@@ -91,7 +91,6 @@ export {
 	runTaskMemoryPolicy,
 	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
 	TASK_MEMORY_POLICY_MAX_OPERATIONS,
-	TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS,
 	type TaskMemoryEnvelope,
 	type TaskMemoryModelClient,
 	type TaskMemoryModelRequest,

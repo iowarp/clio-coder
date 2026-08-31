@@ -31,8 +31,10 @@ import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 
 export const MEMORY_INTERVENTION_REGISTRATION_ID = "observer.memory-intervention";
 export const MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS = 8;
-export const MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS = 400;
+export const MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS = 2_000;
 export const MEMORY_INTERVENTION_DEFAULT_EVERY_N_TOOLS = 10;
+/** Two full deadlines are enough evidence to stop spending this session's endpoint. */
+export const MEMORY_INTERVENTION_TIMEOUT_BACKOFF_THRESHOLD = 2;
 
 export const MEMORY_INTERVENTION_ACTIVITY_LIMIT = 20;
 
@@ -76,6 +78,8 @@ export interface MemoryInterventionDeps {
 	everyNTools?: number;
 	/** Lazily resolves the explicitly configured background role. Null means rules-only. */
 	getModelClient?: () => TaskMemoryModelClient | null;
+	/** Completion budget derived from the resolved background model capability. */
+	getModelMaxTokens?: (configuredMaxTokens: number) => number;
 	/**
 	 * True when the background target's inference endpoint is already serving the
 	 * chat target's stream. A memory step then either queues behind the operator's
@@ -187,6 +191,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let outstandingStep: Promise<void> = Promise.resolve();
 	let rulesInjectedSincePromptedStep = false;
 	let annotatedSinceTurnEnd = false;
+	let consecutiveLlmTimeouts = 0;
 
 	return {
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
@@ -388,27 +393,32 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// produced and the policy vocabulary has no value for a step that never ran.
 		let telemetryDecision: TaskMemoryTelemetryDecision | null = null;
 		try {
-			const client = deps.getModelClient?.() ?? null;
-			if (client === null) {
-				promptedResult = silent("no_client");
-			} else if (deps.backgroundEndpointBusy?.() === true) {
-				tier = "llm";
-				promptedStepTier = tier;
-				promptedResult = silent("endpoint_busy");
-				telemetryDecision = "dropped";
+			if (consecutiveLlmTimeouts >= MEMORY_INTERVENTION_TIMEOUT_BACKOFF_THRESHOLD) {
+				promptedResult = silent("llm_timeout_backoff");
 			} else {
-				tier = "llm";
-				promptedStepTier = tier;
-				promptedResult = await runTaskMemoryPolicy(deps.bank, client, {
-					task: input.task?.trim() || currentTask,
-					trajectory: [...trajectory],
-					deterministicTrigger: input.deterministicTrigger,
-					maxTokens: live.maxTokens,
-					...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
-					previousReminder: lastInjectedMessage,
-					timeoutMs: live.timeoutMs,
-					...(deps.onEnvelope === undefined ? {} : { onEnvelope: deps.onEnvelope }),
-				});
+				const client = deps.getModelClient?.() ?? null;
+				if (client === null) {
+					promptedResult = silent("no_client");
+				} else if (deps.backgroundEndpointBusy?.() === true) {
+					tier = "llm";
+					promptedStepTier = tier;
+					promptedResult = silent("endpoint_busy");
+					telemetryDecision = "dropped";
+				} else {
+					tier = "llm";
+					promptedStepTier = tier;
+					promptedResult = await runTaskMemoryPolicy(deps.bank, client, {
+						task: input.task?.trim() || currentTask,
+						trajectory: [...trajectory],
+						deterministicTrigger: input.deterministicTrigger,
+						maxTokens: live.maxTokens,
+						modelMaxTokens: positiveInteger(deps.getModelMaxTokens?.(live.maxTokens), live.maxTokens),
+						...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
+						previousReminder: lastInjectedMessage,
+						timeoutMs: live.timeoutMs,
+						...(deps.onEnvelope === undefined ? {} : { onEnvelope: deps.onEnvelope }),
+					});
+				}
 			}
 		} catch (error) {
 			// runTaskMemoryPolicy resolves its own failures, so reaching here means
@@ -426,6 +436,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				error: error instanceof Error ? error.message : "resolving the background model client failed",
 			});
 		}
+		if (tier === "llm" && promptedResult.decision === "timeout") consecutiveLlmTimeouts += 1;
+		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
 		lastDecision = promptedResult.decision;
 		if (promptedResult.usage !== null) {
 			try {

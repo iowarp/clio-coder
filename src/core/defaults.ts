@@ -398,16 +398,20 @@ export const DEFAULT_SETTINGS = {
 			enabled: true,
 			everyNTools: 10,
 			windowSteps: 8,
-			maxTokens: 400,
+			// Budget for the answer and any reasoning tokens that precede it.
+			// An always-on-thinking 35B spent the measured 400/400 completion
+			// tokens on reasoning and stopped with finish_reason=length before it
+			// emitted content, so the old budget made a useful step unreachable.
+			maxTokens: 2000,
 			// A memory step runs detached from the turn that triggered it, but it
 			// runs on a real inference endpoint that the operator's own turns and
 			// dispatched workers also queue against. The operator's ledger over 14
 			// days recorded 60 llm-tier steps spending 1,666 seconds of model time
 			// for 6 injections, with one step holding a local server for 102.5
-			// seconds to answer nothing. The deadline is what a turn boundary can
-			// actually wait for; a step that runs past it is recorded as timed out
-			// rather than spending the remaining minutes unobserved.
-			timeoutMs: 30_000,
+			// seconds to answer nothing. A viable output budget earns one minute,
+			// while consecutive timeouts degrade the plane to its free rules tier
+			// instead of repeatedly occupying the endpoint for that full minute.
+			timeoutMs: 60_000,
 		},
 	},
 	watchdog: { enabled: false } as WatchdogSettings,
@@ -616,8 +620,10 @@ memory:
     enabled: true
     everyNTools: 10
     windowSteps: 8
-    maxTokens: 400
-    timeoutMs: 30000
+    # Covers the answer and any thinking before it. An always-on-thinking 35B
+    # spent the measured 400/400 tokens on reasoning, then stopped at length.
+    maxTokens: 2000
+    timeoutMs: 60000
 
 # Opt-in turn-end watchdog. When enabled, a turn that changed the tree is
 # reviewed by one read-only verifier run briefed with the turn's coalesced diff

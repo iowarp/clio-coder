@@ -122,6 +122,7 @@ import {
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
+import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import {
@@ -337,6 +338,7 @@ interface BackgroundMemoryRoute {
 	targetId: string;
 	wireModelId: string;
 	endpointKey: string | null;
+	modelMaxTokens(configuredMaxTokens: number): number;
 }
 
 function createBackgroundMemoryModelClient(
@@ -379,6 +381,12 @@ function createBackgroundMemoryModelClient(
 		targetId,
 		wireModelId: refined.wireModelId,
 		endpointKey,
+		modelMaxTokens: (configuredMaxTokens) =>
+			memoryInterventionModelMaxTokens({
+				configuredMaxTokens,
+				thinkingMechanism: refined.modelRuntime.thinking.mechanism,
+				modelMaxTokens: refined.capabilityDecisions.maxTokens,
+			}),
 		client: {
 			// Wrapped at the layer that knows a request left the process: the step
 			// holds endpoint capacity while it is out and publishes the cache
@@ -1254,6 +1262,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs, bus);
 			return backgroundMemoryRoute?.client ?? null;
 		},
+		getModelMaxTokens: (configuredMaxTokens) =>
+			backgroundMemoryRoute?.modelMaxTokens(configuredMaxTokens) ?? configuredMaxTokens,
 		// A single-slot local server serves one request at a time, so a memory step
 		// started while the operator's turn is streaming either waits behind it or
 		// makes the server swap the resident model out to answer. The chat loop
