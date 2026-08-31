@@ -129,6 +129,8 @@ const SERIAL_FILES = [
 	"tests/contracts/dispatch-background-control.test.ts",
 ];
 const SERIAL_LANE_NAME = "lane-serial";
+/** How long after a lane exits its stdio pipes get to close before runLane stops waiting. */
+const STDIO_DRAIN_MS = 10_000;
 const RUNNER_ARGS = [
 	"--import",
 	"tsx",
@@ -337,7 +339,12 @@ function runLane(name, files, forward, concurrency) {
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk;
 		});
-		child.on("close", (code) => {
+		let settled = false;
+		let drainTimer;
+		const settle = (code, note) => {
+			if (settled) return;
+			settled = true;
+			if (drainTimer) clearTimeout(drainTimer);
 			let reporter = "";
 			try {
 				reporter = readFileSync(reporterPath, "utf8");
@@ -349,11 +356,34 @@ function runLane(name, files, forward, concurrency) {
 				files,
 				code: code ?? 1,
 				stdout,
-				stderr,
+				stderr: note ? `${stderr}${note}` : stderr,
 				reporter,
 				summary: parseSummary(reporter),
 			});
+		};
+		/**
+		 * `close` fires when the child has exited AND its stdio pipes have
+		 * closed. A test that leaks a detached descendant leaves that descendant
+		 * holding the inherited stdout pipe, so `close` can trail `exit` by
+		 * however long the orphan lives. One observed run had every lane's own
+		 * reporter finish inside 117s and a 2337s wall, because a single lane's
+		 * pipe stayed open for another 36 minutes after the lane was done.
+		 *
+		 * The reporter is written to a file, so the pipes carry only stray
+		 * writes: exiting on `exit` plus a bounded drain loses nothing that a
+		 * result depends on. The note goes into the lane's stderr so a leak is
+		 * reported rather than silently absorbed.
+		 */
+		child.on("exit", (code) => {
+			drainTimer = setTimeout(() => {
+				settle(
+					code,
+					`\nshard-tests: ${name} exited but its stdout/stderr pipes stayed open past ${STDIO_DRAIN_MS}ms. ` +
+						`Something the lane spawned outlived it and inherited them. The lane's own results above are complete.\n`,
+				);
+			}, STDIO_DRAIN_MS);
 		});
+		child.on("close", (code) => settle(code));
 	});
 }
 
