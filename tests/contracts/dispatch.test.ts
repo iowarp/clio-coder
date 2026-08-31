@@ -707,15 +707,18 @@ describe("contracts/dispatch", () => {
 			{ type: "message_end", message: { role: "assistant", stopReason: "stop", content: "done" } },
 		];
 		const bundle = makeDispatchBundle(context, {
-			spawnWorker: () => ({
-				pid: 9998,
-				promise: Promise.resolve({ exitCode: 0, signal: null }),
-				events: (async function* () {
-					for (const event of sourceEvents) yield event;
-				})(),
-				abort: () => {},
-				heartbeatAt: { current: Date.now() },
-			}),
+			spawnWorker: () => {
+				deepStrictEqual(enqueuedTasks, ["central progress"], "fleet sees queued before the worker starts");
+				return {
+					pid: 9998,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						for (const event of sourceEvents) yield event;
+					})(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
 		});
 		await bundle.extension.start();
 		try {
