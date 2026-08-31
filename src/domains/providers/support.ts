@@ -59,6 +59,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	llamacpp: "llama.cpp server (auto-detect surface)",
 	"anthropic-compat": "Generic Anthropic-compatible REST",
 	"openai-compat": "Generic OpenAI-compatible REST",
+	litellm: "LiteLLM gateway with per-alias capability discovery and routed-model attribution",
 };
 
 function groupPriority(group: ProviderSupportGroup): number {

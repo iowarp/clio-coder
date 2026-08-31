@@ -22,6 +22,28 @@ export const RESPONSE_SCHEMA_RUNTIME_ID = "llamacpp";
 export const OPENAI_SCHEMA_RUNTIME_ID = "lmstudio";
 
 /**
+ * The LiteLLM gateway, which takes the same standard `json_schema` format.
+ *
+ * This is the one gateway admitted to the table above, and it is admitted on
+ * measurement rather than on the api family the warning describes. Against a
+ * LiteLLM v1.98.0 proxy fronting both a llama.cpp and an LM Studio upstream:
+ * `{"type":"json_schema", json_schema:{...}}` was grammar-enforced end to end
+ * through both, `{"type":"json_object", schema:{...}}` was enforced through
+ * llama.cpp but rejected HTTP 400 by LM Studio, and the same prompt with no
+ * `response_format` returned plain prose. LiteLLM's `drop_params` did not strip
+ * either spelling, because `response_format` is a parameter it recognizes and
+ * forwards whole.
+ *
+ * The standard dialect is therefore the only one that holds across every
+ * upstream a gateway may route to, which is why LiteLLM belongs with LM Studio
+ * here and not with llama.cpp. Re-verify with the gateway's own smoke test
+ * before trusting this against a proxy other than LiteLLM: the hazard the
+ * warning names is real, and the only thing that makes this entry safe is that
+ * somebody measured it.
+ */
+export const GATEWAY_SCHEMA_RUNTIME_ID = "litellm";
+
+/**
  * How a runtime spells a JSON-schema response constraint on the wire.
  *
  * `llamacpp-json-object` is llama-server's own `response_format: { type:
@@ -47,14 +69,32 @@ export type ResponseSchemaDialect = "llamacpp-json-object" | "openai-json-schema
 export function responseSchemaDialectFor(runtimeId: string): ResponseSchemaDialect | null {
 	if (runtimeId === RESPONSE_SCHEMA_RUNTIME_ID) return "llamacpp-json-object";
 	if (runtimeId === OPENAI_SCHEMA_RUNTIME_ID) return "openai-json-schema";
+	if (runtimeId === GATEWAY_SCHEMA_RUNTIME_ID) return "openai-json-schema";
 	return null;
 }
 
-/** Whether this runtime speaks the dialect above. Transport shape, not capability. */
+/**
+ * Whether this runtime speaks the dialect above. Transport shape, not capability.
+ *
+ * LiteLLM joins llama.cpp here because a gateway in front of llama.cpp is the
+ * same transport with one hop added, and the hop was measured not to alter it.
+ * That is what admits a contract-bearing worker to a gateway target; without
+ * it, every typed agent behind a proxy is refused rather than enforced.
+ *
+ * It also opts LiteLLM into {@link responseSchemaConflictsWithTools}, which is
+ * deliberately conservative. Whether a schema and a tool surface can constrain
+ * the same completion is a property of the upstream, and one alias may route to
+ * llama.cpp (which refuses both with HTTP 400) while another routes to LM Studio
+ * (which accepts them). A runtime id cannot tell those apart, so this treats
+ * every gateway upstream as if it were the refusing one. The cost is a
+ * tool-bearing contract run through an LM Studio upstream falling back to the
+ * prompt parser when it did not strictly have to. The alternative is paying a
+ * round trip to discover a predictable 400, and having the answer depend on
+ * which deployment the proxy happened to pick for that request.
+ */
 export function runtimeSpeaksResponseSchemaDialect(runtime: { id: string; kind: string; apiFamily: string }): boolean {
-	return (
-		runtime.id === RESPONSE_SCHEMA_RUNTIME_ID && runtime.kind === "http" && runtime.apiFamily === "openai-completions"
-	);
+	if (runtime.kind !== "http" || runtime.apiFamily !== "openai-completions") return false;
+	return runtime.id === RESPONSE_SCHEMA_RUNTIME_ID || runtime.id === GATEWAY_SCHEMA_RUNTIME_ID;
 }
 
 /**
