@@ -27,13 +27,13 @@ import type { NoticeLevel } from "./command-output.js";
 import {
 	buildCouncilDispatchArgs,
 	COUNCIL_MAX_ROUNDS,
+	COUNCIL_SYNTHESIS_LABEL,
 	COUNCIL_SYNTHESIS_MODES,
 	type CouncilCommandOptions,
 	type CouncilRosters,
 	isCouncilSynthesisMode,
 	resolveCouncilRoster,
 } from "./council.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "./council-grid.js";
 import {
 	formatOracleAnswer,
 	ORACLE_AGENT_ID,
@@ -41,8 +41,9 @@ import {
 	type OracleDigestSources,
 	packOracleDigest,
 } from "./oracle.js";
-import { SETTINGS_SECTIONS, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
-import { isLibraryTab, LIBRARY_TABS } from "./overlays/skills-hub.js";
+import { isLibraryTab, LIBRARY_TABS } from "./overlays/library-tabs.js";
+import type { SettingsCenterRowId } from "./overlays/settings.js";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "./overlays/settings-sections.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 import {
@@ -60,6 +61,25 @@ import type { WorkerEntryState } from "./worker-stream.js";
  * one user-facing slash command: how it parses, which SlashCommand kinds it
  * produces, and how those kinds execute. Adding a new command is one entry
  * rather than extending two parallel switches.
+ *
+ * This module is a CLI seam, which constrains what it may import.
+ * `src/cli/run.ts` reaches `parseSlashCommand` here so a headless
+ * `clio-coder run "/typo"` refuses the token by the same shape test and the same
+ * registry membership the editor uses; a second copy of the parser would drift
+ * from this one on the first command added. That makes the CLI a reacher of
+ * everything this file statically imports, so nothing here may reach the
+ * interactive render graph: no theme, no overlay frame, no overlay module, no
+ * `../engine/tui.js`. Those modules share one bundle chunk with the instant
+ * shell's Stage 0 closure, and a second, disjoint reacher makes esbuild split
+ * it, which is a startup-latency regression rather than a style problem. The
+ * parse-time data tables the registry needs live in leaves for that reason:
+ * `./overlays/settings-sections.js`, `./overlays/library-tabs.js`, and
+ * `COUNCIL_SYNTHESIS_LABEL` in `./council.js`. Import from those, not from the
+ * overlays that re-export them.
+ *
+ * Boundaries rule6 in `tests/boundaries/check-boundaries.ts` refuses a violation
+ * at lint time; `tests/contracts/instant-shell-import-graph.test.ts` is the
+ * measurement it protects.
  */
 
 type ShareCommandVariant =

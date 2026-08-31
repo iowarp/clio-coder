@@ -26,6 +26,17 @@ export type CouncilSynthesisMode = (typeof COUNCIL_SYNTHESIS_MODES)[number];
 /** Rounds the dispatch tool admits. The command enforces the same bound where the operator typed it. */
 export const COUNCIL_MAX_ROUNDS = 3;
 
+/**
+ * The label the coordinator gives the synthesis run of every council group.
+ *
+ * It lives here rather than beside the board layout that draws it because it is
+ * council vocabulary, not presentation: the share path compares against it to
+ * decide whether a run seals the whole council or one voice, and that path must
+ * stay off the render module graph. See the header of
+ * `src/interactive/slash-commands.ts` for the closure budget that depends on it.
+ */
+export const COUNCIL_SYNTHESIS_LABEL = "synthesis";
+
 export function isCouncilSynthesisMode(value: string): value is CouncilSynthesisMode {
 	return COUNCIL_SYNTHESIS_MODES.some((mode) => mode === value);
 }

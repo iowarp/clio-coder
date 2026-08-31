@@ -48,6 +48,7 @@ import { clockLocal } from "../format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
 import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settings-sections.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
 export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
@@ -128,21 +129,7 @@ const RESTART_REQUIRED_IDS = new Set<string>([
 	"terminal.fullscreenScrollbar",
 ]);
 
-export const SETTINGS_SECTIONS = [
-	{ id: "safety", label: "Autonomy & Safety", group: "CORE" },
-	{ id: "orchestrator", label: "Orchestrator", group: "CORE" },
-	{ id: "fleet", label: "Fleet", group: "ROUTING" },
-	{ id: "targets", label: "Targets", group: "ROUTING" },
-	{ id: "models", label: "Models", group: "ROUTING" },
-	{ id: "budget", label: "Budget", group: "RUNTIME" },
-	{ id: "compaction", label: "Compaction", group: "RUNTIME" },
-	{ id: "retry", label: "Retry", group: "RUNTIME" },
-	{ id: "terminal", label: "Terminal", group: "EXPERIENCE" },
-	{ id: "watchdog", label: "Watchdog", group: "EXPERIENCE" },
-	{ id: "advanced", label: "Advanced", group: "EXPERIENCE" },
-] as const;
-
-export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
+export { SETTINGS_SECTIONS, type SettingsSectionId };
 
 const SETTINGS_SECTION_DESCRIPTIONS = {
 	safety: "How freely Clio acts, and how delegated agents' tools are governed.",

@@ -41,13 +41,8 @@ import { type CostProvenance, foregroundStreamUsage } from "../domains/providers
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
-import {
-	COUNCIL_SYNTHESIS_LABEL,
-	type CouncilGroupView,
-	type CouncilMemberView,
-	councilGroupBody,
-	councilIslandLines,
-} from "./council-grid.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
+import { type CouncilGroupView, type CouncilMemberView, councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
 	type ClioTheme,
