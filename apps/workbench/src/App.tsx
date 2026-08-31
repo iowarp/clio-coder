@@ -44,7 +44,7 @@ import type {
 	WireUsageInspection,
 } from "./protocol.ts";
 import { groupTurns, SOURCE_LABELS } from "./chat.ts";
-import { ChatTranscript, JumpToLatest, type ScrollPosition, useFollowLatest } from "./Chat.tsx";
+import { ChatTranscript, FleetStrip, JumpToLatest, type ScrollPosition, useFollowLatest } from "./Chat.tsx";
 import { formatDuration, formatTimestamp } from "./format.ts";
 import { type AppAction, type AppState, formatProjectPath, isPromptBlocked, type OpenWorkspaceState } from "./state.ts";
 
@@ -3468,6 +3468,11 @@ function ConversationCanvas({
 									<code>{open.clio.lastFailure.code}</code>
 								</section>
 							)}
+							{
+								/* Reported dispatch runs only. An empty strip means Clio Coder reported no runs, which is not
+							    the same claim as "no runs exist"; the strip is silent rather than reassuring. */
+							}
+							<FleetStrip runs={open.fleet} />
 							<ChatTranscript
 								turns={turns}
 								phase={open.clio.phase}

@@ -19,7 +19,14 @@ import {
 } from "./chat.ts";
 import { elapsedSeconds, formatClock, formatDuration } from "./format.ts";
 import { MarkdownContent } from "./Markdown.tsx";
-import type { WireClioPhase, WirePendingPermission, WireTimelineItem, WireUsage } from "./protocol.ts";
+import type {
+	WireAgentAttribution,
+	WireClioPhase,
+	WireFleetRun,
+	WirePendingPermission,
+	WireTimelineItem,
+	WireUsage,
+} from "./protocol.ts";
 import { formatProjectPath } from "./state.ts";
 
 const STATUS_GLYPHS: Readonly<Record<WireTimelineItem["status"], string>> = {
@@ -31,6 +38,93 @@ const STATUS_GLYPHS: Readonly<Record<WireTimelineItem["status"], string>> = {
 	failed: "✕",
 	replayed: "○",
 };
+
+const FLEET_GLYPHS: Readonly<Record<WireFleetRun["state"], string>> = {
+	queued: "…",
+	running: "◐",
+	progress: "◑",
+	done: "✓",
+	failed: "✕",
+};
+
+const FLEET_STATE_LABELS: Readonly<Record<WireFleetRun["state"], string>> = {
+	queued: "queued",
+	running: "running",
+	progress: "working",
+	done: "done",
+	failed: "failed",
+};
+
+/**
+ * The delegated agent Clio Coder named for a card, or null when it named none.
+ * The GUI never guesses: an unattributed card stays attributed to the product.
+ */
+function workerLabel(agents: readonly WireAgentAttribution[] | undefined): string | null {
+	const last = agents?.at(-1);
+	if (last === undefined || last.role !== "worker") return null;
+	return last.node === null ? last.agentId : `${last.agentId} · ${last.node}`;
+}
+
+function AgentTag({ agents }: { agents: readonly WireAgentAttribution[] | undefined }) {
+	const label = workerLabel(agents);
+	if (label === null) return null;
+	return (
+		<span className="activity-row__note" title="Reported by Clio Coder as the agent that ran this call">
+			agent {label}
+		</span>
+	);
+}
+
+/**
+ * One row per dispatch run Clio Coder reported over its opt-in event stream.
+ * Every value shown is a reported fact: the agent, the state, the run's own
+ * progress count, and Clio Coder's sanitized task preview. Nothing is derived
+ * and nothing is shown for a run that was never reported.
+ */
+export function FleetStrip({ runs }: { runs: readonly WireFleetRun[] }) {
+	if (runs.length === 0) return null;
+	const live = runs.filter((run) => run.state !== "done" && run.state !== "failed").length;
+	return (
+		<details className="activity" open={live > 0}>
+			<summary className="activity__summary">
+				<span className="activity__glyph" aria-hidden="true">⛭</span>
+				<span className="activity__label">
+					Fleet · {live} running of {runs.length}
+				</span>
+				<span className="activity__count" aria-hidden="true">{runs.length}</span>
+			</summary>
+			<ul className="activity__rows">
+				{runs.map((run) => (
+					<li
+						className={`activity-row activity-row--tool is-${run.state === "queued" ? "queued" : "active"}`}
+						key={run.runId}
+					>
+						<span className="activity-row__glyph" aria-hidden="true">{FLEET_GLYPHS[run.state]}</span>
+						<span className="activity-row__kind">{run.agentId}</span>
+						<span className="activity-row__title">
+							{run.taskPreview ?? "No task preview was reported."}
+							{run.node !== null && <span className="activity-row__note">node {run.node}</span>}
+						</span>
+						<span className="activity-row__state">
+							<span className="sr-only">state</span>
+							{FLEET_STATE_LABELS[run.state]}
+							{run.outcome !== null && <span className="activity-row__elapsed">· {run.outcome}</span>}
+							{run.progressCount > 0 && (
+								<span className="activity-row__elapsed">
+									· {run.progressCount}
+									{run.progressTruncated ? "+" : ""} steps
+								</span>
+							)}
+							{run.durationMs !== null && (
+								<span className="activity-row__elapsed">· {formatDuration(Math.round(run.durationMs / 1000))}</span>
+							)}
+						</span>
+					</li>
+				))}
+			</ul>
+		</details>
+	);
+}
 
 const LIVE_GLYPHS: Readonly<Record<LiveStatus["state"], string>> = {
 	starting: "◌",
@@ -76,6 +170,7 @@ function ActivityRow({ item, nowMs, pendingPermission, onResolve }: {
 			<span className="activity-row__kind">{kindLabel}</span>
 			<span className="activity-row__title">
 				{item.kind === "tool" ? item.summary : item.title}
+				<AgentTag agents={item.agents} />
 				{item.kind === "approval" && <span className="activity-row__note">{item.summary}</span>}
 				{item.kind === "loop" && (
 					<span className="activity-row__note">{SOURCE_LABELS[item.source]} · {item.summary}</span>
