@@ -1278,6 +1278,8 @@ export interface WireFleetVerification {
 
 export const MAX_WIRE_TRACE_RUNS = 8;
 export const MAX_WIRE_TRACE_PHASES = 16;
+export const MAX_WIRE_TRACE_EVENT_KINDS = 12;
+export const MAX_WIRE_TRACE_PROCESS_KINDS = 8;
 
 export interface WireTracePhase {
 	readonly name: string;
@@ -1291,6 +1293,30 @@ export interface WireTracePhase {
 	readonly elapsedMs: number | null;
 	readonly totalTokens: number | null;
 	readonly totalCostUsd: number | null;
+}
+
+/**
+ * A run's events as shapes, never as rows.
+ *
+ * A trace event carries `payload_json` and a free-form name, which are the
+ * class this boundary keeps host-side, so the tail stays in the terminal and
+ * what crosses is how many events of each kind there were and the span they
+ * cover. The counts are aggregated in SQL, so the payloads are not read at all.
+ */
+export interface WireTraceEvents {
+	readonly total: number;
+	readonly firstAt: string | null;
+	readonly lastAt: string | null;
+	readonly kinds: readonly { readonly kind: string; readonly count: number }[];
+	readonly kindsTruncated: boolean;
+}
+
+/** Same rule, applied harder: a process row carries a command line, a pid, and a host. */
+export interface WireTraceProcesses {
+	readonly total: number;
+	readonly running: number;
+	readonly kinds: readonly { readonly kind: string; readonly total: number; readonly running: number }[];
+	readonly kindsTruncated: boolean;
 }
 
 export interface WireTraceRun {
@@ -1307,6 +1333,8 @@ export interface WireTraceRun {
 	readonly totalCostUsd: number | null;
 	readonly phases: readonly WireTracePhase[];
 	readonly phasesTruncated: boolean;
+	readonly events: WireTraceEvents;
+	readonly processes: WireTraceProcesses;
 }
 
 /**
@@ -4707,7 +4735,77 @@ export function validateTraceInspection(
 				"totalCostUsd",
 				"phases",
 				"phasesTruncated",
+				"events",
+				"processes",
 			]);
+			const eventsRecord = expectExactKeys(run.events, `${runLabel}.events`, [
+				"total",
+				"firstAt",
+				"lastAt",
+				"kinds",
+				"kindsTruncated",
+			]);
+			const eventTotal = expectDispatchNumber(eventsRecord.total, `${runLabel}.events.total`, true);
+			const eventKinds = expectArray(
+				eventsRecord.kinds,
+				`${runLabel}.events.kinds`,
+				MAX_WIRE_TRACE_EVENT_KINDS,
+				(entry, kindLabel) => {
+					const kind = expectExactKeys(entry, kindLabel, ["kind", "count"]);
+					return {
+						kind: expectPresentationText(kind.kind, `${kindLabel}.kind`, 64),
+						count: expectDispatchNumber(kind.count, `${kindLabel}.count`, true),
+					};
+				},
+			);
+			const eventKindsTruncated = expectBoolean(
+				eventsRecord.kindsTruncated,
+				`${runLabel}.events.kindsTruncated`,
+			);
+			// A complete breakdown accounts for every event; a truncated one only
+			// ever accounts for fewer, never more.
+			const eventKindSum = eventKinds.reduce((sum, entry) => sum + entry.count, 0);
+			if (eventKindsTruncated ? eventKindSum > eventTotal : eventKindSum !== eventTotal) {
+				invalid(`${runLabel}.events.kinds do not account for the reported total`);
+			}
+			if (new Set(eventKinds.map((entry) => entry.kind)).size !== eventKinds.length) {
+				invalid(`${runLabel}.events.kinds repeats a kind`);
+			}
+			// A span has both ends or neither, and it has them exactly when there
+			// were events to span. A half-open span is a broken answer, not a
+			// narrower one.
+			const eventFirstAt = expectNullableTimestamp(eventsRecord.firstAt, `${runLabel}.events.firstAt`);
+			const eventLastAt = expectNullableTimestamp(eventsRecord.lastAt, `${runLabel}.events.lastAt`);
+			if ((eventFirstAt === null) !== (eventLastAt === null) || (eventTotal === 0) !== (eventFirstAt === null)) {
+				invalid(`${runLabel}.events span contradicts its total`);
+			}
+			const processesRecord = expectExactKeys(run.processes, `${runLabel}.processes`, [
+				"total",
+				"running",
+				"kinds",
+				"kindsTruncated",
+			]);
+			const processTotal = expectDispatchNumber(processesRecord.total, `${runLabel}.processes.total`, true);
+			const processRunning = expectDispatchNumber(processesRecord.running, `${runLabel}.processes.running`, true);
+			// Still alive is a subset of started.
+			if (processRunning > processTotal) {
+				invalid(`${runLabel}.processes reports more running than started`);
+			}
+			const processKinds = expectArray(
+				processesRecord.kinds,
+				`${runLabel}.processes.kinds`,
+				MAX_WIRE_TRACE_PROCESS_KINDS,
+				(entry, kindLabel) => {
+					const kind = expectExactKeys(entry, kindLabel, ["kind", "total", "running"]);
+					const total = expectDispatchNumber(kind.total, `${kindLabel}.total`, true);
+					const running = expectDispatchNumber(kind.running, `${kindLabel}.running`, true);
+					if (running > total) invalid(`${kindLabel} reports more running than started`);
+					return { kind: expectPresentationText(kind.kind, `${kindLabel}.kind`, 64), total, running };
+				},
+			);
+			if (new Set(processKinds.map((entry) => entry.kind)).size !== processKinds.length) {
+				invalid(`${runLabel}.processes.kinds repeats a kind`);
+			}
 			const runId = expectPresentationText(run.runId, `${runLabel}.runId`, 128);
 			if (seen.has(runId)) invalid(`${label}.runs repeats ${runId}`);
 			seen.add(runId);
@@ -4755,6 +4853,22 @@ export function validateTraceInspection(
 					},
 				),
 				phasesTruncated: expectBoolean(run.phasesTruncated, `${runLabel}.phasesTruncated`),
+				events: {
+					total: eventTotal,
+					firstAt: eventFirstAt,
+					lastAt: eventLastAt,
+					kinds: eventKinds,
+					kindsTruncated: eventKindsTruncated,
+				},
+				processes: {
+					total: processTotal,
+					running: processRunning,
+					kinds: processKinds,
+					kindsTruncated: expectBoolean(
+						processesRecord.kindsTruncated,
+						`${runLabel}.processes.kindsTruncated`,
+					),
+				},
 			};
 		},
 	);

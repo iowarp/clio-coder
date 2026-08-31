@@ -216,6 +216,23 @@ export function traceInspectionFixture(): WireTraceInspection {
 				},
 			],
 			phasesTruncated: false,
+			events: {
+				total: 249,
+				firstAt: "2026-08-31T14:00:00.000Z",
+				lastAt: "2026-08-31T14:00:29.000Z",
+				kinds: [
+					{ kind: "message_update", count: 211 },
+					{ kind: "clio_tool_start", count: 21 },
+					{ kind: "tool_call", count: 17 },
+				],
+				kindsTruncated: false,
+			},
+			processes: {
+				total: 3,
+				running: 1,
+				kinds: [{ kind: "worker", total: 3, running: 1 }],
+				kindsTruncated: false,
+			},
 		}],
 		truncated: false,
 	};

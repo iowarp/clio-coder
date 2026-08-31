@@ -1212,6 +1212,48 @@ export class TraceReader {
 			) as unknown as TraceEventRow[];
 	}
 
+	/**
+	 * Per-kind event tallies for one run.
+	 *
+	 * Aggregated in SQL rather than by reading rows, so `payload_json` and the
+	 * free-form event name are never loaded at all. That is the point: a caller
+	 * that only ever wants shapes should not be holding the payloads in memory
+	 * on the way to counting them.
+	 */
+	eventKindCounts(runId: string): Array<{ type: string; count: number }> {
+		return this.db
+			.prepare("SELECT type, COUNT(*) AS count FROM events WHERE run_id=? GROUP BY type ORDER BY count DESC, type")
+			.all(runId) as unknown as Array<{ type: string; count: number }>;
+	}
+
+	/** Total events and the wall span they cover, without reading one of them. */
+	eventSpan(runId: string): { total: number; firstAt: string | null; lastAt: string | null } {
+		const row = this.db
+			.prepare(
+				`SELECT COUNT(*) AS total, MIN(started_at) AS firstAt,
+					MAX(COALESCE(ended_at, started_at)) AS lastAt FROM events WHERE run_id=?`,
+			)
+			.get(runId) as unknown as { total: number; firstAt: string | null; lastAt: string | null } | undefined;
+		return row ?? { total: 0, firstAt: null, lastAt: null };
+	}
+
+	/**
+	 * Per-kind process tallies for one run.
+	 *
+	 * Same reason as {@link eventKindCounts}, and more sharply: a process row
+	 * carries the command line, the pid, and the host, none of which a shape
+	 * count needs.
+	 */
+	processKindCounts(runId: string): Array<{ kind: string; total: number; running: number }> {
+		return this.db
+			.prepare(
+				`SELECT kind, COUNT(*) AS total,
+					SUM(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END) AS running
+				 FROM processes WHERE run_id=? GROUP BY kind ORDER BY total DESC, kind`,
+			)
+			.all(runId) as unknown as Array<{ kind: string; total: number; running: number }>;
+	}
+
 	processes(runId: string): TraceProcessRow[] {
 		return this.db
 			.prepare("SELECT * FROM processes WHERE run_id=? ORDER BY ended_at IS NOT NULL, id")

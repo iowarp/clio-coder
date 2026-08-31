@@ -6839,6 +6839,74 @@ kbd {
 	line-height: 1.35;
 }
 
+.trace-shapes {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.trace-shapes > div {
+	display: grid;
+	gap: 5px;
+	align-content: start;
+	min-width: 0;
+	padding: 9px 10px;
+	border: 1px solid var(--hairline);
+	background: rgb(10 16 22 / 68%);
+}
+
+.trace-shapes__label {
+	color: var(--dim);
+	font-size: 0.52rem;
+}
+
+.trace-shapes__none {
+	color: var(--muted);
+	font-family: var(--font-mono);
+	font-size: 0.55rem;
+}
+
+.trace-shapes ul {
+	display: grid;
+	gap: 2px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.trace-shapes li {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	min-width: 0;
+}
+
+.trace-shapes code {
+	color: var(--paper);
+	font-family: var(--font-mono);
+	font-size: 0.55rem;
+	overflow-wrap: anywhere;
+}
+
+.trace-shapes li > span {
+	flex: 0 0 auto;
+	color: var(--muted);
+	font-family: var(--font-mono);
+	font-size: 0.55rem;
+}
+
+.trace-shapes li.is-bound {
+	color: var(--dim);
+	font-family: var(--font-mono);
+	font-size: 0.5rem;
+}
+
+@media (width <= 900px) {
+	.trace-shapes {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
 .trace-accounting {
 	display: grid;
 	gap: 10px;

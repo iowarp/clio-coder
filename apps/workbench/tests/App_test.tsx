@@ -389,6 +389,12 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 	match(html, /28,665/u);
 	match(html, /\$0\.42/u);
 	match(html, /1 retry/u);
+	// Events and processes cross as shapes; the tail and the command lines do not.
+	match(html, /Event kinds for run run-alpha/u);
+	match(html, /Process kinds for run run-alpha/u);
+	match(html, /message_update/u);
+	match(html, /1 still alive/u);
+	match(html, /stay on the host by design/u);
 	match(html, /errored/u);
 	for (const forbidden of ["the prompt text", "phase_id", "trace.sqlite"]) {
 		ok(!html.includes(forbidden), `trace accounting leaked ${forbidden}`);
