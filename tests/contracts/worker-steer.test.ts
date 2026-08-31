@@ -27,6 +27,7 @@ import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../sr
 import { createOrderedSteerHandler, createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { scaleWatchdog } from "../harness/load.js";
 import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/worker-attestation.js";
 
 const SCOUT_TOOL_CALLS = 18;
@@ -63,7 +64,13 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
-async function waitFor<T>(read: () => T | undefined, message: string, timeoutMs = 1000): Promise<T> {
+/**
+ * A watchdog on a worker-side event arriving. It asserts the event arrives, not
+ * that it arrives quickly, so the budget widens with the shard load the run
+ * carries; alone it stays the 1s it always was.
+ */
+async function waitFor<T>(read: () => T | undefined, message: string, budgetMs = 1000): Promise<T> {
+	const timeoutMs = scaleWatchdog(budgetMs);
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
 		const value = read();

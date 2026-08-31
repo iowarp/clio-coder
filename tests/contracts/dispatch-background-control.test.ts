@@ -18,6 +18,7 @@ import { createMonitorTool } from "../../src/tools/monitor.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { mutationReport } from "../harness/gate-fabric.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
@@ -27,8 +28,13 @@ const approvedDispatch = {
 	approval: { requestId: "test-background-approval", requestedBy: "test-operator", actionClass: "dispatch" as const },
 };
 
-async function waitFor(predicate: () => boolean, message: string, timeoutMs = 8000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
+/**
+ * A watchdog on a background finalization. It asserts that the runs settle, not
+ * that they settle quickly, so the budget widens with the shard load the run
+ * carries; alone it stays the 8s it always was.
+ */
+async function waitFor(predicate: () => boolean, message: string, budgetMs = 8000): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(budgetMs);
 	while (Date.now() <= deadline) {
 		if (predicate()) return;
 		await new Promise((resolve) => setTimeout(resolve, 25));

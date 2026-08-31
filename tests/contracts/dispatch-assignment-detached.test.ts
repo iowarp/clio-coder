@@ -12,6 +12,7 @@ import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { mutationReport } from "../harness/gate-fabric.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 const approvedDispatch = {
 	approval: { requestId: "assignment-detached", requestedBy: "test-operator", actionClass: "dispatch" as const },
@@ -38,8 +39,13 @@ function worker(exitCode: number, text?: string): SpawnedWorker {
 	};
 }
 
-async function waitFor(predicate: () => boolean, message: string, timeoutMs = 2_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
+/**
+ * A watchdog on a settlement that happens off the caller's stack. Nothing here
+ * asserts the settlement was fast, only that it arrives, so the budget widens
+ * with the shard load the run carries; alone it stays the 2s it always was.
+ */
+async function waitFor(predicate: () => boolean, message: string, budgetMs = 2_000): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(budgetMs);
 	while (Date.now() <= deadline) {
 		if (predicate()) return;
 		await new Promise((resolve) => setTimeout(resolve, 10));

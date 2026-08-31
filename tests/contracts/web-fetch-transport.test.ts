@@ -4,8 +4,22 @@ import type { AddressInfo, Socket } from "node:net";
 import test from "node:test";
 import type { ToolResult } from "../../src/tools/registry.js";
 import { webFetchTool } from "../../src/tools/web-fetch.js";
+import { scaleWatchdog } from "../harness/load.js";
 
-const TEST_TIMEOUT_MS = 5_000;
+const TEST_TIMEOUT_MS = scaleWatchdog(5_000);
+/**
+ * The `timeout_ms` every case that expects a *successful* fetch hands the tool.
+ * The server is on loopback in this process, so the number is a watchdog and
+ * not a claim: these cases assert on the body, the redirect chain, or the
+ * cancellation, never on how long the round trip took. Under 24-way shard load
+ * a loopback round trip has been measured past a flat 1000ms, which failed the
+ * case as `web_fetch: timeout after 1000ms` against a server that answered.
+ *
+ * The one case that asserts a timeout fires keeps its own literal 25ms. Scaling
+ * that would be scaling the thing under test.
+ */
+const REACHABLE_TIMEOUT_MS = scaleWatchdog(1_000);
+const ABORTABLE_TIMEOUT_MS = scaleWatchdog(2_000);
 
 interface LocalServer {
 	origin: string;
@@ -20,7 +34,8 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 	return { promise, resolve };
 }
 
-async function bounded<T>(promise: Promise<T>, label: string, timeoutMs = 1_000): Promise<T> {
+async function bounded<T>(promise: Promise<T>, label: string, budgetMs = 1_000): Promise<T> {
+	const timeoutMs = scaleWatchdog(budgetMs);
 	let timer: NodeJS.Timeout | undefined;
 	try {
 		return await Promise.race([
@@ -104,7 +119,7 @@ test("web_fetch preserves method, body, and caller headers through the runtime t
 				headers: { "X-Clio-Contract": "transport", "User-Agent": "contract-agent" },
 				body: "snowman=☃",
 				format: "raw",
-				timeout_ms: 1_000,
+				timeout_ms: REACHABLE_TIMEOUT_MS,
 			}),
 		);
 		const request = await bounded(received.promise, "echo request");
@@ -141,7 +156,7 @@ test("web_fetch follows redirects and reports the final response URL", { timeout
 
 	try {
 		const result = assertOk(
-			await webFetchTool.run({ url: `${server.origin}/redirect`, format: "raw", timeout_ms: 1_000 }),
+			await webFetchTool.run({ url: `${server.origin}/redirect`, format: "raw", timeout_ms: REACHABLE_TIMEOUT_MS }),
 		);
 		strictEqual(result.details?.url, `${server.origin}/final?source=redirect`);
 		match(result.output, new RegExp(`^URL: ${server.origin.replaceAll(".", "\\.")}/final\\?source=redirect`, "m"));
@@ -184,7 +199,7 @@ test("web_fetch streams UTF-8 safely, truncates by bytes, and cancels the unread
 				url: `${server.origin}/stream`,
 				format: "raw",
 				max_bytes: 256,
-				timeout_ms: 1_000,
+				timeout_ms: REACHABLE_TIMEOUT_MS,
 			}),
 		);
 		const chunksSent = await bounded(responseClosed.promise, "stream cancellation");
@@ -212,7 +227,7 @@ test("web_fetch maps an external AbortSignal to its stable aborted result", { ti
 	try {
 		const controller = new AbortController();
 		const resultPromise = webFetchTool.run(
-			{ url: `${server.origin}/abort`, format: "raw", timeout_ms: 2_000 },
+			{ url: `${server.origin}/abort`, format: "raw", timeout_ms: ABORTABLE_TIMEOUT_MS },
 			{ signal: controller.signal },
 		);
 		await bounded(responseStarted.promise, "abort response start");
@@ -259,7 +274,9 @@ test("web_fetch maps HTTP failures to a bounded extracted preview", { timeout: T
 	});
 
 	try {
-		const result = assertError(await webFetchTool.run({ url: `${server.origin}/error`, timeout_ms: 1_000 }));
+		const result = assertError(
+			await webFetchTool.run({ url: `${server.origin}/error`, timeout_ms: REACHABLE_TIMEOUT_MS }),
+		);
 		strictEqual(result.message, "web_fetch: HTTP 418: Teapot Contract\nPreview:\n# Refused\n\n contract preview");
 	} finally {
 		await server.close();
@@ -273,7 +290,7 @@ test("web_fetch rejects binary response types before exposing content", { timeou
 	});
 
 	try {
-		deepStrictEqual(await webFetchTool.run({ url: `${server.origin}/binary`, timeout_ms: 1_000 }), {
+		deepStrictEqual(await webFetchTool.run({ url: `${server.origin}/binary`, timeout_ms: REACHABLE_TIMEOUT_MS }), {
 			kind: "error",
 			message: "web_fetch: binary or unsupported content type: application/octet-stream",
 		});
@@ -286,7 +303,7 @@ test("web_fetch maps a local transport failure instead of throwing", { timeout: 
 	const server = await listen((request) => request.socket.destroy());
 
 	try {
-		deepStrictEqual(await webFetchTool.run({ url: `${server.origin}/reset`, timeout_ms: 1_000 }), {
+		deepStrictEqual(await webFetchTool.run({ url: `${server.origin}/reset`, timeout_ms: REACHABLE_TIMEOUT_MS }), {
 			kind: "error",
 			message: "web_fetch: fetch failed",
 		});

@@ -42,6 +42,7 @@ import {
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 import { createFileMutationObserver } from "../../src/tools/observers.js";
 import { writeTool } from "../../src/tools/write.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 type BuiltCodewiki = Awaited<ReturnType<typeof buildCodewiki>>;
 type ContextBundle = ReturnType<typeof createContextBundle>;
@@ -122,15 +123,22 @@ async function withContextBundle(cwd: string, fn: (bundle: ContextBundle) => Pro
 	}
 }
 
+const CODEWIKI_POLL_MS = 25;
+/**
+ * A watchdog on the incremental indexer landing a batch. It asserts the batch
+ * is indexed, not that indexing is fast, so the 5s of polling widens with the
+ * shard load the run carries; alone it stays the 200 attempts it always was.
+ */
 async function waitForCodewiki(
 	cwd: string,
 	predicate: (codewiki: BuiltCodewiki) => boolean,
 	message: string,
 ): Promise<BuiltCodewiki> {
-	for (let attempt = 0; attempt < 200; attempt += 1) {
+	const attempts = Math.ceil(scaleWatchdog(200 * CODEWIKI_POLL_MS) / CODEWIKI_POLL_MS);
+	for (let attempt = 0; attempt < attempts; attempt += 1) {
 		const codewiki = readCodewiki(cwd);
 		if (codewiki && predicate(codewiki)) return codewiki;
-		await delay(25);
+		await delay(CODEWIKI_POLL_MS);
 	}
 	throw new Error(message);
 }
