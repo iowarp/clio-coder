@@ -33,6 +33,7 @@ import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createStdioServerTransport, createStdioTransport } from "../../src/engine/acp/transport.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 interface RpcClient {
 	request<T>(method: string, params?: unknown): Promise<T>;
@@ -149,15 +150,21 @@ function forceCleanupDirectPid(pid: number | null): void {
 	}
 }
 
-async function waitForCondition(predicate: () => boolean, timeoutMs: number, message: string): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
+/**
+ * Both of these bound a wait on the ACP peer, not a claim that the peer is
+ * quick. The budgets widen with the shard load the run carries and are used
+ * verbatim when the file runs on its own.
+ */
+async function waitForCondition(predicate: () => boolean, budgetMs: number, message: string): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(budgetMs);
 	while (!predicate()) {
 		if (Date.now() >= deadline) throw new Error(message);
 		await new Promise<void>((resolve) => setTimeout(resolve, 10));
 	}
 }
 
-async function within<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+async function within<T>(promise: Promise<T>, budgetMs: number, message: string): Promise<T> {
+	const timeoutMs = scaleWatchdog(budgetMs);
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	try {
 		return await Promise.race([

@@ -21,6 +21,7 @@ import {
 	toolResultContextText,
 	toolResultPresentationText,
 } from "../../src/tools/result-disposition.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 const ESC = "\u001b";
 const NUL = "\u0000";
@@ -255,8 +256,16 @@ describe("contracts/bash result disposition", () => {
 
 	it("preserves timeout, abort, and hard-cap facts in deterministic summary context", async () => {
 		useStateDir();
+		// Two deadlines below, both racing a `printf` in a spawned shell against a
+		// `sleep 2` that must always overshoot them. The claim is that a killed
+		// run still carries the output it produced first, so the deadline only has
+		// to sit between "the marker was written" and "two seconds". A flat 100ms
+		// stopped clearing the low end under 24-way shard load, where a fresh
+		// shell has not always echoed by then; scaled, it is 400ms against the
+		// same 2s sleep, so both `timedOut` and `aborted` still fire.
+		const CUT_SHORT_MS = scaleWatchdog(100);
 		const timeout = await invokeBash(
-			{ command: "printf timeout-marker; sleep 2", timeout_ms: 100, output_policy: "summary" },
+			{ command: "printf timeout-marker; sleep 2", timeout_ms: CUT_SHORT_MS, output_policy: "summary" },
 			{ sessionId: "timeout", toolCallId: "call" },
 		);
 		strictEqual(timeout.kind, "error");
@@ -266,7 +275,7 @@ describe("contracts/bash result disposition", () => {
 		ok(toolResultContextText(timeout).includes("timeout-marker"));
 
 		const controller = new AbortController();
-		setTimeout(() => controller.abort(), 100);
+		setTimeout(() => controller.abort(), CUT_SHORT_MS);
 		const aborted = await invokeBash(
 			{ command: "printf abort-marker; sleep 2", output_policy: "summary" },
 			{ signal: controller.signal, sessionId: "abort", toolCallId: "call" },
