@@ -112,6 +112,11 @@ function opener(options: {
 		set handle(next) {
 			handle = next;
 		},
+		showPermission(next): boolean {
+			state = "permission-confirm";
+			handle = next;
+			return true;
+		},
 		close(): void {
 			state = "closed";
 			handle?.hide();

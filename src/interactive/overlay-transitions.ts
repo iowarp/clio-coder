@@ -20,12 +20,15 @@ export interface OverlayTransitionsDeps {
 export interface OverlayTransitions {
 	state: OverlayState;
 	handle: OverlayHandle | null;
+	/** Raise a permission prompt while preserving the modal it interrupted. */
+	showPermission(handle: OverlayHandle): boolean;
 	close(): void;
 }
 
 export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayTransitions {
 	let state: OverlayState = "closed";
 	let handle: OverlayHandle | null = null;
+	let interrupted: { state: OverlayState; handle: OverlayHandle | null } | null = null;
 
 	return {
 		get state() {
@@ -44,6 +47,13 @@ export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayT
 		set handle(next) {
 			handle = next;
 		},
+		showPermission(nextHandle) {
+			if (state === "permission-confirm") return false;
+			interrupted = state === "closed" ? null : { state, handle };
+			state = "permission-confirm";
+			handle = nextHandle;
+			return true;
+		},
 		close,
 	};
 
@@ -55,12 +65,16 @@ export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayT
 			return;
 		}
 		const leaving = state;
-		state = "closed";
-		deps.stopDispatchBoardTicker();
-		handle?.hide();
-		handle = null;
+		const leavingHandle = handle;
+		const restoring = leaving === "permission-confirm" ? interrupted : null;
+		interrupted = null;
+		state = restoring?.state ?? "closed";
+		handle = restoring?.handle ?? null;
+		if (restoring === null) deps.stopDispatchBoardTicker();
+		leavingHandle?.hide();
 		if (leaving === "permission-confirm") deps.onPermissionOverlayClosed();
 		else deps.onOverlayClosed?.();
+		restoring?.handle?.focus();
 		deps.renderContextIsland();
 		deps.renderTaskIsland();
 		deps.requestRender();
