@@ -106,6 +106,9 @@ describe("clio-coder doctor honesty about its own roots", { concurrency: false }
 		const noAccess = await runCli(["doctor"], { env: scratch.env });
 		const noAccessRow = rowFor(noAccess.stdout, "cache dir");
 		match(noAccessRow, /is not readable or writable or traversable/u);
+		const yaziProfileRow = rowFor(noAccess.stdout, "yazi managed profile");
+		match(yaziProfileRow, /^WARN/u);
+		match(yaziProfileRow, /could not be inspected/u);
 		ok(
 			rowFor(readOnly.stdout, "cache dir") !== noAccessRow,
 			"a read-only root and an inaccessible one must not print the same string",

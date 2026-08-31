@@ -1,6 +1,30 @@
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
-import { describeYaziProfile, inspectCurrentYaziProfile } from "../domains/mux/index.js";
+import {
+	describeYaziProfile,
+	inspectCurrentYaziProfile,
+	userYaziConfigDir,
+	yaziProfileDir,
+} from "../domains/mux/index.js";
 import { describeResolution, toolStatuses } from "../domains/toolchain/index.js";
+
+function yaziProfileFinding(): DoctorFinding {
+	try {
+		const profile = inspectCurrentYaziProfile();
+		return {
+			ok: true,
+			name: "yazi managed profile",
+			detail: describeYaziProfile(profile),
+			level: profile.state === "current" ? "ok" : "warn",
+		};
+	} catch (error) {
+		return {
+			ok: true,
+			name: "yazi managed profile",
+			level: "warn",
+			detail: `${yaziProfileDir()} could not be inspected (${error instanceof Error ? error.message : String(error)}); user config ${userYaziConfigDir()} is separate and untouched`,
+		};
+	}
+}
 
 /**
  * One row per pinned external tool: where it resolves, and how the version
@@ -18,14 +42,5 @@ export function toolchainFindings(): DoctorFinding[] {
 		detail: describeResolution(status),
 		level: status.resolution.source === "none" ? ("warn" as const) : ("ok" as const),
 	}));
-	const profile = inspectCurrentYaziProfile();
-	return [
-		...tools,
-		{
-			ok: true,
-			name: "yazi managed profile",
-			detail: describeYaziProfile(profile),
-			level: profile.state === "current" ? ("ok" as const) : ("warn" as const),
-		},
-	];
+	return [...tools, yaziProfileFinding()];
 }
