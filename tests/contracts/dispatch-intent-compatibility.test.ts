@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -183,6 +183,17 @@ describe("typed dispatch intent compatibility", () => {
 			deepStrictEqual(DISPATCH_INTENT_SUPPORTED_VERSIONS, [DISPATCH_INTENT_VERSION]);
 		} finally {
 			rmSync(elsewhere, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps the version rules free of anything a package layout could change", () => {
+		// A source checkout, a global npm install, and a bundled dist/ must
+		// classify the same input identically. That holds only while the rules
+		// read no file, resolve no module URL, and consult no environment: the
+		// supported set has to stay a compiled-in constant rather than a lookup.
+		const source = readFileSync(new URL("../../src/domains/dispatch/intent-compatibility.ts", import.meta.url), "utf8");
+		for (const forbidden of ["node:fs", "node:module", "node:url", "import.meta", "process.env", "createRequire"]) {
+			strictEqual(source.includes(forbidden), false, `intent-compatibility.ts must not reference ${forbidden}`);
 		}
 	});
 });
