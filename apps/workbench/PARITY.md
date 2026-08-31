@@ -15,15 +15,15 @@ the main application.
 | Verdict | Count |
 | ------- | ----: |
 | Present |    21 |
-| Partial |    60 |
-| Absent  |    31 |
+| Partial |    61 |
+| Absent  |    30 |
 | Total   |   112 |
 
 **host-only-by-design** marks a payload this GUI will not carry in any form, as distinct from one it has not carried
 yet. Event payloads, event names, process command lines, a council's deliberation, and a gate's reasoning are the
-current members, joined by a verification check's argument vector: bounded aggregates, topologies, classifications, and
-verdicts over them cross, the rows and the prose themselves never will, and the panel says so on screen rather than
-leaving the absence to be inferred.
+current members, joined by a verification check's argument vector and an eval report's runner attachments: bounded
+aggregates, topologies, classifications, and verdicts over them cross, the rows and the prose themselves never will, and
+the panel says so on screen rather than leaving the absence to be inferred.
 
 **deferred-by-design** marks a row whose remaining gap is a mutation rather than a missing read. The GUI is read-only by
 decision, not by omission: every adapter it has runs a fixed, argument-free command and changes nothing, and that is the
@@ -52,7 +52,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Agent reference                 | `agents [--json]`                                                             | **Present** | Capability atlas renders bounded discovered-agent recipes and provenance.                                                                                                                                                                                                               |
 | Fleet lifecycle                 | `fleet` list/new/validate/graph/commands/run/status/view/inspect/drain/resume | **Partial** | **deferred-by-design**: Recent run inspection, bounded journal follow, and the fleet-root step index are graphical; authoring, validation, admission control, and execution are absent.                                                                                                 |
 | Evidence artifacts              | `evidence` build/list/inspect                                                 | **Present** | Runs lists recent bundles and opens one to its per-run trust axes. Building a bundle stays terminal, which is a mutation rather than a read.                                                                                                                                            |
-| Evaluation                      | `eval` run/report/compare                                                     | **Absent**  | No eval task discovery, execution, comparison, or report canvas exists.                                                                                                                                                                                                                 |
+| Evaluation                      | `eval` run/report/compare                                                     | **Partial** | Runs lists every stored report with its outcome, route, accounting, and per-scenario result. A report's runner attachments are the whole session transcript and are **host-only-by-design**. Running an eval is execution; comparison and per-trial metric distributions are absent.    |
 | Durable memory                  | `memory` list/propose/promote/approve/reject/prune                            | **Partial** | Effective configuration can report memory presence and the catalog can describe resources, but memory records and reviewed mutations are absent.                                                                                                                                        |
 | Historical usage                | `usage report`                                                                | **Present** | The project-scoped 30-day Usage record projects bounded report rows and distinguishes a missing store from zero activity.                                                                                                                                                               |
 | Durable trace                   | `trace` runs/phases/tail/procs/prune/sql/ui                                   | **Partial** | Runs renders per-run and per-phase accounting plus event and process shapes. Row-level tails and process rows are **host-only-by-design**; pruning is deferred, and arbitrary SQL must never become the GUI boundary.                                                                   |
@@ -159,7 +159,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Agents         | Recipe discovery and execution identity                           | **Partial** | Reference inventory and observed attribution exist; direct execution and status are absent.                                                                                           |
 | Middleware     | Hooks, safety registrations, nudges, receipts, watchdog           | **Partial** | Effective hook configuration is visible; live failures, receipts, nudges, and watchdog state are absent.                                                                              |
 | Session        | Lifecycle, replay, branches, task and decision ledgers            | **Partial** | Core lifecycle and replay are present; branches and ledgers are absent.                                                                                                               |
-| Observability  | Usage, cost, durable trace, run facts                             | **Present** | Visible tokens, historical usage, trace accounting to the phase, and event and process shapes all cross through bounded fixed reads.                                                  |
+| Observability  | Usage, cost, durable trace, run facts                             | **Present** | Visible tokens, historical usage, trace accounting to the phase, event and process shapes, and stored eval reports all cross through bounded fixed reads.                             |
 | Scheduling     | Capacity, admission, worker placement                             | **Partial** | Aggregate admission and heartbeat counts are present; capacity, placement, and controls are absent.                                                                                   |
 | Mux            | Pane host, pane inventory, viewer presets, Yazi bridge            | **Absent**  | **blocked-on-phase4** until the owning work exposes a fixed typed status read.                                                                                                        |
 | Dispatch       | Worker runs, fleets, councils, compete, journals, receipts        | **Partial** | Live lifecycle, aggregate status, run journals, receipt trust, fleet-root step indexes, on-demand verification, council topology, and sealed gate verdicts exist; steering is absent. |
@@ -203,9 +203,15 @@ unmarked, so the read half stays visible as work this GUI can still do.
    through the fixed `verifiers inspect --json` read: which checks exist, where each was declared, the toolchain it
    drives, whether verify pins its argv, and whether the project catalog parses at all. A check's exact argument vector
    is host-only by design, because the schema permits its entries to be absolute paths, so the executable crosses as a
-   toolchain class and the rest crosses as a count. Still to come: safe ACP settings and operations for target/auth
-   lifecycle, memory review, resource installation, verifier authoring and dry-run, share import/export, doctor repair,
-   and fleet admission, each with preview, confirmation, progress, and recovery.
+   toolchain class and the rest crosses as a count. Completed evaluations reach Runs too, through the fixed
+   `eval inventory --json` read over the durable eval store: which reports exist, when each ran, the route and serving
+   configuration it ran under, its pass and token accounting, why its failures failed, what its behavioral judge
+   concluded, and each scenario's trials. A report's runner attachments are the whole session transcript, and they are
+   host-only by design, so they cross as a count. Two reports carry the same ordinal exactly when `eval compare` would
+   accept them as a baseline pair, which is the relation the compiled prompt hash establishes without the hash itself
+   crossing. Still to come: safe ACP settings and operations for target/auth lifecycle, memory review, resource
+   installation, verifier authoring and dry-run, share import/export, doctor repair, and fleet admission, each with
+   preview, confirmation, progress, and recovery.
 7. Expand sanitized ACP events for context pressure and working-set activity, safety budgets and protected artifacts,
    provider retry/runtime notices, agent status, cost budgets, config reload, middleware failures, and shutdown phases.
 8. Add the remaining session-native surfaces: task and decision ledgers, branch tree/fork, side questions, handoff

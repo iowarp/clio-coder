@@ -3,6 +3,7 @@ import { assertComparableTrackedMetricSources } from "../run-compare.js";
 import type { EvalArtifactV4 } from "../schema/artifact.js";
 import {
 	type EvalServingConfigurationV1,
+	evalServingConfigurationOf,
 	renderEvalServingConfiguration,
 	sameEvalServingConfiguration,
 } from "../schema/serving.js";
@@ -90,8 +91,8 @@ export function compareEvalArtifactsV4(
 ): EvalCompareV4Summary {
 	const baselineTokens = baseline.summary.tokens;
 	const candidateTokens = candidate.summary.tokens;
-	const baselineServing = servingConfigurationOf(baseline);
-	const candidateServing = servingConfigurationOf(candidate);
+	const baselineServing = evalServingConfigurationOf(baseline);
+	const candidateServing = evalServingConfigurationOf(candidate);
 	const configDrift = !sameEvalServingConfiguration(baselineServing, candidateServing);
 	if (configDrift && options.allowConfigDrift !== true) {
 		throw new EvalServingConfigurationDriftError(baselineServing, candidateServing);
@@ -328,20 +329,6 @@ function metricComparison(
 		change: classifyChange(baseline.mean, candidate.mean, direction),
 		varianceChange: classifyChange(baseline.variance ?? null, candidate.variance ?? null, "lower"),
 	};
-}
-
-function servingConfigurationOf(artifact: EvalArtifactV4): EvalServingConfigurationV1 {
-	return (
-		artifact.servingConfiguration ?? {
-			targetId: artifact.matrix.target,
-			runtimeId: null,
-			modelId: artifact.matrix.model,
-			serverBuild: null,
-			total_slots: null,
-			thinkingLevel: artifact.matrix.thinking,
-			compiledPromptHash: null,
-		}
-	);
 }
 
 function normalizeMetricFilter(metric: string | undefined): string | undefined {

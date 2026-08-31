@@ -31,6 +31,10 @@ import type {
 	WireCustomizationReloadClass,
 	WireDeleteChallenge,
 	WireDispatchInspection,
+	WireEvalBehaviorOutcome,
+	WireEvalFailureClass,
+	WireEvalInventory,
+	WireEvalReport,
 	WireEventSource,
 	WireEvidenceAxis,
 	WireEvidenceDetail,
@@ -124,6 +128,7 @@ export interface WorkbenchActions {
 	inspectTrace(): void;
 	inspectGateDecisions(): void;
 	inspectInterop(): void;
+	inspectEvalReports(): void;
 	inspectEvidence(): void;
 	readEvidence(evidenceId: string): void;
 	verifyRun(runId: string): void;
@@ -4799,11 +4804,216 @@ function FleetVerification({ verification }: { verification: WireFleetVerificati
 	);
 }
 
+const EVAL_FAILURE_CLASS_LABEL: Record<WireEvalFailureClass, string> = {
+	budget_exhausted: "Cost ceiling reached before the item ran",
+	runner_failed: "The runner exited nonzero",
+	grader_failed: "The grader declared the task unsolved",
+	verifier_failed: "A machinery verifier failed",
+	forbidden_path: "The item wrote outside its declared boundary",
+	assertion_unresolved: "A threshold's metric was never measured",
+	assertion_failed: "A declared threshold was not met",
+	setup_failed: "The workspace fixture never came up",
+	command_error: "A command could not be run at all",
+	other: "A class this build does not name",
+};
+
+const EVAL_BEHAVIOR_OUTCOME_LABEL: Record<WireEvalBehaviorOutcome, { label: string; tone: string }> = {
+	pass: { label: "Behaved as declared", tone: "success" },
+	behavioral_failure: { label: "Broke a declared behavior", tone: "error" },
+	unknown: { label: "Behavior undecided", tone: "warning" },
+	unmeasured: { label: "Behavior unmeasured", tone: "neutral" },
+	infrastructure_failure: { label: "Machinery failed", tone: "error" },
+};
+
+function evalPassTone(report: WireEvalReport): string {
+	if (report.summary.runs === 0) return "neutral";
+	if (report.results.machineryFailures > 0) return "error";
+	return report.summary.failed === 0 ? "success" : "warning";
+}
+
+/**
+ * Stored eval reports, as accounting and outcomes rather than content.
+ *
+ * The panel names its own boundary because the boundary is unusually wide
+ * here: a report's runner attachments are the whole session transcript, and
+ * saying "no attachment content" while showing a count is the honest version
+ * of that.
+ */
+export const EvalReports = memo(function EvalReports({ inventory }: { inventory: WireEvalInventory | null }) {
+	return (
+		<section className="eval-reports" aria-labelledby="eval-reports-title">
+			<div className="eval-reports__heading">
+				<div>
+					<div className="eyebrow">EVAL REPORTS · INSTALLATION-WIDE · READ ONLY</div>
+					<h3 id="eval-reports-title">Completed evaluation runs</h3>
+				</div>
+				<p>
+					Each stored report's outcome, accounting, and per-scenario result. A report also holds the whole session
+					transcript its runner attached, the prompts inside it, and the workspace it ran in; those stay on the host and
+					are counted here rather than shown. Running an evaluation stays a terminal operation.
+				</p>
+			</div>
+			{inventory === null
+				? <p className="eval-reports__empty">The stored eval reports have not been read in this session.</p>
+				: !inventory.available
+				? (
+					<p className="eval-reports__empty">
+						This installation has never run an evaluation, so it has no eval store at all. That is a missing store, not
+						an empty one.
+					</p>
+				)
+				: inventory.reports.length === 0
+				? <p className="eval-reports__empty">Clio Coder's eval store holds no readable reports.</p>
+				: (
+					<ul className="eval-reports__list">
+						{inventory.reports.map((report) => (
+							<li key={report.evalId} className={`is-${evalPassTone(report)}`}>
+								<header>
+									<div>
+										<strong>{report.suiteId}</strong>
+										<code>
+											{report.startedAt === null ? "start not recorded" : formatTimestamp(report.startedAt)} ·{" "}
+											{report.evalId}
+										</code>
+									</div>
+									<StatusMark
+										tone={evalPassTone(report)}
+										label={`${report.summary.passed} of ${report.summary.runs} passed`}
+									/>
+								</header>
+								<dl>
+									<div>
+										<dt>Route</dt>
+										<dd>
+											{report.serving.targetId ?? "unrecorded"} · {report.serving.modelId ?? "no model"}
+											{report.serving.runtimeId === null ? "" : ` · ${report.serving.runtimeId}`}
+										</dd>
+									</div>
+									<div>
+										<dt>Comparable set</dt>
+										<dd>
+											Group {report.servingGroup}
+											{report.serving.observed ? "" : " · matrix only"}
+										</dd>
+									</div>
+									<div>
+										<dt>Tokens</dt>
+										<dd>
+											{report.summary.tokens.measured
+												? `${
+													report.summary.tokens.total?.toLocaleString() ?? "0"
+												} over ${report.summary.tokens.measuredRuns} of ${report.summary.tokens.runs} runs`
+												: "No run reported provider usage"}
+										</dd>
+									</div>
+									<div>
+										<dt>Wall time</dt>
+										<dd>{formatDuration(Math.round(report.summary.wallTimeMs / 1000))}</dd>
+									</div>
+									<div>
+										<dt>Built by</dt>
+										<dd>
+											Clio Coder {report.clioVersion ?? "unrecorded"}
+											{report.clioCommit === null ? "" : ` · ${report.clioCommit.slice(0, 12)}`}
+										</dd>
+									</div>
+									<div>
+										<dt>Host attachments</dt>
+										<dd>
+											{report.results.attachments.toLocaleString()} kept on the host ·{" "}
+											{report.results.canonicalMetrics.toLocaleString()} declared metrics
+										</dd>
+									</div>
+								</dl>
+								{report.failureClasses.length > 0 && (
+									<ul className="eval-reports__failures" aria-label={`Why ${report.suiteId} failed`}>
+										{report.failureClasses.map((entry) => (
+											<li key={entry.failureClass}>
+												<StatusMark tone="error" label={`${entry.count}`} />
+												{EVAL_FAILURE_CLASS_LABEL[entry.failureClass]}
+											</li>
+										))}
+									</ul>
+								)}
+								{report.behaviorOutcomes.length > 0 && (
+									<ul className="eval-reports__behavior" aria-label={`Behavioral verdicts in ${report.suiteId}`}>
+										{report.behaviorOutcomes.map((entry) => (
+											<li key={entry.outcome}>
+												<StatusMark
+													tone={EVAL_BEHAVIOR_OUTCOME_LABEL[entry.outcome].tone}
+													label={`${entry.count}`}
+												/>
+												{EVAL_BEHAVIOR_OUTCOME_LABEL[entry.outcome].label}
+											</li>
+										))}
+									</ul>
+								)}
+								{report.scenarios === null
+									? (
+										<p className="eval-reports__bound">
+											This report predates per-scenario reductions and carries none.
+										</p>
+									)
+									: report.scenarios.length > 0 && (
+										<ol className="eval-scenarios" aria-label={`Scenarios in ${report.suiteId}`}>
+											{report.scenarios.map((scenario) => (
+												<li
+													key={scenario.scenarioId}
+													className={`is-${
+														scenario.machineryFailures > 0
+															? "error"
+															: scenario.failed > 0
+															? "warning"
+															: scenario.passed > 0
+															? "success"
+															: "neutral"
+													}`}
+												>
+													<span className="eval-scenarios__id">{scenario.scenarioId}</span>
+													<span className="eval-scenarios__counts">
+														{scenario.passed}/{scenario.trials} passed
+														{scenario.unmeasured > 0 ? ` · ${scenario.unmeasured} unmeasured` : ""}
+														{scenario.machineryFailures > 0 ? ` · ${scenario.machineryFailures} machinery` : ""}
+													</span>
+												</li>
+											))}
+										</ol>
+									)}
+								{(report.scenariosTruncated || report.scenariosDropped > 0) && (
+									<p className="eval-reports__bound">
+										{report.scenariosTruncated ? "Later scenarios are outside this bounded list." : ""}
+										{report.scenariosDropped > 0
+											? ` ${report.scenariosDropped} scenario reduction${
+												report.scenariosDropped === 1 ? "" : "s"
+											} did not add up and were refused.`
+											: ""}
+									</p>
+								)}
+							</li>
+						))}
+					</ul>
+				)}
+			{inventory !== null && inventory.unreadable > 0 && (
+				<p className="eval-reports__bound">
+					This window holds {inventory.unreadable} report{inventory.unreadable === 1 ? "" : "s"}{" "}
+					in a format this Clio Coder no longer reads.
+				</p>
+			)}
+			{inventory !== null && inventory.truncated && (
+				<p className="eval-reports__bound">
+					Older reports are outside this bounded window. The store holds {inventory.stored.toLocaleString()}.
+				</p>
+			)}
+		</section>
+	);
+});
+
 export const FleetJournal = memo(function FleetJournal({
 	inspection,
 	trace,
 	evidence,
 	decisions,
+	evalInventory,
 	evidenceDetail,
 	pendingEvidenceRead,
 	verification,
@@ -4818,6 +5028,7 @@ export const FleetJournal = memo(function FleetJournal({
 	trace: WireTraceInspection | null;
 	evidence: WireEvidenceInspection | null;
 	decisions: WireGateDecisions | null;
+	evalInventory: WireEvalInventory | null;
 	evidenceDetail: WireEvidenceDetail | null;
 	pendingEvidenceRead: string | null;
 	verification: WireFleetVerification | null;
@@ -5054,6 +5265,8 @@ export const FleetJournal = memo(function FleetJournal({
 				onSelectRun={setSelectedRunId}
 				onReadBundle={onReadEvidence}
 			/>
+
+			<EvalReports inventory={evalInventory} />
 
 			{inspection.runs.length === 0
 				? (
@@ -5970,6 +6183,7 @@ function ConversationCanvas({
 							trace={state.traceInspection}
 							evidence={state.evidenceInspection}
 							decisions={state.gateDecisions}
+							evalInventory={state.evalInventory}
 							evidenceDetail={state.evidenceDetail}
 							pendingEvidenceRead={state.pendingEvidenceRead}
 							verification={state.fleetVerification}
@@ -5977,7 +6191,8 @@ function ConversationCanvas({
 							onReadEvidence={actions.readEvidence}
 							onVerifyRun={actions.verifyRun}
 							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null ||
-								state.pendingEvidenceInspect !== null || state.pendingFleetDecisions !== null}
+								state.pendingEvidenceInspect !== null || state.pendingFleetDecisions !== null ||
+								state.pendingEvalInspect !== null}
 							onRefresh={onRefreshFleet}
 							onBack={onConversationOpen}
 						/>
@@ -7912,6 +8127,14 @@ export function WorkbenchView(
 		) {
 			actions.inspectGateDecisions();
 		}
+		// A stored eval report is finalized when it is written, so it reads on the
+		// same terms: once when the canvas opens, then only when the operator asks.
+		if (
+			view === "fleet-runs" && state.evalInventory === null &&
+			state.pendingEvalInspect === null
+		) {
+			actions.inspectEvalReports();
+		}
 	}, [
 		actions,
 		open?.project.id,
@@ -7923,6 +8146,8 @@ export function WorkbenchView(
 		state.pendingTraceInspect,
 		state.evidenceInspection,
 		state.pendingEvidenceInspect,
+		state.evalInventory,
+		state.pendingEvalInspect,
 		state.dispatchInspection,
 		state.pendingDispatchInspect,
 		state.fleetInspection,
@@ -7982,6 +8207,7 @@ export function WorkbenchView(
 		actions.inspectTrace();
 		actions.inspectEvidence();
 		actions.inspectGateDecisions();
+		actions.inspectEvalReports();
 	}, [actions]);
 
 	useEffect(() => {

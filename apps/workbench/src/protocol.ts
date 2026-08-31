@@ -51,6 +51,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"toolchain.inspect",
 	"interop.inspect",
 	"trace.inspect",
+	"eval.inspect",
 	"evidence.inspect",
 	"evidence.read",
 	"fleet.verify",
@@ -258,6 +259,7 @@ export type DispatchInspectPayload = Readonly<Record<string, never>>;
 export type FleetInspectPayload = Readonly<Record<string, never>>;
 export type FleetDecisionsPayload = Readonly<Record<string, never>>;
 export type InteropInspectPayload = Readonly<Record<string, never>>;
+export type EvalInspectPayload = Readonly<Record<string, never>>;
 
 export type ToolchainInspectPayload = Readonly<Record<string, never>>;
 
@@ -328,6 +330,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "fleet.decisions": FleetDecisionsPayload;
 	readonly "toolchain.inspect": ToolchainInspectPayload;
 	readonly "interop.inspect": InteropInspectPayload;
+	readonly "eval.inspect": EvalInspectPayload;
 	readonly "trace.inspect": TraceInspectPayload;
 	readonly "evidence.inspect": EvidenceInspectPayload;
 	readonly "evidence.read": EvidenceReadPayload;
@@ -370,6 +373,7 @@ export const SERVER_EVENT_KINDS = [
 	"toolchain.state",
 	"interop.state",
 	"trace.state",
+	"eval.state",
 	"evidence.state",
 	"evidence.detail.state",
 	"fleet.verification.state",
@@ -1633,6 +1637,169 @@ export interface WireTraceInspection {
 	readonly truncated: boolean;
 }
 
+export const MAX_WIRE_EVAL_REPORTS = 8;
+export const MAX_WIRE_EVAL_SCENARIOS = 16;
+
+/** Every failure class the suite runner mints, plus the answer for one it does not. */
+export const EVAL_FAILURE_CLASSES = [
+	"budget_exhausted",
+	"runner_failed",
+	"grader_failed",
+	"verifier_failed",
+	"forbidden_path",
+	"assertion_unresolved",
+	"assertion_failed",
+	"setup_failed",
+	"command_error",
+	"other",
+] as const;
+export type WireEvalFailureClass = (typeof EVAL_FAILURE_CLASSES)[number];
+
+export const EVAL_BEHAVIOR_OUTCOMES = [
+	"pass",
+	"behavioral_failure",
+	"unknown",
+	"unmeasured",
+	"infrastructure_failure",
+] as const;
+export type WireEvalBehaviorOutcome = (typeof EVAL_BEHAVIOR_OUTCOMES)[number];
+
+export const EVAL_MATRIX_DIMENSIONS = [
+	"prompt",
+	"recipe",
+	"target",
+	"wireModel",
+	"runtime",
+	"thinkingLevel",
+	"toolSignature",
+	"autonomy",
+	"policy",
+	"projectContext",
+	"corpus",
+] as const;
+export type WireEvalMatrixDimension = (typeof EVAL_MATRIX_DIMENSIONS)[number];
+
+/**
+ * Whole-report token accounting.
+ *
+ * The counts are absent rather than zero when no run reported provider usage,
+ * because a run whose work happened out of the harness's sight has no count and
+ * a numeric zero would claim it cost nothing.
+ */
+export interface WireEvalTokens {
+	readonly measured: boolean;
+	readonly runs: number;
+	readonly measuredRuns: number;
+	readonly input: number | null;
+	readonly output: number | null;
+	readonly total: number | null;
+	readonly cacheRead: number | null;
+	readonly cacheWrite: number | null;
+}
+
+/** One scenario's trials, reduced across repeats. */
+export interface WireEvalScenario {
+	readonly scenarioId: string;
+	readonly trials: number;
+	readonly passed: number;
+	readonly failed: number;
+	readonly unmeasured: number;
+	readonly machineryFailures: number;
+	readonly passAtK: number;
+	readonly passPowK: number;
+}
+
+/**
+ * One stored eval report, as accounting and outcomes rather than content.
+ *
+ * A report's `results[].artifacts` hold whatever the runner attached, which for
+ * the Clio Coder runner is the entire session transcript. That is host-only at any
+ * width and crosses as `attachments`. So do the eval entry path, the per-result
+ * metric map, the compiled prompt hash, the suite hash, and the receipt
+ * digests.
+ */
+export interface WireEvalReport {
+	readonly evalId: string;
+	/** Read back out of the id, which is the only record a report has of when it ran. */
+	readonly startedAt: string | null;
+	readonly suiteId: string;
+	/**
+	 * A 1-based ordinal over the rule `eval compare` uses to accept a baseline.
+	 *
+	 * Two reports sharing an ordinal are two that command will compare without
+	 * `--allow-config-drift`. The fingerprint behind the rule never crosses; the
+	 * relation it establishes does.
+	 */
+	readonly servingGroup: number;
+	readonly clioVersion: string | null;
+	readonly clioCommit: string | null;
+	readonly platform: string | null;
+	readonly node: string | null;
+	readonly matrix: {
+		readonly target: string | null;
+		readonly model: string | null;
+		readonly thinking: string | null;
+		readonly dimensions: readonly WireEvalMatrixDimension[];
+	};
+	readonly serving: {
+		/** False when the artifact recorded none and the matrix it declared is standing in. */
+		readonly observed: boolean;
+		readonly targetId: string | null;
+		readonly runtimeId: string | null;
+		readonly modelId: string | null;
+		readonly serverBuild: string | null;
+		readonly thinkingLevel: string | null;
+		readonly totalSlots: number | null;
+		readonly compiledPromptPinned: boolean;
+	};
+	readonly summary: {
+		readonly runs: number;
+		readonly passed: number;
+		readonly failed: number;
+		readonly passRate: number;
+		readonly wallTimeMs: number;
+		readonly tokens: WireEvalTokens;
+	};
+	readonly results: {
+		readonly total: number;
+		readonly withAssignment: number;
+		readonly withTerminalReceipt: number;
+		readonly withVerdict: number;
+		readonly withBehavioral: number;
+		readonly withExecutionEnvelope: number;
+		readonly machineryFailures: number;
+		readonly attachments: number;
+		readonly canonicalMetrics: number;
+		readonly otherMetrics: number;
+	};
+	readonly failureClasses: readonly { readonly failureClass: WireEvalFailureClass; readonly count: number }[];
+	readonly behaviorOutcomes: readonly { readonly outcome: WireEvalBehaviorOutcome; readonly count: number }[];
+	/** Null when the artifact carried no scenario reductions, which is not the same as carrying none. */
+	readonly scenarios: readonly WireEvalScenario[] | null;
+	readonly scenariosTruncated: boolean;
+	/** Reductions the host refused because their own counts did not add up. */
+	readonly scenariosDropped: number;
+}
+
+/**
+ * Bounded newest-first eval report window selected by Clio Coder, never by browser argv.
+ *
+ * `available` is false for an installation that has never run an eval and has
+ * no store at all, which is a different fact from a store holding no reports.
+ */
+export interface WireEvalInventory {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	readonly available: boolean;
+	/** Reports on disk before the window bound. */
+	readonly stored: number;
+	/** Reports inside the window the current parser refused, counted rather than hidden. */
+	readonly unreadable: number;
+	readonly reports: readonly WireEvalReport[];
+	readonly truncated: boolean;
+}
+
 export const MAX_WIRE_GATE_DECISIONS = 8;
 export const MAX_WIRE_GATE_DECISION_SUBJECTS = 6;
 
@@ -2035,6 +2202,10 @@ export interface InteropStatePayload {
 	readonly inspection: WireInteropInspection;
 }
 
+export interface EvalStatePayload {
+	readonly inventory: WireEvalInventory;
+}
+
 export interface FleetVerificationStatePayload {
 	readonly verification: WireFleetVerification;
 }
@@ -2229,6 +2400,7 @@ export interface ServerEventPayloadByKind {
 	readonly "fleet.decisions.state": FleetDecisionsStatePayload;
 	readonly "toolchain.state": ToolchainStatePayload;
 	readonly "interop.state": InteropStatePayload;
+	readonly "eval.state": EvalStatePayload;
 	readonly "trace.state": TraceStatePayload;
 	readonly "evidence.state": EvidenceStatePayload;
 	readonly "evidence.detail.state": EvidenceDetailStatePayload;
@@ -2590,6 +2762,7 @@ function validateClientPayload<K extends ClientCommandKind>(
 		case "fleet.decisions":
 		case "toolchain.inspect":
 		case "interop.inspect":
+		case "eval.inspect":
 		case "trace.inspect":
 		case "evidence.inspect":
 		case "recovery.inspect":
@@ -5691,6 +5864,392 @@ export function validateInteropInspection(value: unknown, label = "interop inspe
 	};
 }
 
+/** The instant `createEvalId` stamped into an id, or null when the id is not one it minted. */
+function evalIdStartedAt(evalId: string): string | null {
+	const match = /^eval-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z-[0-9a-f]{8}-[0-9a-f]{12}$/u.exec(evalId);
+	if (match === null) return null;
+	const [, year, month, day, hour, minute, second, millisecond] = match;
+	const stamp = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millisecond}Z`;
+	const parsed = new Date(stamp);
+	return Number.isNaN(parsed.getTime()) || parsed.toISOString() !== stamp ? null : stamp;
+}
+
+function expectNullableInteger(value: unknown, label: string): number | null {
+	return value === null ? null : expectInteger(value, label);
+}
+
+function validateEvalTokens(value: unknown, label: string, runs: number): WireEvalTokens {
+	const record = expectExactKeys(value, label, [
+		"measured",
+		"runs",
+		"measuredRuns",
+		"input",
+		"output",
+		"total",
+		"cacheRead",
+		"cacheWrite",
+	]);
+	const measured = expectBoolean(record.measured, `${label}.measured`);
+	const counted = expectInteger(record.runs, `${label}.runs`);
+	const measuredRuns = expectInteger(record.measuredRuns, `${label}.measuredRuns`);
+	const counts = {
+		input: expectNullableInteger(record.input, `${label}.input`),
+		output: expectNullableInteger(record.output, `${label}.output`),
+		total: expectNullableInteger(record.total, `${label}.total`),
+		cacheRead: expectNullableInteger(record.cacheRead, `${label}.cacheRead`),
+		cacheWrite: expectNullableInteger(record.cacheWrite, `${label}.cacheWrite`),
+	};
+	const present = Object.values(counts).filter((count) => count !== null).length;
+	// Unmeasured accounting carries no counts at all. Reading counts beside
+	// `measured: false` is a contradiction rather than a value to prefer.
+	if (measured !== (present === 5)) invalid(`${label} reports counts that disagree with whether it measured any`);
+	if (!measured && measuredRuns !== 0) invalid(`${label} measured no runs while reporting a measured count`);
+	if (measured && (measuredRuns === 0 || measuredRuns > counted)) {
+		invalid(`${label} reports a measured coverage its own run count cannot hold`);
+	}
+	if (counted !== runs) invalid(`${label}.runs disagrees with the report's own run count`);
+	return { measured, runs: counted, measuredRuns, ...counts };
+}
+
+function validateEvalScenario(value: unknown, label: string): WireEvalScenario {
+	const record = expectExactKeys(value, label, [
+		"scenarioId",
+		"trials",
+		"passed",
+		"failed",
+		"unmeasured",
+		"machineryFailures",
+		"passAtK",
+		"passPowK",
+	]);
+	const trials = expectInteger(record.trials, `${label}.trials`);
+	const passed = expectInteger(record.passed, `${label}.passed`);
+	const failed = expectInteger(record.failed, `${label}.failed`);
+	const unmeasured = expectInteger(record.unmeasured, `${label}.unmeasured`);
+	const machineryFailures = expectInteger(record.machineryFailures, `${label}.machineryFailures`);
+	const passAtK = expectInteger(record.passAtK, `${label}.passAtK`);
+	const passPowK = expectInteger(record.passPowK, `${label}.passPowK`);
+	// The reducer partitions one scenario's trials into exactly three outcomes,
+	// counts machinery failures inside the failures, and derives both pass rates
+	// from the counts beside them.
+	if (passed + failed + unmeasured !== trials) invalid(`${label} partitions its trials into outcomes that do not sum`);
+	if (machineryFailures > failed) invalid(`${label} blames machinery for more trials than failed`);
+	if (passAtK !== (trials > 0 && passed > 0 ? 1 : 0)) invalid(`${label}.passAtK disagrees with its own outcomes`);
+	if (passPowK !== (trials > 0 && passed === trials ? 1 : 0)) {
+		invalid(`${label}.passPowK disagrees with its own outcomes`);
+	}
+	return {
+		scenarioId: expectPresentationText(record.scenarioId, `${label}.scenarioId`, 128),
+		trials,
+		passed,
+		failed,
+		unmeasured,
+		machineryFailures,
+		passAtK,
+		passPowK,
+	};
+}
+
+function validateEvalReport(value: unknown, label: string): WireEvalReport {
+	const record = expectExactKeys(value, label, [
+		"evalId",
+		"startedAt",
+		"suiteId",
+		"servingGroup",
+		"clioVersion",
+		"clioCommit",
+		"platform",
+		"node",
+		"matrix",
+		"serving",
+		"summary",
+		"results",
+		"failureClasses",
+		"behaviorOutcomes",
+		"scenarios",
+		"scenariosTruncated",
+		"scenariosDropped",
+	]);
+	const evalId = expectPresentationText(record.evalId, `${label}.evalId`, 128);
+	const startedAt = expectNullableTimestamp(record.startedAt, `${label}.startedAt`);
+	// The stamp is not an independent fact: it is read out of the id, and the id
+	// crosses, so a stamp that disagrees with it was not read out of anything.
+	if (startedAt !== null && startedAt !== evalIdStartedAt(evalId)) {
+		invalid(`${label}.startedAt does not match the stamp inside ${label}.evalId`);
+	}
+
+	const matrix = expectExactKeys(record.matrix, `${label}.matrix`, ["target", "model", "thinking", "dimensions"]);
+	const dimensions = expectArray(
+		matrix.dimensions,
+		`${label}.matrix.dimensions`,
+		EVAL_MATRIX_DIMENSIONS.length,
+		(entry, entryLabel) => expectEnum(entry, entryLabel, EVAL_MATRIX_DIMENSIONS),
+	);
+	if (new Set(dimensions).size !== dimensions.length) invalid(`${label}.matrix.dimensions repeats a dimension`);
+
+	const serving = expectExactKeys(record.serving, `${label}.serving`, [
+		"observed",
+		"targetId",
+		"runtimeId",
+		"modelId",
+		"serverBuild",
+		"thinkingLevel",
+		"totalSlots",
+		"compiledPromptPinned",
+	]);
+	const observed = expectBoolean(serving.observed, `${label}.serving.observed`);
+	const runtimeId = expectNullablePresentationText(serving.runtimeId, `${label}.serving.runtimeId`, 128);
+	const serverBuild = expectNullablePresentationText(serving.serverBuild, `${label}.serving.serverBuild`, 128);
+	const totalSlots = expectNullableInteger(serving.totalSlots, `${label}.serving.totalSlots`);
+	const compiledPromptPinned = expectBoolean(serving.compiledPromptPinned, `${label}.serving.compiledPromptPinned`);
+	// A report with no recorded serving configuration is read off the matrix it
+	// declared, and the matrix knows nothing about the runtime, the server build,
+	// the slot count, or the compiled prompt.
+	if (!observed && (runtimeId !== null || serverBuild !== null || totalSlots !== null || compiledPromptPinned)) {
+		invalid(`${label}.serving reports facts a declared matrix cannot supply`);
+	}
+
+	const summaryRecord = expectExactKeys(record.summary, `${label}.summary`, [
+		"runs",
+		"passed",
+		"failed",
+		"passRate",
+		"wallTimeMs",
+		"tokens",
+	]);
+	const runs = expectInteger(summaryRecord.runs, `${label}.summary.runs`);
+	const passed = expectInteger(summaryRecord.passed, `${label}.summary.passed`);
+	const failed = expectInteger(summaryRecord.failed, `${label}.summary.failed`);
+	const passRate = summaryRecord.passRate;
+	if (typeof passRate !== "number" || !Number.isFinite(passRate) || passRate < 0 || passRate > 1) {
+		invalid(`${label}.summary.passRate must be a ratio between zero and one`);
+	}
+	if (passed + failed !== runs) invalid(`${label}.summary splits its runs into outcomes that do not sum`);
+	if (Math.abs(passRate - (runs === 0 ? 0 : passed / runs)) > 1e-9) {
+		invalid(`${label}.summary.passRate disagrees with its own outcomes`);
+	}
+
+	const resultsRecord = expectExactKeys(record.results, `${label}.results`, [
+		"total",
+		"withAssignment",
+		"withTerminalReceipt",
+		"withVerdict",
+		"withBehavioral",
+		"withExecutionEnvelope",
+		"machineryFailures",
+		"attachments",
+		"canonicalMetrics",
+		"otherMetrics",
+	]);
+	const results = {
+		total: expectInteger(resultsRecord.total, `${label}.results.total`),
+		withAssignment: expectInteger(resultsRecord.withAssignment, `${label}.results.withAssignment`),
+		withTerminalReceipt: expectInteger(resultsRecord.withTerminalReceipt, `${label}.results.withTerminalReceipt`),
+		withVerdict: expectInteger(resultsRecord.withVerdict, `${label}.results.withVerdict`),
+		withBehavioral: expectInteger(resultsRecord.withBehavioral, `${label}.results.withBehavioral`),
+		withExecutionEnvelope: expectInteger(
+			resultsRecord.withExecutionEnvelope,
+			`${label}.results.withExecutionEnvelope`,
+		),
+		machineryFailures: expectInteger(resultsRecord.machineryFailures, `${label}.results.machineryFailures`),
+		attachments: expectInteger(resultsRecord.attachments, `${label}.results.attachments`),
+		canonicalMetrics: expectInteger(resultsRecord.canonicalMetrics, `${label}.results.canonicalMetrics`),
+		otherMetrics: expectInteger(resultsRecord.otherMetrics, `${label}.results.otherMetrics`),
+	};
+	if (results.total !== runs) invalid(`${label}.results.total disagrees with the run count it summarizes`);
+	for (
+		const [field, count] of [
+			["withAssignment", results.withAssignment],
+			["withTerminalReceipt", results.withTerminalReceipt],
+			["withVerdict", results.withVerdict],
+		] as const
+	) {
+		if (count > results.total) invalid(`${label}.results.${field} counts more results than the report holds`);
+	}
+	// The artifact parser requires a behavioral document to reference a verdict
+	// and an execution envelope to reference a behavioral document, so each is a
+	// subset of the one before it.
+	if (results.withBehavioral > results.withVerdict) {
+		invalid(`${label}.results reports behavioral documents without the verdicts they reference`);
+	}
+	if (results.withExecutionEnvelope > results.withBehavioral) {
+		invalid(`${label}.results reports execution envelopes without the behavioral documents they reference`);
+	}
+	// A verdict is a machinery failure only when the result failed and the
+	// failure was not the grader declaring the task unsolved.
+	if (results.machineryFailures > failed) invalid(`${label}.results blames machinery for more runs than failed`);
+
+	const failureClasses = expectArray(
+		record.failureClasses,
+		`${label}.failureClasses`,
+		EVAL_FAILURE_CLASSES.length,
+		(entry, entryLabel) => {
+			const row = expectExactKeys(entry, entryLabel, ["failureClass", "count"]);
+			return {
+				failureClass: expectEnum(row.failureClass, `${entryLabel}.failureClass`, EVAL_FAILURE_CLASSES),
+				count: expectInteger(row.count, `${entryLabel}.count`, 1),
+			};
+		},
+	);
+	if (new Set(failureClasses.map((entry) => entry.failureClass)).size !== failureClasses.length) {
+		invalid(`${label}.failureClasses repeats a class`);
+	}
+	// A passing result carries no class and a failing one always carries one, so
+	// the tally accounts for the failures exactly.
+	if (failureClasses.reduce((sum, entry) => sum + entry.count, 0) !== failed) {
+		invalid(`${label}.failureClasses does not account for the failures it reports`);
+	}
+
+	const behaviorOutcomes = expectArray(
+		record.behaviorOutcomes,
+		`${label}.behaviorOutcomes`,
+		EVAL_BEHAVIOR_OUTCOMES.length,
+		(entry, entryLabel) => {
+			const row = expectExactKeys(entry, entryLabel, ["outcome", "count"]);
+			return {
+				outcome: expectEnum(row.outcome, `${entryLabel}.outcome`, EVAL_BEHAVIOR_OUTCOMES),
+				count: expectInteger(row.count, `${entryLabel}.count`, 1),
+			};
+		},
+	);
+	if (new Set(behaviorOutcomes.map((entry) => entry.outcome)).size !== behaviorOutcomes.length) {
+		invalid(`${label}.behaviorOutcomes repeats an outcome`);
+	}
+	if (behaviorOutcomes.reduce((sum, entry) => sum + entry.count, 0) !== results.withBehavioral) {
+		invalid(`${label}.behaviorOutcomes does not account for the behavioral documents it reports`);
+	}
+
+	const scenariosTruncated = expectBoolean(record.scenariosTruncated, `${label}.scenariosTruncated`);
+	const scenariosDropped = expectInteger(record.scenariosDropped, `${label}.scenariosDropped`);
+	const scenarios = record.scenarios === null ? null : expectArray(
+		record.scenarios,
+		`${label}.scenarios`,
+		MAX_WIRE_EVAL_SCENARIOS,
+		validateEvalScenario,
+	);
+	if (scenarios === null && (scenariosTruncated || scenariosDropped > 0)) {
+		invalid(`${label} bounded or refused entries in a scenario list it never reported`);
+	}
+	if (scenarios !== null) {
+		if (new Set(scenarios.map((entry) => entry.scenarioId)).size !== scenarios.length) {
+			invalid(`${label}.scenarios repeats a scenario`);
+		}
+		// The reductions cover exactly the results that carried a verdict, so a
+		// whole list accounts for them and a bounded or partly refused one
+		// accounts for fewer.
+		const trials = scenarios.reduce((sum, entry) => sum + entry.trials, 0);
+		const whole = !scenariosTruncated && scenariosDropped === 0;
+		if (whole ? trials !== results.withVerdict : trials > results.withVerdict) {
+			invalid(`${label}.scenarios does not account for the verdicts it reduces`);
+		}
+	}
+
+	return {
+		evalId,
+		startedAt,
+		suiteId: expectPresentationText(record.suiteId, `${label}.suiteId`, 128),
+		servingGroup: expectInteger(record.servingGroup, `${label}.servingGroup`, 1),
+		clioVersion: expectNullablePresentationText(record.clioVersion, `${label}.clioVersion`, 64),
+		clioCommit: expectNullablePresentationText(record.clioCommit, `${label}.clioCommit`, 64),
+		platform: expectNullablePresentationText(record.platform, `${label}.platform`, 64),
+		node: expectNullablePresentationText(record.node, `${label}.node`, 64),
+		matrix: {
+			target: expectNullablePresentationText(matrix.target, `${label}.matrix.target`, 128),
+			model: expectNullablePresentationText(matrix.model, `${label}.matrix.model`, 128),
+			thinking: expectNullablePresentationText(matrix.thinking, `${label}.matrix.thinking`, 64),
+			dimensions,
+		},
+		serving: {
+			observed,
+			targetId: expectNullablePresentationText(serving.targetId, `${label}.serving.targetId`, 128),
+			runtimeId,
+			modelId: expectNullablePresentationText(serving.modelId, `${label}.serving.modelId`, 128),
+			serverBuild,
+			thinkingLevel: expectNullablePresentationText(serving.thinkingLevel, `${label}.serving.thinkingLevel`, 64),
+			totalSlots,
+			compiledPromptPinned,
+		},
+		summary: {
+			runs,
+			passed,
+			failed,
+			passRate,
+			wallTimeMs: expectInteger(summaryRecord.wallTimeMs, `${label}.summary.wallTimeMs`),
+			tokens: validateEvalTokens(summaryRecord.tokens, `${label}.summary.tokens`, runs),
+		},
+		results,
+		failureClasses,
+		behaviorOutcomes,
+		scenarios,
+		scenariosTruncated,
+		scenariosDropped,
+	};
+}
+
+/** Every serving field that crosses. Two reports the host grouped together must agree on all of them. */
+const EVAL_SERVING_FIELDS = [
+	"observed",
+	"targetId",
+	"runtimeId",
+	"modelId",
+	"serverBuild",
+	"thinkingLevel",
+	"totalSlots",
+	"compiledPromptPinned",
+] as const;
+
+export function validateEvalInventory(value: unknown, label = "eval inventory"): WireEvalInventory {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"available",
+		"stored",
+		"unreadable",
+		"reports",
+		"truncated",
+	]);
+	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
+	const available = expectBoolean(record.available, `${label}.available`);
+	const stored = expectInteger(record.stored, `${label}.stored`);
+	const unreadable = expectInteger(record.unreadable, `${label}.unreadable`);
+	const truncated = expectBoolean(record.truncated, `${label}.truncated`);
+	const reports = expectArray(record.reports, `${label}.reports`, MAX_WIRE_EVAL_REPORTS, validateEvalReport);
+	// An installation with no eval store has nothing to have counted.
+	if (!available && (stored > 0 || unreadable > 0 || reports.length > 0 || truncated)) {
+		invalid(`${label} reports contents for a store it says does not exist`);
+	}
+	const window = reports.length + unreadable;
+	if (window > stored) invalid(`${label} read more reports than the store holds`);
+	if (truncated !== stored > window) invalid(`${label}.truncated disagrees with its own window`);
+	const seen = new Set<string>();
+	// The ordinals are assigned in the order the window meets a configuration, so
+	// they are dense from one and the first report is always in the first group.
+	const groups = new Map<number, WireEvalReport["serving"]>();
+	for (const report of reports) {
+		if (seen.has(report.evalId)) invalid(`${label}.reports repeats ${report.evalId}`);
+		seen.add(report.evalId);
+		if (report.servingGroup > groups.size + 1) invalid(`${label}.reports skips a serving group ordinal`);
+		const group = groups.get(report.servingGroup);
+		if (group === undefined) groups.set(report.servingGroup, report.serving);
+		else if (EVAL_SERVING_FIELDS.some((field) => group[field] !== report.serving[field])) {
+			// The rule the host grouped by compares a superset of the fields that
+			// cross, so two reports it called comparable must agree on all of them.
+			invalid(`${label}.reports groups ${report.evalId} with a report it does not match`);
+		}
+	}
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		available,
+		stored,
+		unreadable,
+		reports,
+		truncated,
+	};
+}
+
 export function validateGateDecisions(value: unknown, label = "gate decisions"): WireGateDecisions {
 	const record = expectExactKeys(value, label, [
 		"scope",
@@ -6783,6 +7342,12 @@ function validateServerPayload(
 				inspection: validateInteropInspection(record.inspection, `${label}.inspection`),
 			};
 		}
+		case "eval.state": {
+			const record = expectExactKeys(value, label, ["inventory"]);
+			return {
+				inventory: validateEvalInventory(record.inventory, `${label}.inventory`),
+			};
+		}
 		case "toolchain.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -7159,6 +7724,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"toolchain.state",
 	"interop.state",
 	"trace.state",
+	"eval.state",
 	"evidence.state",
 	"evidence.detail.state",
 	"fleet.verification.state",
