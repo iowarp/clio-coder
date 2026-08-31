@@ -1609,10 +1609,17 @@ Deno.test("recovery events retain category counts while rejecting identities and
 			{ id: "runtime", checks: 1, passed: 1, warnings: 0, failures: 0 },
 			{ id: "models", checks: 2, passed: 0, warnings: 1, failures: 1 },
 		],
+		checks: [
+			{ name: "platform", section: "runtime", level: "ok" },
+			{ name: "target private-lab", section: "models", level: "warn" },
+			{ name: null, section: "models", level: "error" },
+		],
+		checksTruncated: false,
 	};
 	const event = serverEvent("recovery.state", { inspection });
 	equal(event.projectId, undefined);
 	deepStrictEqual(event.payload.inspection.summary, inspection.summary);
+	equal(event.payload.inspection.checks[1]?.name, "target private-lab");
 	expectProtocolError(() =>
 		serverEvent("recovery.state", {
 			inspection: { ...inspection, healthy: true },
@@ -1625,6 +1632,7 @@ Deno.test("recovery events retain category counts while rejecting identities and
 				healthy: true,
 				summary: { checks: 0, passed: 0, warnings: 0, failures: 0 },
 				sections: [],
+				checks: [],
 			},
 		})
 	);
@@ -1641,6 +1649,25 @@ Deno.test("recovery events retain category counts while rejecting identities and
 			},
 		})
 	);
+	for (
+		const brokenChecks of [
+			// A name carrying a native path, URL, or raw detail is not a name the
+			// host should ever have emitted, so the browser refuses rather than
+			// redacting on its behalf.
+			[{ name: "settings at /private/settings.yaml", section: "runtime", level: "ok" }],
+			[{ name: "runtime http://10.0.0.7:1234", section: "runtime", level: "ok" }],
+			// One check short of the reported count.
+			inspection.checks.slice(1),
+			// The per-check verdicts have to agree with the section tallies.
+			[
+				{ name: "platform", section: "runtime", level: "ok" },
+				{ name: "target private-lab", section: "models", level: "warn" },
+				{ name: "model private-lab", section: "models", level: "warn" },
+			],
+		]
+	) {
+		expectProtocolError(() => serverEvent("recovery.state", { inspection: { ...inspection, checks: brokenChecks } }));
+	}
 });
 
 Deno.test("command errors use the closed code set and stay hierarchical", () => {

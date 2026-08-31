@@ -34,6 +34,7 @@ import type {
 	WireFleetInspectionStep,
 	WirePendingPermission,
 	WireProjectSummary,
+	WireRecoveryCheckLevel,
 	WireRecoveryInspection,
 	WireRecoverySectionId,
 	WireRoutingInspection,
@@ -5661,6 +5662,14 @@ const RECOVERY_SECTION_PRESENTATION: Record<
 		label: "Interoperability",
 		description: "Detected and configured external agent surfaces.",
 	},
+	toolchain: {
+		label: "External toolchain",
+		description: "Pinned optional programs and the managed file-picker profile.",
+	},
+	panes: {
+		label: "Panes host",
+		description: "Multiplexer mode, reachability, protocol level, and journal writability.",
+	},
 	fleet: {
 		label: "Fleet preflight",
 		description: "Configured node eligibility checks for the selected project.",
@@ -5669,6 +5678,15 @@ const RECOVERY_SECTION_PRESENTATION: Record<
 		label: "Other checks",
 		description: "Additional checks introduced by this Clio Coder version.",
 	},
+};
+
+const RECOVERY_CHECK_PRESENTATION: Record<
+	WireRecoveryCheckLevel,
+	{ readonly label: string; readonly tone: string }
+> = {
+	ok: { label: "Passed", tone: "success" },
+	warn: { label: "Warning", tone: "warning" },
+	error: { label: "Failed", tone: "error" },
 };
 
 function RecoveryPanel({ inspection, pending, onInspect }: {
@@ -5778,26 +5796,68 @@ function RecoveryPanel({ inspection, pending, onInspect }: {
 							{inspection.sections.map((section) => {
 								const presentation = RECOVERY_SECTION_PRESENTATION[section.id];
 								const tone = section.failures > 0 ? "failed" : section.warnings > 0 ? "warning" : "healthy";
+								const rows = inspection.checks.filter((check) => check.section === section.id);
 								return (
 									<li className={`is-${tone}`} key={section.id}>
-										<div>
-											<strong>{presentation.label}</strong>
-											<p>{presentation.description}</p>
-										</div>
-										<span>
-											{section.passed}/{section.checks} passed
-											{section.warnings > 0 ? ` · ${section.warnings} warn` : ""}
-											{section.failures > 0 ? ` · ${section.failures} fail` : ""}
-										</span>
+										<details
+											className="recovery-section"
+											// A section with something wrong opens itself, because that is the
+											// row the operator came here to read.
+											open={section.failures > 0 || section.warnings > 0}
+										>
+											<summary>
+												<div>
+													<strong>{presentation.label}</strong>
+													<p>{presentation.description}</p>
+												</div>
+												<span>
+													{section.passed}/{section.checks} passed
+													{section.warnings > 0 ? ` · ${section.warnings} warn` : ""}
+													{section.failures > 0 ? ` · ${section.failures} fail` : ""}
+												</span>
+											</summary>
+											{rows.length === 0
+												? (
+													<p className="recovery-checks__none">
+														This sweep reported no individual checks for{" "}
+														{presentation.label.toLocaleLowerCase("en-US")}.
+													</p>
+												)
+												: (
+													<ul
+														className="recovery-checks"
+														aria-label={`${presentation.label} diagnostic checks`}
+													>
+														{rows.map((check, index) => (
+															<li
+																className={`is-${check.level}`}
+																key={`${check.name ?? "unnamed"}:${index}`}
+															>
+																<span>{check.name ?? "Unnamed check"}</span>
+																<StatusMark
+																	tone={RECOVERY_CHECK_PRESENTATION[check.level].tone}
+																	label={RECOVERY_CHECK_PRESENTATION[check.level].label}
+																/>
+															</li>
+														))}
+													</ul>
+												)}
+										</details>
 									</li>
 								);
 							})}
 						</ul>
+						{inspection.checksTruncated && (
+							<p className="recovery-checks__bound">
+								This sweep reported more checks than the bounded record carries. The counts above remain complete.
+							</p>
+						)}
 					</div>
 				)}
 			<p className="recovery-boundary">
-				Names, native paths, endpoint URLs, session/model/node identifiers, commands, and raw diagnostics never enter
-				the browser. This check passes no <code>--fix</code>{" "}
+				Each check crosses as its name and verdict only. Native paths, endpoint URLs, socket paths, session and model
+				identifiers, commands, and every raw diagnostic detail stay on the host, and a check whose name is not
+				name-shaped arrives unnamed rather than blanking the sweep. This check passes no <code>--fix</code>{" "}
 				flag and cannot edit settings, though Clio Coder's documented doctor sweep may refresh fleet eligibility facts.
 			</p>
 		</section>

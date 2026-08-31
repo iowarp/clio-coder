@@ -30,7 +30,7 @@ the main application.
 | Target management               | `targets` list/add/use/profile/remove/rename and probe                        | **Partial** | Target listing, selection, offline models, worker profiles, bindings, and explicit probes are present; lifecycle mutations are absent.                               |
 | Model discovery                 | `models [search]`, online and offline JSON inventories                        | **Partial** | Offline model capability inventory is present; online discovery, selection breadth, favorites, and load controls are absent.                                         |
 | Authentication                  | `auth list/status/login/logout`                                               | **Absent**  | No credential-status or reviewed login/logout operation crosses the GUI boundary.                                                                                    |
-| Diagnostic sweep                | `doctor [--fix]`                                                              | **Partial** | Settings exposes a bounded manual diagnostic summary; raw findings, repair preview, `--fix`, and focused checks are absent.                                          |
+| Diagnostic sweep                | `doctor [--fix]`                                                              | **Partial** | Every check reaches Settings by name, section, and verdict; finding details, repair preview, `--fix`, and focused checks are absent.                                 |
 | Resolved installation paths     | `paths [--json]`                                                              | **Partial** | Recovery reports a root-resolution count but intentionally withholds native paths and has no path reference surface.                                                 |
 | State reset and recovery        | `reset`                                                                       | **Partial** | Read-only installation recovery inspection is present; previewed repair, selective reset, and wipe operations are absent.                                            |
 | Project context                 | `context` status/init/refresh/wiki/reset/index/replay/working-set             | **Partial** | Effective context sources and earlier replay are visible; authoring, indexing, working-set state, recall, and reset are absent.                                      |
@@ -125,7 +125,7 @@ the main application.
 | Panes and mux inventory         | Host detection, health, pane list, focus/open/close                   | **Absent**  | **blocked-on-phase4**: no public fixed JSON read exists and this pane must not change `src/domains/mux` or `src/interactive`.                       |
 | Yazi round trip                 | File picker pane, picked path return, focused context                 | **Absent**  | The new terminal/mux round trip is not an ACP operation and is also **blocked-on-phase4** for GUI parity.                                           |
 | Toolchain inventory             | Pinned versions, license, platform, source, resolution, install state | **Present** | Settings renders the fixed listing with version floors, found versions, licenses, platform support, resolution source, and install state.           |
-| Doctor and recovery             | Categorized diagnostic sweep and repair                               | **Partial** | Bounded category/severity counts are present; raw detail and confirmed repair remain intentionally separate.                                        |
+| Doctor and recovery             | Categorized diagnostic sweep and repair                               | **Partial** | Per-check identity, section, and verdict sit under the bounded counts; finding detail and confirmed repair remain intentionally absent.             |
 | Usage and routing               | Historical Usage, offline models, profiles, agent bindings            | **Present** | Project scoping, independent failures, provenance, and missing-store states are explicit.                                                           |
 | Catalog and config              | Agent/skill/extension/library inventory and effective configuration   | **Present** | Bounded projections and direct paths back to the conversation are present.                                                                          |
 
@@ -167,8 +167,10 @@ the main application.
    projection each.
 5. Add an Evidence center for receipt/evidence discovery and trace runs/phases/events, using fixed read commands rather
    than arbitrary SQL, native paths, or raw payloads.
-6. Expand safe ACP settings and operations for target/auth lifecycle, memory review, resource installation, verifiers,
-   share import/export, doctor repair, and fleet admission, each with preview, confirmation, progress, and recovery.
+6. **Partly implemented:** every doctor check now crosses as its name, section, and verdict, so a failing check names
+   its subject instead of adding one to a category tally. Finding detail stays on the host permanently. Still to come:
+   safe ACP settings and operations for target/auth lifecycle, memory review, resource installation, verifiers, share
+   import/export, doctor repair, and fleet admission, each with preview, confirmation, progress, and recovery.
 7. Expand sanitized ACP events for context pressure and working-set activity, safety budgets and protected artifacts,
    provider retry/runtime notices, agent status, cost budgets, config reload, middleware failures, and shutdown phases.
 8. Add the remaining session-native surfaces: task and decision ledgers, branch tree/fork, side questions, handoff

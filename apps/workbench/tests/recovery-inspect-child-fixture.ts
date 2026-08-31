@@ -29,6 +29,16 @@ if (command === "paths\u0000--json") {
 			{ ok: false, name: "model private-lab", detail: "model-secret was not advertised" },
 			{ ok: true, level: "warn", name: "interop private-peer", detail: "at /private/bin/peer" },
 			{ ok: true, level: "warn", name: "fleet node ssh-private", detail: "ineligible at 10.0.0.8" },
+			{
+				ok: true,
+				level: "warn",
+				name: "external tool yazi",
+				detail: "not found; PATH copy /private/bin/yazi is below the floor",
+			},
+			{ ok: true, name: "panes socket", detail: "/private/researcher/.config/herdr/herdr.sock answered a ping" },
+			// A check whose name is not name-shaped: the sweep keeps its verdict and
+			// its section, and drops the name rather than leaking the path in it.
+			{ ok: true, name: "probe for /private/researcher/secret", detail: "present" },
 		],
 	}));
 	Deno.exitCode = 1;
