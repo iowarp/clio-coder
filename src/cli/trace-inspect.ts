@@ -23,6 +23,8 @@ import { truncateToWidth } from "../engine/tui-primitives.js";
 
 export const TRACE_INSPECT_MAX_RUNS = 8;
 export const TRACE_INSPECT_MAX_PHASES = 16;
+export const TRACE_INSPECT_MAX_EVENT_KINDS = 12;
+export const TRACE_INSPECT_MAX_PROCESS_KINDS = 8;
 
 const IDENTITY_WIDTH = 128;
 const STATUS_WIDTH = 64;
@@ -41,6 +43,37 @@ export interface TraceInspectPhase {
 	readonly totalCostUsd: number | null;
 }
 
+/**
+ * What a run's events were, in aggregate.
+ *
+ * Deliberately shapes and not rows. A trace event carries `payload_json` and a
+ * free-form name, which are the class of value this boundary keeps host-side,
+ * so the tail itself stays in the terminal and what crosses is how many events
+ * of each kind there were and the span they cover. The counts come out of SQL,
+ * so the payloads are not read on the way to counting them.
+ */
+export interface TraceInspectEvents {
+	readonly total: number;
+	readonly firstAt: string | null;
+	readonly lastAt: string | null;
+	readonly kinds: readonly { readonly kind: string; readonly count: number }[];
+	readonly kindsTruncated: boolean;
+}
+
+/**
+ * What a run's child processes were, in aggregate.
+ *
+ * Same rule, applied harder: a process row carries the command line, the pid,
+ * and the host. None of that is needed to say a run spawned four workers and
+ * one is still alive, and none of it crosses.
+ */
+export interface TraceInspectProcesses {
+	readonly total: number;
+	readonly running: number;
+	readonly kinds: readonly { readonly kind: string; readonly total: number; readonly running: number }[];
+	readonly kindsTruncated: boolean;
+}
+
 export interface TraceInspectRun {
 	readonly runId: string;
 	readonly agent: string;
@@ -55,6 +88,8 @@ export interface TraceInspectRun {
 	readonly totalCostUsd: number | null;
 	readonly phases: readonly TraceInspectPhase[];
 	readonly phasesTruncated: boolean;
+	readonly events: TraceInspectEvents;
+	readonly processes: TraceInspectProcesses;
 }
 
 export interface TraceInspectSnapshot {
@@ -100,6 +135,34 @@ function elapsed(startedAt: string | null, endedAt: string | null): number | nul
 	const end = Date.parse(endedAt);
 	if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
 	return Math.max(0, end - start);
+}
+
+function eventSummary(reader: TraceReader, runId: string): TraceInspectEvents {
+	const span = reader.eventSpan(runId);
+	const all = reader.eventKindCounts(runId);
+	const visible = all.slice(0, TRACE_INSPECT_MAX_EVENT_KINDS);
+	return {
+		total: tally(span.total) ?? 0,
+		firstAt: span.firstAt,
+		lastAt: span.lastAt,
+		kinds: visible.map((entry) => ({ kind: bounded(entry.type, STATUS_WIDTH), count: tally(entry.count) ?? 0 })),
+		kindsTruncated: all.length > visible.length,
+	};
+}
+
+function processSummary(reader: TraceReader, runId: string): TraceInspectProcesses {
+	const all = reader.processKindCounts(runId);
+	const visible = all.slice(0, TRACE_INSPECT_MAX_PROCESS_KINDS);
+	return {
+		total: all.reduce((sum, entry) => sum + (tally(entry.total) ?? 0), 0),
+		running: all.reduce((sum, entry) => sum + (tally(entry.running) ?? 0), 0),
+		kinds: visible.map((entry) => ({
+			kind: bounded(entry.kind, STATUS_WIDTH),
+			total: tally(entry.total) ?? 0,
+			running: tally(entry.running) ?? 0,
+		})),
+		kindsTruncated: all.length > visible.length,
+	};
 }
 
 /** Pure payload builder, exported so the fixed contract is testable without subprocess capture. */
@@ -155,6 +218,8 @@ export function traceInspectSnapshot(
 					}),
 				),
 				phasesTruncated: allPhases.length > visible.length,
+				events: eventSummary(reader, row.run_id),
+				processes: processSummary(reader, row.run_id),
 			};
 		});
 		return {

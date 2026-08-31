@@ -104,6 +104,14 @@ index is not thereby referenceable: the host serves the run window from the rows
 run has aged out of that window is shown but not served. Being displayed and being served are different things, and the
 allowlist tracks the second.
 
+Some payloads are not redaction decisions but exclusions. A trace event's `payload_json` and a process row's command
+line have no safe projection at any width: truncating a command line still leaks the binary and the first argument, and
+a payload is arbitrary by construction. So the rule for those is not "project less", it is "count instead". The trace
+aggregates are computed in SQL precisely so the excluded columns are never loaded on the way to counting them, which
+turns the boundary into a property of the query rather than a discipline in the projection. The matrix marks this class
+`host-only-by-design`, separately from `deferred-by-design`, because "we will not carry this" and "we have not built
+this yet" should not read the same to whoever picks the work up.
+
 Redaction is a decision about which field, not about which record. A doctor finding is the clearest case: its detail is
 free prose that routinely quotes native paths, endpoint URLs, socket paths, model ids, and session ids, and no version
 of it can safely cross. Its name is a fixed check label plus the subject the check ran against, which is a different

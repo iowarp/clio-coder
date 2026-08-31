@@ -13,10 +13,14 @@ import { resolve } from "node:path";
 import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
 import {
 	type CommandErrorCode,
+	MAX_WIRE_TRACE_EVENT_KINDS,
 	MAX_WIRE_TRACE_PHASES,
+	MAX_WIRE_TRACE_PROCESS_KINDS,
 	MAX_WIRE_TRACE_RUNS,
+	type WireTraceEvents,
 	type WireTraceInspection,
 	type WireTracePhase,
+	type WireTraceProcesses,
 	type WireTraceRun,
 } from "./src/protocol.ts";
 
@@ -143,6 +147,77 @@ function projectPhase(value: unknown): WireTracePhase {
 	return { name, kind, owner, status, attempt, retries, failed: value.failed, elapsedMs, totalTokens, totalCostUsd };
 }
 
+function projectEvents(value: unknown): WireTraceEvents {
+	if (!isRecord(value) || !exactKeys(value, ["total", "firstAt", "lastAt", "kinds", "kindsTruncated"])) {
+		return projectionError("Clio Coder returned an invalid trace event summary.");
+	}
+	const total = counter(value.total, MAX_TOKENS);
+	const firstAt = value.firstAt === null ? null : timestamp(value.firstAt);
+	const lastAt = value.lastAt === null ? null : timestamp(value.lastAt);
+	if (
+		total === undefined || firstAt === undefined || lastAt === undefined ||
+		(value.firstAt !== null && firstAt === null) || (value.lastAt !== null && lastAt === null) ||
+		typeof value.kindsTruncated !== "boolean" || !Array.isArray(value.kinds) ||
+		value.kinds.length > MAX_WIRE_TRACE_EVENT_KINDS
+	) return projectionError("Clio Coder returned an invalid trace event summary.");
+	// A span has both ends or neither, and it has them exactly when there were
+	// events to span. A half-open span is not a narrower answer, it is a broken
+	// one, and the total is the only thing that says which case applies.
+	if ((firstAt === null) !== (lastAt === null) || (total === 0) !== (firstAt === null)) {
+		return projectionError("Clio Coder returned a trace event span that contradicts its total.");
+	}
+	const kinds = value.kinds.map((entry) => {
+		if (!isRecord(entry) || !exactKeys(entry, ["kind", "count"])) {
+			return projectionError("Clio Coder returned an invalid trace event kind.");
+		}
+		const kind = text(entry.kind, 64);
+		const count = counter(entry.count, MAX_TOKENS);
+		if (kind === null || count === undefined) {
+			return projectionError("Clio Coder returned an invalid trace event kind.");
+		}
+		return { kind, count };
+	});
+	if (new Set(kinds.map((entry) => entry.kind)).size !== kinds.length) {
+		return projectionError("Clio Coder returned duplicate trace event kinds.");
+	}
+	// A complete breakdown accounts for every event; a truncated one accounts for
+	// fewer, never more.
+	const sum = kinds.reduce((running, entry) => running + entry.count, 0);
+	if (value.kindsTruncated ? sum > total : sum !== total) {
+		return projectionError("Clio Coder returned trace event kinds that do not account for the total.");
+	}
+	return { total, firstAt, lastAt, kinds, kindsTruncated: value.kindsTruncated };
+}
+
+function projectProcesses(value: unknown): WireTraceProcesses {
+	if (!isRecord(value) || !exactKeys(value, ["total", "running", "kinds", "kindsTruncated"])) {
+		return projectionError("Clio Coder returned an invalid trace process summary.");
+	}
+	const total = counter(value.total, MAX_TOKENS);
+	const running = counter(value.running, MAX_TOKENS);
+	if (
+		total === undefined || running === undefined || running > total ||
+		typeof value.kindsTruncated !== "boolean" || !Array.isArray(value.kinds) ||
+		value.kinds.length > MAX_WIRE_TRACE_PROCESS_KINDS
+	) return projectionError("Clio Coder returned an invalid trace process summary.");
+	const kinds = value.kinds.map((entry) => {
+		if (!isRecord(entry) || !exactKeys(entry, ["kind", "total", "running"])) {
+			return projectionError("Clio Coder returned an invalid trace process kind.");
+		}
+		const kind = text(entry.kind, 64);
+		const kindTotal = counter(entry.total, MAX_TOKENS);
+		const kindRunning = counter(entry.running, MAX_TOKENS);
+		if (kind === null || kindTotal === undefined || kindRunning === undefined || kindRunning > kindTotal) {
+			return projectionError("Clio Coder returned an invalid trace process kind.");
+		}
+		return { kind, total: kindTotal, running: kindRunning };
+	});
+	if (new Set(kinds.map((entry) => entry.kind)).size !== kinds.length) {
+		return projectionError("Clio Coder returned duplicate trace process kinds.");
+	}
+	return { total, running, kinds, kindsTruncated: value.kindsTruncated };
+}
+
 function projectRun(value: unknown): WireTraceRun {
 	const keys = [
 		"runId",
@@ -158,6 +233,8 @@ function projectRun(value: unknown): WireTraceRun {
 		"totalCostUsd",
 		"phases",
 		"phasesTruncated",
+		"events",
+		"processes",
 	] as const;
 	if (!isRecord(value) || !exactKeys(value, keys)) {
 		return projectionError("Clio Coder returned an invalid trace run row.");
@@ -180,6 +257,8 @@ function projectRun(value: unknown): WireTraceRun {
 		typeof value.phasesTruncated !== "boolean" || !Array.isArray(value.phases) ||
 		value.phases.length > MAX_WIRE_TRACE_PHASES
 	) return projectionError("Clio Coder returned an invalid trace run row.");
+	const events = projectEvents(value.events);
+	const processes = projectProcesses(value.processes);
 	return {
 		runId,
 		agent,
@@ -194,6 +273,8 @@ function projectRun(value: unknown): WireTraceRun {
 		totalCostUsd,
 		phases: value.phases.map(projectPhase),
 		phasesTruncated: value.phasesTruncated,
+		events,
+		processes,
 	};
 }
 

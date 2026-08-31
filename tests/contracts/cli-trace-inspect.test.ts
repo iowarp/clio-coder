@@ -7,10 +7,15 @@
  * halves: that the argv is not a surface, and that nothing free-form escapes.
  */
 
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { TRACE_INSPECT_MAX_PHASES, TRACE_INSPECT_MAX_RUNS, traceInspectSnapshot } from "../../src/cli/trace-inspect.js";
+import {
+	TRACE_INSPECT_MAX_EVENT_KINDS,
+	TRACE_INSPECT_MAX_PHASES,
+	TRACE_INSPECT_MAX_RUNS,
+	traceInspectSnapshot,
+} from "../../src/cli/trace-inspect.js";
 import { TraceStore } from "../../src/domains/observability/trace-store.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
@@ -169,5 +174,107 @@ describe("contracts/cli-trace-inspect", () => {
 		const payload = JSON.parse(fixed.stdout) as { available: boolean; runs: unknown[] };
 		strictEqual(payload.available, false);
 		strictEqual(payload.runs.length, 0);
+	});
+
+	it("counts events and processes by kind without reading a payload or a command line", () => {
+		const db = join(scratch.dir, "aggregates.sqlite");
+		const store = new TraceStore(db);
+		seedRun(store, "run-agg", "2026-08-31T10:00:00.000Z", 1);
+		// Events whose payload and name are exactly what must not cross.
+		const kinds = ["message_update", "message_update", "message_update", "tool_call", "log"];
+		kinds.forEach((type, index) => {
+			store.db
+				.prepare(
+					`INSERT INTO events (event_id, run_id, phase_id, parent_id, type, name, payload_json, tokens,
+						started_at, ended_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+				)
+				.run(
+					`run-agg-event-${index}`,
+					"run-agg",
+					"run-agg",
+					null,
+					type,
+					"read /private/researcher/secrets.yaml",
+					JSON.stringify({ secret: "/private/researcher/secrets.yaml" }),
+					null,
+					`2026-08-31T10:00:0${index}.000Z`,
+					`2026-08-31T10:00:1${index}.000Z`,
+				);
+		});
+		// One exited worker and one still alive, both carrying a command line.
+		for (const [index, endedAt] of [
+			["0", "2026-08-31T10:00:20.000Z"],
+			["1", null],
+		] as const) {
+			store.db
+				.prepare(
+					`INSERT INTO processes (run_id, kind, name, pid, command, command_digest, started_at, ended_at, host,
+						birth_token) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+				)
+				.run(
+					"run-agg",
+					"worker",
+					`worker-${index}`,
+					4242 + Number(index),
+					"/usr/bin/node /private/researcher/agent.js --token hunter2",
+					"digest",
+					"2026-08-31T10:00:00.000Z",
+					endedAt,
+					"private-host",
+					"birth-token",
+				);
+		}
+		store.close();
+
+		const run = traceInspectSnapshot(now, db).runs[0];
+		ok(run !== undefined);
+		strictEqual(run.events.total, 5);
+		strictEqual(run.events.firstAt, "2026-08-31T10:00:00.000Z");
+		strictEqual(run.events.lastAt, "2026-08-31T10:00:14.000Z");
+		// Ordered by count, so the shape of the run reads at a glance.
+		deepStrictEqual(run.events.kinds, [
+			{ kind: "message_update", count: 3 },
+			{ kind: "log", count: 1 },
+			{ kind: "tool_call", count: 1 },
+		]);
+		strictEqual(run.events.kindsTruncated, false);
+		strictEqual(run.events.kinds.length <= TRACE_INSPECT_MAX_EVENT_KINDS, true);
+
+		strictEqual(run.processes.total, 2);
+		strictEqual(run.processes.running, 1);
+		deepStrictEqual(run.processes.kinds, [{ kind: "worker", total: 2, running: 1 }]);
+
+		// The whole point of aggregating in SQL: none of this was ever read.
+		const framed = JSON.stringify(run);
+		for (const forbidden of [
+			"/private/",
+			"secrets.yaml",
+			"hunter2",
+			"4242",
+			"private-host",
+			"birth-token",
+			"digest",
+			"worker-0",
+		])
+			ok(!framed.includes(forbidden), `trace aggregates leaked ${forbidden}`);
+	});
+
+	it("reports no events and no processes as zero rather than as absent", () => {
+		const db = join(scratch.dir, "quiet.sqlite");
+		const store = new TraceStore(db);
+		seedRun(store, "run-quiet", "2026-08-31T10:00:00.000Z", 0);
+		store.close();
+
+		const run = traceInspectSnapshot(now, db).runs[0];
+		ok(run !== undefined);
+		// A run that recorded nothing is a fact about the run, not a gap in the
+		// read, so the span is null and the counts are zero rather than missing.
+		strictEqual(run.events.total, 0);
+		strictEqual(run.events.firstAt, null);
+		strictEqual(run.events.lastAt, null);
+		deepStrictEqual(run.events.kinds, []);
+		strictEqual(run.processes.total, 0);
+		strictEqual(run.processes.running, 0);
+		deepStrictEqual(run.processes.kinds, []);
 	});
 });

@@ -3812,6 +3812,50 @@ function TraceAccounting({ run }: { run: WireTraceRun }) {
 						))}
 					</ol>
 				)}
+			<div className="trace-shapes">
+				<div>
+					<span className="trace-shapes__label">Events · {run.events.total.toLocaleString()}</span>
+					{run.events.total === 0
+						? <span className="trace-shapes__none">none recorded</span>
+						: (
+							<ul aria-label={`Event kinds for run ${run.runId}`}>
+								{run.events.kinds.map((entry) => (
+									<li key={entry.kind}>
+										<code>{entry.kind}</code>
+										<span>{entry.count.toLocaleString()}</span>
+									</li>
+								))}
+								{run.events.kindsTruncated && <li className="is-bound">rarer kinds not shown</li>}
+							</ul>
+						)}
+				</div>
+				<div>
+					<span className="trace-shapes__label">
+						Processes · {run.processes.total.toLocaleString()}
+						{run.processes.running > 0 ? ` · ${run.processes.running.toLocaleString()} still alive` : ""}
+					</span>
+					{run.processes.total === 0
+						? <span className="trace-shapes__none">none spawned</span>
+						: (
+							<ul aria-label={`Process kinds for run ${run.runId}`}>
+								{run.processes.kinds.map((entry) => (
+									<li key={entry.kind}>
+										<code>{entry.kind}</code>
+										<span>
+											{entry.total.toLocaleString()}
+											{entry.running > 0 ? ` · ${entry.running.toLocaleString()} alive` : ""}
+										</span>
+									</li>
+								))}
+								{run.processes.kindsTruncated && <li className="is-bound">rarer kinds not shown</li>}
+							</ul>
+						)}
+				</div>
+			</div>
+			<p className="trace-accounting__bound">
+				Event payloads, event names, and process command lines stay on the host by design. What crosses is how many of
+				each kind there were.
+			</p>
 			{run.phasesTruncated && <p className="trace-accounting__bound">Later phases are outside this bounded index.</p>}
 		</section>
 	);

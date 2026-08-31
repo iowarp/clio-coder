@@ -486,6 +486,21 @@ try {
 		equal(await traceAccounting.getByText(forbidden, { exact: false }).count(), 0);
 	}
 
+	// Events and processes cross as shapes. The tail and the command lines do not,
+	// and the panel says so rather than leaving the absence to be inferred.
+	const eventKinds = traceAccounting.getByRole("list", { name: "Event kinds for run run-alpha" });
+	await eventKinds.getByText("message_update", { exact: true }).waitFor();
+	await eventKinds.getByText("211", { exact: true }).waitFor();
+	await traceAccounting.getByRole("list", { name: "Process kinds for run run-alpha" }).getByText("worker", {
+		exact: true,
+	}).waitFor();
+	await traceAccounting.getByText(/stay on the host by design/u).waitFor();
+	// Row-level artifacts, not the words: the panel's own disclosure names command
+	// lines and payloads, so the check has to look for their shapes instead.
+	for (const forbidden of ["payload_json", "birth_token", "command_digest", "/usr/bin"]) {
+		equal(await traceAccounting.getByText(forbidden, { exact: false }).count(), 0);
+	}
+
 	// Verifying re-reads the sealed bytes, so its verdict is stated separately from
 	// the trust state the snapshot recorded rather than replacing it.
 	await fleetJournal.getByRole("button", { name: "Check this receipt now", exact: true }).click();
@@ -527,8 +542,11 @@ try {
 	await evidenceInventory.getByRole("button", { name: "Open trust record", exact: true }).first().click();
 	const trustRecord = evidenceInventory.getByLabel("Trust record for run-alpha-bundle");
 	// The record has one row per covered run, so every axis label appears twice.
-	equal(await trustRecord.getByText("Validation grounding", { exact: true }).count(), 2);
+	// `count()` does not auto-wait, so the wait has to come first or the assertion
+	// races the read that is still in flight.
 	await trustRecord.getByText("Validation grounding", { exact: true }).first().waitFor();
+	// The record has one row per covered run, so every axis label appears twice.
+	equal(await trustRecord.getByText("Validation grounding", { exact: true }).count(), 2);
 	await trustRecord.getByText("failed", { exact: true }).first().waitFor();
 	await trustRecord.getByText("enforced", { exact: true }).first().waitFor();
 	for (const forbidden of ["/home/", "sha256", "receipt-quality"]) {
@@ -1486,6 +1504,7 @@ try {
 			fleetRunsUseDurableBoundedAdapter: true,
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
 			traceAccountingCarriesNoRequestTextOrPath: true,
+			traceTailsCrossAsShapesNotRows: true,
 			evidenceInventoryCarriesShapeAndTrustOnly: true,
 			artifactsAreReferencedOnlyByHostServedIds: true,
 			receiptVerificationIsSeparateFromTheSnapshotVerdict: true,

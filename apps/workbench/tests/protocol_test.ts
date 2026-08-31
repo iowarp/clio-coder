@@ -1835,6 +1835,19 @@ Deno.test("trace accounting validates bounds and refuses rows from an unavailabl
 		totalCostUsd: 0.4213,
 		phases: [phase],
 		phasesTruncated: false,
+		events: {
+			total: 4,
+			firstAt: "2026-08-31T14:00:00.000Z",
+			lastAt: "2026-08-31T14:00:29.000Z",
+			kinds: [{ kind: "message_update", count: 3 }, { kind: "tool_call", count: 1 }],
+			kindsTruncated: false,
+		},
+		processes: {
+			total: 2,
+			running: 1,
+			kinds: [{ kind: "worker", total: 2, running: 1 }],
+			kindsTruncated: false,
+		},
 	};
 	const inspection = {
 		scope: "installation",
@@ -1861,6 +1874,14 @@ Deno.test("trace accounting validates bounds and refuses rows from an unavailabl
 			{ ...inspection, available: false, runs: [], truncated: true },
 			// Negative accounting is not a smaller number, it is a broken store.
 			{ ...inspection, runs: [{ ...run, totalTokens: -1 }] },
+			// Event and process shapes must account for themselves, and a half-open
+			// span is a broken answer rather than a narrower one.
+			{ ...inspection, runs: [{ ...run, events: { ...run.events, kinds: [{ kind: "log", count: 1 }] } }] },
+			{ ...inspection, runs: [{ ...run, events: { ...run.events, lastAt: null } }] },
+			{ ...inspection, runs: [{ ...run, processes: { ...run.processes, running: 9 } }] },
+			// The row-level fields are the ones that must never appear.
+			{ ...inspection, runs: [{ ...run, events: { ...run.events, payloads: ["{}"] } }] },
+			{ ...inspection, runs: [{ ...run, processes: { ...run.processes, commands: ["/usr/bin/node"] } }] },
 		]
 	) {
 		expectProtocolError(() => serverEvent("trace.state", { inspection: broken }));
