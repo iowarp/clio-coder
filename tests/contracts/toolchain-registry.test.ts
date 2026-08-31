@@ -70,6 +70,26 @@ describe("toolchain registry table", () => {
 		}
 	});
 
+	/**
+	 * The floors are a policy decision with a stated bar: a floor moves only when
+	 * someone exercised the older release and wrote down what they checked. That
+	 * makes each number worth pinning, so neither a pin bump that drags its floor
+	 * along nor a lowering done to quiet a rejection can happen unremarked.
+	 */
+	it("holds each PATH floor at the version its evidence supports", () => {
+		const byId = new Map(PINNED_TOOLS.map((entry) => [entry.id, entry]));
+		// Every method the mux domain sends exists in herdr 0.7.5's
+		// `api schema --json` (protocol 17), and src/domains/mux/protocol.ts
+		// already gates its two non-universal methods at that same protocol.
+		strictEqual(byId.get("herdr")?.minimumVersion, "0.7.5");
+		// No equivalent measurement exists for yazi: `ya emit-to` matches at
+		// 26.1.22, but the generated profile and the DDS pick payloads were never
+		// driven there, so the floor stays at the pin.
+		strictEqual(byId.get("yazi")?.minimumVersion, byId.get("yazi")?.version);
+		// Croc negotiates its relay protocol by major version.
+		strictEqual(byId.get("croc")?.minimumVersion, "11.0.0");
+	});
+
 	it("pins the three tools this cycle committed to, with their licenses", () => {
 		const byId = new Map(PINNED_TOOLS.map((entry) => [entry.id, entry]));
 		strictEqual(byId.get("herdr")?.license, "Apache-2.0");
