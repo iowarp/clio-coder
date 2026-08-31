@@ -31,6 +31,8 @@ The conventional final `/v1` mount and a trailing slash normalize to the same en
 
 llama.cpp discovery reads `total_slots` from cached probe results. A router can expose the selected worker's value from `/props?model=<id>` even when router `/props` has no slot count. The selected model's `/v1/models` argv supplies a `--parallel` fallback. LM Studio defaults to one slot when its REST response supplies no concurrency fact. Ollama defaults to one unless `OLLAMA_NUM_PARALLEL` is visible to the local process.
 
+The endpoint set is resolved from the configured targets as well as the probed statuses, so it is the same set a second after boot as it is a minute later. An endpoint that resolves to no limit is not checked at all, and "not checked" is not a conservative answer.
+
 ### Persisted Slot Discovery
 
 A probe learns a fact about a server, not about the process that asked, so a discovered slot count is written to disk and read back as a prior by the next process.
@@ -92,13 +94,29 @@ export interface CapacityLease {
 
 The orchestrator's active model stream is registered in memory against the same endpoint key, so its own turn consumes one endpoint slot before a worker is admitted. This foreground count is not written to `dispatch-admission.json`; process exit releases it. Durable leases and held reservation members carry `endpointKey`, and held members count their peak per wave for the endpoint just as they do for a node.
 
-Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Endpoint saturation is refused rather than queued, because an endpoint-specific request queue would hold a dispatch open behind a stream whose length nobody knows. The refusal names the endpoint, both slot counts, why one slot is already gone, and the two moves that actually free capacity:
+Execution-plan waves also honor the endpoint bound. A plan with four available worker positions targeting one two-slot server packs at most two of them into a wave, or one when the orchestrator already holds the other slot. Endpoint saturation is refused rather than queued, because an endpoint-specific request queue would hold a dispatch open behind a stream whose length nobody knows. The refusal names the endpoint, both slot counts, why one slot is already gone, and the moves that actually free capacity:
 
 ```text
-dispatch: admission denied: endpoint '192.168.86.141:8080' capacity reached (1/1 slots): the orchestrator's own turn holds one; collect in-flight runs or point workers at a second server
+dispatch: admission denied: endpoint '192.168.86.141:8080' capacity reached (1/1 slots): 1 foreground stream holds the slot; reduce the same-wave worker count, set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
 ```
 
-That is the exact text on all three paths that can refuse for this reason: lease acquisition (`src/domains/dispatch/capacity-lease.ts`), the admission gate (`src/domains/dispatch/admission.ts`), and reservation preflight (`src/domains/dispatch/reservation-store.ts`). The `1/1` above is the common local case rather than an example: a llama.cpp router started with `--parallel 1` discovers one slot, so any dispatch raised while the orchestrator is streaming is refused before a worker process starts.
+That remedy is shared by all three paths that can refuse for this reason: lease acquisition (`src/domains/dispatch/capacity-lease.ts`), the admission gate (`src/domains/dispatch/admission.ts`), and reservation preflight (`src/domains/dispatch/reservation-store.ts`). The `1/1` above is the common local case rather than an example: a llama.cpp router started with `--parallel 1` discovers one slot, so any dispatch raised while the orchestrator is streaming is refused before a worker process starts.
+
+### What `/council` Needs on a Single-GPU Setup
+
+A council seats two to five members and runs the whole roster in one wave, so it needs at least two endpoint slots at once, plus a third if the orchestrator's own turn is streaming to the same server. It cannot answer a capacity denial by dispatching fewer members, which is why its denial says so instead of offering that move:
+
+```text
+dispatch: admission denied: endpoint 'mini:8080' capacity exceeded (2/1 slots): no active lease, held reservation, or foreground stream currently holds a slot; a council runs its whole roster in one wave and cannot go below 2 members, so set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
+```
+
+On a single-GPU box there are three ways to make `/council` work, in order of preference:
+
+1. Start the server with enough slots and let discovery find them. `llama-server --parallel 4` is discovered as four slots and persisted, so every later process sees four without re-probing.
+2. Set `maxConcurrentRequests` on the target when the server's real concurrency is higher than what it advertises. It overrides every discovered value.
+3. Point some roster members at a second server. Members on different endpoints do not compete for the same slots.
+
+A server genuinely started with one slot cannot run a council, and admitting one anyway would put two workers plus the orchestrator through a scheduler with room for one. The denial is the correct outcome; the fix is on the server or in the roster.
 
 ### Constants & Operational Bounds
 

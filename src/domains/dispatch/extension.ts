@@ -78,7 +78,7 @@ import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
 	type EndpointCapacity,
-	endpointCapacitiesForStatuses,
+	endpointCapacityFor,
 	endpointCapacityForStatus,
 	firstRuntimeResolutionError,
 	isDispatchEligibleRuntime,
@@ -86,6 +86,7 @@ import {
 	type ResolvedRuntimeTarget,
 	type RuntimeApiFamily,
 	type RuntimeDescriptor,
+	resolveEndpointCapacities,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
 	runtimeResolutionWarnings,
@@ -2459,19 +2460,37 @@ export function createDispatchBundle(
 		}),
 	);
 
+	/**
+	 * Every endpoint the configured fleet can reach.
+	 *
+	 * Deliberately resolved from the configured targets as well as the probed
+	 * statuses. A target whose status has not been built yet contributed no key,
+	 * an absent key carries no limit, and reservation planning skips a dimension
+	 * it has no limit for, so admission against a single-slot server used to fail
+	 * open for whoever asked first after boot.
+	 */
+	function configuredEndpointCapacities(): Readonly<Record<string, EndpointCapacity>> {
+		return resolveEndpointCapacities({
+			statuses: providers.list(),
+			targets: getEffectiveSettings()?.targets ?? [],
+			runtimeFor: (runtimeId) => providers.getRuntime(runtimeId),
+		});
+	}
+
 	function configuredEndpointLimits(): Readonly<Record<string, number>> {
-		return Object.fromEntries(
-			Object.entries(endpointCapacitiesForStatuses(providers.list())).map(([key, value]) => [key, value.limit]),
-		);
+		return Object.fromEntries(Object.entries(configuredEndpointCapacities()).map(([key, value]) => [key, value.limit]));
 	}
 
 	function endpointCapacityForTarget(targetId: string): EndpointCapacity | null {
 		const status = providers.list().find((entry) => entry.target.id === targetId);
-		if (status === undefined) return null;
-		const endpoint = endpointCapacityForStatus(status);
+		const target = status?.target ?? providers.getTarget(targetId);
+		if (target === null || target === undefined) return null;
+		const endpoint =
+			status === undefined
+				? endpointCapacityFor({ target, runtime: providers.getRuntime(target.runtime) })
+				: endpointCapacityForStatus(status);
 		if (endpoint === null) return null;
-		const configured = endpointCapacitiesForStatuses(providers.list())[endpoint.key];
-		return configured ?? endpoint;
+		return configuredEndpointCapacities()[endpoint.key] ?? endpoint;
 	}
 
 	function reservationCapacitySnapshot(settings: EffectiveSettings): ReservationCapacitySnapshot {

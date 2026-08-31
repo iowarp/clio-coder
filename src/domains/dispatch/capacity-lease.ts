@@ -263,6 +263,26 @@ export function describeEndpointCapacityHolders(holders: EndpointCapacityHolders
 	return `${named} ${total === 1 ? "holds" : "hold"} ${total === 1 ? "the slot" : "the slots"}`;
 }
 
+/**
+ * The ways past a saturated inference endpoint, in the order an operator can
+ * act on them.
+ *
+ * `maxConcurrentRequests` is named because the conservative default of one slot
+ * is a guess about an unprobed server, and on a server started with
+ * `--parallel 4` it is simply wrong. Without that sentence the denial reads as
+ * a hardware limit and the operator has no reason to look for a setting.
+ *
+ * `rosterFloor` is the smallest same-wave width the caller's topology can have.
+ * A council runs its whole roster in one wave, so "dispatch fewer at once" is
+ * not a move it has; saying so keeps the remedy honest.
+ */
+export function endpointCapacityRemedy(input?: { rosterFloor?: number }): string {
+	const ways =
+		"set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server";
+	if (input?.rosterFloor === undefined) return `reduce the same-wave worker count, ${ways}`;
+	return `a council runs its whole roster in one wave and cannot go below ${input.rosterFloor} members, so ${ways}`;
+}
+
 function assertCapacity(
 	file: CapacityStateFile,
 	nodeId: string,
@@ -299,7 +319,7 @@ function assertCapacity(
 			const used = holders.leases + holders.reservations + holders.foregroundStreams;
 			if (used >= endpointLimit)
 				throw new Error(
-					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}; collect in-flight runs or point workers at a second server`,
+					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}; ${endpointCapacityRemedy()}`,
 				);
 		}
 	}

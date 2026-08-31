@@ -9,14 +9,29 @@ import {
 	type CapacityStateFile,
 	capacityStateLockPath,
 	describeEndpointCapacityHolders,
+	endpointCapacityRemedy,
 	readCapacityStateUnsafe,
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
+import { COUNCIL_MIN_MEMBERS } from "./gate-role-prompts.js";
 
 const MAX_RESERVATION_RECORDS = 500;
 export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
 
-export type ReservationTopology = "parallel" | "detached" | "sequential" | "pipeline" | "review" | "compete";
+/**
+ * `council` is carried rather than flattened into `parallel` because it is the
+ * one topology with a floor on its own width. Every other plan can answer a
+ * capacity denial by dispatching fewer at once; a council of two cannot, and a
+ * denial that tells it to is advice it cannot take.
+ */
+export type ReservationTopology =
+	| "parallel"
+	| "detached"
+	| "sequential"
+	| "pipeline"
+	| "review"
+	| "compete"
+	| "council";
 export type ReservationMemberStatus = "held" | "consumed" | "released";
 export type ReservationStatus = "active" | "released" | "rolled_back" | "expired";
 
@@ -79,8 +94,10 @@ function endpointCapacityDenial(input: {
 	leases: number;
 	reservations: number;
 	foregroundStreams: number;
+	topology?: ReservationTopology;
 }): string {
-	return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity exceeded (${input.used + input.requested}/${input.limit} slots): ${describeEndpointCapacityHolders(input)}; reduce the same-wave worker count, collect in-flight runs, or point workers at a second server`;
+	const remedy = endpointCapacityRemedy(input.topology === "council" ? { rosterFloor: COUNCIL_MIN_MEMBERS } : undefined);
+	return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity exceeded (${input.used + input.requested}/${input.limit} slots): ${describeEndpointCapacityHolders(input)}; ${remedy}`;
 }
 
 function copyRecord(record: DispatchReservationRecord): DispatchReservationRecord {
@@ -100,7 +117,8 @@ function validRecord(value: unknown): value is DispatchReservationRecord {
 			record.topology === "sequential" ||
 			record.topology === "pipeline" ||
 			record.topology === "review" ||
-			record.topology === "compete") &&
+			record.topology === "compete" ||
+			record.topology === "council") &&
 		(record.status === "active" ||
 			record.status === "released" ||
 			record.status === "rolled_back" ||
@@ -191,6 +209,7 @@ function allocateReservation(
 	tasks: ReadonlyArray<ReservationPlanTask>,
 	existing: ReadonlyArray<DispatchReservationRecord>,
 	capacity: ReservationCapacitySnapshot,
+	topology?: ReservationTopology,
 ): ReservationPlanResult {
 	if (tasks.length === 0) return { ok: false, reason: "reservation requires at least one task" };
 	const duplicate = tasks.find((task, index) => tasks.slice(0, index).some((entry) => entry.memberId === task.memberId));
@@ -230,6 +249,7 @@ function allocateReservation(
 					leases: endpoint.leases ?? endpoint.active - (endpoint.foregroundStreams ?? 0),
 					reservations: heldSlots,
 					foregroundStreams: endpoint.foregroundStreams ?? 0,
+					...(topology === undefined ? {} : { topology }),
 				}),
 			};
 		}
@@ -264,7 +284,7 @@ export function createDispatchReservation(input: {
 				`dispatch: reservation denied: capacity is draining (requested by pid ${drain.requestedByPid} at ${drain.requestedAt})`,
 			);
 		}
-		const planned = allocateReservation(input.tasks, records, input.capacity);
+		const planned = allocateReservation(input.tasks, records, input.capacity, input.topology);
 		if (!planned.ok) {
 			replaceReservations(state, records);
 			writeCapacityStateUnsafe(state);

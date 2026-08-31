@@ -2,6 +2,15 @@
 
 import { COUNCIL_BALLOT_SHAPE, COUNCIL_BALLOT_VERDICT_MAX_BYTES } from "../agents/result-contract.js";
 
+/**
+ * Roster bounds for a council. Two is the point of the topology: one seated
+ * agent is a plain dispatch, and there is nothing to compare. Capacity denials
+ * quote the floor because it is the reason a council cannot answer saturation
+ * by dispatching fewer members.
+ */
+export const COUNCIL_MIN_MEMBERS = 2;
+export const COUNCIL_MAX_MEMBERS = 5;
+
 export const REVIEWER_GATE_PROMPT = [
 	"You are a strict, read-only reviewer of one implementation run.",
 	"Inspect the supplied result and repository state with read-only tools.",
