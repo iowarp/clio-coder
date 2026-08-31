@@ -265,6 +265,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 		},
 	],
 	["tools", async (subArgs) => (await import("./tools.js")).runToolsCommand(subArgs)],
+	["interop", async (subArgs) => (await import("./interop.js")).runInteropCommand(subArgs)],
 	["panes", async (subArgs) => (await import("./panes.js")).runPanesCommand(subArgs)],
 	["doctor", async (subArgs) => (await import("./doctor.js")).runDoctorCommand(subArgs)],
 	["paths", async (subArgs) => (await import("./paths.js")).runPathsCommand(subArgs)],
