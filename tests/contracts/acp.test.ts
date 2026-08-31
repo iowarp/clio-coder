@@ -151,6 +151,26 @@ function forceCleanupDirectPid(pid: number | null): void {
 }
 
 /**
+ * The budgets handed to a peer that is a real spawned `node` process: reach
+ * the connection, answer a turn, answer a permission prompt, and finish dying
+ * after SIGKILL. None of the cases using these asserts that a peer is quick;
+ * they assert on the exit code, the stop reason, whether the pid is gone, and
+ * whether SIGTERM preceded the escalation. Under 24-way shard load a spawned
+ * node has been measured taking longer than a flat 1000ms just to reach its
+ * prompt, which failed `ActiveRun kill and abort both bound a SIGTERM-resistant
+ * ACP peer lifetime` as "abort ACP peer never reached prompt".
+ *
+ * The grace windows are deliberately not here. `terminationGraceMs` and
+ * `cancelGraceMs` stay at their small literals because being small is what
+ * drives the escalation path those cases exist to exercise, and the case at
+ * line ~1325 keeps its 20ms because there the timeout firing is the claim.
+ */
+const PEER_CONNECT_MS = scaleWatchdog(1_000);
+const PEER_TURN_MS = scaleWatchdog(1_000);
+const PEER_PERMISSION_MS = scaleWatchdog(1_000);
+const PEER_TERMINATION_WAIT_MS = scaleWatchdog(1_000);
+
+/**
  * Both of these bound a wait on the ACP peer, not a claim that the peer is
  * quick. The budgets widen with the shard load the run carries and are used
  * verbatim when the file runs on its own.
@@ -1790,9 +1810,9 @@ rl.on("line", (line) => {
 					id: "mock",
 					command: process.execPath,
 					args: [script],
-					connectTimeoutMs: 1000,
-					turnTimeoutMs: 1000,
-					permissionTimeoutMs: 1000,
+					connectTimeoutMs: PEER_CONNECT_MS,
+					turnTimeoutMs: PEER_TURN_MS,
+					permissionTimeoutMs: PEER_PERMISSION_MS,
 					toolGovernance: "clio-policy",
 				},
 				task: "say hello",
@@ -1852,9 +1872,9 @@ setInterval(() => {}, 1000);
 					id: "success-resistant",
 					command: process.execPath,
 					args: [script],
-					connectTimeoutMs: 1_000,
-					turnTimeoutMs: 1_000,
-					permissionTimeoutMs: 1_000,
+					connectTimeoutMs: PEER_CONNECT_MS,
+					turnTimeoutMs: PEER_TURN_MS,
+					permissionTimeoutMs: PEER_PERMISSION_MS,
 					toolGovernance: "clio-policy",
 				},
 				task: "finish but stay alive",
@@ -1862,7 +1882,7 @@ setInterval(() => {}, 1000);
 				safety,
 				cancelGraceMs: 25,
 				terminationGraceMs: 25,
-				terminationWaitMs: 1_000,
+				terminationWaitMs: PEER_TERMINATION_WAIT_MS,
 			});
 			pid = handle.pid;
 			const result = await within(handle.promise, 2_000, "successful resistant ACP peer exceeded teardown bound");
@@ -1890,7 +1910,7 @@ setInterval(() => {}, 1000);
 `;
 		const transport = createStdioTransport(process.execPath, ["-e", resistantCode], {
 			terminationGraceMs: 30,
-			terminationWaitMs: 1_000,
+			terminationWaitMs: PEER_TERMINATION_WAIT_MS,
 		});
 		const pid = transport.pid;
 		let descendantPid: number | null = null;
@@ -1974,16 +1994,16 @@ setInterval(() => {}, 1000);
 						id: `resistant-${action}`,
 						command: process.execPath,
 						args: [script, readyPath, termPath, cancelPath],
-						connectTimeoutMs: 1_000,
+						connectTimeoutMs: PEER_CONNECT_MS,
 						turnTimeoutMs: 60_000,
-						permissionTimeoutMs: 1_000,
+						permissionTimeoutMs: PEER_PERMISSION_MS,
 						toolGovernance: "clio-policy",
 					},
 					task: `exercise ${action}`,
 					cwd: scratch,
 					safety,
 					terminationGraceMs: 30,
-					terminationWaitMs: 1_000,
+					terminationWaitMs: PEER_TERMINATION_WAIT_MS,
 					cancelGraceMs: 100,
 				});
 				const pid = handle.pid;
@@ -2851,7 +2871,7 @@ setInterval(() => {}, 1000);
 		const peer = createStdioServerTransport({ input: clientToServer, output: serverToClient });
 		const processTransport = createStdioTransport(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
 			terminationGraceMs: 25,
-			terminationWaitMs: 1_000,
+			terminationWaitMs: PEER_TERMINATION_WAIT_MS,
 		});
 		try {
 			for (const transport of [peer, processTransport]) {
