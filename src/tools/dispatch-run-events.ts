@@ -2,6 +2,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
+import { defaultRunEventJournal, type RunEventJournalSink } from "../domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { assistantTextFromEvent } from "./dispatch-event-text.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -77,10 +78,76 @@ function eventDetail(event: unknown): string | undefined {
 	return undefined;
 }
 
-export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
+export interface DispatchRunEventRegistryOptions {
+	/**
+	 * Durable tee for the display tail. Omitted takes the process-wide default
+	 * journal (settings-gated by `panes.journal`); `null` turns it off for this
+	 * registry. This is the one wiring choke point: every registry in the
+	 * process is built by this factory, so the sink attaches here rather than at
+	 * each of the three construction sites that call it.
+	 */
+	journal?: RunEventJournalSink | null;
+}
+
+/** Outcome recorded for a run whose completion rejected before a receipt existed. */
+const REGISTRY_FAILURE_OUTCOME = "failed";
+/** Outcome recorded when a receipt settled without a readable outcome field. */
+const REGISTRY_UNKNOWN_OUTCOME = "unknown";
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+export function createDispatchRunEventRegistry(
+	options: DispatchRunEventRegistryOptions = {},
+): DispatchRunEventRegistry {
 	const runTails = new Map<string, RunTailState>();
 	const activeRuns = new Set<string>();
 	const activeBatches = new Set<string>();
+	const journal: RunEventJournalSink | null = options.journal === undefined ? defaultRunEventJournal() : options.journal;
+
+	/**
+	 * Seal one logical run in the journal. `logicalRunId` is the id an operator
+	 * asked about; a retried run's receipt carries the terminal attempt's id
+	 * instead, and that only ever appears as a field on the line.
+	 */
+	const journalSeal = (logicalRunId: string, receipt: RunReceipt): void => {
+		if (journal === null || !isRecord(receipt)) return;
+		// Every field is read defensively. The journal sits on the completion path
+		// of every dispatch, and a receipt that is missing a block it is typed to
+		// have (a stubbed contract, a truncated read) must degrade the transcript,
+		// never reject the completion the caller is awaiting.
+		const digest = receipt.integrity?.digest;
+		const outcome = typeof receipt.outcome === "string" ? receipt.outcome : REGISTRY_UNKNOWN_OUTCOME;
+		journal.receipt(logicalRunId, {
+			outcome,
+			exitCode: typeof receipt.exitCode === "number" ? receipt.exitCode : null,
+			...(typeof digest === "string" ? { digest } : {}),
+			...(receipt.runId !== logicalRunId ? { attemptRunId: receipt.runId } : {}),
+		});
+		journal.terminal(logicalRunId, outcome, receipt.outcomeDetail ?? undefined);
+	};
+
+	/**
+	 * Seal a batch's journals. `assignmentIds` are the logical work ids in
+	 * admission order and `dispatchBatch` resolves one receipt per request, so
+	 * equal lengths pair by index. Anything else pairs by the receipt's own run
+	 * id and leaves unmatched assignments without a terminal line rather than
+	 * inventing an outcome for them.
+	 */
+	const sealBatchJournals = (assignmentIds: ReadonlyArray<string>, receipts: ReadonlyArray<RunReceipt>): void => {
+		if (journal === null || !Array.isArray(receipts)) return;
+		if (assignmentIds.length === receipts.length) {
+			for (const [index, runId] of assignmentIds.entries()) {
+				const receipt = receipts[index];
+				if (receipt !== undefined) journalSeal(runId, receipt);
+			}
+			return;
+		}
+		for (const receipt of receipts) {
+			if (receipt != null && typeof receipt.runId === "string") journalSeal(receipt.runId, receipt);
+		}
+	};
 
 	const pruneRunTails = (): void => {
 		while (runTails.size > RUN_TAIL_RUN_LIMIT) {
@@ -110,6 +177,10 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 		}
 		runTails.set(runId, state);
 		pruneRunTails();
+		// The journal is a tee of exactly this projection, appended after the
+		// in-memory tail is already updated so a sink that degrades cannot change
+		// what `eventTail` returns.
+		journal?.append(runId, entry);
 	};
 
 	const drainSingle = async (
@@ -172,6 +243,7 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 				throw new Error(`dispatch event registry: run '${handle.runId}' is already registered`);
 			}
 			activeRuns.add(handle.runId);
+			journal?.open(handle.runId, agentId);
 			const summaryPromise = drainSingle(handle.runId, agentId, handle.events, bus);
 			const completion = Promise.allSettled([summaryPromise, handle.finalPromise]).then(
 				([summaryResult, receiptResult]) => {
@@ -180,12 +252,24 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 					return { receipt: receiptResult.value, summary: summaryResult.value };
 				},
 			);
-			void completion
-				.finally(() => {
-					activeRuns.delete(handle.runId);
-					pruneRunTails();
-				})
-				.catch(() => {});
+			// One subscription, not a `.then().finally()` chain. Chaining pushes the
+			// tail release a microtask later than it used to land, and a caller that
+			// awaits `completion` and then reads `eventTail` observes the run as
+			// still active. Journal and release settle together in this handler.
+			const releaseSingle = (): void => {
+				activeRuns.delete(handle.runId);
+				pruneRunTails();
+			};
+			void completion.then(
+				({ receipt }) => {
+					journalSeal(handle.runId, receipt);
+					releaseSingle();
+				},
+				(error: unknown) => {
+					journal?.terminal(handle.runId, REGISTRY_FAILURE_OUTCOME, errorText(error));
+					releaseSingle();
+				},
+			);
 			return { runId: handle.runId, completion };
 		},
 		registerBatch(handle, agentIds, bus) {
@@ -204,6 +288,9 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 			}
 			activeBatches.add(handle.batchId);
 			for (const runId of handle.assignmentIds) activeRuns.add(runId);
+			for (const [index, runId] of handle.assignmentIds.entries()) {
+				journal?.open(runId, agentIds[index] ?? "unknown");
+			}
 			const completion = Promise.allSettled([drainBatch(handle.batchId, handle.events, bus), handle.finalPromise]).then(
 				([summariesResult, receiptsResult]) => {
 					if (summariesResult.status === "rejected") throw summariesResult.reason;
@@ -211,13 +298,25 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 					return { receipts: receiptsResult.value, summaries: summariesResult.value };
 				},
 			);
-			void completion
-				.finally(() => {
-					activeBatches.delete(handle.batchId);
-					for (const runId of handle.assignmentIds) activeRuns.delete(runId);
-					pruneRunTails();
-				})
-				.catch(() => {});
+			// Single subscription for the same reason as registerSingle above.
+			const releaseBatch = (): void => {
+				activeBatches.delete(handle.batchId);
+				for (const runId of handle.assignmentIds) activeRuns.delete(runId);
+				pruneRunTails();
+			};
+			void completion.then(
+				({ receipts }) => {
+					sealBatchJournals(handle.assignmentIds, receipts);
+					releaseBatch();
+				},
+				(error: unknown) => {
+					const detail = errorText(error);
+					for (const runId of handle.assignmentIds) {
+						journal?.terminal(runId, REGISTRY_FAILURE_OUTCOME, detail);
+					}
+					releaseBatch();
+				},
+			);
 			for (const [index, runId] of handle.assignmentIds.entries()) {
 				if (!runTails.has(runId)) {
 					runTails.set(runId, {

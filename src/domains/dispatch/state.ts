@@ -28,6 +28,7 @@ import { atomicWrite } from "../../engine/session.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
+import { removeRunEventJournals } from "./run-event-journal.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 
 export interface FleetRunRecord {
@@ -323,6 +324,14 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				const capped = capRuns(merged, maxRuns);
 				runs = capped;
 				atomicWrite(target, JSON.stringify(capped, null, 2));
+				// A run that left the ring has no ledger row to view any more, so its
+				// event journal is unreachable state. Retention is bound to the ring
+				// rather than to a second policy so the two can never disagree about
+				// how much history exists.
+				if (merged.length > capped.length) {
+					const kept = new Set(capped.map((run) => run.id));
+					removeRunEventJournals(merged.filter((run) => !kept.has(run.id)).map((run) => run.id));
+				}
 				// Everything this process claimed is now on disk, so the mirror holds
 				// no newer state until the next write. Clearing here is what stops a
 				// long-lived process from re-asserting an old snapshot of its own rows

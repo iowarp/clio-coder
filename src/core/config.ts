@@ -1010,6 +1010,7 @@ const TOP_LEVEL_KEYS = [
 	"compaction",
 	"context",
 	"prewarm",
+	"panes",
 	"retry",
 	"guardrails",
 ] as const;
@@ -1603,6 +1604,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("enabled" in raw.prewarm) {
 				const v = expectBoolean(issues, "prewarm.enabled", raw.prewarm.enabled);
 				if (v !== undefined) settings.prewarm.enabled = v;
+			}
+		}
+	}
+
+	if ("panes" in raw) {
+		if (!isPlainObject(raw.panes)) {
+			issues.add("panes", `expected a map, got ${describe(raw.panes)}`);
+		} else {
+			issues.unknownKeys("panes", raw.panes, ["journal"]);
+			if ("journal" in raw.panes) {
+				const v = expectBoolean(issues, "panes.journal", raw.panes.journal);
+				if (v !== undefined) settings.panes.journal = v;
 			}
 		}
 	}

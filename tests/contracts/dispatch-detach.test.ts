@@ -1,10 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { after, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { readRunEventJournal, runEventJournalPath } from "../../src/domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import {
@@ -225,6 +226,68 @@ describe("detached dispatch + collect", () => {
 			const peek = (await monitor.run({ mode: "peek", run_id: firstRunId }, {})) as ToolRunResult;
 			strictEqual(peek.kind, "ok");
 			ok(peek.kind === "ok" && (peek.details?.eventCount as number) >= 1, "run tail buffered for peek");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("tees run events to the journal without changing what eventTail returns", async () => {
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker() });
+		await bundle.extension.start();
+		try {
+			// Two identical detached dispatches: one registry with the journal
+			// explicitly off, one with the default sink attached. The tail is the
+			// monitor peek surface, so it has to be byte-identical either way.
+			const runIdsFor = async (runEvents: ReturnType<typeof createDispatchRunEventRegistry>): Promise<string[]> => {
+				const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract, runEvents });
+				const result = (await tool.run(
+					{ tasks: ["journal parity"], detach: true },
+					{ sessionId: "session-journal", ...approvedDispatch },
+				)) as ToolRunResult;
+				strictEqual(result.kind, "ok");
+				const ids = result.details?.assignmentIds as string[];
+				await waitFor(
+					() => ids.every((runId) => bundle.contract.getRun(runId)?.status === "completed"),
+					"detached runs finalized in the background",
+				);
+				await waitFor(
+					() => ids.every((runId) => (runEvents.eventTail(runId)?.entries.length ?? 0) >= 1),
+					"run tails buffered in the background",
+				);
+				return ids;
+			};
+
+			const withoutJournal = createDispatchRunEventRegistry({ journal: null });
+			const [plainRunId] = await runIdsFor(withoutJournal);
+			ok(plainRunId !== undefined);
+			const plainTail = withoutJournal.eventTail(plainRunId);
+			ok(plainTail);
+
+			const withJournal = createDispatchRunEventRegistry();
+			const [journaledRunId] = await runIdsFor(withJournal);
+			ok(journaledRunId !== undefined);
+			const journaledTail = withJournal.eventTail(journaledRunId);
+			ok(journaledTail);
+
+			strictEqual(journaledTail.agentId, plainTail.agentId);
+			deepStrictEqual(
+				journaledTail.entries.map((entry) => [entry.type, entry.detail]),
+				plainTail.entries.map((entry) => [entry.type, entry.detail]),
+				"the journal sink does not add, drop, or rewrite a tail entry",
+			);
+
+			// The run that had a sink also has a durable transcript of exactly that
+			// tail, sealed by a receipt line and closed by a terminal line.
+			strictEqual(existsSync(runEventJournalPath(plainRunId)), false, "journal: null writes nothing");
+			await waitFor(() => readRunEventJournal(journaledRunId).terminal !== null, "the journal reached its terminal line");
+			const journal = readRunEventJournal(journaledRunId);
+			deepStrictEqual(
+				journal.lines.filter((line) => line.kind === "event").map((line) => line.type),
+				journaledTail.entries.map((entry) => entry.type),
+			);
+			ok(journal.lines.some((line) => line.kind === "receipt"));
+			strictEqual(journal.lines.at(-1)?.kind, "terminal");
+			strictEqual(journal.terminal?.outcome, bundle.contract.getRun(journaledRunId)?.outcome);
 		} finally {
 			await bundle.extension.stop?.();
 		}

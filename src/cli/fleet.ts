@@ -7,6 +7,7 @@
  *   clio-coder fleet commands init             draft a repository command registry
  *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
  *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
+ *   clio-coder fleet view <runId> [--follow]   read-only viewer for one dispatched run
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
  * Fleet contracts are repo-owned policy (.clio-coder/fleets/<name>.md). Preflight
@@ -89,6 +90,7 @@ Subcommands:
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
+  view <runId> [--follow]       read one run's ledger entry, event journal, and receipt
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
 
@@ -96,6 +98,9 @@ Notes:
   status reads the durable run ledger. Rows started by another process show
   heartbeat liveness from the recorded worker pid; per-token live meters are
   only available inside the process that owns the run.
+  view is read-only and shares no memory with the orchestrator, so it follows a
+  run from a second terminal or over SSH. Its transcript comes from the run
+  event journal, written when panes.journal is on (the default).
   drain preserves running work. Repeat it to renew the one-hour expiry; resume
   clears it early. The expiry prevents an abandoned drain from wedging Clio.
 `;
@@ -738,6 +743,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runFleet(args.slice(1));
 		case "status":
 			return runStatus(args.slice(1));
+		case "view":
+			return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 		case "drain":
 			return runAdmissionControl("drain", args.slice(1));
 		case "resume":
