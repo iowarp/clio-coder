@@ -2062,7 +2062,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...(options.toolRegistry !== undefined ? { "clio-coder/tools": "mediated" } : {}),
 				},
 			},
-			authMethods: [],
+			authMethods: [
+				{
+					id: "clio-login",
+					name: "Clio Target Auth & Setup",
+					description: "Configure models, API keys, and target endpoints in terminal",
+					type: "terminal",
+					args: ["auth", "login"],
+				},
+			],
 		} satisfies AcpInitializeResponse;
 	});
 

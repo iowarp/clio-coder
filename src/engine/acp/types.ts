@@ -94,11 +94,20 @@ export interface AcpImplementationInfo {
 	version?: string;
 }
 
+export interface AcpAuthMethod {
+	id: string;
+	name: string;
+	description?: string;
+	type: "agent" | "terminal";
+	args?: string[];
+	env?: Record<string, string>;
+}
+
 export interface AcpInitializeResponse {
 	protocolVersion?: number;
 	agentCapabilities?: Record<string, unknown>;
 	agentInfo?: AcpImplementationInfo;
-	authMethods?: unknown[];
+	authMethods?: AcpAuthMethod[];
 }
 
 export interface AcpSessionInfo {
