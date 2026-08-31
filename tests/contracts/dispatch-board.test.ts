@@ -15,6 +15,7 @@ import {
 	type DispatchBoardRow,
 	deriveRunEvidenceState,
 	dispatchStatusPresentation,
+	formatDispatchBoardLines,
 	formatTaskIslandLines,
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
@@ -124,6 +125,18 @@ describe("dispatch board island frames", () => {
 			}).join("\n"),
 		);
 		ok(rendered.includes("slots 1/2 mini:8080"), rendered);
+	});
+
+	it("shows queued endpoint work beside occupancy instead of counting it as an active slot", () => {
+		const endpoint = { key: "http://queue-test.invalid:9444", label: "queue-test:9444", limit: 1 };
+		const rendered = stripSgr(
+			formatDispatchBoardLines(
+				[makeRow({ runId: "running", endpoint }), makeRow({ runId: "queued", status: "enqueued", endpoint })],
+				100,
+			).join("\n"),
+		);
+		ok(rendered.includes("slots 1/1 +1 queued queue-test:9444"), rendered);
+		ok(!rendered.includes("slots 2/1"), rendered);
 	});
 });
 
