@@ -230,6 +230,22 @@ describe("contracts/panes slash parsing", () => {
 		strictEqual(stray.kind, "panes-usage");
 	});
 
+	it("separates the usage error from the usage line", () => {
+		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
+		ok(entry);
+		const notices: string[] = [];
+		entry.handle(parseSlashCommand("/panes show"), {
+			notice: (_level: string, text: string) => notices.push(text),
+		} as unknown as SlashCommandContext);
+		strictEqual(notices.length, 1);
+		const notice = notices[0] ?? "";
+		// The reason and the usage line used to run together as
+		// `Missing required argument: run-or-agentusage: /panes show ...`.
+		ok(!notice.includes("run-or-agentusage:"), notice);
+		strictEqual(notice.split("\n")[0], "Missing required argument: run-or-agent");
+		match(notice, /\nusage: \/panes show <run-or-agent>/);
+	});
+
 	it("knows its own preset ids", () => {
 		deepStrictEqual([...PANES_PRESET_IDS], ["yazi", "logs", "shell"]);
 		ok(isPanesPresetId("shell"));
