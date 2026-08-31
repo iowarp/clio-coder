@@ -141,6 +141,13 @@ export {
 	runtimeModelListSource,
 	supportGroupLabel,
 } from "./support.js";
+export {
+	readTargetModelSnapshot,
+	recordTargetModelSnapshot,
+	TARGET_MODEL_CACHE_TTL_MS,
+	type TargetModelSnapshot,
+	targetModelSnapshotPath,
+} from "./target-model-cache.js";
 export type {
 	CapabilityFlags,
 	StructuredOutputMode,
