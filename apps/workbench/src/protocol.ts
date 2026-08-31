@@ -1135,10 +1135,49 @@ export const RECOVERY_SECTION_IDS = [
 	"history",
 	"models",
 	"interoperability",
+	"toolchain",
+	"panes",
 	"fleet",
 	"other",
 ] as const;
 export type WireRecoverySectionId = (typeof RECOVERY_SECTION_IDS)[number];
+
+export const RECOVERY_CHECK_LEVELS = ["ok", "warn", "error"] as const;
+export type WireRecoveryCheckLevel = (typeof RECOVERY_CHECK_LEVELS)[number];
+export const MAX_WIRE_RECOVERY_CHECKS = 128;
+
+/**
+ * One diagnostic check's identity and verdict, without its detail.
+ *
+ * A doctor finding's detail is free prose that routinely quotes native paths,
+ * endpoint URLs, socket paths, model ids, and session ids, so no detail crosses
+ * this boundary. The name does, because a name is either a fixed check label or
+ * that label plus the subject it ran against, which is what turns "one models
+ * check failed" into something an operator can act on. A name that does not
+ * hold to that safe shape arrives as null rather than failing the whole sweep.
+ */
+export interface WireRecoveryCheck {
+	readonly name: string | null;
+	readonly section: WireRecoverySectionId;
+	readonly level: WireRecoveryCheckLevel;
+}
+
+/**
+ * The safe shape for a diagnostic check name.
+ *
+ * Structural rather than a fixed vocabulary, so a harness that adds a check or
+ * renames one does not break the sweep. At most five space-separated tokens of
+ * word characters, dots, plus, and dashes: enough for `Clio Coder version`,
+ * `settings.yaml`, `model blade-gateway`, and `external tool herdr`, and not
+ * enough for any of the slashes, colons, quotes, or parentheses that every
+ * native path, URL, and prose detail in a doctor report contains.
+ */
+const RECOVERY_CHECK_NAME = /^[A-Za-z0-9][\w.+-]{0,63}(?: [A-Za-z0-9][\w.+-]{0,63}){0,4}$/u;
+
+/** True when a doctor check name may cross to the browser intact. */
+export function isSafeRecoveryCheckName(value: string): boolean {
+	return value.length <= 96 && RECOVERY_CHECK_NAME.test(value);
+}
 
 export interface WireRecoveryCounts {
 	readonly checks: number;
@@ -1167,6 +1206,8 @@ export interface WireRecoveryInspection {
 	}>;
 	readonly summary: WireRecoveryCounts;
 	readonly sections: readonly WireRecoverySection[];
+	readonly checks: readonly WireRecoveryCheck[];
+	readonly checksTruncated: boolean;
 }
 
 export interface WireTarget {
@@ -4256,6 +4297,8 @@ export function validateRecoveryInspection(
 		"versions",
 		"summary",
 		"sections",
+		"checks",
+		"checksTruncated",
 	]);
 	if (record.scope !== "installation") {
 		invalid(`${label}.scope must be installation`);
@@ -4345,6 +4388,63 @@ export function validateRecoveryInspection(
 	if (healthy !== (summary.failures === 0)) {
 		invalid(`${label}.healthy contradicts its failure count`);
 	}
+	const checksTruncated = expectBoolean(
+		record.checksTruncated,
+		`${label}.checksTruncated`,
+	);
+	const checks = expectArray(
+		record.checks,
+		`${label}.checks`,
+		MAX_WIRE_RECOVERY_CHECKS,
+		(row, rowLabel): WireRecoveryCheck => {
+			const checkRecord = expectExactKeys(row, rowLabel, [
+				"name",
+				"section",
+				"level",
+			]);
+			const name = expectNullablePresentationText(
+				checkRecord.name,
+				`${rowLabel}.name`,
+				96,
+			);
+			// A name that reached here unsafe means the host projection did not do
+			// its job, so this rejects rather than redacting on the browser's behalf.
+			if (name !== null && !isSafeRecoveryCheckName(name)) {
+				invalid(`${rowLabel}.name is not a safe diagnostic check name`);
+			}
+			return {
+				name,
+				section: expectEnum(
+					checkRecord.section,
+					`${rowLabel}.section`,
+					RECOVERY_SECTION_IDS,
+				),
+				level: expectEnum(
+					checkRecord.level,
+					`${rowLabel}.level`,
+					RECOVERY_CHECK_LEVELS,
+				),
+			};
+		},
+	);
+	if (
+		checksTruncated
+			? checks.length !== MAX_WIRE_RECOVERY_CHECKS || summary.checks <= MAX_WIRE_RECOVERY_CHECKS
+			: checks.length !== summary.checks
+	) invalid(`${label}.checks contradict the reported check count`);
+	// The per-check verdicts and the per-section tallies are two projections of
+	// one sweep, so they have to agree wherever the list is complete.
+	if (!checksTruncated) {
+		for (const section of sections) {
+			const rows = checks.filter((check) => check.section === section.id);
+			if (
+				rows.length !== section.checks ||
+				rows.filter((check) => check.level === "ok").length !== section.passed ||
+				rows.filter((check) => check.level === "warn").length !== section.warnings ||
+				rows.filter((check) => check.level === "error").length !== section.failures
+			) invalid(`${label}.checks contradict section ${section.id}`);
+		}
+	}
 	return {
 		scope: "installation",
 		projectContext: expectBoolean(
@@ -4357,6 +4457,8 @@ export function validateRecoveryInspection(
 		versions,
 		summary,
 		sections,
+		checks,
+		checksTruncated,
 	};
 }
 

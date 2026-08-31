@@ -978,7 +978,19 @@ try {
 		await recoveryRecord.getByText("2 reported failures", { exact: true }).waitFor();
 		await recoveryRecord.getByText("Targets & models", { exact: true }).waitFor();
 		await recoveryRecord.getByText("0/2 passed · 1 warn · 1 fail", { exact: true }).waitFor();
-		for (const forbidden of ["/home/", "http://", "private-lab", "ssh-private", "model-secret"]) {
+		// A section carrying a warning or a failure opens itself, because that is
+		// the row the operator came here to read; a clean one stays folded.
+		const modelChecks = recoveryRecord.getByRole("list", { name: "Targets & models diagnostic checks" });
+		await modelChecks.getByText("model private-lab", { exact: true }).waitFor();
+		await modelChecks.getByText("target private-lab", { exact: true }).waitFor();
+		await recoveryRecord.getByText("external tool yazi", { exact: true }).waitFor();
+		// A clean section stays folded, so its checks are out of the accessibility
+		// tree until the operator opens it.
+		equal(await recoveryRecord.getByRole("list", { name: "Runtime diagnostic checks" }).count(), 0);
+		equal(await recoveryRecord.getByText("Unnamed check", { exact: true }).isVisible(), false);
+		await recoveryRecord.getByText("Other checks", { exact: true }).click();
+		await recoveryRecord.getByText("Unnamed check", { exact: true }).waitFor();
+		for (const forbidden of ["/home/", "http://", "model-secret", "herdr.sock", "below the floor", "10.0.0"]) {
 			equal(await recoveryRecord.getByText(forbidden, { exact: false }).count(), 0);
 		}
 		await settingsPage.screenshot({ path: new URL("settings-recovery.png", artifactDirectory).pathname });
@@ -1386,6 +1398,7 @@ try {
 			unavailableProjectExplainedAndRemovable: true,
 			bothTargetsProbedBeforeAnyHealthClaim: true,
 			recoveryUsesRedactedDoctorAndPathsAdapters: true,
+			recoveryNamesEachCheckWithoutItsDetail: true,
 			toolchainUsesPathFreeFixedAdapter: true,
 			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,

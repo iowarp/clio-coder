@@ -1,4 +1,4 @@
-import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { deepStrictEqual, equal, ok, rejects, throws } from "node:assert/strict";
 import {
 	ClioCliRecoveryInspector,
 	ClioRecoveryInspectError,
@@ -7,7 +7,7 @@ import {
 
 const FIXTURE = new URL("./recovery-inspect-child-fixture.ts", import.meta.url).pathname;
 
-Deno.test("recovery inspection aggregates fixed categories and drops raw diagnostic identities", async () => {
+Deno.test("recovery inspection names each check and drops every raw diagnostic detail", async () => {
 	const root = await Deno.makeTempDir({ prefix: "clio-coder-gui-recovery-inspect-" });
 	try {
 		const inspector = new ClioCliRecoveryInspector({
@@ -22,7 +22,7 @@ Deno.test("recovery inspection aggregates fixed categories and drops raw diagnos
 		equal(inspection.healthy, false);
 		equal(inspection.pathsResolved, 4);
 		deepStrictEqual(inspection.versions, { clioCoder: "0.3.9", node: "v24.9.0", platform: "linux-x64" });
-		deepStrictEqual(inspection.summary, { checks: 15, passed: 10, warnings: 3, failures: 2 });
+		deepStrictEqual(inspection.summary, { checks: 18, passed: 12, warnings: 4, failures: 2 });
 		deepStrictEqual(inspection.sections.find((section) => section.id === "models"), {
 			id: "models",
 			checks: 2,
@@ -30,16 +30,53 @@ Deno.test("recovery inspection aggregates fixed categories and drops raw diagnos
 			warnings: 1,
 			failures: 1,
 		});
+		// Names that classified into the sections the older projection did not know
+		// about, which previously all landed in "other".
+		deepStrictEqual(inspection.sections.find((section) => section.id === "toolchain"), {
+			id: "toolchain",
+			checks: 1,
+			passed: 0,
+			warnings: 1,
+			failures: 0,
+		});
+		deepStrictEqual(inspection.sections.find((section) => section.id === "panes"), {
+			id: "panes",
+			checks: 1,
+			passed: 1,
+			warnings: 0,
+			failures: 0,
+		});
+
+		equal(inspection.checks.length, inspection.summary.checks);
+		equal(inspection.checksTruncated, false);
+		// The subject a check ran against crosses with it: that is what makes the
+		// verdict actionable rather than "one models check failed".
+		deepStrictEqual(
+			inspection.checks.find((check) => check.name === "model private-lab"),
+			{ name: "model private-lab", section: "models", level: "error" },
+		);
+		deepStrictEqual(
+			inspection.checks.find((check) => check.name === "external tool yazi"),
+			{ name: "external tool yazi", section: "toolchain", level: "warn" },
+		);
+		// A name carrying a native path keeps its verdict and section and loses the
+		// name, rather than blanking the whole sweep.
+		deepStrictEqual(
+			inspection.checks.filter((check) => check.name === null),
+			[{ name: null, section: "other", level: "ok" }],
+		);
+
 		const frame = JSON.stringify(inspection);
 		for (
 			const forbidden of [
 				"researcher",
-				"private-lab",
 				"model-secret",
-				"private-peer",
-				"ssh-private",
 				"10.0.0",
 				"secretToken",
+				"/private/",
+				"http://",
+				"herdr.sock",
+				"below the floor",
 			]
 		) ok(!frame.includes(forbidden), `recovery projection leaked ${forbidden}`);
 	} finally {
@@ -48,43 +85,30 @@ Deno.test("recovery inspection aggregates fixed categories and drops raw diagnos
 });
 
 Deno.test("recovery projection rejects contradictory summaries and invalid path roots", () => {
-	const doctor = { ok: true, fix: false, findings: [{ ok: false, name: "settings.yaml", detail: "invalid" }] };
-	rejects(
-		Promise.resolve().then(() =>
+	const roots = { config: "/a", data: "/b", state: "/c", cache: "/d" };
+	const at = "2026-08-30T15:00:00.000Z";
+	throws(
+		() =>
 			projectRecoveryInspection(
-				doctor,
-				{
-					config: "/a",
-					data: "/b",
-					state: "/c",
-					cache: "/d",
-				},
-				"2026-08-30T15:00:00.000Z",
+				{ ok: true, fix: false, findings: [{ ok: false, name: "settings.yaml", detail: "invalid" }] },
+				roots,
+				at,
 				false,
-			)
-		),
+			),
 		/contradictory diagnostic summary/u,
 	);
-	rejects(
-		Promise.resolve().then(() =>
+	throws(
+		() =>
 			projectRecoveryInspection(
 				{ ok: true, fix: false, findings: [{ ok: true, name: "Clio Coder version", detail: "0.3.9" }] },
-				{ config: "relative", data: "/b", state: "/c", cache: "/d" },
-				"2026-08-30T15:00:00.000Z",
+				{ ...roots, config: "relative" },
+				at,
 				false,
-			)
-		),
+			),
 		/invalid path resolution report/u,
 	);
-	rejects(
-		Promise.resolve().then(() =>
-			projectRecoveryInspection(
-				{ ok: true, fix: false, findings: [] },
-				{ config: "/a", data: "/b", state: "/c", cache: "/d" },
-				"2026-08-30T15:00:00.000Z",
-				false,
-			)
-		),
+	throws(
+		() => projectRecoveryInspection({ ok: true, fix: false, findings: [] }, roots, at, /* projectContext */ false),
 		/invalid diagnostic report/u,
 	);
 });

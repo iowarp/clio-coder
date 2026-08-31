@@ -158,7 +158,7 @@ export function recoveryInspectionFixture(): WireRecoveryInspection {
 		healthy: false,
 		pathsResolved: 4,
 		versions: { clioCoder: "0.3.9", node: "v24.9.0", platform: "linux-x64" },
-		summary: { checks: 15, passed: 10, warnings: 3, failures: 2 },
+		summary: { checks: 18, passed: 12, warnings: 4, failures: 2 },
 		sections: [
 			{ id: "runtime", checks: 4, passed: 4, warnings: 0, failures: 0 },
 			{ id: "storage", checks: 4, passed: 4, warnings: 0, failures: 0 },
@@ -172,8 +172,33 @@ export function recoveryInspectionFixture(): WireRecoveryInspection {
 				warnings: 1,
 				failures: 0,
 			},
+			{ id: "toolchain", checks: 1, passed: 0, warnings: 1, failures: 0 },
+			{ id: "panes", checks: 1, passed: 1, warnings: 0, failures: 0 },
 			{ id: "fleet", checks: 1, passed: 0, warnings: 1, failures: 0 },
+			{ id: "other", checks: 1, passed: 1, warnings: 0, failures: 0 },
 		],
+		checks: [
+			{ name: "Clio Coder version", section: "runtime", level: "ok" },
+			{ name: "node version", section: "runtime", level: "ok" },
+			{ name: "platform", section: "runtime", level: "ok" },
+			{ name: "engine runtime", section: "runtime", level: "ok" },
+			{ name: "config dir", section: "storage", level: "ok" },
+			{ name: "data dir", section: "storage", level: "ok" },
+			{ name: "state dir", section: "storage", level: "ok" },
+			{ name: "cache dir", section: "storage", level: "ok" },
+			{ name: "settings.yaml", section: "configuration", level: "error" },
+			{ name: "credentials", section: "configuration", level: "ok" },
+			{ name: "session store", section: "history", level: "ok" },
+			{ name: "target private-lab", section: "models", level: "warn" },
+			{ name: "model private-lab", section: "models", level: "error" },
+			{ name: "interop private-peer", section: "interoperability", level: "warn" },
+			{ name: "fleet node ssh-private", section: "fleet", level: "warn" },
+			{ name: "external tool yazi", section: "toolchain", level: "warn" },
+			{ name: "panes socket", section: "panes", level: "ok" },
+			// A check whose name held a native path arrives unnamed.
+			{ name: null, section: "other", level: "ok" },
+		],
+		checksTruncated: false,
 	};
 }
 

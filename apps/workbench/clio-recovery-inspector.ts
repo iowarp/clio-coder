@@ -10,7 +10,10 @@ import { isAbsolute, resolve } from "node:path";
 import { ClioReadCommandError, ClioReadCommandRunner } from "./clio-read-command.ts";
 import {
 	type CommandErrorCode,
+	isSafeRecoveryCheckName,
+	MAX_WIRE_RECOVERY_CHECKS,
 	RECOVERY_SECTION_IDS,
+	type WireRecoveryCheck,
 	type WireRecoveryInspection,
 	type WireRecoverySectionId,
 } from "./src/protocol.ts";
@@ -69,13 +72,18 @@ function sectionFor(name: string): WireRecoverySectionId {
 	if (name === "Clio Coder version" || name === "node version" || name === "platform" || name === "engine runtime") {
 		return "runtime";
 	}
-	if (name === "config dir" || name === "data dir" || name === "state dir" || name === "cache dir") {
-		return "storage";
-	}
+	if (
+		name === "config dir" || name === "data dir" || name === "state dir" || name === "cache dir" ||
+		name === "state storage"
+	) return "storage";
 	if (name === "settings.yaml" || name === "credentials") return "configuration";
 	if (name === "state metadata" || name === "session store" || name === "cache telemetry") return "history";
 	if (name.startsWith("model ") || name.startsWith("target ")) return "models";
 	if (name.startsWith("interop ")) return "interoperability";
+	// The pinned external programs and the managed Yazi profile are one operator
+	// concern, and the Toolchain panel is where its inventory already lives.
+	if (name.startsWith("external tool ") || name === "yazi managed profile") return "toolchain";
+	if (name.startsWith("panes ")) return "panes";
 	if (name.startsWith("fleet ")) return "fleet";
 	return "other";
 }
@@ -121,6 +129,7 @@ export function projectRecoveryInspection(
 	}
 	const sections = new Map<WireRecoverySectionId, MutableCounts>();
 	const summary: MutableCounts = { checks: 0, passed: 0, warnings: 0, failures: 0 };
+	const checks: WireRecoveryCheck[] = [];
 	let clioCoderVersion: string | null = null;
 	let nodeVersion: string | null = null;
 	let platform: string | null = null;
@@ -152,6 +161,17 @@ export function projectRecoveryInspection(
 			summary.failures += 1;
 		}
 		sections.set(sectionId, counts);
+		// The detail is free prose that quotes native paths, endpoint URLs, socket
+		// paths, model ids, and session ids, so only the name and verdict cross. A
+		// name that is not name-shaped is dropped rather than failing the sweep,
+		// because a harness that renames a check must not blank the whole panel.
+		if (checks.length < MAX_WIRE_RECOVERY_CHECKS) {
+			checks.push({
+				name: isSafeRecoveryCheckName(name) ? name : null,
+				section: sectionId,
+				level,
+			});
+		}
 
 		if (name === "Clio Coder version") clioCoderVersion = safeVersion(detail, false);
 		else if (name === "node version") nodeVersion = safeVersion(detail, true);
@@ -173,6 +193,8 @@ export function projectRecoveryInspection(
 			const counts = sections.get(id);
 			return counts === undefined ? [] : [{ id, ...counts }];
 		}),
+		checks,
+		checksTruncated: summary.checks > checks.length,
 	};
 }
 

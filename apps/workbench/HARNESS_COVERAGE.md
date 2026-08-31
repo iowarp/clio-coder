@@ -80,6 +80,13 @@ It validates 31 server event kinds:
 That closed set is an asset. New harness areas should enter as small typed DTO families, not as a generic “run CLI” or
 “render JSON” escape hatch.
 
+Redaction is a decision about which field, not about which record. A doctor finding is the clearest case: its detail is
+free prose that routinely quotes native paths, endpoint URLs, socket paths, model ids, and session ids, and no version
+of it can safely cross. Its name is a fixed check label plus the subject the check ran against, which is a different
+kind of fact and is what separates “one models check failed” from “model zbook failed”. So the detail stays on the host
+and the name crosses, subject to a structural shape rule rather than a fixed vocabulary, so that a harness renaming a
+check costs that check its name and nothing else costs the sweep.
+
 A harness fact that is genuinely part of an existing family widens that family's DTO instead of claiming a new command
 kind. The fleet-root step index arrived that way: it is the parent of the durable runs `fleet.inspect` already reads, so
 it rides the same fixed read and the same `fleet.inspection.state` event rather than paying for a second child process

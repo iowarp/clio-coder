@@ -1283,13 +1283,24 @@ Deno.test("settings renders redacted Clio Coder recovery diagnostics without raw
 	match(html, /0\/2 passed · 1 warn · 1 fail/u);
 	match(html, /0\.3\.9/u);
 	match(html, /selected-project context/u);
+	// Each check reaches the panel by name and verdict, which is what turns a
+	// section tally into something an operator can act on.
+	match(html, /External toolchain/u);
+	match(html, /Panes host/u);
+	match(html, /model private-lab/u);
+	match(html, /external tool yazi/u);
+	match(html, /Unnamed check/u);
+	match(html, /Failed/u);
+	match(html, /Warning/u);
 	for (
 		const forbidden of [
 			"/private/",
 			"http://",
 			"model-secret",
-			"ssh-private",
 			"settings.yaml is invalid",
+			"herdr.sock",
+			"below the floor",
+			"10.0.0",
 		]
 	) {
 		ok(!html.includes(forbidden), `recovery UI leaked ${forbidden}`);
