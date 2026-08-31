@@ -22,6 +22,7 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,6 +43,7 @@ import {
 	resetVersionProbeCache,
 	resolveEntryBinary,
 	resolveToolBinary,
+	STALE_STAGING_MS,
 	satisfiesMinimum,
 	type ToolStatus,
 	toolVersionDir,
@@ -432,8 +434,44 @@ describe("toolchain install pruning", () => {
 
 		const outcome = pruneSupersededVersions("staged", "1.0.0", { root });
 		deepStrictEqual(outcome.removed, [], "a dot-prefixed staging directory is not a version");
+		deepStrictEqual(outcome.staleStaging, [], "a directory made moments ago is not abandoned");
 		ok(existsSync(staging), "the directory another installer is filling survives the prune");
 		deepStrictEqual(installedToolVersions("staged", { root }), ["1.0.0"]);
+	});
+
+	it("sweeps a staging directory old enough that no install could still own it", async () => {
+		const payload = Buffer.from("#!/bin/sh\necho swept\n");
+		const entry = versionedEntry("abandoned", "1.0.0", payload);
+		const first = await installPinnedTool(entry, { root, platform: "linux-x64", fetch: async () => payload });
+		ok(first.ok, first.message);
+		const dead = age(join(root, "abandoned", ".1.0.0.incomplete-31337-k9"), STALE_STAGING_MS + 60_000);
+		const retired = age(join(root, "abandoned", ".0.9.0.replaced-31337-k8"), STALE_STAGING_MS + 60_000);
+		const live = age(join(root, "abandoned", ".2.0.0.incomplete-31338-m1"), 1_000);
+		// Something the operator parked here themselves. It is dot-prefixed and old,
+		// and it is still not the installer's to delete.
+		const foreign = age(join(root, "abandoned", ".notes"), STALE_STAGING_MS + 60_000);
+
+		const outcome = pruneSupersededVersions("abandoned", "1.0.0", { root });
+		deepStrictEqual(outcome.staleStaging, [".0.9.0.replaced-31337-k8", ".1.0.0.incomplete-31337-k9"]);
+		match(outcome.message, /swept 2 abandoned install directories/);
+		strictEqual(existsSync(dead), false);
+		strictEqual(existsSync(retired), false);
+		ok(existsSync(live), "a staging directory made a second ago belongs to a running install");
+		ok(existsSync(foreign), "a name the installer never produces is not the installer's to delete");
+		deepStrictEqual(installedToolVersions("abandoned", { root }), ["1.0.0"], "the pinned version is untouched");
+	});
+
+	it("names the sweep in the install result when a killed install left litter", async () => {
+		const payload = Buffer.from("#!/bin/sh\necho repaired\n");
+		const entry = versionedEntry("litter", "1.0.0", payload);
+		const first = await installPinnedTool(entry, { root, platform: "linux-x64", fetch: async () => payload });
+		ok(first.ok, first.message);
+		age(join(root, "litter", ".1.0.0.incomplete-9-a"), STALE_STAGING_MS + 60_000);
+
+		const second = await installPinnedTool(entry, { root, platform: "linux-x64", fetch: async () => payload });
+		ok(second.ok, second.message);
+		strictEqual(second.skipped, true);
+		match(second.message, /swept 1 abandoned install directory/);
 	});
 });
 
@@ -481,7 +519,7 @@ describe("toolchain remove", () => {
 		match(result.message, /herdr is not installed under .*herdr; nothing to remove/);
 	});
 
-	it("keeps a staging directory it cannot claim, and still removes every version", () => {
+	it("keeps a staging directory a running install could still own, and still removes every version", () => {
 		vendorVersion(root, "herdr", "0.8.2", "herdr");
 		const staging = join(root, "herdr", ".0.9.0.incomplete-77-zz");
 		mkdirSync(staging, { recursive: true });
@@ -489,9 +527,23 @@ describe("toolchain remove", () => {
 		const result = removeTool("herdr", { root });
 		ok(result.ok, result.message);
 		deepStrictEqual(result.removed, ["0.8.2"]);
+		deepStrictEqual(result.staleStaging, []);
 		ok(existsSync(staging), "a live installer's staging directory is not swept up");
+		ok(existsSync(join(root, "herdr")), "and the directory holding it survives with it");
 		deepStrictEqual(installedToolVersions("herdr", { root }), []);
 		rmSync(join(root, "herdr"), { recursive: true, force: true });
+	});
+
+	it("takes the tool directory when the only thing left in it is an abandoned install", () => {
+		vendorVersion(root, "yazi", "26.8.15", "yazi");
+		age(join(root, "yazi", ".26.8.15.incomplete-5-b"), STALE_STAGING_MS + 60_000);
+
+		const result = removeTool("yazi", { root });
+		ok(result.ok, result.message);
+		deepStrictEqual(result.removed, ["26.8.15"]);
+		deepStrictEqual(result.staleStaging, [".26.8.15.incomplete-5-b"]);
+		match(result.message, /swept 1 abandoned install directory/);
+		strictEqual(existsSync(join(root, "yazi")), false, "nothing is left to hold the directory open");
 	});
 });
 
@@ -708,6 +760,14 @@ function versionedEntry(id: string, version: string, payload: Buffer): PinnedToo
 		},
 		documents: [],
 	};
+}
+
+/** Create a directory and backdate it by `ageMs`, returning its path. */
+function age(path: string, ageMs: number): string {
+	mkdirSync(path, { recursive: true });
+	const when = new Date(Date.now() - ageMs);
+	utimesSync(path, when, when);
+	return path;
 }
 
 /** A vendored version directory placed by hand, the way an install leaves one. */
