@@ -30,6 +30,7 @@ import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { mutationReport } from "../harness/gate-fabric.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
@@ -39,8 +40,13 @@ const approvedDispatch = {
 	approval: { requestId: "test-ledger-approval", requestedBy: "test-operator", actionClass: "dispatch" as const },
 };
 
-async function waitFor(predicate: () => boolean, message: string, timeoutMs = 8000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
+/**
+ * A watchdog on a ledger write that lands off the caller's stack. It asserts
+ * the write arrives, not that it arrives quickly, so the budget widens with the
+ * shard load the run carries; alone it stays the 8s it always was.
+ */
+async function waitFor(predicate: () => boolean, message: string, budgetMs = 8000): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(budgetMs);
 	while (Date.now() <= deadline) {
 		if (predicate()) return;
 		await new Promise((resolve) => setTimeout(resolve, 10));
@@ -355,8 +361,17 @@ describe("contracts/agent-ledger composition: dispatch tool", () => {
 			const result = await call;
 			const runIds = result.details?.assignmentIds as string[];
 			strictEqual(runIds.length, 2);
-			for (const runId of runIds) ok(bundle.contract.getRun(runId)?.status !== "running", "each run settled");
-			ok(typeof readAgentLedger(ledgerId)?.closedAt === "string", "settlement closes the board");
+			// The tool resolving is not the same event as the run rows leaving
+			// "running": the batch's own settlement writes them, and that write
+			// lands a tick later. Reading them synchronously off `await call` was
+			// an ordering assumption that only held while the box was idle enough
+			// for the tick to have already run. Waiting for the same condition
+			// proves the same thing without depending on which tick it lands in.
+			await waitFor(
+				() => runIds.every((runId) => bundle.contract.getRun(runId)?.status !== "running"),
+				"each run settled",
+			);
+			await waitFor(() => typeof readAgentLedger(ledgerId)?.closedAt === "string", "settlement closes the board");
 			// The board the peers built is what the main model reads back, rendered
 			// the same way its workers saw it and attributed the same way.
 			const output = result.kind === "ok" ? result.output : result.message;
