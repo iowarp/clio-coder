@@ -162,14 +162,26 @@ export function muxErrorKind(wireCode: string): MuxErrorKind {
 /** Diagnostic sink. The mux never throws at its callers, so this is how failures surface. */
 export type MuxLog = (level: "debug" | "info" | "warning", message: string) => void;
 
+/** Terminal outcome a run's viewer pane records, for the close and label policies. */
+export type MuxRunOutcome = "succeeded" | "failed" | "canceled" | "timed_out";
+
 /** Display state a run projects onto its viewer pane. */
 export interface MuxRunDisplayState {
 	/** Clio phase label; becomes a metadata token. */
 	phase: string;
 	agentState: MuxReportableAgentState;
 	model?: string;
-	outcome?: "succeeded" | "failed" | "canceled" | "timed_out";
+	outcome?: MuxRunOutcome;
+	/**
+	 * Per-state sidebar label overrides, e.g. `{ idle: "review ready" }`. Spec
+	 * 4.7 asks for one on the terminal report so a finished run does not read as
+	 * an idle shell.
+	 */
+	stateLabels?: Readonly<Record<string, string>>;
 }
+
+/** The three sounds `notification.show` accepts, per protocol 17's schema. */
+export type MuxNotificationSound = "none" | "done" | "request";
 
 /** What Clio reports about its own hosting pane in guest mode (SA-3). */
 export interface MuxSelfReport {
@@ -196,5 +208,11 @@ export interface MuxPaneRecord {
 	runId: string | null;
 	agentId: string | null;
 	/** Last outcome reported through `reportRunState`, used by the close policy. */
-	outcome: MuxRunDisplayState["outcome"] | null;
+	outcome: MuxRunOutcome | null;
+	/**
+	 * True when the record was adopted from a snapshot at boot rather than
+	 * created in this process. The bridge reads it so a resumed session reports
+	 * onto the pane it found instead of opening a second one.
+	 */
+	adopted?: boolean;
 }

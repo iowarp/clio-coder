@@ -98,5 +98,6 @@ export function paneRecord(
 		runId: fields.runId ?? null,
 		agentId: fields.agentId ?? null,
 		outcome: fields.outcome ?? null,
+		...(fields.adopted === true ? { adopted: true } : {}),
 	};
 }

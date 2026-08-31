@@ -17,12 +17,14 @@
 import type { DomainContract } from "../../core/domain-loader.js";
 import type { MuxDetection } from "./detect.js";
 import { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";
+import { muxSupportsMethod } from "./protocol.js";
 import type { MuxClient, MuxSubscription } from "./socket-client.js";
 import {
 	MuxError,
 	type MuxEvent,
 	type MuxLog,
 	type MuxMode,
+	type MuxNotificationSound,
 	type MuxPaneRecord,
 	type MuxPaneRef,
 	type MuxReportableAgentState,
@@ -62,19 +64,49 @@ export interface MuxOpenUtilityPaneRequest {
 export interface MuxNotifyRequest {
 	title: string;
 	body?: string;
-	sound?: "none" | "done" | "request";
+	sound?: MuxNotificationSound;
+}
+
+/** One still-running run a resumed session wants its viewer pane back for. */
+export interface MuxAdoptableRun {
+	runId: string;
+	agentId: string;
+	label: string;
 }
 
 export interface MuxContract extends DomainContract {
 	readonly mode: MuxMode;
 	/** `mode !== "none"` and the socket is currently healthy. */
 	available(): boolean;
+	/**
+	 * The rung detection resolved to, with the socket it answered on and the
+	 * protocol recorded from the handshake. `/panes` and `clio-coder doctor`
+	 * print it; the focus and notify ladders gate on its protocol.
+	 */
+	detection(): Readonly<MuxDetection>;
 	openRunPane(request: MuxOpenRunPaneRequest): Promise<MuxPaneRef | null>;
 	focusRunPane(runId: string): Promise<boolean>;
 	closeRunPane(runId: string, options?: { keepOnFailure?: boolean }): Promise<void>;
 	openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null>;
+	/** Close one Clio-created pane by pane id. Refuses a pane Clio did not create. */
+	closePane(paneId: string): Promise<boolean>;
 	reportRunState(runId: string, state: MuxRunDisplayState): Promise<void>;
 	notify(request: MuxNotifyRequest): Promise<void>;
+	/**
+	 * Re-adopt viewer panes that outlived the process that made them.
+	 *
+	 * A resumed session takes a fresh `session.snapshot` and claims back every
+	 * pane carrying Clio's owner token whose `run` token names a run the caller
+	 * says is still going. That is what stops a restart from opening a second
+	 * pane beside the one already on screen. Returns the runs it adopted.
+	 */
+	adoptRunPanes(runs: ReadonlyArray<MuxAdoptableRun>): Promise<ReadonlyArray<string>>;
+	/**
+	 * Called when a pane Clio owns leaves, whether the user closed it or the
+	 * program in it exited. The bridge records the run id and does not reopen:
+	 * a closed viewer pane is a decision, not a fault.
+	 */
+	onPaneGone(handler: (record: MuxPaneRecord) => void): () => void;
 	/** Panes Clio created, with their purpose and run id. */
 	list(): ReadonlyArray<MuxPaneRecord>;
 	/**
@@ -140,6 +172,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	let stopped = false;
 	let subscription: MuxSubscription | null = null;
 	let fleetTab: FleetTab | null = null;
+	const paneGoneHandlers = new Set<(record: MuxPaneRecord) => void>();
 
 	const degrade = (what: string, error: unknown): void => {
 		const message = error instanceof Error ? error.message : String(error);
@@ -238,6 +271,13 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		const dropped = registry.forget(event.paneId);
 		if (dropped) {
 			log("debug", `mux pane ${event.paneId} left on ${event.kind}; dropped from the registry`);
+			for (const handler of paneGoneHandlers) {
+				try {
+					handler(dropped);
+				} catch (error) {
+					log("debug", `mux pane-gone handler threw: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
 		}
 	};
 
@@ -246,6 +286,10 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 
 		available(): boolean {
 			return usable();
+		},
+
+		detection(): Readonly<MuxDetection> {
+			return detection;
 		},
 
 		async openRunPane(request: MuxOpenRunPaneRequest): Promise<MuxPaneRef | null> {
@@ -298,8 +342,24 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return await attempt(
 				"focusRunPane",
 				async (live) => {
-					// herdr has no pane.focus method. agent.focus arrives in phase 3;
-					// focusing the pane's tab is the documented fallback until then.
+					// herdr has no pane.focus method, so this is a two-rung ladder.
+					// agent.focus is preferred because it additionally marks the pane
+					// seen, clearing herdr's attention state; it resolves for a viewer
+					// pane exactly because pane.report_agent gave that pane agent
+					// authority. A pane that never got authority, or a server too old
+					// for the method, falls back to focusing the pane's tab, which is
+					// what phase 1 did for every pane.
+					if (muxSupportsMethod(detection.server, "agent.focus")) {
+						try {
+							await live.agentFocus(entry.ref.paneId);
+							return true;
+						} catch (error) {
+							// A transport failure has to reach `attempt` so the contract
+							// degrades; anything the server refused is a reason to fall back.
+							if (error instanceof MuxError && (error.kind === "transport" || error.kind === "timeout")) throw error;
+							log("debug", `mux agent.focus on ${entry.ref.paneId} refused; falling back to tab.focus`);
+						}
+					}
 					await live.tabFocus(entry.ref.tabId);
 					return true;
 				},
@@ -323,6 +383,22 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					return undefined;
 				},
 				undefined,
+			);
+		},
+
+		async closePane(paneId: string): Promise<boolean> {
+			// Spec 4.4's ownership rule, restated for the operator-facing path:
+			// `/panes close` addresses panes by id and must refuse anything the
+			// registry does not hold.
+			if (!registry.owns(paneId)) return false;
+			return await attempt(
+				"closePane",
+				async (live) => {
+					await live.paneClose(paneId);
+					registry.forget(paneId);
+					return true;
+				},
+				false,
 			);
 		},
 
@@ -368,10 +444,15 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						tokens: {
 							[OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE,
 							role: token(entry.agentId),
+							run: token(entry.runId),
 							phase: token(state.phase),
 							model: token(state.model),
 							outcome: token(state.outcome),
 						},
+						// A finished run reported as `idle` reads in herdr's sidebar
+						// exactly like an untouched shell. The override is what makes a
+						// terminal pane say what it is holding.
+						...(state.stateLabels ? { stateLabels: state.stateLabels } : {}),
 					});
 					return undefined;
 				},
@@ -380,10 +461,73 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		},
 
 		async notify(request: MuxNotifyRequest): Promise<void> {
-			// `notification.show` is phase 3 wire surface. Phase 1 keeps the method on
-			// the contract so the bridge can be written against it, and records the
-			// intent in the log rather than silently dropping it.
-			log("debug", `mux notify (not wired until phase 3): ${request.title}`);
+			if (!muxSupportsMethod(detection.server, "notification.show")) {
+				log("debug", `mux notify skipped, server protocol is below the notification.show floor: ${request.title}`);
+				return;
+			}
+			await attempt(
+				"notify",
+				async (live) => {
+					const result = await live.notificationShow({
+						title: request.title,
+						...(request.body ? { body: request.body } : {}),
+						...(request.sound ? { sound: request.sound } : {}),
+					});
+					// A suppressed toast is the operator's own herdr config talking
+					// (disabled, rate limited, no foreground client). Reporting it as a
+					// warning would turn their setting into Clio's error.
+					if (!result.shown) log("debug", `mux notify not shown (${result.reason}): ${request.title}`);
+					return undefined;
+				},
+				undefined,
+			);
+		},
+
+		async adoptRunPanes(runs: ReadonlyArray<MuxAdoptableRun>): Promise<ReadonlyArray<string>> {
+			if (runs.length === 0) return [];
+			const wanted = new Map(runs.map((run) => [run.runId, run]));
+			return await attempt(
+				"adoptRunPanes",
+				async (live) => {
+					const snapshot = await live.snapshot();
+					const adopted: string[] = [];
+					for (const pane of snapshot.panes) {
+						if (pane.tokens[OWNER_TOKEN_KEY] !== OWNER_TOKEN_VALUE) continue;
+						const runId = pane.tokens.run;
+						if (runId === undefined) continue;
+						const run = wanted.get(runId);
+						// A run that already has a pane in this process wins: the record
+						// here is live and the snapshot is a moment old.
+						if (!run || registry.byRunId(runId) || registry.owns(pane.paneId)) continue;
+						registry.record(
+							paneRecord(
+								{ paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId },
+								{
+									purpose: "run",
+									label: run.label,
+									openedAt: now(),
+									runId,
+									agentId: run.agentId,
+									adopted: true,
+								},
+							),
+						);
+						adopted.push(runId);
+					}
+					if (adopted.length > 0) {
+						log("info", `mux adopted ${adopted.length} viewer pane(s) left open by a previous session`);
+					}
+					return adopted;
+				},
+				[],
+			);
+		},
+
+		onPaneGone(handler: (record: MuxPaneRecord) => void): () => void {
+			paneGoneHandlers.add(handler);
+			return () => {
+				paneGoneHandlers.delete(handler);
+			};
 		},
 
 		list(): ReadonlyArray<MuxPaneRecord> {
@@ -418,6 +562,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			subscription?.close();
 			subscription = null;
 			fleetTab = null;
+			paneGoneHandlers.clear();
 			registry.clear();
 			if (client) await client.close().catch(() => undefined);
 		},

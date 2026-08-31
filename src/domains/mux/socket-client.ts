@@ -37,6 +37,7 @@ import {
 	type MuxEvent,
 	type MuxEventKind,
 	type MuxLog,
+	type MuxNotificationSound,
 	type MuxPane,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
@@ -117,6 +118,22 @@ export interface MuxSubscribeOptions {
 	onResync?: (snapshot: MuxSnapshot) => void;
 }
 
+export interface MuxNotificationRequest {
+	title: string;
+	body?: string;
+	sound?: MuxNotificationSound;
+}
+
+/**
+ * What the server did with a toast. `shown: false` is a normal answer: the
+ * operator's own herdr config can disable toasts, rate-limit them, or have no
+ * foreground client to paint one, and none of those is a Clio failure.
+ */
+export interface MuxNotificationResult {
+	shown: boolean;
+	reason: string;
+}
+
 /**
  * The domain-facing surface. Phase 1 covers exactly the wire methods spec 4.3
  * lists for this phase, plus `pane.send_text`, `pane.report_agent`,
@@ -152,6 +169,18 @@ export interface MuxClient {
 	/** Takes agent authority over a pane. Only ever called on Clio-owned panes and Clio's own pane. */
 	paneReportAgent(request: MuxReportAgentRequest): Promise<void>;
 	paneReportMetadata(request: MuxReportMetadataRequest): Promise<void>;
+	/**
+	 * Ask the foreground client to paint a toast. Protocol-gated; see
+	 * `protocol.ts`. The server answers whether it painted one and why not.
+	 */
+	notificationShow(request: MuxNotificationRequest): Promise<MuxNotificationResult>;
+	/**
+	 * Focus the pane hosting an agent, and clear herdr's attention state on it.
+	 * `target` is a pane id for panes Clio gave agent authority through
+	 * `pane.report_agent`, or an agent name. Protocol-gated; `tab.focus` is the
+	 * fallback for a pane with no agent authority.
+	 */
+	agentFocus(target: string): Promise<void>;
 
 	subscribe(
 		kinds: ReadonlyArray<MuxEventKind>,
@@ -670,6 +699,22 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 					ttl_ms: request.ttlMs,
 				}),
 			);
+		},
+		async notificationShow(request: MuxNotificationRequest): Promise<MuxNotificationResult> {
+			const result = await callObject(
+				"notification.show",
+				params({ title: request.title, body: request.body, sound: request.sound }),
+			);
+			// `reason` is required on the wire, but a server that grows a new one
+			// must not turn a painted toast into a protocol error, so an unreadable
+			// reason degrades to the shown flag alone.
+			return {
+				shown: result.shown === true,
+				reason: optionalString(result, "reason") ?? (result.shown === true ? "shown" : "unknown"),
+			};
+		},
+		async agentFocus(target: string): Promise<void> {
+			await call("agent.focus", { target });
 		},
 		subscribe,
 		async close(): Promise<void> {
