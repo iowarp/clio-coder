@@ -86,7 +86,7 @@ export async function installPinnedTool(
 		return failure(entry.id, entry.version, dir, `no pinned asset for ${platform}`);
 	}
 
-	const installedBinaries = Object.keys(download.binaryMembers).map((name) => join(dir, executableName(name)));
+	const installedBinaries = Object.keys(download.binaryMembers).map((name) => join(dir, executableName(name, platform)));
 	if (!options.force && installedBinaries.every((path) => existsSync(path))) {
 		const swept = prune(root, entry);
 		return {
@@ -174,10 +174,10 @@ export async function installPinnedTool(
 		for (const [name, memberPath] of Object.entries(download.binaryMembers)) {
 			const member = members.get(memberPath);
 			if (member === undefined) continue;
-			const target = join(staging, executableName(name));
+			const target = join(staging, executableName(name, platform));
 			writeFileSync(target, member.data);
 			chmodSync(target, 0o755);
-			binaries.push(join(dir, executableName(name)));
+			binaries.push(join(dir, executableName(name, platform)));
 		}
 		for (const memberPath of download.documentMembers) {
 			const member = members.get(memberPath);
@@ -306,8 +306,16 @@ function sha256(bytes: Buffer): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-function executableName(name: string): string {
-	return process.platform === "win32" ? `${name}.exe` : name;
+/**
+ * What a binary is called once installed, for the platform being installed.
+ *
+ * Keyed off the target rather than `process.platform`, because `--platform`
+ * exists: installing the win32 asset from Linux has to write `herdr.exe`, and
+ * writing `herdr` there would produce a directory Windows could never run and
+ * that the resolution ladder on Windows would report as not installed.
+ */
+function executableName(name: string, platform: ToolPlatform): string {
+	return platform.startsWith("win32") ? `${name}.exe` : name;
 }
 
 function failure(id: string, version: string, dir: string, message: string): ToolInstallResult {

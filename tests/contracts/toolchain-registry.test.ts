@@ -45,6 +45,7 @@ import {
 	resolveToolBinary,
 	STALE_STAGING_MS,
 	satisfiesMinimum,
+	type ToolPlatform,
 	type ToolStatus,
 	toolVersionDir,
 } from "../../src/domains/toolchain/index.js";
@@ -97,12 +98,35 @@ describe("toolchain registry table", () => {
 		strictEqual(byId.get("croc")?.license, "MIT");
 	});
 
-	it("declares every native Linux and macOS platform published for the pins", () => {
+	/**
+	 * A platform is declared only where its asset was downloaded and hashed, and
+	 * only where the installer can actually place what the asset contains. Both
+	 * halves matter: herdr publishes a Windows zip whose ConPTY runtime has to
+	 * live in a subdirectory, and the installer flattens every member to its
+	 * basename, so declaring it would produce an install that verifies and
+	 * unpacks cleanly and cannot run.
+	 */
+	it("declares the platforms whose assets were fetched, hashed, and are placeable", () => {
 		const byId = new Map(PINNED_TOOLS.map((entry) => [entry.id, entry]));
 		for (const id of ["herdr", "yazi", "croc"]) {
 			const entry = byId.get(id);
 			ok(entry !== undefined, `${id} is pinned`);
-			deepStrictEqual(Object.keys(entry.downloads).sort(), FOUR_NATIVE_PLATFORMS, `${id} has all four assets`);
+			for (const platform of FOUR_NATIVE_PLATFORMS) {
+				ok(entry.downloads[platform as ToolPlatform] !== undefined, `${id} declares ${platform}`);
+			}
+		}
+		deepStrictEqual(Object.keys(byId.get("herdr")?.downloads ?? {}).sort(), FOUR_NATIVE_PLATFORMS);
+		deepStrictEqual(Object.keys(byId.get("yazi")?.downloads ?? {}).sort(), [...FOUR_NATIVE_PLATFORMS, "win32-x64"]);
+		deepStrictEqual(Object.keys(byId.get("croc")?.downloads ?? {}).sort(), [...FOUR_NATIVE_PLATFORMS, "win32-x64"]);
+	});
+
+	it("names Windows members with the extension Windows needs", () => {
+		for (const entry of PINNED_TOOLS) {
+			const windows = entry.downloads["win32-x64"];
+			if (windows === undefined) continue;
+			for (const [name, memberPath] of Object.entries(windows.binaryMembers)) {
+				ok(memberPath.endsWith(`${name}.exe`), `${entry.id} win32 member for ${name} is an .exe`);
+			}
 		}
 	});
 
@@ -200,6 +224,36 @@ describe("toolchain install", () => {
 		strictEqual(result.ok, false);
 		match(result.message, /checksum mismatch/);
 		strictEqual(existsSync(join(root, "fake-doc", entry.version)), false);
+	});
+
+	it("names a win32 install's binaries with .exe even when installed from another platform", async () => {
+		const archive = buildZip([
+			{ name: "bundle/winny.exe", content: Buffer.from("MZ fake\n"), mode: 0o755 },
+			{ name: "bundle/LICENSE", content: Buffer.from("MIT text\n"), mode: 0o644 },
+		]);
+		const entry: PinnedTool = {
+			...fakeEntry({ sha256: hash(archive) }),
+			id: "fake-win",
+			binaries: ["winny"],
+			primaryBinary: "winny",
+			downloads: {
+				"win32-x64": {
+					url: "https://example.invalid/asset.zip",
+					sha256: hash(archive),
+					archive: "zip",
+					binaryMembers: { winny: "bundle/winny.exe" },
+					documentMembers: ["bundle/LICENSE"],
+				},
+			},
+		};
+		const result = await installPinnedTool(entry, { root, platform: "win32-x64", fetch: async () => archive });
+		ok(result.ok, result.message);
+		// The name follows the target, not the host. Writing `winny` here would
+		// produce a directory Windows could never run and that the ladder there
+		// would report as not installed.
+		ok(existsSync(join(root, "fake-win", entry.version, "winny.exe")), "the binary carries the .exe Windows needs");
+		deepStrictEqual(result.binaries, [join(root, "fake-win", entry.version, "winny.exe")]);
+		strictEqual(existsSync(join(root, "fake-win", entry.version, "winny")), false);
 	});
 
 	it("installs a raw asset with its side license, executable, under <root>/<id>/<version>", async () => {

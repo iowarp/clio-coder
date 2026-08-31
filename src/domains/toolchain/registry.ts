@@ -79,6 +79,16 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 				documentMembers: [],
 			},
 		},
+		// No `win32-x64` entry, and not for want of an asset. herdr publishes
+		// `herdr-windows-x86_64.zip` for this tag and it was downloaded and read:
+		// alongside `herdr.exe` it carries a ConPTY runtime, `conpty/conpty.dll`
+		// and `conpty/x64/OpenConsole.exe`, that has to sit in a subdirectory
+		// beside the executable. The installer places every declared member flat
+		// under its basename, so declaring this asset would install a `herdr.exe`
+		// with its runtime scattered next to it, which is a broken install that
+		// checksums and unpacks cleanly. Windows herdr waits on the installer
+		// learning to preserve a member's relative path.
+		//
 		// The release asset is a bare executable, so the Apache-2.0 text comes
 		// from the repository at the pinned tag.
 		documents: [
@@ -149,6 +159,18 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 				},
 				documentMembers: ["yazi-aarch64-apple-darwin/LICENSE"],
 			},
+			// Same shape as the other three: two executables and a LICENSE at
+			// known member paths, so the installer needs nothing new to place it.
+			"win32-x64": {
+				url: "https://github.com/sxyazi/yazi/releases/download/v26.8.15/yazi-x86_64-pc-windows-msvc.zip",
+				sha256: "451f6770999fa8f9b08e6c9f94a688c263b6d3007b0944c4407f1ae335eace30",
+				archive: "zip",
+				binaryMembers: {
+					yazi: "yazi-x86_64-pc-windows-msvc/yazi.exe",
+					ya: "yazi-x86_64-pc-windows-msvc/ya.exe",
+				},
+				documentMembers: ["yazi-x86_64-pc-windows-msvc/LICENSE"],
+			},
 		},
 		documents: [],
 	},
@@ -191,6 +213,16 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 				sha256: "96c4ef67751b4387e3d44a7a559aafe54094f0089f34a6c71dfb5361bd48d368",
 				archive: "tar.gz",
 				binaryMembers: { croc: "croc" },
+				documentMembers: ["LICENSE", "THIRD_PARTY_NOTICES.md"],
+			},
+			// A zip rather than a tarball on Windows, and the only entry in the
+			// table whose hash is confirmed by upstream's own checksums file
+			// rather than only by the download this repository made.
+			"win32-x64": {
+				url: "https://github.com/schollz/croc/releases/download/v11.3.6/croc_v11.3.6_Windows-64bit.zip",
+				sha256: "ed22552d371d55a9e3c3b612b982484fa00adaff8fb32c3f19f36dbf8e248bbf",
+				archive: "zip",
+				binaryMembers: { croc: "croc.exe" },
 				documentMembers: ["LICENSE", "THIRD_PARTY_NOTICES.md"],
 			},
 		},
