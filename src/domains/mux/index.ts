@@ -18,6 +18,7 @@ export function createMuxDomainModule(options: MuxDomainOptions): DomainModule<M
 }
 
 export type {
+	MuxAdoptableRun,
 	MuxContract,
 	MuxNotifyRequest,
 	MuxOpenRunPaneRequest,
@@ -30,6 +31,7 @@ export { detectMux, type MuxDetection, type MuxEnablement, resolveSocketCandidat
 export type { MuxDomainOptions } from "./extension.js";
 export { MuxManifest } from "./manifest.js";
 export { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";
+export { MUX_METHOD_MIN_PROTOCOL, type MuxGatedMethod, muxSupportsMethod } from "./protocol.js";
 export { createMuxClient, type MuxClient, type MuxClientOptions, type MuxSubscription } from "./socket-client.js";
 export {
 	type MuxAgentState,
@@ -39,12 +41,14 @@ export {
 	type MuxEventKind,
 	type MuxLog,
 	type MuxMode,
+	type MuxNotificationSound,
 	type MuxPane,
 	type MuxPaneRecord,
 	type MuxPaneRef,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
 	type MuxRunDisplayState,
+	type MuxRunOutcome,
 	type MuxSelfLocation,
 	type MuxSelfReport,
 	type MuxServerInfo,
@@ -52,3 +56,4 @@ export {
 	type MuxTab,
 	muxErrorKind,
 } from "./types.js";
+export { clioCliEntryPath, runViewerCommand, type ViewerCommandOptions } from "./viewer-command.js";

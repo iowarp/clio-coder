@@ -55,6 +55,18 @@ export interface FakeHerdrServerOptions {
 	protocol?: number;
 	/** Pane ids present at boot, in order. The first is Clio's own pane. */
 	panes?: ReadonlyArray<FakeHerdrPane>;
+	/**
+	 * What `notification.show` reports back. `false` models an operator whose own
+	 * herdr config disabled toasts, which the wire calls a normal answer.
+	 */
+	toastsShown?: boolean;
+}
+
+/** One toast the fixture was asked to paint. */
+export interface FakeHerdrNotification {
+	title: string;
+	body: string | null;
+	sound: string | null;
 }
 
 export interface FakeHerdrServer {
@@ -64,6 +76,16 @@ export interface FakeHerdrServer {
 	setHandler(method: string, handler: FakeHerdrHandler | null): void;
 	/** Panes the server currently believes exist. */
 	panes(): ReadonlyArray<FakeHerdrPane>;
+	/** Toasts requested through `notification.show`, oldest first. */
+	notifications(): ReadonlyArray<FakeHerdrNotification>;
+	/** Metadata tokens the server retained for a pane, as `pane.get` would report them. */
+	tokensFor(paneId: string): Readonly<Record<string, string>>;
+	/** Set the tokens a pane carries, as a previous session's panes would. */
+	setTokens(paneId: string, tokens: Readonly<Record<string, string>>): void;
+	/** Whether a pane holds agent authority, which is what `agent.focus` resolves through. */
+	hasAgentAuthority(paneId: string): boolean;
+	/** The pane `agent.focus` most recently focused, or null. */
+	focusedPane(): string | null;
 	addPane(pane: FakeHerdrPane): void;
 	removePane(paneId: string): void;
 	/** Push one lifecycle event to every open subscription connection. */
@@ -84,7 +106,12 @@ interface Connection {
 
 const DEFAULT_PANES: ReadonlyArray<FakeHerdrPane> = [{ paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1" }];
 
-function paneInfo(pane: FakeHerdrPane, focused = false): Record<string, unknown> {
+function paneInfo(
+	pane: FakeHerdrPane,
+	focused = false,
+	tokens: Readonly<Record<string, string>> = {},
+	agent: string | null = null,
+): Record<string, unknown> {
 	return {
 		pane_id: pane.paneId,
 		terminal_id: `term_${pane.paneId.replace(":", "_")}`,
@@ -96,8 +123,8 @@ function paneInfo(pane: FakeHerdrPane, focused = false): Record<string, unknown>
 		label: null,
 		title: null,
 		cwd: "/tmp",
-		agent: null,
-		tokens: {},
+		agent,
+		tokens,
 		state_labels: {},
 	};
 }
@@ -125,6 +152,11 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 	const handlers = new Map<string, FakeHerdrHandler>();
 	const panes: FakeHerdrPane[] = [...(options.panes ?? DEFAULT_PANES)];
 	const tabLabels = new Map<string, string>([["w1:t1", "shell"]]);
+	const paneTokens = new Map<string, Record<string, string>>();
+	const agentPanes = new Set<string>();
+	const notifications: FakeHerdrNotification[] = [];
+	const toastsShown = options.toastsShown ?? true;
+	let focusedPaneId: string | null = null;
 	let nextConnectionId = 0;
 	let nextTab = 1;
 	let nextPane = panes.length;
@@ -159,7 +191,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 			},
 		],
 		tabs: tabsInPlay(),
-		panes: panes.map((pane, index) => paneInfo(pane, index === 0)),
+		panes: panes.map((pane, index) => paneInfo(pane, index === 0, paneTokens.get(pane.paneId) ?? {})),
 		layouts: [],
 		agents: [],
 	});
@@ -174,14 +206,19 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 			case "pane.current": {
 				const pane = panes[0];
 				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
-				return { result: { type: "pane_current", pane: paneInfo(pane, true) } };
+				return { result: { type: "pane_current", pane: paneInfo(pane, true, paneTokens.get(pane.paneId) ?? {}) } };
 			}
 			case "pane.list":
-				return { result: { type: "pane_list", panes: panes.map((pane) => paneInfo(pane)) } };
+				return {
+					result: {
+						type: "pane_list",
+						panes: panes.map((pane) => paneInfo(pane, false, paneTokens.get(pane.paneId) ?? {})),
+					},
+				};
 			case "pane.get": {
 				const pane = panes.find((entry) => entry.paneId === params.pane_id);
 				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
-				return { result: { type: "pane_info", pane: paneInfo(pane) } };
+				return { result: { type: "pane_info", pane: paneInfo(pane, false, paneTokens.get(pane.paneId) ?? {}) } };
 			}
 			case "pane.split": {
 				const targetId = typeof params.target_pane_id === "string" ? params.target_pane_id : panes[0]?.paneId;
@@ -251,9 +288,62 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				};
 			}
 			case "pane.send_text":
-			case "pane.report_agent":
-			case "pane.report_metadata":
 				return { result: { type: "ok" } };
+			case "pane.report_agent": {
+				const pane = panes.find((entry) => entry.paneId === params.pane_id);
+				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
+				// Agent authority is what makes `agent.focus` resolve for a pane id,
+				// so the fixture records it rather than answering a bare ok: the focus
+				// ladder's fallback rung is only reachable when it is absent.
+				agentPanes.add(pane.paneId);
+				return { result: { type: "ok" } };
+			}
+			case "pane.report_metadata": {
+				const pane = panes.find((entry) => entry.paneId === params.pane_id);
+				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
+				const tokens = paneTokens.get(pane.paneId) ?? {};
+				const incoming = params.tokens;
+				if (incoming && typeof incoming === "object") {
+					for (const [key, value] of Object.entries(incoming as Record<string, unknown>)) {
+						// herdr clears a token whose value is null rather than setting it,
+						// which the phase 1 manual gate observed against a live server.
+						if (value === null) delete tokens[key];
+						else if (typeof value === "string") tokens[key] = value;
+					}
+				}
+				paneTokens.set(pane.paneId, tokens);
+				return { result: { type: "ok" } };
+			}
+			// Both of the following are protocol-gated in `src/domains/mux/protocol.ts`.
+			// A server configured below the floor answers the way an older herdr
+			// does, so a test can exercise the fallback rungs without a second binary.
+			case "notification.show": {
+				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method notification.show" } };
+				const title = typeof params.title === "string" ? params.title : "";
+				notifications.push({
+					title,
+					body: typeof params.body === "string" ? params.body : null,
+					sound: typeof params.sound === "string" ? params.sound : null,
+				});
+				return { result: { type: "notification_show", shown: toastsShown, reason: toastsShown ? "shown" : "disabled" } };
+			}
+			case "agent.focus": {
+				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method agent.focus" } };
+				const target = typeof params.target === "string" ? params.target : "";
+				const pane = panes.find((entry) => entry.paneId === target);
+				// herdr resolves an agent target by pane id only when that pane holds
+				// agent authority, and by agent name otherwise.
+				if (!pane || !agentPanes.has(pane.paneId)) {
+					return { error: { code: "agent_not_found", message: `agent target not found: ${target}` } };
+				}
+				focusedPaneId = pane.paneId;
+				return {
+					result: {
+						type: "agent_info",
+						agent: { target: pane.paneId, pane_id: pane.paneId, name: "clio", status: "working" },
+					},
+				};
+			}
 			case "events.subscribe":
 				return { result: { type: "subscription_started" } };
 			default:
@@ -353,6 +443,21 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 		},
 		addPane(pane: FakeHerdrPane): void {
 			panes.push(pane);
+		},
+		notifications(): ReadonlyArray<FakeHerdrNotification> {
+			return [...notifications];
+		},
+		tokensFor(paneId: string): Readonly<Record<string, string>> {
+			return { ...(paneTokens.get(paneId) ?? {}) };
+		},
+		setTokens(paneId: string, tokens: Readonly<Record<string, string>>): void {
+			paneTokens.set(paneId, { ...tokens });
+		},
+		hasAgentAuthority(paneId: string): boolean {
+			return agentPanes.has(paneId);
+		},
+		focusedPane(): string | null {
+			return focusedPaneId;
 		},
 		removePane(paneId: string): void {
 			const index = panes.findIndex((entry) => entry.paneId === paneId);

@@ -187,17 +187,22 @@ describe("mux contract in guest mode", () => {
 		ok(second.tabId !== first.tabId);
 	});
 
-	it("focuses a run pane through its tab and refuses runs it does not own", async () => {
+	it("focuses a run pane through agent.focus and refuses runs it does not own", async () => {
 		const { fake, runtime } = await guest();
 		const mux = runtime.contract;
 		const ref = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
 		ok(ref);
 		strictEqual(await mux.focusRunPane("run-1"), true);
-		strictEqual(fake.requestsFor("tab.focus").length, 1);
-		strictEqual(fake.requestsFor("tab.focus")[0]?.params.tab_id, ref.tabId);
+		// agent.focus is the preferred rung: it resolves for the viewer pane
+		// precisely because openRunPane gave that pane agent authority, and it
+		// additionally clears herdr's attention state.
+		strictEqual(fake.requestsFor("agent.focus").length, 1);
+		strictEqual(fake.requestsFor("agent.focus")[0]?.params.target, ref.paneId);
+		strictEqual(fake.focusedPane(), ref.paneId);
+		strictEqual(fake.requestsFor("tab.focus").length, 0, "the fallback must not fire when agent.focus resolves");
 
 		strictEqual(await mux.focusRunPane("a-run-clio-never-opened"), false);
-		strictEqual(fake.requestsFor("tab.focus").length, 1, "an unowned run must not reach the server");
+		strictEqual(fake.requestsFor("agent.focus").length, 1, "an unowned run must not reach the server");
 	});
 
 	it("never closes, or reports state on, a pane Clio did not create", async () => {
@@ -232,6 +237,9 @@ describe("mux contract in guest mode", () => {
 		deepStrictEqual(metadata?.params.tokens, {
 			clio_owner: "clio:mux",
 			role: "tester",
+			// The run token is what a later process reads back off the pane to
+			// re-adopt this viewer instead of opening a second one.
+			run: "run-1",
 			phase: "verifying",
 			model: "qwen3-coder",
 			outcome: "failed",
@@ -374,5 +382,148 @@ describe("mux contract in guest mode", () => {
 		const splitsBefore = fake.requestsFor("pane.split").length;
 		strictEqual(await mux.openRunPane({ runId: "run-2", agentId: "fixer", label: "two" }), null);
 		strictEqual(fake.requestsFor("pane.split").length, splitsBefore);
+	});
+});
+
+describe("mux contract phase 3 surfaces", () => {
+	it("falls back to tab.focus when agent.focus cannot resolve the pane", async () => {
+		const { fake, runtime } = await guest();
+		const mux = runtime.contract;
+		const ref = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		ok(ref);
+		// A pane whose agent authority herdr no longer holds is exactly the state
+		// spec 4.3 names the fallback rung for.
+		fake.setHandler("agent.focus", () => ({ error: { code: "agent_not_found", message: "no agent there" } }));
+		strictEqual(await mux.focusRunPane("run-1"), true);
+		strictEqual(fake.requestsFor("agent.focus").length, 1, "the preferred rung is still tried first");
+		strictEqual(fake.requestsFor("tab.focus").length, 1);
+		strictEqual(fake.requestsFor("tab.focus")[0]?.params.tab_id, ref.tabId);
+		strictEqual(mux.available(), true, "a server refusal is not a transport failure");
+	});
+
+	it("skips both gated methods on a server below their protocol floor", async () => {
+		const fake = await startFakeHerdrServer({ protocol: 16, version: "0.6.0" });
+		servers.push(fake);
+		const detection = await detectMux({
+			env: { HERDR_ENV: "1", HERDR_SOCKET_PATH: fake.socketPath, HERDR_WORKSPACE_ID: "w1", HERDR_PANE_ID: "w1:p1" },
+			openClient: (socketPath) => createMuxClient({ socketPath, requestTimeoutMs: 1_500, connectTimeoutMs: 500 }),
+		});
+		ok(detection.client);
+		const runtime = createMuxRuntime({ detection: detection.detection, client: detection.client });
+		runtimes.push(runtime);
+		const mux = runtime.contract;
+		const ref = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		ok(ref);
+		await mux.notify({ title: "done" });
+		strictEqual(fake.requestsFor("notification.show").length, 0, "a gated method is not attempted below its floor");
+		strictEqual(await mux.focusRunPane("run-1"), true);
+		strictEqual(fake.requestsFor("agent.focus").length, 0);
+		strictEqual(fake.requestsFor("tab.focus").length, 1, "the fallback rung carries the focus instead");
+	});
+
+	it("shows a toast, and accepts a suppressed one without degrading", async () => {
+		const { fake, runtime } = await guest();
+		await runtime.contract.notify({ title: "tester failed", body: "exit 1", sound: "request" });
+		const shown = fake.notifications().at(-1);
+		strictEqual(shown?.title, "tester failed");
+		strictEqual(shown?.body, "exit 1");
+		strictEqual(shown?.sound, "request");
+
+		const quiet = await startFakeHerdrServer({ toastsShown: false });
+		servers.push(quiet);
+		const detection = await detectMux({
+			env: { HERDR_ENV: "1", HERDR_SOCKET_PATH: quiet.socketPath, HERDR_WORKSPACE_ID: "w1" },
+			openClient: (socketPath) => createMuxClient({ socketPath, requestTimeoutMs: 1_500, connectTimeoutMs: 500 }),
+		});
+		ok(detection.client);
+		const quietRuntime = createMuxRuntime({ detection: detection.detection, client: detection.client });
+		runtimes.push(quietRuntime);
+		await quietRuntime.contract.notify({ title: "suppressed" });
+		strictEqual(quiet.notifications().length, 1, "the call still went out");
+		strictEqual(quietRuntime.contract.available(), true, "shown:false is an answer, not a failure");
+	});
+
+	it("adopts a still-open viewer pane from a previous session and never opens a second", async () => {
+		const fake = await startFakeHerdrServer({
+			panes: [
+				{ paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1" },
+				{ paneId: "w1:p9", tabId: "w1:t2", workspaceId: "w1" },
+				{ paneId: "w1:p8", tabId: "w1:t2", workspaceId: "w1" },
+			],
+		});
+		servers.push(fake);
+		// The pane a previous process opened still carries Clio's owner token and
+		// the run it was opened for; a foreign pane carries neither.
+		fake.setTokens("w1:p9", { clio_owner: "clio:mux", run: "run-1", role: "tester" });
+		fake.setTokens("w1:p8", { run: "run-2" });
+		const detection = await detectMux({
+			env: { HERDR_ENV: "1", HERDR_SOCKET_PATH: fake.socketPath, HERDR_WORKSPACE_ID: "w1", HERDR_PANE_ID: "w1:p1" },
+			openClient: (socketPath) => createMuxClient({ socketPath, requestTimeoutMs: 1_500, connectTimeoutMs: 500 }),
+		});
+		ok(detection.client);
+		const runtime = createMuxRuntime({ detection: detection.detection, client: detection.client });
+		runtimes.push(runtime);
+		const mux = runtime.contract;
+
+		const adopted = await mux.adoptRunPanes([
+			{ runId: "run-1", agentId: "tester", label: "one" },
+			{ runId: "run-2", agentId: "fixer", label: "two" },
+			{ runId: "run-3", agentId: "scout", label: "three" },
+		]);
+		deepStrictEqual([...adopted], ["run-1"], "only a pane carrying Clio's owner token is Clio's to adopt");
+		strictEqual(mux.list().length, 1);
+		strictEqual(mux.list()[0]?.adopted, true);
+
+		const splitsBefore = fake.requestsFor("pane.split").length;
+		const again = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		strictEqual(again?.paneId, "w1:p9");
+		strictEqual(fake.requestsFor("pane.split").length, splitsBefore, "an adopted run must not open a second pane");
+		strictEqual(fake.requestsFor("tab.create").length, 0);
+	});
+
+	it("reports a pane leaving to its handlers, once, with the record that left", async () => {
+		const { fake, runtime } = await guest();
+		const mux = runtime.contract;
+		const seen: string[] = [];
+		const off = mux.onPaneGone((record) => {
+			if (record.runId) seen.push(record.runId);
+		});
+		const ref = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		ok(ref);
+		fake.pushEvent("pane_closed", { paneId: ref.paneId, workspaceId: ref.workspaceId });
+		await waitForCondition(() => seen.length === 1, "the pane-gone handler");
+		deepStrictEqual(seen, ["run-1"]);
+		off();
+		const second = await mux.openRunPane({ runId: "run-2", agentId: "fixer", label: "two" });
+		ok(second);
+		fake.pushEvent("pane_closed", { paneId: second.paneId, workspaceId: second.workspaceId });
+		await waitForCondition(() => mux.list().length === 0, "the registry to drop the second pane");
+		deepStrictEqual(seen, ["run-1"], "an unsubscribed handler stops hearing");
+	});
+
+	it("closes a Clio-owned pane by id and refuses a foreign one", async () => {
+		const { fake, runtime } = await guest();
+		const mux = runtime.contract;
+		const ref = await mux.openUtilityPane({ argv: ["bash"], cwd: "/work", label: "shell" });
+		ok(ref);
+		strictEqual(await mux.closePane("w1:p1"), false, "Clio's own hosting pane is not Clio's to close");
+		strictEqual(fake.requestsFor("pane.close").length, 0);
+		strictEqual(await mux.closePane(ref.paneId), true);
+		strictEqual(fake.requestsFor("pane.close").length, 1);
+		strictEqual(mux.list().length, 0);
+	});
+
+	it("puts a state_labels override on the terminal report", async () => {
+		const { fake, runtime } = await guest();
+		const mux = runtime.contract;
+		await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		await mux.reportRunState("run-1", {
+			phase: "done",
+			agentState: "idle",
+			outcome: "succeeded",
+			stateLabels: { idle: "review ready" },
+		});
+		const metadata = fake.requestsFor("pane.report_metadata").at(-1);
+		deepStrictEqual(metadata?.params.state_labels, { idle: "review ready" });
 	});
 });
