@@ -196,7 +196,7 @@ Deno.test("the Effective Clio Coder map renders provenance, apply timing, redact
 	ok(!html.includes("/home/"));
 });
 
-Deno.test("the capability atlas renders bounded inventory facts and names the verifier interface gap", () => {
+Deno.test("the capability atlas renders bounded inventory facts including the declared check plane", () => {
 	const html = renderToStaticMarkup(
 		<ClioCatalog
 			inspection={catalogInspectionFixture()}
@@ -216,7 +216,8 @@ Deno.test("the capability atlas renders bounded inventory facts and names the ve
 	match(html, /Library resources/u);
 	match(html, /Extensions/u);
 	match(html, /mutate an extension package/u);
-	match(html, /Typed interface required/u);
+	match(html, /Project checks/u);
+	match(html, /Catalog accepted/u);
 	match(
 		html,
 		/Bodies, hashes, native paths, source URLs, requirements, and raw diagnostics stay host-side/u,

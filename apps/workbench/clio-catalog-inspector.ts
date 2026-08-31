@@ -2,10 +2,10 @@
  * Bounded adapters for Clio Coder's public read-only resource catalogs.
  *
  * The upstream JSON shapes contain fields that must not become browser data:
- * skill bodies and hashes, native user paths, arbitrary diagnostics, and source
- * URLs. This module projects only the small inventory needed by the graphical
- * catalog. Each command fails independently so one damaged catalog cannot hide
- * the others.
+ * skill bodies and hashes, native user paths, arbitrary diagnostics, source
+ * URLs, and a verification check's exact argument vector. This module projects
+ * only the small inventory needed by the graphical catalog. Each command fails
+ * independently so one damaged catalog cannot hide the others.
  */
 
 import { resolve } from "node:path";
@@ -24,11 +24,20 @@ import {
 	CATALOG_LIBRARY_ORIGINS,
 	CATALOG_RESOURCE_SCOPES,
 	CATALOG_SKILL_SOURCES,
+	CATALOG_VERIFIER_AUTHORITIES,
+	CATALOG_VERIFIER_BLOCKS,
+	CATALOG_VERIFIER_DISCOVERY,
+	CATALOG_VERIFIER_ORIGINS,
+	CATALOG_VERIFIER_REJECTIONS,
+	CATALOG_VERIFIER_RUNNERS,
+	CATALOG_VERIFIER_SIGNALS,
 	MAX_WIRE_CATALOG_AGENTS,
 	MAX_WIRE_CATALOG_EXTENSIONS,
 	MAX_WIRE_CATALOG_LABELS,
 	MAX_WIRE_CATALOG_LIBRARY_ENTRIES,
 	MAX_WIRE_CATALOG_SKILLS,
+	MAX_WIRE_CATALOG_VERIFIER_TAGS,
+	MAX_WIRE_CATALOG_VERIFIERS,
 	type WireCatalogAgent,
 	type WireCatalogAgentCollection,
 	type WireCatalogExtension,
@@ -38,6 +47,8 @@ import {
 	type WireCatalogLibraryEntry,
 	type WireCatalogSkill,
 	type WireCatalogSkillCollection,
+	type WireCatalogVerifier,
+	type WireCatalogVerifierCollection,
 } from "./src/protocol.ts";
 
 export const DEFAULT_CATALOG_INSPECT_TIMEOUT_MS = 12_000;
@@ -109,6 +120,9 @@ function truncateUtf8(value: string, maximumBytes: number): string {
 
 function description(value: unknown): string | null {
 	if (typeof value !== "string") return null;
+	// The control characters are the point: this is the projection that keeps a
+	// terminal escape or a NUL out of a description bound for the browser.
+	// deno-lint-ignore no-control-regex
 	const normalized = value.replaceAll(/[\u0000-\u001f\u007f\s]+/gu, " ").trim();
 	if (normalized.length === 0) return null;
 	return truncateUtf8(normalized, 512);
@@ -364,6 +378,116 @@ export function projectExtensionCatalog(value: unknown): WireCatalogExtensionCol
 	};
 }
 
+const VERIFIER_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/;
+const VERIFIER_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const VERIFIER_LOCATION_PATTERN = /^(root|checks\[\d{1,3}\])(\.[a-zA-Z]{1,32}(\[\d{1,3}\])?)?$/;
+const MAX_VERIFIER_TIMEOUT_MS = 900_000;
+
+function projectVerifier(value: unknown): WireCatalogVerifier | null {
+	if (!isRecord(value)) return null;
+	const id = exactText(value.id, 64);
+	const summary = description(value.description);
+	const argumentCount = integer(value.argumentCount);
+	const timeoutMs = integer(value.timeoutMs);
+	if (
+		id === null || summary === null || argumentCount === null || timeoutMs === null || timeoutMs === 0 ||
+		timeoutMs > MAX_VERIFIER_TIMEOUT_MS || !VERIFIER_ID_PATTERN.test(id) ||
+		!isOneOf(value.origin, CATALOG_VERIFIER_ORIGINS) || !isOneOf(value.signal, CATALOG_VERIFIER_SIGNALS) ||
+		!isOneOf(value.authority, CATALOG_VERIFIER_AUTHORITIES) || !isOneOf(value.runner, CATALOG_VERIFIER_RUNNERS) ||
+		typeof value.runsAtRepositoryRoot !== "boolean" || typeof value.argvFixed !== "boolean"
+	) return null;
+	// A package-script check is the one origin verify does not pin, and the one
+	// origin package.json can have produced. Both directions are refused here so
+	// a harness that changes either stops crossing rather than crossing wrong.
+	if (value.argvFixed === (value.origin === "package-script")) return null;
+	if ((value.origin === "package-script") !== (value.signal === "package-script")) return null;
+	if (value.signal === "manual-entry") return null;
+	if (value.origin !== "proposed" && value.authority !== "project-declared") return null;
+	if (!Array.isArray(value.tags) || value.tags.length > MAX_WIRE_CATALOG_VERIFIER_TAGS) return null;
+	const tags: string[] = [];
+	for (const entry of value.tags) {
+		const tag = exactText(entry, 32);
+		if (tag === null || !VERIFIER_TAG_PATTERN.test(tag) || tags.includes(tag)) return null;
+		tags.push(tag);
+	}
+	return {
+		id,
+		description: summary,
+		origin: value.origin,
+		signal: value.signal,
+		authority: value.authority,
+		runner: value.runner,
+		argumentCount,
+		runsAtRepositoryRoot: value.runsAtRepositoryRoot,
+		argvFixed: value.argvFixed,
+		timeoutMs,
+		tags,
+	};
+}
+
+/**
+ * Project the fixed verifier read.
+ *
+ * This projection drops no row silently. A check that fails any of its shape
+ * rules fails the whole snapshot, because a check plane that looks complete
+ * while a check was refused is the wrong answer for a surface whose job is to
+ * say what this project verifies with.
+ */
+export function projectVerifierCatalog(value: unknown): WireCatalogVerifierCollection {
+	if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.checks)) {
+		throw new ClioCatalogProjectionError("Clio Coder returned an invalid verifier inventory.");
+	}
+	if (value.checks.length > MAX_RAW_CATALOG_ITEMS) {
+		throw new ClioCatalogProjectionError("Clio Coder returned too many verifier checks.");
+	}
+	const issueCount = integer(value.diagnosticCount);
+	if (
+		issueCount === null || typeof value.catalogPresent !== "boolean" || typeof value.checksTruncated !== "boolean" ||
+		!isOneOf(value.discovery, CATALOG_VERIFIER_DISCOVERY) ||
+		(value.blockedBy !== null && !isOneOf(value.blockedBy, CATALOG_VERIFIER_BLOCKS)) ||
+		(value.catalogValid !== null && typeof value.catalogValid !== "boolean") ||
+		(value.rejection !== null && !isOneOf(value.rejection, CATALOG_VERIFIER_REJECTIONS))
+	) throw new ClioCatalogProjectionError("Clio Coder returned an invalid verifier inventory.");
+	const rejectedAt = value.rejectedAt === null ? null : exactText(value.rejectedAt, 64);
+	if (value.rejectedAt !== null && (rejectedAt === null || !VERIFIER_LOCATION_PATTERN.test(rejectedAt))) {
+		throw new ClioCatalogProjectionError("Clio Coder reported a verifier rejection outside the catalog schema.");
+	}
+	const projected = value.checks.map(projectVerifier);
+	if (projected.some((check) => check === null)) {
+		throw new ClioCatalogProjectionError("Clio Coder returned a verifier check the boundary refuses.");
+	}
+	const items = (projected as WireCatalogVerifier[]).slice(0, MAX_WIRE_CATALOG_VERIFIERS);
+	return {
+		availability: "available",
+		items,
+		truncated: value.checksTruncated || items.length !== projected.length,
+		issueCount,
+		discovery: value.discovery,
+		blockedBy: value.blockedBy,
+		catalogPresent: value.catalogPresent,
+		catalogValid: value.catalogValid,
+		rejection: value.rejection,
+		rejectedAt,
+	};
+}
+
+function failedVerifierCollection(): WireCatalogVerifierCollection {
+	// A failed adapter knows nothing about the catalog, so it claims nothing:
+	// "we could not read this" and "you have no catalog" are different states.
+	return {
+		availability: "failed",
+		items: [],
+		truncated: false,
+		issueCount: 0,
+		discovery: "blocked",
+		blockedBy: "unclassified",
+		catalogPresent: false,
+		catalogValid: null,
+		rejection: null,
+		rejectedAt: null,
+	};
+}
+
 interface FailedCatalogCollection {
 	readonly availability: "failed";
 	readonly items: readonly never[];
@@ -412,13 +536,23 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 		}
 	}
 
+	async #verifiers(root: string): Promise<WireCatalogVerifierCollection> {
+		try {
+			return projectVerifierCatalog(await this.#runner.runJson(root, ["verifiers", "inspect", "--json"]));
+		} catch (error) {
+			this.#log(`Clio Coder verifier catalog inspection failed (${failureCode(error)}).`);
+			return failedVerifierCollection();
+		}
+	}
+
 	async inspect(trustedRoot: string): Promise<WireCatalogInspection> {
 		const root = resolve(trustedRoot);
-		const [agents, skills, library, extensions] = await Promise.all([
+		const [agents, skills, library, extensions, verifiers] = await Promise.all([
 			this.#collection(root, "agent", ["agents", "--json"], projectAgentCatalog),
 			this.#collection(root, "skill", ["skills", "list", "--json"], projectSkillCatalog),
 			this.#collection(root, "library", ["library", "list", "--json"], projectLibraryCatalog),
 			this.#collection(root, "extension", ["extensions", "list", "--all", "--json"], projectExtensionCatalog),
+			this.#verifiers(root),
 		]);
 		return {
 			inspectedAt: new Date(this.#now()).toISOString(),
@@ -426,7 +560,7 @@ export class ClioCliCatalogInspector implements ClioCatalogInspector {
 			skills,
 			library,
 			extensions,
-			verifiers: { availability: "typed-interface-required" },
+			verifiers,
 		};
 	}
 }

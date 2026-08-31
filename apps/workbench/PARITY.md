@@ -15,14 +15,15 @@ the main application.
 | Verdict | Count |
 | ------- | ----: |
 | Present |    20 |
-| Partial |    60 |
-| Absent  |    32 |
+| Partial |    61 |
+| Absent  |    31 |
 | Total   |   112 |
 
 **host-only-by-design** marks a payload this GUI will not carry in any form, as distinct from one it has not carried
 yet. Event payloads, event names, process command lines, a council's deliberation, and a gate's reasoning are the
-current members: bounded aggregates, topologies, and verdicts over them cross, the rows and the prose themselves never
-will, and the panel says so on screen rather than leaving the absence to be inferred.
+current members, joined by a verification check's argument vector: bounded aggregates, topologies, classifications, and
+verdicts over them cross, the rows and the prose themselves never will, and the panel says so on screen rather than
+leaving the absence to be inferred.
 
 **deferred-by-design** marks a row whose remaining gap is a mutation rather than a missing read. The GUI is read-only by
 decision, not by omission: every adapter it has runs a fixed, argument-free command and changes nothing, and that is the
@@ -58,7 +59,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Extension packages              | `extensions` list/discover/install/enable/disable/remove                      | **Partial** | Installed extension inventory, scope, precedence, resources, and diagnostics are present; lifecycle mutations are absent.                                                                                             |
 | Skills                          | `skills` list/search/inspect/validate/install/update/sync/eval                | **Partial** | Installed skill inventory and provenance are present; search, inspection, validation, installation, update, and evaluation are absent.                                                                                |
 | Resource library                | `library` list/search/add/use/sync/push/remote-confirm                        | **Partial** | Bounded available-resource inventory is present; search across remotes and reviewed lifecycle operations are absent.                                                                                                  |
-| Verifiers                       | `verifiers` discover/author/validate/dry-run/add/edit/rename/remove           | **Absent**  | Capability atlas names the missing typed interface but cannot inspect or drive verifier workflows.                                                                                                                    |
+| Verifiers                       | `verifiers` discover/author/validate/dry-run/add/edit/rename/remove           | **Partial** | **deferred-by-design**: The atlas renders the declared check plane and the catalog's parse verdict. Each check's argument vector is **host-only-by-design**; authoring, editing, and dry-run execution are absent.    |
 | External toolchain              | `tools` list/status/install                                                   | **Partial** | Settings renders a path-free pinned inventory with resolution and platform facts; per-tool status detail and reviewed installation are absent.                                                                        |
 | Pane installation               | `panes install`                                                               | **Absent**  | **deferred-by-design**: Installation is a consequential toolchain mutation and has no GUI operation.                                                                                                                  |
 | Documentation server            | `docs [topic]`                                                                | **Absent**  | There is no contextual documentation launcher or embedded operator reference.                                                                                                                                         |
@@ -139,7 +140,7 @@ unmarked, so the read half stays visible as work this GUI can still do.
 | Toolchain inventory             | Pinned versions, license, platform, source, resolution, install state | **Present** | Settings renders the fixed listing with version floors, found versions, licenses, platform support, resolution source, and install state.                         |
 | Doctor and recovery             | Categorized diagnostic sweep and repair                               | **Partial** | Per-check identity, section, and verdict sit under the bounded counts; finding detail and confirmed repair remain intentionally absent.                           |
 | Usage and routing               | Historical Usage, offline models, profiles, agent bindings            | **Present** | Project scoping, independent failures, provenance, and missing-store states are explicit.                                                                         |
-| Catalog and config              | Agent/skill/extension/library inventory and effective configuration   | **Present** | Bounded projections and direct paths back to the conversation are present.                                                                                        |
+| Catalog and config              | Agent/skill/extension/library/check inventory and effective config    | **Present** | Bounded projections and direct paths back to the conversation are present.                                                                                        |
 
 ## Runtime domain roster
 
@@ -196,8 +197,12 @@ unmarked, so the read half stays visible as work this GUI can still do.
    the version Clio Coder last recorded for each, whether its ACP adapter can start offline, whether a delegation entry
    already names it, and whether the operator's standing accept or decline still holds. The read runs no foreign
    executable and carries no resolved binary or agent home directory, and wiring a peer stays an explicit terminal
-   review. Still to come: safe ACP settings and operations for target/auth lifecycle, memory review, resource
-   installation, verifiers, share import/export, doctor repair, and fleet admission, each with preview, confirmation,
+   review. This project's verification checks reach the atlas too, through the fixed `verifiers inspect --json` read:
+   which checks exist, where each was declared, the toolchain it drives, whether verify pins its argv, and whether the
+   project catalog parses at all. A check's exact argument vector is host-only by design, because the schema permits its
+   entries to be absolute paths, so the executable crosses as a toolchain class and the rest crosses as a count. Still
+   to come: safe ACP settings and operations for target/auth lifecycle, memory review, resource installation, verifier
+   authoring and dry-run, share import/export, doctor repair, and fleet admission, each with preview, confirmation,
    progress, and recovery.
 7. Expand sanitized ACP events for context pressure and working-set activity, safety budgets and protected artifacts,
    provider retry/runtime notices, agent status, cost budgets, config reload, middleware failures, and shutdown phases.

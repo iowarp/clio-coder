@@ -753,10 +753,101 @@ export const CATALOG_EXTENSION_RESOURCE_KINDS = [
 ] as const;
 export type WireCatalogExtensionResourceKind = (typeof CATALOG_EXTENSION_RESOURCE_KINDS)[number];
 
+/** Where a verification check was declared, and therefore how much of it the operator wrote. */
+export const CATALOG_VERIFIER_ORIGINS = [
+	"package-script",
+	"catalog",
+	"proposed",
+] as const;
+export type WireCatalogVerifierOrigin = (typeof CATALOG_VERIFIER_ORIGINS)[number];
+/** The declaration Clio Coder read the check out of. */
+export const CATALOG_VERIFIER_SIGNALS = [
+	"package-script",
+	"project-catalog",
+	"cargo",
+	"cmake-preset",
+	"python-runner",
+	"just-recipe",
+	"make-target",
+	"go-module",
+	"validation-contract",
+	"manual-entry",
+] as const;
+export type WireCatalogVerifierSignal = (typeof CATALOG_VERIFIER_SIGNALS)[number];
+export const CATALOG_VERIFIER_AUTHORITIES = [
+	"project-declared",
+	"toolchain-defined",
+] as const;
+export type WireCatalogVerifierAuthority = (typeof CATALOG_VERIFIER_AUTHORITIES)[number];
+/**
+ * The toolchain a check drives, classified host-side from its executable.
+ *
+ * The argument vector itself is host-only by design. Its entries may be
+ * absolute paths by schema, so no width of projection makes them safe, and the
+ * executable therefore crosses as a class rather than as a token.
+ */
+export const CATALOG_VERIFIER_RUNNERS = [
+	"npm",
+	"pnpm",
+	"yarn",
+	"bun",
+	"deno",
+	"node",
+	"cargo",
+	"go",
+	"make",
+	"just",
+	"cmake",
+	"ctest",
+	"ninja",
+	"python",
+	"pytest",
+	"uv",
+	"tox",
+	"nox",
+	"dotnet",
+	"gradle",
+	"maven",
+	"rake",
+	"swift",
+	"other",
+] as const;
+export type WireCatalogVerifierRunner = (typeof CATALOG_VERIFIER_RUNNERS)[number];
+/** Why Clio Coder could not enumerate the check plane at all. */
+export const CATALOG_VERIFIER_BLOCKS = [
+	"catalog-rejected",
+	"id-collision",
+	"unclassified",
+] as const;
+export type WireCatalogVerifierBlock = (typeof CATALOG_VERIFIER_BLOCKS)[number];
+/** Why the production parser refused the project catalog. Its sentence stays host-side. */
+export const CATALOG_VERIFIER_REJECTIONS = [
+	"unreadable",
+	"invalid-yaml",
+	"unsupported-version",
+	"unknown-field",
+	"missing-field",
+	"duplicate-id",
+	"shell-command",
+	"too-large",
+	"invalid-cwd",
+	"invalid-value",
+	"unclassified",
+] as const;
+export type WireCatalogVerifierRejection = (typeof CATALOG_VERIFIER_REJECTIONS)[number];
+export const CATALOG_VERIFIER_DISCOVERY = ["complete", "blocked"] as const;
+export type WireCatalogVerifierDiscovery = (typeof CATALOG_VERIFIER_DISCOVERY)[number];
+/** Schema locations only, such as `root.checks` or `checks[3].command[0]`. */
+const CATALOG_VERIFIER_LOCATION_PATTERN = /^(root|checks\[\d{1,3}\])(\.[a-zA-Z]{1,32}(\[\d{1,3}\])?)?$/;
+const CATALOG_VERIFIER_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/;
+const CATALOG_VERIFIER_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
 export const MAX_WIRE_CATALOG_AGENTS = 64;
 export const MAX_WIRE_CATALOG_SKILLS = 64;
 export const MAX_WIRE_CATALOG_LIBRARY_ENTRIES = 64;
 export const MAX_WIRE_CATALOG_EXTENSIONS = 64;
+export const MAX_WIRE_CATALOG_VERIFIERS = 64;
+export const MAX_WIRE_CATALOG_VERIFIER_TAGS = 16;
 export const MAX_WIRE_CATALOG_LABELS = 32;
 
 export interface WireCatalogAgentBudget {
@@ -848,14 +939,47 @@ export interface WireCatalogExtensionCollection {
 	readonly issueCount: number;
 }
 
+export interface WireCatalogVerifier {
+	readonly id: string;
+	readonly description: string;
+	readonly origin: WireCatalogVerifierOrigin;
+	readonly signal: WireCatalogVerifierSignal;
+	readonly authority: WireCatalogVerifierAuthority;
+	readonly runner: WireCatalogVerifierRunner;
+	/** How many arguments follow the executable. The arguments themselves are host-only by design. */
+	readonly argumentCount: number;
+	/** True when the check runs at the repository root. A subdirectory's name never crosses. */
+	readonly runsAtRepositoryRoot: boolean;
+	/** True when verify pins argv, cwd, and timeout through safe-exec rather than passing extra argv through. */
+	readonly argvFixed: boolean;
+	readonly timeoutMs: number;
+	readonly tags: readonly string[];
+}
+
+export interface WireCatalogVerifierCollection {
+	readonly availability: WireCatalogAvailability;
+	readonly items: readonly WireCatalogVerifier[];
+	readonly truncated: boolean;
+	/** Discovery diagnostics raised while reading the check plane. Each quotes a path, so only the count crosses. */
+	readonly issueCount: number;
+	readonly discovery: WireCatalogVerifierDiscovery;
+	readonly blockedBy: WireCatalogVerifierBlock | null;
+	/** Whether a project catalog file exists. Its path stays host-side. */
+	readonly catalogPresent: boolean;
+	/** Whether the production parser accepted it; null when there is nothing to parse. */
+	readonly catalogValid: boolean | null;
+	readonly rejection: WireCatalogVerifierRejection | null;
+	/** The schema location the rejection named, never the value it quoted. */
+	readonly rejectedAt: string | null;
+}
+
 export interface WireCatalogInspection {
 	readonly inspectedAt: string;
 	readonly agents: WireCatalogAgentCollection;
 	readonly skills: WireCatalogSkillCollection;
 	readonly library: WireCatalogLibraryCollection;
 	readonly extensions: WireCatalogExtensionCollection;
-	/** Clio Coder currently offers no typed verifier listing; the GUI never scrapes its table. */
-	readonly verifiers: Readonly<{ availability: "typed-interface-required" }>;
+	readonly verifiers: WireCatalogVerifierCollection;
 }
 
 export const USAGE_STORE_STATES = ["available", "missing"] as const;
@@ -3741,6 +3865,219 @@ function validateCatalogExtension(
 	};
 }
 
+function validateCatalogVerifier(
+	value: unknown,
+	label: string,
+): WireCatalogVerifier {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"description",
+		"origin",
+		"signal",
+		"authority",
+		"runner",
+		"argumentCount",
+		"runsAtRepositoryRoot",
+		"argvFixed",
+		"timeoutMs",
+		"tags",
+	]);
+	const id = expectPresentationText(record.id, `${label}.id`, 64);
+	if (!CATALOG_VERIFIER_ID_PATTERN.test(id)) {
+		invalid(`${label}.id must match the declared check identifier shape`);
+	}
+	const origin = expectEnum(
+		record.origin,
+		`${label}.origin`,
+		CATALOG_VERIFIER_ORIGINS,
+	);
+	const signal = expectEnum(
+		record.signal,
+		`${label}.signal`,
+		CATALOG_VERIFIER_SIGNALS,
+	);
+	const argvFixed = expectBoolean(record.argvFixed, `${label}.argvFixed`);
+	// A package-script check is the one origin verify does not pin: it runs npm
+	// with the declared script name and may take extra argv. Every other origin
+	// goes through safe-exec with the declaration's own vector.
+	if (argvFixed === (origin === "package-script")) {
+		invalid(`${label}.argvFixed must be false exactly for a package-script check`);
+	}
+	// A package-script check can only have been read out of package.json, and
+	// nothing else can have been read out of it.
+	if ((origin === "package-script") !== (signal === "package-script")) {
+		invalid(`${label}.signal must be package-script exactly for a package-script check`);
+	}
+	// The authoring flow mints manual-entry; a discovery read never can.
+	if (signal === "manual-entry") {
+		invalid(`${label}.signal cannot be manual-entry in a discovery read`);
+	}
+	// Only a proposal comes from a toolchain declaration Clio Coder read itself.
+	if (origin !== "proposed" && record.authority !== "project-declared") {
+		invalid(`${label}.authority must be project-declared for a declared check`);
+	}
+	const timeoutMs = expectInteger(record.timeoutMs, `${label}.timeoutMs`, 1);
+	if (timeoutMs > 900_000) {
+		invalid(`${label}.timeoutMs exceeds the declared catalog timeout cap`);
+	}
+	const tags = expectArray(
+		record.tags,
+		`${label}.tags`,
+		MAX_WIRE_CATALOG_VERIFIER_TAGS,
+		(entry, entryLabel) => {
+			const tag = expectPresentationText(entry, entryLabel, 32);
+			if (!CATALOG_VERIFIER_TAG_PATTERN.test(tag)) {
+				invalid(`${entryLabel} must match the declared catalog tag shape`);
+			}
+			return tag;
+		},
+	);
+	if (new Set(tags).size !== tags.length) invalid(`${label}.tags contains duplicate tags`);
+	return {
+		id,
+		description: expectPresentationText(
+			record.description,
+			`${label}.description`,
+			512,
+		),
+		origin,
+		signal,
+		authority: expectEnum(
+			record.authority,
+			`${label}.authority`,
+			CATALOG_VERIFIER_AUTHORITIES,
+		),
+		runner: expectEnum(record.runner, `${label}.runner`, CATALOG_VERIFIER_RUNNERS),
+		argumentCount: expectCatalogCount(
+			record.argumentCount,
+			`${label}.argumentCount`,
+		),
+		runsAtRepositoryRoot: expectBoolean(
+			record.runsAtRepositoryRoot,
+			`${label}.runsAtRepositoryRoot`,
+		),
+		argvFixed,
+		timeoutMs,
+		tags,
+	};
+}
+
+function validateCatalogVerifierCollection(
+	value: unknown,
+	label: string,
+): WireCatalogVerifierCollection {
+	const record = expectExactKeys(value, label, [
+		"availability",
+		"items",
+		"truncated",
+		"issueCount",
+		"discovery",
+		"blockedBy",
+		"catalogPresent",
+		"catalogValid",
+		"rejection",
+		"rejectedAt",
+	]);
+	const availability = expectEnum(
+		record.availability,
+		`${label}.availability`,
+		CATALOG_AVAILABILITY,
+	);
+	const items = expectArray(
+		record.items,
+		`${label}.items`,
+		MAX_WIRE_CATALOG_VERIFIERS,
+		validateCatalogVerifier,
+	);
+	if (availability === "failed" && items.length > 0) {
+		invalid(`${label} cannot carry checks when its adapter failed`);
+	}
+	if (new Set(items.map((item) => item.id)).size !== items.length) {
+		invalid(`${label}.items contains duplicate check ids`);
+	}
+	const discovery = expectEnum(
+		record.discovery,
+		`${label}.discovery`,
+		CATALOG_VERIFIER_DISCOVERY,
+	);
+	const blockedBy = record.blockedBy === null ? null : expectEnum(
+		record.blockedBy,
+		`${label}.blockedBy`,
+		CATALOG_VERIFIER_BLOCKS,
+	);
+	// Blocked and its reason are the same fact stated twice, and a blocked
+	// discovery enumerated nothing, so it can carry no checks.
+	if ((discovery === "blocked") !== (blockedBy !== null)) {
+		invalid(`${label}.blockedBy exists exactly when discovery is blocked`);
+	}
+	if (discovery === "blocked" && items.length > 0) {
+		invalid(`${label} cannot carry checks when discovery was blocked`);
+	}
+	const catalogPresent = expectBoolean(
+		record.catalogPresent,
+		`${label}.catalogPresent`,
+	);
+	if (record.catalogValid !== null && typeof record.catalogValid !== "boolean") {
+		invalid(`${label}.catalogValid must be a boolean or null`);
+	}
+	const catalogValid = record.catalogValid as boolean | null;
+	const rejection = record.rejection === null ? null : expectEnum(
+		record.rejection,
+		`${label}.rejection`,
+		CATALOG_VERIFIER_REJECTIONS,
+	);
+	const rejectedAt = record.rejectedAt === null ? null : expectPresentationText(
+		record.rejectedAt,
+		`${label}.rejectedAt`,
+		64,
+	);
+	if (rejectedAt !== null && !CATALOG_VERIFIER_LOCATION_PATTERN.test(rejectedAt)) {
+		invalid(`${label}.rejectedAt must name a catalog schema location`);
+	}
+	// A missing catalog was never parsed, so it has no verdict and no rejection,
+	// and nothing can claim to have been read out of it.
+	if (!catalogPresent) {
+		if (catalogValid !== null) invalid(`${label}.catalogValid must be null when no catalog exists`);
+		if (items.some((item) => item.origin === "catalog")) {
+			invalid(`${label} cannot carry a catalog check when no catalog exists`);
+		}
+	} else if (catalogValid === null) {
+		invalid(`${label}.catalogValid must state a verdict when a catalog exists`);
+	}
+	// The rejection is the verdict's reason: it exists exactly when the parser
+	// refused, and a location without a reason names nothing.
+	if ((catalogValid === false) !== (rejection !== null)) {
+		invalid(`${label}.rejection exists exactly when the catalog was refused`);
+	}
+	if (rejection === null && rejectedAt !== null) {
+		invalid(`${label}.rejectedAt cannot name a location without a rejection`);
+	}
+	// Discovery loads the same catalog through the same parser, so a refused
+	// catalog cannot coexist with a discovery that enumerated the check plane.
+	if (catalogValid === false && blockedBy !== "catalog-rejected") {
+		invalid(`${label} must report a refused catalog as the discovery block`);
+	}
+	if (catalogValid !== false && blockedBy === "catalog-rejected") {
+		invalid(`${label} cannot blame a catalog its own verdict accepted`);
+	}
+	// A catalog check exists only where a catalog parsed.
+	if (catalogValid !== true && items.some((item) => item.origin === "catalog")) {
+		invalid(`${label} cannot carry a catalog check without an accepted catalog`);
+	}
+	return {
+		availability,
+		items,
+		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+		issueCount: expectCatalogCount(record.issueCount, `${label}.issueCount`),
+		discovery,
+		blockedBy,
+		catalogPresent,
+		catalogValid,
+		rejection,
+		rejectedAt,
+	};
+}
+
 function validateCatalogCollection<T>(
 	value: unknown,
 	label: string,
@@ -3792,12 +4129,6 @@ function validateCatalogInspection(
 		"extensions",
 		"verifiers",
 	]);
-	const verifiers = expectExactKeys(record.verifiers, `${label}.verifiers`, [
-		"availability",
-	]);
-	if (verifiers.availability !== "typed-interface-required") {
-		invalid(`${label}.verifiers.availability must be typed-interface-required`);
-	}
 	return {
 		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
 		agents: validateCatalogCollection(
@@ -3824,7 +4155,10 @@ function validateCatalogInspection(
 			MAX_WIRE_CATALOG_EXTENSIONS,
 			validateCatalogExtension,
 		),
-		verifiers: { availability: "typed-interface-required" },
+		verifiers: validateCatalogVerifierCollection(
+			record.verifiers,
+			`${label}.verifiers`,
+		),
 	};
 }
 

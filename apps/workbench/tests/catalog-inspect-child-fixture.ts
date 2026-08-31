@@ -81,6 +81,58 @@ if (command === "agents --json") {
 			diagnostics: [{ type: "warning", message: "private extension diagnostic sk-secret" }],
 		}],
 	};
+} else if (command === "verifiers inspect --json") {
+	payload = scenario === "verifiers-blocked"
+		? {
+			version: 1,
+			generatedAt: "2026-08-31T12:00:00.000Z",
+			catalogPresent: true,
+			catalogValid: false,
+			rejection: "shell-command",
+			rejectedAt: "checks[1].command[0]",
+			discovery: "blocked",
+			blockedBy: "catalog-rejected",
+			checks: [],
+			checksTruncated: false,
+			diagnosticCount: 0,
+		}
+		: {
+			version: 1,
+			generatedAt: "2026-08-31T12:00:00.000Z",
+			catalogPresent: true,
+			catalogValid: true,
+			rejection: null,
+			rejectedAt: null,
+			discovery: "complete",
+			blockedBy: null,
+			checks: [{
+				id: "test",
+				description: "Run package.json script 'test'.",
+				origin: "package-script",
+				signal: "package-script",
+				authority: "project-declared",
+				runner: "npm",
+				argumentCount: 2,
+				runsAtRepositoryRoot: true,
+				argvFixed: false,
+				timeoutMs: 120000,
+				tags: ["test"],
+			}, {
+				id: "lint.rust",
+				description: "Lint the workspace with clippy.",
+				origin: "catalog",
+				signal: "project-catalog",
+				authority: "project-declared",
+				runner: "cargo",
+				argumentCount: 3,
+				runsAtRepositoryRoot: false,
+				argvFixed: true,
+				timeoutMs: 300000,
+				tags: ["lint", "rust"],
+			}],
+			checksTruncated: false,
+			diagnosticCount: 1,
+		};
 } else {
 	Deno.exit(23);
 }

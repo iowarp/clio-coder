@@ -9,11 +9,13 @@ import {
 import { loadProjectVerifierCatalog, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../tools/verify/catalog.js";
 import { verifyTool } from "../tools/verify/index.js";
 import { printError, printOk } from "./argv.js";
+import { runVerifiersInspect } from "./verifiers-inspect.js";
 
 const HELP = `Project verifier authoring
 
 Usage:
   clio-coder verifiers discover
+  clio-coder verifiers inspect --json
   clio-coder verifiers author [--exclude <id>] [--rename <old>=<new>] [--dry-run <id>] [--yes]
   clio-coder verifiers validate
   clio-coder verifiers dry-run <id>
@@ -30,6 +32,10 @@ Fields:
 Discovery and every preview are read-only. Mutating commands write only with
 --yes after printing the exact argv, cwd, timeout, tags, source provenance, and
 effective execution authority. dry-run invokes the production verify path.
+
+inspect is the fixed machine-readable read a GUI host may run. It takes no other
+argument, runs no check, and carries no argv, cwd, source path, or diagnostic
+text: the toolchain each check drives is classified, and the arguments stay here.
 `;
 
 const VALUE_OPTIONS = new Set([
@@ -282,6 +288,9 @@ function validateCommand(): number {
 }
 
 export async function runVerifiersCommand(argv: string[]): Promise<number> {
+	// Routed before the authoring parser so the fixed read stays exactly fixed. No
+	// authoring flag can reach it, and no flag it does not name can be spent on it.
+	if (argv[0] === "inspect") return runVerifiersInspect(argv.slice(1));
 	const parsed = parseAuthoringArgs(argv);
 	if (parsed.error !== undefined) {
 		printError(parsed.error);

@@ -347,11 +347,34 @@ try {
 	equal(await catalog.getByRole("tab", { name: /^Extensions/u }).getAttribute("aria-selected"), "true");
 	await page.screenshot({ path: new URL("catalog-extensions.png", artifactDirectory).pathname, fullPage: true });
 	await page.keyboard.press("ArrowRight");
-	await catalog.getByRole("heading", {
-		name: "Verifier discovery is real, but it is not machine-readable yet",
+	await catalog.getByRole("heading", { name: "lint.rust" }).waitFor();
+	// A package-script check and a catalog check are the same plane with
+	// different execution authority, and the card says which is which.
+	await catalog.getByText("Verify runs npm with this script name and may pass extra argv", { exact: true })
+		.waitFor();
+	await catalog.getByText("Verify pins argv, working directory, and timeout through safe-exec", { exact: true })
+		.waitFor();
+	await catalog.getByText("Runs in a subdirectory", { exact: true }).waitFor();
+	// A toolchain declaration nothing has adopted is named as such rather than
+	// listed beside the checks that actually run.
+	await catalog.getByText("Authoring would offer this check; nothing runs it until you write the catalog", {
+		exact: true,
 	}).waitFor();
-	await catalog.getByText("clio-coder verifiers discover", { exact: false }).waitFor();
-	equal(await catalog.getByText("/home/", { exact: false }).count(), 0);
+	// The argv cannot appear here because the wire type has no field for it; that
+	// is proven in the protocol and adapter tests. What this asserts is the other
+	// half, that the panel's own copy names no location either.
+	for (const forbidden of ["/home/", ".clio-coder", "verifiers.yaml"]) {
+		equal(
+			await catalog.getByText(forbidden, { exact: false }).count(),
+			0,
+			`the verifier panel leaked ${forbidden}`,
+		);
+	}
+	// A count crossing instead of the vector is the whole point, so it is asserted
+	// rather than left to the forbidden list.
+	await catalog.getByText("2 held host-side", { exact: true }).first().waitFor();
+	// Nothing in this panel offers to author, edit, or run a check.
+	equal(await catalog.getByRole("button", { name: /author|dry.run|edit|remove/iu }).count(), 0);
 	const catalogAccessibility = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
 		.analyze();
@@ -1584,6 +1607,7 @@ try {
 			recoveryNamesEachCheckWithoutItsDetail: true,
 			toolchainUsesPathFreeFixedAdapter: true,
 			interopDetectionRunsNoForeignExecutableAndNamesNoPath: true,
+			verifierCheckPlaneCrossesWithoutItsArgv: true,
 			safeSettingsOptionFamiliesRoundTripped: true,
 			autonomySetInTheGuiReachedTheNextTurn: true,
 			nextTurnAndNextSessionLabelledDistinctly: true,
