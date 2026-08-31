@@ -182,6 +182,10 @@ export const SETTINGS_LABELS_BY_ID = {
 	"panes.keepFailed": "Keep failed panes",
 	"panes.notifications": "Pane notifications",
 	"panes.journal": "Run event journal",
+	"panes.yazi.enabled": "Files pane",
+	"panes.yazi.mode": "Files pane mode",
+	"panes.yazi.profile": "Yazi profile",
+	"panes.yazi.followCwd": "Follow conversation cwd",
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
 	"modelSelector.favorites": "Pinned favorites",
@@ -228,8 +232,9 @@ type EntrySettingId =
 	| `fleet.endpoints.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
 type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement" | "panes"}`;
+type TerminalGroupHeaderId = "terminal.group.files-pane";
 type TargetsCtaId = "targets.add-cta";
-export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId | TargetsCtaId;
+export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId | TerminalGroupHeaderId | TargetsCtaId;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
 const UNBIND_CHOICE = "(unbind)";
 const AUTO_PLACEMENT_CHOICE = "(auto placement)";
@@ -282,6 +287,10 @@ export const SETTINGS_SECTION_ROWS = {
 		"terminal.smoothStreaming",
 		"terminal.notify",
 		"theme",
+		"panes.yazi.enabled",
+		"panes.yazi.mode",
+		"panes.yazi.profile",
+		"panes.yazi.followCwd",
 	],
 	watchdog: ["watchdog.enabled", "watchdog.target", "watchdog.cadenceToolCalls"],
 	advanced: [
@@ -329,6 +338,10 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"panes.keepFailed": "Whether a failed run's viewer pane stays open for the post-mortem.",
 	"panes.notifications": "Which terminal run states raise a pane-host toast.",
 	"panes.journal": "Whether every dispatched run's event tail is written to disk for `clio-coder fleet view`.",
+	"panes.yazi.enabled": "Whether `/panes open yazi` may open the files pane or one-shot chooser.",
+	"panes.yazi.mode": "Keep Yazi beside the conversation, or close it after one selection.",
+	"panes.yazi.profile": "Use Clio's managed pick profile or leave the operator's Yazi profile untouched.",
+	"panes.yazi.followCwd": "Push the conversation directory into an already-open companion pane.",
 	scope: "Alt+J and Alt+K model cycle set.",
 	"modelSelector.recentLimit": "How many recently used models /model remembers.",
 	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
@@ -1310,6 +1323,22 @@ function fleetGroupHeader(id: FleetGroupHeaderId, label: string): SettingsCenter
 	};
 }
 
+function terminalGroupHeader(id: TerminalGroupHeaderId, label: string): SettingsCenterItem {
+	return {
+		id,
+		label,
+		currentValue: "",
+		description: `${label} behavior in the terminal.`,
+		section: "terminal",
+		configPath: id,
+		affordance: "group heading",
+		scope: "live",
+		readOnly: true,
+		presentationKind: "group-header",
+		valueSegments: [],
+	};
+}
+
 function targetAddCta(): SettingsCenterItem {
 	return {
 		id: "targets.add-cta",
@@ -1573,6 +1602,11 @@ export function buildSettingItems(
 			affordance: "single clio-coder palette",
 			readOnly: true,
 		}),
+		terminalGroupHeader("terminal.group.files-pane", "Files pane"),
+		settingItem("panes.yazi.enabled", String(panes.yazi.enabled), { values: ["true", "false"] }),
+		settingItem("panes.yazi.mode", panes.yazi.mode, { values: ["companion", "chooser"] }),
+		settingItem("panes.yazi.profile", panes.yazi.profile, { values: ["managed", "user"] }),
+		settingItem("panes.yazi.followCwd", String(panes.yazi.followCwd), { values: ["true", "false"] }),
 		settingItem("watchdog.enabled", String(watchdog.enabled), {
 			values: ["false", "true"],
 		}),
@@ -2051,6 +2085,18 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "panes.journal":
 			if (value === "true" || value === "false") settings.panes.journal = value === "true";
+			return;
+		case "panes.yazi.enabled":
+			if (value === "true" || value === "false") settings.panes.yazi.enabled = value === "true";
+			return;
+		case "panes.yazi.mode":
+			if (value === "companion" || value === "chooser") settings.panes.yazi.mode = value;
+			return;
+		case "panes.yazi.profile":
+			if (value === "managed" || value === "user") settings.panes.yazi.profile = value;
+			return;
+		case "panes.yazi.followCwd":
+			if (value === "true" || value === "false") settings.panes.yazi.followCwd = value === "true";
 			return;
 		case "modelSelector.recentLimit":
 			applyNonNegativeInteger(value, (next) => {

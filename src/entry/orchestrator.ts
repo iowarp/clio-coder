@@ -1415,17 +1415,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const dispatchBackground = createDispatchBackgroundRegistry();
 	// One `PanesOperations` instance drives both the `panes` tool and the
 	// `/panes` slash command, so the model and the operator cannot be told
-	// different things about the same pane. Built only when a pane host answered
-	// detection; `mode === "none"` means there is nothing to operate.
-	const panes =
-		mux && mux.mode !== "none"
-			? createPanesRuntime({
-					mux,
-					getSettings: () => getCurrentSettings(),
-					getDispatchSnapshot: () => dispatch.snapshot(),
-					getCwd: () => process.cwd(),
-				})
-			: null;
+	// different things about the same pane. It also owns the no-mux Yazi chooser,
+	// while model tool registration below remains gated on a live pane host.
+	const panes = mux
+		? createPanesRuntime({
+				mux,
+				getSettings: () => getCurrentSettings(),
+				getDispatchSnapshot: () => dispatch.snapshot(),
+				getCwd: () => process.cwd(),
+			})
+		: null;
 	registerAllTools(toolRegistry, {
 		...(session
 			? {
@@ -1452,7 +1451,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Registered only when a pane host answered detection, so the tool is
 		// absent from the prompt on a machine with none rather than present and
 		// always refusing.
-		...(panes ? { panes } : {}),
+		...(panes && mux?.mode !== "none" ? { panes } : {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		...(config ? { getWorkerRosters: () => config.get().workers.rosters } : {}),
 		getSkillLoaderOptions: () => ({
@@ -2072,6 +2071,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),
 		...(panes ? { panes } : {}),
+		...(panes ? { attachYaziBridge: (bridge) => panes.attachYazi(bridge) } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),

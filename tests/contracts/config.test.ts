@@ -358,7 +358,14 @@ describe("contracts/config", () => {
 
 	it("validates the panes section strictly and keeps the shipped defaults for unset keys", () => {
 		const accepted = validateSettings({
-			panes: { enabled: "off", agents: "all", keepFailed: false, notifications: "all", journal: false },
+			panes: {
+				enabled: "off",
+				agents: "all",
+				keepFailed: false,
+				notifications: "all",
+				journal: false,
+				yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
+			},
 		});
 		deepStrictEqual(accepted.issues, []);
 		deepStrictEqual(accepted.settings.panes, {
@@ -367,6 +374,7 @@ describe("contracts/config", () => {
 			keepFailed: false,
 			notifications: "all",
 			journal: false,
+			yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
 		});
 
 		const partial = validateSettings({ panes: { agents: "off" } });
@@ -374,9 +382,17 @@ describe("contracts/config", () => {
 		strictEqual(partial.settings.panes.agents, "off");
 		strictEqual(partial.settings.panes.enabled, DEFAULT_SETTINGS.panes.enabled);
 		strictEqual(partial.settings.panes.keepFailed, DEFAULT_SETTINGS.panes.keepFailed);
+		deepStrictEqual(partial.settings.panes.yazi, DEFAULT_SETTINGS.panes.yazi);
 
 		const bad = validateSettings({
-			panes: { enabled: "guest", agents: "sometimes", keepFailed: "yes", notifications: 1, mode: "auto" },
+			panes: {
+				enabled: "guest",
+				agents: "sometimes",
+				keepFailed: "yes",
+				notifications: 1,
+				mode: "auto",
+				yazi: { mode: "sidecar", profile: "mine", enabled: "yes", followCwd: 1, extra: true },
+			},
 		});
 		deepStrictEqual(bad.issues.map((issue) => issue.path).sort(), [
 			"panes.agents",
@@ -384,6 +400,11 @@ describe("contracts/config", () => {
 			"panes.keepFailed",
 			"panes.mode",
 			"panes.notifications",
+			"panes.yazi.enabled",
+			"panes.yazi.extra",
+			"panes.yazi.followCwd",
+			"panes.yazi.mode",
+			"panes.yazi.profile",
 		]);
 		// Every rejected value falls back to the shipped default rather than being
 		// half-applied; a pane rung Clio cannot honor must not survive validation.

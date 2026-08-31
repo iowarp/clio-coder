@@ -28,6 +28,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"modelSelector",
 	"terminal.smoothStreaming",
 	"attribution.gitCommits",
+	// The bridge reads these on every explicit open; no mux re-detection is
+	// needed because the host capability rung remains `panes.enabled`.
+	"panes.yazi",
 	// The watchdog registration reads its settings live on every trigger, so
 	// enabling it, retargeting it, or changing its cadence takes effect on the
 	// next turn boundary without a restart or a session-routing patch.

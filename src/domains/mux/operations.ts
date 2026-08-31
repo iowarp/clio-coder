@@ -65,6 +65,21 @@ export interface PanesEffectiveSettings {
 	keepFailed: boolean;
 	notifications: string;
 	journal: boolean;
+	yazi: {
+		enabled: boolean;
+		mode: "companion" | "chooser";
+		profile: "managed" | "user";
+		followCwd: boolean;
+	};
+}
+
+/** File-pane return-path state flattened for `/panes` and the model tool. */
+export interface PanesYaziStatus {
+	mode: "companion" | "chooser" | "closed";
+	paneId: string | null;
+	paneCwd: string | null;
+	lastLineAt: number | null;
+	droppedLines: number;
 }
 
 /** What `/panes` with no subcommand answers. */
@@ -76,6 +91,7 @@ export interface PanesStatus {
 	socketPath: string | null;
 	server: { version: string; protocol: number } | null;
 	settings: PanesEffectiveSettings;
+	yazi: PanesYaziStatus;
 	panes: ReadonlyArray<PanesInventoryEntry>;
 }
 
@@ -85,8 +101,8 @@ export type PanesShowResult =
 	| { status: "unavailable"; reason: string };
 
 export type PanesOpenResult =
-	| { status: "opened"; label: string; paneId: string }
-	| { status: "missing-binary"; preset: string; binary: string; installHint: string }
+	| { status: "opened"; label: string; paneId: string | null }
+	| { status: "missing-binary"; preset: string; binary: string; installHint: string; detail: string }
 	| { status: "refused"; reason: string }
 	| { status: "unavailable"; reason: string };
 
@@ -96,6 +112,25 @@ export type PanesCloseResult =
 	| { status: "unavailable"; reason: string };
 
 /**
+ * Interactive-only controller attached after the composer and TUI exist.
+ *
+ * This structural interface stays in the shared leaf so the panes domain does
+ * not import the interactive implementation and the tool does not gain a path
+ * into `src/interactive/**`.
+ */
+export interface PanesYaziController {
+	open(options?: {
+		once?: boolean;
+	}): Promise<
+		| { status: "opened"; mode: "companion" | "chooser"; paneId: string | null; existing: boolean }
+		| { status: "missing-binary"; binary: "yazi" | "ya"; detail: string }
+		| { status: "profile-error"; reason: string }
+		| { status: "unavailable"; reason: string }
+	>;
+	status(): Readonly<PanesYaziStatus>;
+}
+
+/**
  * The operations both callers drive. The tool sees a narrower door: its schema
  * has no argv field at all, and `open` refuses one even if a caller fabricates
  * it.
@@ -103,6 +138,8 @@ export type PanesCloseResult =
 export interface PanesOperations {
 	status(): PanesStatus;
 	show(target: string): Promise<PanesShowResult>;
-	open(request: { preset?: string; argv?: ReadonlyArray<string> }): Promise<PanesOpenResult>;
+	open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult>;
 	close(target: string): Promise<PanesCloseResult>;
+	/** Bind the composer-facing Yazi bridge without rebuilding this shared object. */
+	attachYazi(controller: PanesYaziController): () => void;
 }
