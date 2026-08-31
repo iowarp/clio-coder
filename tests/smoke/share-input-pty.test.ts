@@ -24,6 +24,7 @@ import {
 	type RenderTraceFrameRecord,
 	type RenderTraceRecord,
 } from "../../src/interactive/render-trace.js";
+import { scaleWatchdog } from "../harness/load.js";
 import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 import { openPty, type PtySession, ptySupported, stripAnsi } from "../harness/pty.js";
 
@@ -163,8 +164,12 @@ async function waitForTrace<T>(
 	path: string,
 	find: (records: RenderTraceRecord[]) => T | undefined,
 	description: string,
-	timeoutMs = 20_000,
+	budgetMs = 20_000,
 ): Promise<T> {
+	// A watchdog on a trace record appearing. The cases assert on the ordering
+	// and content of the records, never on how soon one showed up, so the budget
+	// widens with the shard load the run carries.
+	const timeoutMs = scaleWatchdog(budgetMs);
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		const found = find(readTrace(path));
@@ -189,7 +194,8 @@ function highestInputSeq(path: string): number {
  * island or fall outside the viewport; the receipt is the same terminal truth
  * the worker block settles on.
  */
-async function waitForSealedRunId(scratch: Scratch, agentId: string, timeoutMs = 30_000): Promise<string> {
+async function waitForSealedRunId(scratch: Scratch, agentId: string, budgetMs = 30_000): Promise<string> {
+	const timeoutMs = scaleWatchdog(budgetMs);
 	const directory = join(scratch.env.CLIO_CODER_STATE_DIR ?? "", "receipts");
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {

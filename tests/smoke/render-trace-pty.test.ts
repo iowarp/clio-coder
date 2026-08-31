@@ -13,6 +13,7 @@ import { describe, it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { RenderTraceFrameRecord, RenderTraceRecord } from "../../src/interactive/render-trace.js";
+import { scaleWatchdog } from "../harness/load.js";
 import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 import { openPty, ptySupported, stripAnsi } from "../harness/pty.js";
 
@@ -120,8 +121,12 @@ async function waitForTrace<T>(
 	path: string,
 	find: (records: RenderTraceRecord[]) => T | undefined,
 	description: string,
-	timeoutMs = 20_000,
+	budgetMs = 20_000,
 ): Promise<T> {
+	// A watchdog on a trace record appearing. The cases assert on the ordering
+	// and content of the records, never on how soon one showed up, so the budget
+	// widens with the shard load the run carries.
+	const timeoutMs = scaleWatchdog(budgetMs);
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		const found = find(readTrace(path));

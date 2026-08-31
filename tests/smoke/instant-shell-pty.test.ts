@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { RenderTraceRecord } from "../../src/interactive/render-trace.js";
+import { scaleWatchdog } from "../harness/load.js";
 import { openPty, ptySupported, stripAnsi } from "../harness/pty.js";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -104,7 +105,7 @@ function persistedBashEntries(root: string): Array<{ command: string; output: st
 }
 
 async function waitForBootBashEntries(root: string): Promise<Array<{ command: string; output: string }>> {
-	const deadline = Date.now() + 10_000;
+	const deadline = Date.now() + scaleWatchdog(10_000);
 	while (Date.now() < deadline) {
 		const entries = persistedBashEntries(root).filter((entry) => entry.command.startsWith("printf admitted-"));
 		if (entries.length === 2) return entries;
