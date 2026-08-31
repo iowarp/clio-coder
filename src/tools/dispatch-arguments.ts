@@ -6,7 +6,11 @@ import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { DispatchIntent } from "../domains/dispatch/intent.js";
-import { dispatchIntentScopeWidening } from "../domains/dispatch/intent-compatibility.js";
+import {
+	classifyDispatchIntentCompatibility,
+	dispatchIntentRefusals,
+	dispatchIntentScopeWidening,
+} from "../domains/dispatch/intent-compatibility.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
@@ -197,10 +201,17 @@ function dispatchRequestFromArgs(
 				? args.writeRoots.filter((entry): entry is string => typeof entry === "string")
 				: undefined;
 			if (legacy !== undefined) {
-				const left = [...new Set(legacy)].sort();
-				if (JSON.stringify(left) !== JSON.stringify(resolved.intent.writeRoots)) {
-					return { ok: false, message: "intent_write_roots_contradiction" };
-				}
+				// Asked through the same rule the job-spec validator asks, so the two
+				// cannot disagree about the same pair. A raw string comparison here
+				// would refuse './src/tools' against 'src/tools', which name one tree.
+				const refusal = dispatchIntentRefusals(
+					classifyDispatchIntentCompatibility({
+						intent: resolved.intent,
+						writeRoots: legacy,
+						...(cwd !== undefined ? { cwd } : {}),
+					}),
+				).find((entry) => entry.code === "intent_write_roots_contradiction");
+				if (refusal !== undefined) return { ok: false, message: refusal.message };
 				request.writeRoots = legacy;
 			} else {
 				request.writeRoots = resolved.intent.writeRoots;
