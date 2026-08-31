@@ -469,6 +469,7 @@ class WorkbenchRuntime implements HostSink {
 			routingInspection: open.routingInspection,
 			targets: open.host.targets,
 			targetsTruncated: open.host.targetsTruncated,
+			fleet: open.host.fleet,
 			processGeneration: open.host.generation,
 			lastSequence: 0,
 		};
@@ -546,6 +547,17 @@ class WorkbenchRuntime implements HostSink {
 					targetId: event.targetId,
 					health: event.health,
 				});
+				return;
+			case "fleet.activity":
+				// Session scoped rather than turn scoped: a dispatch run can settle
+				// after the turn that started it, so this never joins the turn
+				// projection and never carries a turn identity.
+				if (event.projectId !== open.project.id) return;
+				this.#broadcast("fleet.activity", {
+					projectId: event.projectId,
+					processGeneration: event.generation,
+					sessionId: event.sessionId,
+				}, event.payload);
 				return;
 			default: {
 				if (event.context.projectId !== open.project.id) return;

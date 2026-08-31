@@ -1173,6 +1173,8 @@ Deno.test("a bound session carries the target, model, and autonomy Clio Coder at
 			settings: false,
 			targets: false,
 			loopBlocked: true,
+			dispatchEvents: false,
+			agentAttribution: false,
 		});
 	} finally {
 		await test.dispose();
@@ -1906,6 +1908,82 @@ Deno.test("an approval that expires mid-run never reaches Clio Coder as a reject
 			answers.every((answer) => JSON.stringify(answer).includes("reject-once") === false),
 			"the fixture must never have recorded a rejection",
 		);
+	} finally {
+		await test.dispose();
+	}
+});
+
+Deno.test("dispatch lifecycle facts become fleet rows and survive the turn that started them", async () => {
+	const test = await harness("dispatch-fleet");
+	try {
+		const capabilities = test.host.snapshot().capabilities;
+		ok(capabilities);
+		equal(capabilities.dispatchEvents, true);
+		equal(capabilities.agentAttribution, true);
+
+		const context = await test.host.startTurn("Audit the convergence study.");
+		await waitForEvent(test.sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
+		// The detached run settles after the prompt returned, so the row for it
+		// arrives on the session rather than on the turn.
+		const failed = await waitForEvent(test.sink, "fleet.activity", (event) => event.payload.run.runId === "run-2");
+		equal(failed.payload.run.state, "failed");
+		equal(failed.payload.run.outcome, "timed_out");
+		equal(failed.payload.run.agentId, "reviewer");
+		equal(failed.payload.source, "reported-by-clio");
+
+		const first = test.sink.ofType("fleet.activity").filter((event) => event.payload.run.runId === "run-1");
+		deepStrictEqual(first.map((event) => event.payload.run.state), ["queued", "running", "progress", "done"]);
+		const settledRun = first.at(-1)?.payload.run;
+		ok(settledRun);
+		equal(settledRun.agentId, "explorer");
+		equal(settledRun.node, "blade");
+		equal(settledRun.attempt, 0);
+		equal(settledRun.progressCount, 4);
+		equal(settledRun.progressTruncated, false);
+		equal(settledRun.outcome, "succeeded");
+		equal(settledRun.durationMs, 1_200);
+		equal(settledRun.tokenCount, 640);
+		equal(settledRun.taskPreview, "Audit the convergence study");
+
+		// The host keeps the runs, so a browser that reloads mid-flight is handed
+		// the same rows rather than an empty strip.
+		deepStrictEqual(test.host.fleet.map((run) => [run.runId, run.state]), [["run-1", "done"], ["run-2", "failed"]]);
+	} finally {
+		await test.dispose();
+	}
+});
+
+Deno.test("a tool call that spawned a worker is attributed to it, and the rest to the orchestrator", async () => {
+	const test = await harness("dispatch-fleet");
+	try {
+		const context = await test.host.startTurn("Audit the convergence study.");
+		await waitForEvent(test.sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
+
+		const tools = test.sink.ofType("turn.tool");
+		deepStrictEqual(tools.map((event) => event.payload.status), ["in_progress", "in_progress", "completed"]);
+		deepStrictEqual(tools[0]?.payload.agents, [{
+			role: "orchestrator",
+			agentId: "orchestrator",
+			runId: null,
+			node: null,
+		}]);
+		const worker = { role: "worker", agentId: "explorer", runId: "run-1", node: "blade" };
+		for (const event of tools.slice(1)) {
+			deepStrictEqual(event.payload.agents, [
+				{ role: "orchestrator", agentId: "orchestrator", runId: null, node: null },
+				worker,
+			]);
+		}
+		const narrative = test.sink.ofType("turn.text");
+		ok(narrative.length > 0);
+		for (const event of narrative) {
+			deepStrictEqual(event.payload.agents, [{
+				role: "orchestrator",
+				agentId: "orchestrator",
+				runId: null,
+				node: null,
+			}], "the main narrative is the orchestrator's, and the GUI is told so rather than assuming it");
+		}
 	} finally {
 		await test.dispose();
 	}

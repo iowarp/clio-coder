@@ -62,6 +62,8 @@ function clioSnapshot(phase = "idle") {
 			settings: true,
 			targets: true,
 			loopBlocked: true,
+			dispatchEvents: true,
+			agentAttribution: true,
 		},
 		session: null,
 		lastFailure: null,
@@ -95,6 +97,7 @@ function wireWorkspace(overrides: Record<string, unknown> = {}) {
 		routingInspection: null,
 		targets: null,
 		targetsTruncated: false,
+		fleet: [],
 		processGeneration: null,
 		lastSequence: 0,
 		...overrides,
@@ -125,8 +128,8 @@ function serverEvent<K extends ServerEventKind>(kind: K, payload: unknown, seque
 	}) as ServerEventOf<K>;
 }
 
-Deno.test("the v3 command family is a hard cut with no engine or sandbox aliases", () => {
-	equal(PROTOCOL_VERSION, 3);
+Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases", () => {
+	equal(PROTOCOL_VERSION, 4);
 	deepStrictEqual(CLIENT_COMMAND_KINDS, [
 		"project.browse",
 		"project.open",
@@ -392,7 +395,7 @@ Deno.test("clio snapshots use closed phases and never carry an engine kind", () 
 	expectProtocolError(() => serverEvent("clio.state", { snapshot: { ...clioSnapshot(), capabilities: {} } }));
 });
 
-Deno.test("workspace payloads accept only the exact v3 workspace", () => {
+Deno.test("workspace payloads accept only the exact v4 workspace", () => {
 	const opened = serverEvent("project.opened", { workspace: wireWorkspace() });
 	equal(opened.payload.workspace.project.rootPath, "/tmp/workbench/alpha");
 	expectProtocolError(() => serverEvent("project.opened", { workspace: wireWorkspace({ agents: [] }) }));
@@ -499,6 +502,7 @@ Deno.test("turn events carry a full context and reject raw ACP data", () => {
 		status: "in_progress",
 		summary: "reading",
 		locations: [{ segments: ["notes.md"] }],
+		agents: [],
 		source: "observed-on-acp",
 	});
 	equal(tool.turnId, "turn-1");
@@ -511,7 +515,7 @@ Deno.test("turn events carry a full context and reject raw ACP data", () => {
 			kind: "turn.text",
 			projectId: "project-alpha",
 			terminal: false,
-			payload: { text: "hello", source: "observed-on-acp" },
+			payload: { text: "hello", agents: [], source: "observed-on-acp" },
 		})
 	);
 	for (
@@ -529,9 +533,79 @@ Deno.test("turn events carry a full context and reject raw ACP data", () => {
 				status: "completed",
 				summary: "done",
 				locations: [],
+				agents: [],
 				source: "observed-on-acp",
 				...forbidden,
 			})
+		);
+	}
+});
+
+const FLEET_RUN = {
+	runId: "run-1",
+	agentId: "explorer",
+	state: "progress",
+	taskPreview: "Audit the convergence study",
+	node: "blade",
+	attempt: 0,
+	progressCount: 4,
+	progressTruncated: false,
+	outcome: null,
+	durationMs: null,
+	tokenCount: null,
+	updatedAt: "2026-08-18T12:00:00.000Z",
+};
+
+Deno.test("fleet activity carries only reported dispatch facts under a closed state set", () => {
+	const activity = serverEvent("fleet.activity", { run: FLEET_RUN, source: "reported-by-clio" });
+	equal(activity.payload.run.state, "progress");
+	equal(activity.payload.run.progressCount, 4);
+	// A fleet fact belongs to the session, not to a turn: a detached run settles
+	// after the turn that started it returned.
+	equal(activity.turnId, undefined);
+
+	for (
+		const invalidRun of [
+			{ ...FLEET_RUN, state: "cancelled" },
+			{ ...FLEET_RUN, progressCount: -1 },
+			{ ...FLEET_RUN, outcome: "succeeded" },
+			{ ...FLEET_RUN, runId: "run\u0007one" },
+			{ ...FLEET_RUN, task: "the exact dispatched task" },
+		]
+	) {
+		expectProtocolError(() => serverEvent("fleet.activity", { run: invalidRun, source: "reported-by-clio" }));
+	}
+	// A settled run may name its outcome; that is the only state that may.
+	const settled = serverEvent("fleet.activity", {
+		run: { ...FLEET_RUN, state: "done", outcome: "succeeded", durationMs: 1_200, tokenCount: 640 },
+		source: "reported-by-clio",
+	});
+	equal(settled.payload.run.outcome, "succeeded");
+});
+
+Deno.test("agent attribution is a closed role set that binds a worker to its run", () => {
+	const attributed = serverEvent("turn.text", {
+		text: "The worker reported back.",
+		agents: [
+			{ role: "orchestrator", agentId: "orchestrator", runId: null, node: null },
+			{ role: "worker", agentId: "explorer", runId: "run-1", node: "blade" },
+		],
+		source: "observed-on-acp",
+	});
+	equal(attributed.payload.agents.length, 2);
+	equal(attributed.payload.agents[1]?.agentId, "explorer");
+
+	for (
+		const invalidAgents of [
+			[{ role: "supervisor", agentId: "explorer", runId: "run-1", node: null }],
+			[{ role: "orchestrator", agentId: "orchestrator", runId: "run-1", node: null }],
+			[{ role: "worker", agentId: "explorer", runId: "run-1" }],
+			[{ role: "worker", agentId: "explorer", runId: "run-1", node: null, task: "raw" }],
+			Array.from({ length: 18 }, () => ({ role: "worker", agentId: "a", runId: "r", node: null })),
+		]
+	) {
+		expectProtocolError(() =>
+			serverEvent("turn.text", { text: "x", agents: invalidAgents, source: "observed-on-acp" })
 		);
 	}
 });
@@ -1163,7 +1237,7 @@ Deno.test("server envelopes reject old versions, unknown kinds, and oversized fr
 	for (const removed of ["engine.state", "turn.agent", "turn.change", "turn.evidence", "project.created"]) {
 		ok(!(SERVER_EVENT_KINDS as readonly string[]).includes(removed), `${removed} must be gone`);
 	}
-	const modest = serverEvent("turn.text", { text: "x".repeat(1_024), source: "observed-on-acp" });
+	const modest = serverEvent("turn.text", { text: "x".repeat(1_024), agents: [], source: "observed-on-acp" });
 	deepStrictEqual(parseServerEvent(encodeServerEvent(modest)), modest);
 	// Every field below is individually legal; only the assembled frame is too large.
 	const inflated = serverEvent("project.opened", {

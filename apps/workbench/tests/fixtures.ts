@@ -329,6 +329,8 @@ export function clioSnapshotFixture(
 			settings: true,
 			targets: true,
 			loopBlocked: true,
+			dispatchEvents: true,
+			agentAttribution: true,
 		},
 		session: {
 			id: "session-alpha-0001",
@@ -396,6 +398,7 @@ export function workspaceFixture(
 		routingInspection: null,
 		targets: null,
 		targetsTruncated: false,
+		fleet: [],
 		processGeneration: "generation-alpha-0001",
 		lastSequence: 0,
 		...overrides,
@@ -476,6 +479,13 @@ export function serverEventFixture<K extends ServerEventKind>(
 			processGeneration: options.processGeneration ?? "generation-alpha-0001",
 			sessionId: options.sessionId ?? "session-alpha-0001",
 			turnId: options.turnId ?? "turn-1",
+		}
+		: kind === "fleet.activity"
+		// Session scoped: a dispatch run can settle after the turn that started it.
+		? {
+			projectId: options.projectId ?? FIXTURE_PROJECT_ID,
+			processGeneration: options.processGeneration ?? "generation-alpha-0001",
+			sessionId: options.sessionId ?? "session-alpha-0001",
 		}
 		: PROJECT_EVENT_KINDS.has(kind)
 		? { projectId: options.projectId ?? FIXTURE_PROJECT_ID }

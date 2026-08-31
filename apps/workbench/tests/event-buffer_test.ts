@@ -27,11 +27,11 @@ class ManualFrameClock implements FrameClock {
 }
 
 function text(sequence: number, value: string) {
-	return serverEventFixture("turn.text", { text: value, source: "observed-on-acp" }, { sequence });
+	return serverEventFixture("turn.text", { text: value, agents: [], source: "observed-on-acp" }, { sequence });
 }
 
 function thought(sequence: number, value: string) {
-	return serverEventFixture("turn.thought", { text: value, source: "observed-on-acp" }, { sequence });
+	return serverEventFixture("turn.thought", { text: value, agents: [], source: "observed-on-acp" }, { sequence });
 }
 
 Deno.test("stream deltas are delivered once on the display frame in exact wire order", () => {
@@ -59,6 +59,7 @@ Deno.test("a control event immediately flushes preceding stream deltas in one or
 		status: "in_progress",
 		summary: "Reading the note.",
 		locations: [{ segments: ["note.md"] }],
+		agents: [],
 		source: "observed-on-acp",
 	}, { sequence: 2 }));
 

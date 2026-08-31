@@ -433,18 +433,21 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 		deepStrictEqual(harness.updates.map(({ update }) => update), [
 			{
 				type: "message",
+				agents: [],
 				replay: null,
 				sessionId: fixtureSessionId,
 				text: "Fixture turn started. ",
 			},
 			{
 				type: "thought",
+				agents: [],
 				replay: null,
 				sessionId: fixtureSessionId,
 				text: "Inspecting deterministic input. ",
 			},
 			{
 				type: "tool",
+				agents: [],
 				replay: null,
 				variant: "start",
 				sessionId: fixtureSessionId,
@@ -456,6 +459,7 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 			},
 			{
 				type: "tool",
+				agents: [],
 				replay: null,
 				variant: "update",
 				sessionId: fixtureSessionId,
@@ -467,6 +471,7 @@ Deno.test("spawned fixture completes initialize, new, ordered prompt updates, us
 			},
 			{
 				type: "message",
+				agents: [],
 				replay: null,
 				sessionId: fixtureSessionId,
 				text: "Fixture turn complete.",
@@ -1354,5 +1359,57 @@ Deno.test("extension event sequence increases across prompts in one child proces
 		equal(harness.extensionEvents[firstSequences.length]?.event.sequence, firstMaximum + 1);
 		await harness.client.notify("session/cancel", { sessionId: fixtureSessionId });
 		await second;
+	});
+});
+
+Deno.test("dispatch events and agent attribution cross the client boundary as validated facts", async () => {
+	await withFixture("dispatch-fleet", async (harness) => {
+		const kinds = [
+			"safety.loopBlocked",
+			"dispatch.enqueued",
+			"dispatch.started",
+			"dispatch.progress",
+			"dispatch.completed",
+			"dispatch.failed",
+		];
+		await initialize(harness.client, {
+			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds } } },
+		});
+		await newSession(harness.client, harness.root);
+		await prompt(harness.client);
+		await waitFor(() => harness.extensionEvents.length === 5, "every dispatch frame");
+
+		deepStrictEqual(harness.extensionEvents.map(({ event }) => event.kind), [
+			"dispatch.enqueued",
+			"dispatch.started",
+			"dispatch.progress",
+			"dispatch.completed",
+			// Emitted after the prompt returned: a detached run outlives its turn.
+			"dispatch.failed",
+		]);
+		const started = harness.extensionEvents[1]?.event;
+		ok(started && started.kind === "dispatch.started");
+		equal(started.turnId, null, "a dispatch fact is bound to the session, not to a turn");
+		equal(started.terminal, false);
+		equal(started.payload.runId, "run-1");
+		equal(started.payload.taskPreview, "Audit the convergence study");
+		equal(started.payload.node, "blade");
+		equal(started.payload.attempt, 0);
+		const completed = harness.extensionEvents[3]?.event;
+		ok(completed && completed.kind === "dispatch.completed");
+		equal(completed.terminal, true, "only a settled run is terminal");
+		equal(completed.payload.tokenCount, 640);
+
+		// The tool call the worker ran under carries both identities; everything
+		// else on the main stream carries only the orchestrator.
+		const toolUpdates = harness.updates.filter(({ update }) => update.type === "tool");
+		equal(toolUpdates.length, 3);
+		deepStrictEqual(toolUpdates[0]?.update.agents, [
+			{ role: "orchestrator", agentId: "orchestrator", runId: null, node: null },
+		]);
+		deepStrictEqual(toolUpdates[2]?.update.agents, [
+			{ role: "orchestrator", agentId: "orchestrator", runId: null, node: null },
+			{ role: "worker", agentId: "explorer", runId: "run-1", node: "blade" },
+		]);
 	});
 });

@@ -7,7 +7,7 @@
  * ACP frames.
  */
 
-export const PROTOCOL_VERSION = 3 as const;
+export const PROTOCOL_VERSION = 4 as const;
 export const PRODUCT_NAME = "Clio Coder" as const;
 export const MAX_CLIENT_FRAME_BYTES = 16 * 1024;
 export const MAX_SERVER_EVENT_BYTES = 256 * 1024;
@@ -321,6 +321,7 @@ export const SERVER_EVENT_KINDS = [
 	"turn.permission.requested",
 	"turn.permission.resolved",
 	"turn.terminal",
+	"fleet.activity",
 	"protocol.error",
 	"command.error",
 ] as const;
@@ -404,6 +405,10 @@ export interface WireClioCapabilities {
 	readonly settings: boolean;
 	readonly targets: boolean;
 	readonly loopBlocked: boolean;
+	/** Clio Coder advertised the dispatch lifecycle on its opt-in event stream. */
+	readonly dispatchEvents: boolean;
+	/** Clio Coder advertised per-frame agent attribution on its session updates. */
+	readonly agentAttribution: boolean;
 }
 
 export interface WireClioAgent {
@@ -447,6 +452,8 @@ export interface WireTimelineItem {
 	readonly sequence?: number;
 	/** Exact terminal usage fields reported by Clio Coder; present only on live outcome/failure cards. */
 	readonly usage?: WireUsage;
+	/** Who produced this card, when Clio Coder reported an identity for it. */
+	readonly agents?: readonly WireAgentAttribution[];
 	readonly source: WireEventSource;
 }
 
@@ -986,6 +993,8 @@ export interface WireProjectWorkspace {
 	readonly routingInspection: WireRoutingInspection | null;
 	readonly targets: readonly WireTarget[] | null;
 	readonly targetsTruncated: boolean;
+	/** Dispatch runs the host has observed on this session, oldest first. */
+	readonly fleet: readonly WireFleetRun[];
 	readonly processGeneration: string | null;
 	readonly lastSequence: number;
 }
@@ -1073,8 +1082,31 @@ export interface TurnStartedPayload {
 	readonly source: WireEventSource;
 }
 
+/**
+ * Where a frame's identity came from. `orchestrator` is the main Clio Coder
+ * agent that owns the session; `worker` is a delegated agent Clio Coder
+ * reported starting under a specific tool call. Nothing here is inferred from
+ * tool titles or timing: an unattributed frame carries an empty list.
+ */
+export const AGENT_ROLES = ["orchestrator", "worker"] as const;
+export type WireAgentRole = (typeof AGENT_ROLES)[number];
+
+export interface WireAgentAttribution {
+	readonly role: WireAgentRole;
+	readonly agentId: string;
+	/** Dispatch run this agent is executing; null for the orchestrator. */
+	readonly runId: string | null;
+	/** Fleet node the run was placed on; null renders as the local node. */
+	readonly node: string | null;
+}
+
+/** Orchestrator plus the per-tool-call worker cap Clio Coder enforces. */
+export const MAX_WIRE_AGENT_ATTRIBUTIONS = 17;
+
 export interface TurnTextPayload {
 	readonly text: string;
+	/** Who produced this text, most general first. Empty when identity did not cross. */
+	readonly agents: readonly WireAgentAttribution[];
 	readonly source: WireEventSource;
 }
 
@@ -1085,6 +1117,46 @@ export interface TurnToolPayload {
 	readonly status: "in_progress" | "completed" | "failed" | "canceled";
 	readonly summary: string;
 	readonly locations: readonly WireProjectPath[];
+	/** Who ran this call, most general first. Empty when identity did not cross. */
+	readonly agents: readonly WireAgentAttribution[];
+	readonly source: WireEventSource;
+}
+
+/**
+ * Presentation state of one dispatch run. `progress` is not a phase of its own:
+ * it is a running run that has reported activity, kept distinct so a strip can
+ * show that a run is doing work rather than merely admitted.
+ */
+export const FLEET_RUN_STATES = ["queued", "running", "progress", "done", "failed"] as const;
+export type WireFleetRunState = (typeof FLEET_RUN_STATES)[number];
+
+/**
+ * One dispatch run as the GUI may draw it. Every field on it is reported by
+ * Clio Coder over its opt-in event stream; nothing is derived or inferred.
+ * `taskPreview` is Clio Coder's own sanitized, byte-bounded prefix of the
+ * dispatched task, never the exact task.
+ */
+export interface WireFleetRun {
+	readonly runId: string;
+	readonly agentId: string;
+	readonly state: WireFleetRunState;
+	readonly taskPreview: string | null;
+	readonly node: string | null;
+	readonly attempt: number | null;
+	readonly progressCount: number;
+	/** True once Clio Coder capped this run's forwarded progress stream. */
+	readonly progressTruncated: boolean;
+	readonly outcome: string | null;
+	readonly durationMs: number | null;
+	readonly tokenCount: number | null;
+	readonly updatedAt: string;
+}
+
+/** Runs the GUI keeps on the strip before the oldest settled one is dropped. */
+export const MAX_WIRE_FLEET_RUNS = 64;
+
+export interface FleetActivityPayload {
+	readonly run: WireFleetRun;
 	readonly source: WireEventSource;
 }
 
@@ -1173,6 +1245,7 @@ export interface ServerEventPayloadByKind {
 	readonly "turn.permission.requested": TurnPermissionRequestedPayload;
 	readonly "turn.permission.resolved": TurnPermissionResolvedPayload;
 	readonly "turn.terminal": TurnTerminalPayload;
+	readonly "fleet.activity": FleetActivityPayload;
 	readonly "protocol.error": ProtocolErrorPayload;
 	readonly "command.error": CommandErrorPayload;
 }
@@ -1766,7 +1839,18 @@ function validateBoundSession(value: unknown, label: string): WireBoundSession {
 	};
 }
 
-const CAPABILITY_KEYS = ["load", "list", "label", "delete", "autonomy", "settings", "targets", "loopBlocked"] as const;
+const CAPABILITY_KEYS = [
+	"load",
+	"list",
+	"label",
+	"delete",
+	"autonomy",
+	"settings",
+	"targets",
+	"loopBlocked",
+	"dispatchEvents",
+	"agentAttribution",
+] as const;
 
 function validateCapabilities(value: unknown, label: string): WireClioCapabilities {
 	const record = expectExactKeys(value, label, CAPABILITY_KEYS);
@@ -1812,13 +1896,78 @@ function validateClioSnapshot(value: unknown, label: string): WireClioSnapshot {
 	};
 }
 
+/**
+ * Agent attribution as it crosses the boundary. The list is ordered from the
+ * most general identity to the most specific, so a renderer that wants one
+ * label takes the last entry and one that wants provenance reads the whole
+ * chain. An empty list means Clio Coder reported no identity, which the GUI
+ * renders as the product rather than as a guess.
+ */
+function validateAgentAttributions(value: unknown, label: string): readonly WireAgentAttribution[] {
+	return expectArray(value, label, MAX_WIRE_AGENT_ATTRIBUTIONS, (entry, entryLabel) => {
+		const record = expectExactKeys(entry, entryLabel, ["role", "agentId", "runId", "node"]);
+		const role = expectEnum(record.role, `${entryLabel}.role`, AGENT_ROLES);
+		const runId = record.runId === null ? null : expectPresentationText(record.runId, `${entryLabel}.runId`, 128);
+		if (role === "orchestrator" && runId !== null) {
+			invalid(`${entryLabel}.runId must be null for the orchestrator`);
+		}
+		return {
+			role,
+			agentId: expectPresentationText(record.agentId, `${entryLabel}.agentId`, 128),
+			runId,
+			node: record.node === null ? null : expectPresentationText(record.node, `${entryLabel}.node`, 128),
+		};
+	});
+}
+
+function validateFleetRun(value: unknown, label: string): WireFleetRun {
+	const record = expectExactKeys(value, label, [
+		"runId",
+		"agentId",
+		"state",
+		"taskPreview",
+		"node",
+		"attempt",
+		"progressCount",
+		"progressTruncated",
+		"outcome",
+		"durationMs",
+		"tokenCount",
+		"updatedAt",
+	]);
+	const state = expectEnum(record.state, `${label}.state`, FLEET_RUN_STATES);
+	const outcome = record.outcome === null ? null : expectPresentationText(record.outcome, `${label}.outcome`, 64);
+	if (outcome !== null && state !== "done" && state !== "failed") {
+		invalid(`${label}.outcome is valid only on a settled run`);
+	}
+	return {
+		runId: expectPresentationText(record.runId, `${label}.runId`, 128),
+		agentId: expectPresentationText(record.agentId, `${label}.agentId`, 128),
+		state,
+		taskPreview: record.taskPreview === null
+			? null
+			: expectPresentationText(record.taskPreview, `${label}.taskPreview`, 512),
+		node: record.node === null ? null : expectPresentationText(record.node, `${label}.node`, 128),
+		attempt: record.attempt === null ? null : expectInteger(record.attempt, `${label}.attempt`, 0),
+		progressCount: expectInteger(record.progressCount, `${label}.progressCount`, 0),
+		progressTruncated: expectBoolean(record.progressTruncated, `${label}.progressTruncated`),
+		outcome,
+		durationMs: record.durationMs === null ? null : expectInteger(record.durationMs, `${label}.durationMs`, 0),
+		tokenCount: record.tokenCount === null ? null : expectInteger(record.tokenCount, `${label}.tokenCount`, 0),
+		updatedAt: expectTimestamp(record.updatedAt, `${label}.updatedAt`),
+	};
+}
+
 function validateWireTimelineItem(value: unknown, label: string): WireTimelineItem {
 	const record = expectExactKeys(
 		value,
 		label,
 		["id", "kind", "title", "summary", "status", "turnId", "origin", "startedAt", "source"],
-		["detail", "sequence", "endedAt", "usage"],
+		["detail", "sequence", "endedAt", "usage", "agents"],
 	);
+	const agents = Object.hasOwn(record, "agents")
+		? validateAgentAttributions(record.agents, `${label}.agents`)
+		: undefined;
 	const detail = Object.hasOwn(record, "detail") ? expectPresentationText(record.detail, `${label}.detail`) : undefined;
 	const sequence = Object.hasOwn(record, "sequence")
 		? expectInteger(record.sequence, `${label}.sequence`, 1)
@@ -1867,6 +2016,7 @@ function validateWireTimelineItem(value: unknown, label: string): WireTimelineIt
 		...(endedAt === undefined ? {} : { endedAt }),
 		...(sequence === undefined ? {} : { sequence }),
 		...(usage === undefined ? {} : { usage }),
+		...(agents === undefined ? {} : { agents }),
 		source,
 	};
 }
@@ -2852,6 +3002,7 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 		"routingInspection",
 		"targets",
 		"targetsTruncated",
+		"fleet",
 		"processGeneration",
 		"lastSequence",
 	]);
@@ -2891,6 +3042,7 @@ function validateWireWorkspace(value: unknown, label: string): WireProjectWorksp
 			: validateRoutingInspection(record.routingInspection, `${label}.routingInspection`),
 		targets: record.targets === null ? null : validateTargets(record.targets, `${label}.targets`),
 		targetsTruncated: expectBoolean(record.targetsTruncated, `${label}.targetsTruncated`),
+		fleet: expectArray(record.fleet, `${label}.fleet`, MAX_WIRE_FLEET_RUNS, validateFleetRun),
 		processGeneration: expectNullableId(record.processGeneration, `${label}.processGeneration`),
 		lastSequence: expectInteger(record.lastSequence, `${label}.lastSequence`),
 	};
@@ -3036,9 +3188,10 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 		}
 		case "turn.text":
 		case "turn.thought": {
-			const record = expectExactKeys(value, label, ["text", "source"]);
+			const record = expectExactKeys(value, label, ["text", "agents", "source"]);
 			return {
 				text: expectStreamText(record.text, `${label}.text`),
+				agents: validateAgentAttributions(record.agents, `${label}.agents`),
 				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
@@ -3050,6 +3203,7 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				"status",
 				"summary",
 				"locations",
+				"agents",
 				"source",
 			]);
 			return {
@@ -3063,6 +3217,14 @@ function validateServerPayload(kind: ServerEventKind, value: unknown): ServerEve
 				),
 				summary: expectPresentationText(record.summary, `${label}.summary`),
 				locations: validateLocations(record.locations, `${label}.locations`),
+				agents: validateAgentAttributions(record.agents, `${label}.agents`),
+				source: validateEventSource(record.source, `${label}.source`),
+			};
+		}
+		case "fleet.activity": {
+			const record = expectExactKeys(value, label, ["run", "source"]);
+			return {
+				run: validateFleetRun(record.run, `${label}.run`),
 				source: validateEventSource(record.source, `${label}.source`),
 			};
 		}
