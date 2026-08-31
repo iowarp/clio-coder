@@ -49,6 +49,35 @@ export function renderCompactionSummaryLine(input: CompactionSummaryLineInput): 
 	return `[context engine] llm_summary: ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars; ~${input.tokensBefore} tokens before${tail}`;
 }
 
+/** Why the non-destructive stage had nothing to do before a summary ran. */
+export type EvictionSkipReason = "all-protected" | "nothing-evictable" | "disabled";
+
+export interface EvictionSkipLineInput {
+	reason: EvictionSkipReason;
+	/** Turn starts in the visible slice the policy was offered. */
+	turns: number;
+	protectLastTurns: number;
+	policyId: string;
+}
+
+/**
+ * One line saying the working-set stage was considered and declined, in the
+ * same `[context engine] working set:` voice its eviction notice uses. Without
+ * it a short session falls from the pressure threshold straight into the
+ * destructive summary with nothing in the transcript explaining why the cheap
+ * stage did not run (smoke pass 2, G1).
+ */
+export function renderEvictionSkipLine(input: EvictionSkipLineInput): string {
+	const turnWord = input.turns === 1 ? "turn" : "turns";
+	const cause =
+		input.reason === "disabled"
+			? "eviction is off (context.workingSet.enabled false)"
+			: input.reason === "all-protected"
+				? `nothing evictable, all ${input.turns} ${turnWord} are inside the protected window (protectLastTurns ${input.protectLastTurns})`
+				: `nothing evictable by ${input.policyId} above the protected window (protectLastTurns ${input.protectLastTurns})`;
+	return `[context engine] working set: ${cause}; llm_summary runs instead`;
+}
+
 export interface RenderCompactionSummaryOptions {
 	/** Override the default markdown theme. Defaults to the local theme above. */
 	theme?: MarkdownTheme;

@@ -26,6 +26,7 @@ import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { ToolName } from "../core/tool-names.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
+import { isTurnStart } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
@@ -89,7 +90,7 @@ import {
 	toolNamesFromAgentState,
 } from "./chat-loop-messages.js";
 import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
-import { renderCompactionSummaryLine } from "./renderers/compaction-summary.js";
+import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./renderers/compaction-summary.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -216,6 +217,27 @@ export interface TurnContext {
 	notePrewarm(prewarm: PrewarmStats): void;
 	resetForSession(): void;
 	dispose(): void;
+}
+
+/**
+ * Why the working-set stage declined, said in the terms the operator can act
+ * on. The two cases are worth separating: a session whose every turn is inside
+ * `protectLastTurns` was never offered a candidate, while a longer one was
+ * offered candidates the policy refused. The first is the shape smoke pass 2
+ * found (G1), and the setting it names is the one that changes it.
+ */
+function evictionSkipMessage(
+	visibleEntries: ReadonlyArray<SessionEntry>,
+	workingSet: Readonly<{ protectLastTurns: number; policy: string }>,
+	policyId: string,
+): string {
+	const turns = visibleEntries.filter(isTurnStart).length;
+	return renderEvictionSkipLine({
+		reason: turns <= workingSet.protectLastTurns ? "all-protected" : "nothing-evictable",
+		turns,
+		protectLastTurns: workingSet.protectLastTurns,
+		policyId,
+	});
 }
 
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
@@ -661,6 +683,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 		let preSummaryStageActed = false;
+		// G1 from smoke pass 2: a short session generates all its pressure inside
+		// the protection window, the non-destructive layer finds nothing, and the
+		// destructive summary ran with nothing in the transcript saying eviction
+		// was considered and declined. Held here and emitted only if a summary
+		// actually follows.
+		let evictionSkipNotice: string | null = null;
 		const rememberEmptyAutomaticAttempt = (): void => {
 			if (!force && !preSummaryStageActed && activeAutoTurnId) emptyAutoCompactTurnId = activeAutoTurnId;
 		};
@@ -743,12 +771,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					}
 				} else if (settings.context.workingSet.enabled) {
 					let planned: ReturnType<typeof planEviction>;
+					let visibleEntries: ReadonlyArray<SessionEntry> = [];
+					let policyId = settings.context.workingSet.policy;
 					try {
 						const entries = deps.readSessionEntries() ?? [];
 						const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
+						policyId = policy.id;
+						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
 						planned = (deps.planEviction ?? planEviction)(policy, {
-							entries: selectVisibleEntries(entries, state.lastTurnId ?? undefined),
+							entries: visibleEntries,
 							view,
 							cwd: deps.session.current()?.cwd ?? null,
 							settings: settings.context.workingSet,
@@ -830,7 +862,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							emitCompactionActivity("failed", compactionFailureMessage(error));
 							throw error;
 						}
+					} else {
+						evictionSkipNotice = evictionSkipMessage(visibleEntries, settings.context.workingSet, policyId);
 					}
+				} else {
+					evictionSkipNotice = renderEvictionSkipLine({
+						reason: "disabled",
+						turns: 0,
+						protectLastTurns: settings.context.workingSet.protectLastTurns,
+						policyId: settings.context.workingSet.policy,
+					});
 				}
 			}
 		}
@@ -847,6 +888,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			summaryLifecycleStarted = true;
 		};
 		if (force) startSummaryLifecycle();
+		// Said before the summary call, not after it: the operator is about to wait
+		// on a destructive stage, and the reason the cheap one was skipped is only
+		// useful ahead of it.
+		if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice);
 		let result: CompactResult | null = null;
 		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 		try {
