@@ -158,6 +158,40 @@ export function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): stri
 	return errors;
 }
 
+/**
+ * The TUI's verdict for a command-shaped token the registry does not own,
+ * applied to a headless task. Returns the refusal message, or null when the
+ * task is not an unknown command.
+ *
+ * `parseSlashCommand` is the canonical shape test and the canonical registry
+ * walk, so a token that is one word of letters, digits, hyphens, or colons and
+ * names no command lands here exactly as it does in the editor. Prose keeps
+ * reaching the model: an absolute path such as `/home/user/notes` carries a
+ * separator and is not one word, and `\/tmp is full` is the same escape the
+ * editor honors.
+ *
+ * A prompt template claims the token before the refusal does. Only membership
+ * is checked, not expansion: a template that exists but refuses (an untrusted
+ * project root, an unreadable body) has its own message, which the headless
+ * boot path already prints from the expansion itself. Deciding that here would
+ * duplicate the trust rules and put two refusals on one token.
+ *
+ * Both modules are imported lazily. `clio-coder run` reaches the model through
+ * a dynamic `bootOrchestrator` import to keep its startup off the interactive
+ * and resource module graphs, and a task that does not start with a slash must
+ * not pay for either.
+ */
+export async function unknownSlashCommandRefusal(task: string): Promise<string | null> {
+	if (!task.trim().startsWith("/")) return null;
+	const { parseSlashCommand } = await import("../interactive/slash-commands.js");
+	const command = parseSlashCommand(task);
+	if (command.kind !== "unknown-command") return null;
+	const { loadPromptTemplates } = await import("../domains/resources/index.js");
+	const templates = loadPromptTemplates({ cwd: process.cwd() });
+	if (templates.items.some((template) => template.name === command.token)) return null;
+	return `/${command.token} is not a command. Type /help for the list.`;
+}
+
 export async function runClioRun(
 	args: ReadonlyArray<string>,
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
@@ -218,6 +252,15 @@ export async function runClioRun(
 			if (!assembled) return 2;
 
 			if (parsed.agentId === undefined) {
+				// A mistyped slash command is a usage error, not a task. Refusing it
+				// here keeps it from booting a session and spending a model turn on a
+				// command that was never run, which is what the TUI has always done
+				// and what docs/extensions-and-sharing.md documents for both surfaces.
+				const slashRefusal = await unknownSlashCommandRefusal(assembled.prompt);
+				if (slashRefusal !== null) {
+					process.stderr.write(`clio-coder run: ${slashRefusal}\n`);
+					return 2;
+				}
 				// An explicit --target override is a one-run target; a missing id is an
 				// operator config error, not an assistant response. Reject it before the
 				// headless turn so the resolver diagnostic never streams to stdout as a

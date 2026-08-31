@@ -277,6 +277,10 @@ it is never sent to the model. That covers spellings removed outright, such as
 behavior where an unrecognized spelling reached the model as prose and was answered
 conversationally, which left the operator believing a command had run when nothing had.
 
+A headless `clio-coder run "/typo"` refuses the same way. The verdict is reached
+before boot, so no session is opened and no turn is spent; the diagnostic names
+the token on stderr and the run exits `2`, the usage-error code.
+
 Command-shaped means one word of letters, digits, hyphens, or colons after the slash, so
 paths such as `/home/user/notes.md` still reach the model unchanged. One word
 followed by prose is treated as a command, because `/status please` and `/tmp is
