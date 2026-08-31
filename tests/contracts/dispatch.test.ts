@@ -5148,6 +5148,7 @@ rl.once("line", (line) => {
 						reasonCode?: string;
 						policySource?: string;
 						timeoutMs?: number;
+						fallback?: "deny" | "fail";
 						escalation?: boolean;
 				  }
 				| undefined;
@@ -5164,6 +5165,7 @@ rl.once("line", (line) => {
 			strictEqual(request?.reasonCode, "bash-command-substitution");
 			strictEqual(request?.policySource, "builtin-command-allowlist");
 			strictEqual(request?.timeoutMs, 120_000);
+			strictEqual(request?.fallback, "deny");
 			strictEqual(request?.escalation, true);
 		} finally {
 			unsubscribe();

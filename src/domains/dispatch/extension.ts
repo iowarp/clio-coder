@@ -4797,6 +4797,7 @@ export function createDispatchBundle(
 					...(ruleId !== null ? { ruleId } : {}),
 					...(policySource !== null ? { policySource } : {}),
 					...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
+					fallback: spec.escalation?.fallback ?? "deny",
 					escalation: true,
 				});
 			}
@@ -4871,6 +4872,9 @@ export function createDispatchBundle(
 					decidedBy,
 					actionClass,
 					reason,
+					...(source === "timeout" && (event.payload.mode === "deny" || event.payload.mode === "fail")
+						? { fallback: event.payload.mode }
+						: {}),
 					...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
 				});
 			}
