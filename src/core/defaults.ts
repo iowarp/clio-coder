@@ -507,11 +507,13 @@ export const DEFAULT_SETTINGS = {
 	} as PrewarmSettings,
 	panes: {
 		/**
-		 * Guest mode when a pane host is detected, and nothing at all when one is
-		 * not. Detection costs no file descriptor without `HERDR_ENV`, so `auto`
-		 * is free on a machine with no pane host installed.
+		 * Off: a plain `clio-coder` performs zero pane-host work, and none of the
+		 * mux domain even loads. The extension is activated per session with
+		 * `clio-coder --with-panes`, or durably by setting this to `auto` (guest
+		 * mode when a pane host is detected). The flag beats the setting in both
+		 * directions.
 		 */
-		enabled: "auto",
+		enabled: "off",
 		/**
 		 * Detached batches and backgrounded dispatches are the runs that vanish
 		 * from the operator's view, so they are the ones a pane is worth. An
@@ -855,19 +857,19 @@ context:
 prewarm:
   enabled: true
 
-# The pane layer. enabled picks the capability rung: auto takes guest mode when
-# a pane host is detected, embedded asks Clio to own a private session (not yet
-# implemented), off skips detection. agents decides which dispatched runs get a
-# viewer pane: auto covers detached batches and dispatches moved to the
-# background, all adds attached runs, off opens none. keepFailed leaves a failed
-# run's pane open for the post-mortem. notifications picks which terminal states
-# raise a toast. journal tees every dispatched run's event tail to
-# <state>/runs/<runId>/events.ndjson so \`clio-coder fleet view <runId> --follow\`
-# can watch a run from a second terminal. Journal directories are removed when
-# their run leaves the run ledger ring, and \`clio-coder reset --state\` clears
-# them with the rest of the state root.
+# The pane layer. Off by default: plain \`clio-coder\` does no pane-host work at
+# all. Start \`clio-coder --with-panes\` to activate the extension for one
+# session, or set enabled: auto to activate it whenever a pane host is
+# detected (embedded, a Clio-owned private session, is not implemented yet).
+# The command-line flag beats this setting in both directions. notifications
+# picks which terminal run states raise a toast. journal tees every dispatched
+# run's event tail to <state>/runs/<runId>/events.ndjson so
+# \`clio-coder fleet view <runId> --follow\` can watch a run from a second
+# terminal; it is written regardless of any pane host being present. Journal
+# directories are removed when their run leaves the run ledger ring, and
+# \`clio-coder reset --state\` clears them with the rest of the state root.
 panes:
-  enabled: auto
+  enabled: off
   agents: auto
   keepFailed: true
   notifications: failures

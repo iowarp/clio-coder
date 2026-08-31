@@ -1002,7 +1002,7 @@ describe("contracts/settings center", () => {
 		deepStrictEqual(byId.get("panes.enabled")?.values, ["auto", "embedded", "off"]);
 		deepStrictEqual(byId.get("panes.agents")?.values, ["auto", "all", "off"]);
 		deepStrictEqual(byId.get("panes.notifications")?.values, ["failures", "all", "off"]);
-		strictEqual(byId.get("panes.enabled")?.currentValue, "auto");
+		strictEqual(byId.get("panes.enabled")?.currentValue, "off");
 		strictEqual(byId.get("panes.keepFailed")?.currentValue, "true");
 		strictEqual(byId.get("panes.notifications")?.defaultValue, "failures");
 
@@ -1019,7 +1019,7 @@ describe("contracts/settings center", () => {
 		applySettingChange(settings, "panes.notifications", "sometimes");
 		strictEqual(settings.panes.notifications, "failures");
 		applySettingChange(settings, "panes.enabled", "guest");
-		strictEqual(settings.panes.enabled, "auto");
+		strictEqual(settings.panes.enabled, "off");
 		applySettingChange(settings, "panes.yazi.mode", "sidecar");
 		strictEqual(settings.panes.yazi.mode, "companion");
 		applySettingChange(settings, "panes.yazi.profile", "mine");

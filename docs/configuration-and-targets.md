@@ -669,7 +669,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |
 | `prewarm.enabled` | `true` | boolean | next turn |
-| `panes.enabled` | `auto` | `auto`, `embedded`, or `off` | restart |
+| `panes.enabled` | `off` | `auto`, `embedded`, or `off` | restart; `--with-panes` / `--no-panes` beat it |
 | `panes.agents` | `auto` | `auto`, `all`, or `off` | next dispatch |
 | `panes.keepFailed` | `true` | boolean | next dispatch |
 | `panes.notifications` | `failures` | `failures`, `all`, or `off` | next dispatch |

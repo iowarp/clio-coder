@@ -98,7 +98,7 @@ import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-en
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
-import { createMuxDomainModule, type MuxContract, type MuxEnablement, runViewerCommand } from "../domains/mux/index.js";
+import type { MuxContract } from "../domains/mux/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule, recordBackgroundMemoryStep } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -178,6 +178,7 @@ import { createChatLoop } from "../interactive/chat-loop.js";
 import { type RunIo, startInteractive } from "../interactive/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
 import type { BootOptions } from "./boot-options.js";
+import { resolvePanesEnablement } from "./panes-activation.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
@@ -189,7 +190,6 @@ import {
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
 import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
-import { createPanesRuntime } from "../interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { runWatchdogReview } from "../interactive/watchdog-run.js";
@@ -852,12 +852,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// gate detection off so they never resolve a socket path or open a descriptor.
 	// This mirrors the `interactive` predicate computed after the domains load.
 	const muxInteractive = !options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1";
-	// The domain is built before the config contract loads, so the rung comes off
-	// the settings the interactive entry point already read strictly
-	// (`src/cli/clio.ts:31`). Absent, `auto` is the shipped default and costs
-	// nothing without `HERDR_ENV`. This is why `panes.enabled` is a restart-scoped
-	// row: the ladder runs once, here.
-	const muxEnablement: MuxEnablement = options.startupSettings?.panes.enabled ?? "auto";
+	// The rung is settled before the config contract loads, off the settings the
+	// interactive entry point already read strictly (`src/cli/clio.ts:31`) and
+	// the `--with-panes` / `--no-panes` flag, which wins in both directions. This
+	// is why `panes.enabled` is a restart-scoped row: the decision runs once,
+	// here. An inactive rung loads nothing: the whole extension, mux domain
+	// included, lives behind the dynamic import below.
+	const muxEnablement = resolvePanesEnablement(options.panes, options.startupSettings?.panes.enabled);
+	const withPanes = muxInteractive && muxEnablement !== "off" ? await import("./with-panes.js") : null;
 
 	const result = await loadDomains(
 		[
@@ -888,17 +890,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			SessionDomainModule,
 			ObservabilityDomainModule,
 			SchedulingDomainModule,
-			createMuxDomainModule({
-				enabled: muxInteractive ? muxEnablement : "off",
-				cwd: process.cwd(),
-				// A viewer pane follows the run's on-disk journal through this
-				// install's own CLI, so it needs no herdr knowledge and keeps working
-				// when the pane host goes away mid-run.
-				viewerCommand: (request) => runViewerCommand(request.runId),
-				log: (level, message) => {
-					if (level === "warning") bootStderr(`[mux] ${message}\n`);
-				},
-			}),
+			...(withPanes
+				? [
+						withPanes.createMuxDomainModule({
+							enabled: muxEnablement,
+							cwd: process.cwd(),
+							// A viewer pane follows the run's on-disk journal through this
+							// install's own CLI, so it needs no herdr knowledge and keeps
+							// working when the pane host goes away mid-run.
+							viewerCommand: (request) => withPanes.runViewerCommand(request.runId),
+							log: (level, message) => {
+								if (level === "warning") bootStderr(`[mux] ${message}\n`);
+							},
+						}),
+					]
+				: []),
 			// Dispatch resolves worker targets through the session's effective
 			// settings view once it exists (assigned below, after the config
 			// contract loads); until then it falls back to the shared snapshot.
@@ -1417,14 +1423,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// `/panes` slash command, so the model and the operator cannot be told
 	// different things about the same pane. It also owns the no-mux Yazi chooser,
 	// while model tool registration below remains gated on a live pane host.
-	const panes = mux
-		? createPanesRuntime({
-				mux,
-				getSettings: () => getCurrentSettings(),
-				getDispatchSnapshot: () => dispatch.snapshot(),
-				getCwd: () => process.cwd(),
-			})
-		: null;
+	const panes =
+		withPanes && mux
+			? withPanes.createPanesRuntime({
+					mux,
+					getSettings: () => getCurrentSettings(),
+					getDispatchSnapshot: () => dispatch.snapshot(),
+					getCwd: () => process.cwd(),
+				})
+			: null;
 	registerAllTools(toolRegistry, {
 		...(session
 			? {
@@ -2073,6 +2080,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(mux ? { mux } : {}),
 		...(panes ? { panes } : {}),
 		...(panes ? { attachYaziBridge: (bridge) => panes.attachYazi(bridge) } : {}),
+		// The interactive surface never imports the panes glue itself; the
+		// factories arrive only on an active boot, through the same dynamic
+		// import that loaded the mux domain.
+		...(withPanes ? { createMuxBridge: withPanes.createMuxBridge, createYaziBridge: withPanes.createYaziBridge } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),

@@ -26,6 +26,8 @@ export interface BootOptions {
 	terminalLease?: TerminalLease;
 	/** Strict effective settings snapshot shared by preflight, Stage 0, and hydration. */
 	startupSettings?: Readonly<ClioSettings>;
+	/** `--with-panes` / `--no-panes`. The flag beats `panes.enabled` in both directions. */
+	panes?: "with" | "without";
 	headless?: {
 		prompt: string;
 		images?: ReadonlyArray<ImageContent>;

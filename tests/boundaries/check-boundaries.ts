@@ -298,7 +298,17 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 	},
 	{
 		module: "src/interactive/panes-runtime.ts",
-		reason: "the Stage 1 composition root creates the optional interactive panes runtime.",
+		reason: "the panes composition root (src/entry/with-panes.ts) creates the optional interactive panes runtime.",
+	},
+	{
+		module: "src/interactive/mux-bridge.ts",
+		reason:
+			"the panes composition root (src/entry/with-panes.ts) supplies the dispatch-to-pane bridge factory; it loads only behind the --with-panes dynamic import.",
+	},
+	{
+		module: "src/interactive/yazi-bridge.ts",
+		reason:
+			"the panes composition root (src/entry/with-panes.ts) supplies the file-pane bridge factory; it loads only behind the --with-panes dynamic import.",
 	},
 	{
 		module: "src/interactive/tool-prose-registration.ts",
