@@ -67,9 +67,20 @@ import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-bound
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import {
+	aggregateCostAmounts,
+	type CostAggregate,
+	ObservabilityDomainModule,
+	renderCostAggregate,
+	renderCostAmount,
+} from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import { foregroundStreamUsage, ProvidersDomainModule } from "../domains/providers/index.js";
+import {
+	type CostProvenance,
+	foregroundStreamUsage,
+	normalizeCostProvenance,
+	ProvidersDomainModule,
+} from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
@@ -487,7 +498,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
 					else
 						process.stdout.write(
-							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=$${step.costUsd.toFixed(4)}\n`,
+							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance)}\n`,
 						);
 					return;
 				}
@@ -528,7 +539,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		);
 	} else {
 		process.stdout.write(
-			`fleet ${contract.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost $${outcome.totalCostUsd.toFixed(4)}\n`,
+			`fleet ${contract.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderCostAggregate(outcome.totalCost)}\n`,
 		);
 		for (const loop of outcome.result.loops)
 			process.stdout.write(
@@ -614,7 +625,16 @@ export function statusSnapshot(): {
 	admission: FleetAdmissionStatus;
 	running: Array<Record<string, unknown>>;
 	retrying: Array<Record<string, unknown>>;
-	totals: { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; runtimeSeconds: number };
+	totals: {
+		inputTokens: number;
+		outputTokens: number;
+		totalTokens: number;
+		/** The bare sum, kept for JSON readers that already parse it. Render `cost`. */
+		costUsd: number;
+		/** Mirrors what `DispatchSnapshot.totals.cost` declares for the in-process surface. */
+		cost: CostAggregate;
+		runtimeSeconds: number;
+	};
 } {
 	const ledger = openLedger();
 	const nowMs = Date.now();
@@ -635,10 +655,18 @@ export function statusSnapshot(): {
 				elapsedMs: Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : 0,
 				tokens: { input: 0, output: 0, total: row.tokenCount },
 				costUsd: row.costUsd,
+				// Absent on pre-provenance ledger rows, which readers must treat as
+				// unknown; `renderCostAmount` normalizes it rather than assuming free.
+				costProvenance: row.costProvenance,
 				node: row.node?.id ?? "local",
 			};
 		});
 	const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
+	// Folded rather than summed: a ledger of runs nobody priced totals to an
+	// absent cost claim, not to zero dollars.
+	const cost = aggregateCostAmounts(
+		rows.map((row) => ({ usd: row.costUsd, provenance: normalizeCostProvenance(row.costProvenance) })),
+	);
 	for (const row of rows) {
 		const split = rowTokenSplit(row);
 		totals.inputTokens += split.input;
@@ -658,7 +686,7 @@ export function statusSnapshot(): {
 		admission: admissionStatus(capacityDrain(nowMs)),
 		running,
 		retrying: [],
-		totals,
+		totals: { ...totals, cost },
 	};
 }
 
@@ -683,7 +711,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 		for (const row of snapshot.running) {
 			const lineage = row.lineage as { attempt: number; depth: number };
 			process.stdout.write(
-				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  $${(row.costUsd as number).toFixed(4)}\n`,
+				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  ${renderCostAmount(row.costUsd as number, row.costProvenance as CostProvenance | undefined)}\n`,
 			);
 			const budget = row.budget as RunToolBudgetEnvelope | null;
 			if (budget !== null) {
@@ -704,7 +732,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 	}
 	const t = snapshot.totals;
 	process.stdout.write(
-		`totals: tokens=${t.totalTokens} (in=${t.inputTokens} out=${t.outputTokens}) cost=$${t.costUsd.toFixed(4)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
+		`totals: tokens=${t.totalTokens} (in=${t.inputTokens} out=${t.outputTokens}) cost=${renderCostAggregate(t.cost)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
 	);
 	return 0;
 }
