@@ -50,11 +50,8 @@ export function isPanesPresetId(value: string): value is PanesPresetId {
 export interface PanesInventoryEntry {
 	paneId: string;
 	tabId: string;
-	purpose: "run" | "utility";
+	purpose: "watch" | "utility";
 	label: string;
-	runId: string | null;
-	agentId: string | null;
-	outcome: string | null;
 	adopted: boolean;
 	/** An open operation admitted locally but not yet reconciled into the mux registry. */
 	pending?: boolean;
@@ -63,8 +60,6 @@ export interface PanesInventoryEntry {
 /** Effective pane settings, as `/panes` prints them. */
 export interface PanesEffectiveSettings {
 	enabled: string;
-	agents: string;
-	keepFailed: boolean;
 	notifications: string;
 	journal: boolean;
 	yazi: {
@@ -98,9 +93,29 @@ export interface PanesStatus {
 }
 
 export type PanesShowResult =
-	| { status: "focused"; runId: string; agentId: string | null; label: string }
+	| { status: "watching"; runId: string; agentId: string; opened: boolean }
 	| { status: "not-found"; target: string; candidates: ReadonlyArray<string> }
+	| { status: "refused"; reason: string }
 	| { status: "unavailable"; reason: string };
+
+/** What one watch call settles to; the controller lives in src/interactive/watch-pane.ts. */
+export type PanesWatchResult =
+	| { status: "watching"; runId: string; paneId: string; opened: boolean }
+	| { status: "unavailable"; reason: string };
+
+/**
+ * Interactive-only watch-pane controller, attached after the TUI exists. A
+ * structural interface here for the same reason {@link PanesYaziController}
+ * is: neither the domain nor the tool may import the interactive tree.
+ */
+export interface PanesWatchController {
+	/** Point the watch pane at a run, opening or adopting the pane first if needed. */
+	watch(runId: string): Promise<PanesWatchResult>;
+	/** Retarget only; false when no watch pane is open or the write failed. */
+	follow(runId: string): boolean;
+	isOpen(): boolean;
+	dispose(): void;
+}
 
 export type PanesOpenResult =
 	| { status: "opened"; label: string; paneId: string | null }
@@ -144,4 +159,6 @@ export interface PanesOperations {
 	close(target: string): Promise<PanesCloseResult>;
 	/** Bind the composer-facing Yazi bridge without rebuilding this shared object. */
 	attachYazi(controller: PanesYaziController): () => void;
+	/** Bind the workers-view watch controller; `show` routes runs through it. */
+	attachWatch(controller: PanesWatchController): () => void;
 }

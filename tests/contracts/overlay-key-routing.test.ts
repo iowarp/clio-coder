@@ -96,6 +96,8 @@ function makeDeps(): {
 		toggleSelectedDispatchDetail: () => {
 			toggleDetailCount += 1;
 		},
+		// Panes off in these fixtures: Enter falls through to the detail toggle.
+		watchSelectedDispatch: () => false,
 		cancelAskUser: () => {
 			cancelAskUserCount += 1;
 		},

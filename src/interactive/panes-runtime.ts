@@ -9,6 +9,11 @@
  * instead of an install hint (phase 1 report, open question 3). And every
  * mutation is scoped to panes Clio created, because the contract's registry
  * refuses anything else.
+ *
+ * `show` targets running dispatches, not panes: it resolves a fuzzy agent id
+ * or run-id prefix against the live dispatch snapshot and points the shared
+ * watch pane at the match, under the one policy decision in
+ * `pane-policy.ts`. There is no per-run pane inventory to search any more.
  */
 
 import type { ClioSettings } from "../core/config.js";
@@ -27,10 +32,12 @@ import {
 	type PanesOperations,
 	type PanesShowResult,
 	type PanesStatus,
+	type PanesWatchController,
 	type PanesYaziController,
 	type PanesYaziStatus,
 } from "../domains/mux/operations.js";
 import { resolveBinary } from "../tools/executables.js";
+import { type PaneWatchSource, paneWatchDecision } from "./pane-policy.js";
 
 export interface PanesRuntimeDeps {
 	mux: MuxContract;
@@ -54,9 +61,6 @@ function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesIn
 		tabId: record.ref.tabId,
 		purpose: record.purpose,
 		label: record.label,
-		runId: record.runId,
-		agentId: record.agentId,
-		outcome: record.outcome,
 		adopted: record.adopted === true,
 	}));
 }
@@ -65,6 +69,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	const probe = deps.resolveBinaryPath ?? resolveBinary;
 	const journalRoot = deps.journalRoot ?? runEventJournalRoot;
 	let yaziController: PanesYaziController | null = null;
+	let watchController: PanesWatchController | null = null;
 	let nextPendingOpen = 0;
 	const pendingOpens = new Map<string, PanesInventoryEntry>();
 	const beginPendingOpen = (label: string): string => {
@@ -75,9 +80,6 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			tabId: "pending",
 			purpose: "utility",
 			label,
-			runId: null,
-			agentId: null,
-			outcome: null,
 			adopted: false,
 			pending: true,
 		});
@@ -92,22 +94,25 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	});
 
 	/**
-	 * Resolve one operator- or model-supplied target to a run pane Clio owns.
+	 * Resolve one operator- or model-supplied target to a live dispatched run.
 	 *
-	 * Fuzzy agent id first, then runId prefix, most recent pane winning, which is
-	 * spec 4.8's order. "The tester" is what an operator types; a run id is what
-	 * a tool call carries.
+	 * Fuzzy agent id first, then runId prefix, most recent run winning: "the
+	 * tester" is what an operator types; a run id is what a tool call carries.
+	 * Retrying runs count as live; the watch pane shows them coming back.
 	 */
-	const matchRunPane = (target: string): MuxPaneRecord | null => {
+	const matchRun = (target: string): { runId: string; agentId: string; status: string } | null => {
 		const needle = target.trim().toLowerCase();
 		if (needle.length === 0) return null;
-		const runPanes = deps.mux.list().filter((record) => record.purpose === "run" && record.runId !== null);
-		// `list()` is insertion-ordered oldest first, so the reversal is what makes
-		// "most recent match wins" true rather than incidental.
-		const newestFirst = [...runPanes].reverse();
-		const byAgent = newestFirst.find((record) => (record.agentId ?? "").toLowerCase().includes(needle));
+		const snapshot = deps.getDispatchSnapshot();
+		const live = [
+			...snapshot.running.map((run) => ({ runId: run.runId, agentId: run.agentId, status: "running" })),
+			...snapshot.retrying.map((run) => ({ runId: run.runId, agentId: run.agentId, status: "retrying" })),
+		];
+		// Newest first, so "the tester" means the tester the operator just started.
+		const newestFirst = [...live].reverse();
+		const byAgent = newestFirst.find((run) => run.agentId.toLowerCase().includes(needle));
 		if (byAgent) return byAgent;
-		return newestFirst.find((record) => (record.runId ?? "").toLowerCase().startsWith(needle)) ?? null;
+		return newestFirst.find((run) => run.runId.toLowerCase().startsWith(needle)) ?? null;
 	};
 
 	/** argv for one preset, once its binary has been found. */
@@ -124,6 +129,28 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		return null;
 	};
 
+	const show = async (target: string, source: PaneWatchSource): Promise<PanesShowResult> => {
+		if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+		const match = matchRun(target);
+		if (match === null) {
+			// The candidate list is what turns a miss into a next step: it names
+			// the runs that are actually live right now.
+			const snapshot = deps.getDispatchSnapshot();
+			const candidates = [
+				...new Set([...snapshot.running.map((run) => run.agentId), ...snapshot.retrying.map((run) => run.agentId)]),
+			];
+			return { status: "not-found", target, candidates };
+		}
+		const decision = paneWatchDecision({ source, runStatus: match.status });
+		if (!decision.open) return { status: "refused", reason: decision.reason };
+		if (watchController === null) {
+			return { status: "unavailable", reason: "the watch pane is not wired in this session" };
+		}
+		const watched = await watchController.watch(match.runId);
+		if (watched.status !== "watching") return { status: "unavailable", reason: watched.reason };
+		return { status: "watching", runId: match.runId, agentId: match.agentId, opened: watched.opened };
+	};
+
 	return {
 		status(): PanesStatus {
 			const detection = deps.mux.detection();
@@ -136,8 +163,6 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				server: detection.server,
 				settings: {
 					enabled: panes.enabled,
-					agents: panes.agents,
-					keepFailed: panes.keepFailed,
 					notifications: panes.notifications,
 					journal: panes.journal,
 					yazi: { ...panes.yazi },
@@ -147,21 +172,10 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			};
 		},
 
-		async show(target: string): Promise<PanesShowResult> {
-			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
-			const match = matchRunPane(target);
-			if (match === null || match.runId === null) {
-				// The candidate list is what turns a miss into a next step. It names
-				// live runs, not just panes, because a run with no pane is exactly the
-				// case where "show me the tester" fails and the operator needs to know
-				// the tester is running without one.
-				const running = deps.getDispatchSnapshot().running.map((run) => run.agentId);
-				const panes = deps.mux.list().flatMap((record) => (record.agentId ? [record.agentId] : []));
-				return { status: "not-found", target, candidates: [...new Set([...panes, ...running])] };
-			}
-			const focused = await deps.mux.focusRunPane(match.runId);
-			if (!focused) return { status: "unavailable", reason: `pane for ${match.runId} could not be focused` };
-			return { status: "focused", runId: match.runId, agentId: match.agentId, label: match.label };
+		show(target: string): Promise<PanesShowResult> {
+			// The slash command and the tool share this implementation; the policy
+			// treats both as operator pull, so the source only matters for logs.
+			return show(target, "slash");
 		},
 
 		async open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult> {
@@ -255,7 +269,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			const match =
 				newestFirst.find((record) => record.ref.paneId.toLowerCase() === needle) ??
 				newestFirst.find((record) => record.label.toLowerCase().includes(needle)) ??
-				matchRunPane(target);
+				newestFirst.find((record) => record.purpose === needle);
 			if (!match) return { status: "not-found", target };
 			const closed = await deps.mux.closePane(match.ref.paneId);
 			return closed ? { status: "closed", closed: 1, labels: [match.label] } : { status: "not-found", target };
@@ -265,6 +279,13 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			yaziController = controller;
 			return () => {
 				if (yaziController === controller) yaziController = null;
+			};
+		},
+
+		attachWatch(controller: PanesWatchController): () => void {
+			watchController = controller;
+			return () => {
+				if (watchController === controller) watchController = null;
 			};
 		},
 	};

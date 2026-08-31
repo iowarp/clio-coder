@@ -1,15 +1,15 @@
 /**
  * Domain wiring for the pane layer.
  *
- * `createExtension` runs the detection ladder once at boot. With `HERDR_ENV`
- * unset that costs nothing: no socket is opened, the contract resolves to
- * `none`, and every consumer degrades to the native fleet surfaces. Detection
- * failures are never fatal, so a wedged herdr server delays boot by at most the
+ * `createExtension` runs the detection ladder once at boot. This module only
+ * loads on a `--with-panes` boot (src/entry/with-panes.ts), so a plain session
+ * never reaches this code at all; within an active session, detection failures
+ * are never fatal, and a wedged herdr server delays boot by at most the
  * one-second ping budget per socket candidate.
  */
 
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { createMuxRuntime, type MuxContract, type MuxRuntimeOptions } from "./contract.js";
+import { createMuxRuntime, type MuxContract } from "./contract.js";
 import { detectMux, type MuxEnablement } from "./detect.js";
 import type { MuxLog } from "./types.js";
 
@@ -18,8 +18,6 @@ export interface MuxDomainOptions {
 	enabled?: MuxEnablement;
 	env?: NodeJS.ProcessEnv;
 	log?: MuxLog;
-	cwd?: string;
-	viewerCommand?: MuxRuntimeOptions["viewerCommand"];
 }
 
 export async function createMuxBundle(
@@ -34,13 +32,7 @@ export async function createMuxBundle(
 	});
 	log(detection.mode === "none" ? "debug" : "info", `mux mode ${detection.mode}: ${detection.reason}`);
 
-	const runtime = createMuxRuntime({
-		detection,
-		client,
-		log,
-		...(options.cwd ? { cwd: options.cwd } : {}),
-		...(options.viewerCommand ? { viewerCommand: options.viewerCommand } : {}),
-	});
+	const runtime = createMuxRuntime({ detection, client, log });
 
 	const extension: DomainExtension = {
 		async start(): Promise<void> {

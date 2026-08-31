@@ -13,7 +13,8 @@
  * the seam as type-only imports at the call sites and cost nothing.
  */
 
-export { createMuxDomainModule, runViewerCommand } from "../domains/mux/index.js";
+export { createMuxDomainModule } from "../domains/mux/index.js";
 export { createMuxBridge } from "../interactive/mux-bridge.js";
 export { createPanesRuntime } from "../interactive/panes-runtime.js";
+export { createWatchPaneController } from "../interactive/watch-pane.js";
 export { createYaziBridge } from "../interactive/yazi-bridge.js";

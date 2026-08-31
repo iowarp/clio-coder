@@ -178,8 +178,6 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.agentBindings": "Add agent route",
 	"workers.maxRetries": "Fleet retries",
 	"panes.enabled": "Panes",
-	"panes.agents": "Run viewer panes",
-	"panes.keepFailed": "Keep failed panes",
 	"panes.notifications": "Pane notifications",
 	"panes.journal": "Run event journal",
 	"panes.yazi.enabled": "Files pane",
@@ -270,8 +268,6 @@ export const SETTINGS_SECTION_ROWS = {
 		"workers.profiles",
 		"workers.agentBindings",
 		"panes.enabled",
-		"panes.agents",
-		"panes.keepFailed",
 		"panes.notifications",
 		"panes.journal",
 	],
@@ -334,8 +330,6 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
 	"panes.enabled": "Default panes activation for new sessions; `--with-panes` / `--no-panes` beat it.",
-	"panes.agents": "Which dispatched runs get their own viewer pane.",
-	"panes.keepFailed": "Whether a failed run's viewer pane stays open for the post-mortem.",
 	"panes.notifications": "Which terminal run states raise a pane-host toast.",
 	"panes.journal": "Whether every dispatched run's event tail is written to disk for `clio-coder fleet view`.",
 	"panes.yazi.enabled": "Whether `/panes open yazi` may open the files pane or one-shot chooser.",
@@ -1525,8 +1519,6 @@ export function buildSettingItems(
 		...fleetEndpointRows(options?.providers),
 		fleetGroupHeader("fleet.group.panes", "Panes"),
 		settingItem("panes.enabled", panes.enabled, { values: ["auto", "embedded", "off"] }),
-		settingItem("panes.agents", panes.agents, { values: ["auto", "all", "off"] }),
-		settingItem("panes.keepFailed", String(panes.keepFailed), { values: ["true", "false"] }),
 		settingItem("panes.notifications", panes.notifications, { values: ["failures", "all", "off"] }),
 		settingItem("panes.journal", String(panes.journal), { values: ["true", "false"] }),
 		settingItem("targets", "", {
@@ -2073,12 +2065,6 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "panes.enabled":
 			if (value === "auto" || value === "embedded" || value === "off") settings.panes.enabled = value;
-			return;
-		case "panes.agents":
-			if (value === "auto" || value === "all" || value === "off") settings.panes.agents = value;
-			return;
-		case "panes.keepFailed":
-			if (value === "true" || value === "false") settings.panes.keepFailed = value === "true";
 			return;
 		case "panes.notifications":
 			if (value === "failures" || value === "all" || value === "off") settings.panes.notifications = value;

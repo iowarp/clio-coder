@@ -360,8 +360,6 @@ describe("contracts/config", () => {
 		const accepted = validateSettings({
 			panes: {
 				enabled: "off",
-				agents: "all",
-				keepFailed: false,
 				notifications: "all",
 				journal: false,
 				yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
@@ -370,34 +368,33 @@ describe("contracts/config", () => {
 		deepStrictEqual(accepted.issues, []);
 		deepStrictEqual(accepted.settings.panes, {
 			enabled: "off",
-			agents: "all",
-			keepFailed: false,
 			notifications: "all",
 			journal: false,
 			yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
 		});
 
-		const partial = validateSettings({ panes: { agents: "off" } });
+		// The retired per-dispatch pane knobs stay accepted-and-ignored so an
+		// older settings file keeps passing the strict boot gate.
+		const retired = validateSettings({ panes: { agents: "off", keepFailed: false } });
+		deepStrictEqual(retired.issues, []);
+		deepStrictEqual(retired.settings.panes, DEFAULT_SETTINGS.panes);
+
+		const partial = validateSettings({ panes: { notifications: "off" } });
 		deepStrictEqual(partial.issues, []);
-		strictEqual(partial.settings.panes.agents, "off");
+		strictEqual(partial.settings.panes.notifications, "off");
 		strictEqual(partial.settings.panes.enabled, DEFAULT_SETTINGS.panes.enabled);
-		strictEqual(partial.settings.panes.keepFailed, DEFAULT_SETTINGS.panes.keepFailed);
 		deepStrictEqual(partial.settings.panes.yazi, DEFAULT_SETTINGS.panes.yazi);
 
 		const bad = validateSettings({
 			panes: {
 				enabled: "guest",
-				agents: "sometimes",
-				keepFailed: "yes",
 				notifications: 1,
 				mode: "auto",
 				yazi: { mode: "sidecar", profile: "mine", enabled: "yes", followCwd: 1, extra: true },
 			},
 		});
 		deepStrictEqual(bad.issues.map((issue) => issue.path).sort(), [
-			"panes.agents",
 			"panes.enabled",
-			"panes.keepFailed",
 			"panes.mode",
 			"panes.notifications",
 			"panes.yazi.enabled",

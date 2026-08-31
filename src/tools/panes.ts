@@ -22,12 +22,8 @@ export interface PanesToolDeps {
 
 function describeInventory(deps: PanesToolDeps): ToolResult {
 	const status = deps.panes.status();
-	const header = `panes mode=${status.mode} ${status.available ? "available" : "unavailable"}; agents=${status.settings.agents} keepFailed=${status.settings.keepFailed} notifications=${status.settings.notifications}`;
-	const rows = status.panes.map((pane) => {
-		const run = pane.runId ? ` run=${pane.runId}` : "";
-		const outcome = pane.outcome ? ` outcome=${pane.outcome}` : "";
-		return `- ${pane.paneId} ${pane.purpose} ${pane.label}${run}${outcome}`;
-	});
+	const header = `panes mode=${status.mode} ${status.available ? "available" : "unavailable"}; notifications=${status.settings.notifications}`;
+	const rows = status.panes.map((pane) => `- ${pane.paneId} ${pane.purpose} ${pane.label}`);
 	return {
 		kind: "ok",
 		output: [header, ...(rows.length > 0 ? rows : ["- no Clio-owned panes"])].join("\n"),
@@ -55,16 +51,16 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 			if (action === "show") {
 				if (target.length === 0) return { kind: "error", message: "panes: action=show requires target" };
 				const result = await deps.panes.show(target);
-				if (result.status === "focused") {
+				if (result.status === "watching") {
 					return {
 						kind: "ok",
-						output: `focused the viewer pane for ${result.agentId ?? result.label} (run ${result.runId}).`,
+						output: `the watch pane is now rendering ${result.agentId} (run ${result.runId}).`,
 						details: { action: "show", runId: result.runId, agentId: result.agentId },
 					};
 				}
 				if (result.status === "not-found") {
-					const known = result.candidates.length > 0 ? ` Known agents: ${result.candidates.join(", ")}.` : "";
-					return { kind: "error", message: `panes: no pane matches '${result.target}'.${known}` };
+					const known = result.candidates.length > 0 ? ` Live runs: ${result.candidates.join(", ")}.` : "";
+					return { kind: "error", message: `panes: no live run matches '${result.target}'.${known}` };
 				}
 				return { kind: "error", message: `panes: ${result.reason}` };
 			}

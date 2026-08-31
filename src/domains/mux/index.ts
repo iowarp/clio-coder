@@ -9,7 +9,7 @@ export const MuxDomainModule: DomainModule<MuxContract> = {
 	createExtension: (context) => createMuxBundle(context),
 };
 
-/** Parameterized module for callers that gate panes off or supply a viewer command. */
+/** Parameterized module for callers that gate panes off or on explicitly. */
 export function createMuxDomainModule(options: MuxDomainOptions): DomainModule<MuxContract> {
 	return {
 		manifest: MuxManifest,
@@ -18,10 +18,8 @@ export function createMuxDomainModule(options: MuxDomainOptions): DomainModule<M
 }
 
 export type {
-	MuxAdoptableRun,
 	MuxContract,
 	MuxNotifyRequest,
-	MuxOpenRunPaneRequest,
 	MuxOpenUtilityPaneRequest,
 	MuxRuntime,
 	MuxRuntimeOptions,
@@ -42,13 +40,11 @@ export {
 	type MuxLog,
 	type MuxMode,
 	type MuxNotificationSound,
-	type MuxPane,
+	type MuxPanePurpose,
 	type MuxPaneRecord,
 	type MuxPaneRef,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
-	type MuxRunDisplayState,
-	type MuxRunOutcome,
 	type MuxSelfLocation,
 	type MuxSelfReport,
 	type MuxServerInfo,
@@ -56,7 +52,7 @@ export {
 	type MuxTab,
 	muxErrorKind,
 } from "./types.js";
-export { clioCliEntryPath, runViewerCommand, type ViewerCommandOptions } from "./viewer-command.js";
+export { clioCliEntryPath, type ViewerCommandOptions, watchViewerCommand } from "./viewer-command.js";
 export {
 	createYaziEventStream,
 	parseYaziEventLine,

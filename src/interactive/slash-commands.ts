@@ -843,7 +843,7 @@ export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 		`panes: mode=${status.mode} ${status.available ? "available" : "unavailable"} (${server})`,
 		`  ${status.reason}`,
 		...(status.socketPath ? [`  socket ${status.socketPath}`] : []),
-		`  settings: enabled=${status.settings.enabled} agents=${status.settings.agents} keepFailed=${status.settings.keepFailed} notifications=${status.settings.notifications} journal=${status.settings.journal}`,
+		`  settings: enabled=${status.settings.enabled} notifications=${status.settings.notifications} journal=${status.settings.journal}`,
 		`  files: enabled=${status.settings.yazi.enabled} mode=${status.settings.yazi.mode} profile=${status.settings.yazi.profile} followCwd=${status.settings.yazi.followCwd}`,
 		`  file pane: mode=${status.yazi.mode} pane=${status.yazi.paneId ?? "none"} cwd=${status.yazi.paneCwd ?? "unknown"} lastLine=${status.yazi.lastLineAt === null ? "never" : new Date(status.yazi.lastLineAt).toISOString()} dropped=${status.yazi.droppedLines}`,
 	];
@@ -852,11 +852,9 @@ export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 	} else {
 		lines.push(`  ${status.panes.length} Clio-owned pane(s):`);
 		for (const pane of status.panes) {
-			const run = pane.runId ? ` run=${pane.runId}` : "";
-			const outcome = pane.outcome ? ` outcome=${pane.outcome}` : "";
 			const adopted = pane.adopted ? " adopted" : "";
 			const pending = pane.pending ? " opening" : "";
-			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${run}${outcome}${adopted}${pending}`);
+			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${adopted}${pending}`);
 		}
 	}
 	lines.push(`  presets: ${PANES_PRESETS.map((preset) => `${preset.id} (${preset.summary})`).join(", ")}`);
@@ -1618,7 +1616,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "panes",
-		description: "Inspect the pane layer, focus a run's viewer pane, or open a utility pane",
+		description: "Inspect the pane layer, watch a live run in a pane, or open a utility pane",
 		group: "Inspect",
 		kinds: ["panes", "panes-show", "panes-open", "panes-close", "panes-usage"],
 		args: {
@@ -1631,7 +1629,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		subcommandDescriptions: {
-			show: "focus the viewer pane for a run or agent",
+			show: "watch a live run or agent in the watch pane",
 			open: `open a utility pane (${PANES_PRESET_IDS.join(", ")}, or a command)`,
 			close: "close a Clio-owned pane, or all of them",
 		},
@@ -1688,11 +1686,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind === "panes-show") {
 				runLocal(async () => {
 					const result = await panes.show(command.target);
-					if (result.status === "focused") {
-						ctx.notice("success", `focused ${result.agentId ?? result.label} (${result.runId})`);
+					if (result.status === "watching") {
+						ctx.notice("success", `watching ${result.agentId} (${result.runId})${result.opened ? " in a new pane" : ""}`);
 					} else if (result.status === "not-found") {
-						const known = result.candidates.length > 0 ? `; known: ${result.candidates.join(", ")}` : "";
-						ctx.notice("warn", `no pane matches ${result.target}${known}`);
+						const known = result.candidates.length > 0 ? `; live runs: ${result.candidates.join(", ")}` : "";
+						ctx.notice("warn", `no live run matches ${result.target}${known}`);
 					} else {
 						ctx.notice("warn", result.reason);
 					}

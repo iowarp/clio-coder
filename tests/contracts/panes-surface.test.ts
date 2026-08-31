@@ -1,33 +1,32 @@
 /**
- * The `/panes` operator surface and the `panes` orchestrator tool, per spec 4.8.
+ * The `/panes` operator surface and the `panes` orchestrator tool.
  *
  * The load-bearing rules: the slash parser tells a preset from operator argv;
  * the tool has no argv door at all and refuses one that is fabricated; preset
  * binaries are probed before the pane is split, so a missing program prints an
  * install hint instead of flickering a pane; every mutation is scoped to panes
- * Clio created; and the safety classifier puts the tool in the read class, which
- * is what keeps it off the approval path.
+ * Clio created; `show` resolves live dispatches (not panes) and drives the
+ * shared watch controller; and the safety classifier puts the tool in the read
+ * class, which is what keeps it off the approval path.
  */
 
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import { createMuxRuntime } from "../../src/domains/mux/contract.js";
 import { detectMux } from "../../src/domains/mux/detect.js";
-import type {
-	MuxAdoptableRun,
-	MuxContract,
-	MuxOpenUtilityPaneRequest,
-	MuxPaneRecord,
-	MuxPaneRef,
-} from "../../src/domains/mux/index.js";
+import type { MuxContract, MuxOpenUtilityPaneRequest, MuxPaneRecord, MuxPaneRef } from "../../src/domains/mux/index.js";
 import {
 	isPanesPresetId,
 	PANES_PRESET_IDS,
 	type PanesOperations,
 	type PanesStatus,
+	type PanesWatchController,
 	type PanesYaziController,
 } from "../../src/domains/mux/operations.js";
 import { createMuxClient } from "../../src/domains/mux/socket-client.js";
@@ -39,6 +38,7 @@ import {
 	parseSlashCommand,
 	type SlashCommandContext,
 } from "../../src/interactive/slash-commands.js";
+import { createWatchPaneController } from "../../src/interactive/watch-pane.js";
 import { createPanesTool } from "../../src/tools/panes.js";
 import { TOOL_PLANES } from "../../src/tools/policy.js";
 import { startFakeHerdrServer } from "../harness/fake-herdr-server.js";
@@ -52,27 +52,22 @@ interface UtilityOpen {
 interface StubMux {
 	contract: MuxContract;
 	opened: UtilityOpen[];
-	focused: string[];
 	closed: string[];
 	records: MuxPaneRecord[];
 }
 
 function record(fields: Partial<MuxPaneRecord> & { paneId: string }): MuxPaneRecord {
 	return {
-		ref: { paneId: fields.paneId, tabId: fields.ref?.tabId ?? "w1:tFleet", workspaceId: "w1" },
-		purpose: fields.purpose ?? "run",
+		ref: { paneId: fields.paneId, tabId: fields.ref?.tabId ?? "w1:t1", workspaceId: "w1" },
+		purpose: fields.purpose ?? "utility",
 		label: fields.label ?? fields.paneId,
 		openedAt: 0,
-		runId: fields.runId ?? null,
-		agentId: fields.agentId ?? null,
-		outcome: fields.outcome ?? null,
 		...(fields.adopted === true ? { adopted: true } : {}),
 	};
 }
 
 function stubMux(options: { available?: boolean; records?: ReadonlyArray<MuxPaneRecord> } = {}): StubMux {
 	const opened: UtilityOpen[] = [];
-	const focused: string[] = [];
 	const closed: string[] = [];
 	const records = [...(options.records ?? [])];
 	let nextPane = 100;
@@ -87,18 +82,13 @@ function stubMux(options: { available?: boolean; records?: ReadonlyArray<MuxPane
 			candidates: ["/tmp/h.sock"],
 			reason: "guest mode on /tmp/h.sock (herdr 0.7.5, protocol 17)",
 		}),
-		async openRunPane(): Promise<MuxPaneRef | null> {
-			return null;
-		},
-		async focusRunPane(runId: string): Promise<boolean> {
-			focused.push(runId);
-			return records.some((entry) => entry.runId === runId);
-		},
-		async closeRunPane(): Promise<void> {},
 		async openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null> {
 			opened.push({ argv: [...request.argv], cwd: request.cwd, label: request.label });
 			nextPane += 1;
 			return { paneId: `w1:p${nextPane}`, tabId: "w1:t1", workspaceId: "w1" };
+		},
+		async adoptPane(): Promise<MuxPaneRef | null> {
+			return null;
 		},
 		async closePane(paneId: string): Promise<boolean> {
 			const index = records.findIndex((entry) => entry.ref.paneId === paneId);
@@ -107,16 +97,12 @@ function stubMux(options: { available?: boolean; records?: ReadonlyArray<MuxPane
 			closed.push(paneId);
 			return true;
 		},
-		async reportRunState(): Promise<void> {},
 		async notify(): Promise<void> {},
 		async worktreeCreate(): Promise<null> {
 			return null;
 		},
 		async worktreeRemove(): Promise<boolean> {
 			return false;
-		},
-		async adoptRunPanes(_runs: ReadonlyArray<MuxAdoptableRun>): Promise<ReadonlyArray<string>> {
-			return [];
 		},
 		onPaneGone: () => () => {},
 		list: () => [...records],
@@ -125,7 +111,7 @@ function stubMux(options: { available?: boolean; records?: ReadonlyArray<MuxPane
 		},
 		async shutdown(): Promise<void> {},
 	};
-	return { contract, opened, focused, closed, records };
+	return { contract, opened, closed, records };
 }
 
 const EMPTY_SNAPSHOT = {
@@ -135,12 +121,41 @@ const EMPTY_SNAPSHOT = {
 	totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 } as unknown as DispatchSnapshot;
 
+function snapshotWith(
+	running: ReadonlyArray<{ runId: string; agentId: string }>,
+	retrying: ReadonlyArray<{ runId: string; agentId: string }> = [],
+): DispatchSnapshot {
+	return {
+		...EMPTY_SNAPSHOT,
+		running: running.map((run) => ({ ...run })),
+		retrying: retrying.map((run) => ({ ...run, attempt: 1, dueAt: "", reason: "" })),
+	} as unknown as DispatchSnapshot;
+}
+
+/** A recording watch controller, standing in for the interactive one. */
+function fakeWatch(): { controller: PanesWatchController; watched: string[] } {
+	const watched: string[] = [];
+	return {
+		watched,
+		controller: {
+			async watch(runId: string) {
+				watched.push(runId);
+				return { status: "watching", runId, paneId: "w1:pWatch", opened: watched.length === 1 };
+			},
+			follow: () => true,
+			isOpen: () => watched.length > 0,
+			dispose: () => {},
+		},
+	};
+}
+
 function runtimeFor(
 	mux: StubMux,
 	options: {
 		binaries?: ReadonlyArray<string>;
 		newestRun?: string | null;
 		snapshot?: DispatchSnapshot;
+		watch?: PanesWatchController;
 		onYaziOpen?: (options?: { once?: boolean }) => ReturnType<PanesYaziController["open"]>;
 	} = {},
 ): PanesOperations {
@@ -154,6 +169,7 @@ function runtimeFor(
 		journalRoot: () => "/state/runs",
 		newestJournalRunId: () => (options.newestRun === undefined ? "run-newest" : options.newestRun),
 	});
+	if (options.watch) runtime.attachWatch(options.watch);
 	runtime.attachYazi({
 		open: (openOptions) =>
 			options.onYaziOpen?.(openOptions) ??
@@ -229,8 +245,6 @@ describe("contracts/panes slash parsing", () => {
 			server: { version: "0.7.5", protocol: 17 },
 			settings: {
 				enabled: "auto",
-				agents: "auto",
-				keepFailed: true,
 				notifications: "failures",
 				journal: true,
 				yazi: { enabled: true, mode: "companion", profile: "managed", followCwd: true },
@@ -239,12 +253,9 @@ describe("contracts/panes slash parsing", () => {
 			panes: [
 				{
 					paneId: "w1:p9",
-					tabId: "w1:tFleet",
-					purpose: "run",
-					label: "tester: run the suite",
-					runId: "run-1",
-					agentId: "tester",
-					outcome: "failed",
+					tabId: "w1:t1",
+					purpose: "watch",
+					label: "watch",
 					adopted: true,
 				},
 			],
@@ -253,10 +264,10 @@ describe("contracts/panes slash parsing", () => {
 		match(lines, /mode=guest available/);
 		match(lines, /protocol 17/);
 		match(lines, /socket \/tmp\/h\.sock/);
-		match(lines, /agents=auto keepFailed=true notifications=failures journal=true/);
+		match(lines, /enabled=auto notifications=failures journal=true/);
 		match(lines, /files: enabled=true mode=companion profile=managed followCwd=true/);
 		match(lines, /file pane: mode=companion pane=w1:p8 cwd=\/work\/src .* dropped=2/);
-		match(lines, /w1:p9 run tester: run the suite run=run-1 outcome=failed adopted/);
+		match(lines, /w1:p9 watch watch adopted/);
 		match(lines, /presets: yazi .*, logs .*, shell /);
 
 		const empty = formatPanesStatus({ ...status, panes: [] }).join("\n");
@@ -365,33 +376,55 @@ describe("contracts/panes operations", () => {
 		);
 	});
 
-	it("matches an agent id first and a runId prefix second, newest pane winning", async () => {
-		const mux = stubMux({
-			records: [
-				record({ paneId: "w1:p1", runId: "run-aaa1", agentId: "tester", label: "tester: old" }),
-				record({ paneId: "w1:p2", runId: "run-bbb2", agentId: "fixer", label: "fixer: two" }),
-				record({ paneId: "w1:p3", runId: "run-aaa9", agentId: "tester", label: "tester: new" }),
-			],
+	it("show resolves live runs by agent id first and runId prefix second, newest winning", async () => {
+		const mux = stubMux();
+		const watch = fakeWatch();
+		const panes = runtimeFor(mux, {
+			watch: watch.controller,
+			snapshot: snapshotWith([
+				{ runId: "run-aaa1", agentId: "tester" },
+				{ runId: "run-bbb2", agentId: "fixer" },
+				{ runId: "run-aaa9", agentId: "tester" },
+			]),
 		});
-		const panes = runtimeFor(mux);
 		const byAgent = await panes.show("tester");
-		strictEqual(byAgent.status, "focused");
-		if (byAgent.status === "focused") strictEqual(byAgent.runId, "run-aaa9");
+		strictEqual(byAgent.status, "watching");
+		if (byAgent.status === "watching") strictEqual(byAgent.runId, "run-aaa9");
 
 		const byPrefix = await panes.show("run-bbb");
-		strictEqual(byPrefix.status, "focused");
-		if (byPrefix.status === "focused") strictEqual(byPrefix.runId, "run-bbb2");
+		strictEqual(byPrefix.status, "watching");
+		if (byPrefix.status === "watching") strictEqual(byPrefix.runId, "run-bbb2");
+		deepStrictEqual(watch.watched, ["run-aaa9", "run-bbb2"]);
 
 		const miss = await panes.show("scout");
 		strictEqual(miss.status, "not-found");
 		if (miss.status === "not-found") ok(miss.candidates.includes("tester"));
 	});
 
+	it("show also finds a retrying run: the pane shows it coming back", async () => {
+		const watch = fakeWatch();
+		const panes = runtimeFor(stubMux(), {
+			watch: watch.controller,
+			snapshot: snapshotWith([], [{ runId: "run-retry", agentId: "builder" }]),
+		});
+		const result = await panes.show("builder");
+		strictEqual(result.status, "watching");
+		deepStrictEqual(watch.watched, ["run-retry"]);
+	});
+
+	it("show says the watch pane is unwired rather than pretending", async () => {
+		const panes = runtimeFor(stubMux(), {
+			snapshot: snapshotWith([{ runId: "run-1", agentId: "tester" }]),
+		});
+		const result = await panes.show("tester");
+		strictEqual(result.status, "unavailable");
+	});
+
 	it("closes only panes Clio owns, and closes them all on request", async () => {
 		const mux = stubMux({
 			records: [
 				record({ paneId: "w1:p1", purpose: "utility", label: "shell" }),
-				record({ paneId: "w1:p2", runId: "run-1", agentId: "tester", label: "tester: one" }),
+				record({ paneId: "w1:p2", purpose: "watch", label: "watch" }),
 			],
 		});
 		const panes = runtimeFor(mux);
@@ -399,9 +432,9 @@ describe("contracts/panes operations", () => {
 		const one = await panes.close("shell");
 		strictEqual(one.status, "closed");
 		deepStrictEqual(mux.closed, ["w1:p1"]);
-		const rest = await panes.close("all");
+		// The watch pane closes by its purpose name too.
+		const rest = await panes.close("watch");
 		strictEqual(rest.status, "closed");
-		if (rest.status === "closed") strictEqual(rest.closed, 1);
 		deepStrictEqual(mux.closed, ["w1:p1", "w1:p2"]);
 	});
 
@@ -415,20 +448,20 @@ describe("contracts/panes operations", () => {
 	});
 
 	it("reports mode, effective settings, and the inventory", () => {
-		const mux = stubMux({ records: [record({ paneId: "w1:p1", runId: "run-1", agentId: "tester" })] });
+		const mux = stubMux({ records: [record({ paneId: "w1:p1", purpose: "watch", label: "watch" })] });
 		const status = runtimeFor(mux).status();
 		strictEqual(status.mode, "guest");
 		strictEqual(status.available, true);
 		strictEqual(status.socketPath, "/tmp/h.sock");
 		deepStrictEqual(status.server, { version: "0.7.5", protocol: 17 });
-		strictEqual(status.settings.agents, DEFAULT_SETTINGS.panes.agents);
+		strictEqual(status.settings.notifications, DEFAULT_SETTINGS.panes.notifications);
 		strictEqual(status.panes.length, 1);
-		strictEqual(status.panes[0]?.runId, "run-1");
+		strictEqual(status.panes[0]?.purpose, "watch");
 	});
 });
 
-describe("contracts/panes orchestrator tool", () => {
-	it("reconciles both focus dimensions through the slash and agent-tool paths", async () => {
+describe("contracts/panes watch flow against the pane host", () => {
+	it("show opens one watch pane running the selection viewer, then reuses it", async () => {
 		const fake = await startFakeHerdrServer();
 		const detected = await detectMux({
 			env: {
@@ -444,42 +477,58 @@ describe("contracts/panes orchestrator tool", () => {
 		const muxRuntime = createMuxRuntime({ detection: detected.detection, client: detected.client });
 		await muxRuntime.start();
 		try {
-			await muxRuntime.contract.openRunPane({ runId: "run-1", agentId: "tester", label: "tester" });
-			const scout = await muxRuntime.contract.openRunPane({ runId: "run-2", agentId: "scout", label: "scout" });
-			ok(scout);
+			const selectionPath = join(tmpdir(), `clio-watch-${process.pid}-${Date.now()}`);
+			const watch = createWatchPaneController({
+				mux: muxRuntime.contract,
+				getCwd: () => "/work",
+				selectionPath,
+			});
 			const panes = createPanesRuntime({
 				mux: muxRuntime.contract,
 				getSettings: () => DEFAULT_SETTINGS,
-				getDispatchSnapshot: () => EMPTY_SNAPSHOT,
+				getDispatchSnapshot: () =>
+					snapshotWith([
+						{ runId: "run-1", agentId: "tester" },
+						{ runId: "run-2", agentId: "scout" },
+					]),
 				getCwd: () => "/work",
 				resolveBinaryPath: (name) => `/usr/bin/${name}`,
 			});
+			panes.attachWatch(watch);
 
 			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
 			ok(entry);
-			let slashFocus = Promise.resolve();
+			let slashWork = Promise.resolve();
 			entry.handle(parseSlashCommand("/panes show scout"), {
 				panes,
 				runLocalOperation: (operation: () => Promise<void>) => {
-					slashFocus = slashFocus.then(operation);
+					slashWork = slashWork.then(operation);
 				},
 				notice: () => {},
 			} as unknown as SlashCommandContext);
-			await slashFocus;
-			strictEqual(fake.focusedTab(), scout.tabId);
-			strictEqual(fake.focusedPane(), scout.paneId);
+			await slashWork;
 
-			await detected.client.tabFocus("w1:t1");
-			const shown = await createPanesTool({ panes }).run({ action: "show", target: "scout" });
+			// One split, unfocused, running this install's watch viewer.
+			const split = fake.requestsFor("pane.split");
+			strictEqual(split.length, 1);
+			strictEqual(split[0]?.params.focus, false, "the watch pane must not steal the keyboard");
+			const sent = String(fake.requestsFor("pane.send_text")[0]?.params.text);
+			ok(sent.includes("'fleet' 'view' '--watch'"), sent);
+			strictEqual(readFileSync(selectionPath, "utf8"), "run-2\n");
+
+			// The tool retargets the same pane: a file write, no second split.
+			const shown = await createPanesTool({ panes }).run({ action: "show", target: "tester" });
 			strictEqual(shown.kind, "ok");
-			strictEqual(fake.focusedTab(), scout.tabId);
-			strictEqual(fake.focusedPane(), scout.paneId);
+			strictEqual(fake.requestsFor("pane.split").length, 1);
+			strictEqual(readFileSync(selectionPath, "utf8"), "run-1\n");
 		} finally {
 			await muxRuntime.stop();
 			await fake.stop();
 		}
 	});
+});
 
+describe("contracts/panes orchestrator tool", () => {
 	it("refuses an argv pane however it is spelled", async () => {
 		const mux = stubMux();
 		const tool = createPanesTool({ panes: runtimeFor(mux) });
@@ -499,18 +548,22 @@ describe("contracts/panes orchestrator tool", () => {
 
 	it("drives the same operations the slash command does", async () => {
 		const mux = stubMux({
-			records: [record({ paneId: "w1:p1", runId: "run-1", agentId: "tester", label: "tester: one" })],
+			records: [record({ paneId: "w1:p1", purpose: "watch", label: "watch" })],
 		});
-		const panes = runtimeFor(mux);
+		const watch = fakeWatch();
+		const panes = runtimeFor(mux, {
+			watch: watch.controller,
+			snapshot: snapshotWith([{ runId: "run-1", agentId: "tester" }]),
+		});
 		const tool = createPanesTool({ panes });
 
 		const shown = await tool.run({ action: "show", target: "tester" });
 		strictEqual(shown.kind, "ok");
-		deepStrictEqual(mux.focused, ["run-1"]);
+		deepStrictEqual(watch.watched, ["run-1"]);
 
 		const listed = await tool.run({ action: "list" });
 		strictEqual(listed.kind, "ok");
-		match(listed.kind === "ok" ? listed.output : "", /w1:p1 run tester: one run=run-1/);
+		match(listed.kind === "ok" ? listed.output : "", /w1:p1 watch watch/);
 
 		const opened = await tool.run({ action: "open", preset: "shell" });
 		strictEqual(opened.kind, "ok");
