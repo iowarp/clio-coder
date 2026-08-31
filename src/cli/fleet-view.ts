@@ -50,11 +50,15 @@ import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth } from "../engine/tui-primitives.js";
 
 const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow]
+clio-coder fleet view --watch <selection-file>
 
 Follow one dispatched run from its durable state: the run ledger entry, the
 run event journal, and the sealed receipt once it exists.
 
   --follow    keep tailing until the run's terminal line, then stay open (q exits)
+  --watch     follow whichever run id the selection file names, retargeting
+              live as the file changes (q exits). This is the process the
+              interactive workers view (Alt+W) runs inside its watch pane.
 
 Without --follow the current snapshot is printed and the command exits.
 The transcript comes from <state>/runs/<runId>/events.ndjson, which the
@@ -315,6 +319,37 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 	return lines;
 }
 
+/**
+ * The watch surface as lines. Pure for the same reason {@link renderRunView}
+ * is. A missing selection and a selection the ledger does not know yet are the
+ * two states the run renderer cannot say anything about, and both are normal:
+ * the first is the pane before any worker was entered, the second is a queued
+ * run the operator selected before its ledger row landed.
+ */
+export function renderWatchView(
+	runId: string | null,
+	model: RunViewModel | null,
+	width: number = DEFAULT_WIDTH,
+): string[] {
+	const columns = Math.max(MIN_WIDTH, width);
+	if (runId === null) {
+		return [
+			"no worker selected.",
+			"",
+			"In clio-coder, open the workers view (Alt+W), pick a run, press Enter.",
+			"Arrow keys there retarget this pane live.",
+		];
+	}
+	if (model === null) {
+		return [
+			truncateToWidth(`run ${sanitizeBounded(runId, 64)} is not in the run ledger yet.`, columns, "…", false),
+			"",
+			"A queued run appears here the moment it starts.",
+		];
+	}
+	return renderRunView(model, columns);
+}
+
 // ---------------------------------------------------------------------------
 // Fleet root index
 // ---------------------------------------------------------------------------
@@ -495,15 +530,25 @@ function fail(message: string): number {
 
 interface ParsedViewArgs {
 	runId?: string;
+	watchPath?: string;
 	follow: boolean;
 	help: boolean;
 }
 
 function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 	const parsed: ParsedViewArgs = { follow: false, help: false };
-	for (const arg of args) {
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === undefined) continue;
 		if (arg === "--follow" || arg === "-f") {
 			parsed.follow = true;
+			continue;
+		}
+		if (arg === "--watch") {
+			const value = args[i + 1];
+			if (value === undefined || value.startsWith("-")) return "--watch requires a selection-file path";
+			parsed.watchPath = value;
+			i += 1;
 			continue;
 		}
 		if (arg === "--help" || arg === "-h") {
@@ -514,7 +559,30 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 		if (parsed.runId !== undefined) return `unexpected argument: ${arg}`;
 		parsed.runId = arg;
 	}
+	if (parsed.watchPath !== undefined && parsed.runId !== undefined) {
+		return "--watch follows the selection file; it does not take a run id";
+	}
+	if (parsed.watchPath !== undefined && parsed.follow) {
+		return "--watch already follows; drop --follow";
+	}
 	return parsed;
+}
+
+/**
+ * The selection file is one line: the run id the watch view should render.
+ * Empty, missing, or torn content reads as "no selection" and costs one poll
+ * interval, never a crash; the writer (src/interactive/watch-pane.ts) replaces
+ * the file atomically.
+ */
+export function readWatchSelection(path: string): string | null {
+	let raw: string;
+	try {
+		raw = readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+	const line = raw.split("\n", 1)[0]?.trim() ?? "";
+	return line.length > 0 && line.length <= 128 ? line : null;
 }
 
 function terminalWidth(): number {
@@ -532,6 +600,17 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
+	}
+	if (parsed.watchPath !== undefined) {
+		// The watch loop needs an interactive terminal for the same reason
+		// --follow does; without one, print the selected run's snapshot and exit.
+		if (process.stdout.isTTY !== true || process.stdin.isTTY !== true) {
+			const selected = readWatchSelection(parsed.watchPath);
+			const model = selected === null ? null : loadRunViewModel(selected);
+			process.stdout.write(`${renderWatchView(selected, model, terminalWidth()).join("\n")}\n`);
+			return 0;
+		}
+		return watchSelection(parsed.watchPath);
 	}
 	if (parsed.runId === undefined) {
 		process.stderr.write(HELP);
@@ -576,6 +655,58 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		return 0;
 	}
 	return followRun(runId);
+}
+
+/**
+ * Alternate-screen watch loop: the workers-view pane process. Every poll it
+ * re-reads the selection file and renders whichever run it names, so arrow-key
+ * navigation in the TUI retargets this process through one small file write
+ * and no socket traffic. It never stops on a terminal run; the selection is
+ * the operator's cursor, and the cursor outlives any one run.
+ */
+async function watchSelection(selectionPath: string): Promise<number> {
+	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui-primitives.js");
+	const terminal = new ProcessTerminal();
+	const tui = new TuiAltScreen(terminal);
+	let selected = readWatchSelection(selectionPath);
+	let model = selected === null ? null : loadRunViewModel(selected);
+
+	const view = {
+		render(width: number): string[] {
+			const lines = renderWatchView(selected, model, width);
+			lines.push("");
+			lines.push("watching the workers-view selection… q to quit");
+			return lines;
+		},
+		invalidate(): void {},
+	};
+	tui.addChild(view);
+
+	return await new Promise<number>((resolve) => {
+		let settled = false;
+		const timer = setInterval(() => {
+			selected = readWatchSelection(selectionPath);
+			model = selected === null ? null : loadRunViewModel(selected);
+			tui.requestRender();
+		}, POLL_MS);
+		const finish = (): void => {
+			if (settled) return;
+			settled = true;
+			clearInterval(timer);
+			removeInput();
+			tui.stop();
+			resolve(0);
+		};
+		const removeInput = tui.addInputListener((data: string) => {
+			if (data === "q" || data === QUIT_CTRL_C || data === QUIT_ESCAPE) {
+				finish();
+				return { consume: true };
+			}
+			return undefined;
+		});
+		tui.start();
+		tui.requestRender();
+	});
 }
 
 /**
