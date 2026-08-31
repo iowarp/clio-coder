@@ -123,6 +123,10 @@ const SERIAL_FILES = [
 	"tests/contracts/commit-attribution.test.ts",
 	// a port closed a moment ago is still refused, which needs nothing else binding
 	"tests/smoke/cli-recovery-messages.test.ts",
+	// a converted batch finalizes through the durable store, whose lock does not
+	// share a disk with 23 other lanes gracefully: 0.75s alone, 34s to 67s under
+	// a full run, an amplification no fixed budget covers
+	"tests/contracts/dispatch-background-control.test.ts",
 ];
 const SERIAL_LANE_NAME = "lane-serial";
 const RUNNER_ARGS = [
