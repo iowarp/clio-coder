@@ -1,3 +1,5 @@
+// Default constants for Clio Coder settings.
+
 /**
  * Default settings shipped with Clio Coder. Written to the resolved config
  * directory's settings.yaml on first install if the file does not already
