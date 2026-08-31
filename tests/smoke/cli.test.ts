@@ -431,7 +431,16 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			strictEqual(configuredTarget.runtime, "openai-compat");
 			strictEqual(configuredTarget.url, fixture.url);
 			strictEqual(configuredTarget.defaultModel, "fixture-alpha");
-			deepStrictEqual(configuredTarget.wireModels, ["fixture-alpha", "fixture-beta"]);
+			strictEqual(configuredTarget.wireModels, undefined, "probe catalogs stay out of settings.yaml");
+			const modelCacheDir = join(scratch.dir, "cache", "provider-target-models");
+			const modelCacheFiles = readdirSync(modelCacheDir);
+			strictEqual(modelCacheFiles.length, 1, "one per-target probe snapshot is cached");
+			const modelCache = JSON.parse(readFileSync(join(modelCacheDir, modelCacheFiles[0] ?? ""), "utf8")) as {
+				targetId: string;
+				models: string[];
+			};
+			strictEqual(modelCache.targetId, "fixture-openai");
+			deepStrictEqual(modelCache.models, ["fixture-alpha", "fixture-beta"]);
 			deepStrictEqual(configuredTarget.auth, { apiKeyEnvVar: "CLIO_CODER_TEST_OPENAI_KEY" });
 			deepStrictEqual(configuredTarget.capabilities, {
 				contextWindow: 32768,
@@ -467,13 +476,16 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 					available: boolean;
 					health: { status: string };
 					discoveredModels: string[];
+					discoveredModelsSource?: string;
 				}>;
 			};
 			const listedTarget = targets.targets.find((target) => target.target.id === "fixture-openai");
 			ok(listedTarget, `targets --json did not list fixture-openai: ${targetsJson.stdout}`);
 			strictEqual(listedTarget.target.runtime, "openai-compat");
 			strictEqual(listedTarget.target.defaultModel, "fixture-alpha");
-			deepStrictEqual(listedTarget.target.wireModels, ["fixture-alpha", "fixture-beta"]);
+			strictEqual(listedTarget.target.wireModels, undefined);
+			deepStrictEqual(listedTarget.discoveredModels, ["fixture-alpha", "fixture-beta"]);
+			strictEqual(listedTarget.discoveredModelsSource, "cache");
 			strictEqual(listedTarget.target.auth?.apiKeyEnvVar, "CLIO_CODER_TEST_OPENAI_KEY");
 
 			const offlineModels = await runCli(["models", "--offline", "--json"], { env });

@@ -18,6 +18,7 @@ import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
 import { listKnownModelsForRuntime } from "./support.js";
+import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import { EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import {
@@ -134,10 +135,12 @@ function discoveredModelsSource(
 	probe: ProbeResult | null,
 	preservePreviousProbe: boolean,
 	previous: TargetStatus | undefined,
+	cachedModels: ReadonlyArray<string>,
 	desc: RuntimeDescriptor,
 ): "probe" | "cache" | "runtime" | "none" {
 	if (probe?.models !== undefined) return "probe";
 	if (preservePreviousProbe && previous?.discoveredModels && previous.discoveredModels.length > 0) return "cache";
+	if (cachedModels.length > 0) return "cache";
 	if (desc.knownModels && desc.knownModels.length > 0) return "runtime";
 	return "none";
 }
@@ -175,6 +178,7 @@ export function mergeProbeResult(
 	target: TargetDescriptor,
 	probe: ProbeResult | null,
 	previous: TargetStatus | undefined,
+	cachedModels: ReadonlyArray<string> = [],
 ): ProbeMerge {
 	const probeSucceeded = probe?.ok ?? false;
 	const preservePrevious = !probeSucceeded && previous !== undefined && sameProbeIdentity(previous.target, target);
@@ -190,12 +194,16 @@ export function mergeProbeResult(
 		probe?.notes && probe.notes.length > 0 ? probe.notes : preservePrevious ? previous.probeNotes : undefined;
 	const probeSurfaces = probe?.surfaces ?? (preservePrevious ? previous.probeSurfaces : undefined);
 	const discoveredModels = uniqueModels(
-		probe?.models ?? (preservePrevious ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
+		probe?.models ??
+			(preservePrevious ? previous.discoveredModels : undefined) ??
+			(cachedModels.length > 0 ? cachedModels : undefined) ??
+			desc.knownModels ??
+			[],
 	);
 	const discoveredModelStates = probe?.modelStates ?? (preservePrevious ? previous.discoveredModelStates : null) ?? null;
 	const merge: ProbeMerge = {
 		discoveredModels,
-		discoveredModelsSource: discoveredModelsSource(probe, preservePrevious, previous, desc),
+		discoveredModelsSource: discoveredModelsSource(probe, preservePrevious, previous, cachedModels, desc),
 		discoveredModelStates,
 		probeCapabilities,
 		probeModelCapabilities,
@@ -317,7 +325,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			return out;
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
-		const merge = mergeProbeResult(desc, target, probe, previous);
+		const cachedModels = readTargetModelSnapshot(target)?.models ?? [];
+		const merge = mergeProbeResult(desc, target, probe, previous, cachedModels);
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthy = probe !== null ? probe.ok : null;
 		const unservedDefault = probe?.ok ? unservedDefaultModelReason(desc, target, merge) : null;
@@ -415,6 +424,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		const status = buildStatus(target, desc, probeResult, previous);
 		statuses.set(target.id, status);
+		if (probeResult.ok && probeResult.models !== undefined) {
+			recordTargetModelSnapshot(target, probeResult.models);
+		}
 		// Durable so the next process resolves this endpoint's real slot count
 		// instead of the conservative default. Fire and forget: the probe's answer
 		// is already in `statuses`, and a failed write must not fail the probe.

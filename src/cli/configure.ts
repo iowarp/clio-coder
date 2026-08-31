@@ -19,6 +19,8 @@ import {
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
+	readTargetModelSnapshot,
+	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
 	supportGroupLabel,
 } from "../domains/providers/index.js";
@@ -390,8 +392,8 @@ function catalogContextWindowFor(runtime: RuntimeDescriptor, modelId: string): n
 /**
  * Check the resolved model against the catalog where there is one and against
  * the target's own list where there is not. A runtime with no catalog used to
- * pass any string here while the same command wrote the live list that ruled
- * it out into `wireModels`, so the target saved as `ok` and failed on its first
+ * pass any string here while the same command had a live list that ruled it
+ * out, so the target saved as `ok` and failed on its first
  * turn. Without a catalog or a live list there is nothing to check against, and
  * the note says so rather than implying the id was verified.
  */
@@ -620,7 +622,6 @@ function buildDescriptor(
 	parts: {
 		url?: string;
 		model?: string;
-		wireModels?: string[];
 		apiKeyEnv?: string;
 		apiKeyRef?: string;
 		oauthProfile?: string;
@@ -634,19 +635,12 @@ function buildDescriptor(
 ): TargetDescriptor {
 	const descriptor: TargetDescriptor = { id, runtime: runtime.id };
 	if (parts.url) descriptor.url = parts.url;
-	const wireModels =
-		parts.wireModels?.filter((value, index, all) => value.trim().length > 0 && all.indexOf(value) === index) ?? [];
 	if (parts.model) descriptor.defaultModel = parts.model;
-	else {
-		const firstWireModel = wireModels[0];
-		if (firstWireModel) descriptor.defaultModel = firstWireModel;
-	}
 	const auth: NonNullable<TargetDescriptor["auth"]> = {};
 	if (parts.apiKeyEnv) auth.apiKeyEnvVar = parts.apiKeyEnv;
 	if (parts.apiKeyRef) auth.apiKeyRef = parts.apiKeyRef;
 	if (parts.oauthProfile) auth.oauthProfile = parts.oauthProfile;
 	if (Object.keys(auth).length > 0) descriptor.auth = auth;
-	if (wireModels.length > 0) descriptor.wireModels = wireModels;
 	if (parts.gateway) descriptor.gateway = true;
 	if (parts.lifecycle) descriptor.lifecycle = parts.lifecycle;
 	const caps: NonNullable<TargetDescriptor["capabilities"]> = {};
@@ -717,7 +711,7 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
  */
 interface WireModelInventory {
 	models: string[];
-	source: "catalog" | "probe" | "existing" | "none";
+	source: "catalog" | "probe" | "cache" | "legacy" | "none";
 	/** Per-model load state when the probe reported it. */
 	modelStates?: Readonly<Record<string, ProbeModelStatus>> | undefined;
 }
@@ -764,13 +758,21 @@ async function resolveSupportedWireModels(
 		// lists models only through probeModels still gets its ids checked.
 		const probe = await runtimeProbe(runtime, target, authToken);
 		if (probe?.ok && probe.models && probe.models.length > 0) {
+			recordTargetModelSnapshot(target, probe.models);
 			return { models: [...probe.models], source: "probe", modelStates: probe.modelStates };
 		}
 		const discovered = await runtimeProbeModels(runtime, target, authToken);
-		if (discovered.length > 0) return { models: discovered, source: "probe" };
+		if (discovered.length > 0) {
+			recordTargetModelSnapshot(target, discovered);
+			return { models: discovered, source: "probe" };
+		}
 	}
-	if (existing?.wireModels && existing.wireModels.length > 0)
-		return { models: [...existing.wireModels], source: "existing" };
+	const cached = readTargetModelSnapshot(target);
+	if (cached && cached.models.length > 0) return { models: [...cached.models], source: "cache" };
+	if (existing?.wireModels && existing.wireModels.length > 0) {
+		recordTargetModelSnapshot(target, existing.wireModels);
+		return { models: [...existing.wireModels], source: "legacy" };
+	}
 	return { models: [], source: "none" };
 }
 
@@ -908,7 +910,6 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	const descriptor = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
 		...(model ? { model } : {}),
-		...(wireModels.length > 0 ? { wireModels } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
@@ -969,6 +970,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	applyConfiguration(settings);
 	updateSettings(applyConfiguration);
 	const probe = await runtimeProbe(runtime, descriptor);
+	if (probe?.ok && probe.models) recordTargetModelSnapshot(descriptor, probe.models);
 	printSummary(settings, descriptor, probe);
 	if (
 		runtime.auth === "oauth" &&
@@ -1275,10 +1277,7 @@ async function runInteractive(
 	}
 
 	let model: string | undefined = defaults.model;
-	let inventory: WireModelInventory =
-		existing?.wireModels && existing.wireModels.length > 0
-			? { models: [...existing.wireModels], source: "existing" }
-			: { models: [], source: "none" };
+	let inventory: WireModelInventory = { models: [], source: "none" };
 	const tentative = buildDescriptor(runtime, targetId, {
 		...(url !== undefined ? { url } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
@@ -1370,7 +1369,6 @@ async function runInteractive(
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
 		...(oauthProfile !== undefined ? { oauthProfile } : {}),
-		...(wireModels.length > 0 ? { wireModels } : {}),
 		gateway: gatewayAnswer,
 		...(defaults.lifecycle !== undefined
 			? { lifecycle: defaults.lifecycle }
@@ -1398,6 +1396,7 @@ async function runInteractive(
 	}
 
 	const probe = await runtimeProbe(runtime, descriptor);
+	if (probe?.ok && probe.models) recordTargetModelSnapshot(descriptor, probe.models);
 	if (probe) {
 		process.stdout.write("\n");
 		for (const line of probeLines(descriptor, probe)) process.stdout.write(`${line}\n`);
