@@ -125,8 +125,26 @@ export {
 	DISPATCH_INTENT_TIMEOUT_MIN_MS,
 	DISPATCH_INTENT_VERIFICATION_CAP,
 	isDispatchIntent,
+	narrowDispatchIntentToReadOnly,
 	normalizeDispatchIntent,
 } from "./intent.js";
+export type {
+	DispatchIntentAdoption,
+	DispatchIntentCompatibilityCode,
+	DispatchIntentCompatibilityDecision,
+	DispatchIntentCompatibilityFinding,
+} from "./intent-compatibility.js";
+export {
+	classifyDispatchIntentCompatibility,
+	DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE,
+	DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE,
+	DISPATCH_INTENT_SUPPORTED_VERSIONS,
+	DISPATCH_INTENT_VERSION,
+	dispatchIntentAdoption,
+	dispatchIntentRefusals,
+	dispatchIntentScopeWidening,
+	isSupportedDispatchIntentVersion,
+} from "./intent-compatibility.js";
 export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export { createRouteHistoryStore } from "./route-history.js";

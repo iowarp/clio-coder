@@ -1,12 +1,12 @@
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
-import { pathBoundaryCovers } from "../core/path-boundary.js";
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { DispatchIntent } from "../domains/dispatch/intent.js";
+import { dispatchIntentScopeWidening } from "../domains/dispatch/intent-compatibility.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
@@ -273,21 +273,10 @@ export function dispatchRequestsFromArgs(
 			}
 			const ceiling = options.resolveIntent(sharedIntent, parsed.request.cwd);
 			if (!ceiling.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${ceiling.message}` };
-			const pathCeilings = {
-				readRoots: [...ceiling.intent.readRoots, ...ceiling.intent.writeRoots],
-				writeRoots: ceiling.intent.writeRoots,
-				relevantPaths: [...ceiling.intent.readRoots, ...ceiling.intent.writeRoots, ...ceiling.intent.relevantPaths],
-			};
-			for (const field of ["readRoots", "writeRoots", "relevantPaths"] as const) {
-				const outside = parsed.request.intent?.[field].find(
-					(candidate) => !pathBoundaryCovers(pathCeilings[field], candidate),
-				);
-				if (outside !== undefined) {
-					return {
-						ok: false,
-						message: `dispatch: task ${index + 1}: intent_scope_widening: ${field} entry '${outside}' is outside the top-level intent ceiling`,
-					};
-				}
+			const widening =
+				parsed.request.intent === undefined ? null : dispatchIntentScopeWidening(ceiling.intent, parsed.request.intent);
+			if (widening !== null) {
+				return { ok: false, message: `dispatch: task ${index + 1}: ${widening.message}` };
 			}
 		}
 		requests.push(parsed.request);

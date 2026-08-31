@@ -21,6 +21,7 @@ import {
 import { isExecutionRole } from "./execution-role.js";
 import { COMPETE_STANCES, type CompeteStance } from "./gate-role-prompts.js";
 import { type DispatchIntent, isDispatchIntent } from "./intent.js";
+import { classifyDispatchIntentCompatibility, dispatchIntentRefusals } from "./intent-compatibility.js";
 import { isRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type {
 	DispatchRequestOrigin,
@@ -478,14 +479,21 @@ export function validateJobSpec(spec: unknown): Validated {
 			errors.push("writeRoots must be a non-empty array of non-empty strings");
 		}
 	}
-	if ("intent" in spec && spec.intent !== undefined && !isDispatchIntent(spec.intent)) {
-		errors.push("intent must be a normalized dispatch intent");
-	}
-	if (isDispatchIntent(spec.intent) && spec.intent.writeRoots.length > 0 && Array.isArray(spec.writeRoots)) {
-		const jobCwd = typeof spec.cwd === "string" && spec.cwd.length > 0 ? spec.cwd : process.cwd();
-		const legacy = [...new Set(spec.writeRoots.map((root) => resolvePathBoundary(jobCwd, String(root))))].sort();
-		const declared = [...new Set(spec.intent.writeRoots.map((root) => resolvePathBoundary(jobCwd, root)))].sort();
-		if (JSON.stringify(legacy) !== JSON.stringify(declared)) errors.push("intent_write_roots_contradiction");
+	// One owner for the typed-intent migration rules (#163). Every dispatch
+	// producer reaches a worker through this validator, so classifying here is
+	// what makes the compatibility table true of the fleet, CLI, ACP, and
+	// extension paths rather than only of the model-facing tool.
+	if ("intent" in spec) {
+		for (const refusal of dispatchIntentRefusals(
+			classifyDispatchIntentCompatibility({
+				intent: spec.intent,
+				...(spec.writeRoots !== undefined ? { writeRoots: spec.writeRoots } : {}),
+				...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
+				...(typeof spec.cwd === "string" && spec.cwd.length > 0 ? { cwd: spec.cwd } : {}),
+			}),
+		)) {
+			errors.push(refusal.message);
+		}
 	}
 
 	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
