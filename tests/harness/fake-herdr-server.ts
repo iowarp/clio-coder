@@ -25,6 +25,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scaleWatchdog } from "./load.js";
 
 export interface FakeHerdrRequest {
 	connectionId: number;
@@ -653,8 +654,13 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 	return server;
 }
 
-/** Polls `predicate` until it holds or the budget runs out. */
-export async function waitForCondition(predicate: () => boolean, message: string, timeoutMs = 4_000): Promise<void> {
+/**
+ * Polls `predicate` until it holds or the budget runs out. The budget is a
+ * watchdog against a wait that never ends, not a claim that the condition
+ * arrives quickly, so it is widened by the shard load the run carries.
+ */
+export async function waitForCondition(predicate: () => boolean, message: string, budgetMs = 4_000): Promise<void> {
+	const timeoutMs = scaleWatchdog(budgetMs);
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
 		if (predicate()) return;

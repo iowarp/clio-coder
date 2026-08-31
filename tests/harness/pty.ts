@@ -9,6 +9,7 @@
  * so this stays a test-only tool and never reaches the package.
  */
 import { platform } from "node:process";
+import { scaleWatchdog } from "./load.js";
 
 export interface PtyInputStep {
 	/** Milliseconds after the input schedule starts to type this. */
@@ -168,7 +169,11 @@ export async function openPty(
 		exitDisposable.dispose();
 	});
 
-	const bounded = async <T>(promise: Promise<T>, timeoutMs: number, description: string): Promise<T> => {
+	// Every caller of this is waiting for a real terminal to do something, so its
+	// budget is a watchdog and is widened by the shard load the run carries.
+	// Nothing here asserts that the wait was short.
+	const bounded = async <T>(promise: Promise<T>, budgetMs: number, description: string): Promise<T> => {
+		const timeoutMs = scaleWatchdog(budgetMs);
 		let timeout: NodeJS.Timeout | null = null;
 		try {
 			return await Promise.race([
@@ -260,26 +265,51 @@ export async function runInPty(
 			for (const handle of inputTimers) clearTimeout(handle);
 			resolve({ output: child.output, exitCode, signal, timedOut, matched });
 		};
-		const timer = setTimeout(async () => {
-			try {
-				const result = await child.killAndWaitForExit();
-				finish(result.exitCode, result.signal, true, false);
-			} catch {
-				finish(-1, 0, true, false);
-			}
-		}, options.timeoutMs ?? 20_000);
+		const timer = setTimeout(
+			async () => {
+				try {
+					const result = await child.killAndWaitForExit();
+					finish(result.exitCode, result.signal, true, false);
+				} catch {
+					finish(-1, 0, true, false);
+				}
+			},
+			scaleWatchdog(options.timeoutMs ?? 20_000),
+		);
+		/**
+		 * Steps are armed one at a time, each timer set when the previous
+		 * keystroke was actually written rather than all at once from the start
+		 * of the schedule.
+		 *
+		 * The gaps between steps are the contract, not the absolute offsets: a
+		 * double-tap exit means two Ctrl-C inside the product's 500ms window, and
+		 * a lone Ctrl-C means one outside it. Arming every timer up front leaves
+		 * each gap free to compress or stretch by however much the event loop was
+		 * starved between two independent firings, which under 24-way shard load
+		 * is enough to push a 150ms tap outside a 500ms window. Chaining lets a
+		 * gap run late but never short, so the schedule the caller wrote is the
+		 * schedule the child sees.
+		 */
 		const scheduleInput = (): void => {
-			for (const step of options.input ?? []) {
+			const steps = options.input ?? [];
+			const arm = (index: number, previousAfterMs: number): void => {
+				const step = steps[index];
+				if (!step) return;
 				inputTimers.push(
-					setTimeout(() => {
-						try {
-							child.write(step.data);
-						} catch {
-							// The child exited before this keystroke. Nothing to type into.
-						}
-					}, step.afterMs),
+					setTimeout(
+						() => {
+							try {
+								child.write(step.data);
+							} catch {
+								// The child exited before this keystroke. Nothing to type into.
+							}
+							arm(index + 1, step.afterMs);
+						},
+						Math.max(0, step.afterMs - previousAfterMs),
+					),
 				);
-			}
+			};
+			arm(0, 0);
 		};
 		let inputScheduled = options.readyWhen === undefined;
 		if (inputScheduled) scheduleInput();
