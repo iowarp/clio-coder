@@ -11,8 +11,19 @@ import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
 import type { DispatchToolDeps } from "../../src/tools/dispatch-types.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 const declared = new Map([["test", { id: "test", timeoutMs: 30_000 }]]);
+
+/**
+ * The budget each host verification check gets to run its `node -e` one-liner.
+ * A watchdog: every case using it asserts on the resulting status and exit
+ * code, never on how long the check took. Under 24-way shard load spawning
+ * node has been measured past a flat 10s, which timed the check out and turned
+ * `runs without memoization outside a Git workspace` into "rejected" against a
+ * command that would have exited 0.
+ */
+const CHECK_TIMEOUT_MS = scaleWatchdog(10_000);
 
 function admission(runtimeId = "http") {
 	const dispatch = {
@@ -210,7 +221,7 @@ describe("host-run dispatch verification", () => {
 					check: "pass",
 					argv: [process.execPath, "-e", "process.stdout.write('host pass')"],
 					cwd: root,
-					timeoutMs: 10_000,
+					timeoutMs: CHECK_TIMEOUT_MS,
 				},
 			],
 		};
@@ -235,7 +246,7 @@ describe("host-run dispatch verification", () => {
 						check: "fail",
 						argv: [process.execPath, "-e", "process.stderr.write('failure tail'); process.exit(7)"],
 						cwd: root,
-						timeoutMs: 10_000,
+						timeoutMs: CHECK_TIMEOUT_MS,
 					},
 				],
 			},
@@ -266,7 +277,7 @@ describe("host-run dispatch verification", () => {
 					check,
 					argv: [process.execPath, "-e", `setTimeout(() => process.stdout.write('${check}'), 20)`],
 					cwd: root,
-					timeoutMs: 10_000,
+					timeoutMs: CHECK_TIMEOUT_MS,
 				},
 			],
 		});
@@ -296,7 +307,7 @@ describe("host-run dispatch verification", () => {
 						check: "non-git-pass",
 						argv: [process.execPath, "-e", "process.stdout.write('non-git pass')"],
 						cwd: root,
-						timeoutMs: 10_000,
+						timeoutMs: CHECK_TIMEOUT_MS,
 					},
 				],
 			},

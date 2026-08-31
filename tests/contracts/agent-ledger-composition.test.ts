@@ -220,9 +220,25 @@ describe("contracts/agent-ledger composition: bundle", () => {
 			strictEqual(receiptB.ledgerContribution?.posted, 2);
 			ok(receiptA.ledgerContribution?.digest !== receiptB.ledgerContribution?.digest, "each run digests its own entries");
 			for (const receipt of [receiptA, receiptB]) {
+				// The seal is computed over the run envelope, and the envelope's
+				// terminal fields (endedAt, exitCode, outcome) are written by the
+				// same settlement that resolves finalPromise, a tick later. Reading
+				// the envelope straight off the await compared a sealed receipt
+				// against a half-written envelope and failed as a ledger mismatch.
+				// The wait is only for the envelope to stop being in flight; the
+				// seal itself is still checked exactly once, strictly.
+				await waitFor(
+					() => bundle.contract.getRun(receipt.runId)?.status !== "running",
+					`run ${receipt.runId} never left "running" before its seal was checked`,
+				);
 				const envelope = bundle.contract.getRun(receipt.runId);
 				ok(envelope !== null && envelope !== undefined);
-				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true, "the contribution is under the seal");
+				const verification = verifyReceiptIntegrity(receipt, envelope);
+				strictEqual(
+					verification.ok,
+					true,
+					`the contribution is under the seal${verification.ok ? "" : `: ${verification.reason}`}`,
+				);
 			}
 
 			// A run with no ledger is offered no tool and no callback.
