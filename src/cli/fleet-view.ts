@@ -34,7 +34,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { clioStateDir } from "../core/xdg.js";
+import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
 import {
 	type RunEventJournalLine,
@@ -330,6 +330,7 @@ export function renderWatchView(
 	runId: string | null,
 	model: RunViewModel | null,
 	width: number = DEFAULT_WIDTH,
+	ledgerRoot: string = clioStateDir(),
 ): string[] {
 	const columns = Math.max(MIN_WIDTH, width);
 	if (runId === null) {
@@ -341,10 +342,16 @@ export function renderWatchView(
 		];
 	}
 	if (model === null) {
+		const missing = `run ${sanitizeBounded(runId, 64)} is not in the run ledger under ${ledgerRoot}.`;
+		const wrappedMissing: string[] = [];
+		for (let offset = 0; offset < missing.length; offset += columns) {
+			wrappedMissing.push(missing.slice(offset, offset + columns));
+		}
 		return [
-			truncateToWidth(`run ${sanitizeBounded(runId, 64)} is not in the run ledger yet.`, columns, "…", false),
+			...wrappedMissing,
 			"",
-			"A queued run appears here the moment it starts.",
+			"If this run is queued, it has not started yet; this view will update when its ledger entry appears.",
+			"If it already started or finished, it was not found in this ledger.",
 		];
 	}
 	return renderRunView(model, columns);
@@ -531,6 +538,12 @@ function fail(message: string): number {
 interface ParsedViewArgs {
 	runId?: string;
 	watchPath?: string;
+	dirs?: {
+		config?: string;
+		data?: string;
+		state?: string;
+		cache?: string;
+	};
 	follow: boolean;
 	help: boolean;
 }
@@ -551,6 +564,24 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 			i += 1;
 			continue;
 		}
+		const dirRole =
+			arg === "--config-dir"
+				? "config"
+				: arg === "--data-dir"
+					? "data"
+					: arg === "--state-dir"
+						? "state"
+						: arg === "--cache-dir"
+							? "cache"
+							: null;
+		if (dirRole !== null) {
+			const value = args[i + 1];
+			if (value === undefined || value.startsWith("-")) return `${arg} requires a directory path`;
+			parsed.dirs ??= {};
+			parsed.dirs[dirRole] = value;
+			i += 1;
+			continue;
+		}
 		if (arg === "--help" || arg === "-h") {
 			parsed.help = true;
 			continue;
@@ -566,6 +597,21 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 		return "--watch already follows; drop --follow";
 	}
 	return parsed;
+}
+
+/**
+ * Pin the already-resolved parent layout before any fleet-view read. These are
+ * internal self-invocation flags rather than inherited raw environment: the
+ * pane shell may discard or replace its environment, but it cannot reinterpret
+ * the four absolute values already present in argv.
+ */
+function applyViewDirs(dirs: ParsedViewArgs["dirs"]): void {
+	if (dirs === undefined) return;
+	if (dirs.config !== undefined) process.env.CLIO_CODER_CONFIG_DIR = dirs.config;
+	if (dirs.data !== undefined) process.env.CLIO_CODER_DATA_DIR = dirs.data;
+	if (dirs.state !== undefined) process.env.CLIO_CODER_STATE_DIR = dirs.state;
+	if (dirs.cache !== undefined) process.env.CLIO_CODER_CACHE_DIR = dirs.cache;
+	resetXdgCache();
 }
 
 /**
@@ -601,6 +647,7 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		process.stdout.write(HELP);
 		return 0;
 	}
+	applyViewDirs(parsed.dirs);
 	if (parsed.watchPath !== undefined) {
 		// The watch loop needs an interactive terminal for the same reason
 		// --follow does; without one, print the selected run's snapshot and exit.

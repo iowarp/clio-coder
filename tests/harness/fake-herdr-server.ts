@@ -289,6 +289,12 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				panes.splice(index, 1);
 				return { result: { type: "ok" } };
 			}
+			case "pane.rename": {
+				if (protocol < 17) return { error: { code: "invalid_request", message: "unknown method pane.rename" } };
+				const pane = panes.find((entry) => entry.paneId === params.pane_id);
+				if (!pane) return { error: { code: "pane_not_found", message: "pane not found" } };
+				return { result: { type: "ok" } };
+			}
 			case "pane.layout": {
 				const pane = panes.find((entry) => entry.paneId === params.pane_id) ?? panes[0];
 				if (!pane) return { error: { code: "pane_layout_unavailable", message: "pane layout unavailable" } };

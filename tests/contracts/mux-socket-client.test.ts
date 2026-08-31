@@ -225,6 +225,7 @@ describe("mux socket client", () => {
 		strictEqual(split.tabId, "w1:t1");
 		ok((await live.paneLayout(split.paneId)).includes(split.paneId));
 
+		await live.paneRename(split.paneId, "clio watch");
 		await live.paneSendText(split.paneId, "echo hi\n");
 		await live.paneReportAgent({ paneId: split.paneId, source: "clio:mux", agent: "tester", state: "working" });
 		await live.paneReportMetadata({ paneId: split.paneId, source: "clio:mux", tokens: { clio_owner: "clio:mux" } });
@@ -236,6 +237,7 @@ describe("mux socket client", () => {
 
 		// A split with no focus request must not ask herdr to steal focus.
 		strictEqual(fake.requestsFor("pane.split")[0]?.params.focus, false);
+		deepStrictEqual(fake.requestsFor("pane.rename")[0]?.params, { pane_id: split.paneId, label: "clio watch" });
 	});
 
 	it("surfaces a request with no response as MuxRequestTimeout", async () => {

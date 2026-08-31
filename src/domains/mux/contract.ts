@@ -61,6 +61,8 @@ export interface MuxOpenUtilityPaneRequest {
 	argv: ReadonlyArray<string>;
 	cwd: string;
 	label: string;
+	/** Operator-facing pane title. Omitted when the caller wants the shell default. */
+	title?: string;
 	purpose?: MuxPanePurpose;
 	direction?: "right" | "down";
 	env?: Readonly<Record<string, string>>;
@@ -193,10 +195,12 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		live: MuxClient,
 		paneId: string,
 		tokens: Readonly<Record<string, string | null>>,
+		title?: string,
 	): Promise<void> => {
 		await live.paneReportMetadata({
 			paneId,
 			source: METADATA_SOURCE,
+			...(title === undefined ? {} : { title }),
 			tokens: { [OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE, ...tokens },
 		});
 	};
@@ -241,8 +245,18 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					const ref: MuxPaneRef = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
 					const purpose = request.purpose ?? "utility";
 					registry.record(paneRecord(ref, { purpose, label: request.label, openedAt: now() }));
+					const title = request.title;
+					const titleSupported = title !== undefined && muxSupportsMethod(detection.server, "pane.rename");
+					if (titleSupported) {
+						try {
+							await live.paneRename(pane.paneId, title);
+						} catch {
+							// Presentation is optional. A server that advertises the floor but
+							// lacks or refuses rename must not strand an otherwise healthy pane.
+						}
+					}
 					// The `role` token is what adoptPane finds again after a restart.
-					await tagOwner(live, pane.paneId, { role: token(purpose) });
+					await tagOwner(live, pane.paneId, { role: token(purpose) }, titleSupported ? title : undefined);
 					if (request.argv.length > 0) {
 						// herdr has no argv parameter on pane.split, so the command goes in
 						// through the pane's shell. `exec` replaces the shell so the pane

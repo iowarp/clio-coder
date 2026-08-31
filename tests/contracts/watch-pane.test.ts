@@ -16,6 +16,13 @@ import { after, describe, it } from "node:test";
 import type { MuxContract, MuxOpenUtilityPaneRequest, MuxPaneRecord, MuxPaneRef } from "../../src/domains/mux/index.js";
 import { createWatchPaneController } from "../../src/interactive/watch-pane.js";
 
+const TEST_DIRS = {
+	config: "/resolved/config",
+	data: "/resolved/data",
+	state: "/resolved/state",
+	cache: "/resolved/cache",
+} as const;
+
 const dirs: string[] = [];
 after(() => {
 	for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
@@ -93,7 +100,12 @@ describe("watch pane controller", () => {
 	it("opens one watch pane on first watch, then only writes the selection", async () => {
 		const mux = fakeMux();
 		const selectionPath = tempSelection();
-		const watch = createWatchPaneController({ mux: mux.contract, getCwd: () => "/work", selectionPath });
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath,
+			dirs: TEST_DIRS,
+		});
 
 		const first = await watch.watch("run-1");
 		strictEqual(first.status, "watching");
@@ -101,7 +113,19 @@ describe("watch pane controller", () => {
 		strictEqual(mux.opened.length, 1);
 		strictEqual(mux.opened[0]?.purpose, "watch");
 		strictEqual(mux.opened[0]?.direction, "right");
-		ok(mux.opened[0]?.argv.join(" ").includes(`--watch ${selectionPath}`));
+		strictEqual(mux.opened[0]?.title, "clio watch");
+		const command = mux.opened[0]?.argv ?? [];
+		ok(command.join(" ").includes(`--watch ${selectionPath}`));
+		deepStrictEqual(command.slice(4, -2), [
+			"--config-dir",
+			TEST_DIRS.config,
+			"--data-dir",
+			TEST_DIRS.data,
+			"--state-dir",
+			TEST_DIRS.state,
+			"--cache-dir",
+			TEST_DIRS.cache,
+		]);
 		strictEqual(readFileSync(selectionPath, "utf8"), "run-1\n");
 
 		const second = await watch.watch("run-2");
@@ -121,7 +145,12 @@ describe("watch pane controller", () => {
 	it("adopts a surviving watch pane instead of opening a second", async () => {
 		const mux = fakeMux();
 		mux.adoptable = { paneId: "w1:p77", tabId: "w1:t1", workspaceId: "w1" };
-		const watch = createWatchPaneController({ mux: mux.contract, getCwd: () => "/work", selectionPath: tempSelection() });
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath: tempSelection(),
+			dirs: TEST_DIRS,
+		});
 		const result = await watch.watch("run-1");
 		strictEqual(result.status, "watching");
 		if (result.status === "watching") {
@@ -134,7 +163,12 @@ describe("watch pane controller", () => {
 	it("follow retargets an open pane and refuses to open a closed one", async () => {
 		const mux = fakeMux();
 		const selectionPath = tempSelection();
-		const watch = createWatchPaneController({ mux: mux.contract, getCwd: () => "/work", selectionPath });
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath,
+			dirs: TEST_DIRS,
+		});
 
 		strictEqual(watch.follow("run-1"), false, "navigation never opens a pane");
 		strictEqual(mux.opened.length, 0);
@@ -148,7 +182,12 @@ describe("watch pane controller", () => {
 	it("treats an operator-closed pane as a decision: follow goes quiet, Enter reopens", async () => {
 		const mux = fakeMux();
 		const selectionPath = tempSelection();
-		const watch = createWatchPaneController({ mux: mux.contract, getCwd: () => "/work", selectionPath });
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath,
+			dirs: TEST_DIRS,
+		});
 		const first = await watch.watch("run-1");
 		strictEqual(first.status, "watching");
 		const paneId = first.status === "watching" ? first.paneId : "";
@@ -167,7 +206,12 @@ describe("watch pane controller", () => {
 	it("reports unavailability when the pane host refuses the split", async () => {
 		const mux = fakeMux();
 		mux.contract.openUtilityPane = async () => null;
-		const watch = createWatchPaneController({ mux: mux.contract, getCwd: () => "/work", selectionPath: tempSelection() });
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath: tempSelection(),
+			dirs: TEST_DIRS,
+		});
 		const result = await watch.watch("run-1");
 		strictEqual(result.status, "unavailable");
 	});
