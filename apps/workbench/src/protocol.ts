@@ -47,6 +47,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"routing.inspect",
 	"dispatch.inspect",
 	"fleet.inspect",
+	"fleet.decisions",
 	"toolchain.inspect",
 	"trace.inspect",
 	"evidence.inspect",
@@ -254,6 +255,7 @@ export interface RoutingInspectPayload {
 export type DispatchInspectPayload = Readonly<Record<string, never>>;
 
 export type FleetInspectPayload = Readonly<Record<string, never>>;
+export type FleetDecisionsPayload = Readonly<Record<string, never>>;
 
 export type ToolchainInspectPayload = Readonly<Record<string, never>>;
 
@@ -321,6 +323,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "routing.inspect": RoutingInspectPayload;
 	readonly "dispatch.inspect": DispatchInspectPayload;
 	readonly "fleet.inspect": FleetInspectPayload;
+	readonly "fleet.decisions": FleetDecisionsPayload;
 	readonly "toolchain.inspect": ToolchainInspectPayload;
 	readonly "trace.inspect": TraceInspectPayload;
 	readonly "evidence.inspect": EvidenceInspectPayload;
@@ -360,6 +363,7 @@ export const SERVER_EVENT_KINDS = [
 	"routing.state",
 	"dispatch.state",
 	"fleet.inspection.state",
+	"fleet.decisions.state",
 	"toolchain.state",
 	"trace.state",
 	"evidence.state",
@@ -1465,6 +1469,115 @@ export interface WireTraceInspection {
 	readonly truncated: boolean;
 }
 
+export const MAX_WIRE_GATE_DECISIONS = 8;
+export const MAX_WIRE_GATE_DECISION_SUBJECTS = 6;
+
+export const GATE_TOPOLOGIES = ["review", "compete"] as const;
+export type WireGateTopology = (typeof GATE_TOPOLOGIES)[number];
+export const GATE_DECISION_OUTCOMES = [
+	"pass",
+	"fail",
+	"revise",
+	"exhausted",
+	"winner",
+	"no-winner",
+	"operator-confirmed",
+	"full-auto-applied",
+] as const;
+export type WireGateDecisionOutcome = (typeof GATE_DECISION_OUTCOMES)[number];
+
+/** Which outcomes each topology is allowed to reach. The store enforces the same split. */
+export const GATE_OUTCOMES_BY_TOPOLOGY: Readonly<
+	Record<WireGateTopology, ReadonlyArray<WireGateDecisionOutcome>>
+> = {
+	review: ["pass", "fail", "revise", "exhausted"],
+	compete: ["winner", "no-winner", "operator-confirmed", "full-auto-applied"],
+};
+
+/** Outcomes that name a winning candidate, and therefore require one. */
+export const GATE_OUTCOMES_WITH_WINNER: ReadonlyArray<WireGateDecisionOutcome> = [
+	"winner",
+	"operator-confirmed",
+	"full-auto-applied",
+];
+
+export const GATE_DECISION_REASONS = [
+	"all-candidates-failed",
+	"builder-run-failed",
+	"reviewer-run-failed",
+	"reviewer-checks-failed",
+	"reviewer-report-invalid",
+	"judge-run-failed",
+	"judge-result-invalid",
+	"judge-winner-out-of-range",
+	"judge-picked-failed-candidate",
+	"winner-touches-protected-artifact",
+	"operator-confirmed-winner",
+	"full-auto-applied-winner",
+	"unclassified",
+] as const;
+export type WireGateDecisionReason = (typeof GATE_DECISION_REASONS)[number];
+
+/** The independence facts sealed on a decision beside its verdict. */
+export interface WireGateCorrelation {
+	readonly agent: boolean;
+	readonly target: boolean;
+	readonly modelFamily: boolean;
+	readonly runtime: boolean;
+	readonly node: boolean;
+	readonly independent: boolean;
+}
+
+export interface WireGateWinner {
+	readonly index: number;
+	readonly runId: string;
+}
+
+/**
+ * One sealed coordinator verdict.
+ *
+ * A reviewer's findings and a judge's reasoning live in the decider run's own
+ * receipt, and the decision's stored `detail` interpolates failure reasons,
+ * protected artifact names, and approval request ids. None of that crosses. What
+ * does is the verdict, who was graded, who graded them, whether the grader was
+ * independent of the graded route, and a closed classification of why the gate
+ * ended where it did.
+ */
+export interface WireGateDecision {
+	readonly id: string;
+	readonly group: string;
+	readonly topology: WireGateTopology;
+	readonly cycle: number;
+	readonly outcome: WireGateDecisionOutcome;
+	readonly decidedAt: string;
+	readonly subjects: readonly string[];
+	readonly subjectsTruncated: boolean;
+	readonly decider: string | null;
+	readonly correlation: WireGateCorrelation | null;
+	readonly winner: WireGateWinner | null;
+	readonly confirms: string | null;
+	readonly reason: WireGateDecisionReason | null;
+}
+
+/**
+ * Bounded newest-first gate decisions selected by Clio Coder, never by argv.
+ *
+ * `available` separates an installation that has never run a gate from one
+ * whose gates aged out of the scan, and `unverifiable` counts artifacts whose
+ * own integrity no longer holds. The store's read API drops those silently,
+ * which is right for a consumer acting on evidence and wrong for an operator
+ * surface, so they are counted here rather than disappearing.
+ */
+export interface WireGateDecisions {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	readonly available: boolean;
+	readonly decisions: readonly WireGateDecision[];
+	readonly truncated: boolean;
+	readonly unverifiable: number;
+}
+
 export const TOOLCHAIN_SOURCES = ["path", "vendored", "none"] as const;
 export type WireToolchainSource = (typeof TOOLCHAIN_SOURCES)[number];
 export const MAX_WIRE_TOOLCHAIN_ITEMS = 32;
@@ -1698,6 +1811,10 @@ export interface EvidenceDetailStatePayload {
 	readonly detail: WireEvidenceDetail;
 }
 
+export interface FleetDecisionsStatePayload {
+	readonly decisions: WireGateDecisions;
+}
+
 export interface FleetVerificationStatePayload {
 	readonly verification: WireFleetVerification;
 }
@@ -1889,6 +2006,7 @@ export interface ServerEventPayloadByKind {
 	readonly "routing.state": RoutingStatePayload;
 	readonly "dispatch.state": DispatchStatePayload;
 	readonly "fleet.inspection.state": FleetInspectionStatePayload;
+	readonly "fleet.decisions.state": FleetDecisionsStatePayload;
 	readonly "toolchain.state": ToolchainStatePayload;
 	readonly "trace.state": TraceStatePayload;
 	readonly "evidence.state": EvidenceStatePayload;
@@ -2248,6 +2366,7 @@ function validateClientPayload<K extends ClientCommandKind>(
 	switch (kind) {
 		case "dispatch.inspect":
 		case "fleet.inspect":
+		case "fleet.decisions":
 		case "toolchain.inspect":
 		case "trace.inspect":
 		case "evidence.inspect":
@@ -4786,6 +4905,153 @@ export function validateFleetInspection(
 	};
 }
 
+function validateGateDecision(value: unknown, label: string): WireGateDecision {
+	const record = expectExactKeys(value, label, [
+		"id",
+		"group",
+		"topology",
+		"cycle",
+		"outcome",
+		"decidedAt",
+		"subjects",
+		"subjectsTruncated",
+		"decider",
+		"correlation",
+		"winner",
+		"confirms",
+		"reason",
+	]);
+	const topology = expectEnum(record.topology, `${label}.topology`, GATE_TOPOLOGIES);
+	const outcome = expectEnum(record.outcome, `${label}.outcome`, GATE_DECISION_OUTCOMES);
+	// A review gate answers pass/fail/revise/exhausted and a compete gate answers
+	// winner/no-winner/confirmed/applied. Neither can reach the other's verdicts,
+	// so a crossed pair is two decisions folded into one.
+	if (!GATE_OUTCOMES_BY_TOPOLOGY[topology].includes(outcome)) {
+		invalid(`${label}.outcome cannot be reached by a ${topology} gate`);
+	}
+	const seen = new Set<string>();
+	const subjects = expectArray(
+		record.subjects,
+		`${label}.subjects`,
+		MAX_WIRE_GATE_DECISION_SUBJECTS,
+		(entry, entryLabel) => {
+			const runId = expectPresentationText(entry, entryLabel, 128);
+			if (seen.has(runId)) invalid(`${label}.subjects repeats ${runId}`);
+			seen.add(runId);
+			return runId;
+		},
+	);
+	if (subjects.length === 0) invalid(`${label} grades no run`);
+	const subjectsTruncated = expectBoolean(record.subjectsTruncated, `${label}.subjectsTruncated`);
+	const decider = expectNullablePresentationText(record.decider, `${label}.decider`, 128);
+	let correlation: WireGateCorrelation | null = null;
+	if (record.correlation !== null) {
+		const facts = expectExactKeys(record.correlation, `${label}.correlation`, [
+			"agent",
+			"target",
+			"modelFamily",
+			"runtime",
+			"node",
+			"independent",
+		]);
+		const agent = expectBoolean(facts.agent, `${label}.correlation.agent`);
+		const modelFamily = expectBoolean(facts.modelFamily, `${label}.correlation.modelFamily`);
+		const independent = expectBoolean(facts.independent, `${label}.correlation.independent`);
+		// Independence is defined as sharing neither the agent nor the model family.
+		// A verdict claiming both is claiming a second opinion it did not get.
+		if (independent !== (!agent && !modelFamily)) {
+			invalid(`${label}.correlation claims an independence its own dimensions contradict`);
+		}
+		correlation = {
+			agent,
+			target: expectBoolean(facts.target, `${label}.correlation.target`),
+			modelFamily,
+			runtime: expectBoolean(facts.runtime, `${label}.correlation.runtime`),
+			node: expectBoolean(facts.node, `${label}.correlation.node`),
+			independent,
+		};
+	}
+	// A correlation measures a decider against its subjects, so it cannot exist
+	// without one. The decision store refuses the pair for the same reason.
+	if (correlation !== null && decider === null) {
+		invalid(`${label}.correlation has no decider to measure`);
+	}
+	let winner: WireGateWinner | null = null;
+	if (record.winner !== null) {
+		const picked = expectExactKeys(record.winner, `${label}.winner`, ["index", "runId"]);
+		const index = expectDispatchNumber(picked.index, `${label}.winner.index`, true);
+		if (index < 1) invalid(`${label}.winner.index is a 1-based candidate ordinal`);
+		winner = { index, runId: expectPresentationText(picked.runId, `${label}.winner.runId`, 128) };
+	}
+	// Only three outcomes name a winner, and each of them requires one.
+	if ((winner !== null) !== GATE_OUTCOMES_WITH_WINNER.includes(outcome)) {
+		invalid(`${label} reports a winner its outcome does not account for`);
+	}
+	// The winning candidate is one of the runs this decision graded. It can fall
+	// outside the named subjects only because the subject list was bounded.
+	if (winner !== null && !subjects.includes(winner.runId) && !subjectsTruncated) {
+		invalid(`${label}.winner names a run this decision did not grade`);
+	}
+	return {
+		id: expectPresentationText(record.id, `${label}.id`, 128),
+		group: expectPresentationText(record.group, `${label}.group`, 128),
+		topology,
+		cycle: expectDispatchNumber(record.cycle, `${label}.cycle`, true),
+		outcome,
+		decidedAt: expectTimestamp(record.decidedAt, `${label}.decidedAt`),
+		subjects,
+		subjectsTruncated,
+		decider,
+		correlation,
+		winner,
+		confirms: expectNullablePresentationText(record.confirms, `${label}.confirms`, 128),
+		reason: record.reason === null ? null : expectEnum(record.reason, `${label}.reason`, GATE_DECISION_REASONS),
+	};
+}
+
+export function validateGateDecisions(value: unknown, label = "gate decisions"): WireGateDecisions {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"available",
+		"decisions",
+		"truncated",
+		"unverifiable",
+	]);
+	if (record.scope !== "installation") invalid(`${label}.scope must be installation`);
+	const available = expectBoolean(record.available, `${label}.available`);
+	const seen = new Set<string>();
+	const decisions = expectArray(
+		record.decisions,
+		`${label}.decisions`,
+		MAX_WIRE_GATE_DECISIONS,
+		(entry, entryLabel) => {
+			const decision = validateGateDecision(entry, entryLabel);
+			if (seen.has(decision.id)) invalid(`${label}.decisions repeats ${decision.id}`);
+			seen.add(decision.id);
+			return decision;
+		},
+	);
+	const unverifiable = expectDispatchNumber(record.unverifiable, `${label}.unverifiable`, true);
+	const truncated = expectBoolean(record.truncated, `${label}.truncated`);
+	// An installation with no decision store has nothing to report and nothing to
+	// have failed verification, so a frame claiming either is describing a store
+	// it also says does not exist.
+	if (!available && (decisions.length > 0 || truncated || unverifiable > 0)) {
+		invalid(`${label} reports decisions from a store it says is absent`);
+	}
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		available,
+		decisions,
+		truncated,
+		unverifiable,
+	};
+}
+
 function expectNullableDispatchNumber(
 	value: unknown,
 	label: string,
@@ -5823,6 +6089,12 @@ function validateServerPayload(
 				),
 			};
 		}
+		case "fleet.decisions.state": {
+			const record = expectExactKeys(value, label, ["decisions"]);
+			return {
+				decisions: validateGateDecisions(record.decisions, `${label}.decisions`),
+			};
+		}
 		case "toolchain.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -6195,6 +6467,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"project.browse.listing",
 	"dispatch.state",
 	"fleet.inspection.state",
+	"fleet.decisions.state",
 	"toolchain.state",
 	"trace.state",
 	"evidence.state",

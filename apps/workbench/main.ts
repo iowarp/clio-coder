@@ -12,6 +12,11 @@ import {
 	ClioToolchainInspectError,
 	type ClioToolchainInspector,
 } from "./clio-toolchain-inspector.ts";
+import {
+	ClioCliDecisionsInspector,
+	ClioDecisionsInspectError,
+	type ClioDecisionsInspector,
+} from "./clio-decisions-inspector.ts";
 import { ClioCliTraceInspector, ClioTraceInspectError, type ClioTraceInspector } from "./clio-trace-inspector.ts";
 import {
 	ClioCliEvidenceInspector,
@@ -56,6 +61,7 @@ import {
 	type WireDispatchInspection,
 	type WireEvidenceInspection,
 	type WireFleetInspection,
+	type WireGateDecisions,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
 	type WireRoutingInspection,
@@ -185,6 +191,8 @@ export interface WorkbenchServerOptions {
 	toolchainInspector?: ClioToolchainInspector;
 	/** Overrides the fixed installation-wide durable trace adapter (tests). */
 	traceInspector?: ClioTraceInspector;
+	/** Overrides the fixed installation-wide sealed gate decision adapter (tests). */
+	decisionsInspector?: ClioDecisionsInspector;
 	/** Overrides the fixed installation-wide durable evidence adapter (tests). */
 	evidenceInspector?: ClioEvidenceInspector;
 	/** Overrides the redacted Clio Coder doctor/paths adapter (tests). */
@@ -386,6 +394,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #fleetInspector: ClioFleetInspector;
 	readonly #toolchainInspector: ClioToolchainInspector;
 	readonly #traceInspector: ClioTraceInspector;
+	readonly #decisionsInspector: ClioDecisionsInspector;
 	readonly #evidenceInspector: ClioEvidenceInspector;
 	/**
 	 * The only way a browser may name a durable artifact: by echoing an id this
@@ -410,6 +419,7 @@ class WorkbenchRuntime implements HostSink {
 	#fleetInspection: WireFleetInspection | null = null;
 	#toolchainInspection: WireToolchainInspection | null = null;
 	#traceInspection: WireTraceInspection | null = null;
+	#gateDecisions: WireGateDecisions | null = null;
 	#evidenceInspection: WireEvidenceInspection | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
@@ -438,6 +448,7 @@ class WorkbenchRuntime implements HostSink {
 				| "fleetInspector"
 				| "toolchainInspector"
 				| "traceInspector"
+				| "decisionsInspector"
 				| "evidenceInspector"
 				| "recoveryInspector"
 				| "permissionEscalateMs"
@@ -482,6 +493,10 @@ class WorkbenchRuntime implements HostSink {
 			new ClioCliTraceInspector({
 				log: options.quiet ? () => undefined : (message) => console.error(message),
 			});
+		this.#decisionsInspector = options.decisionsInspector ??
+			new ClioCliDecisionsInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
 		this.#evidenceInspector = options.evidenceInspector ??
 			new ClioCliEvidenceInspector({
 				log: options.quiet ? () => undefined : (message) => console.error(message),
@@ -522,12 +537,13 @@ class WorkbenchRuntime implements HostSink {
 			recent: await this.#recentDtos(),
 			homePath: this.#state.homePath,
 			stateDirNote:
-				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, durable run, toolchain, trace, evidence, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
+				`The desktop app keeps only its recent-project list under ${this.#state.stateDir}; bounded configuration, catalog, project usage, offline routing, dispatch, durable run, toolchain, trace, gate decision, evidence, and recovery inspections ask Clio Coder for typed data, redact it on the host, and never change Clio Coder configuration.`,
 			securityNote: SECURITY_NOTE,
 			dispatchInspection: this.#dispatchInspection,
 			fleetInspection: this.#fleetInspection,
 			toolchainInspection: this.#toolchainInspection,
 			traceInspection: this.#traceInspection,
+			gateDecisions: this.#gateDecisions,
 			evidenceInspection: this.#evidenceInspection,
 		};
 	}
@@ -750,6 +766,9 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (command.kind === "trace.inspect") {
 			return this.#serializeRead(() => this.#dispatchTraceInspect(session, command));
+		}
+		if (command.kind === "fleet.decisions") {
+			return this.#serializeRead(() => this.#dispatchFleetDecisions(session, command));
 		}
 		if (command.kind === "evidence.inspect") {
 			return this.#serializeRead(() => this.#dispatchEvidenceInspect(session, command));
@@ -977,6 +996,27 @@ class WorkbenchRuntime implements HostSink {
 			if (this.#closed || session.closed) return;
 			this.#traceInspection = inspection;
 			this.#broadcast("trace.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
+		}
+	}
+
+	async #dispatchFleetDecisions(
+		session: SocketSession,
+		command: ClientCommandOf<"fleet.decisions">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			const decisions = await this.#decisionsInspector.inspect(this.#state.homePath);
+			if (this.#closed || session.closed) return;
+			this.#gateDecisions = decisions;
+			this.#broadcast("fleet.decisions.state", {}, { decisions });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send("command.error", {}, {
@@ -1575,6 +1615,9 @@ class WorkbenchRuntime implements HostSink {
 		if (error instanceof ClioTraceInspectError) {
 			return { code: error.code, message: error.message };
 		}
+		if (error instanceof ClioDecisionsInspectError) {
+			return { code: error.code, message: error.message };
+		}
 		if (error instanceof ClioEvidenceInspectError) {
 			return { code: error.code, message: error.message };
 		}
@@ -1742,6 +1785,7 @@ export async function startWorkbenchServer(
 		...(options.fleetInspector === undefined ? {} : { fleetInspector: options.fleetInspector }),
 		...(options.toolchainInspector === undefined ? {} : { toolchainInspector: options.toolchainInspector }),
 		...(options.traceInspector === undefined ? {} : { traceInspector: options.traceInspector }),
+		...(options.decisionsInspector === undefined ? {} : { decisionsInspector: options.decisionsInspector }),
 		...(options.evidenceInspector === undefined ? {} : { evidenceInspector: options.evidenceInspector }),
 		...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
