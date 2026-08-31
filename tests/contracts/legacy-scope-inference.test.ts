@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { asDirectoryPathBoundary, resolvePathBoundary } from "../../src/core/path-boundary.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -109,7 +109,13 @@ describe("legacy dispatch path inference", () => {
 				resolveIntent,
 			},
 		);
-		deepStrictEqual(parsed, { ok: false, message: "dispatch: task 1: intent_write_roots_contradiction" });
+		strictEqual(parsed.ok, false);
+		ok(parsed.ok === false);
+		// The code is the stable part; the rest of the message has to name the fix,
+		// because a caller that only learns "contradiction" cannot tell which of the
+		// two declarations it is meant to drop.
+		match(parsed.message, /^dispatch: task 1: intent_write_roots_contradiction: /u);
+		match(parsed.message, /drop writeRoots and declare the exact write scope once in intent\.write_roots/u);
 	});
 
 	it("refuses a malformed inferred path with a typed code", () => {

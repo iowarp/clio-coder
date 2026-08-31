@@ -2,7 +2,8 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import {
 	type DispatchIntent,
 	type DispatchIntentCheckBound,
@@ -25,6 +26,11 @@ import {
 } from "../../src/domains/dispatch/intent-compatibility.js";
 import { declaredIntentPathProvenance, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
+import { resolvedDispatchPlanFromArgs } from "../../src/tools/dispatch-plan.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const CHECKS = new Map<string, DispatchIntentCheckBound>([["typecheck", { id: "typecheck", timeoutMs: 60_000 }]]);
 
@@ -267,6 +273,46 @@ describe("typed dispatch intent job-spec admission", () => {
 		ok(result.errors.some((error) => error.startsWith("intent_write_roots_contradiction:")));
 	});
 
+	it("gives the model-facing parser the same verdict and the same wording as the validator", () => {
+		// The parser used to compare the two write declarations as raw strings and
+		// answer with a bare reason code. That disagreed with the validator, which
+		// compares resolved boundaries, and it carried no fix for the caller.
+		const parse = (writeRoots: ReadonlyArray<string>) =>
+			dispatchRequestsFromArgs(
+				{ tasks: [{ task: "Regenerate the client" }], intent: { write_roots: ["src/generated"] }, writeRoots },
+				{
+					auto: { approvedAuthorities: [], authorityBasis: "operator-plan-approval" },
+					resolveIntent: (raw) => {
+						const normalized = normalizeDispatchIntent(raw, CHECKS);
+						if (!normalized.ok) return { ok: false, message: `${normalized.reason}: ${normalized.message}` };
+						return { ok: true, intent: normalized.intent, resolvedVerification: [] };
+					},
+				},
+			);
+
+		// Two spellings of one tree are one declaration, not a contradiction.
+		const equivalent = parse(["./src/generated"]);
+		strictEqual(equivalent.ok, true);
+
+		const contradictory = parse(["docs"]);
+		strictEqual(contradictory.ok, false);
+		ok(contradictory.ok === false);
+		match(contradictory.message, /intent_write_roots_contradiction: /u);
+		match(contradictory.message, /Neither the union nor the legacy field wins/u);
+
+		// The validator reaches the same two verdicts on the same two pairs.
+		const spec = (writeRoots: ReadonlyArray<string>) =>
+			validateJobSpec({
+				agentId: "coder",
+				task: "Regenerate the client",
+				cwd: process.cwd(),
+				writeRoots,
+				intent: intent({ writeRoots: ["src/generated"] }),
+			});
+		strictEqual(spec(["./src/generated"]).ok, true);
+		strictEqual(spec(["docs"]).ok, false);
+	});
+
 	it("never widens the effective write roots to resolve an ambiguity", () => {
 		const result = validateJobSpec({
 			agentId: "coder",
@@ -276,6 +322,61 @@ describe("typed dispatch intent job-spec admission", () => {
 		});
 		ok(result.ok === true);
 		deepStrictEqual(result.spec.writeRoots, [`${join(process.cwd(), "src/generated")}/`]);
+	});
+});
+
+describe("council admission narrowing", () => {
+	beforeEach(async () => {
+		await isolateDispatchState();
+	});
+	afterEach(() => {
+		restoreDispatchState();
+	});
+
+	it("seals read roots, not write roots, onto every council member the plan approves", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: "primary", runtime: "openai", defaultModel: "base-model" }];
+		settings.workers.default.target = "primary";
+		settings.workers.default.model = "base-model";
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			previewNode: () => ({ node: { id: "local", kind: "local" } }),
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
+			const prepared = tool.prepareAdmissionArguments?.({
+				mode: "council",
+				task: "Assess the dispatch scope contract",
+				members: [
+					{ label: "one", target: "primary" },
+					{ label: "two", target: "primary" },
+				],
+				intent: { read_roots: ["docs/"], write_roots: ["src/domains/dispatch/"] },
+			});
+			ok(prepared);
+			// A preparation failure would leave no resolved plan and silently pass
+			// every assertion below, so the refusal channel is checked first.
+			strictEqual(prepared.__clio_dispatch_plan_preparation_error, undefined);
+			const tasks = resolvedDispatchPlanFromArgs(prepared)?.tasks ?? [];
+			const members = tasks.filter((task) => task.role === "member");
+			strictEqual(members.length, 2);
+			for (const member of members) {
+				ok(member.intent, "a council member inherits the caller's declaration");
+				deepStrictEqual(member.intent.writeRoots, [], "a read-only member never carries a write scope");
+				deepStrictEqual(member.intent.readRoots, ["docs/", "src/domains/dispatch/"]);
+				// The same trees, so rule selection and worker context are unchanged.
+				deepStrictEqual(
+					member.intent.pathProvenance.map((entry) => entry.path),
+					["docs/", "src/domains/dispatch/"],
+				);
+			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 });
 

@@ -40,6 +40,7 @@ import {
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
 } from "../domains/dispatch/gate-role-prompts.js";
+import { narrowDispatchIntentToReadOnly } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
@@ -1885,6 +1886,13 @@ async function runCouncil(
 					executionRole: "researcher",
 					autonomy: "read-only",
 					toolProfile: "council-read-only",
+					// Admission already demoted the caller's declared write roots to
+					// read roots for every planned member, and the resolved-plan pin
+					// below carries that narrowed intent in. Repeat it here so the
+					// no-plan fallback path lands on the same request: a member spread
+					// from `base` would otherwise inherit a write scope its read-only
+					// autonomy cannot grant, and the two paths would disagree.
+					...(base.intent === undefined ? {} : { intent: narrowDispatchIntentToReadOnly(base.intent) }),
 					// A vote is a majority over the members' verdict fields, so a vote
 					// council asks each member for one and seals the ballot it asked
 					// for. The seated recipe is untouched: the ask is a task suffix and
