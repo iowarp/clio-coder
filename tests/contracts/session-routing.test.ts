@@ -63,6 +63,17 @@ function simulateSession(file: { current: ClioSettings }) {
 			mergeRoutingPatchIntoSettings(saved, patch);
 			file.current = saved;
 		},
+		/**
+		 * The scoped commit `/model` now goes through: "session" moves the live
+		 * route only, "global" is the historical write-through.
+		 */
+		updateRoutingAtScope(patch: RoutingPatch, scope: "session" | "global"): void {
+			if (scope === "global") {
+				this.updateRouting(patch);
+				return;
+			}
+			applyRoutingPatch(routing, patch);
+		},
 		applySettingsBlob(next: ClioSettings): void {
 			const patch = diffRouting(applySessionRouting(file.current, routing), next);
 			if (patch) applyRoutingPatch(routing, patch);
@@ -129,6 +140,24 @@ describe("contracts/session-routing", () => {
 		sessionB.updateRouting({ scope: ["target-b/model-b"] });
 		deepStrictEqual(sessionA.view().scope, ["target-a/model-a", "target-b/model-b"]);
 		deepStrictEqual(sessionB.view().scope, ["target-b/model-b"]);
+	});
+
+	// G3 from smoke pass 2: a mid-conversation `/model` rewrote the orchestrator
+	// role in settings.yaml with no prompt, so the next launch came up on a dead
+	// endpoint. Session scope has to be a route that dies with the session.
+	it("keeps a session-scoped model swap out of saved settings and applies a global one", () => {
+		const file = { current: settingsWithTargets() };
+		const session = simulateSession(file);
+
+		session.updateRoutingAtScope({ orchestrator: { target: "target-b", model: "model-b" } }, "session");
+		strictEqual(session.view().orchestrator.target, "target-b", "the session routes to the new target");
+		strictEqual(file.current.orchestrator.target, "target-a", "settings.yaml is untouched");
+		strictEqual(file.current.orchestrator.model, "model-a");
+
+		session.updateRoutingAtScope({ orchestrator: { target: "target-b", model: "model-b" } }, "global");
+		strictEqual(session.view().orchestrator.target, "target-b");
+		strictEqual(file.current.orchestrator.target, "target-b", "a global save is the next launch's default");
+		strictEqual(file.current.orchestrator.model, "model-b");
 	});
 
 	it("writes through only the patched fields so sessions cannot clobber each other's saved defaults", () => {

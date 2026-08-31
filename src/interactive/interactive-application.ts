@@ -209,12 +209,19 @@ export interface InteractiveDeps {
 	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
 	/** Live CLIO-CODER.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
-	/** Persist a thinking level set by `/thinking <level>` or `/model <pattern>:<level>`. */
-	onSetThinkingLevel?: (level: ThinkingLevel) => void;
+	/**
+	 * Persist a thinking level set by `/thinking <level>` or `/model <pattern>:<level>`.
+	 * Scope "session" leaves settings.yaml alone; omitted means the historical
+	 * write-through, which is what the Shift+Tab cycle and `/thinking` still want.
+	 */
+	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "global") => void;
 	/** Persist the next thinking level when Shift+Tab is pressed. */
 	onCycleThinking?: () => void;
-	/** Persist the orchestrator target selected in /model. */
-	onSelectModel?: (ref: { target: string; model: string }) => void;
+	/**
+	 * Apply the orchestrator target selected in /model at the scope the operator
+	 * chose. "session" routes this session only and never touches settings.yaml.
+	 */
+	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "global") => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
 	writeSettings?: (next: ClioSettings) => void;
 	/**
@@ -744,6 +751,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openView: (filter) => openViewOverlayState(filter),
 		...(deps.panes ? { panes: deps.panes } : {}),
 		openModel: () => openModelOverlayState(),
+		openModelScope: (ref) => openModelScopeState(ref),
 		openSettings: (section, rowId) => openSettingsOverlayState(section, rowId),
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
@@ -851,6 +859,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openModelOverlayState,
+		openModelScopeState,
 		openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

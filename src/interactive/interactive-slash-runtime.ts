@@ -37,6 +37,7 @@ import { runOperatorRecall } from "./context-recall-command.js";
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { OracleDigestSources } from "./oracle.js";
+import type { PendingModelScope } from "./overlays/model-scope.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import {
 	type ContextClearCommandOptions,
@@ -90,8 +91,8 @@ export interface InteractiveSlashRuntimeDeps {
 	 * making a value permanent stays the Settings overlay's explicit choice.
 	 */
 	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
-	onSelectModel?: (ref: { target: string; model: string }) => void;
-	onSetThinkingLevel?: (level: ThinkingLevel) => void;
+	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "global") => void;
+	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "global") => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
@@ -139,6 +140,11 @@ export interface InteractiveSlashRuntimeDeps {
 	/** Pane-layer operations behind `/panes`. Absent when the mux resolved to `none`. */
 	panes?: PanesOperations;
 	openModel: () => void;
+	/**
+	 * Ask where a resolved `/model <pattern>` swap lands before anything applies.
+	 * Absent on a host with no overlay layer, where the swap stays session-scoped.
+	 */
+	openModelScope?: (ref: PendingModelScope) => void;
 	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
@@ -490,9 +496,20 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openModel: deps.openModel,
 		providers: deps.providers,
 		applyModelRef: (ref) => {
-			deps.onSelectModel?.({ target: ref.target, model: ref.model });
-			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
+			// A mid-conversation swap used to rewrite the orchestrator role in
+			// settings.yaml with no prompt, so the next launch could come up on a
+			// dead endpoint (smoke pass 2, G3). The scope dialog owns the commit
+			// now, and it applies nothing until the operator answers.
+			if (deps.openModelScope) {
+				deps.openModelScope(ref);
+				return "pending";
+			}
+			// No overlay layer to ask with: session scope is the answer that cannot
+			// outlive the session that chose it.
+			deps.onSelectModel?.({ target: ref.target, model: ref.model }, "session");
+			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, "session");
 			deps.requestRender();
+			return "applied";
 		},
 		openSettings: deps.openSettings,
 		openResume: deps.openResume,

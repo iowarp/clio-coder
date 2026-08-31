@@ -98,6 +98,37 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	// G3 from smoke pass 2: `/model <pattern>` applied the swap and rewrote the
+	// orchestrator role in settings.yaml with no prompt.
+	it("hands a resolved /model swap to the scope dialog instead of applying it", () => {
+		const harness = createHarness();
+		const scoped: Array<{ target: string; model: string }> = [];
+		const applied: Array<{ target: string; model: string; scope: string }> = [];
+		const runtime = createInteractiveSlashRuntime({
+			...harness.deps,
+			onSelectModel: (ref, scope) => applied.push({ ...ref, scope }),
+			openModelScope: (ref) => scoped.push({ target: ref.target, model: ref.model }),
+		});
+
+		strictEqual(runtime.context.applyModelRef({ target: "local", model: "alpha" }), "pending");
+		deepStrictEqual(scoped, [{ target: "local", model: "alpha" }]);
+		deepStrictEqual(applied, [], "nothing is applied until the operator picks a scope");
+	});
+
+	// A host with no overlay layer (headless drivers, tests) still has to answer
+	// the question, and the answer that cannot outlive the session is session.
+	it("applies a /model swap at session scope when there is no dialog to ask with", () => {
+		const harness = createHarness();
+		const applied: Array<{ target: string; model: string; scope: string }> = [];
+		const runtime = createInteractiveSlashRuntime({
+			...harness.deps,
+			onSelectModel: (ref, scope) => applied.push({ ...ref, scope }),
+		});
+
+		strictEqual(runtime.context.applyModelRef({ target: "local", model: "alpha" }), "applied");
+		deepStrictEqual(applied, [{ target: "local", model: "alpha", scope: "session" }]);
+	});
+
 	it("settles a pane mutation before admitting the following inventory read", async () => {
 		const harness = createHarness();
 		let finishOpen = (): void => {

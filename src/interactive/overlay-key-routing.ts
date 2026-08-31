@@ -15,6 +15,7 @@ export type OverlayState =
 	| "memory"
 	| "view"
 	| "model"
+	| "model-scope"
 	| "settings"
 	| "resume"
 	| "tree"
@@ -287,6 +288,9 @@ export function routeOverlayKey(
 	if (overlayState === "memory") return false;
 	if (overlayState === "view") return false;
 	if (overlayState === "model") return routeModelOverlayKey(data, deps);
+	// The scope dialog owns Esc itself: cancelling it must leave the model where
+	// it was, and a router-level close cannot say that to the caller waiting on it.
+	if (overlayState === "model-scope") return false;
 	// Settings owns Esc itself: its stack is sections → rows → detail, and a
 	// router-level close made every Esc leave the overlay from wherever the
 	// operator was, so a cancelled picker and a finished visit looked the same.

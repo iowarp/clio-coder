@@ -8,16 +8,19 @@ import {
 	type OverlayLifecycleApplicationDeps,
 	type OverlayLifecycleRuntimeDeps,
 } from "../../src/interactive/overlay-lifecycle.js";
+import type { OpenModelScopeOverlayDeps } from "../../src/interactive/overlays/model-scope.js";
 import type { OpenModelOverlayDeps } from "../../src/interactive/overlays/model-selector.js";
 import type { OpenSettingsOverlayDeps, SettingsOverlayHandle } from "../../src/interactive/overlays/settings.js";
 
 type SelectorCharacterizationDeps = OverlayLifecycleRuntimeDeps & {
 	openModelOverlay?: (tui: TUI, deps: OpenModelOverlayDeps) => OverlayHandle;
+	openModelScopeOverlay?: (tui: TUI, deps: OpenModelScopeOverlayDeps) => OverlayHandle;
 	openSettingsOverlay?: (tui: TUI, deps: OpenSettingsOverlayDeps) => SettingsOverlayHandle;
 };
 
 interface SelectorFactories {
 	model?: (deps: OpenModelOverlayDeps) => OverlayHandle;
+	scope?: (deps: OpenModelScopeOverlayDeps) => OverlayHandle;
 	settings?: (deps: OpenSettingsOverlayDeps) => SettingsOverlayHandle;
 }
 
@@ -40,7 +43,8 @@ function makeLifecycle(options: {
 		bus: { on: () => () => {}, emit: () => {} },
 		...(settings ? { getSettings: () => settings } : {}),
 		writeSettings: (next: ClioSettings) => events.push(`write:${JSON.stringify(next.modelSelector?.favorites ?? [])}`),
-		onSelectModel: (ref: { target: string; model: string }) => events.push(`select:${ref.target}/${ref.model}`),
+		onSelectModel: (ref: { target: string; model: string }, scope: string) =>
+			events.push(`select:${ref.target}/${ref.model}:${scope}`),
 		getFleetNodes: () => [],
 	} as unknown as OverlayLifecycleApplicationDeps;
 	const runtime = {
@@ -65,6 +69,7 @@ function makeLifecycle(options: {
 		editor: { getText: () => "", setText: () => {} },
 		getSlashContext: () => ({}),
 		openModelOverlay: (_tui: TUI, deps: OpenModelOverlayDeps) => factories.model?.(deps) ?? overlayHandle(),
+		openModelScopeOverlay: (_tui: TUI, deps: OpenModelScopeOverlayDeps) => factories.scope?.(deps) ?? overlayHandle(),
 		openSettingsOverlay: (_tui: TUI, deps: OpenSettingsOverlayDeps) =>
 			factories.settings?.(deps) ?? ({ ...overlayHandle(), refreshRows: () => {} } as unknown as SettingsOverlayHandle),
 	} as unknown as SelectorCharacterizationDeps;
@@ -117,10 +122,14 @@ describe("contracts/interactive model selector overlays", () => {
 		strictEqual(typeof settingsDeps?.connectTarget, "function");
 	});
 
-	it("delegates model selection and favorite persistence before refreshing the footer", () => {
+	// G3 from smoke pass 2: a pick used to reach settings.yaml with no prompt.
+	// The picker resolves what to run and the scope dialog resolves where it
+	// lands, so nothing is applied between the two.
+	it("routes a picked model through the scope dialog and applies at the chosen scope", () => {
 		const events: string[] = [];
 		const settings = { modelSelector: { recentLimit: 12, favorites: [] } } as unknown as ClioSettings;
 		let modelDeps: OpenModelOverlayDeps | undefined;
+		let scopeDeps: OpenModelScopeOverlayDeps | undefined;
 		const lifecycle = makeLifecycle({
 			events,
 			settings,
@@ -129,16 +138,66 @@ describe("contracts/interactive model selector overlays", () => {
 					modelDeps = deps;
 					return overlayHandle();
 				},
+				scope: (deps) => {
+					scopeDeps = deps;
+					return overlayHandle();
+				},
 			},
 		});
 
 		lifecycle.openModelOverlayState();
 		modelDeps?.onSelect({ target: "local", model: "alpha" });
+		deepStrictEqual(scopeDeps?.ref, { target: "local", model: "alpha" }, "the swap reaches the dialog intact");
+		deepStrictEqual(
+			events.filter((event) => event.startsWith("select:")),
+			[],
+			"nothing is applied while the operator is still choosing",
+		);
+
+		scopeDeps?.onChoose("session");
 		modelDeps?.onToggleFavorite?.({ target: "local", model: "alpha" }, true);
 
 		deepStrictEqual(
 			events.filter((event) => event === "footer" || event.startsWith("select:") || event.startsWith("write:")),
-			["select:local/alpha", "footer", 'write:["local/alpha"]', "footer"],
+			["select:local/alpha:session", "footer", 'write:["local/alpha"]', "footer"],
+		);
+	});
+
+	it("applies globally when the operator says so, and applies nothing when they cancel", () => {
+		const events: string[] = [];
+		const settings = { modelSelector: { recentLimit: 12, favorites: [] } } as unknown as ClioSettings;
+		let modelDeps: OpenModelOverlayDeps | undefined;
+		let scopeDeps: OpenModelScopeOverlayDeps | undefined;
+		const lifecycle = makeLifecycle({
+			events,
+			settings,
+			factories: {
+				model: (deps) => {
+					modelDeps = deps;
+					return overlayHandle();
+				},
+				scope: (deps) => {
+					scopeDeps = deps;
+					return overlayHandle();
+				},
+			},
+		});
+
+		lifecycle.openModelOverlayState();
+		modelDeps?.onSelect({ target: "local", model: "alpha" });
+		scopeDeps?.onChoose("global");
+		deepStrictEqual(
+			events.filter((event) => event.startsWith("select:")),
+			["select:local/alpha:global"],
+		);
+
+		lifecycle.openModelOverlayState();
+		modelDeps?.onSelect({ target: "local", model: "beta" });
+		scopeDeps?.onCancel();
+		deepStrictEqual(
+			events.filter((event) => event.startsWith("select:")),
+			["select:local/alpha:global"],
+			"cancelling leaves the model where it was",
 		);
 	});
 
