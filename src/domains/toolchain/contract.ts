@@ -1,5 +1,6 @@
 import type { DomainContract } from "../../core/domain-loader.js";
 import type { ToolInstallOptions, ToolInstallResult } from "./install.js";
+import type { ToolRemoveOptions, ToolRemoveResult } from "./remove.js";
 import type { PinnedTool, ToolResolution, ToolStatus } from "./types.js";
 
 export interface ToolchainContract extends DomainContract {
@@ -18,4 +19,10 @@ export interface ToolchainContract extends DomainContract {
 	 * command; nothing on a startup path may reach it.
 	 */
 	install(id: string, options?: ToolInstallOptions): Promise<ToolInstallResult>;
+	/**
+	 * Delete every vendored version of one tool. Nothing outside
+	 * `<data>/tools/<id>` is reachable, and a tool with nothing installed is a
+	 * successful no-op rather than an error.
+	 */
+	remove(id: string, options?: ToolRemoveOptions): ToolRemoveResult;
 }

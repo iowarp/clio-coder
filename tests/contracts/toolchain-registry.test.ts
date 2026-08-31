@@ -30,14 +30,20 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { deflateRawSync, gzipSync } from "node:zlib";
 import {
 	compareVersions,
+	describeFloorRejection,
+	describeResolution,
+	installedToolVersions,
 	installPinnedTool,
 	PINNED_TOOLS,
 	type PinnedTool,
 	parseVersion,
+	pruneSupersededVersions,
+	removeTool,
 	resetVersionProbeCache,
 	resolveEntryBinary,
 	resolveToolBinary,
 	satisfiesMinimum,
+	type ToolStatus,
 	toolVersionDir,
 } from "../../src/domains/toolchain/index.js";
 import { resolveBinary } from "../../src/tools/executables.js";
@@ -351,6 +357,213 @@ describe("toolchain install", () => {
 	});
 });
 
+/**
+ * A pin bump used to leave the version it superseded on disk forever: nothing
+ * resolved it, nothing deleted it, and only an operator who went looking under
+ * the data root would ever know. Installing now sweeps, so a tool holds the
+ * pinned version and nothing else.
+ */
+describe("toolchain install pruning", () => {
+	let root: string;
+
+	before(() => {
+		root = mkdtempSync(join(tmpdir(), "clio-toolchain-prune-"));
+	});
+	after(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("keeps only the pinned version when a bump lands beside an older one", async () => {
+		const old = Buffer.from("#!/bin/sh\necho old\n");
+		const fresh = Buffer.from("#!/bin/sh\necho fresh\n");
+		const first = await installPinnedTool(versionedEntry("bumped", "1.0.0", old), {
+			root,
+			platform: "linux-x64",
+			fetch: async () => old,
+		});
+		ok(first.ok, first.message);
+		deepStrictEqual(first.pruned, [], "the first install of a tool supersedes nothing");
+
+		const second = await installPinnedTool(versionedEntry("bumped", "2.0.0", fresh), {
+			root,
+			platform: "linux-x64",
+			fetch: async () => fresh,
+		});
+		ok(second.ok, second.message);
+		deepStrictEqual(second.pruned, ["1.0.0"], "the superseded version is named in the result");
+		match(second.message, /pruned 1\.0\.0/);
+		deepStrictEqual(installedToolVersions("bumped", { root }), ["2.0.0"]);
+		strictEqual(existsSync(join(root, "bumped", "1.0.0")), false, "the old version directory is gone");
+		strictEqual(readFileSync(join(root, "bumped", "2.0.0", "bumped"), "utf8"), fresh.toString("utf8"));
+	});
+
+	it("prunes leftovers even when the pinned version was already installed", async () => {
+		const payload = Buffer.from("#!/bin/sh\necho already\n");
+		const entry = versionedEntry("leftover", "3.0.0", payload);
+		const first = await installPinnedTool(entry, { root, platform: "linux-x64", fetch: async () => payload });
+		ok(first.ok, first.message);
+		// A machine that bumped pins before pruning existed looks exactly like this.
+		mkdirSync(join(root, "leftover", "2.9.0"), { recursive: true });
+		writeFileSync(join(root, "leftover", "2.9.0", "leftover"), payload);
+
+		let fetches = 0;
+		const second = await installPinnedTool(entry, {
+			root,
+			platform: "linux-x64",
+			fetch: async () => {
+				fetches += 1;
+				return payload;
+			},
+		});
+		ok(second.ok, second.message);
+		strictEqual(second.skipped, true, "the pinned version was already there");
+		strictEqual(fetches, 0, "a repair costs no network");
+		deepStrictEqual(second.pruned, ["2.9.0"]);
+		deepStrictEqual(installedToolVersions("leftover", { root }), ["3.0.0"]);
+	});
+
+	it("leaves a concurrent installer's staging directory alone", async () => {
+		const payload = Buffer.from("#!/bin/sh\necho staged\n");
+		const entry = versionedEntry("staged", "1.0.0", payload);
+		const first = await installPinnedTool(entry, { root, platform: "linux-x64", fetch: async () => payload });
+		ok(first.ok, first.message);
+		const staging = join(root, "staged", ".9.9.9.incomplete-4242-abc");
+		mkdirSync(staging, { recursive: true });
+
+		const outcome = pruneSupersededVersions("staged", "1.0.0", { root });
+		deepStrictEqual(outcome.removed, [], "a dot-prefixed staging directory is not a version");
+		ok(existsSync(staging), "the directory another installer is filling survives the prune");
+		deepStrictEqual(installedToolVersions("staged", { root }), ["1.0.0"]);
+	});
+});
+
+/**
+ * `tools remove` is the cleanup verb the domain shipped without. Everything it
+ * unlinks lives under `<root>/<id>`, which Clio created by downloading it, so
+ * the worst outcome of a mistake is a re-download of checksum-pinned bytes.
+ */
+describe("toolchain remove", () => {
+	let root: string;
+
+	before(() => {
+		root = mkdtempSync(join(tmpdir(), "clio-toolchain-remove-"));
+	});
+	after(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("deletes every vendored version of a known tool, and the tool directory with them", () => {
+		vendorVersion(root, "croc", "11.3.6", "croc");
+		vendorVersion(root, "croc", "10.0.1", "croc");
+		vendorVersion(root, "yazi", "26.8.15", "yazi");
+
+		const result = removeTool("croc", { root });
+		ok(result.ok, result.message);
+		deepStrictEqual(result.removed, ["10.0.1", "11.3.6"]);
+		match(result.message, /removed croc 10\.0\.1, 11\.3\.6/);
+		strictEqual(existsSync(join(root, "croc")), false, "the tool directory goes with its last version");
+		deepStrictEqual(installedToolVersions("yazi", { root }), ["26.8.15"], "another tool is untouched");
+	});
+
+	it("refuses an id the registry does not know instead of deleting a path built from it", () => {
+		mkdirSync(join(root, "not-a-tool"), { recursive: true });
+		const result = removeTool("not-a-tool", { root });
+		strictEqual(result.ok, false);
+		match(result.message, /unknown tool: not-a-tool/);
+		deepStrictEqual(result.removed, []);
+		ok(existsSync(join(root, "not-a-tool")), "an unknown id unlinks nothing");
+	});
+
+	it("is a successful no-op with a clear message when nothing is installed", () => {
+		const result = removeTool("herdr", { root });
+		ok(result.ok, "the state the operator asked for already holds");
+		deepStrictEqual(result.removed, []);
+		match(result.message, /herdr is not installed under .*herdr; nothing to remove/);
+	});
+
+	it("keeps a staging directory it cannot claim, and still removes every version", () => {
+		vendorVersion(root, "herdr", "0.8.2", "herdr");
+		const staging = join(root, "herdr", ".0.9.0.incomplete-77-zz");
+		mkdirSync(staging, { recursive: true });
+
+		const result = removeTool("herdr", { root });
+		ok(result.ok, result.message);
+		deepStrictEqual(result.removed, ["0.8.2"]);
+		ok(existsSync(staging), "a live installer's staging directory is not swept up");
+		deepStrictEqual(installedToolVersions("herdr", { root }), []);
+		rmSync(join(root, "herdr"), { recursive: true, force: true });
+	});
+});
+
+/**
+ * The floors stay conservative, so the rejection has to be legible: every
+ * render of one names the binary found, the version it reported, and the floor
+ * it missed, and offers the install command exactly where installing would
+ * change something.
+ */
+describe("toolchain floor honesty", () => {
+	it("names the path, the version found, and the floor of a rejected PATH copy", () => {
+		const status = statusFor({ candidate: { path: "/usr/bin/herdr", version: "0.7.5", satisfiesMinimum: false } });
+		strictEqual(describeFloorRejection(status), "PATH copy /usr/bin/herdr is 0.7.5, below the 0.8.2 floor");
+	});
+
+	it("never reports a rejected PATH copy as an absent binary, and offers the remedy", () => {
+		const detail = describeResolution(
+			statusFor({ candidate: { path: "/usr/bin/herdr", version: "0.7.5", satisfiesMinimum: false } }),
+		);
+		match(detail, /PATH copy \/usr\/bin\/herdr is 0\.7\.5, below the 0\.8\.2 floor/);
+		match(detail, /nothing is vendored/);
+		match(detail, /clio-coder tools install herdr/);
+		strictEqual(detail.startsWith("not found"), false, "the copy was found and rejected, not missing");
+	});
+
+	it("repeats the rejection beside a vendored copy but offers no remedy that changes nothing", () => {
+		const detail = describeResolution(
+			statusFor({
+				source: "vendored",
+				vendoredPath: "/data/tools/herdr/0.8.2/herdr",
+				candidate: { path: "/usr/bin/herdr", version: "0.7.5", satisfiesMinimum: false },
+			}),
+		);
+		match(detail, /vendored \/data\/tools\/herdr\/0\.8\.2\/herdr \(0\.8\.2\)/);
+		match(detail, /below the 0\.8\.2 floor, so Clio runs the vendored copy/);
+		strictEqual(detail.includes("tools install"), false, "installing again would change nothing");
+	});
+
+	it("says the version was unreadable rather than rendering an empty one", () => {
+		const status = statusFor({ candidate: { path: "/usr/bin/herdr", version: null, satisfiesMinimum: false } });
+		strictEqual(
+			describeFloorRejection(status),
+			"PATH copy /usr/bin/herdr is an unreadable version, below the 0.8.2 floor",
+		);
+		match(describeResolution(status), /an unreadable version/);
+	});
+
+	it("keeps the rejection on a platform with no pinned asset and names no dead-end command", () => {
+		const detail = describeResolution(
+			statusFor({
+				supported: false,
+				platform: null,
+				candidate: { path: "/usr/bin/herdr", version: "0.7.5", satisfiesMinimum: false },
+			}),
+		);
+		match(detail, /no pinned asset for this platform/);
+		match(detail, /below the 0\.8\.2 floor/);
+		strictEqual(detail.includes("tools install"), false, "there is no asset to install here");
+	});
+
+	it("says nothing about a floor when the PATH copy cleared it", () => {
+		const status = statusFor({
+			source: "path",
+			binaryPath: "/usr/bin/herdr",
+			version: "0.9.0",
+			candidate: { path: "/usr/bin/herdr", version: "0.9.0", satisfiesMinimum: true },
+		});
+		strictEqual(describeFloorRejection(status), null);
+		strictEqual(describeResolution(status), "PATH /usr/bin/herdr (0.9.0, pin 0.8.2)");
+	});
+});
+
 describe("toolchain resolution ladder", () => {
 	let scratch: string;
 	let pathDir: string;
@@ -470,6 +683,80 @@ function fakeEntry(overrides: { sha256: string }): PinnedTool {
 
 function hash(bytes: Buffer): string {
 	return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** A raw-asset fixture whose id and version the caller picks, for pin bumps. */
+function versionedEntry(id: string, version: string, payload: Buffer): PinnedTool {
+	return {
+		id,
+		version,
+		summary: "fixture",
+		homepage: "https://example.invalid",
+		license: "MIT",
+		binaries: [id],
+		primaryBinary: id,
+		minimumVersion: version,
+		versionArgs: ["--version"],
+		downloads: {
+			"linux-x64": {
+				url: `https://example.invalid/${id}-${version}`,
+				sha256: hash(payload),
+				archive: "raw",
+				binaryMembers: { [id]: "" },
+				documentMembers: [],
+			},
+		},
+		documents: [],
+	};
+}
+
+/** A vendored version directory placed by hand, the way an install leaves one. */
+function vendorVersion(root: string, id: string, version: string, binary: string): void {
+	const dir = join(root, id, version);
+	mkdirSync(dir, { recursive: true });
+	writeFakeBinary(join(dir, binary), `${binary} ${version}`);
+	writeFileSync(join(dir, "LICENSE"), "fixture license\n");
+}
+
+/**
+ * A `ToolStatus` built by hand for the renderers.
+ *
+ * The floor sentences depend only on the status shape, so pinning them here
+ * costs no filesystem and no PATH stub, and covers combinations (an unsupported
+ * platform carrying a rejected PATH copy) that are awkward to stage on disk.
+ */
+function statusFor(overrides: {
+	source?: "path" | "vendored" | "none";
+	binaryPath?: string | null;
+	version?: string | null;
+	vendoredPath?: string | null;
+	supported?: boolean;
+	platform?: ToolStatus["platform"];
+	candidate: { path: string; version: string | null; satisfiesMinimum: boolean } | null;
+}): ToolStatus {
+	const entry: PinnedTool = {
+		...versionedEntry("herdr", "0.8.2", Buffer.from("x")),
+		license: "Apache-2.0",
+	};
+	const source = overrides.source ?? "none";
+	const vendoredPath = overrides.vendoredPath ?? null;
+	return {
+		id: entry.id,
+		version: entry.version,
+		license: entry.license,
+		platform: overrides.platform === undefined ? "linux-x64" : overrides.platform,
+		supported: overrides.supported ?? true,
+		installed: vendoredPath !== null,
+		installDir: `/data/tools/${entry.id}/${entry.version}`,
+		resolution: {
+			source,
+			binaryPath: overrides.binaryPath ?? vendoredPath,
+			version: overrides.version ?? (source === "vendored" ? entry.version : null),
+			entry,
+			pathCandidate: overrides.candidate,
+			vendoredPath,
+		},
+	};
 }
 
 /** A shell stub that answers `--version` the way the real binary would. */

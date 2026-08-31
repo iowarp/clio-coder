@@ -14,7 +14,17 @@ export { installPinnedTool, installTool } from "./install.js";
 export { ToolchainManifest } from "./manifest.js";
 export { toolchainRoot, toolVersionDir, vendoredBinaryPath } from "./paths.js";
 export { currentToolPlatform, findPinnedTool, findPinnedToolByBinary, PINNED_TOOLS } from "./registry.js";
-export { describeResolution, resolveEntryBinary, resolveToolBinary, toolStatus, toolStatuses } from "./resolve.js";
+export type { ToolRemoveOptions, ToolRemoveResult } from "./remove.js";
+export { installedToolVersions, pruneSupersededVersions, removeTool } from "./remove.js";
+export {
+	describeFloorRejection,
+	describeResolution,
+	installRemedy,
+	resolveEntryBinary,
+	resolveToolBinary,
+	toolStatus,
+	toolStatuses,
+} from "./resolve.js";
 export type {
 	PinnedTool,
 	PinnedToolDocument,
