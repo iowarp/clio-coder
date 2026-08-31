@@ -9,12 +9,13 @@
  * zero pane churn, which is what makes the navigation feel like part of the
  * board rather than like driving a terminal multiplexer.
  *
- * Lifecycle is deliberately lazy in both directions. The pane opens on the
- * first watch (operator Enter, `/panes show`, or the panes tool), is adopted
- * back from a previous session when one is still on screen in this workspace,
- * and is never closed by navigation: leaving the workers view parks it on the
- * last selection, and it goes away when the operator quits the viewer (`q`),
- * closes the pane, or runs `/panes close watch`.
+ * Pane creation is deliberately lazy, but reclamation is eager. A surviving
+ * pane is adopted as soon as the controller starts so the relaunched session's
+ * inventory owns it before the next watch command. A new pane still opens only
+ * on the first watch (operator Enter, `/panes show`, or the panes tool), and is
+ * never closed by navigation: leaving the workers view parks it on the last
+ * selection, and it goes away when the operator quits the viewer (`q`), closes
+ * the pane, or runs `/panes close watch`.
  */
 
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -68,9 +69,31 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 	const write = deps.writeFile ?? atomicWrite;
 
 	let paneId: string | null = null;
+	let disposed = false;
+	let adoptionInFlight: Promise<boolean> | null = null;
 	const unsubscribe = deps.mux.onPaneGone((record) => {
 		if (record.ref.paneId === paneId) paneId = null;
 	});
+	const adoptExistingPane = (): Promise<boolean> => {
+		if (disposed || paneId !== null) return Promise.resolve(true);
+		if (adoptionInFlight !== null) return adoptionInFlight;
+		const attempt = Promise.resolve()
+			.then(() => deps.mux.adoptPane({ purpose: "watch", label: "watch" }))
+			.then((adopted) => {
+				if (!disposed && paneId === null && adopted !== null) paneId = adopted.paneId;
+				return true;
+			})
+			.catch(() => {
+				// Startup reclamation is best effort. An explicit watch retries the
+				// scan before it opens a replacement pane.
+				return false;
+			})
+			.finally(() => {
+				if (adoptionInFlight === attempt) adoptionInFlight = null;
+			});
+		adoptionInFlight = attempt;
+		return attempt;
+	};
 
 	const writeSelection = (runId: string): boolean => {
 		try {
@@ -81,17 +104,19 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		}
 	};
 
+	// Reclaim durable ownership for inventory and navigation immediately. The
+	// scan remains best effort and never opens a replacement pane on its own.
+	void adoptExistingPane();
+
 	return {
 		async watch(runId: string): Promise<PanesWatchResult> {
 			if (!writeSelection(runId)) {
 				return { status: "unavailable", reason: `cannot write the watch selection at ${selectionPath}` };
 			}
 			if (paneId !== null) return { status: "watching", runId, paneId, opened: false };
-			const adopted = await deps.mux.adoptPane({ purpose: "watch", label: "watch" });
-			if (adopted !== null) {
-				paneId = adopted.paneId;
-				return { status: "watching", runId, paneId, opened: false };
-			}
+			const scanned = await adoptExistingPane();
+			if (!scanned) await adoptExistingPane();
+			if (paneId !== null) return { status: "watching", runId, paneId, opened: false };
 			const opened = await deps.mux.openUtilityPane({
 				argv: command(selectionPath, dirs),
 				cwd: deps.getCwd(),
@@ -120,6 +145,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 
 		dispose(): void {
 			// The pane parks; only the subscription goes.
+			disposed = true;
 			unsubscribe();
 		},
 	};
