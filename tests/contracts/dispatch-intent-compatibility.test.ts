@@ -6,6 +6,8 @@ import { describe, it } from "node:test";
 import {
 	type DispatchIntent,
 	type DispatchIntentCheckBound,
+	declaredScopeIntent,
+	isDispatchIntent,
 	narrowDispatchIntentToReadOnly,
 	normalizeDispatchIntent,
 } from "../../src/domains/dispatch/intent.js";
@@ -21,7 +23,7 @@ import {
 	dispatchIntentScopeWidening,
 	isSupportedDispatchIntentVersion,
 } from "../../src/domains/dispatch/intent-compatibility.js";
-import { declaredIntentPathProvenance } from "../../src/domains/dispatch/path-scope.js";
+import { declaredIntentPathProvenance, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 
 const CHECKS = new Map<string, DispatchIntentCheckBound>([["typecheck", { id: "typecheck", timeoutMs: 60_000 }]]);
@@ -182,6 +184,45 @@ describe("typed dispatch intent compatibility", () => {
 		} finally {
 			rmSync(elsewhere, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("non-model producers declaring typed scope", () => {
+	it("normalizes producer-declared paths exactly as a model-facing declaration is normalized", () => {
+		const built = declaredScopeIntent({ relevantPaths: ["docs/b.md", " src/a.ts ", "src/a.ts", "tests/"] });
+		ok(built.ok);
+		deepStrictEqual(built.intent.relevantPaths, ["docs/b.md", "src/a.ts", "tests/"]);
+		deepStrictEqual(built.intent.writeRoots, []);
+		deepStrictEqual(built.intent.expectedOutputs, []);
+		deepStrictEqual(built.intent.verification, []);
+		strictEqual(isDispatchIntent(built.intent), true);
+		deepStrictEqual(classifyDispatchIntentCompatibility({ intent: built.intent }), []);
+	});
+
+	it("refuses producer paths that escape the repository instead of accepting them", () => {
+		const escaping = declaredScopeIntent({ relevantPaths: ["../outside"] });
+		ok(!escaping.ok);
+		strictEqual(escaping.reason, "intent_path_escapes_root");
+		const absolute = declaredScopeIntent({ writeRoots: ["/etc"] });
+		ok(!absolute.ok);
+		strictEqual(absolute.reason, "intent_path_absolute");
+	});
+
+	it("resolves a fleet step's declared scope as declared rather than inferred", () => {
+		const built = declaredScopeIntent({ relevantPaths: ["src/generated/"] });
+		ok(built.ok);
+		const scope = resolveDispatchPathScope({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "Regenerate the client described in docs/plan.md.",
+			intent: built.intent,
+		});
+		strictEqual(scope.source, "declared");
+		deepStrictEqual(scope.workingContextPaths, ["src/generated/"]);
+		// The contract's own boundary stays with the fleet enforcer: declared
+		// scope never becomes a second per-tool write grant.
+		deepStrictEqual(scope.writeBoundaries, []);
+		deepStrictEqual(scope.inferredOnlyPaths, ["docs/plan.md"]);
 	});
 });
 

@@ -142,6 +142,47 @@ function normalizePathList(
 	return [...new Set(normalized)].sort(compareCodepoints);
 }
 
+/**
+ * Build typed intent from paths a non-model producer already holds.
+ *
+ * Fleet contracts, CLI entry points, and extensions declare repository-relative
+ * scope in their own artifacts long before a dispatch request exists. Without
+ * this they hand the request nothing, and the scope resolver falls back to
+ * reading path-like tokens out of the rendered prompt, which is the exact
+ * ambiguity typed intent removes. The paths go through the same normalization,
+ * caps, and provenance construction as a model-facing declaration, so a
+ * producer cannot mint an intent shape the dispatch tool could not.
+ *
+ * Verification and expected outputs are deliberately not accepted here.
+ * A declared check id has to be resolved against the project's verification
+ * catalog before it means anything, and that resolution belongs to the
+ * admission controller that owns the catalog, not to a scope builder.
+ */
+export function declaredScopeIntent(input: {
+	readRoots?: ReadonlyArray<string>;
+	writeRoots?: ReadonlyArray<string>;
+	relevantPaths?: ReadonlyArray<string>;
+}): DispatchIntentNormalizationResult {
+	const readRoots = normalizePathList(input.readRoots, "intent.read_roots");
+	if (!Array.isArray(readRoots)) return readRoots;
+	const writeRoots = normalizePathList(input.writeRoots, "intent.write_roots");
+	if (!Array.isArray(writeRoots)) return writeRoots;
+	const relevantPaths = normalizePathList(input.relevantPaths, "intent.relevant_paths");
+	if (!Array.isArray(relevantPaths)) return relevantPaths;
+	return {
+		ok: true,
+		intent: {
+			version: 2,
+			readRoots,
+			writeRoots,
+			relevantPaths,
+			pathProvenance: declaredIntentPathProvenance({ readRoots, writeRoots, relevantPaths }),
+			expectedOutputs: [],
+			verification: [],
+		},
+	};
+}
+
 export function isDispatchIntent(value: unknown): value is DispatchIntent {
 	if (!isRecord(value) || value.version !== 2) return false;
 	for (const field of ["readRoots", "writeRoots", "relevantPaths", "expectedOutputs"] as const) {
