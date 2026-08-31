@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { scaleWatchdog } from "../harness/load.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
@@ -205,19 +206,25 @@ describe("smoke/SIGINT kills running tool children", { concurrency: false, skip:
 		child.stderr?.on("data", (chunk: string) => {
 			stderr += chunk;
 		});
-		const exited = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
+		// The signal is captured alongside the code because the interesting
+		// failure is `code === null`, which means the CLI died to a signal
+		// instead of running its coordinated shutdown. Without the signal name
+		// that failure says only "null !== 130" and identifies nothing.
+		const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+			child.on("close", (code, signal) => resolve({ code, signal })),
+		);
 
-		const toolStarted = await waitFor(() => pgrepMarker().length > 0, 30_000);
+		const toolStarted = await waitFor(() => pgrepMarker().length > 0, scaleWatchdog(30_000));
 		ok(toolStarted, `bash tool child never appeared; stderr=${stderr}`);
 
 		child.kill("SIGINT");
-		const code = await exited;
-		strictEqual(code, 130, `expected coordinated SIGINT exit; stderr=${stderr}`);
+		const { code, signal } = await exited;
+		strictEqual(code, 130, `expected coordinated SIGINT exit; signal=${signal ?? "none"}; stderr=${stderr}`);
 
 		// The tool's detached process group must not survive the CLI: the drain
 		// hook disposes the chat loop, the agent abort reaches the tool's
 		// AbortSignal, and bash-exec signals the group.
-		const cleaned = await waitFor(() => pgrepMarker().length === 0, 5_000);
+		const cleaned = await waitFor(() => pgrepMarker().length === 0, scaleWatchdog(5_000));
 		ok(cleaned, `tool child survived SIGINT: pids=${pgrepMarker().join(",")}; stderr=${stderr}`);
 
 		// The costly failure path is the one operators audit, so the interrupted
