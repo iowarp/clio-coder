@@ -100,7 +100,9 @@ function createHarness() {
 describe("contracts/interactive slash runtime", () => {
 	it("settles a pane mutation before admitting the following inventory read", async () => {
 		const harness = createHarness();
-		let finishOpen: (() => void) | null = null;
+		let finishOpen = (): void => {
+			throw new Error("open resolver was not captured");
+		};
 		const panes: PanesStatus["panes"] = [];
 		const status = (): PanesStatus => ({
 			mode: "guest",
@@ -155,7 +157,6 @@ describe("contracts/interactive slash runtime", () => {
 			false,
 			"the read has not raced the open",
 		);
-		ok(finishOpen);
 		finishOpen();
 		await Promise.all([opening, listing]);
 		ok(harness.events.some((event) => event.includes("w1:p9 utility shell")));

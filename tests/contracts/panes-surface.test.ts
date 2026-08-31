@@ -343,7 +343,9 @@ describe("contracts/panes operations", () => {
 
 	it("includes an admitted open in inventory while the mux registry is still pending", async () => {
 		const mux = stubMux();
-		let finish: ((ref: MuxPaneRef) => void) | null = null;
+		let finish = (_ref: MuxPaneRef): void => {
+			throw new Error("open resolver was not captured");
+		};
 		mux.contract.openUtilityPane = (request: MuxOpenUtilityPaneRequest) => {
 			mux.opened.push({ argv: [...request.argv], cwd: request.cwd, label: request.label });
 			return new Promise<MuxPaneRef>((resolve) => {
@@ -355,7 +357,6 @@ describe("contracts/panes operations", () => {
 		const pending = panes.status().panes.find((pane) => pane.pending === true);
 		strictEqual(pending?.label, "shell");
 		match(formatPanesStatus(panes.status()).join("\n"), /pending:1 utility shell opening/);
-		ok(finish);
 		finish({ paneId: "w1:p101", tabId: "w1:t1", workspaceId: "w1" });
 		strictEqual((await opening).status, "opened");
 		strictEqual(

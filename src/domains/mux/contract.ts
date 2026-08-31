@@ -472,7 +472,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					await live.paneReportMetadata({
 						paneId: entry.ref.paneId,
 						source: METADATA_SOURCE,
-						displayAgent: state.displayAgent,
+						...(state.displayAgent ? { displayAgent: state.displayAgent } : {}),
 						tokens: {
 							[OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE,
 							role: token(entry.agentId),
