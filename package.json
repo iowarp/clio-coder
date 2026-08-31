@@ -96,8 +96,10 @@
 		"live:tui": "node --import tsx benchmarks/internal/pty-drive.ts",
 		"live:home": "node --import tsx benchmarks/internal/live-home.ts"
 	},
+	"optionalDependencies": {
+		"@anthropic-ai/claude-agent-sdk": "0.3.186"
+	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "0.3.186",
 		"@earendil-works/pi-agent-core": "0.84.0",
 		"@earendil-works/pi-ai": "0.84.0",
 		"@earendil-works/pi-tui": "0.84.0",

@@ -83,7 +83,11 @@ export default defineConfig({
 		vendorGrammars();
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
-	// runtime deps need no listing here. Only the builtin needs the explicit
-	// entry; see removeNodeProtocol above.
-	external: ["node:sqlite"],
+	// runtime deps need no listing here. `optionalDependencies` is not part of
+	// that default, so the Claude Agent SDK needs the explicit entry: without it
+	// esbuild would bundle the optional package into dist/ and reintroduce the
+	// hard requirement that #258 removed. External keeps the lazy
+	// `await import()` in src/engine/claude/sdk-module.ts a real runtime import.
+	// The builtin entry is for removeNodeProtocol above.
+	external: ["node:sqlite", "@anthropic-ai/claude-agent-sdk"],
 });
