@@ -148,6 +148,14 @@ export function extractGlobalFlags(
 			rest.push(...argv.slice(i));
 			break;
 		}
+		if (arg === "--acp") {
+			// Treat the global spelling as a command boundary. Rewriting only the
+			// sentinel keeps every trailing ACP option on the exact same dispatcher
+			// and parser path as `clio-coder acp`, without importing that command into
+			// the dependency-light startup graph.
+			rest.push("acp", ...argv.slice(i + 1));
+			break;
+		}
 		if (ROOT_FLAG_TOKENS.has(arg)) {
 			rest.push(arg);
 			continue;

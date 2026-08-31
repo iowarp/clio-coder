@@ -30,6 +30,7 @@ science. CLIO stands for Context Layer for Input/Output, named for the Greek mus
 Usage:
   clio-coder                      start interactive repository chat
   clio-coder acp                  serve Clio as an ACP v1 agent over stdio
+  clio-coder --acp                alias for clio-coder acp
   clio-coder run [flags] <task>   run one headless main-agent turn
   clio-coder --version, -v        print the Clio Coder version
   clio-coder --api-key <key>      override the active target API key for this run
