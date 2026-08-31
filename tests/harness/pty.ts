@@ -294,10 +294,16 @@ export async function runInPty(
 			const steps = options.input ?? [];
 			const arm = (index: number, previousAfterMs: number): void => {
 				const step = steps[index];
-				if (!step) return;
+				// The `settled` guards are what keep the chain from outliving the
+				// run. `finish` clears everything in inputTimers, but a timer armed
+				// from inside an already-fired callback is not in that array yet, so
+				// without this a schedule whose child exited early leaves one live
+				// timer holding the process open past the test that made it.
+				if (!step || settled) return;
 				inputTimers.push(
 					setTimeout(
 						() => {
+							if (settled) return;
 							try {
 								child.write(step.data);
 							} catch {

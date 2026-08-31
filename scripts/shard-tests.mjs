@@ -131,6 +131,19 @@ const SERIAL_FILES = [
 const SERIAL_LANE_NAME = "lane-serial";
 /** How long after a lane exits its stdio pipes get to close before runLane stops waiting. */
 const STDIO_DRAIN_MS = 10_000;
+/**
+ * Hard cap on a single lane. The heaviest lane's own tests total about 115s,
+ * so ten minutes is five times the worst honest lane and is only reachable by
+ * a lane that has stopped making progress.
+ *
+ * This exists because two runs in this suite's history reported walls of 2337s
+ * and 4225s while every lane's reporter showed its own tests finishing inside
+ * 117s and every test passing. A lane that hangs after its work is done is
+ * still a bug, and a run that takes 70 minutes to tell you everything passed
+ * is not a usable gate. The cap turns that into a named lane and a non-zero
+ * exit, which is something a person can act on.
+ */
+const LANE_CAP_MS = 600_000;
 const RUNNER_ARGS = [
 	"--import",
 	"tsx",
@@ -339,11 +352,14 @@ function runLane(name, files, forward, concurrency) {
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk;
 		});
+		const startedAt = Date.now();
 		let settled = false;
 		let drainTimer;
+		let capTimer;
 		const settle = (code, note) => {
 			if (settled) return;
 			settled = true;
+			if (capTimer) clearTimeout(capTimer);
 			if (drainTimer) clearTimeout(drainTimer);
 			let reporter = "";
 			try {
@@ -355,12 +371,29 @@ function runLane(name, files, forward, concurrency) {
 				name,
 				files,
 				code: code ?? 1,
+				elapsedMs: Date.now() - startedAt,
 				stdout,
 				stderr: note ? `${stderr}${note}` : stderr,
 				reporter,
 				summary: parseSummary(reporter),
 			});
 		};
+		capTimer = setTimeout(() => {
+			// The lane shares this process's group, so only its own pid may be
+			// signalled; a group kill here would reach the runner. Anything the
+			// lane spawned is reparented, and the `exit` handler's drain settles
+			// whatever it was holding.
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				// Already gone; settle is canonical.
+			}
+			settle(
+				1,
+				`\nshard-tests: ${name} was killed after ${(LANE_CAP_MS / 1000).toFixed(0)}s without finishing. ` +
+					`Its reporter output above is whatever it had written by then.\n`,
+			);
+		}, LANE_CAP_MS);
 		/**
 		 * `close` fires when the child has exited AND its stdio pipes have
 		 * closed. A test that leaks a detached descendant leaves that descendant
@@ -517,6 +550,18 @@ async function main() {
 	process.stdout.write(
 		`\n# shards ${shardLabel}  # tests ${totalTests}  # pass ${totalPass}  # fail ${totalFail}  # wall ${wallSeconds}s\n`,
 	);
+	// The wall is the slowest lane. When it is far above the rest, the run was
+	// held by one lane rather than by the size of the suite, and naming it is
+	// the difference between a diagnosable report and "the suite was slow".
+	const slowest = [...results].sort((left, right) => right.elapsedMs - left.elapsedMs);
+	const leader = slowest[0];
+	const runnerUp = slowest[1];
+	if (leader && runnerUp && leader.elapsedMs > runnerUp.elapsedMs * 2) {
+		process.stdout.write(
+			`# ${leader.name} took ${(leader.elapsedMs / 1000).toFixed(1)}s against ${(runnerUp.elapsedMs / 1000).toFixed(1)}s for the next slowest. ` +
+				`The run was held by that lane, not by the size of the suite.\n`,
+		);
+	}
 	if (!strayGitExistedBefore && existsSync(strayGit)) {
 		process.stdout.write(
 			`# ${strayGit} was created during this run. Nothing in this repository may write a .git at the system temp root: it makes every mkdtemp scratch look like it sits inside a git repository and breaks the ignore-policy contracts. Remove it, then look for a tmp-git-guard message in the lane output above for the caller. See issue #205.\n`,
