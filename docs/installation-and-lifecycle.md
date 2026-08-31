@@ -5,6 +5,18 @@ Clio Coder is designed to be self-contained and platform-compliant. This documen
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.3.9). You can open it directly in any web browser to view details dynamically.
 
+### Optional dependency: the Claude Agent SDK
+
+`@anthropic-ai/claude-agent-sdk` is an `optionalDependencies` entry, not a hard dependency. Its platform package carries a proprietary binary of roughly 224MB per platform, and only the `claude-sdk` runtime uses it. Skip it with:
+
+```bash
+npm install -g @iowarp/clio-coder --omit=optional
+```
+
+Measured on Linux x64 with a production install (`--omit=dev`): 387MB across 118 packages with the SDK, 143MB across 109 packages without it. That is 244MB and nine packages saved, a 63% smaller tree, and what remains is fully open-licensed.
+
+Everything except the `claude-sdk` runtime works on the smaller install: boot, `clio-coder doctor`, every other target and worker runtime. Dispatching a `claude-sdk` target on an install that omitted the package fails that run with a diagnostic naming the package and the command that fixes it (`npm install @anthropic-ai/claude-agent-sdk@0.3.186`); nothing else degrades, and nothing fails at startup.
+
 ---
 
 ## 1. Directory Layout & Platform Defaults

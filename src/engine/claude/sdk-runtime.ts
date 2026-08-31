@@ -1,15 +1,18 @@
-import {
-	type CanUseTool,
-	type EffortLevel,
-	type HookCallback,
-	type Options,
-	type PermissionMode,
-	type PermissionResult,
+// Types only. `@anthropic-ai/claude-agent-sdk` is an optional dependency, so
+// nothing here may reach it at module scope; the one value this runtime calls
+// (`query`) comes from the lazy loader in ./sdk-module.js at run time.
+import type {
+	CanUseTool,
+	EffortLevel,
+	HookCallback,
+	Options,
+	PermissionMode,
+	PermissionResult,
 	query,
-	type SDKMessage,
-	type SDKResultMessage,
-	type SDKUserMessage,
-	type ThinkingConfig,
+	SDKMessage,
+	SDKResultMessage,
+	SDKUserMessage,
+	ThinkingConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { readClioVersion } from "../../core/package-root.js";
@@ -19,6 +22,7 @@ import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
+import { loadClaudeAgentSdk } from "./sdk-module.js";
 import { isClaudeCodeSessionId } from "./session-id.js";
 import {
 	type ClaudeToolPermissionDecision,
@@ -607,6 +611,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 
 		emit({ type: "agent_start" } as AgentEvent);
 		try {
+			// First touch of the optional SDK. An install that omitted it fails
+			// here with a typed diagnostic naming the package and the install
+			// command, and lands in the catch below as an ordinary run failure.
+			const { query } = await loadClaudeAgentSdk();
 			queryHandle = query({ prompt: buildClaudeSdkPrompt(input), options });
 			for await (const sdkMessage of queryHandle) {
 				if (sdkMessage.type === "system" && (sdkMessage as { subtype?: string }).subtype === "init") {

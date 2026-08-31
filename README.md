@@ -51,6 +51,11 @@ first session, type a request in plain words or `/help` for the command
 palette. `/settings` changes the model later, `/quit` leaves, and
 `clio-coder doctor` reports the install's health at any time.
 
+Adding `--omit=optional` to that install skips the Claude Agent SDK's 224MB
+proprietary binary, taking the tree from 387MB to 143MB. Everything but the
+`claude-sdk` worker runtime works without it. See
+[Installation and Lifecycle](docs/installation-and-lifecycle.md#optional-dependency-the-claude-agent-sdk).
+
 |  | You are | Start here |
 | --- | --- | --- |
 | 🔬 | A researcher or developer who wants to use it | [Your models](#your-models-your-choice) → [At the keyboard](#at-the-keyboard) → [Safety](#safety-you-can-read) |
