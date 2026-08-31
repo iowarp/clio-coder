@@ -626,7 +626,13 @@ export function renderDispatchCard(
 	row: DispatchBoardRow,
 	width: number,
 	evidence?: RunEvidencePresentation,
-	options: { selected?: boolean; expanded?: boolean; endpointActive?: number; theme?: ClioTheme } = {},
+	options: {
+		selected?: boolean;
+		expanded?: boolean;
+		endpointActive?: number;
+		endpointQueued?: number;
+		theme?: ClioTheme;
+	} = {},
 ): string[] {
 	const theme = options.theme ?? clioTheme();
 	const contentWidth = Math.max(0, width - 4);
@@ -678,7 +684,12 @@ export function renderDispatchCard(
 		statusStr,
 		theme.fg("muted", `node ${row.node ?? "local"}`),
 		...(row.endpoint !== undefined
-			? [theme.fg("info", `slots ${options.endpointActive ?? 0}/${row.endpoint.limit} ${row.endpoint.label}`)]
+			? [
+					theme.fg(
+						"info",
+						`slots ${options.endpointActive ?? 0}/${row.endpoint.limit}${(options.endpointQueued ?? 0) > 0 ? ` +${options.endpointQueued} queued` : ""} ${row.endpoint.label}`,
+					),
+				]
 			: []),
 		...(row.gate !== undefined ? [theme.fg("info", `gate ${row.gate.role} c${row.gate.cycle}`)] : []),
 		...(row.rerouteCount !== undefined && row.rerouteCount > 0
@@ -998,13 +1009,12 @@ export function formatDispatchBoardLines(
 	}
 
 	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };
+	const endpointQueued: Record<string, number> = {};
 	for (const row of rows) {
-		if (
-			row.endpoint !== undefined &&
-			(row.status === "running" || row.status === "stale" || row.status === "enqueued" || row.status === "cancelling")
-		) {
+		if (row.endpoint === undefined) continue;
+		if (row.status === "enqueued") endpointQueued[row.endpoint.key] = (endpointQueued[row.endpoint.key] ?? 0) + 1;
+		else if (row.status === "running" || row.status === "stale" || row.status === "cancelling")
 			endpointActive[row.endpoint.key] = (endpointActive[row.endpoint.key] ?? 0) + 1;
-		}
 	}
 
 	// A council is one question asked of several members, so its rows render as
@@ -1015,7 +1025,12 @@ export function formatDispatchBoardLines(
 			: renderDispatchCard(item.row, width, deriveRunEvidenceState(observability, item.row.runId), {
 					selected: item.row.runId === selectedRunId,
 					expanded: detailExpanded && item.row.runId === selectedRunId,
-					...(item.row.endpoint !== undefined ? { endpointActive: endpointActive[item.row.endpoint.key] ?? 0 } : {}),
+					...(item.row.endpoint !== undefined
+						? {
+								endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
+								endpointQueued: endpointQueued[item.row.endpoint.key] ?? 0,
+							}
+						: {}),
 				}),
 	);
 	const body: string[] = [];
