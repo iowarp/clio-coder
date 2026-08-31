@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import { BusChannels, type LoopBlockedPayload } from "../../core/bus-events.js";
+import {
+	BusChannels,
+	type DispatchCompletedPayload,
+	type DispatchEnqueuedPayload,
+	type DispatchFailedPayload,
+	type DispatchProgressPayload,
+	type DispatchStartedPayload,
+	type LoopBlockedPayload,
+} from "../../core/bus-events.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
@@ -33,6 +41,7 @@ import type {
 	AcpToolKind,
 } from "./types.js";
 import {
+	ACP_AGENT_META_KEY,
 	ACP_MAX_CHUNK_BYTES,
 	ACP_MAX_RAW_RECORD_BYTES,
 	ACP_MAX_STRING_BYTES,
@@ -173,6 +182,25 @@ interface ActivePrompt {
 interface AcpToolCallSnapshot {
 	rawInput: Record<string, unknown>;
 	locations?: AcpToolCallLocation[];
+	/** Exact title and kind this call was announced under, replayed by later updates. */
+	title: string;
+	kind: AcpToolKind;
+	/**
+	 * Delegated agents this call spawned, oldest first, bounded by
+	 * {@link ACP_MAX_TOOL_CALL_AGENTS}. A dispatch tool that fans out reports one
+	 * entry per run, which is what lets a client label the segment with the
+	 * agents that actually ran under it rather than with the product name.
+	 */
+	agents?: AcpAgentAttribution[];
+}
+
+/** One `clio-coder/agent` attribution entry. `role` names where the identity came from. */
+interface AcpAgentAttribution {
+	version: 1;
+	role: "orchestrator" | "worker";
+	agentId: string;
+	runId?: string;
+	node?: string;
 }
 
 interface AcpServerUsage {
@@ -298,6 +326,74 @@ const ACP_MAX_TOOL_TITLE_BYTES = 512;
 /** W001-A1 cardinality bounds for one live prompt and one load replay. */
 const ACP_MAX_LIVE_TOOL_CALLS = 128;
 const ACP_MAX_REPLAY_TOOL_CALLS = 8192;
+
+/**
+ * Bus channels this server is willing to forward over the opt-in
+ * `clio-coder/event` notification. Nothing outside this list is forwardable:
+ * the list is the allowlist, and a client's requested kinds are intersected
+ * with it rather than trusted. `safety.loopBlocked` was the first member; the
+ * dispatch lifecycle joined it so a client can draw a live fleet board from
+ * reported facts instead of inferring one from tool titles or timing.
+ */
+const ACP_FORWARDABLE_EVENT_KINDS = [
+	"safety.loopBlocked",
+	"dispatch.enqueued",
+	"dispatch.started",
+	"dispatch.progress",
+	"dispatch.completed",
+	"dispatch.failed",
+] as const;
+
+type AcpForwardableEventKind = (typeof ACP_FORWARDABLE_EVENT_KINDS)[number];
+
+/** A client may name at most this many kinds; an over-long list refuses the whole opt-in. */
+const ACP_MAX_REQUESTED_EVENT_KINDS = 16;
+
+/**
+ * Sanitized, bounded preview of a dispatched task. The exact task is the
+ * operator's own prose and can be arbitrarily long, so what crosses is a
+ * control-character-stripped prefix carrying the standard truncation marker;
+ * the exact text never leaves the process.
+ */
+const ACP_MAX_DISPATCH_TASK_PREVIEW_BYTES = 160;
+
+/** Wire bound for the short identifiers a dispatch event carries. */
+const ACP_MAX_DISPATCH_ID_BYTES = 128;
+
+/**
+ * Progress events forwarded per run before the stream is capped. One run
+ * publishes one progress fact per worker event, which is unbounded; a client
+ * only needs enough to know the run is alive, so the cap is announced with a
+ * final `truncated` frame rather than by silently going quiet.
+ */
+const ACP_MAX_DISPATCH_PROGRESS_EVENTS = 256;
+
+/** Live dispatch runs whose progress counters this server tracks at once. */
+const ACP_MAX_TRACKED_DISPATCH_RUNS = 512;
+
+/** Delegated agents recorded against one tool call before further ones are dropped. */
+const ACP_MAX_TOOL_CALL_AGENTS = 16;
+
+/**
+ * Attribution for a frame this server produced on the main session. Every live
+ * frame carries it, so a client never has to decide whether an unattributed
+ * frame means "the orchestrator" or "identity unavailable".
+ */
+const ORCHESTRATOR_ATTRIBUTION: AcpAgentAttribution = {
+	version: 1,
+	role: "orchestrator",
+	agentId: "orchestrator",
+};
+
+const ORCHESTRATOR_UPDATE_META: Record<string, unknown> = {
+	[ACP_AGENT_META_KEY]: [ORCHESTRATOR_ATTRIBUTION],
+};
+
+/** The `_meta` a tool-call frame carries: its own agents when it spawned any, else the orchestrator. */
+function toolCallUpdateMeta(snapshot: AcpToolCallSnapshot | undefined): Record<string, unknown> {
+	if (snapshot?.agents === undefined || snapshot.agents.length === 0) return ORCHESTRATOR_UPDATE_META;
+	return { [ACP_AGENT_META_KEY]: [ORCHESTRATOR_ATTRIBUTION, ...snapshot.agents] };
+}
 
 /** Depth past which `boundRawRecord` stops walking and elides the subtree. */
 const ACP_MAX_RAW_RECORD_DEPTH = 8;
@@ -691,8 +787,9 @@ function sendUpdate(
 	sessionId: string,
 	active: ActivePrompt,
 	update: Record<string, unknown>,
+	meta: Record<string, unknown> = ORCHESTRATOR_UPDATE_META,
 ): void {
-	const params: AcpSessionUpdateParams = { sessionId, update };
+	const params: AcpSessionUpdateParams = { sessionId, update, _meta: meta };
 	active.updatesSent += 1;
 	transport.notify("session/update", params);
 }
@@ -722,12 +819,18 @@ function settleOpenToolCalls(
 	text: string,
 ): void {
 	for (const toolCallId of active.openToolCalls) {
-		sendUpdate(transport, sessionId, active, {
-			sessionUpdate: "tool_call_update",
-			toolCallId,
-			status: "failed" satisfies AcpToolCallStatus,
-			content: toolCallContent(text),
-		});
+		sendUpdate(
+			transport,
+			sessionId,
+			active,
+			{
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				status: "failed" satisfies AcpToolCallStatus,
+				content: toolCallContent(text),
+			},
+			toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)),
+		);
 		// The sweep is a terminal update like any other, so a late end for a swept
 		// id cannot reopen the call the client has already seen fail.
 		active.terminalToolCalls.add(toolCallId);
@@ -794,13 +897,15 @@ function handleChatEvent(
 		const snapshot: AcpToolCallSnapshot = {
 			rawInput: boundRawRecord(event.args),
 			...(locations !== null ? { locations } : {}),
+			title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+			kind: toolKind(toolName),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
 		sendUpdate(transport, sessionId, active, {
 			sessionUpdate: "tool_call",
 			toolCallId,
-			title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
-			kind: toolKind(toolName),
+			title: snapshot.title,
+			kind: snapshot.kind,
 			status: "in_progress" satisfies AcpToolCallStatus,
 			rawInput: snapshot.rawInput,
 			...(snapshot.locations !== undefined ? { locations: snapshot.locations } : {}),
@@ -826,15 +931,21 @@ function handleChatEvent(
 		active.openToolCalls.delete(toolCallId);
 		active.terminalToolCalls.add(toolCallId);
 		const output = boundString(outputText(event.result), ACP_MAX_CHUNK_BYTES);
-		sendUpdate(transport, sessionId, active, {
-			sessionUpdate: "tool_call_update",
-			toolCallId,
-			title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
-			kind: toolKind(toolName),
-			status: toolStatus(event),
-			...(output.length > 0 ? { content: toolCallContent(output) } : {}),
-			rawOutput: boundRawRecord({ result: event.result, isError: event.isError === true }),
-		});
+		sendUpdate(
+			transport,
+			sessionId,
+			active,
+			{
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				title: boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+				kind: toolKind(toolName),
+				status: toolStatus(event),
+				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
+				rawOutput: boundRawRecord({ result: event.result, isError: event.isError === true }),
+			},
+			toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)),
+		);
 		return;
 	}
 	if (event.type === "message_end") {
@@ -1500,9 +1611,24 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	const sessions = new Map<string, AcpServerSession>();
 	const workspaceInstanceId = randomUUID();
 	let initialized = false;
-	let loopBlockedEventsEnabled = false;
+	const enabledEventKinds = new Set<AcpForwardableEventKind>();
 	let eventSequence = 0;
+	/**
+	 * Per-run progress counters for the forwarded dispatch stream, insertion
+	 * ordered. A terminal event removes its run; the cap evicts the oldest live
+	 * run rather than refusing the newest, so a leaked run cannot starve the
+	 * board of the run an operator is actually watching.
+	 */
+	const dispatchProgress = new Map<string, { count: number; capped: boolean }>();
 	let activeSessionId: string | null = null;
+	/**
+	 * The one session this process hosts, from the moment it is bound until it is
+	 * closed. Distinct from {@link activeSessionId}, which is only set while a
+	 * prompt is running: a detached dispatch run legitimately finishes after the
+	 * turn that started it, and a client keyed on the bound session still needs
+	 * that outcome so its board does not leave the run running forever.
+	 */
+	let boundSessionId: string | null = null;
 	let activePromptState: ActivePrompt | null = null;
 	let sessionCreated = false;
 	let promptSettled: Promise<void> | null = null;
@@ -1541,48 +1667,244 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			options.chat.cancel();
 		},
 	});
-	const unsubscribeLoopBlocked =
-		options.bus?.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {
-			if (!initialized || !loopBlockedEventsEnabled || activeSessionId === null || activePromptState === null) return;
-			if (
-				!Number.isSafeInteger(payload.repeatCount) ||
-				payload.repeatCount < 1 ||
-				!Number.isSafeInteger(payload.blocksThisTurn) ||
-				payload.blocksThisTurn < 1 ||
-				!Number.isSafeInteger(payload.budget) ||
-				payload.budget < 1 ||
-				!(["block", "lockout", "stop"] as ReadonlyArray<string>).includes(payload.disposition) ||
-				payload.interrupted !== (payload.disposition === "stop")
-			) {
-				return;
-			}
-			const tool = safeStoredString(payload.tool, 64).trim();
-			if (tool.length === 0) return;
-			eventSequence += 1;
-			try {
-				options.transport.notify("clio-coder/event", {
-					version: 1,
-					workspaceInstanceId,
-					sessionId: activeSessionId,
-					turnId: safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES),
-					sequence: eventSequence,
-					kind: "safety.loopBlocked",
-					terminal: false,
-					payload: {
-						toolCallId: null,
-						tool,
-						repeatCount: payload.repeatCount,
-						blocksThisTurn: payload.blocksThisTurn,
-						budget: payload.budget,
-						disposition: payload.disposition,
-						interrupted: payload.interrupted,
-						shape: null,
-					},
+	/**
+	 * Sends one frame of the opt-in stream. Every forwarded channel goes through
+	 * here so the envelope, the sequence, and the opt-in check cannot drift per
+	 * channel. Nothing is sent before a session exists: the envelope's
+	 * `sessionId` is the client's only way to bind a fact to what it is showing.
+	 */
+	const forwardEvent = (
+		kind: AcpForwardableEventKind,
+		turnId: string | null,
+		terminal: boolean,
+		payload: Record<string, unknown>,
+	): void => {
+		const sessionId = activeSessionId ?? boundSessionId;
+		if (!initialized || !enabledEventKinds.has(kind) || sessionId === null) return;
+		eventSequence += 1;
+		try {
+			options.transport.notify("clio-coder/event", {
+				version: 1,
+				workspaceInstanceId,
+				sessionId,
+				turnId,
+				sequence: eventSequence,
+				kind,
+				terminal,
+				payload,
+			});
+		} catch {
+			options.diagnostics?.("failed to send an opted-in ACP event");
+		}
+	};
+
+	/**
+	 * The identity every dispatch frame carries. The exact task never crosses:
+	 * what goes on the wire is a control-character-stripped, byte-bounded prefix
+	 * carrying the standard truncation marker, so a client can label a run
+	 * without receiving the operator's prose. A run whose id or agent cannot be
+	 * represented safely is dropped rather than forwarded under a repaired
+	 * identity, because a board keyed on a rewritten id merges distinct runs.
+	 */
+	const dispatchIdentity = (payload: {
+		runId: string;
+		agentId: string;
+		task?: string | undefined;
+		node?: string | undefined;
+	}): { runId: string; agentId: string; taskPreview: string | null; node: string | null } | null => {
+		const runId = safeStoredIdentifier(payload.runId, ACP_MAX_DISPATCH_ID_BYTES);
+		const agentId = safeStoredIdentifier(payload.agentId, ACP_MAX_DISPATCH_ID_BYTES);
+		if (runId === null || agentId === null) return null;
+		const preview =
+			payload.task === undefined ? "" : safeStoredString(payload.task, ACP_MAX_DISPATCH_TASK_PREVIEW_BYTES).trim();
+		return {
+			runId,
+			agentId,
+			taskPreview: preview.length === 0 ? null : preview,
+			node: safeStoredIdentifier(payload.node, ACP_MAX_DISPATCH_ID_BYTES),
+		};
+	};
+
+	/** Forgets a run's progress counter and keeps the live map inside its cap. */
+	const trackDispatchRun = (runId: string): { count: number; capped: boolean } => {
+		const existing = dispatchProgress.get(runId);
+		if (existing !== undefined) return existing;
+		if (dispatchProgress.size >= ACP_MAX_TRACKED_DISPATCH_RUNS) {
+			const oldest = dispatchProgress.keys().next();
+			if (!oldest.done) dispatchProgress.delete(oldest.value);
+		}
+		const created = { count: 0, capped: false };
+		dispatchProgress.set(runId, created);
+		return created;
+	};
+
+	const safeCount = (value: unknown): number | null =>
+		typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+	const unsubscribeEvents: Array<() => void> = [];
+	if (options.bus !== undefined) {
+		const bus = options.bus;
+		unsubscribeEvents.push(
+			bus.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {
+				// Loop blocks describe the turn that is running, so unlike a dispatch
+				// run they are meaningless outside one.
+				if (activePromptState === null) return;
+				if (
+					!Number.isSafeInteger(payload.repeatCount) ||
+					payload.repeatCount < 1 ||
+					!Number.isSafeInteger(payload.blocksThisTurn) ||
+					payload.blocksThisTurn < 1 ||
+					!Number.isSafeInteger(payload.budget) ||
+					payload.budget < 1 ||
+					!(["block", "lockout", "stop"] as ReadonlyArray<string>).includes(payload.disposition) ||
+					payload.interrupted !== (payload.disposition === "stop")
+				) {
+					return;
+				}
+				const tool = safeStoredString(payload.tool, 64).trim();
+				if (tool.length === 0) return;
+				forwardEvent("safety.loopBlocked", safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES), false, {
+					toolCallId: null,
+					tool,
+					repeatCount: payload.repeatCount,
+					blocksThisTurn: payload.blocksThisTurn,
+					budget: payload.budget,
+					disposition: payload.disposition,
+					interrupted: payload.interrupted,
+					shape: null,
 				});
-			} catch {
-				options.diagnostics?.("failed to send an opted-in ACP event");
-			}
-		}) ?? (() => {});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.DispatchEnqueued, (payload: DispatchEnqueuedPayload) => {
+				const identity = dispatchIdentity(payload);
+				if (identity === null) return;
+				trackDispatchRun(identity.runId);
+				forwardEvent("dispatch.enqueued", null, false, {
+					...identity,
+					origin: safeStoredIdentifier(payload.requestOrigin, 64),
+					attempt: null,
+				});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.DispatchStarted, (payload: DispatchStartedPayload) => {
+				const identity = dispatchIdentity(payload);
+				if (identity === null) return;
+				trackDispatchRun(identity.runId);
+				// A run started by a tool call this turn already put on the wire is
+				// the one place the harness knows which agent produced a tool
+				// segment. Record it and re-announce the call so a client can label
+				// the segment while the worker is still running.
+				attributeRunToToolCall(payload.parentToolCallId, identity);
+				forwardEvent("dispatch.started", null, false, {
+					...identity,
+					origin: safeStoredIdentifier(payload.requestOrigin, 64),
+					attempt: safeCount(payload.attempt),
+				});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.DispatchProgress, (payload: DispatchProgressPayload) => {
+				const identity = dispatchIdentity(payload);
+				if (identity === null) return;
+				const state = trackDispatchRun(identity.runId);
+				if (state.capped) return;
+				state.count += 1;
+				const capped = state.count > ACP_MAX_DISPATCH_PROGRESS_EVENTS;
+				if (capped) state.capped = true;
+				// The worker/ACP event that triggered this crossed a process boundary
+				// and is typed `unknown`; none of it goes on the wire. What a board
+				// needs is that the run is alive and roughly how much it has done.
+				forwardEvent("dispatch.progress", null, false, {
+					runId: identity.runId,
+					agentId: identity.agentId,
+					progressCount: state.count,
+					truncated: capped,
+				});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.DispatchCompleted, (payload: DispatchCompletedPayload) => {
+				const identity = dispatchIdentity(payload);
+				if (identity === null) return;
+				dispatchProgress.delete(identity.runId);
+				forwardEvent("dispatch.completed", null, true, {
+					runId: identity.runId,
+					agentId: identity.agentId,
+					outcome: safeStoredIdentifier(payload.outcome, 64),
+					outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
+					durationMs: safeCount(payload.durationMs),
+					tokenCount: safeCount(payload.tokenCount),
+				});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.DispatchFailed, (payload: DispatchFailedPayload) => {
+				const identity = dispatchIdentity(payload);
+				if (identity === null) return;
+				dispatchProgress.delete(identity.runId);
+				// `outcomeDetail` is free-form failure prose that legitimately quotes
+				// paths, argv, and provider bodies. The taxonomy crosses; the prose
+				// does not.
+				forwardEvent("dispatch.failed", null, true, {
+					runId: identity.runId,
+					agentId: identity.agentId,
+					outcome: safeStoredIdentifier(payload.outcome, 64),
+					reason: safeStoredIdentifier(payload.reason, 64),
+					durationMs: safeCount(payload.durationMs),
+				});
+			}),
+		);
+	}
+	const unsubscribeEventStream = (): void => {
+		for (const unsubscribe of unsubscribeEvents) unsubscribe();
+		unsubscribeEvents.length = 0;
+		dispatchProgress.clear();
+	};
+
+	/**
+	 * Records a delegated agent against the tool call that spawned it and
+	 * re-announces that call so the attribution reaches the client while the
+	 * worker is running. Nothing is minted here: an id with no open call this
+	 * turn binds to nothing, exactly as on the permission path.
+	 */
+	function attributeRunToToolCall(
+		parentToolCallId: string | undefined,
+		identity: { runId: string; agentId: string; node: string | null },
+	): void {
+		const active = activePromptState;
+		if (active === null || activeSessionId === null) return;
+		if (parentToolCallId === undefined || parentToolCallId.length === 0) return;
+		const wireId = openWireIdFor(active, parentToolCallId);
+		if (wireId === null) return;
+		const snapshot = active.toolCallSnapshots.get(wireId);
+		if (snapshot === undefined) return;
+		const agents = snapshot.agents ?? [];
+		if (agents.length >= ACP_MAX_TOOL_CALL_AGENTS) return;
+		if (agents.some((agent) => agent.runId === identity.runId)) return;
+		agents.push({
+			version: 1,
+			role: "worker",
+			agentId: identity.agentId,
+			runId: identity.runId,
+			...(identity.node !== null ? { node: identity.node } : {}),
+		});
+		snapshot.agents = agents;
+		sendUpdate(
+			options.transport,
+			activeSessionId,
+			active,
+			{
+				sessionUpdate: "tool_call_update",
+				toolCallId: wireId,
+				title: snapshot.title,
+				kind: snapshot.kind,
+				status: "in_progress" satisfies AcpToolCallStatus,
+			},
+			toolCallUpdateMeta(snapshot),
+		);
+	}
 
 	const requireInitialized = (): void => {
 		if (!initialized) throw new AcpRequestError(-32000, "initialize must be called first", { code: "not_initialized" });
@@ -1671,15 +1993,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const eventRequest =
 			clientMeta !== null && isRecord(clientMeta["clio-coder/events"]) ? clientMeta["clio-coder/events"] : null;
 		const requestedEventKinds = eventRequest !== null ? eventRequest.kinds : null;
-		loopBlockedEventsEnabled =
+		// A malformed request refuses the whole opt-in rather than the offending
+		// entry: a client that sent an unrepresentable kind does not know what it
+		// asked for, and silently honouring the rest of its list hides that.
+		enabledEventKinds.clear();
+		if (
 			eventRequest !== null &&
 			eventRequest.version === 1 &&
 			Array.isArray(requestedEventKinds) &&
-			requestedEventKinds.length <= 16 &&
-			requestedEventKinds.every(
-				(kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind),
-			) &&
-			requestedEventKinds.includes("safety.loopBlocked");
+			requestedEventKinds.length <= ACP_MAX_REQUESTED_EVENT_KINDS &&
+			requestedEventKinds.every((kind) => typeof kind === "string" && utf8Bytes(kind) <= 64 && !hasControlCharacters(kind))
+		) {
+			for (const kind of ACP_FORWARDABLE_EVENT_KINDS) {
+				if (requestedEventKinds.includes(kind)) enabledEventKinds.add(kind);
+			}
+		}
 		const canLoadSession =
 			options.session !== undefined &&
 			options.readSessionEntries !== undefined &&
@@ -1717,12 +2045,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						list: options.providers !== undefined,
 						probe: options.providers !== undefined,
 					},
+					// Per-frame agent attribution on `session/update`. Announced so a
+					// client can tell "this agent produced nothing" apart from "this
+					// peer does not report identity at all".
+					[ACP_AGENT_META_KEY]: { version: 1, meta: ACP_AGENT_META_KEY },
 					...(options.bus
 						? {
 								"clio-coder/events": {
 									version: 1,
 									notification: "clio-coder/event",
-									kinds: ["safety.loopBlocked"],
+									kinds: ACP_FORWARDABLE_EVENT_KINDS,
 									workspaceInstanceId,
 								},
 							}
@@ -1767,6 +2099,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 		sessionCreated = true;
 		sessions.set(id, session);
+		boundSessionId = id;
 		// NewSessionResponse is { sessionId, modes?, models?, _meta? }; cwd is not a
 		// schema field. Clio runs a single-session-per-process server pinned to the
 		// launch cwd, so no extra fields are needed.
@@ -1840,6 +2173,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 		sessionCreated = true;
 		sessions.set(id, session);
+		boundSessionId = id;
 		for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
 		return {
 			_meta: {
@@ -2134,6 +2468,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		if (options.session?.current()?.id === session.id) await options.session.close();
 		sessions.delete(session.id);
+		if (boundSessionId === session.id) boundSessionId = null;
 		closedSessionIds.add(session.id);
 		return {};
 	});
@@ -2230,7 +2565,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	return await new Promise<number>((resolve) => {
 		options.transport.onClose(() => {
 			permission.unregister();
-			unsubscribeLoopBlocked();
+			unsubscribeEventStream();
 			permission.cancelPending("ACP transport closed");
 			for (const session of sessions.values()) cancelSession(session, "ACP transport closed");
 			const inFlight = promptSettled;

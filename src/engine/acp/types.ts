@@ -7,6 +7,13 @@ import type { AgentMessage } from "../types.js";
  */
 export const ACP_USAGE_META_KEY = "clio-coder/usage";
 export const ACP_SESSION_META_KEY = "clio-coder/session";
+/**
+ * Per-frame agent attribution on `session/update`. It names which agent
+ * produced the frame so a client can label a message, reasoning item, or tool
+ * call instead of attributing every frame to the product. Purely additive: a
+ * client that does not read it sees exactly the frames it saw before.
+ */
+export const ACP_AGENT_META_KEY = "clio-coder/agent";
 
 /**
  * Wire bounds for one prompt turn (CONTRACT C001 §3). A client renders every
@@ -141,6 +148,8 @@ export interface AcpToolCallUpdate {
 export interface AcpSessionUpdateParams {
 	sessionId?: string;
 	update?: Record<string, unknown>;
+	/** Namespaced extension slot; carries replay and agent-attribution metadata. */
+	_meta?: Record<string, unknown>;
 }
 
 export type AcpPermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always" | string;
