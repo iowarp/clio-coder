@@ -190,7 +190,7 @@ describe("typed dispatch intent", () => {
 			writeRoots: ["src/domains"],
 		});
 		ok(!contradiction.ok);
-		ok(contradiction.errors.includes("intent_write_roots_contradiction"));
+		ok(contradiction.errors.some((error) => error.startsWith("intent_write_roots_contradiction:")));
 	});
 });
 

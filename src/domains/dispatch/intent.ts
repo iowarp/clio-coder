@@ -32,7 +32,20 @@ export type DispatchIntentNormalizationResult =
 	| { ok: true; intent: DispatchIntent }
 	| { ok: false; reason: string; message: string };
 
-const RAW_FIELDS = new Set(["read_roots", "write_roots", "relevant_paths", "expected_outputs", "verification"]);
+/**
+ * `version` is accepted on raw model-facing intent so a caller replaying a
+ * declaration it was shown can echo the version back. It is validated, never
+ * trusted: an unsupported value is a terminal refusal rather than a field the
+ * normalizer quietly overwrites with the version this build speaks.
+ */
+const RAW_FIELDS = new Set([
+	"version",
+	"read_roots",
+	"write_roots",
+	"relevant_paths",
+	"expected_outputs",
+	"verification",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -164,6 +177,30 @@ export function isDispatchIntent(value: unknown): value is DispatchIntent {
 	);
 }
 
+/**
+ * Project a declared intent onto a run that may not write.
+ *
+ * Council members, reviewers, judges, and any other read-only expansion of a
+ * caller's single task inherit the caller's declared scope. Inheriting
+ * `writeRoots` verbatim would leave the request claiming a write scope the run's
+ * autonomy makes unenforceable, so the write roots become read roots: the same
+ * trees, strictly less authority. Nothing is added, so the projection can only
+ * narrow. Returns the input unchanged when there is no write scope to demote.
+ */
+export function narrowDispatchIntentToReadOnly(intent: DispatchIntent): DispatchIntent {
+	if (intent.writeRoots.length === 0) return intent;
+	const readRoots = [...new Set([...intent.readRoots, ...intent.writeRoots])].sort(compareCodepoints);
+	return {
+		version: 2,
+		readRoots,
+		writeRoots: [],
+		relevantPaths: [...intent.relevantPaths],
+		pathProvenance: declaredIntentPathProvenance({ readRoots, writeRoots: [], relevantPaths: intent.relevantPaths }),
+		expectedOutputs: [...intent.expectedOutputs],
+		verification: intent.verification.map((entry) => ({ ...entry })),
+	};
+}
+
 export function normalizeDispatchIntent(
 	raw: unknown,
 	checks: ReadonlyMap<string, DispatchIntentCheckBound>,
@@ -173,6 +210,12 @@ export function normalizeDispatchIntent(
 		.filter((key) => !RAW_FIELDS.has(key))
 		.sort(compareCodepoints);
 	if (unknown.length > 0) return fail("intent_malformed", `intent contains unknown field '${unknown[0]}'`);
+	if (raw.version !== undefined && raw.version !== 2) {
+		return fail(
+			"intent_version_unsupported",
+			`intent declares version ${JSON.stringify(raw.version)}; this build speaks dispatch intent version 2. A declaration at another version is refused rather than migrated: restate read_roots, write_roots, relevant_paths, expected_outputs, and verification under version 2`,
+		);
+	}
 	const readRoots = normalizePathList(raw.read_roots, "intent.read_roots");
 	if (!Array.isArray(readRoots)) return readRoots;
 	const writeRoots = normalizePathList(raw.write_roots, "intent.write_roots");

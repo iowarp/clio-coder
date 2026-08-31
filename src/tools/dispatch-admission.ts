@@ -10,7 +10,7 @@ import {
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
 } from "../domains/dispatch/gate-role-prompts.js";
-import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
+import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -644,6 +644,11 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							executionRole: "researcher",
 							autonomy: "read-only",
 							toolProfile: "council-read-only",
+							// A member inherits the caller's declared scope but never its
+							// write authority: the same trees arrive as read roots, so the
+							// declaration stays enforceable against a read-only run instead of
+							// claiming a write scope nothing can grant.
+							...(base.intent === undefined ? {} : { intent: narrowDispatchIntentToReadOnly(base.intent) }),
 							// The runner reuses this composed task from the resolved plan, so
 							// the approval artifact the plan hash binds shows the operator the
 							// exact ballot the member is asked to cast.
