@@ -254,6 +254,12 @@ function App() {
 					dispatch({ type: "trace.inspect.submitted", requestId });
 				}
 			},
+			inspectGateDecisions() {
+				const requestId = send("fleet.decisions", {});
+				if (requestId !== null) {
+					dispatch({ type: "fleet.decisions.submitted", requestId });
+				}
+			},
 			inspectEvidence() {
 				const requestId = send("evidence.inspect", {});
 				if (requestId !== null) {

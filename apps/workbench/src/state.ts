@@ -16,6 +16,7 @@ import {
 	validateDispatchInspection,
 	validateEvidenceInspection,
 	validateFleetInspection,
+	validateGateDecisions,
 	validateServerEvent,
 	validateToolchainInspection,
 	validateTraceInspection,
@@ -29,6 +30,7 @@ import {
 	type WireFleetInspection,
 	type WireFleetRun,
 	type WireFleetVerification,
+	type WireGateDecisions,
 	type WireProjectPath,
 	type WireProjectSummary,
 	type WireProjectWorkspace,
@@ -93,6 +95,7 @@ export interface WireBootstrap {
 	readonly fleetInspection: WireFleetInspection | null;
 	readonly toolchainInspection: WireToolchainInspection | null;
 	readonly traceInspection: WireTraceInspection | null;
+	readonly gateDecisions: WireGateDecisions | null;
 	readonly evidenceInspection: WireEvidenceInspection | null;
 }
 
@@ -117,6 +120,7 @@ export interface AppState {
 	readonly fleetInspection: WireFleetInspection | null;
 	readonly toolchainInspection: WireToolchainInspection | null;
 	readonly traceInspection: WireTraceInspection | null;
+	readonly gateDecisions: WireGateDecisions | null;
 	readonly evidenceInspection: WireEvidenceInspection | null;
 	/** The one bundle the operator opened, if any. */
 	readonly evidenceDetail: WireEvidenceDetail | null;
@@ -152,6 +156,8 @@ export interface AppState {
 	readonly pendingToolchainInspect: string | null;
 	/** Request id of the installation-wide durable trace accounting snapshot. */
 	readonly pendingTraceInspect: string | null;
+	/** Request id of the installation-wide sealed gate decision window. */
+	readonly pendingFleetDecisions: string | null;
 	/** Request id of the installation-wide durable evidence inventory. */
 	readonly pendingEvidenceInspect: string | null;
 	/** The bundle id whose trust record is being read, if any. */
@@ -198,6 +204,7 @@ export type AppAction =
 	| { readonly type: "fleet.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "toolchain.inspect.submitted"; readonly requestId: string }
 	| { readonly type: "trace.inspect.submitted"; readonly requestId: string }
+	| { readonly type: "fleet.decisions.submitted"; readonly requestId: string }
 	| { readonly type: "evidence.inspect.submitted"; readonly requestId: string }
 	| {
 		readonly type: "evidence.read.submitted";
@@ -234,6 +241,7 @@ export const initialAppState: AppState = {
 	fleetInspection: null,
 	toolchainInspection: null,
 	traceInspection: null,
+	gateDecisions: null,
 	evidenceInspection: null,
 	evidenceDetail: null,
 	fleetVerification: null,
@@ -253,6 +261,7 @@ export const initialAppState: AppState = {
 	pendingFleetInspect: null,
 	pendingToolchainInspect: null,
 	pendingTraceInspect: null,
+	pendingFleetDecisions: null,
 	pendingEvidenceInspect: null,
 	pendingEvidenceRead: null,
 	pendingFleetVerify: null,
@@ -278,6 +287,7 @@ const BOOTSTRAP_KEYS = [
 	"fleetInspection",
 	"toolchainInspection",
 	"traceInspection",
+	"gateDecisions",
 	"evidenceInspection",
 ] as const;
 
@@ -525,6 +535,10 @@ export function parseBootstrapPayload(value: unknown): WireBootstrap {
 			record.traceInspection,
 			"bootstrap.traceInspection",
 		),
+		gateDecisions: record.gateDecisions === null ? null : validateGateDecisions(
+			record.gateDecisions,
+			"bootstrap.gateDecisions",
+		),
 		evidenceInspection: record.evidenceInspection === null ? null : validateEvidenceInspection(
 			record.evidenceInspection,
 			"bootstrap.evidenceInspection",
@@ -690,6 +704,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				fleetInspection: action.payload.fleetInspection,
 				toolchainInspection: action.payload.toolchainInspection,
 				traceInspection: action.payload.traceInspection,
+				gateDecisions: action.payload.gateDecisions,
 				evidenceInspection: action.payload.evidenceInspection,
 				evidenceDetail: null,
 				fleetVerification: null,
@@ -701,6 +716,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				pendingFleetInspect: null,
 				pendingToolchainInspect: null,
 				pendingTraceInspect: null,
+				pendingFleetDecisions: null,
 				pendingEvidenceInspect: null,
 				pendingEvidenceRead: null,
 				pendingFleetVerify: null,
@@ -762,6 +778,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 			return { ...state, pendingToolchainInspect: action.requestId };
 		case "trace.inspect.submitted":
 			return { ...state, pendingTraceInspect: action.requestId };
+		case "fleet.decisions.submitted":
+			return { ...state, pendingFleetDecisions: action.requestId };
 		case "evidence.inspect.submitted":
 			return { ...state, pendingEvidenceInspect: action.requestId };
 		case "evidence.read.submitted":
@@ -817,6 +835,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						pendingFleetInspect: null,
 						pendingToolchainInspect: null,
 						pendingTraceInspect: null,
+						pendingFleetDecisions: null,
 						pendingEvidenceInspect: null,
 						pendingEvidenceRead: null,
 						pendingFleetVerify: null,
@@ -926,7 +945,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 						...sequenced,
 						traceInspection: event.payload.inspection,
 						pendingTraceInspect: null,
+						pendingFleetDecisions: null,
 						announcement: "Durable run accounting updated",
+					};
+				case "fleet.decisions.state":
+					return {
+						...sequenced,
+						gateDecisions: event.payload.decisions,
+						pendingFleetDecisions: null,
+						announcement: "Sealed gate decisions updated",
 					};
 				case "evidence.state":
 					return {

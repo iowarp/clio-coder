@@ -23,6 +23,7 @@ import {
 	FIXTURE_PROJECT_ID,
 	fleetInspectionFixture,
 	fleetVerificationFixture,
+	gateDecisionsFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	serverEventFixture,
@@ -63,6 +64,7 @@ const inertActions: WorkbenchActions = {
 	inspectFleet() {},
 	inspectToolchain() {},
 	inspectTrace() {},
+	inspectGateDecisions() {},
 	inspectEvidence() {},
 	readEvidence() {},
 	verifyRun() {},
@@ -290,6 +292,7 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 			inspection={fleetInspectionFixture()}
 			trace={traceInspectionFixture()}
 			evidence={evidenceInspectionFixture()}
+			decisions={gateDecisionsFixture()}
 			evidenceDetail={evidenceDetailFixture()}
 			pendingEvidenceRead={null}
 			verification={fleetVerificationFixture()}
@@ -331,6 +334,7 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 			inspection={fleetInspectionFixture()}
 			trace={traceInspectionFixture()}
 			evidence={evidenceInspectionFixture()}
+			decisions={gateDecisionsFixture()}
 			evidenceDetail={evidenceDetailFixture()}
 			pendingEvidenceRead={null}
 			verification={fleetVerificationFixture()}
@@ -420,6 +424,7 @@ Deno.test("an unread and an unavailable trace database are told apart, and neith
 				inspection={fleetInspectionFixture()}
 				trace={trace}
 				evidence={null}
+				decisions={null}
 				evidenceDetail={null}
 				pendingEvidenceRead={null}
 				verification={null}

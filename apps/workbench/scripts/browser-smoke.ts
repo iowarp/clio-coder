@@ -18,6 +18,7 @@ import type { ClioConfigInspector } from "../clio-config-inspector.ts";
 import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
+import type { ClioDecisionsInspector } from "../clio-decisions-inspector.ts";
 import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
 import type { ClioEvidenceInspector } from "../clio-evidence-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
@@ -32,6 +33,7 @@ import {
 	evidenceInspectionFixture,
 	fleetInspectionFixture,
 	fleetVerificationFixture,
+	gateDecisionsFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
 	toolchainInspectionFixture,
@@ -117,6 +119,9 @@ const running = await startWorkbenchServer({
 	traceInspector: {
 		inspect: () => Promise.resolve(traceInspectionFixture()),
 	} satisfies ClioTraceInspector,
+	decisionsInspector: {
+		inspect: () => Promise.resolve(gateDecisionsFixture()),
+	} satisfies ClioDecisionsInspector,
 	evidenceInspector: {
 		inspect: () => Promise.resolve(evidenceInspectionFixture()),
 		read: (_cwd, evidenceId) => Promise.resolve({ ...evidenceDetailFixture(), evidenceId }),
@@ -567,6 +572,30 @@ try {
 	equal(await fleetRoots.getByText("/fleet-runs/", { exact: false }).count(), 0);
 	// Selecting the step whose run is in the window drives the run record beside it.
 	await stepIndex.getByRole("button", { disabled: false }).first().click();
+	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
+
+	// A sealed gate verdict says what the coordinator concluded about these runs
+	// and how far its grader was from the route it was grading.
+	const gates = fleetJournal.getByRole("region", { name: "Verdicts reached about these runs" });
+	await gates.getByText("Review gate ran out of cycles", { exact: true }).waitFor();
+	await gates.getByText("Compete gate picked a winner", { exact: true }).waitFor();
+	await gates.getByText("not independent: the same model family", { exact: true }).waitFor();
+	await gates.getByText("independent of the route it graded", { exact: true }).waitFor();
+	await gates.getByText("candidate 2", { exact: true }).waitFor();
+	// The reason is the host's classification, never the sealed text behind it.
+	await gates.getByText(/the reviewer did not answer under its typed contract/u).waitFor();
+	// An artifact that no longer authenticates is counted rather than hidden.
+	await gates.getByText(/no longer authenticate against their own integrity digest/u).waitFor();
+	// run-alpha is the one graded run inside this window; the reviewer, judge and
+	// both candidates are not, so exactly one reference is selectable.
+	const gateRuns = gates.getByRole("list", { name: "Runs graded by gate fleet-345ea2e6c1ad:review" });
+	await gateRuns.getByRole("button", { disabled: false }).first().waitFor();
+	equal(await gateRuns.getByRole("button", { disabled: false }).count(), 1);
+	equal(await gateRuns.getByRole("button", { disabled: true }).count(), 1);
+	for (const forbidden of ["failed check", "verifier report", "clio/compete/", "/gate-decisions/", "sha256"]) {
+		equal(await gates.getByText(forbidden, { exact: false }).count(), 0);
+	}
+	await gateRuns.getByRole("button", { disabled: false }).first().click();
 	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
 
 	// Council topology names who was seated and how many rounds each voice took,
@@ -1538,6 +1567,7 @@ try {
 			dispatchUsesInstallationWideBoundedAdapter: true,
 			fleetRunsUseDurableBoundedAdapter: true,
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
+			gateVerdictsCrossWithoutTheirReasoning: true,
 			councilTopologyCrossesItsShapeAndNotItsDeliberation: true,
 			traceAccountingCarriesNoRequestTextOrPath: true,
 			traceTailsCrossAsShapesNotRows: true,

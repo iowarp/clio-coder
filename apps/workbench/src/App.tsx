@@ -41,6 +41,8 @@ import type {
 	WireFleetVerification,
 	WireFleetVerifyReason,
 	WireFleetVerifyState,
+	WireGateDecision,
+	WireGateDecisions,
 	WirePendingPermission,
 	WireProjectSummary,
 	WireRecoveryCheckLevel,
@@ -115,6 +117,7 @@ export interface WorkbenchActions {
 	inspectFleet(): void;
 	inspectToolchain(): void;
 	inspectTrace(): void;
+	inspectGateDecisions(): void;
 	inspectEvidence(): void;
 	readEvidence(evidenceId: string): void;
 	verifyRun(runId: string): void;
@@ -3786,6 +3789,223 @@ const COUNCIL_SYNTHESIS_LABELS: Readonly<Record<string, string>> = {
 	judge: "a judge dispatched to synthesize the answers",
 };
 
+const GATE_OUTCOME_LABELS: Readonly<Record<string, string>> = {
+	pass: "passed",
+	fail: "failed",
+	revise: "sent back for revision",
+	exhausted: "ran out of cycles",
+	winner: "picked a winner",
+	"no-winner": "picked nobody",
+	"operator-confirmed": "confirmed by the operator",
+	"full-auto-applied": "applied under full-auto",
+};
+
+const GATE_REASON_LABELS: Readonly<Record<string, string>> = {
+	"all-candidates-failed": "every candidate builder failed, so there was nothing to judge",
+	"builder-run-failed": "the builder run did not finish",
+	"reviewer-run-failed": "the reviewer run did not finish",
+	"reviewer-checks-failed": "the reviewer reported failed checks",
+	"reviewer-report-invalid": "the reviewer did not answer under its typed contract",
+	"judge-run-failed": "the judge run did not finish",
+	"judge-result-invalid": "the judge did not answer under its typed contract",
+	"judge-winner-out-of-range": "the judge named a candidate that does not exist",
+	"judge-picked-failed-candidate": "the judge picked a candidate whose builder had failed",
+	"winner-touches-protected-artifact": "the winning candidate changed a protected artifact",
+	"operator-confirmed-winner": "an operator confirmed the prior judge decision",
+	"full-auto-applied-winner": "full-auto applied the prior judge decision",
+	unclassified: "Clio Coder recorded a reason this GUI does not classify",
+};
+
+function gateOutcomeTone(outcome: string): string {
+	if (outcome === "pass" || outcome === "winner" || outcome === "operator-confirmed") return "success";
+	if (outcome === "fail" || outcome === "exhausted" || outcome === "no-winner") return "error";
+	return "action";
+}
+
+/** One graded run, linkable exactly while it is inside the run window. */
+function GateRunReference(
+	{ runId, role, inWindow, selected, onSelectRun }: {
+		runId: string;
+		role: string;
+		inWindow: boolean;
+		selected: boolean;
+		onSelectRun: (runId: string) => void;
+	},
+) {
+	return (
+		<li>
+			<button
+				type="button"
+				disabled={!inWindow}
+				aria-current={inWindow && selected ? "true" : undefined}
+				onClick={() => onSelectRun(runId)}
+			>
+				<span className="gate-decisions__role">{role}</span>
+				<span className="gate-decisions__run">{inWindow ? runId : `${runId} · outside this run window`}</span>
+			</button>
+		</li>
+	);
+}
+
+/**
+ * Sealed coordinator gate decisions.
+ *
+ * A reviewer verdict and a judge's winner cannot be written back into the
+ * receipts they grade without invalidating them, so the coordinator seals a
+ * separate integrity-covered artifact for each. Nothing in the terminal surface
+ * reads them back either; a run shows its own outcome and never the verdict a
+ * gate reached about it.
+ *
+ * The verdict crosses. The reasoning does not: a reviewer's findings and a
+ * judge's argument live in the decider run's own receipt, and the decision's
+ * stored reason line quotes failure text, protected artifact names, and approval
+ * request ids, so the host classifies it into a closed set instead.
+ */
+function GateDecisions(
+	{ decisions, knownRunIds, selectedRunId, onSelectRun }: {
+		decisions: WireGateDecisions | null;
+		knownRunIds: readonly string[];
+		selectedRunId: string | null;
+		onSelectRun: (runId: string) => void;
+	},
+) {
+	if (decisions === null) return null;
+	const inWindow = new Set(knownRunIds);
+	return (
+		<section className="gate-decisions" aria-labelledby="gate-decisions-title">
+			<div className="gate-decisions__heading">
+				<div>
+					<div className="eyebrow">GATE DECISIONS · SEALED COORDINATOR VERDICTS</div>
+					<h3 id="gate-decisions-title">Verdicts reached about these runs</h3>
+				</div>
+				<p>
+					A review or compete gate seals its verdict beside the receipts it graded, because writing it into them would
+					invalidate their evidence. This is that verdict, who it graded, and whether the grader was independent of the
+					route it was grading. The reasoning behind it stays on the host.
+				</p>
+			</div>
+			{!decisions.available
+				? (
+					<p className="gate-decisions__empty">
+						This installation has never sealed a gate decision. Review and compete gates write one; a direct dispatch
+						does not.
+					</p>
+				)
+				: decisions.decisions.length === 0
+				? (
+					<p className="gate-decisions__empty">
+						Clio Coder reports no gate decisions in this bounded scan.
+					</p>
+				)
+				: (
+					<ul className="gate-decisions__list">
+						{decisions.decisions.map((decision) => (
+							<li key={decision.id}>
+								<header>
+									<div>
+										<strong>
+											{decision.topology === "review" ? "Review" : "Compete"} gate{" "}
+											{GATE_OUTCOME_LABELS[decision.outcome] ?? decision.outcome}
+										</strong>
+										<code>{decision.group}</code>
+									</div>
+									<StatusMark
+										tone={gateOutcomeTone(decision.outcome)}
+										label={`cycle ${decision.cycle.toLocaleString()}`}
+									/>
+								</header>
+								<dl>
+									<div>
+										<dt>Sealed</dt>
+										<dd>
+											<time dateTime={decision.decidedAt}>{formatTimestamp(decision.decidedAt)}</time>
+										</dd>
+									</div>
+									<div>
+										<dt>Independence</dt>
+										<dd>{gateIndependenceText(decision)}</dd>
+									</div>
+									<div>
+										<dt>Winner</dt>
+										<dd>
+											{decision.winner === null
+												? "not a winner-picking outcome"
+												: `candidate ${decision.winner.index.toLocaleString()}`}
+										</dd>
+									</div>
+									<div>
+										<dt>Confirms</dt>
+										<dd>{decision.confirms ?? "not a confirmation"}</dd>
+									</div>
+								</dl>
+								<ul className="gate-decisions__runs" aria-label={`Runs graded by gate ${decision.group}`}>
+									{decision.subjects.map((runId) => (
+										<GateRunReference
+											key={runId}
+											runId={runId}
+											role={decision.winner?.runId === runId ? "graded · winner" : "graded"}
+											inWindow={inWindow.has(runId)}
+											selected={selectedRunId === runId}
+											onSelectRun={onSelectRun}
+										/>
+									))}
+									{decision.decider !== null && (
+										<GateRunReference
+											runId={decision.decider}
+											role={decision.topology === "review" ? "reviewer" : "judge"}
+											inWindow={inWindow.has(decision.decider)}
+											selected={selectedRunId === decision.decider}
+											onSelectRun={onSelectRun}
+										/>
+									)}
+								</ul>
+								{decision.subjectsTruncated && (
+									<p className="gate-decisions__bound">
+										This gate graded more runs than the bounded list names.
+									</p>
+								)}
+								{decision.reason !== null && (
+									<p className="gate-decisions__reason">
+										{GATE_REASON_LABELS[decision.reason] ?? decision.reason}. The exact text Clio Coder recorded stays
+										on the host.
+									</p>
+								)}
+							</li>
+						))}
+					</ul>
+				)}
+			{decisions.unverifiable > 0 && (
+				<p className="gate-decisions__bound gate-decisions__bound--alarm">
+					{decisions.unverifiable.toLocaleString()}{" "}
+					sealed decision file(s) in this scan no longer authenticate against their own integrity digest and are not
+					shown.
+				</p>
+			)}
+			{decisions.truncated && (
+				<p className="gate-decisions__bound">Older gate decisions are outside this bounded scan.</p>
+			)}
+		</section>
+	);
+}
+
+/**
+ * How far the grader was from the route it graded.
+ *
+ * Independence is defined as sharing neither the agent nor the model family: a
+ * shared target, runtime, or node is an operational fact about a small fleet,
+ * while a shared agent or model family is a shared failure mode, and only those
+ * two can make a verdict self-confirming.
+ */
+function gateIndependenceText(decision: WireGateDecision): string {
+	if (decision.correlation === null) return "no decider ran";
+	if (decision.correlation.independent) return "independent of the route it graded";
+	const shared = [
+		...(decision.correlation.agent ? ["the same agent"] : []),
+		...(decision.correlation.modelFamily ? ["the same model family"] : []),
+	];
+	return `not independent: ${shared.join(" and ")}`;
+}
+
 /**
  * The sealed council report as a reference, linkable only inside the run window.
  *
@@ -4376,6 +4596,7 @@ export const FleetJournal = memo(function FleetJournal({
 	inspection,
 	trace,
 	evidence,
+	decisions,
 	evidenceDetail,
 	pendingEvidenceRead,
 	verification,
@@ -4389,6 +4610,7 @@ export const FleetJournal = memo(function FleetJournal({
 	inspection: WireFleetInspection | null;
 	trace: WireTraceInspection | null;
 	evidence: WireEvidenceInspection | null;
+	decisions: WireGateDecisions | null;
 	evidenceDetail: WireEvidenceDetail | null;
 	pendingEvidenceRead: string | null;
 	verification: WireFleetVerification | null;
@@ -4601,6 +4823,13 @@ export const FleetJournal = memo(function FleetJournal({
 					</p>
 				)}
 			</section>
+
+			<GateDecisions
+				decisions={decisions}
+				knownRunIds={inspection.runs.map((run) => run.runId)}
+				selectedRunId={selected?.runId ?? null}
+				onSelectRun={setSelectedRunId}
+			/>
 
 			<CouncilTopology
 				councils={inspection.councils}
@@ -5533,6 +5762,7 @@ function ConversationCanvas({
 							inspection={state.fleetInspection}
 							trace={state.traceInspection}
 							evidence={state.evidenceInspection}
+							decisions={state.gateDecisions}
 							evidenceDetail={state.evidenceDetail}
 							pendingEvidenceRead={state.pendingEvidenceRead}
 							verification={state.fleetVerification}
@@ -5540,7 +5770,7 @@ function ConversationCanvas({
 							onReadEvidence={actions.readEvidence}
 							onVerifyRun={actions.verifyRun}
 							pending={state.pendingFleetInspect !== null || state.pendingTraceInspect !== null ||
-								state.pendingEvidenceInspect !== null}
+								state.pendingEvidenceInspect !== null || state.pendingFleetDecisions !== null}
 							onRefresh={onRefreshFleet}
 							onBack={onConversationOpen}
 						/>
@@ -7293,6 +7523,14 @@ export function WorkbenchView(
 		) {
 			actions.inspectEvidence();
 		}
+		// A sealed gate verdict is finalized the moment it is written, so it reads
+		// on the same terms as the accounting: once on open, then on request.
+		if (
+			view === "fleet-runs" && state.gateDecisions === null &&
+			state.pendingFleetDecisions === null
+		) {
+			actions.inspectGateDecisions();
+		}
 	}, [
 		actions,
 		open?.project.id,
@@ -7362,6 +7600,7 @@ export function WorkbenchView(
 		actions.inspectFleet();
 		actions.inspectTrace();
 		actions.inspectEvidence();
+		actions.inspectGateDecisions();
 	}, [actions]);
 
 	useEffect(() => {

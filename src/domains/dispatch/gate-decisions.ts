@@ -298,8 +298,18 @@ export interface StagePendingGateDecisionOptions {
 	stateDir?: string;
 }
 
-function decisionsDirectory(stateDir = clioStateDir()): string {
+/**
+ * Where the durable decision artifacts live.
+ *
+ * Exported so a read-only projection can bound its own scan without duplicating
+ * the layout. Nothing outside this module may compose an artifact path from it.
+ */
+export function gateDecisionsDirectory(stateDir = clioStateDir()): string {
 	return join(stateDir, "gate-decisions");
+}
+
+function decisionsDirectory(stateDir = clioStateDir()): string {
+	return gateDecisionsDirectory(stateDir);
 }
 
 function pendingDecisionsDirectory(stateDir = clioStateDir()): string {

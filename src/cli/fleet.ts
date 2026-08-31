@@ -8,6 +8,7 @@
  *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
  *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
  *   clio-coder fleet inspect --json             bounded recent run and journal projection
+ *   clio-coder fleet decisions --json           bounded sealed review and compete gate verdicts
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
@@ -104,6 +105,7 @@ Subcommands:
        [--json]                 emit step receipts as JSON
   status [--json]               show running, retrying, and total dispatch state
   inspect --json                emit a bounded recent-run and event-journal projection
+  decisions --json              emit a bounded window of sealed review and compete gate verdicts
   view <runId> [--follow]       read one run's ledger entry, event journal, and receipt
   view <fleetRootId>            list a fleet run's steps and the run id to view for each
   drain [--json]                deny new execution starts for up to one hour
@@ -841,6 +843,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runStatus(args.slice(1));
 		case "inspect":
 			return (await import("./fleet-inspect.js")).runFleetInspect(args.slice(1));
+		case "decisions":
+			return (await import("./fleet-decisions.js")).runFleetDecisions(args.slice(1));
 		case "verify":
 			return (await import("./fleet-verify.js")).runFleetVerify(args.slice(1));
 		case "view":

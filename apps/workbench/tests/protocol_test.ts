@@ -134,7 +134,7 @@ function serverEvent<K extends ServerEventKind>(
 		: kind === "connection.ready" || kind === "protocol.error" ||
 				kind === "command.error" ||
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
-				kind === "fleet.inspection.state" ||
+				kind === "fleet.inspection.state" || kind === "fleet.decisions.state" ||
 				kind === "toolchain.state" || kind === "trace.state" || kind === "evidence.state" ||
 				kind === "evidence.detail.state" || kind === "fleet.verification.state" ||
 				kind === "recovery.state"
@@ -182,6 +182,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"routing.inspect",
 		"dispatch.inspect",
 		"fleet.inspect",
+		"fleet.decisions",
 		"toolchain.inspect",
 		"trace.inspect",
 		"evidence.inspect",
@@ -506,6 +507,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"routing.inspect": { projectId: "project-alpha" },
 		"dispatch.inspect": {},
 		"fleet.inspect": {},
+		"fleet.decisions": {},
 		"toolchain.inspect": {},
 		"trace.inspect": {},
 		"evidence.inspect": {},
@@ -1563,6 +1565,69 @@ Deno.test("the fleet root index validates step counts, attribution, and identity
 	expectProtocolError(() =>
 		serverEvent("fleet.inspection.state", { inspection: { ...inspection, roots: [root, root] } })
 	);
+});
+
+Deno.test("gate decisions validate the verdict, the winner, and the independence they claim", () => {
+	const decision = {
+		id: "review-mt20xowx-a270cb-mt213mjr-5462547e6338",
+		group: "review-mt20xowx-a270cb",
+		topology: "review",
+		cycle: 2,
+		outcome: "exhausted",
+		decidedAt: "2026-08-31T13:58:00.000Z",
+		subjects: ["run-alpha"],
+		subjectsTruncated: false,
+		decider: "run-reviewer",
+		correlation: { agent: false, target: true, modelFamily: true, runtime: true, node: true, independent: false },
+		winner: null,
+		confirms: null,
+		reason: "reviewer-report-invalid",
+	};
+	const decisions = {
+		scope: "installation",
+		inspectedAt: "2026-08-31T14:02:00.000Z",
+		generatedAt: "2026-08-31T14:01:28.728Z",
+		available: true,
+		decisions: [decision],
+		truncated: false,
+		unverifiable: 0,
+	};
+	const event = serverEvent("fleet.decisions.state", { decisions });
+	equal(event.projectId, undefined);
+	equal(event.payload.decisions.decisions[0]?.reason, "reviewer-report-invalid");
+	equal(event.payload.decisions.decisions[0]?.correlation?.independent, false);
+	for (
+		const broken of [
+			// The reviewer's own findings are what this boundary keeps host-side.
+			{ ...decision, detail: "reviewer reported 2 failed check(s)" },
+			// Neither topology can reach the other's verdicts.
+			{ ...decision, outcome: "no-winner" },
+			// Independence is sharing neither the agent nor the model family.
+			{ ...decision, correlation: { ...decision.correlation, independent: true } },
+			// A correlation with no decider measures nothing.
+			{ ...decision, decider: null },
+			// Only three outcomes name a winner, and each requires one.
+			{ ...decision, winner: { index: 1, runId: "run-alpha" } },
+			{
+				...decision,
+				topology: "compete",
+				outcome: "winner",
+				winner: { index: 1, runId: "run-never-graded" },
+			},
+			// A gate that graded nothing is not a gate.
+			{ ...decision, subjects: [] },
+			{ ...decision, subjects: ["run-alpha", "run-alpha"] },
+		]
+	) {
+		expectProtocolError(() =>
+			serverEvent("fleet.decisions.state", { decisions: { ...decisions, decisions: [broken] } })
+		);
+	}
+	expectProtocolError(() =>
+		serverEvent("fleet.decisions.state", { decisions: { ...decisions, decisions: [decision, decision] } })
+	);
+	// A store the frame says is absent cannot also report what it holds.
+	expectProtocolError(() => serverEvent("fleet.decisions.state", { decisions: { ...decisions, available: false } }));
 });
 
 Deno.test("council topology validates seated labels, rounds, and the synthesis it claims", () => {
