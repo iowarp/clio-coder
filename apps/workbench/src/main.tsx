@@ -254,6 +254,12 @@ function App() {
 					dispatch({ type: "trace.inspect.submitted", requestId });
 				}
 			},
+			inspectEvidence() {
+				const requestId = send("evidence.inspect", {});
+				if (requestId !== null) {
+					dispatch({ type: "evidence.inspect.submitted", requestId });
+				}
+			},
 			inspectRecovery() {
 				const requestId = send("recovery.inspect", {});
 				if (requestId !== null) {

@@ -18,6 +18,7 @@ import {
 	clioSnapshotFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	evidenceInspectionFixture,
 	FIXTURE_PROJECT_ID,
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
@@ -60,6 +61,7 @@ const inertActions: WorkbenchActions = {
 	inspectFleet() {},
 	inspectToolchain() {},
 	inspectTrace() {},
+	inspectEvidence() {},
 	inspectRecovery() {},
 	listTargets() {},
 	probeTarget() {},
@@ -283,6 +285,7 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 		<FleetJournal
 			inspection={fleetInspectionFixture()}
 			trace={traceInspectionFixture()}
+			evidence={evidenceInspectionFixture()}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -317,6 +320,7 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 		<FleetJournal
 			inspection={fleetInspectionFixture()}
 			trace={traceInspectionFixture()}
+			evidence={evidenceInspectionFixture()}
 			pending={false}
 			onRefresh={() => undefined}
 			onBack={() => undefined}
@@ -337,6 +341,19 @@ Deno.test("the fleet root index names planned steps and only links runs in this 
 	match(html, /no run recorded/u);
 	match(html, /review gate produced no structured verdict/u);
 	ok(html.includes("disabled"), "steps outside the run window stay unselectable");
+	// The evidence inventory links a bundle to the runs already in this window and
+	// leaves a bundle whose runs have aged out unselectable.
+	match(html, /Durable evidence built from these runs/u);
+	match(html, /run-alpha-bundle/u);
+	match(html, /Compromised/u);
+	match(html, /audit-linked/u);
+	match(html, /3 secret-shaped values were redacted/u);
+	match(html, /1 protected artifact event recorded/u);
+	match(html, /no verdict of its own/u);
+	for (const forbidden of ["tasks", "cwds", "transcript.md", "sessionEntries"]) {
+		ok(!html.includes(forbidden), `evidence inventory leaked ${forbidden}`);
+	}
+
 	// The trace accounting for the selected run rides alongside its event spine.
 	match(html, /Durable accounting for run run-alpha/u);
 	match(html, /28,665/u);
@@ -366,6 +383,7 @@ Deno.test("an unread and an unavailable trace database are told apart, and neith
 			<FleetJournal
 				inspection={fleetInspectionFixture()}
 				trace={trace}
+				evidence={null}
 				pending={false}
 				onRefresh={() => undefined}
 				onBack={() => undefined}

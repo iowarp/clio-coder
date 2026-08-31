@@ -49,6 +49,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"fleet.inspect",
 	"toolchain.inspect",
 	"trace.inspect",
+	"evidence.inspect",
 	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
@@ -256,6 +257,8 @@ export type ToolchainInspectPayload = Readonly<Record<string, never>>;
 
 export type TraceInspectPayload = Readonly<Record<string, never>>;
 
+export type EvidenceInspectPayload = Readonly<Record<string, never>>;
+
 export type RecoveryInspectPayload = Readonly<Record<string, never>>;
 
 export interface TargetsListPayload {
@@ -302,6 +305,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "fleet.inspect": FleetInspectPayload;
 	readonly "toolchain.inspect": ToolchainInspectPayload;
 	readonly "trace.inspect": TraceInspectPayload;
+	readonly "evidence.inspect": EvidenceInspectPayload;
 	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
@@ -338,6 +342,7 @@ export const SERVER_EVENT_KINDS = [
 	"fleet.inspection.state",
 	"toolchain.state",
 	"trace.state",
+	"evidence.state",
 	"recovery.state",
 	"targets.state",
 	"targets.probed",
@@ -1103,6 +1108,68 @@ export interface WireFleetInspection {
 	readonly rootsTruncated: boolean;
 }
 
+export const EVIDENCE_SOURCE_KINDS = ["run", "session", "eval"] as const;
+export type WireEvidenceSourceKind = (typeof EVIDENCE_SOURCE_KINDS)[number];
+export const EVIDENCE_TRUST_VERDICTS = [
+	"reviewed",
+	"grounded",
+	"unverified",
+	"compromised",
+	"unknown",
+] as const;
+export type WireEvidenceTrustVerdict = (typeof EVIDENCE_TRUST_VERDICTS)[number];
+export const MAX_WIRE_EVIDENCE_ARTIFACTS = 12;
+export const MAX_WIRE_EVIDENCE_IDS = 8;
+
+/**
+ * One durable evidence bundle, as shape and trust rather than content.
+ *
+ * The underlying overview also carries the task text the operator typed, the
+ * working directories its runs executed in, and the file names inside the
+ * bundle. None of that crosses. `runIds` does, because it is what lets the GUI
+ * say which of the runs it already lists a bundle was built from.
+ */
+export interface WireEvidenceArtifact {
+	readonly evidenceId: string;
+	readonly sourceKind: WireEvidenceSourceKind;
+	readonly generatedAt: string;
+	readonly startedAt: string | null;
+	readonly endedAt: string | null;
+	readonly runIds: readonly string[];
+	readonly runIdsTruncated: boolean;
+	readonly agentIds: readonly string[];
+	readonly statuses: readonly string[];
+	readonly tags: readonly string[];
+	readonly totals: Readonly<{
+		runs: number;
+		receipts: number;
+		toolCalls: number;
+		toolErrors: number;
+		blockedToolCalls: number;
+		protectedArtifacts: number;
+		tokens: number;
+		costUsd: number;
+		wallTimeMs: number;
+	}>;
+	/** Secret-shaped values the builder replaced across the bundle's exports. */
+	readonly redactionCount: number;
+	readonly trust: Readonly<{
+		verdict: WireEvidenceTrustVerdict;
+		runsCovered: number;
+		/** True when the bundle predates the canonical trust projection. */
+		historical: boolean;
+	}>;
+}
+
+/** Bounded newest-first evidence window selected by Clio Coder, never by browser argv. */
+export interface WireEvidenceInspection {
+	readonly scope: "installation";
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	readonly artifacts: readonly WireEvidenceArtifact[];
+	readonly truncated: boolean;
+}
+
 export const MAX_WIRE_TRACE_RUNS = 8;
 export const MAX_WIRE_TRACE_PHASES = 16;
 
@@ -1379,6 +1446,10 @@ export interface TraceStatePayload {
 	readonly inspection: WireTraceInspection;
 }
 
+export interface EvidenceStatePayload {
+	readonly inspection: WireEvidenceInspection;
+}
+
 export interface RecoveryStatePayload {
 	readonly inspection: WireRecoveryInspection;
 }
@@ -1568,6 +1639,7 @@ export interface ServerEventPayloadByKind {
 	readonly "fleet.inspection.state": FleetInspectionStatePayload;
 	readonly "toolchain.state": ToolchainStatePayload;
 	readonly "trace.state": TraceStatePayload;
+	readonly "evidence.state": EvidenceStatePayload;
 	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
@@ -1924,6 +1996,7 @@ function validateClientPayload<K extends ClientCommandKind>(
 		case "fleet.inspect":
 		case "toolchain.inspect":
 		case "trace.inspect":
+		case "evidence.inspect":
 		case "recovery.inspect":
 			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
 		case "project.browse": {
@@ -2183,6 +2256,10 @@ function expectTimestamp(value: unknown, label: string): string {
 		return invalid(`${label} must be a canonical ISO timestamp`);
 	}
 	return timestamp;
+}
+
+function expectNullableTimestamp(value: unknown, label: string): string | null {
+	return value === null ? null : expectTimestamp(value, label);
 }
 
 function expectNullableId(value: unknown, label: string): string | null {
@@ -4236,6 +4313,130 @@ function expectNullableDispatchNumber(
 	return value === null ? null : expectDispatchNumber(value, label, integer);
 }
 
+/** A bounded list of distinct identity strings. */
+function expectIdentityList(value: unknown, label: string): readonly string[] {
+	const list = expectArray(
+		value,
+		label,
+		MAX_WIRE_EVIDENCE_IDS,
+		(entry, entryLabel) => expectPresentationText(entry, entryLabel, 128),
+	);
+	if (new Set(list).size !== list.length) invalid(`${label} repeats an entry`);
+	return list;
+}
+
+export function validateEvidenceInspection(
+	value: unknown,
+	label = "evidence inspection",
+): WireEvidenceInspection {
+	const record = expectExactKeys(value, label, [
+		"scope",
+		"inspectedAt",
+		"generatedAt",
+		"artifacts",
+		"truncated",
+	]);
+	if (record.scope !== "installation") {
+		invalid(`${label}.scope must be installation`);
+	}
+	const seen = new Set<string>();
+	const artifacts = expectArray(
+		record.artifacts,
+		`${label}.artifacts`,
+		MAX_WIRE_EVIDENCE_ARTIFACTS,
+		(value, rowLabel): WireEvidenceArtifact => {
+			const artifact = expectExactKeys(value, rowLabel, [
+				"evidenceId",
+				"sourceKind",
+				"generatedAt",
+				"startedAt",
+				"endedAt",
+				"runIds",
+				"runIdsTruncated",
+				"agentIds",
+				"statuses",
+				"tags",
+				"totals",
+				"redactionCount",
+				"trust",
+			]);
+			const evidenceId = expectPresentationText(artifact.evidenceId, `${rowLabel}.evidenceId`, 128);
+			if (seen.has(evidenceId)) invalid(`${label}.artifacts repeats ${evidenceId}`);
+			seen.add(evidenceId);
+			const totals = expectExactKeys(artifact.totals, `${rowLabel}.totals`, [
+				"runs",
+				"receipts",
+				"toolCalls",
+				"toolErrors",
+				"blockedToolCalls",
+				"protectedArtifacts",
+				"tokens",
+				"costUsd",
+				"wallTimeMs",
+			]);
+			const toolCalls = expectDispatchNumber(totals.toolCalls, `${rowLabel}.totals.toolCalls`, true);
+			const toolErrors = expectDispatchNumber(totals.toolErrors, `${rowLabel}.totals.toolErrors`, true);
+			// A failed call is a subset of the calls that were attempted.
+			if (toolErrors > toolCalls) {
+				invalid(`${rowLabel}.totals reports more tool errors than tool calls`);
+			}
+			const trust = expectExactKeys(artifact.trust, `${rowLabel}.trust`, [
+				"verdict",
+				"runsCovered",
+				"historical",
+			]);
+			const verdict = expectEnum(trust.verdict, `${rowLabel}.trust.verdict`, EVIDENCE_TRUST_VERDICTS);
+			const runsCovered = expectDispatchNumber(trust.runsCovered, `${rowLabel}.trust.runsCovered`, true);
+			const historical = expectBoolean(trust.historical, `${rowLabel}.trust.historical`);
+			// A bundle with no canonical trust record has no verdict of its own,
+			// and one that recorded runs is no longer in the historical format.
+			if (historical && (runsCovered > 0 || verdict !== "unknown")) {
+				invalid(`${rowLabel}.trust contradicts its historical projection`);
+			}
+			return {
+				evidenceId,
+				sourceKind: expectEnum(artifact.sourceKind, `${rowLabel}.sourceKind`, EVIDENCE_SOURCE_KINDS),
+				generatedAt: expectTimestamp(artifact.generatedAt, `${rowLabel}.generatedAt`),
+				startedAt: expectNullableTimestamp(artifact.startedAt, `${rowLabel}.startedAt`),
+				endedAt: expectNullableTimestamp(artifact.endedAt, `${rowLabel}.endedAt`),
+				runIds: expectIdentityList(artifact.runIds, `${rowLabel}.runIds`),
+				runIdsTruncated: expectBoolean(artifact.runIdsTruncated, `${rowLabel}.runIdsTruncated`),
+				agentIds: expectIdentityList(artifact.agentIds, `${rowLabel}.agentIds`),
+				statuses: expectIdentityList(artifact.statuses, `${rowLabel}.statuses`),
+				tags: expectIdentityList(artifact.tags, `${rowLabel}.tags`),
+				totals: {
+					runs: expectDispatchNumber(totals.runs, `${rowLabel}.totals.runs`, true),
+					receipts: expectDispatchNumber(totals.receipts, `${rowLabel}.totals.receipts`, true),
+					toolCalls,
+					toolErrors,
+					blockedToolCalls: expectDispatchNumber(
+						totals.blockedToolCalls,
+						`${rowLabel}.totals.blockedToolCalls`,
+						true,
+					),
+					protectedArtifacts: expectDispatchNumber(
+						totals.protectedArtifacts,
+						`${rowLabel}.totals.protectedArtifacts`,
+						true,
+					),
+					tokens: expectDispatchNumber(totals.tokens, `${rowLabel}.totals.tokens`, true),
+					costUsd: expectDispatchNumber(totals.costUsd, `${rowLabel}.totals.costUsd`, false),
+					wallTimeMs: expectDispatchNumber(totals.wallTimeMs, `${rowLabel}.totals.wallTimeMs`, true),
+				},
+				redactionCount: expectDispatchNumber(artifact.redactionCount, `${rowLabel}.redactionCount`, true),
+				trust: { verdict, runsCovered, historical },
+			};
+		},
+	);
+	return {
+		scope: "installation",
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		artifacts,
+		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+	};
+}
+
 export function validateTraceInspection(
 	value: unknown,
 	label = "trace inspection",
@@ -4985,6 +5186,15 @@ function validateServerPayload(
 				),
 			};
 		}
+		case "evidence.state": {
+			const record = expectExactKeys(value, label, ["inspection"]);
+			return {
+				inspection: validateEvidenceInspection(
+					record.inspection,
+					`${label}.inspection`,
+				),
+			};
+		}
 		case "recovery.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -5324,6 +5534,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"fleet.inspection.state",
 	"toolchain.state",
 	"trace.state",
+	"evidence.state",
 	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([

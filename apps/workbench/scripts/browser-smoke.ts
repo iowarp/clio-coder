@@ -19,6 +19,7 @@ import type { ClioDispatchInspector } from "../clio-dispatch-inspector.ts";
 import type { ClioFleetInspector } from "../clio-fleet-inspector.ts";
 import type { ClioToolchainInspector } from "../clio-toolchain-inspector.ts";
 import type { ClioTraceInspector } from "../clio-trace-inspector.ts";
+import type { ClioEvidenceInspector } from "../clio-evidence-inspector.ts";
 import type { ClioRecoveryInspector } from "../clio-recovery-inspector.ts";
 import type { ClioUsageInspector } from "../clio-usage-inspector.ts";
 import type { ClioRoutingInspector } from "../clio-routing-inspector.ts";
@@ -27,6 +28,7 @@ import {
 	catalogInspectionFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	evidenceInspectionFixture,
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
 	routingInspectionFixture,
@@ -112,6 +114,9 @@ const running = await startWorkbenchServer({
 	traceInspector: {
 		inspect: () => Promise.resolve(traceInspectionFixture()),
 	} satisfies ClioTraceInspector,
+	evidenceInspector: {
+		inspect: () => Promise.resolve(evidenceInspectionFixture()),
+	} satisfies ClioEvidenceInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
 
@@ -475,6 +480,21 @@ try {
 	await tracePhases.getByText("errored", { exact: true }).waitFor();
 	for (const forbidden of ["the prompt text", "trace.sqlite", "phase_id"]) {
 		equal(await traceAccounting.getByText(forbidden, { exact: false }).count(), 0);
+	}
+
+	// The evidence inventory links a bundle back into the run window and says so
+	// when a bundle predates the canonical trust projection.
+	const evidenceInventory = fleetJournal.getByRole("region", { name: "Durable evidence built from these runs" });
+	await evidenceInventory.getByText("run-alpha-bundle", { exact: true }).waitFor();
+	await evidenceInventory.getByText("Compromised", { exact: true }).waitFor();
+	await evidenceInventory.getByRole("list", { name: "Tags on run-alpha-bundle" }).getByText("blocked-tool", {
+		exact: true,
+	}).waitFor();
+	await evidenceInventory.getByText(/no verdict of its own/u).waitFor();
+	// run-alpha is in the window and run-beta is not, so exactly one is selectable.
+	equal(await evidenceInventory.getByRole("button", { disabled: true }).count(), 1);
+	for (const forbidden of ["tasks", "cwds", "transcript.md", "/home/"]) {
+		equal(await evidenceInventory.getByText(forbidden, { exact: false }).count(), 0);
 	}
 
 	// The fleet root index names the planned steps and only offers a selection
@@ -1428,6 +1448,7 @@ try {
 			fleetRunsUseDurableBoundedAdapter: true,
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
 			traceAccountingCarriesNoRequestTextOrPath: true,
+			evidenceInventoryCarriesShapeAndTrustOnly: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,

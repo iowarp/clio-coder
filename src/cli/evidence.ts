@@ -12,6 +12,7 @@ import {
 	loadEvidenceRunProvenance,
 	provenanceTranscriptLines,
 } from "../domains/evidence/index.js";
+import { runEvidenceInventory } from "./evidence-inventory.js";
 import { printError, printNote, printOk } from "./shared.js";
 
 const HELP = `clio-coder evidence build --run <runId>
@@ -19,14 +20,16 @@ clio-coder evidence build --session <sessionId>
 clio-coder evidence build --eval <evalId>
 clio-coder evidence inspect <evidenceId>
 clio-coder evidence list
+clio-coder evidence inventory --json
 
 Build or inspect deterministic Clio evidence artifacts.
 `;
 
-type EvidenceCommand = "build" | "inspect" | "list";
+type EvidenceCommand = "build" | "inspect" | "list" | "inventory";
 
 interface ParsedEvidenceArgs {
 	command?: EvidenceCommand;
+	json: boolean;
 	runId?: string;
 	sessionId?: string;
 	evalId?: string;
@@ -35,7 +38,7 @@ interface ParsedEvidenceArgs {
 }
 
 function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
-	const parsed: ParsedEvidenceArgs = { help: false };
+	const parsed: ParsedEvidenceArgs = { help: false, json: false };
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === undefined) continue;
@@ -44,11 +47,21 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 			continue;
 		}
 		if (parsed.command === undefined) {
-			if (arg === "build" || arg === "inspect" || arg === "list") {
+			if (arg === "build" || arg === "inspect" || arg === "list" || arg === "inventory") {
 				parsed.command = arg;
 				continue;
 			}
 			throw new Error(`unknown evidence command: ${arg}`);
+		}
+		// `inventory` is the fixed read a GUI host may invoke. Its argv is not a
+		// surface, so anything past the one required flag is a usage error rather
+		// than something to ignore.
+		if (parsed.command === "inventory") {
+			if (arg === "--json" && !parsed.json) {
+				parsed.json = true;
+				continue;
+			}
+			throw new Error("inventory accepts only --json");
 		}
 		if (parsed.command === "build") {
 			if (arg === "--run") {
@@ -102,6 +115,11 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 			parsed.evidenceId !== undefined)
 	) {
 		throw new Error("list does not accept extra arguments");
+	}
+	// The GUI read is only fixed if `--json` is required rather than defaulted:
+	// a bare `evidence inventory` must not quietly print something else.
+	if (parsed.command === "inventory" && !parsed.json) {
+		throw new Error("inventory requires --json");
 	}
 	return parsed;
 }
@@ -168,7 +186,8 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 			renderEvidenceList(await listEvidenceOverviews(dataDir));
 			return 0;
 		}
-		printError("evidence requires build, inspect, or list");
+		if (parsed.command === "inventory") return runEvidenceInventory(parsed.json);
+		printError("evidence requires build, inspect, list, or inventory");
 		return 2;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));

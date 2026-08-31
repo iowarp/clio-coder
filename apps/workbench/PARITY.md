@@ -15,8 +15,8 @@ the main application.
 | Verdict | Count |
 | ------- | ----: |
 | Present |    18 |
-| Partial |    57 |
-| Absent  |    37 |
+| Partial |    58 |
+| Absent  |    36 |
 | Total   |   112 |
 
 ## Command-line surface
@@ -38,7 +38,7 @@ the main application.
 | Upgrade                         | `upgrade`                                                                     | **Absent**  | The GUI has no version comparison, migration preview, or upgrade operation.                                                                                                               |
 | Agent reference                 | `agents [--json]`                                                             | **Present** | Capability atlas renders bounded discovered-agent recipes and provenance.                                                                                                                 |
 | Fleet lifecycle                 | `fleet` list/new/validate/graph/commands/run/status/view/inspect/drain/resume | **Partial** | Recent run inspection, bounded journal follow, and the fleet-root step index are graphical; authoring, validation, admission control, and execution are absent.                           |
-| Evidence artifacts              | `evidence` build/list/inspect                                                 | **Absent**  | The timeline shows session evidence, but durable evidence discovery and artifact inspection have no typed GUI boundary.                                                                   |
+| Evidence artifacts              | `evidence` build/list/inspect                                                 | **Partial** | Runs lists recent bundles with provenance, tags, totals, redaction counts, and a trust verdict; building one and reading its contents stay terminal.                                      |
 | Evaluation                      | `eval` run/report/compare                                                     | **Absent**  | No eval task discovery, execution, comparison, or report canvas exists.                                                                                                                   |
 | Durable memory                  | `memory` list/propose/promote/approve/reject/prune                            | **Partial** | Effective configuration can report memory presence and the catalog can describe resources, but memory records and reviewed mutations are absent.                                          |
 | Historical usage                | `usage report`                                                                | **Present** | The project-scoped 30-day Usage record projects bounded report rows and distinguishes a missing store from zero activity.                                                                 |
@@ -113,7 +113,7 @@ the main application.
 | Fleet root inspection           | Planned step index and terminal run ids                               | **Present** | Runs indexes recent roots to their planned step order, terminal run ids, attribution, and failure reason, and links steps into the window.          |
 | Council                         | Roster preview, approval, rounds, member grid, synthesis              | **Absent**  | Generic dispatch activity is insufficient to reconstruct council topology or voices.                                                                |
 | Compete                         | Parallel candidates, judge/gate decision, winner, cleanup evidence    | **Absent**  | No typed compete topology, candidate result, gate, or cleanup projection reaches ACP.                                                               |
-| Receipt trust and verify        | Sealed receipt status and `/view verify` host check                   | **Partial** | Runs projects sealed receipt trust and evidence summaries without native paths; explicit on-demand host verification is absent.                     |
+| Receipt trust and verify        | Sealed receipt status and `/view verify` host check                   | **Partial** | Runs projects sealed receipt trust and per-bundle evidence trust verdicts without native paths; on-demand host verification is absent.              |
 | Task and decision boards        | Inspect and mutate session ledgers                                    | **Absent**  | Neither ledger is part of protocol v4.                                                                                                              |
 | Memory overlay                  | Lessons, task bank, activity, promotion                               | **Absent**  | Memory configuration facts do not expose records or mutations.                                                                                      |
 | Resource overlays               | Agents, skills, prompts, extensions, library                          | **Partial** | Agents, installed skills/extensions, and library inventories are present; prompts and reviewed mutations are incomplete.                            |
@@ -166,9 +166,11 @@ the main application.
    facts, compete candidate and gate outcomes, and receipt verification remain and still need an authenticated bounded
    projection each.
 5. **Partly implemented:** durable trace runs and phases now reach the GUI through the fixed `trace inspect --json`
-   read, bounded to eight runs and sixteen phases, carrying no request text, description, error prose, or database path.
-   Still to come: an Evidence center for receipt and evidence discovery, plus trace event tails and process views, all
-   through fixed read commands rather than arbitrary SQL, native paths, or raw payloads.
+   read, bounded to eight runs and sixteen phases, carrying no request text, description, error prose, or database path;
+   and durable evidence bundles reach it through the fixed `evidence inventory --json` read, bounded to twelve bundles,
+   carrying provenance, tags, totals, redaction counts, and a per-bundle trust verdict but no task text, working
+   directory, or bundle file name. Still to come: reading one bundle's contents, building a bundle, and trace event
+   tails and process views, all through fixed read commands rather than arbitrary SQL, native paths, or raw payloads.
 6. **Partly implemented:** every doctor check now crosses as its name, section, and verdict, so a failing check names
    its subject instead of adding one to a category tally. Finding detail stays on the host permanently. Still to come:
    safe ACP settings and operations for target/auth lifecycle, memory review, resource installation, verifiers, share

@@ -205,6 +205,11 @@ function parseOverview(value: unknown, source: string): EvidenceOverview {
 	const totals = readTotals(value.totals, `${source}.totals`);
 	const tags = readStringArray(value, source, "tags") as EvidenceOverview["tags"];
 	const files = readStringArray(value, source, "files");
+	// Additive since the redaction pass landed, so a bundle written before it
+	// simply has no count. Reading it optionally is what keeps the declared
+	// field reachable: it was written to disk and then dropped on the way back.
+	const redactionCount =
+		typeof value.redactionCount === "number" && Number.isFinite(value.redactionCount) ? value.redactionCount : undefined;
 	return {
 		version: 1,
 		evidenceId,
@@ -224,6 +229,7 @@ function parseOverview(value: unknown, source: string): EvidenceOverview {
 		totals,
 		tags,
 		files,
+		...(redactionCount === undefined ? {} : { redactionCount }),
 	};
 }
 
