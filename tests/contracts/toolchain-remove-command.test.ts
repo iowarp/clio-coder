@@ -122,10 +122,44 @@ describe("contracts/tools remove command", () => {
 		match(payload.dir, /[/\\]tools[/\\]herdr$/);
 	});
 
+	it("sweeps every pinned tool under --all and counts the ones that had nothing", async () => {
+		vendor("croc", "11.3.6");
+		vendor("herdr", "0.8.2");
+
+		const result = await runTools(["remove", "--all"]);
+		strictEqual(result.code, 0);
+		match(result.stdout, /removed herdr 0\.8\.2/);
+		match(result.stdout, /removed croc 11\.3\.6/);
+		match(result.stdout, /1 of 3 had nothing vendored/);
+		strictEqual(existsSync(join(dataDir, "tools", "croc")), false);
+		strictEqual(existsSync(join(dataDir, "tools", "herdr")), false);
+	});
+
+	it("refuses --all together with an id rather than guessing which one was meant", async () => {
+		const result = await runTools(["remove", "--all", "croc"]);
+		strictEqual(result.code, 2);
+		match(result.stderr, /takes no tool id/);
+	});
+
+	it("refuses --all on a verb that does not have it", async () => {
+		const result = await runTools(["install", "--all"]);
+		strictEqual(result.code, 2);
+		match(result.stderr, /--all is only valid with `tools remove`/);
+	});
+
+	it("reports every tool under --all --json", async () => {
+		vendor("yazi", "26.8.15");
+		const result = await runTools(["remove", "--all", "--json"]);
+		strictEqual(result.code, 0);
+		const payload = JSON.parse(result.stdout) as Array<{ id: string; removed: string[] }>;
+		strictEqual(payload.length, 3, "one entry per registry row, installed or not");
+		deepStrictEqual(payload.find((row) => row.id === "yazi")?.removed, ["26.8.15"]);
+	});
+
 	it("advertises the verb in the command's own help", async () => {
 		const result = await runTools(["--help"]);
 		strictEqual(result.code, 0);
-		match(result.stdout, /clio-coder tools remove <id>/);
+		match(result.stdout, /clio-coder tools remove <id>\|--all/);
 		match(result.stdout, /versions it superseded are pruned/);
 	});
 });
