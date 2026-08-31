@@ -4872,9 +4872,7 @@ export function createDispatchBundle(
 					decidedBy,
 					actionClass,
 					reason,
-					...(source === "timeout" && (event.payload.mode === "deny" || event.payload.mode === "fail")
-						? { fallback: event.payload.mode }
-						: {}),
+					...(source === "timeout" ? { fallback: spec.escalation?.fallback ?? "deny" } : {}),
 					...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
 				});
 			}
