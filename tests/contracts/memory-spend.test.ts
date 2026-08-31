@@ -148,10 +148,10 @@ describe("contracts/proactive memory spend", { concurrency: false }, () => {
 	it("records a timed-out step as a timeout rather than as silence", async () => {
 		strictEqual(
 			TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
-			30_000,
-			"the bounded default is the contract; a turn boundary cannot wait three minutes",
+			60_000,
+			"the bounded default is the contract; a memory step cannot wait unboundedly",
 		);
-		strictEqual(DEFAULT_SETTINGS.memory.intervention.timeoutMs, 30_000);
+		strictEqual(DEFAULT_SETTINGS.memory.intervention.timeoutMs, 60_000);
 
 		const raced = await runTaskMemoryPolicy(
 			new TaskMemoryBank(),
