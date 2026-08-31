@@ -42,7 +42,7 @@ import { createProcessInteractiveShell, getActiveRenderTrace } from "./interacti
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
-import { createMuxBridge, runPaneLabel } from "./mux-bridge.js";
+import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { writeInputWedgeDump } from "./render-trace.js";
@@ -57,7 +57,7 @@ import type {
 import { processAutoPacingAllowed, resolveSmoothStreamingMode } from "./stream-pacing-policy.js";
 import type { TerminalLease } from "./terminal-lease.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
-import { createYaziBridge, type YaziBridge } from "./yazi-bridge.js";
+import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
 
 export {
 	IDLE_LEADER_STATE,
@@ -152,7 +152,10 @@ export interface InteractiveDeps {
 	createMuxBridge?: typeof createMuxBridge;
 	/** Bind the file-pane return path after the composer and TUI exist. */
 	attachYaziBridge?: (bridge: YaziBridge) => () => void;
-	/** Factory seam for contract tests; production uses `createYaziBridge`. */
+	/**
+	 * File-pane factory. Supplied by the `--with-panes` composition root (or a
+	 * contract test); absent on a plain boot, which therefore loads no yazi code.
+	 */
 	createYaziBridge?: typeof createYaziBridge;
 	/**
 	 * Shared tool registry. When wired, the permission overlay opens automatically
@@ -591,27 +594,30 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		chatRenderer,
 		io,
 	} = presentation;
-	const yaziBridge = deps.panes
-		? (deps.createYaziBridge ?? createYaziBridge)({
-				...(deps.mux ? { mux: deps.mux } : {}),
-				getDraft: () => editor.getText(),
-				setDraft: (text) => editor.setText(text),
-				requestRender: () => tui.requestRender(),
-				notice: (level, text) => notify(level, text, `yazi:${level}`),
-				getCwd: () => process.cwd(),
-				getSettings: () =>
-					deps.getSettings?.().panes.yazi ?? {
-						mode: "companion",
-						profile: "managed",
-						followCwd: true,
+	// The factory arrives only from an active `--with-panes` boot (or a test); a
+	// plain session has no deps.panes and no factory, and loads no yazi code.
+	const yaziBridge =
+		deps.panes && deps.createYaziBridge
+			? deps.createYaziBridge({
+					...(deps.mux ? { mux: deps.mux } : {}),
+					getDraft: () => editor.getText(),
+					setDraft: (text) => editor.setText(text),
+					requestRender: () => tui.requestRender(),
+					notice: (level, text) => notify(level, text, `yazi:${level}`),
+					getCwd: () => process.cwd(),
+					getSettings: () =>
+						deps.getSettings?.().panes.yazi ?? {
+							mode: "companion",
+							profile: "managed",
+							followCwd: true,
+						},
+					stopUi: () => tui.stop(),
+					startUi: () => {
+						tui.start();
+						tui.requestRender(true);
 					},
-				stopUi: () => tui.stop(),
-				startUi: () => {
-					tui.start();
-					tui.requestRender(true);
-				},
-			})
-		: null;
+				})
+			: null;
 	const detachYaziBridge = yaziBridge ? deps.attachYaziBridge?.(yaziBridge) : undefined;
 	refreshPresentationFooter = () => footer.refresh();
 	const agentProgress = createAgentProgress(terminal);
@@ -915,10 +921,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	};
 	// Spec 4.7. Built only when a pane host answered detection, so a session with
 	// no panes subscribes to nothing and the bus handlers do not exist at all.
+	// The factory arrives from the `--with-panes` composition root (or a test);
+	// a plain session loads none of the bridge code.
 	const mux = deps.mux;
 	const muxBridge =
-		mux && mux.mode !== "none"
-			? (deps.createMuxBridge ?? createMuxBridge)({
+		mux && mux.mode !== "none" && deps.createMuxBridge
+			? deps.createMuxBridge({
 					bus: deps.bus,
 					mux,
 					getPanesSettings: () => {
@@ -942,7 +950,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 						deps.dispatch.snapshot().running.map((run) => ({
 							runId: run.runId,
 							agentId: run.agentId,
-							label: runPaneLabel(run),
+							...(typeof run.task === "string" ? { task: run.task } : {}),
 						})),
 					log: (level, message) => {
 						if (level === "warning") notify("warning", message, "mux:bridge");

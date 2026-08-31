@@ -74,9 +74,10 @@ export interface MuxBridgeDeps {
 	isDetached?: (runId: string) => boolean;
 	/**
 	 * Still-running runs a resumed session should re-adopt panes for. Called once
-	 * at construction; absent skips reconciliation.
+	 * at construction; absent skips reconciliation. Labels are derived here, so
+	 * the caller hands over raw identity rather than importing the label rules.
 	 */
-	resumableRuns?: () => ReadonlyArray<MuxAdoptableRun>;
+	resumableRuns?: () => ReadonlyArray<{ runId: string; agentId: string; task?: string | undefined }>;
 	/** Persistent transcript notice; unlike a herdr toast, this remains auditable in the TUI. */
 	notice?: (level: "error", text: string) => void;
 	log?: MuxLog;
@@ -442,7 +443,11 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 	];
 
 	const adoption = (async (): Promise<void> => {
-		const resumable = deps.resumableRuns?.() ?? [];
+		const resumable: ReadonlyArray<MuxAdoptableRun> = (deps.resumableRuns?.() ?? []).map((run) => ({
+			runId: run.runId,
+			agentId: run.agentId,
+			label: runPaneLabel(run),
+		}));
 		if (resumable.length === 0 || !deps.mux.available()) return;
 		const adopted = await deps.mux.adoptRunPanes(resumable);
 		for (const runId of adopted) {

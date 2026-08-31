@@ -67,6 +67,28 @@ describe("instant-shell built import graph", () => {
 		}
 	});
 
+	it("keeps the mux domain out of the default boot's static closure", () => {
+		// Plain `clio-coder` must perform zero pane-host work; the whole panes
+		// extension loads through the dynamic import of src/entry/with-panes.ts
+		// only when activation resolves on. A static edge from the orchestrator
+		// graph into the mux domain would make every boot pay for it again.
+		const entry = chunkContaining("src/entry/orchestrator.ts");
+		const source = staticClosure(entry)
+			.map((file) => readFileSync(join(DIST, file), "utf8"))
+			.join("\n");
+		for (const forbidden of [
+			"src/domains/mux/socket-client.ts",
+			"src/domains/mux/contract.ts",
+			"src/domains/mux/detect.ts",
+			"src/domains/mux/yazi/session.ts",
+			"src/interactive/mux-bridge.ts",
+			"src/interactive/yazi-bridge.ts",
+			"src/entry/with-panes.ts",
+		]) {
+			strictEqual(source.includes(forbidden), false, `${basename(entry)} eagerly contains ${forbidden}`);
+		}
+	});
+
 	it("keeps the pre-Stage 0 target check off provider implementation graphs", () => {
 		const entry = chunkContaining("injected Stage 1 hydration failure");
 		const source = staticClosure(entry)

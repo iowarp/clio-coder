@@ -1669,7 +1669,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			const panes = ctx.panes;
 			if (!panes) {
-				ctx.notice("info", "panes are not available in this session; run `clio-coder doctor` for why");
+				// Inactive by choice, not unavailable: the operations object exists in
+				// every `--with-panes` session, even one where no pane host answered.
+				ctx.notice(
+					"info",
+					"panes are inactive: this session started without them. Restart with `clio-coder --with-panes`, or set panes.enabled=auto",
+				);
 				return;
 			}
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());

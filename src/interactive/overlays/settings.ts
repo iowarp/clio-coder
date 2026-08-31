@@ -333,7 +333,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.profiles": "Named target/model/thinking choices that native workers can use. Enter adds one.",
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
-	"panes.enabled": "Which pane-host rung Clio may use for live run views.",
+	"panes.enabled": "Default panes activation for new sessions; `--with-panes` / `--no-panes` beat it.",
 	"panes.agents": "Which dispatched runs get their own viewer pane.",
 	"panes.keepFailed": "Whether a failed run's viewer pane stays open for the post-mortem.",
 	"panes.notifications": "Which terminal run states raise a pane-host toast.",

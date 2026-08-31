@@ -70,6 +70,11 @@ export interface GlobalCliFlags {
 	noContextFiles: boolean;
 	noSkills: boolean;
 	skillPaths: string[];
+	/**
+	 * Panes activation from the command line. `--with-panes` and `--no-panes`
+	 * both beat the `panes.enabled` setting; absent means the setting decides.
+	 */
+	panes?: "with" | "without";
 	rest: string[];
 	error?: string;
 }
@@ -85,6 +90,8 @@ const GLOBAL_ONLY_FLAGS: ReadonlyMap<string, string> = new Map([
 	["--api-key", "--api-key <key>"],
 	["--no-context-files", "--no-context-files"],
 	["-nc", "-nc"],
+	["--with-panes", "--with-panes"],
+	["--no-panes", "--no-panes"],
 ]);
 
 /**
@@ -128,6 +135,7 @@ export function extractGlobalFlags(
 	let apiKey: string | undefined;
 	let noContextFiles = false;
 	let noSkills = false;
+	let panes: "with" | "without" | undefined;
 	const skillPaths: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -152,6 +160,12 @@ export function extractGlobalFlags(
 			noSkills = true;
 			continue;
 		}
+		if (arg === "--with-panes" || arg === "--no-panes") {
+			// Last occurrence wins, so a wrapper script's baked-in choice can be
+			// overridden by appending the opposite flag.
+			panes = arg === "--with-panes" ? "with" : "without";
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
@@ -162,6 +176,7 @@ export function extractGlobalFlags(
 					rest,
 					error: `${arg} requires a value`,
 					...(apiKey === undefined ? {} : { apiKey }),
+					...(panes === undefined ? {} : { panes }),
 				};
 			}
 			if (arg === "--api-key") apiKey = value;
@@ -176,6 +191,7 @@ export function extractGlobalFlags(
 			rest,
 			error: unknownGlobalOptionError(arg),
 			...(apiKey === undefined ? {} : { apiKey }),
+			...(panes === undefined ? {} : { panes }),
 		};
 	}
 	return {
@@ -184,5 +200,6 @@ export function extractGlobalFlags(
 		skillPaths,
 		rest,
 		...(apiKey === undefined ? {} : { apiKey }),
+		...(panes === undefined ? {} : { panes }),
 	};
 }

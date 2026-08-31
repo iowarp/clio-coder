@@ -42,12 +42,28 @@ function journalWritabilityFinding(root = runEventJournalRoot()): DoctorFinding 
 }
 
 export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promise<DoctorFinding[]> {
-	let enabled: "auto" | "embedded" | "off" = "auto";
+	let enabled: "auto" | "embedded" | "off" = "off";
 	try {
 		enabled = readSettings().panes.enabled;
 	} catch {
 		// An unreadable settings file is already reported by the settings row;
-		// this section answers on the shipped default rather than throwing.
+		// this section answers on the shipped default (off) rather than throwing.
+	}
+
+	// Inactive by choice is a different answer from unavailable. With the
+	// setting off, detection is skipped the same way the boot skips it, and the
+	// row names the two ways to turn the extension on instead of warning about
+	// a socket nobody asked for.
+	if (enabled === "off") {
+		return [
+			{
+				ok: true,
+				name: "panes mode",
+				detail:
+					"off by choice (panes.enabled=off); start `clio-coder --with-panes` for one session, or set panes.enabled=auto",
+			},
+			journalWritabilityFinding(),
+		];
 	}
 
 	// Detection is the same ladder the interactive boot runs, so this row is the
