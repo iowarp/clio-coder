@@ -65,6 +65,24 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	const probe = deps.resolveBinaryPath ?? resolveBinary;
 	const journalRoot = deps.journalRoot ?? runEventJournalRoot;
 	let yaziController: PanesYaziController | null = null;
+	let nextPendingOpen = 0;
+	const pendingOpens = new Map<string, PanesInventoryEntry>();
+	const beginPendingOpen = (label: string): string => {
+		nextPendingOpen += 1;
+		const id = `pending:${nextPendingOpen}`;
+		pendingOpens.set(id, {
+			paneId: id,
+			tabId: "pending",
+			purpose: "utility",
+			label,
+			runId: null,
+			agentId: null,
+			outcome: null,
+			adopted: false,
+			pending: true,
+		});
+		return id;
+	};
 	const closedYaziStatus = (): PanesYaziStatus => ({
 		mode: "closed",
 		paneId: null,
@@ -125,7 +143,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					yazi: { ...panes.yazi },
 				},
 				yazi: yaziController?.status() ?? closedYaziStatus(),
-				panes: inventory(deps.mux.list()),
+				panes: [...inventory(deps.mux.list()), ...pendingOpens.values()],
 			};
 		},
 
@@ -160,20 +178,28 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					if (!yaziController) {
 						return { status: "unavailable", reason: "the files-pane return path is not ready" };
 					}
-					const result = await yaziController.open(request.once ? { once: true } : undefined);
-					if (result.status === "opened") {
-						return { status: "opened", label: preset.id, paneId: result.paneId };
-					}
-					if (result.status === "missing-binary") {
+					const pendingId = beginPendingOpen(preset.id);
+					try {
+						const result = await yaziController.open(request.once ? { once: true } : undefined);
+						if (result.status === "opened") {
+							return { status: "opened", label: preset.id, paneId: result.paneId };
+						}
+						if (result.status === "missing-binary") {
+							return {
+								status: "missing-binary",
+								preset: preset.id,
+								binary: result.binary,
+								installHint: preset.installHint,
+								detail: result.detail,
+							};
+						}
 						return {
-							status: "missing-binary",
-							preset: preset.id,
-							binary: result.binary,
-							installHint: preset.installHint,
-							detail: result.detail,
+							status: result.status === "profile-error" ? "refused" : "unavailable",
+							reason: result.reason,
 						};
+					} finally {
+						pendingOpens.delete(pendingId);
 					}
-					return { status: result.status === "profile-error" ? "refused" : "unavailable", reason: result.reason };
 				}
 				if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
 				const binaryPath = probe(preset.binary);
@@ -190,17 +216,27 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				if (argv === null) {
 					return { status: "refused", reason: `preset ${preset.id} has nothing to show yet` };
 				}
-				const ref = await deps.mux.openUtilityPane({ argv, cwd, label: preset.id });
-				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${preset.id}` };
-				return { status: "opened", label: preset.id, paneId: ref.paneId };
+				const pendingId = beginPendingOpen(preset.id);
+				try {
+					const ref = await deps.mux.openUtilityPane({ argv, cwd, label: preset.id });
+					if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${preset.id}` };
+					return { status: "opened", label: preset.id, paneId: ref.paneId };
+				} finally {
+					pendingOpens.delete(pendingId);
+				}
 			}
 			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
 			const argv = request.argv ?? [];
 			if (argv.length === 0) return { status: "refused", reason: "nothing to run" };
 			const label = argv[0] ?? "pane";
-			const ref = await deps.mux.openUtilityPane({ argv, cwd, label });
-			if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
-			return { status: "opened", label, paneId: ref.paneId };
+			const pendingId = beginPendingOpen(label);
+			try {
+				const ref = await deps.mux.openUtilityPane({ argv, cwd, label });
+				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
+				return { status: "opened", label, paneId: ref.paneId };
+			} finally {
+				pendingOpens.delete(pendingId);
+			}
 		},
 
 		async close(target: string): Promise<PanesCloseResult> {

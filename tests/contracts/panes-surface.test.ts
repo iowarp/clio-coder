@@ -14,6 +14,8 @@ import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
+import { createMuxRuntime } from "../../src/domains/mux/contract.js";
+import { detectMux } from "../../src/domains/mux/detect.js";
 import type {
 	MuxAdoptableRun,
 	MuxContract,
@@ -28,6 +30,7 @@ import {
 	type PanesStatus,
 	type PanesYaziController,
 } from "../../src/domains/mux/operations.js";
+import { createMuxClient } from "../../src/domains/mux/socket-client.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
 import {
@@ -38,6 +41,7 @@ import {
 } from "../../src/interactive/slash-commands.js";
 import { createPanesTool } from "../../src/tools/panes.js";
 import { TOOL_PLANES } from "../../src/tools/policy.js";
+import { startFakeHerdrServer } from "../harness/fake-herdr-server.js";
 
 interface UtilityOpen {
 	argv: ReadonlyArray<string>;
@@ -337,6 +341,29 @@ describe("contracts/panes operations", () => {
 		deepStrictEqual(mux.opened[0]?.argv, ["btop", "--utf-force"]);
 	});
 
+	it("includes an admitted open in inventory while the mux registry is still pending", async () => {
+		const mux = stubMux();
+		let finish: ((ref: MuxPaneRef) => void) | null = null;
+		mux.contract.openUtilityPane = (request: MuxOpenUtilityPaneRequest) => {
+			mux.opened.push({ argv: [...request.argv], cwd: request.cwd, label: request.label });
+			return new Promise<MuxPaneRef>((resolve) => {
+				finish = resolve;
+			});
+		};
+		const panes = runtimeFor(mux);
+		const opening = panes.open({ preset: "shell" });
+		const pending = panes.status().panes.find((pane) => pane.pending === true);
+		strictEqual(pending?.label, "shell");
+		match(formatPanesStatus(panes.status()).join("\n"), /pending:1 utility shell opening/);
+		ok(finish);
+		finish({ paneId: "w1:p101", tabId: "w1:t1", workspaceId: "w1" });
+		strictEqual((await opening).status, "opened");
+		strictEqual(
+			panes.status().panes.some((pane) => pane.pending === true),
+			false,
+		);
+	});
+
 	it("matches an agent id first and a runId prefix second, newest pane winning", async () => {
 		const mux = stubMux({
 			records: [
@@ -400,6 +427,58 @@ describe("contracts/panes operations", () => {
 });
 
 describe("contracts/panes orchestrator tool", () => {
+	it("reconciles both focus dimensions through the slash and agent-tool paths", async () => {
+		const fake = await startFakeHerdrServer();
+		const detected = await detectMux({
+			env: {
+				HERDR_ENV: "1",
+				HERDR_SOCKET_PATH: fake.socketPath,
+				HERDR_WORKSPACE_ID: "w1",
+				HERDR_TAB_ID: "w1:t1",
+				HERDR_PANE_ID: "w1:p1",
+			},
+			openClient: (socketPath) => createMuxClient({ socketPath, requestTimeoutMs: 1_500, connectTimeoutMs: 500 }),
+		});
+		ok(detected.client);
+		const muxRuntime = createMuxRuntime({ detection: detected.detection, client: detected.client });
+		await muxRuntime.start();
+		try {
+			await muxRuntime.contract.openRunPane({ runId: "run-1", agentId: "tester", label: "tester" });
+			const scout = await muxRuntime.contract.openRunPane({ runId: "run-2", agentId: "scout", label: "scout" });
+			ok(scout);
+			const panes = createPanesRuntime({
+				mux: muxRuntime.contract,
+				getSettings: () => DEFAULT_SETTINGS,
+				getDispatchSnapshot: () => EMPTY_SNAPSHOT,
+				getCwd: () => "/work",
+				resolveBinaryPath: (name) => `/usr/bin/${name}`,
+			});
+
+			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
+			ok(entry);
+			let slashFocus = Promise.resolve();
+			entry.handle(parseSlashCommand("/panes show scout"), {
+				panes,
+				runLocalOperation: (operation: () => Promise<void>) => {
+					slashFocus = slashFocus.then(operation);
+				},
+				notice: () => {},
+			} as unknown as SlashCommandContext);
+			await slashFocus;
+			strictEqual(fake.focusedTab(), scout.tabId);
+			strictEqual(fake.focusedPane(), scout.paneId);
+
+			await detected.client.tabFocus("w1:t1");
+			const shown = await createPanesTool({ panes }).run({ action: "show", target: "scout" });
+			strictEqual(shown.kind, "ok");
+			strictEqual(fake.focusedTab(), scout.tabId);
+			strictEqual(fake.focusedPane(), scout.paneId);
+		} finally {
+			await muxRuntime.stop();
+			await fake.stop();
+		}
+	});
+
 	it("refuses an argv pane however it is spelled", async () => {
 		const mux = stubMux();
 		const tool = createPanesTool({ panes: runtimeFor(mux) });

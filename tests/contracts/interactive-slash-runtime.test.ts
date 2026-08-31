@@ -10,6 +10,7 @@ import { getAtPath } from "../../src/core/session-routing.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { PanesOperations, PanesStatus } from "../../src/domains/mux/operations.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionEntry } from "../../src/domains/session/index.js";
 import { createUserTasksStore } from "../../src/domains/user-tasks/store.js";
@@ -97,6 +98,69 @@ function createHarness() {
 }
 
 describe("contracts/interactive slash runtime", () => {
+	it("settles a pane mutation before admitting the following inventory read", async () => {
+		const harness = createHarness();
+		let finishOpen: (() => void) | null = null;
+		const panes: PanesStatus["panes"] = [];
+		const status = (): PanesStatus => ({
+			mode: "guest",
+			available: true,
+			reason: "fake",
+			socketPath: "/tmp/fake.sock",
+			server: { version: "0.8.2", protocol: 21 },
+			settings: {
+				enabled: "auto",
+				agents: "auto",
+				keepFailed: true,
+				notifications: "failures",
+				journal: true,
+				yazi: { enabled: true, mode: "companion", profile: "managed", followCwd: true },
+			},
+			yazi: { mode: "closed", paneId: null, paneCwd: null, lastLineAt: null, droppedLines: 0 },
+			panes,
+		});
+		harness.deps.panes = {
+			status,
+			async show() {
+				return { status: "not-found", target: "none", candidates: [] };
+			},
+			async open() {
+				await new Promise<void>((resolve) => {
+					finishOpen = resolve;
+				});
+				(panes as Array<(typeof panes)[number]>).push({
+					paneId: "w1:p9",
+					tabId: "w1:t2",
+					purpose: "utility",
+					label: "shell",
+					runId: null,
+					agentId: null,
+					outcome: null,
+					adopted: false,
+				});
+				return { status: "opened", label: "shell", paneId: "w1:p9" };
+			},
+			async close() {
+				return { status: "closed", closed: 0, labels: [] };
+			},
+			attachYazi: () => () => {},
+		} satisfies PanesOperations;
+		const runtime = createInteractiveSlashRuntime(harness.deps);
+		const opening = runtime.admitCommand("/panes open shell");
+		await flushAsync();
+		const listing = runtime.admitCommand("/panes");
+		await flushAsync();
+		strictEqual(
+			harness.events.some((event) => event.includes("w1:p9")),
+			false,
+			"the read has not raced the open",
+		);
+		ok(finishOpen);
+		finishOpen();
+		await Promise.all([opening, listing]);
+		ok(harness.events.some((event) => event.includes("w1:p9 utility shell")));
+	});
+
 	it("acknowledges captured chat admission before draining the next Stage 0 record", async () => {
 		const harness = createHarness();
 		const busyError =

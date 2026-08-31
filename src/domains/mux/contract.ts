@@ -161,6 +161,17 @@ function shellQuote(argv: ReadonlyArray<string>): string {
 	return argv.map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`).join(" ");
 }
 
+/**
+ * A run viewer must not replace its shell: herdr removes the pane when that
+ * process exits. After follow mode returns, render one static receipt view and
+ * leave the shell alive so a kept failure remains a useful post-mortem pane.
+ */
+function durableViewerShellLine(argv: ReadonlyArray<string>): string {
+	const snapshotArgv = argv.filter((arg) => arg !== "--follow");
+	const snapshot = snapshotArgv.length < argv.length && snapshotArgv.length > 0 ? `; ${shellQuote(snapshotArgv)}` : "";
+	return `${shellQuote(argv)}${snapshot}\n`;
+}
+
 function token(value: string | undefined | null): string | null {
 	if (typeof value !== "string" || value.length === 0) return null;
 	return value.length > TOKEN_VALUE_MAX ? value.slice(0, TOKEN_VALUE_MAX) : value;
@@ -342,7 +353,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					await reportAgent(live, pane.paneId, request.agentId, "working", RUN_AGENT_SOURCE, request.label);
 					const argv = options.viewerCommand?.(request);
 					if (argv && argv.length > 0) {
-						await live.paneSendText(pane.paneId, `exec ${shellQuote(argv)}\n`);
+						await live.paneSendText(pane.paneId, durableViewerShellLine(argv));
 					}
 					return ref;
 				},
@@ -356,26 +367,31 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return await attempt(
 				"focusRunPane",
 				async (live) => {
-					// herdr has no pane.focus method, so this is a two-rung ladder.
-					// agent.focus is preferred because it additionally marks the pane
-					// seen, clearing herdr's attention state; it resolves for a viewer
-					// pane exactly because pane.report_agent gave that pane agent
-					// authority. A pane that never got authority, or a server too old
-					// for the method, falls back to focusing the pane's tab, which is
-					// what phase 1 did for every pane.
+					// Herdr exposes tab and agent focus separately, while the operator
+					// contract promises one focused pane in one focused tab. Always set
+					// the tab first, then the agent pane, and verify both dimensions from
+					// one live snapshot. This is the single ladder used by slash and tool.
+					await live.tabFocus(entry.ref.tabId);
 					if (muxSupportsMethod(detection.server, "agent.focus")) {
 						try {
 							await live.agentFocus(entry.ref.paneId);
-							return true;
 						} catch (error) {
-							// A transport failure has to reach `attempt` so the contract
-							// degrades; anything the server refused is a reason to fall back.
 							if (error instanceof MuxError && (error.kind === "transport" || error.kind === "timeout")) throw error;
-							log("debug", `mux agent.focus on ${entry.ref.paneId} refused; falling back to tab.focus`);
+							// Authority can expire independently of pane ownership. Reassert the
+							// same authority openRunPane established, then retry once.
+							await reportAgent(live, entry.ref.paneId, entry.agentId ?? entry.label, "working", RUN_AGENT_SOURCE);
+							try {
+								await live.agentFocus(entry.ref.paneId);
+							} catch (retryError) {
+								if (retryError instanceof MuxError && (retryError.kind === "transport" || retryError.kind === "timeout")) {
+									throw retryError;
+								}
+								log("debug", `mux agent.focus on ${entry.ref.paneId} remained unavailable after authority refresh`);
+							}
 						}
 					}
-					await live.tabFocus(entry.ref.tabId);
-					return true;
+					const snapshot = await live.snapshot();
+					return snapshot.focusedTabId === entry.ref.tabId && snapshot.focusedPaneId === entry.ref.paneId;
 				},
 				false,
 			);
@@ -456,6 +472,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					await live.paneReportMetadata({
 						paneId: entry.ref.paneId,
 						source: METADATA_SOURCE,
+						displayAgent: state.displayAgent,
 						tokens: {
 							[OWNER_TOKEN_KEY]: OWNER_TOKEN_VALUE,
 							role: token(entry.agentId),
@@ -463,6 +480,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 							phase: token(state.phase),
 							model: token(state.model),
 							outcome: token(state.outcome),
+							...state.tokens,
 						},
 						// A finished run reported as `idle` reads in herdr's sidebar
 						// exactly like an untouched shell. The override is what makes a
@@ -601,7 +619,9 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			subscription = null;
 			fleetTab = null;
 			paneGoneHandlers.clear();
-			registry.clear();
+			// Pane ownership is server-side and intentionally survives process
+			// shutdown. Keep the local snapshot too so the contract itself proves
+			// shutdown tears down sockets, never panes.
 			if (client) await client.close().catch(() => undefined);
 		},
 	};

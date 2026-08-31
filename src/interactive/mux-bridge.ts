@@ -77,6 +77,8 @@ export interface MuxBridgeDeps {
 	 * at construction; absent skips reconciliation.
 	 */
 	resumableRuns?: () => ReadonlyArray<MuxAdoptableRun>;
+	/** Persistent transcript notice; unlike a herdr toast, this remains auditable in the TUI. */
+	notice?: (level: "error", text: string) => void;
 	log?: MuxLog;
 	now?: () => number;
 	throttleMs?: number;
@@ -97,6 +99,7 @@ type RunPhase = "queued" | "running" | "blocked" | "done";
 interface RunRecord {
 	runId: string;
 	agentId: string;
+	role: string;
 	label: string;
 	model: string | null;
 	phase: RunPhase;
@@ -121,6 +124,16 @@ function isFailure(outcome: MuxRunOutcome | null): boolean {
 	return outcome === "failed" || outcome === "timed_out";
 }
 
+function notificationsQualify(record: RunRecord, settings: MuxBridgePanesSettings): boolean {
+	return settings.notifications === "all" || (settings.notifications === "failures" && isFailure(record.outcome));
+}
+
+function persistentFailureNotice(record: RunRecord, settings: MuxBridgePanesSettings, deps: MuxBridgeDeps): void {
+	if (!isFailure(record.outcome) || !notificationsQualify(record, settings)) return;
+	const detail = record.detail ? `: ${record.detail}` : "";
+	deps.notice?.("error", `${record.agentId} ${record.outcome ?? "failed"} (${record.runId})${detail}`);
+}
+
 /**
  * Bounded, sanitized pane label. `DispatchRunIdentity.task` is exact dispatched
  * text and `bus-events.ts:524` requires every UI projection to sanitize and
@@ -138,17 +151,50 @@ export function runPaneLabel(identity: { agentId: string; task?: string | undefi
  * Sidebar labels a terminal pane carries. A finished run reported as `idle`
  * is indistinguishable from an untouched shell without one.
  */
-function terminalStateLabels(outcome: MuxRunOutcome | null): Record<string, string> {
-	if (outcome === null) return { idle: "finished" };
-	const label =
-		outcome === "succeeded"
-			? "review ready"
-			: outcome === "failed"
-				? "failed, review"
-				: outcome === "timed_out"
-					? "timed out, review"
-					: "canceled";
-	return { idle: label };
+function outcomeLabel(outcome: MuxRunOutcome | null): string {
+	if (outcome === null) return "finished";
+	return outcome === "succeeded"
+		? "review ready"
+		: outcome === "failed"
+			? "failed, review"
+			: outcome === "timed_out"
+				? "timed out, review"
+				: "canceled";
+}
+
+interface RolePresentation {
+	token: string;
+	display: string;
+	working: string;
+	blocked: string;
+}
+
+/** Stable role vocabulary for sidebar tokens and every semantic state. */
+function rolePresentation(role: string): RolePresentation {
+	const normalized = role.trim().toLowerCase();
+	if (normalized === "candidate" || normalized === "builder") {
+		return { token: normalized, display: normalized, working: "building", blocked: "build blocked" };
+	}
+	if (normalized === "reviewer" || normalized === "judge" || normalized === "synthesis") {
+		return { token: normalized, display: normalized, working: "reviewing", blocked: "review blocked" };
+	}
+	if (normalized === "member") {
+		return { token: normalized, display: "council member", working: "deliberating", blocked: "member blocked" };
+	}
+	if (/test|verif|qa/u.test(normalized)) {
+		return { token: normalized, display: normalized, working: "verifying", blocked: "verification blocked" };
+	}
+	if (/scout|research|explor/u.test(normalized)) {
+		return { token: normalized, display: normalized, working: "researching", blocked: "research blocked" };
+	}
+	if (/fix|debug|repair/u.test(normalized)) {
+		return { token: normalized, display: normalized, working: "repairing", blocked: "repair blocked" };
+	}
+	return { token: normalized || "agent", display: normalized || "agent", working: "running", blocked: "needs input" };
+}
+
+function runStateLabels(role: RolePresentation, outcome: MuxRunOutcome | null): Record<string, string> {
+	return { working: role.working, blocked: role.blocked, idle: outcomeLabel(outcome) };
 }
 
 /** Which semantic agent state herdr should paint for a run's current phase. */
@@ -195,6 +241,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		const record: RunRecord = existing ?? {
 			runId: identity.runId,
 			agentId: identity.agentId,
+			role: identity.gate?.role ?? identity.agentId,
 			label: runPaneLabel(identity),
 			model: identity.wireModelId ?? null,
 			phase: "queued",
@@ -227,7 +274,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 
 	const settle = async (record: RunRecord, settings: MuxBridgePanesSettings): Promise<void> => {
 		const failure = isFailure(record.outcome);
-		if (settings.notifications === "all" || (settings.notifications === "failures" && failure)) {
+		if (notificationsQualify(record, settings)) {
 			const long = record.durationMs !== null && record.durationMs >= LONG_RUN_MS;
 			await deps.mux.notify({
 				title: `${record.agentId} ${record.outcome ?? "finished"}`,
@@ -237,6 +284,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 				sound: failure ? "request" : long ? "done" : "none",
 			});
 		}
+		persistentFailureNotice(record, settings, deps);
 		if (record.opened && !record.paneGone) {
 			await deps.mux.closeRunPane(record.runId, { keepOnFailure: settings.keepFailed });
 		}
@@ -254,12 +302,15 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 			record.opened = ref !== null;
 		}
 		if (record.opened && !record.paneGone) {
+			const role = rolePresentation(record.role);
 			await deps.mux.reportRunState(record.runId, {
 				phase: record.phase,
 				agentState: agentStateFor(record.phase),
 				...(record.model ? { model: record.model } : {}),
 				...(record.outcome ? { outcome: record.outcome } : {}),
-				...(terminal ? { stateLabels: terminalStateLabels(record.outcome) } : {}),
+				displayAgent: record.agentId,
+				tokens: { role: role.token, role_display: role.display, agent: record.agentId },
+				stateLabels: runStateLabels(role, record.outcome),
 			});
 		}
 		if (terminal) {
@@ -284,8 +335,12 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 			// contract already degrades every method, and asking per run would let a
 			// mid-flush degradation split one burst across two behaviors.
 			if (!deps.mux.available()) {
+				const settings = deps.getPanesSettings();
 				for (const record of dirty) {
-					if (record.phase === "done") runs.delete(record.runId);
+					if (record.phase === "done") {
+						persistentFailureNotice(record, settings, deps);
+						runs.delete(record.runId);
+					}
 				}
 				return;
 			}
@@ -396,6 +451,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 			runs.set(runId, {
 				runId,
 				agentId: run.agentId,
+				role: run.agentId,
 				label: run.label,
 				model: null,
 				phase: "running",

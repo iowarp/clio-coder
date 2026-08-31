@@ -193,6 +193,10 @@ export interface MuxRunDisplayState {
 	agentState: MuxReportableAgentState;
 	model?: string;
 	outcome?: MuxRunOutcome;
+	/** Human agent label rendered separately from the raw authority name. */
+	displayAgent?: string;
+	/** Role-aware presentation tokens merged with Clio's ownership tokens. */
+	tokens?: Readonly<Record<string, string | null>>;
 	/**
 	 * Per-state sidebar label overrides, e.g. `{ idle: "review ready" }`. Spec
 	 * 4.7 asks for one on the terminal report so a finished run does not read as

@@ -947,6 +947,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 					log: (level, message) => {
 						if (level === "warning") notify("warning", message, "mux:bridge");
 					},
+					notice: (level, text) => appendNotice(level, text, busNoticeSink),
 				})
 			: null;
 	const interactiveSubscriptions = createInteractiveSubscriptions({

@@ -330,6 +330,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 				const tabId = typeof params.tab_id === "string" ? params.tab_id : "";
 				if (!tabLabels.has(tabId)) return { error: { code: "tab_not_found", message: "tab not found" } };
 				focusedTabId = tabId;
+				focusedPaneId = panes.find((pane) => pane.tabId === tabId)?.paneId ?? focusedPaneId;
 				const workspaceId = panes.find((pane) => pane.tabId === tabId)?.workspaceId ?? "w1";
 				return {
 					result: {
