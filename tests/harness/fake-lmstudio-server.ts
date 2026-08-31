@@ -1,4 +1,5 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import type { Socket } from "node:net";
 
 export type FakeLmStudioMode = "0.4" | "0.3";
 
@@ -293,7 +294,41 @@ export async function startFakeLmStudioServer(
 		return json(response, 200, { error: `Unexpected endpoint or method. (${request.method} ${path})` });
 	});
 
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	/**
+	 * Every socket the server has accepted.
+	 *
+	 * `close()` used to be `server.close()` alone, which stops accepting and
+	 * then resolves whenever the sockets happen to drain. The clients here are
+	 * `fetch`, and undici pools its connections per origin, so a keep-alive
+	 * socket to `127.0.0.1:<port>` outlives the case that opened it. The next
+	 * case binds port 0, the kernel hands back a recently freed port under this
+	 * suite's churn, and undici answers the new origin from the pooled socket
+	 * belonging to the server that just went away. The probe gets a reset rather
+	 * than the greeting, and `configure` refuses to save a target that "did not
+	 * return the LM Studio greeting" against a server that is running and
+	 * correct.
+	 *
+	 * Holding the sockets and destroying them on close makes the teardown
+	 * something the client observes: undici sees the socket die and evicts it
+	 * from the pool before anything can bind that port again. This is the same
+	 * discipline `tests/contracts/web-fetch-transport.test.ts` already applies
+	 * to its own local server.
+	 */
+	const sockets = new Set<Socket>();
+	server.on("connection", (socket) => {
+		sockets.add(socket);
+		socket.on("close", () => sockets.delete(socket));
+	});
+
+	await new Promise<void>((resolve, reject) => {
+		// Without this, a bind failure leaves the promise pending forever and the
+		// case reports a timeout somewhere unrelated instead of the bind error.
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => {
+			server.removeListener("error", reject);
+			resolve();
+		});
+	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("fake LM Studio server did not bind an HTTP port");
 	return {
@@ -306,6 +341,17 @@ export async function startFakeLmStudioServer(
 		failNextLoads(count = 1) {
 			remainingLoadFailures += count;
 		},
-		close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+		close: () =>
+			new Promise<void>((resolve, reject) => {
+				// Order matters: stop accepting, then tear every pooled connection
+				// down, then wait for the close callback. `server.close()` on its
+				// own returns while a keep-alive socket is still alive on the
+				// client side.
+				server.close((error) => (error ? reject(error) : resolve()));
+				server.closeIdleConnections();
+				server.closeAllConnections();
+				for (const socket of sockets) socket.destroy();
+				sockets.clear();
+			}),
 	};
 }
