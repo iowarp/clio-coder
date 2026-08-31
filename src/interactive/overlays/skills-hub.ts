@@ -26,6 +26,7 @@ import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import type { LibraryInstallConfirmSubject } from "./library-install-confirm.js";
 import { openLibraryInstallConfirmOverlay } from "./library-install-confirm.js";
+import { isLibraryTab, LIBRARY_TABS } from "./library-tabs.js";
 import { type ListOverlayItem, type ListOverlayTab, openListOverlay } from "./list-overlay.js";
 
 /**
@@ -53,22 +54,12 @@ const GROUP_DIAGNOSTICS = "Diagnostics";
 const GROUP_INSTALLED = "Installed";
 const GROUP_AVAILABLE = "Available";
 
-/** The hub's tabs, in the order ←/→ walks them. `skill` is the original view. */
-export const LIBRARY_TABS: ReadonlyArray<{ id: LibraryEntryKind; label: string }> = [
-	{ id: "skill", label: "Skills" },
-	{ id: "agent", label: "Agents" },
-	{ id: "prompt", label: "Prompts" },
-	{ id: "fleet", label: "Fleets" },
-];
+export { isLibraryTab, LIBRARY_TABS };
 
 export const SKILLS_HUB_TITLE = "Skills Hub";
 
 /** Row id prefix for a library row, which is how an action tells the tabs apart. */
 export const LIBRARY_ROW_PREFIX = "library:";
-
-export function isLibraryTab(value: string): value is LibraryEntryKind {
-	return LIBRARY_TABS.some((tab) => tab.id === value);
-}
 
 /** @internal exported for contract tests */
 export const SKILLS_HUB_EMPTY =

@@ -176,10 +176,15 @@ export function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): stri
  * boot path already prints from the expansion itself. Deciding that here would
  * duplicate the trust rules and put two refusals on one token.
  *
- * Both modules are imported lazily. `clio-coder run` reaches the model through
- * a dynamic `bootOrchestrator` import to keep its startup off the interactive
- * and resource module graphs, and a task that does not start with a slash must
- * not pay for either.
+ * Both modules are imported lazily, so a task that does not start with a slash
+ * pays for neither. The laziness is a startup-cost choice and nothing more: for
+ * bundle partitioning a dynamic import is worse than a static one, because a
+ * dynamically imported module becomes a chunk split point by itself. What keeps
+ * this edge safe is the other end. `slash-commands.ts` is a declared CLI seam
+ * whose own imports stay off the interactive render graph, so reaching it does
+ * not make this file a second reacher of the chunk the instant shell's Stage 0
+ * closure sits on. Boundaries rule6 in `tests/boundaries/check-boundaries.ts`
+ * holds both halves of that.
  */
 export async function unknownSlashCommandRefusal(task: string): Promise<string | null> {
 	if (!task.trim().startsWith("/")) return null;

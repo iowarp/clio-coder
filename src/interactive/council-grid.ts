@@ -14,6 +14,7 @@
  */
 
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
 import {
 	type ClioTheme,
 	type ClioToken,
@@ -37,9 +38,6 @@ export const COUNCIL_COLUMN_GUTTER = 2;
 
 /** Rows of a member's bounded answer tail a column shows before it defers to `/view`. */
 export const COUNCIL_ANSWER_ROWS = 4;
-
-/** The label the coordinator gives the synthesis run of every council group. */
-export const COUNCIL_SYNTHESIS_LABEL = "synthesis";
 
 /** One council run as the board draws it: the roster facts plus the run's presentation. */
 export interface CouncilMemberView {

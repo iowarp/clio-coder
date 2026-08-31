@@ -213,6 +213,47 @@ function checkBoundaries(): void {
 				expectRule: "rule2",
 			},
 			{
+				name: "cli reaching a non-seam module in the engine tree",
+				files: {
+					"src/cli/fleet-view.ts": 'import { truncateToWidth } from "../engine/tui.js";\nexport const t = truncateToWidth;',
+					"src/engine/tui.ts": "export function truncateToWidth() {}",
+				},
+				expectRule: "rule6",
+			},
+			{
+				name: "cli reaching a non-seam module in the interactive tree, dynamically",
+				files: {
+					"src/cli/run.ts": 'export const load = () => import("../interactive/clio-editor.js");',
+					"src/interactive/clio-editor.ts": "export function createEditor() {}",
+				},
+				expectRule: "rule6",
+			},
+			{
+				name: "cli seam whose own closure reaches the Stage 0 closure",
+				files: {
+					"src/cli/run.ts": 'export const load = () => import("../interactive/slash-commands.js");',
+					"src/interactive/slash-commands.ts":
+						'import { SECTIONS } from "./overlays/settings.js";\nexport const parseSlashCommand = () => SECTIONS;',
+					"src/interactive/overlays/settings.ts":
+						'import { theme } from "../theme/index.js";\nexport const SECTIONS = [theme];',
+					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
+					"src/interactive/theme/index.ts": "export const theme = {};",
+				},
+				expectRule: "rule6",
+			},
+			{
+				name: "cli seam whose closure stays off the Stage 0 closure (allowed)",
+				files: {
+					"src/cli/run.ts": 'export const load = () => import("../interactive/slash-commands.js");',
+					"src/interactive/slash-commands.ts":
+						'import { SECTIONS } from "./overlays/settings-sections.js";\nexport const parseSlashCommand = () => SECTIONS;',
+					"src/interactive/overlays/settings-sections.ts": "export const SECTIONS = [];",
+					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
+					"src/interactive/theme/index.ts": "export const theme = {};",
+				},
+				expectRule: null,
+			},
+			{
 				name: "mixed type/value import treated as a value import",
 				files: {
 					"src/worker/entry.ts": 'import { type ConfigContract, createConfigBundle } from "../domains/config/extension.js";',
