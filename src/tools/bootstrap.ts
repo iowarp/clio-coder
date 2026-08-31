@@ -3,6 +3,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
+import type { PanesOperations } from "../domains/mux/operations.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { builtin, toolPromptHintsForNames } from "./builtin-tool-catalog.js";
 import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreTools } from "./core-bootstrap.js";
@@ -10,6 +11,7 @@ import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.j
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import { lazyTool } from "./lazy-tool.js";
 import { monitorToolSurface } from "./monitor-surface.js";
+import { panesToolSurface } from "./panes-surface.js";
 import type { ToolRegistry } from "./registry.js";
 import { steerToolSurface } from "./steer-surface.js";
 
@@ -25,6 +27,11 @@ export interface ToolBootstrapDeps extends CoreToolBootstrapDeps {
 	getCostCeilingUsd?: () => number;
 	getWorkerRosters?: () => WorkerRosters;
 	dispatchBackground?: DispatchBackgroundRegistry;
+	/**
+	 * Pane operations. Present only when a pane host answered detection, which
+	 * is what keeps the `panes` tool out of the prompt on a machine with none.
+	 */
+	panes?: PanesOperations;
 }
 
 /**
@@ -80,5 +87,14 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			),
 		});
 	}
-	assertRegisteredBuiltinTools(registry, registration, Boolean(deps.dispatch));
+	if (deps.panes) {
+		const panes = deps.panes;
+		registry.register({
+			...builtin(
+				lazyTool(panesToolSurface, async () => (await import("./panes.js")).createPanesTool({ panes })),
+				{ path: "src/tools/panes.ts", scope: "core" },
+			),
+		});
+	}
+	assertRegisteredBuiltinTools(registry, registration, Boolean(deps.dispatch), Boolean(deps.panes));
 }

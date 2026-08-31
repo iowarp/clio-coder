@@ -1,0 +1,193 @@
+/**
+ * The one implementation of `PanesOperations`, shared by `/panes` and the
+ * `panes` orchestrator tool.
+ *
+ * Two rules run through it. Presets probe their binary through the toolchain
+ * ladder *before* the pane is split: `openUtilityPane` delivers its command by
+ * sending `exec <argv>` into the pane's shell, so a binary that is not there
+ * kills the pane the instant it appears, and the operator sees a flicker
+ * instead of an install hint (phase 1 report, open question 3). And every
+ * mutation is scoped to panes Clio created, because the contract's registry
+ * refuses anything else.
+ */
+
+import type { ClioSettings } from "../core/config.js";
+import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
+import {
+	newestRunEventJournalRunId,
+	runEventJournalPath,
+	runEventJournalRoot,
+} from "../domains/dispatch/run-event-journal.js";
+import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
+import {
+	PANES_PRESETS,
+	type PanesCloseResult,
+	type PanesInventoryEntry,
+	type PanesOpenResult,
+	type PanesOperations,
+	type PanesShowResult,
+	type PanesStatus,
+} from "../domains/mux/operations.js";
+import { resolveBinary } from "../tools/executables.js";
+
+export interface PanesRuntimeDeps {
+	mux: MuxContract;
+	getSettings: () => Readonly<ClioSettings>;
+	/** Live dispatch state, used to turn a fuzzy agent id into a run id. */
+	getDispatchSnapshot: () => DispatchSnapshot;
+	getCwd: () => string;
+	/** Injection seam for tests; production uses the toolchain ladder. */
+	resolveBinaryPath?: (name: string) => string | null;
+	/** Journal root override for tests. */
+	journalRoot?: () => string;
+	/** Newest run whose journal exists, for the `logs` preset. */
+	newestJournalRunId?: () => string | null;
+}
+
+const UNAVAILABLE = "the pane layer is not available in this session";
+
+function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesInventoryEntry> {
+	return records.map((record) => ({
+		paneId: record.ref.paneId,
+		tabId: record.ref.tabId,
+		purpose: record.purpose,
+		label: record.label,
+		runId: record.runId,
+		agentId: record.agentId,
+		outcome: record.outcome,
+		adopted: record.adopted === true,
+	}));
+}
+
+export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
+	const probe = deps.resolveBinaryPath ?? resolveBinary;
+	const journalRoot = deps.journalRoot ?? runEventJournalRoot;
+
+	/**
+	 * Resolve one operator- or model-supplied target to a run pane Clio owns.
+	 *
+	 * Fuzzy agent id first, then runId prefix, most recent pane winning, which is
+	 * spec 4.8's order. "The tester" is what an operator types; a run id is what
+	 * a tool call carries.
+	 */
+	const matchRunPane = (target: string): MuxPaneRecord | null => {
+		const needle = target.trim().toLowerCase();
+		if (needle.length === 0) return null;
+		const runPanes = deps.mux.list().filter((record) => record.purpose === "run" && record.runId !== null);
+		// `list()` is insertion-ordered oldest first, so the reversal is what makes
+		// "most recent match wins" true rather than incidental.
+		const newestFirst = [...runPanes].reverse();
+		const byAgent = newestFirst.find((record) => (record.agentId ?? "").toLowerCase().includes(needle));
+		if (byAgent) return byAgent;
+		return newestFirst.find((record) => (record.runId ?? "").toLowerCase().startsWith(needle)) ?? null;
+	};
+
+	/** argv for one preset, once its binary has been found. */
+	const presetArgv = (presetId: string, binaryPath: string): ReadonlyArray<string> | null => {
+		if (presetId === "yazi") return [binaryPath, deps.getCwd()];
+		if (presetId === "shell") return [binaryPath, "-l"];
+		if (presetId === "logs") {
+			const runId = (deps.newestJournalRunId ?? (() => newestRunEventJournalRunId(journalRoot())))();
+			if (runId === null) return null;
+			// `-F` rather than `-f`: the journal is recreated when its run's
+			// directory is pruned, and a viewer following an inode would silently
+			// stop at that point.
+			return [binaryPath, "-n", "200", "-F", runEventJournalPath(runId, journalRoot())];
+		}
+		return null;
+	};
+
+	return {
+		status(): PanesStatus {
+			const detection = deps.mux.detection();
+			const panes = deps.getSettings().panes;
+			return {
+				mode: deps.mux.mode,
+				available: deps.mux.available(),
+				reason: detection.reason,
+				socketPath: detection.socketPath,
+				server: detection.server,
+				settings: {
+					enabled: panes.enabled,
+					agents: panes.agents,
+					keepFailed: panes.keepFailed,
+					notifications: panes.notifications,
+					journal: panes.journal,
+				},
+				panes: inventory(deps.mux.list()),
+			};
+		},
+
+		async show(target: string): Promise<PanesShowResult> {
+			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			const match = matchRunPane(target);
+			if (match === null || match.runId === null) {
+				// The candidate list is what turns a miss into a next step. It names
+				// live runs, not just panes, because a run with no pane is exactly the
+				// case where "show me the tester" fails and the operator needs to know
+				// the tester is running without one.
+				const running = deps.getDispatchSnapshot().running.map((run) => run.agentId);
+				const panes = deps.mux.list().flatMap((record) => (record.agentId ? [record.agentId] : []));
+				return { status: "not-found", target, candidates: [...new Set([...panes, ...running])] };
+			}
+			const focused = await deps.mux.focusRunPane(match.runId);
+			if (!focused) return { status: "unavailable", reason: `pane for ${match.runId} could not be focused` };
+			return { status: "focused", runId: match.runId, agentId: match.agentId, label: match.label };
+		},
+
+		async open(request: { preset?: string; argv?: ReadonlyArray<string> }): Promise<PanesOpenResult> {
+			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			const cwd = deps.getCwd();
+			if (request.preset !== undefined) {
+				const preset = PANES_PRESETS.find((entry) => entry.id === request.preset);
+				if (!preset) {
+					return { status: "refused", reason: `unknown preset: ${request.preset}` };
+				}
+				const binaryPath = probe(preset.binary);
+				if (binaryPath === null) {
+					return {
+						status: "missing-binary",
+						preset: preset.id,
+						binary: preset.binary,
+						installHint: preset.installHint,
+					};
+				}
+				const argv = presetArgv(preset.id, binaryPath);
+				if (argv === null) {
+					return { status: "refused", reason: `preset ${preset.id} has nothing to show yet` };
+				}
+				const ref = await deps.mux.openUtilityPane({ argv, cwd, label: preset.id });
+				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${preset.id}` };
+				return { status: "opened", label: preset.id, paneId: ref.paneId };
+			}
+			const argv = request.argv ?? [];
+			if (argv.length === 0) return { status: "refused", reason: "nothing to run" };
+			const label = argv[0] ?? "pane";
+			const ref = await deps.mux.openUtilityPane({ argv, cwd, label });
+			if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
+			return { status: "opened", label, paneId: ref.paneId };
+		},
+
+		async close(target: string): Promise<PanesCloseResult> {
+			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			const owned = deps.mux.list();
+			if (target === "all") {
+				const labels: string[] = [];
+				// Snapshot first: closing mutates the registry the list came from.
+				for (const record of [...owned]) {
+					if (await deps.mux.closePane(record.ref.paneId)) labels.push(record.label);
+				}
+				return { status: "closed", closed: labels.length, labels };
+			}
+			const needle = target.trim().toLowerCase();
+			const newestFirst = [...owned].reverse();
+			const match =
+				newestFirst.find((record) => record.ref.paneId.toLowerCase() === needle) ??
+				newestFirst.find((record) => record.label.toLowerCase().includes(needle)) ??
+				matchRunPane(target);
+			if (!match) return { status: "not-found", target };
+			const closed = await deps.mux.closePane(match.ref.paneId);
+			return closed ? { status: "closed", closed: 1, labels: [match.label] } : { status: "not-found", target };
+		},
+	};
+}

@@ -104,6 +104,12 @@ function baseClassify(tool: string): ActionClass | null {
 		// local mirror. Neither touches the workspace, so it is never gated
 		// behind a confirmation.
 		case ToolNames.Ledger:
+		// panes focuses, opens, and closes terminal panes Clio itself created, in
+		// a pane host that lives outside the workspace. Nothing it does writes a
+		// file, runs a model-supplied command (its schema exposes presets only),
+		// or survives the session, so it is reversible, local, and never gated
+		// behind a confirmation.
+		case ToolNames.Panes:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

@@ -98,7 +98,7 @@ import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-en
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
-import { createMuxDomainModule, type MuxContract } from "../domains/mux/index.js";
+import { createMuxDomainModule, type MuxContract, type MuxEnablement, runViewerCommand } from "../domains/mux/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule, recordBackgroundMemoryStep } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -189,6 +189,7 @@ import {
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
 import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
+import { createPanesRuntime } from "../interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { runWatchdogReview } from "../interactive/watchdog-run.js";
@@ -850,7 +851,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Panes are an interactive-surface projection. Headless, ACP, and worker boots
 	// gate detection off so they never resolve a socket path or open a descriptor.
 	// This mirrors the `interactive` predicate computed after the domains load.
-	const muxEnabled = !options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1";
+	const muxInteractive = !options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1";
+	// The domain is built before the config contract loads, so the rung comes off
+	// the settings the interactive entry point already read strictly
+	// (`src/cli/clio.ts:31`). Absent, `auto` is the shipped default and costs
+	// nothing without `HERDR_ENV`. This is why `panes.enabled` is a restart-scoped
+	// row: the ladder runs once, here.
+	const muxEnablement: MuxEnablement = options.startupSettings?.panes.enabled ?? "auto";
 
 	const result = await loadDomains(
 		[
@@ -882,8 +889,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			ObservabilityDomainModule,
 			SchedulingDomainModule,
 			createMuxDomainModule({
-				enabled: muxEnabled ? "auto" : "off",
+				enabled: muxInteractive ? muxEnablement : "off",
 				cwd: process.cwd(),
+				// A viewer pane follows the run's on-disk journal through this
+				// install's own CLI, so it needs no herdr knowledge and keeps working
+				// when the pane host goes away mid-run.
+				viewerCommand: (request) => runViewerCommand(request.runId),
 				log: (level, message) => {
 					if (level === "warning") bootStderr(`[mux] ${message}\n`);
 				},
@@ -1402,6 +1413,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Operator-initiated backgrounding is a TUI affordance: the registry is the
 	// one object the dispatch tool and the keypress both hold.
 	const dispatchBackground = createDispatchBackgroundRegistry();
+	// One `PanesOperations` instance drives both the `panes` tool and the
+	// `/panes` slash command, so the model and the operator cannot be told
+	// different things about the same pane. Built only when a pane host answered
+	// detection; `mode === "none"` means there is nothing to operate.
+	const panes =
+		mux && mux.mode !== "none"
+			? createPanesRuntime({
+					mux,
+					getSettings: () => getCurrentSettings(),
+					getDispatchSnapshot: () => dispatch.snapshot(),
+					getCwd: () => process.cwd(),
+				})
+			: null;
 	registerAllTools(toolRegistry, {
 		...(session
 			? {
@@ -1425,6 +1449,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// provenance and compete winner handling agree with the approval surface.
 		getAutonomy: resolveEffectiveAutonomy,
 		...(interactive ? { dispatchBackground } : {}),
+		// Registered only when a pane host answered detection, so the tool is
+		// absent from the prompt on a machine with none rather than present and
+		// always refusing.
+		...(panes ? { panes } : {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		...(config ? { getWorkerRosters: () => config.get().workers.rosters } : {}),
 		getSkillLoaderOptions: () => ({
@@ -2043,6 +2071,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),
+		...(panes ? { panes } : {}),
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),

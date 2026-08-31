@@ -49,6 +49,10 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// review the board depends on. Sequential so two posts in one batch do not
 	// interleave against the local post cap.
 	[ToolNames.Ledger]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
+	// panes projects Clio's own runs onto a pane host and opens preset utility
+	// panes. It mutates no workspace, so it stays read class; sequential because
+	// two pane operations in one batch would race the same pane registry.
+	[ToolNames.Panes]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },
@@ -75,6 +79,8 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
 const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Monitor, ToolNames.Steer]);
 const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
+/** Registered only when a pane host answered detection and the mux is live. */
+const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
 const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebFetch]);
 
@@ -82,8 +88,9 @@ export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;
 	includeDispatchTools?: boolean;
 	includeInteractiveTools?: boolean;
+	includePanesTools?: boolean;
 	/**
-	 * Unlike the other three, this defaults to true: every registry registers
+	 * Unlike the other four, this defaults to true: every registry registers
 	 * the network plane unless a run explicitly asked to be hermetic, so an
 	 * unset option must keep demanding it.
 	 */
@@ -132,12 +139,14 @@ function validateBuiltinToolPolicy(specs: ReadonlyArray<ToolSpec>, options: Buil
 	const includeSessionTools = options.includeSessionTools ?? false;
 	const includeDispatchTools = options.includeDispatchTools ?? false;
 	const includeInteractiveTools = options.includeInteractiveTools ?? false;
+	const includePanesTools = options.includePanesTools ?? false;
 	const includeNetworkTools = options.includeNetworkTools ?? true;
 	const required = new Set<ToolName>(Object.values(ToolNames));
 	for (const tool of [...required]) {
 		if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeInteractiveTools && INTERACTIVE_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (!includePanesTools && PANES_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeNetworkTools && NETWORK_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {

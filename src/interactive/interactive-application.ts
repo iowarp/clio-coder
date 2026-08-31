@@ -13,6 +13,7 @@ import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
 import type { MuxContract } from "../domains/mux/index.js";
+import type { PanesOperations } from "../domains/mux/operations.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -41,6 +42,7 @@ import { createProcessInteractiveShell, getActiveRenderTrace } from "./interacti
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
+import { createMuxBridge, runPaneLabel } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { writeInputWedgeDump } from "./render-trace.js";
@@ -134,10 +136,19 @@ export interface InteractiveDeps {
 	/**
 	 * Pane layer. Absent whenever the mux resolved to `none`, and best-effort even
 	 * when present: a mux failure degrades to `available() === false` and never
-	 * reaches a dispatch or a turn. The dispatch bridge that drives it lands in
-	 * phase 3.
+	 * reaches a dispatch or a turn. The bridge in `mux-bridge.ts` drives it.
 	 */
 	mux?: MuxContract;
+	/**
+	 * Pane-layer operations behind `/panes` and the `panes` tool. Built by the
+	 * composition root so the tool registry and this surface drive one instance.
+	 */
+	panes?: PanesOperations;
+	/**
+	 * Factory seam for the dispatch-to-pane bridge, so a contract test can drive
+	 * it without a TUI. Production leaves it unset and gets `createMuxBridge`.
+	 */
+	createMuxBridge?: typeof createMuxBridge;
 	/**
 	 * Shared tool registry. When wired, the permission overlay opens automatically
 	 * whenever a tool call is parked waiting for operator confirmation, and the
@@ -689,6 +700,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openMemory: () => openMemoryOverlayState(),
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
+		...(deps.panes ? { panes: deps.panes } : {}),
 		openModel: () => openModelOverlayState(),
 		openSettings: (section, rowId) => openSettingsOverlayState(section, rowId),
 		openResume: () => openResumeOverlayState(),
@@ -874,6 +886,42 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		};
 		notify(outcome.ok ? "success" : "info", outcome.message, "dispatch:background");
 	};
+	// Spec 4.7. Built only when a pane host answered detection, so a session with
+	// no panes subscribes to nothing and the bus handlers do not exist at all.
+	const mux = deps.mux;
+	const muxBridge =
+		mux && mux.mode !== "none"
+			? (deps.createMuxBridge ?? createMuxBridge)({
+					bus: deps.bus,
+					mux,
+					getPanesSettings: () => {
+						const panes = deps.getSettings?.().panes;
+						return {
+							agents: panes?.agents ?? "auto",
+							keepFailed: panes?.keepFailed ?? true,
+							notifications: panes?.notifications ?? "failures",
+						};
+					},
+					// Both the detached path and the attach-to-background conversion
+					// write one durable batch record, so this single read answers the
+					// `auto` policy for both without a second signal.
+					isDetached: (runId) =>
+						deps.dispatch.detached
+							?.list()
+							.some((batch) => batch.runs.some((run) => run.runId === runId || run.assignmentId === runId)) === true,
+					// A resumed session re-adopts the panes still on screen for runs the
+					// dispatch domain still considers live, rather than opening seconds.
+					resumableRuns: () =>
+						deps.dispatch.snapshot().running.map((run) => ({
+							runId: run.runId,
+							agentId: run.agentId,
+							label: runPaneLabel(run),
+						})),
+					log: (level, message) => {
+						if (level === "warning") notify("warning", message, "mux:bridge");
+					},
+				})
+			: null;
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
 		refreshFooter: () => footer.refresh(),
@@ -963,7 +1011,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			disposeOverlay: overlayLifecycle.dispose,
 			stopAgentProgress: agentProgress.stop,
 			disposeChat: () => deps.chat.dispose(),
-			disposeSubscriptions: interactiveSubscriptions.dispose,
+			disposeSubscriptions: () => {
+				muxBridge?.dispose();
+				interactiveSubscriptions.dispose();
+			},
 		},
 		beforeStopUi: (() => {
 			let settlement: Promise<void> | null = null;
