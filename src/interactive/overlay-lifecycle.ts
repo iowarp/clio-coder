@@ -22,6 +22,7 @@ import {
 export * from "./overlay-key-routing.js";
 
 import type { OverlayState } from "./overlay-key-routing.js";
+import type { PendingModelScope } from "./overlays/model-scope.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 
 // Runtime lifecycle construction lives beside the pure modal key router so the
@@ -48,6 +49,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "onNewSession"
 	| "onResumeSession"
 	| "onSelectModel"
+	| "onSetThinkingLevel"
 	| "providers"
 	| "readSessionEntries"
 	| "registerAskUserHandler"
@@ -108,6 +110,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	openAuthDialog?: typeof import("./overlays/auth-dialog.js").openAuthDialog;
 	openAskUserOverlay?: typeof import("./overlays/ask-user.js").openAskUserOverlay;
 	openModelOverlay?: typeof import("./overlays/model-selector.js").openModelOverlay;
+	openModelScopeOverlay?: typeof import("./overlays/model-scope.js").openModelScopeOverlay;
 	openSettingsOverlay?: typeof import("./overlays/settings.js").openSettingsOverlay;
 	openSessionOverlay?: typeof import("./overlays/session-selector.js").openSessionOverlay;
 	openTreeOverlay?: typeof import("./overlays/tree-selector.js").openTreeOverlay;
@@ -151,6 +154,8 @@ export interface OverlayLifecycleController {
 	startHandoffState(goal: string): void;
 	startFleetRunState(name: string, vars: Readonly<Record<string, string>>): void;
 	openModelOverlayState(): void;
+	/** `/model <pattern>` and the picker both land here: choose session or global before anything applies. */
+	openModelScopeState(ref: PendingModelScope): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(): void;
 	openTreeOverlayState(): void;
@@ -196,6 +201,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openAuthDialog: openAuthDialogFactory,
 		openAskUserOverlay: openAskUserOverlayFactory,
 		openModelOverlay: openModelOverlayFactory,
+		openModelScopeOverlay: openModelScopeOverlayFactory,
 		openSettingsOverlay: openSettingsOverlayFactory,
 		openSessionOverlay: openSessionOverlayFactory,
 		openTreeOverlay: openTreeOverlayFactory,
@@ -338,10 +344,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.writeSettings ? { writeSettings: deps.app.writeSettings } : {}),
 		...(deps.app.commitSetting ? { commitSetting: deps.app.commitSetting } : {}),
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
+		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
 		connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
 		...(deps.app.interop ? { getInteropProposals: interopProposalsFor(deps.app.interop) } : {}),
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
+		...(openModelScopeOverlayFactory ? { openModelScopeOverlay: openModelScopeOverlayFactory } : {}),
 		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
 	});
 
@@ -473,6 +481,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		startFleetRunState,
 		startHandoffState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
+		openModelScopeState: overlayModelSelectors.openModelScopeState,
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

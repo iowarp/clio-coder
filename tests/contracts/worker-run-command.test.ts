@@ -103,7 +103,7 @@ function recorder(options: { receipt?: RunReceipt; workerRuns?: WorkerEntryState
 		openView: () => undefined,
 		openModel: () => undefined,
 		providers: {} as ProvidersContract,
-		applyModelRef: () => undefined,
+		applyModelRef: () => "applied" as const,
 		openSettings: () => undefined,
 		openResume: () => undefined,
 		startNewSession: () => undefined,

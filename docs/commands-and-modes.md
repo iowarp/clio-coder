@@ -212,6 +212,14 @@ There are no slash-command aliases. `/context compact`, `/quit`, `/model`,
 spellings stay errors that name `/help` instead of guessing which operation the
 operator intended.
 
+`/model` never changes routing on its own. Both spellings, the picker and
+`/model <pattern>`, resolve the swap and then ask where it lands: `Apply this
+session`, `Apply and save globally`, or `Cancel`. Session is the default and
+touches no file, so a mid-conversation experiment dies with the session that
+made it; global is the same write the settings center performs, and it is the
+only one a later launch inherits. Cancel leaves the model where it was. A
+thinking level named in the pattern follows the same choice.
+
 `/btw <question>` runs one model round beside the session and renders the answer
 in an overlay. It sends the same compiled message history the next turn would
 send, as read-only input, under a short system instruction saying this is a side

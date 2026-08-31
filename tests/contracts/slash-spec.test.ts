@@ -90,7 +90,7 @@ describe("contracts/slash-spec", () => {
 			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
 			openModel: () => opened.push("model"),
 			providers: {} as ProvidersContract,
-			applyModelRef: () => undefined,
+			applyModelRef: () => "applied" as const,
 			openSettings: (section, rowId) =>
 				opened.push(rowId ? `settings:${section}:${rowId}` : section ? `settings:${section}` : "settings"),
 			openResume: () => opened.push("resume"),

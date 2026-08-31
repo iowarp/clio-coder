@@ -1610,6 +1610,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mutateSaved?.(saved);
 		});
 	};
+	/**
+	 * A routing change at the scope the operator chose. "session" moves the live
+	 * route and leaves settings.yaml alone, so a swap that points at a dead
+	 * endpoint dies with the session that made it; "global" is the historical
+	 * write-through. Nothing on this path writes durably without a scope.
+	 */
+	const applyRoutingAtScope = (patch: RoutingPatch, scope: "session" | "global"): void => {
+		if (scope === "global") {
+			updateSessionRouting(patch);
+			return;
+		}
+		applyRoutingPatch(sessionRouting, patch);
+		bumpSessionState();
+	};
 	const readAcpSafeSettings = (): AcpSafeSettingsSnapshot => {
 		const settings = getCurrentSettings();
 		return {
@@ -2208,7 +2222,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					},
 				}
 			: {}),
-		onSetThinkingLevel: (level) => {
+		onSetThinkingLevel: (level, scope) => {
 			const current = getCurrentSettings();
 			const nextLevel =
 				resolveModelRuntimeCapabilitiesForProviders(
@@ -2217,7 +2231,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					current.orchestrator.model,
 					level,
 				)?.thinking.effectiveLevel ?? "off";
-			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
+			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "global");
 		},
 		onCycleThinking: () => {
 			const current = getCurrentSettings();
@@ -2234,7 +2248,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			);
 			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
 		},
-		onSelectModel: ({ target, model }) => {
+		onSelectModel: ({ target, model }, scope) => {
 			const registry = getRuntimeRegistry();
 			const settings = getCurrentSettings();
 			const descriptor = settings.targets.find((e) => e.id === target);
@@ -2251,7 +2265,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					);
 				}
 			}
-			updateSessionRouting({ orchestrator: { target, model } });
+			applyRoutingAtScope({ orchestrator: { target, model } }, scope);
+			// Recents live in the state dir, not settings.yaml, and are how a swap
+			// stays reachable in the picker. A session-scoped swap still earns one.
 			rememberRecentModel(`${target}/${model}`, getCurrentSettings().modelSelector.recentLimit);
 		},
 		writeSettings: (next) => applySettingsBlob(next),

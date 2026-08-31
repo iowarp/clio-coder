@@ -685,8 +685,12 @@ export interface SlashCommandContext {
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
-	/** Apply a resolved model reference to settings (and optionally thinking level). */
-	applyModelRef: (ref: ResolvedModelRef) => void;
+	/**
+	 * Apply a resolved model reference, or hand it to the scope dialog. "pending"
+	 * means the operator has yet to choose session or global and nothing has
+	 * changed; the dialog reports the outcome itself.
+	 */
+	applyModelRef: (ref: ResolvedModelRef) => "applied" | "pending";
 	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
 	openResume: () => void;
 	startNewSession: () => void;
@@ -1827,9 +1831,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return;
 				}
 				if (result.warning) ctx.notice("warn", result.warning);
-				ctx.applyModelRef(result.ref);
-				const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
-				ctx.notice("success", `active: ${result.ref.target}/${result.ref.model}${suffix}`);
+				// "pending" means the scope dialog is up: it says what landed and
+				// where, so announcing a swap here would be announcing a choice the
+				// operator has not made yet.
+				if (ctx.applyModelRef(result.ref) === "applied") {
+					const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
+					ctx.notice("success", `active this session: ${result.ref.target}/${result.ref.model}${suffix}`);
+				}
 				ctx.render();
 			})();
 		},

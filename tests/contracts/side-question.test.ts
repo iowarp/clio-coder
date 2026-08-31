@@ -42,7 +42,7 @@ function slashContext(sink: { opened: string[]; notices: string[]; submitted: st
 		openView: () => undefined,
 		openModel: () => undefined,
 		providers: {} as ProvidersContract,
-		applyModelRef: () => undefined,
+		applyModelRef: () => "applied" as const,
 		openSettings: () => undefined,
 		openResume: () => undefined,
 		startNewSession: () => undefined,

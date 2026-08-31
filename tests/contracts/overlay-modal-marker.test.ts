@@ -61,6 +61,7 @@ const MARKER_IDS = [
 	"memory",
 	"message-picker",
 	"model",
+	"model-scope",
 	"permission-confirm",
 	"prompts",
 	"resume",
