@@ -1157,6 +1157,16 @@ describe("compete dispatch", () => {
 			strictEqual(judge?.gate?.subjects?.length, 2);
 			for (const candidate of candidates) {
 				ok(judge?.gate?.subjects?.some((subject) => subject.runId === candidate.runId));
+				const group = candidate.gate?.group;
+				const cycle = candidate.gate?.cycle;
+				ok(group);
+				ok(cycle);
+				deepStrictEqual(candidate.gate?.worktree, {
+					backend: "native",
+					path: join(repo, ".clio-coder", "worktrees", group ?? "", `candidate-${cycle}`),
+					branch: `clio/compete/${group}/${cycle}`,
+					fallback: "mux-unavailable",
+				});
 				const envelope = bundle.contract.getRun(candidate.runId);
 				ok(envelope);
 				if (envelope) deepStrictEqual(verifyReceiptIntegrity(candidate, envelope), { ok: true });
