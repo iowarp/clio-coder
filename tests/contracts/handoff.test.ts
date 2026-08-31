@@ -354,6 +354,11 @@ describe("contracts/handoff session seeding", () => {
 			close() {
 				this.state = "closed";
 			},
+			showPermission(next) {
+				this.state = "permission-confirm";
+				this.handle = next;
+				return true;
+			},
 		};
 		let reviewedDocument: string | null = null;
 		const rounds: RoundRecord[] = [];

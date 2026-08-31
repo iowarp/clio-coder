@@ -269,11 +269,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		getAutonomy: () => deps.app.getSettings?.().autonomy ?? "auto-edit",
 		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view, inspect) => {
-			if (overlayTransitions.state !== "closed") return false;
-			overlayTransitions.state = "permission-confirm";
+			if (overlayTransitions.state === "permission-confirm") return false;
 			const body = createPermissionOverlayBody(view, inspect);
 			permissionBody = body;
-			overlayTransitions.handle = showOverlayFrame(tui, body, {
+			const handle = showOverlayFrame(tui, body, {
 				...permissionOverlayPlacement(tui, editor, footer.view),
 				width: PERMISSION_OVERLAY_WIDTH,
 				// Not derived from the title: that one is classified per decision
@@ -286,6 +285,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				// the mutation is open.
 				footerHint: (innerWidth) => permissionOverlayHint(innerWidth, editor.getText().length > 0, inspectionHint()),
 			});
+			if (!overlayTransitions.showPermission(handle)) {
+				handle.hide();
+				permissionBody = null;
+				return false;
+			}
 			tui.requestRender();
 			return true;
 		},

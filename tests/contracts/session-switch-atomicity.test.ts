@@ -151,6 +151,11 @@ describe("contracts/session-switch-atomicity", () => {
 			close() {
 				this.state = "closed";
 			},
+			showPermission(next) {
+				this.state = "permission-confirm";
+				this.handle = next;
+				return true;
+			},
 		};
 		const lifecycle = createOverlaySessionLifecycle({
 			tui: { requestRender() {} } as never,

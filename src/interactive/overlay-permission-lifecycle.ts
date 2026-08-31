@@ -215,21 +215,20 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let confirmed = false;
 	let stopping = false;
 
-	const openWorker = (entry: WorkerEscalationEntry): void => {
-		if (deps.getOverlayState() !== "closed") return;
-		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry))) return;
+	const openWorker = (entry: WorkerEscalationEntry): boolean => {
+		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry))) return false;
 		pendingWorker = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
 		pendingPermission = null;
 		confirmed = false;
+		return true;
 	};
 	const maybeOpenWorker = (): void => {
-		if (deps.getOverlayState() !== "closed") return;
-		const next = workerQueue.shift();
-		if (next) openWorker(next);
+		const next = workerQueue[0];
+		if (next && openWorker(next)) workerQueue.shift();
 	};
 	const retryPending = (): void => {
 		maybeOpenWorker();
-		if (deps.getOverlayState() === "closed" && deps.toolRegistry?.hasParkedCalls()) {
+		if (deps.getOverlayState() !== "permission-confirm" && deps.toolRegistry?.hasParkedCalls()) {
 			deps.toolRegistry.renotifyHead();
 		}
 	};
@@ -238,11 +237,10 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
 			const autonomy = deps.getAutonomy();
 			const view = mainApprovalRequestView(call, decision, meta, autonomy, deps.toolRegistry?.parkedCount());
-			// The dialog states the tool, the target, the action class, the axis
-			// that asked, and the keys that answer it. While it is on screen the
-			// notice repeats all of that one line above the transcript, so it is
-			// emitted only when no dialog could open (another overlay holds the
-			// screen), which is the case where it is the operator's only signal.
+			// The dialog states the tool, target, action class, asking axis, and
+			// decision keys. Another modal is interrupted so this prompt can take
+			// focus. The notice remains for a second queued approval or a frame that
+			// could not mount, when it is the operator's only additional signal.
 			const announceParked = (): void => {
 				if (!markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) return;
 				const notice = approvalParkedNotice(call.tool, decision, autonomy);
@@ -255,10 +253,6 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					state: "awaiting-approval",
 					view,
 				});
-			}
-			if (deps.getOverlayState() !== "closed") {
-				announceParked();
-				return;
 			}
 			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view))) {
 				announceParked();

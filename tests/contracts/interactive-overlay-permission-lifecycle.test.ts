@@ -32,6 +32,11 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 	const parked: PermissionHarness["parked"] = [];
 	const draft = { text: "" };
 	const frames: PermissionHarness["frames"] = [];
+	const overlayHandle = (id: string): OverlayHandle =>
+		({
+			hide: () => events.push(`hide:${id}`),
+			focus: () => events.push(`focus:${id}`),
+		}) as unknown as OverlayHandle;
 	// The stub keeps the registry's queue so `renotifyHead` can do what the
 	// real one does: fire the listener again for the head parked call.
 	const toolRegistry = {
@@ -117,6 +122,10 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 			},
 		},
 		getSlashContext: () => ({}),
+		openHelpOverlay: () => {
+			events.push("show:help");
+			return overlayHandle("help");
+		},
 		showOverlayFrame: (
 			_tui: unknown,
 			body: unknown,
@@ -136,10 +145,7 @@ function createPermissionHarness(options: { columns?: number } = {}): Permission
 					: undefined;
 			frames.push({ title, ...(tone !== undefined ? { tone } : {}), body: render?.(80) ?? [] });
 			events.push(`show:${current}`);
-			return {
-				hide: () => events.push(`hide:${current}`),
-				footerHint: (innerWidth: number) => frameOptions.footerHint?.(innerWidth) ?? "",
-			} as unknown as OverlayHandle;
+			return overlayHandle(String(current));
 		},
 	} as unknown as OverlayLifecycleRuntimeDeps;
 
@@ -383,16 +389,16 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 	});
 
 	/**
-	 * A call that parks while `/context`, a picker, or the fleet board holds the
-	 * screen can only be announced. Nothing re-attempted the dialog when that
-	 * overlay closed, so the transcript said awaiting approval, the footer said
-	 * confirm, and the operator had nothing to press (issue #186). Closing the
-	 * blocking overlay now re-presents the head of the queue.
+	 * An approval that parked while help held the keyboard used to stay behind
+	 * help while its transcript render covered the modal. The screen showed no
+	 * actionable prompt and the scalar lifecycle had no way to raise one. The
+	 * approval now interrupts help as the focused frame and restores help after
+	 * the decision.
 	 */
-	it("re-presents a call that parked while another overlay held the screen", () => {
+	it("raises a parked approval over help and restores help after the decision", () => {
 		const harness = createPermissionHarness({ columns: 60 });
-		harness.lifecycle.toggleDispatchBoardOverlay();
-		strictEqual(harness.lifecycle.getState(), "dispatch-board");
+		harness.lifecycle.openHelpOverlayState();
+		strictEqual(harness.lifecycle.getState(), "help");
 		harness.events.length = 0;
 
 		harness.permissionRequired(
@@ -404,17 +410,26 @@ describe("contracts/interactive permission overlay lifecycle", () => {
 			} as PermissionRequiredMeta,
 		);
 
-		strictEqual(harness.lifecycle.getState(), "dispatch-board", "the board keeps the screen");
-		ok(harness.events.includes("notice"), `announced while it cannot show: ${harness.events.join(",")}`);
-		ok(!harness.events.some((event) => event.startsWith("show:")), "no second frame under the board");
+		strictEqual(harness.lifecycle.getState(), "permission-confirm", "the approval takes input immediately");
+		ok(harness.events.includes("show:1"), `the approval frame is mounted above help: ${harness.events.join(",")}`);
+		ok(!harness.events.includes("notice"), "the visible approval does not need a queued notice");
+
+		strictEqual(
+			routePermissionOverlayKey("\u001b", {
+				cancelPermission: () => harness.lifecycle.closeOverlay(),
+				confirmPermission: () => harness.lifecycle.confirmPermission(),
+				stopTurnFromPermission: () => harness.lifecycle.stopTurnFromPermission(),
+			}),
+			true,
+		);
+		strictEqual(harness.lifecycle.getState(), "help", "denying returns input to help");
+		ok(harness.events.includes("hide:1"), `the approval frame closed: ${harness.events.join(",")}`);
+		ok(harness.events.includes("focus:help"), `the interrupted frame regained focus: ${harness.events.join(",")}`);
+
 		harness.events.length = 0;
-
 		harness.lifecycle.closeOverlay();
-
-		strictEqual(harness.lifecycle.getState(), "permission-confirm", "the dialog opens once the board is gone");
-		ok(harness.events.includes("renotify-head"), `the queue head is re-presented: ${harness.events.join(",")}`);
-		ok(harness.events.includes("show:2"), `a 60-column terminal still gets the dialog: ${harness.events.join(",")}`);
-		ok(!harness.events.includes("notice"), "the re-presented request is not announced twice");
+		strictEqual(harness.lifecycle.getState(), "closed");
+		ok(harness.events.includes("hide:help"), "the restored help overlay remains closable");
 	});
 
 	/**
