@@ -18,6 +18,7 @@
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -164,6 +165,41 @@ describe("run event journal production wiring", () => {
 				1,
 				"one terminal line, not one per writer",
 			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("keeps route warning text in the durable transcript fleet view reads", async () => {
+		const context = dispatchStubContext();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => okWorker(),
+			journalRunEvents: true,
+		});
+		await bundle.extension.start();
+		try {
+			const warning = "target mini resolved without an advertised output-token limit";
+			context.bus.emit(BusChannels.DispatchProgress, {
+				runId: "route-warning-run",
+				agentId: "coder",
+				event: { type: "route_warning", level: "warning", message: warning },
+			});
+			context.bus.emit(BusChannels.DispatchFailed, {
+				runId: "route-warning-run",
+				agentId: "coder",
+				targetId: "mini",
+				wireModelId: "test-model",
+				runtimeId: "llamacpp",
+				runtimeKind: "http",
+				outcome: "failed",
+				outcomeDetail: "test terminal",
+				reason: "failed",
+			});
+
+			const journal = readRunEventJournal("route-warning-run");
+			const routeWarning = journal.lines.find((line) => line.kind === "event" && line.type === "route_warning");
+			ok(routeWarning?.kind === "event");
+			strictEqual(routeWarning.detail, warning);
 		} finally {
 			await bundle.extension.stop?.();
 		}
