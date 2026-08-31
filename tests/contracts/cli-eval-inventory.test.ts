@@ -122,7 +122,7 @@ function artifact(options: ArtifactOptions): EvalArtifactV4 {
 		evalId: options.evalId,
 		suite: { id: options.suiteId ?? "public-main-agent-behavior", hash: options.suiteHash ?? SUITE_HASH },
 		clio: {
-			version: "0.3.9",
+			version: "0.4.0",
 			commit: "7cf5b06a5e2d429a2ed06b086cb335793fa5a9c7",
 			// The entry path is host-only; the projection must not echo it.
 			entry: `/home/researcher/code/${SECRET}/dist/cli/index.js`,
@@ -239,7 +239,7 @@ describe("contracts/cli-eval-inventory", () => {
 		strictEqual(report.startedAt, "2026-08-30T20:58:57.010Z");
 		strictEqual(report.suiteId, "public-main-agent-behavior");
 		strictEqual(report.servingGroup, 1);
-		strictEqual(report.clioVersion, "0.3.9");
+		strictEqual(report.clioVersion, "0.4.0");
 		strictEqual(report.clioCommit, "7cf5b06a5e2d429a2ed06b086cb335793fa5a9c7");
 		strictEqual(report.platform, "linux-x64");
 		deepStrictEqual(report.matrix.dimensions, ["target", "wireModel"]);

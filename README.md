@@ -288,7 +288,7 @@ dist-tag instead.
 From source, pinned to this release:
 
 ```bash
-git clone --branch v0.3.9 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.0 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 npm run install:local
 export PATH="$HOME/.local/bin:$PATH"
@@ -314,7 +314,7 @@ Full lifecycle details, including `reset` and the upgrade path, are in
 
 ## Status
 
-The current release is **v0.3.9**, installable from npm as
+The current release is **v0.4.0**, installable from npm as
 [`@iowarp/clio-coder`](https://www.npmjs.com/package/@iowarp/clio-coder) or
 from source. Clio Coder is still experimental: we ship quickly, interfaces may
 change between minor versions, and model-specific behavior varies by target, so
