@@ -626,9 +626,9 @@ export function renderDispatchCard(
 	row: DispatchBoardRow,
 	width: number,
 	evidence?: RunEvidencePresentation,
-	options: { selected?: boolean; expanded?: boolean; endpointActive?: number } = {},
+	options: { selected?: boolean; expanded?: boolean; endpointActive?: number; theme?: ClioTheme } = {},
 ): string[] {
-	const theme = clioTheme();
+	const theme = options.theme ?? clioTheme();
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);

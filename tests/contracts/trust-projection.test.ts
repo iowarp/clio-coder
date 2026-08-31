@@ -47,7 +47,7 @@ import {
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { createStdioServerTransport } from "../../src/engine/acp/transport.js";
 import { createDispatchBoardStore, renderDispatchCard } from "../../src/interactive/dispatch-board.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
+import { createClioTheme } from "../../src/interactive/theme/index.js";
 import { receiptTrustDetail } from "../../src/interactive/view/artifacts.js";
 import { readWorkerReceiptFacts } from "../../src/interactive/worker-receipts.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
@@ -439,7 +439,8 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 			const row = store.rows()[0];
 			ok(row?.trust);
 			strictEqual(row.trust.text, CANONICAL_SUMMARY);
-			const card = renderDispatchCard(row, 160).join("\n");
+			const theme = createClioTheme({ color: true, truecolor: true });
+			const card = renderDispatchCard(row, 160, undefined, { theme }).join("\n");
 			const plain = card.replace(SGR, "");
 			const boardText = plain.replace(/[│\n]/gu, " ").replace(/\s+/gu, " ");
 			ok(boardText.includes("◇ grounded;"), plain);
@@ -448,7 +449,6 @@ describe("contracts/trust projection: one fixture, every surface", () => {
 			ok(boardText.includes("host checks verified"), plain);
 			ok(!plain.includes("host_verification="), "the raw receipt field is no longer the evidence line");
 			ok(!plain.includes("not_requested"), "not_requested is not a trust state");
-			const theme = clioTheme();
 			ok(card.includes(theme.fgSequence("info")), "grounded renders with the info token");
 			ok(!card.includes(`${theme.fgSequence("success")}◇`), "a sealed, grounded receipt is not styled as reviewed");
 		} finally {
