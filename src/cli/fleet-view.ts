@@ -22,6 +22,11 @@
  *     and bounded before rendering, per the `DispatchRunIdentity` warning in
  *     src/core/bus-events.ts:524. Journal event details cross the same seam and
  *     get the same treatment.
+ *
+ * Terminal primitives come from src/engine/tui-primitives.ts, never from the
+ * src/engine/tui.js barrel, and that is load-bearing. See the header of
+ * tui-primitives.ts for why an edge from here to the barrel breaks the Stage 0
+ * instant-shell chunk budget.
  */
 
 import { readFileSync } from "node:fs";
@@ -37,7 +42,7 @@ import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { truncateToWidth } from "../engine/tui.js";
+import { truncateToWidth } from "../engine/tui-primitives.js";
 
 const HELP = `clio-coder fleet view <runId> [--follow]
 
@@ -383,7 +388,7 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
  * path uses, so the two surfaces cannot drift.
  */
 async function followRun(runId: string): Promise<number> {
-	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui.js");
+	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui-primitives.js");
 	const terminal = new ProcessTerminal();
 	const tui = new TuiAltScreen(terminal);
 	let model = loadRunViewModel(runId);
