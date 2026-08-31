@@ -1,4 +1,4 @@
-import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { deepStrictEqual, equal, ok, rejects, throws } from "node:assert/strict";
 import { ClioCliFleetInspector, ClioFleetInspectError, projectFleetInspection } from "../clio-fleet-inspector.ts";
 
 const FIXTURE = new URL("./fleet-inspect-child-fixture.ts", import.meta.url).pathname;
@@ -25,6 +25,14 @@ Deno.test("the fleet adapter invokes only the fixed recent-run projection", asyn
 			state: "pending",
 			summary: "Receipt pending; this run has not finalized.",
 		});
+		const rootRow = inspection.roots[0];
+		ok(rootRow !== undefined);
+		equal(rootRow.rootId, "fleet-345ea2e6c1ad");
+		equal(rootRow.plannedSteps, 3);
+		equal(rootRow.steps.length, 3);
+		// The index points into the run window rather than carrying its own
+		// evidence, so no durable fleet-run location rides along with it.
+		ok(!JSON.stringify(inspection.roots).includes("/fleet-runs/"));
 	} finally {
 		await Deno.remove(root, { recursive: true });
 	}
@@ -53,19 +61,90 @@ Deno.test("fleet projection rejects extra path fields and duplicate run identiti
 		version: 1,
 		generatedAt: "2026-08-31T14:00:00.000Z",
 		truncated: false,
+		roots: [],
+		rootsTruncated: false,
 	};
-	rejects(
-		Promise.resolve().then(() =>
+	throws(
+		() =>
 			projectFleetInspection({
 				...base,
 				runs: [{ ...run, receiptPath: "/secret" }],
-			}, base.generatedAt)
-		),
+			}, base.generatedAt),
 		/invalid durable run row/u,
 	);
-	rejects(
-		Promise.resolve().then(() => projectFleetInspection({ ...base, runs: [run, run] }, base.generatedAt)),
+	throws(
+		() => projectFleetInspection({ ...base, runs: [run, run] }, base.generatedAt),
 		/duplicate durable run identities/u,
+	);
+	// A snapshot from a build that predates the root index is not a snapshot this
+	// GUI can read: the closed key set is what keeps a new field from arriving
+	// unvalidated, so it must reject in both directions.
+	throws(
+		() =>
+			projectFleetInspection(
+				{ version: 1, generatedAt: base.generatedAt, runs: [], truncated: false },
+				base.generatedAt,
+			),
+		/invalid recent-run snapshot/u,
+	);
+});
+
+Deno.test("fleet root projection rejects durable paths, bad attribution, and duplicate identities", () => {
+	const root = {
+		rootId: "fleet-345ea2e6c1ad",
+		fleet: "build-review",
+		startedAt: "2026-08-31T13:59:00.000Z",
+		elapsedMs: 210_000,
+		running: true,
+		resumedFrom: null,
+		plannedSteps: 2,
+		recordedSteps: 1,
+		steps: [
+			{ stepId: "build", runId: "run-alpha", agentId: "builder", outcome: "succeeded", detail: null },
+			{ stepId: "apply", runId: null, agentId: null, outcome: "not run", detail: null },
+		],
+		stepsTruncated: false,
+	};
+	const base = {
+		version: 1,
+		generatedAt: "2026-08-31T14:00:00.000Z",
+		runs: [],
+		truncated: false,
+		rootsTruncated: false,
+	};
+	const accepted = projectFleetInspection({ ...base, roots: [root] }, base.generatedAt);
+	equal(accepted.roots[0]?.steps[1]?.agentId, null);
+	throws(
+		() =>
+			projectFleetInspection(
+				{ ...base, roots: [{ ...root, recordPath: "/state/fleet-runs/x.json" }] },
+				base.generatedAt,
+			),
+		/invalid fleet root row/u,
+	);
+	throws(
+		() =>
+			projectFleetInspection({
+				...base,
+				roots: [{ ...root, steps: [{ ...root.steps[1], agentId: "builder" }] }],
+			}, base.generatedAt),
+		/attributed an agent to a fleet step that never ran/u,
+	);
+	throws(
+		() => projectFleetInspection({ ...base, roots: [{ ...root, recordedSteps: 5 }] }, base.generatedAt),
+		/contradictory fleet step counts/u,
+	);
+	throws(
+		() =>
+			projectFleetInspection({
+				...base,
+				roots: [{ ...root, plannedSteps: 4, steps: [root.steps[0], root.steps[0]] }],
+			}, base.generatedAt),
+		/duplicate fleet step identities/u,
+	);
+	throws(
+		() => projectFleetInspection({ ...base, roots: [root, root] }, base.generatedAt),
+		/duplicate fleet root identities/u,
 	);
 });
 

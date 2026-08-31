@@ -19,7 +19,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveGuardrail } from "../../core/guardrails.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
@@ -106,6 +106,41 @@ export function readFleetRun(runId: string): FleetRunRecord | null {
 
 export async function writeFleetRun(record: FleetRunRecord): Promise<void> {
 	await atomicWrite(fleetRunPath(record.id), `${JSON.stringify(record, null, 2)}\n`);
+}
+
+/**
+ * How many fleet-run records a single listing will open.
+ *
+ * The directory is unbounded and the newest root is only discoverable by
+ * reading each record's start stamp, so a scan is the only ordering available.
+ * The cap keeps that scan proportional on an installation that has accumulated
+ * roots for months, at the cost of missing a root older than the cap. That is
+ * the right trade for every caller here: they all want the recent end.
+ */
+export const MAX_FLEET_RUN_SCAN = 64;
+
+/**
+ * Durable fleet-run roots, newest start first.
+ *
+ * Reads defensively for the same reason {@link readFleetRun} does: one record
+ * written by another build, half-written, or removed between the listing and
+ * the open must cost that root its row, never the whole listing.
+ */
+export function listFleetRuns(limit = MAX_FLEET_RUN_SCAN): FleetRunRecord[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(join(clioStateDir(), "fleet-runs"));
+	} catch {
+		return [];
+	}
+	const records: FleetRunRecord[] = [];
+	for (const name of entries.slice(0, MAX_FLEET_RUN_SCAN)) {
+		if (!name.endsWith(".json")) continue;
+		const record = readFleetRun(name.slice(0, -".json".length));
+		if (record !== null) records.push(record);
+	}
+	records.sort((a, b) => (Date.parse(b.startedAt) || 0) - (Date.parse(a.startedAt) || 0));
+	return records.slice(0, Math.max(0, limit));
 }
 
 // `RunEnvelope.heartbeatAt` deliberately persists only the absolute wall-clock

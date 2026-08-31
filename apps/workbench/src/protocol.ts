@@ -1026,6 +1026,8 @@ export const FLEET_EVIDENCE_STATES = [
 export type WireFleetEvidenceState = (typeof FLEET_EVIDENCE_STATES)[number];
 export const MAX_WIRE_FLEET_INSPECTION_RUNS = 8;
 export const MAX_WIRE_FLEET_INSPECTION_EVENTS = 32;
+export const MAX_WIRE_FLEET_INSPECTION_ROOTS = 4;
+export const MAX_WIRE_FLEET_INSPECTION_STEPS = 24;
 
 export interface WireFleetInspectionEvent {
 	readonly at: string;
@@ -1055,6 +1057,36 @@ export interface WireFleetInspectionRun {
 	readonly terminal: boolean;
 }
 
+export interface WireFleetInspectionStep {
+	readonly stepId: string;
+	/** The run the step terminated on, or null when the step never ran. */
+	readonly runId: string | null;
+	readonly agentId: string | null;
+	readonly outcome: string;
+	readonly detail: string | null;
+}
+
+/**
+ * One fleet root's planned step index.
+ *
+ * A root owns no ledger row, receipt, or journal, so this is deliberately not a
+ * transcript and carries no evidence of its own. Its `steps[].runId` points at
+ * the run window in the same inspection, which is what lets the GUI say which
+ * fleet a recent run belongs to instead of listing runs with no lineage.
+ */
+export interface WireFleetInspectionRoot {
+	readonly rootId: string;
+	readonly fleet: string;
+	readonly startedAt: string;
+	readonly elapsedMs: number;
+	readonly running: boolean;
+	readonly resumedFrom: string | null;
+	readonly plannedSteps: number;
+	readonly recordedSteps: number;
+	readonly steps: readonly WireFleetInspectionStep[];
+	readonly stepsTruncated: boolean;
+}
+
 /** Bounded newest-first run window selected by Clio Coder, never by browser argv. */
 export interface WireFleetInspection {
 	readonly scope: "installation";
@@ -1062,6 +1094,8 @@ export interface WireFleetInspection {
 	readonly generatedAt: string;
 	readonly runs: readonly WireFleetInspectionRun[];
 	readonly truncated: boolean;
+	readonly roots: readonly WireFleetInspectionRoot[];
+	readonly rootsTruncated: boolean;
 }
 
 export const TOOLCHAIN_SOURCES = ["path", "vendored", "none"] as const;
@@ -3886,6 +3920,8 @@ export function validateFleetInspection(
 		"generatedAt",
 		"runs",
 		"truncated",
+		"roots",
+		"rootsTruncated",
 	]);
 	if (record.scope !== "installation") {
 		invalid(`${label}.scope must be installation`);
@@ -4003,12 +4039,89 @@ export function validateFleetInspection(
 			};
 		},
 	);
+	const seenRoots = new Set<string>();
+	const roots = expectArray(
+		record.roots,
+		`${label}.roots`,
+		MAX_WIRE_FLEET_INSPECTION_ROOTS,
+		(value, rootLabel): WireFleetInspectionRoot => {
+			const root = expectExactKeys(value, rootLabel, [
+				"rootId",
+				"fleet",
+				"startedAt",
+				"elapsedMs",
+				"running",
+				"resumedFrom",
+				"plannedSteps",
+				"recordedSteps",
+				"steps",
+				"stepsTruncated",
+			]);
+			const rootId = expectPresentationText(root.rootId, `${rootLabel}.rootId`, 128);
+			if (seenRoots.has(rootId)) invalid(`${label}.roots repeats ${rootId}`);
+			seenRoots.add(rootId);
+			const seenSteps = new Set<string>();
+			const steps = expectArray(
+				root.steps,
+				`${rootLabel}.steps`,
+				MAX_WIRE_FLEET_INSPECTION_STEPS,
+				(step, stepLabel): WireFleetInspectionStep => {
+					const entry = expectExactKeys(step, stepLabel, [
+						"stepId",
+						"runId",
+						"agentId",
+						"outcome",
+						"detail",
+					]);
+					const stepId = expectPresentationText(entry.stepId, `${stepLabel}.stepId`, 128);
+					if (seenSteps.has(stepId)) invalid(`${rootLabel}.steps repeats ${stepId}`);
+					seenSteps.add(stepId);
+					const runId = expectNullablePresentationText(entry.runId, `${stepLabel}.runId`, 128);
+					const agentId = expectNullablePresentationText(entry.agentId, `${stepLabel}.agentId`, 128);
+					// A step that never ran has no run to attribute, so an agent without a
+					// run is a record this GUI cannot render truthfully.
+					if (runId === null && agentId !== null) {
+						invalid(`${stepLabel} attributes an agent to a step that never ran`);
+					}
+					return {
+						stepId,
+						runId,
+						agentId,
+						outcome: expectPresentationText(entry.outcome, `${stepLabel}.outcome`, 256),
+						detail: expectNullablePresentationText(entry.detail, `${stepLabel}.detail`, 512),
+					};
+				},
+			);
+			const plannedSteps = expectDispatchNumber(root.plannedSteps, `${rootLabel}.plannedSteps`, true);
+			const recordedSteps = expectDispatchNumber(root.recordedSteps, `${rootLabel}.recordedSteps`, true);
+			if (recordedSteps > plannedSteps) {
+				invalid(`${rootLabel} records more steps than it planned`);
+			}
+			if (steps.length > plannedSteps) {
+				invalid(`${rootLabel} indexes more steps than it planned`);
+			}
+			return {
+				rootId,
+				fleet: expectPresentationText(root.fleet, `${rootLabel}.fleet`, 128),
+				startedAt: expectTimestamp(root.startedAt, `${rootLabel}.startedAt`),
+				elapsedMs: expectDispatchNumber(root.elapsedMs, `${rootLabel}.elapsedMs`, true),
+				running: expectBoolean(root.running, `${rootLabel}.running`),
+				resumedFrom: expectNullablePresentationText(root.resumedFrom, `${rootLabel}.resumedFrom`, 128),
+				plannedSteps,
+				recordedSteps,
+				steps,
+				stepsTruncated: expectBoolean(root.stepsTruncated, `${rootLabel}.stepsTruncated`),
+			};
+		},
+	);
 	return {
 		scope: "installation",
 		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
 		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
 		runs,
 		truncated: expectBoolean(record.truncated, `${label}.truncated`),
+		roots,
+		rootsTruncated: expectBoolean(record.rootsTruncated, `${label}.rootsTruncated`),
 	};
 }
 

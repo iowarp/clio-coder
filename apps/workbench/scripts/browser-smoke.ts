@@ -461,6 +461,21 @@ try {
 	for (const forbidden of ["receiptPath", "events.ndjson", "/receipts/"]) {
 		equal(await fleetJournal.getByText(forbidden, { exact: false }).count(), 0);
 	}
+	// The fleet root index names the planned steps and only offers a selection
+	// for a step whose run is actually in this bounded window.
+	const fleetRoots = fleetJournal.getByRole("region", { name: "Fleets that dispatched these runs" });
+	await fleetRoots.getByText("build-review", { exact: true }).waitFor();
+	await fleetRoots.getByText("fleet-345ea2e6c1ad", { exact: true }).waitFor();
+	await fleetRoots.getByText("2 of 3", { exact: true }).waitFor();
+	const stepIndex = fleetRoots.getByRole("list", { name: "Planned steps for fleet build-review" });
+	await stepIndex.getByText("builder · run-alpha", { exact: true }).waitFor();
+	await stepIndex.getByText("debugger · outside this run window", { exact: true }).waitFor();
+	await stepIndex.getByText("no run recorded", { exact: true }).waitFor();
+	equal(await stepIndex.getByRole("button", { disabled: true }).count(), 2);
+	equal(await fleetRoots.getByText("/fleet-runs/", { exact: false }).count(), 0);
+	// Selecting the step whose run is in the window drives the run record beside it.
+	await stepIndex.getByRole("button", { disabled: false }).first().click();
+	await fleetJournal.getByRole("heading", { name: "builder · run-alpha" }).waitFor();
 	const fleetAccessibility = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
 		.analyze();
@@ -1382,6 +1397,7 @@ try {
 			routingInventoryUsesOfflineBoundedAdapters: true,
 			dispatchUsesInstallationWideBoundedAdapter: true,
 			fleetRunsUseDurableBoundedAdapter: true,
+			fleetRootIndexLinksOnlyRunsInThisWindow: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,

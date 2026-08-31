@@ -309,6 +309,35 @@ Deno.test("the durable run journal renders bounded events and receipt trust with
 	}
 });
 
+Deno.test("the fleet root index names planned steps and only links runs in this window", () => {
+	const html = renderToStaticMarkup(
+		<FleetJournal
+			inspection={fleetInspectionFixture()}
+			pending={false}
+			onRefresh={() => undefined}
+			onBack={() => undefined}
+		/>,
+	);
+	match(html, /Fleets that dispatched these runs/u);
+	match(html, /build-review/u);
+	match(html, /fleet-345ea2e6c1ad/u);
+	match(html, /In flight/u);
+	match(html, /2 of 3/u);
+	match(html, /not a resume/u);
+	match(html, /Planned steps for fleet build-review/u);
+	// The step whose run is in the window links to it; the one whose run is not
+	// says so instead of offering a selection that cannot resolve.
+	match(html, /builder · run-alpha/u);
+	match(html, /debugger · outside this run window/u);
+	// A step that never ran has no run and no agent to attribute.
+	match(html, /no run recorded/u);
+	match(html, /review gate produced no structured verdict/u);
+	ok(html.includes("disabled"), "steps outside the run window stay unselectable");
+	for (const forbidden of ["/fleet-runs/", "planHash", "planSteps", "receiptDigest"]) {
+		ok(!html.includes(forbidden), `fleet root index leaked ${forbidden}`);
+	}
+});
+
 Deno.test("the toolchain inventory renders pins, resolution, and license without native paths", () => {
 	const html = renderToStaticMarkup(
 		<ToolchainInventory

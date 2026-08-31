@@ -13,10 +13,14 @@ import {
 	FLEET_EVIDENCE_STATES,
 	FLEET_JOURNAL_STATES,
 	MAX_WIRE_FLEET_INSPECTION_EVENTS,
+	MAX_WIRE_FLEET_INSPECTION_ROOTS,
 	MAX_WIRE_FLEET_INSPECTION_RUNS,
+	MAX_WIRE_FLEET_INSPECTION_STEPS,
 	type WireFleetInspection,
 	type WireFleetInspectionEvent,
+	type WireFleetInspectionRoot,
 	type WireFleetInspectionRun,
+	type WireFleetInspectionStep,
 } from "./src/protocol.ts";
 
 export const DEFAULT_FLEET_INSPECT_TIMEOUT_MS = 8_000;
@@ -103,6 +107,11 @@ function elapsed(value: unknown): number | null {
 			(value as number) <= 365 * 24 * 60 * 60 * 1_000
 		? value as number
 		: null;
+}
+
+/** A planned/recorded step tally. Bounded well above any fleet an operator writes. */
+function count(value: unknown): number | null {
+	return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 10_000 ? value as number : null;
 }
 
 function isOneOf<const T extends readonly string[]>(
@@ -201,13 +210,101 @@ function projectRun(value: unknown): WireFleetInspectionRun {
 	};
 }
 
+function projectStep(value: unknown): WireFleetInspectionStep {
+	if (
+		!isRecord(value) ||
+		!exactKeys(value, ["stepId", "runId", "agentId", "outcome", "detail"])
+	) {
+		return projectionError("Clio Coder returned an invalid fleet step row.");
+	}
+	const stepId = text(value.stepId, 128);
+	const runId = nullableText(value.runId, 128);
+	const agentId = nullableText(value.agentId, 128);
+	const outcome = text(value.outcome, 256);
+	const detail = nullableText(value.detail, 512);
+	if (
+		stepId === null || runId === undefined || agentId === undefined ||
+		outcome === null || detail === undefined
+	) {
+		return projectionError("Clio Coder returned an invalid fleet step row.");
+	}
+	// A step with no terminal run has nothing to attribute, so an agent id
+	// without one is a record this projection cannot render truthfully.
+	if (runId === null && agentId !== null) {
+		return projectionError("Clio Coder attributed an agent to a fleet step that never ran.");
+	}
+	return { stepId, runId, agentId, outcome, detail };
+}
+
+function projectRoot(value: unknown): WireFleetInspectionRoot {
+	const keys = [
+		"rootId",
+		"fleet",
+		"startedAt",
+		"elapsedMs",
+		"running",
+		"resumedFrom",
+		"plannedSteps",
+		"recordedSteps",
+		"steps",
+		"stepsTruncated",
+	] as const;
+	if (!isRecord(value) || !exactKeys(value, keys)) {
+		return projectionError("Clio Coder returned an invalid fleet root row.");
+	}
+	const rootId = text(value.rootId, 128);
+	const fleet = text(value.fleet, 128);
+	const startedAt = timestamp(value.startedAt);
+	const elapsedMs = elapsed(value.elapsedMs);
+	const resumedFrom = nullableText(value.resumedFrom, 128);
+	const plannedSteps = count(value.plannedSteps);
+	const recordedSteps = count(value.recordedSteps);
+	if (
+		rootId === null || fleet === null || startedAt === null ||
+		elapsedMs === null || resumedFrom === undefined ||
+		plannedSteps === null || recordedSteps === null ||
+		typeof value.running !== "boolean" ||
+		typeof value.stepsTruncated !== "boolean" ||
+		!Array.isArray(value.steps) ||
+		value.steps.length > MAX_WIRE_FLEET_INSPECTION_STEPS
+	) {
+		return projectionError("Clio Coder returned an invalid fleet root row.");
+	}
+	const steps = value.steps.map(projectStep);
+	if (new Set(steps.map((step) => step.stepId)).size !== steps.length) {
+		return projectionError("Clio Coder returned duplicate fleet step identities.");
+	}
+	if (recordedSteps > plannedSteps || steps.length > plannedSteps) {
+		return projectionError("Clio Coder returned contradictory fleet step counts.");
+	}
+	return {
+		rootId,
+		fleet,
+		startedAt,
+		elapsedMs,
+		running: value.running,
+		resumedFrom,
+		plannedSteps,
+		recordedSteps,
+		steps,
+		stepsTruncated: value.stepsTruncated,
+	};
+}
+
 export function projectFleetInspection(
 	value: unknown,
 	inspectedAt: string,
 ): WireFleetInspection {
 	if (
 		!isRecord(value) ||
-		!exactKeys(value, ["version", "generatedAt", "runs", "truncated"])
+		!exactKeys(value, [
+			"version",
+			"generatedAt",
+			"runs",
+			"truncated",
+			"roots",
+			"rootsTruncated",
+		])
 	) {
 		throw new ClioFleetProjectionError(
 			"Clio Coder returned an invalid recent-run snapshot.",
@@ -217,7 +314,9 @@ export function projectFleetInspection(
 	if (
 		value.version !== 1 || generatedAt === null || !Array.isArray(value.runs) ||
 		value.runs.length > MAX_WIRE_FLEET_INSPECTION_RUNS ||
-		typeof value.truncated !== "boolean"
+		typeof value.truncated !== "boolean" || !Array.isArray(value.roots) ||
+		value.roots.length > MAX_WIRE_FLEET_INSPECTION_ROOTS ||
+		typeof value.rootsTruncated !== "boolean"
 	) {
 		throw new ClioFleetProjectionError(
 			"Clio Coder returned an invalid recent-run snapshot.",
@@ -229,12 +328,20 @@ export function projectFleetInspection(
 			"Clio Coder returned duplicate durable run identities.",
 		);
 	}
+	const roots = value.roots.map(projectRoot);
+	if (new Set(roots.map((root) => root.rootId)).size !== roots.length) {
+		throw new ClioFleetProjectionError(
+			"Clio Coder returned duplicate fleet root identities.",
+		);
+	}
 	return {
 		scope: "installation",
 		inspectedAt,
 		generatedAt,
 		runs,
 		truncated: value.truncated,
+		roots,
+		rootsTruncated: value.rootsTruncated,
 	};
 }
 
