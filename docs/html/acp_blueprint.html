@@ -38,7 +38,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.3.9</span>
+        <span class="version-badge">v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -81,7 +81,7 @@
           <div class="glass-card">
             <h2>Supported ACP Methods</h2>
             <p>The native ACP server (<code>clio-coder acp</code>) exposes JSON-RPC 2.0 methods over stdio. Diagnostics route exclusively to <code>stderr</code>.</p>
-            
+
             <table class="ref-table">
               <thead>
                 <tr>
@@ -117,9 +117,24 @@
                   <td>Cancels in-flight execution, active tool operations, and pending permission requests.</td>
                 </tr>
                 <tr>
+                  <td><code>session/close</code></td>
+                  <td>Client &rarr; Server</td>
+                  <td>Closes the durable session cleanly. Advertised via <code>_meta["clio-coder/session"].close</code>.</td>
+                </tr>
+                <tr>
                   <td><code>clio-coder/session/list</code></td>
                   <td>Client &rarr; Server</td>
                   <td>Lists bounded session summaries from the canonical workspace. Legal during turns.</td>
+                </tr>
+                <tr>
+                  <td><code>clio-coder/session/label</code></td>
+                  <td>Client &rarr; Server</td>
+                  <td>Sets or clears a durable session display name (0–256 UTF-8 bytes).</td>
+                </tr>
+                <tr>
+                  <td><code>clio-coder/session/delete</code></td>
+                  <td>Client &rarr; Server</td>
+                  <td>Permanently deletes a closed workspace session. Refuses hosted or unended records.</td>
                 </tr>
                 <tr>
                   <td><code>clio-coder/session/autonomy</code></td>
@@ -137,12 +152,32 @@
                   <td>Atomically validates and persists a flat patch over the safe settings subset.</td>
                 </tr>
                 <tr>
+                  <td><code>clio-coder/targets/list</code></td>
+                  <td>Client &rarr; Server</td>
+                  <td>Lists bounded, credential-free target/model summaries without network traffic.</td>
+                </tr>
+                <tr>
+                  <td><code>clio-coder/targets/probe</code></td>
+                  <td>Client &rarr; Server</td>
+                  <td>Explicitly probes one configured target and returns closed health/latency facts.</td>
+                </tr>
+                <tr>
                   <td><code>session/request_permission</code></td>
                   <td>Server &rarr; Client</td>
-                  <td>Requests client-side approval for a gated mutating action.</td>
+                  <td>Requests client-side approval for a gated mutating action. Serial queue with timeout ceiling.</td>
+                </tr>
+                <tr>
+                  <td><code>clio-coder/event</code></td>
+                  <td>Server &rarr; Client</td>
+                  <td>Opt-in extension events: <code>safety.loopBlocked</code> and <code>dispatch.{enqueued,started,progress,completed,failed}</code>.</td>
                 </tr>
               </tbody>
             </table>
+
+            <div style="margin-top: 2rem;">
+              <h3>Localhost Workbench Client &amp; Delegation Peers</h3>
+              <p>The repository includes the <code>apps/workbench</code> desktop client interfacing over this ACP adapter. It provides session browsing, target probes, safe settings patches, evaluation inventory, and the live fleet event strip. In the reverse direction, Clio acts as an ACP client via <code>/delegate &lt;agent-id&gt; &lt;task&gt;</code>, rendering external ACP peers (e.g. Codex, OpenCode) with typed read scopes into the main transcript.</p>
+            </div>
           </div>
         </div>
 
@@ -255,7 +290,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder ACP Server Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder ACP Server Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -264,15 +299,15 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-      
+
       const pane = document.getElementById(`pane-${tabId}`);
       if (pane) pane.classList.add('active');
-      
+
       const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
         return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
       });
       if (activeBtn) activeBtn.classList.add('active');
-      
+
       if (window.initTableOfContents) window.initTableOfContents();
     }
 
@@ -281,7 +316,7 @@
       const out = document.getElementById('rpcOutput');
 
       if (choice === 'init') {
-        out.innerText = `--> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"Zed","version":"0.148.0"}}}\n\n<-- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"clio-coder","version":"0.3.7"},"agentCapabilities":{"loadSession":true,"_meta":{"clio-coder/session":{"close":true}}}}}`;
+        out.innerText = `--> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"Zed","version":"0.148.0"}}}\n\n<-- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"clio-coder","version":"0.4.0"},"agentCapabilities":{"loadSession":true,"_meta":{"clio-coder/session":{"close":true}}}}}`;
       } else if (choice === 'new') {
         out.innerText = `--> {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/workspace/project","mcpServers":[]}}\n\n<-- {"jsonrpc":"2.0","id":2,"result":{"sessionId":"01912a34-b567-7890-abcd-ef0123456789","_meta":{"clio-coder/session":{"sessionId":"01912a34-...","target":"local-lmstudio","model":"qwen3.8-27b","autonomy":"auto-edit","createdAt":"2026-08-19T16:00:00.000Z","resumed":false}}}}`;
       } else if (choice === 'get_safe') {

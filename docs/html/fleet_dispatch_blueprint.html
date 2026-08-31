@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fleet Dispatch Architecture &amp; Mechanics (v0.3.9)</title>
+  <title>Fleet Dispatch Architecture &amp; Mechanics (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     .fleet-grid {
@@ -93,12 +93,12 @@
           <div class="meta-chips-row">
             <span class="chip">Source: docs/fleet-dispatch.md</span>
             <span class="chip chip-orange">clio-coder docs fleet</span>
-            <span class="badge-v030">v0.3.9 Architecture</span>
+            <span class="badge-v030">v0.4.0 Architecture</span>
           </div>
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Back</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -119,14 +119,17 @@
       <main>
         <!-- Architecture Overview Card -->
         <div class="glass-card">
-          <h2>Fleet Dispatch v0.3.9 Overview</h2>
-          <p>Clio's Fleet Dispatch orchestrates bounded agents across local processes and remote HPC nodes via SSH transport. In v0.3.9, dispatch includes process-safe capacity leases, WorkerSpec v3 attestation, ExecutionPlan v2 DAGs, Contract v4 per-step write boundaries (detect-and-rollback), bounded check/repair loops, deterministic code steps, strict receipt integrity v16, measured shadow routing, readiness-gated active routing, transactional editing attempts, and bounded agent automation.</p>
+          <h2>Fleet Dispatch v0.4.0 Overview</h2>
+          <p>Clio's Fleet Dispatch orchestrates bounded agents across local processes and remote HPC nodes via SSH transport. In v0.4.0, dispatch includes process-safe capacity leases, WorkerSpec v3 attestation, ExecutionPlan v2 DAGs, Contract v4 per-step write boundaries (detect-and-rollback), bounded check/repair loops, deterministic code steps, strict receipt integrity v16, measured shadow routing, readiness-gated active routing, transactional editing attempts, and bounded agent automation.</p>
         </div>
 
         <!-- Interactive Tabs Navigation -->
         <div class="tabs-nav">
           <button type="button" class="tab-btn active" onclick="switchTab('topology')">
             Fleet Topology &amp; Placement
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('intent')">
+            Typed Intent (v2) &amp; Path Scopes
           </button>
           <button type="button" class="tab-btn" onclick="switchTab('scout')">
             Scout Exploration &amp; Budget
@@ -156,6 +159,48 @@
 
             <div class="fleet-grid" id="nodeGrid">
               <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Typed Intent -->
+        <div class="tab-pane" id="pane-intent">
+          <div class="interactive-panel">
+            <h3>Typed Intent Specification (Version 2)</h3>
+            <p>Clio's dispatch tool (<code>dispatch</code>) accepts structured, machine-verifiable intent declarations to bound worker authority, seal path provenance, and enforce gate checks before execution:</p>
+
+            <div class="terminal-window" style="margin-top: 1rem;">
+              <div class="term-line"><span class="term-prompt">// Model argument payload</span></div>
+              <div class="term-line">{</div>
+              <div class="term-line">&nbsp;&nbsp;<span class="term-prompt">"agent"</span>: "coder",</div>
+              <div class="term-line">&nbsp;&nbsp;<span class="term-prompt">"task"</span>: "Refactor session ledger in src/engine/session/ledger.ts",</div>
+              <div class="term-line">&nbsp;&nbsp;<span class="term-prompt">"intent"</span>: {</div>
+              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"read_roots"</span>: ["src/engine/session", "src/core"],</div>
+              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"write_roots"</span>: ["src/engine/session"],</div>
+              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"relevant_paths"</span>: ["src/engine/session/ledger.ts", "tests/session.test.ts"],</div>
+              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"expected_outputs"</span>: ["src/engine/session/ledger.ts"],</div>
+              <div class="term-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="term-prompt">"verification"</span>: [{ <span class="term-prompt">"check"</span>: "test", <span class="term-prompt">"timeout_ms"</span>: 15000 }]</div>
+              <div class="term-line">&nbsp;&nbsp;}</div>
+              <div class="term-line">}</div>
+            </div>
+
+            <div style="margin-top: 1.5rem;" class="grid grid-2">
+              <div class="glass-card">
+                <h4>Intent Enforcement Guarantees</h4>
+                <ul>
+                  <li><strong>Integrity-Sealed Path Provenance:</strong> Tracks exact declared sources and confidence for all policy paths.</li>
+                  <li><strong>Hard Parameter Caps:</strong> &le;32 entries in each path list (512B each), &le;8 verification checks (&ge;1,000ms timeout).</li>
+                  <li><strong>Repository Root Containment:</strong> Paths must be repo-relative POSIX without parent directory traversal (<code>..</code>).</li>
+                </ul>
+              </div>
+              <div class="glass-card">
+                <h4>Read-Only Role Projection</h4>
+                <ul>
+                  <li><strong>Council / Reviewer Projection:</strong> <code>narrowDispatchIntentToReadOnly()</code> converts <code>write_roots</code> to <code>read_roots</code> with zero write permissions.</li>
+                  <li><strong>Fail-Closed Gate Checks:</strong> Undeclared verification check IDs are rejected at preflight admission.</li>
+                  <li><strong>No Silent Fallbacks:</strong> Unknown fields or version mismatches produce fatal refusals rather than silent migrations.</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -236,7 +281,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Fleet Dispatch Mechanics &bull; Version 0.3.7</p>
+      <p>Clio Coder Fleet Dispatch Mechanics &bull; Version 0.4.0</p>
       <p>IOWarp / Gnosis Research Center &bull; iowarp.ai</p>
     </footer>
   </div>

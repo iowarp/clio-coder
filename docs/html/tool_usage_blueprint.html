@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tool Usage Reference Blueprint (v0.3.9)</title>
+  <title>Tool Usage Reference Blueprint (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     /* Custom calculator styling */
@@ -76,7 +76,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -97,7 +97,7 @@
       <main>
         <div class="glass-card">
           <h2>Overview Summary</h2>
-          <p>Clio Coder exposes 20 built-in tools organized across 7 distinct planes. This reference covers argument surfaces, result formatting, and turn budget mechanics.</p>
+          <p>Clio Coder exposes 21 built-in tools organized across 7 distinct planes, backed by the <code>clio-coder tools</code> pinned toolchain manager and first-class <code>--with-panes</code> guest mode. This reference covers argument surfaces, result formatting, and turn budget mechanics.</p>
         </div>
 
         <div class="tabs-nav">
@@ -114,13 +114,13 @@
           <div class="glass-card">
             <h3>Tool Surface Planes</h3>
             <p>Select a plane below to explore its available tools and parameters:</p>
-            
+
             <div class="atlas-grid" style="margin-top:1.5rem;">
               <div class="atlas-menu">
                 <button type="button" class="atlas-btn active" onclick="selectPlane(1)">1. Observe Plane (7)</button>
                 <button type="button" class="atlas-btn" onclick="selectPlane(2)">2. Mutate Plane (2)</button>
                 <button type="button" class="atlas-btn" onclick="selectPlane(3)">3. Execute Plane (3)</button>
-                <button type="button" class="atlas-btn" onclick="selectPlane(4)">4. Orchestrate Plane (4)</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(4)">4. Orchestrate Plane (6)</button>
                 <button type="button" class="atlas-btn" onclick="selectPlane(5)">5. Retrieve Plane (1)</button>
                 <button type="button" class="atlas-btn" onclick="selectPlane(6)">6. Interact Plane (1)</button>
                 <button type="button" class="atlas-btn" onclick="selectPlane(7)">7. Artifact Plane (1)</button>
@@ -140,7 +140,7 @@
               <div class="glass-card">
                 <h3>Envelope &amp; Budget Parameters</h3>
                 <p>Simulate a tool result to calculate truncation thresholds, offload directories, and per-turn budget usages:</p>
-                
+
                 <div class="form-group">
                   <label for="toolSelect">Tool Type</label>
                   <select id="toolSelect" onchange="runCalc()">
@@ -170,7 +170,7 @@
             <div class="specs-col">
               <div class="glass-card">
                 <h3>Simulator Verdict</h3>
-                
+
                 <div id="calcVerdictBox" class="verdict-box normal">
                   <strong id="calcTitle" style="display:block; font-size:1.1rem">FITS CLEANLY</strong>
                   <span id="calcDesc">Output fits within per-call caps and turn budgets.</span>
@@ -202,7 +202,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Tool Usage Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Tool Usage Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -237,12 +237,14 @@
         ]
       },
       4: {
-        title: "Orchestrate Plane (4 Tools)",
+        title: "Orchestrate Plane (6 Tools)",
         tools: [
-          { name: "dispatch", params: "task, tasks, mode, detach, agent, target, model, node, failover, allowed_candidates, thinking_level, cwd, timeout_ms, briefing, max_output_bytes", desc: "Dispatches worker agents, compete worktree groups, or fan-out batch execution plans." },
+          { name: "dispatch", params: "task, tasks, mode, detach, agent, target, model, node, intent, routing, thinking_level, cwd, timeout_ms, briefing, max_output_bytes", desc: "Dispatches worker agents, compete worktree groups, or fan-out batch execution plans with typed intent scopes." },
           { name: "monitor", params: "run_id, mode", desc: "Inspects active/dispatched worker execution timelines, statuses, and receipts." },
           { name: "steer", params: "run_id, action, message", desc: "Steers with guidance or cancels in-flight worker execution runs." },
-          { name: "tasks", params: "action, title, tasks, id, note", desc: "Manages structured session task boards across plan, add, start, done, block, and drop actions." }
+          { name: "tasks", params: "action, title, tasks, id, note", desc: "Manages structured session task boards across plan, add, start, done, block, and drop actions." },
+          { name: "ledger", params: "action, channel, note, claim", desc: "Reads local mirror and posts findings over the one-way control lane without workspace mutation." },
+          { name: "panes", params: "action, target, preset", desc: "Focuses, opens, closes, and inventories terminal panes Clio owns beside this session (requires --with-panes)." }
         ]
       },
       5: {
@@ -272,7 +274,7 @@
 
       const p = PLANES[planeId];
       let html = `<h3>${p.title}</h3><div style="margin-top:1rem; display:flex; flex-direction:column; gap:1.25rem;">`;
-      
+
       p.tools.forEach(t => {
         html += `
           <div>
@@ -302,7 +304,7 @@
 
       const totalBudget = 192;
       const budgetLeft = Math.max(0, totalBudget - used);
-      
+
       const vBox = document.getElementById("calcVerdictBox");
       const vTitle = document.getElementById("calcTitle");
       const vDesc = document.getElementById("calcDesc");
@@ -317,7 +319,7 @@
       }
 
       const effectiveCap = Math.min(cap, budgetLeft);
-      
+
       if (size <= effectiveCap) {
         vBox.className = "verdict-box normal";
         vTitle.innerText = "FITS CLEANLY";
@@ -327,13 +329,13 @@
         vBox.className = "verdict-box warn";
         vTitle.innerText = "TRUNCATED & OFFLOADED";
         vDesc.innerText = `Result (${size} KB) exceeds cap limits. Clio will truncate output to ${effectiveCap} KB and write full content to local scratch folder.`;
-        
+
         let noticeStr = `[${tool}: ${Math.floor(effectiveCap * 10)}/100 lines shown (${effectiveCap}KB of ${size}KB)`;
         if (tool !== 'read') {
           noticeStr += ` | full: .clio-coder/state/scratch/session_123/call_abc.txt`;
         }
         noticeStr += ` | next: offset=${Math.floor(effectiveCap * 10) + 1}]`;
-        
+
         notice.innerText = noticeStr;
       }
     }

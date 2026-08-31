@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Model Catalog & Probing Blueprint</title>
-  
+
   <!-- Fonts -->
-  
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -15,7 +15,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dark: #6b7280;
-      
+
       /* Glowing Neon Palette */
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
@@ -29,7 +29,7 @@
       --color-rose-rgb: 239, 68, 68;
       --color-blue: #3b82f6;
       --color-blue-rgb: 59, 130, 246;
-      
+
       --gradient-cyan-purple: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
@@ -43,7 +43,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 5% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 95% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
@@ -908,7 +908,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -954,6 +954,7 @@
             <select id="probe-target" class="form-control" onchange="onTargetChange()">
               <option value="ollama">Ollama (Local Native)</option>
               <option value="lmstudio">LM Studio (Local Native)</option>
+              <option value="litellm">LiteLLM Gateway (Proxy / Multi-model Router)</option>
               <option value="openai">OpenAI (Cloud)</option>
               <option value="bedrock">Amazon Bedrock (Cloud)</option>
               <option value="anthropic-max">Anthropic Max (Claude Pro Subscription)</option>
@@ -1076,8 +1077,8 @@
           Capability Layer Aggregation Sandbox
         </div>
         <p style="margin-bottom: 1.5rem; color: var(--text-muted); font-size: 0.95rem;">
-          Clio Coder resolves model capabilities dynamically using a hierarchical overlay stack: 
-          <code>Runtime Defaults &rarr; Catalog Model &rarr; Knowledge Base (YAML quirks) &rarr; Live Probe &rarr; User overrides</code>. 
+          Clio Coder resolves model capabilities dynamically using a hierarchical overlay stack:
+          <code>Runtime Defaults &rarr; Catalog Model &rarr; Knowledge Base (YAML quirks) &rarr; Live Probe &rarr; User overrides</code>.
           Modify individual properties on each layer below to see how the final effective capability and its source attribution update in real-time.
         </p>
 
@@ -1364,7 +1365,7 @@
             <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
               How the thinking and content blocks are serialized in the API payload or message history:
             </div>
-            
+
             <div style="margin-bottom: 1rem;">
               <span class="badge-mini" style="background: rgba(0, 240, 255, 0.1); border-color: var(--color-cyan); color: var(--color-cyan);" id="replay-mechanism-badge">Ollama Native Field</span>
             </div>
@@ -1385,7 +1386,7 @@
     <!-- TAB 4: ARCHITECTURE FLOWCHARTS -->
     <div id="diagrams" class="tab-pane">
       <div class="flowchart-container">
-        
+
         <!-- DIAGRAM A -->
         <div class="glass-card">
           <div class="svg-title">
@@ -1428,7 +1429,7 @@
               <text x="255" y="55" class="node-title">Layer 2: Catalog definition</text>
               <text x="255" y="75" class="node-text">context: 16k</text>
               <text x="255" y="95" class="node-text">vision: true</text>
-              
+
               <!-- Layer 3 -->
               <rect x="460" y="30" width="180" height="90" class="node-box" />
               <text x="475" y="55" class="node-title">Layer 3: KB (YAML quirks)</text>
@@ -1538,7 +1539,7 @@
               <path d="M 195 310 L 100 310 L 100 270" class="arrow-line" />
               <path d="M 260 270 L 260 250" class="arrow-line" />
               <text x="135" y="300" class="label-text">No</text>
-              
+
               <!-- Step 6: Substring match check -->
               <rect x="35" y="200" width="130" height="70" class="step-box" />
               <text x="50" y="225" class="step-title">5. Substring Match?</text>
@@ -1633,7 +1634,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.3.9. Designed with high-performance dark aesthetics.</p>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.4.0. Designed with high-performance dark aesthetics.</p>
     </footer>
   </div>
 
@@ -1642,7 +1643,7 @@
     function _switchTab(tabId) {
       document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
       document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
-      
+
       document.getElementById(tabId).classList.add('active');
       event.currentTarget.classList.add('active');
 
@@ -1666,6 +1667,9 @@
         { id: "qwen2.5-coder-7b-instruct", name: "Qwen 2.5 Coder 7B", chat: true, tools: true, reasoning: false, vision: false, context: 32768, format: "qwen" },
         { id: "phi-4", name: "Microsoft Phi-4 (Reasoning)", chat: true, tools: true, reasoning: true, vision: false, context: 16384, format: "openai" },
         { id: "deepseek-r1-distill-qwen-14b", name: "DeepSeek R1 Distill 14B", chat: true, tools: false, reasoning: true, vision: false, context: 131072, format: "deepseek-r1" }
+      ],
+      litellm: [
+        { id: "code", name: "code (sample semantic alias)", chat: true, tools: true, reasoning: true, vision: false, context: 262144, format: "litellm" }
       ],
       openai: [
         { id: "gpt-4o", name: "GPT-4o (Chat/Vision/Tools)", chat: true, tools: true, reasoning: false, vision: true, context: 128000, format: "openai" },
@@ -1697,11 +1701,11 @@
       const urlInput = document.getElementById('probe-url');
       const authInput = document.getElementById('probe-auth');
       const modelSelect = document.getElementById('probe-model');
-      
+
       // Clear previous console logs
       const logBox = document.getElementById('probe-console-log');
       logBox.innerHTML = `<div class="log-entry"><span class="log-time">[12:53:02]</span><span class="log-info">Switched target to ${target}.</span></div>`;
-      
+
       // Update values based on target
       if (target === 'ollama') {
         urlInput.value = "http://localhost:11434";
@@ -1712,6 +1716,11 @@
         urlInput.value = "http://localhost:1234";
         authInput.value = "";
         authInput.placeholder = "Optional API Key passkey";
+        authInput.disabled = false;
+      } else if (target === 'litellm') {
+        urlInput.value = "http://localhost:4000";
+        authInput.value = "••••••••••••••••";
+        authInput.placeholder = "LiteLLM Virtual Key / Master Key (Bearer)";
         authInput.disabled = false;
       } else if (target === 'openai') {
         urlInput.value = "https://api.openai.com/v1";
@@ -1757,7 +1766,7 @@
       const target = document.getElementById('probe-target').value;
       const modelId = document.getElementById('probe-model').value;
       const model = modelCatalog[target].find(m => m.id === modelId);
-      
+
       const logBox = document.getElementById('probe-console-log');
       if (model) {
         logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Selected Model: ${model.id} (Context: ${model.context} tokens)</span></div>`;
@@ -1778,23 +1787,25 @@
       const model = modelCatalog[target].find(m => m.id === modelId);
       const latency = parseInt(document.getElementById('probe-latency').value, 10);
       const outcome = document.querySelector('input[name="outcome"]:checked').value;
-      
+
       const logBox = document.getElementById('probe-console-log');
       const statusText = document.getElementById('probe-status-text');
       const statusDot = document.getElementById('probe-status-dot');
-      
+
       // Reset badges
       disableAllBadges();
-      
+
       statusText.innerText = "PROBING";
       statusDot.className = "status-dot active";
-      
+
       logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Sending connection check request to: <strong>${url}</strong></span></div>`;
-      
+
       if (target === 'ollama') {
         logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Attempting native fingerprint: HTTP GET /api/version</span></div>`;
       } else if (target === 'lmstudio') {
         logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Attempting native fingerprint: HTTP GET /api/v1/models</span></div>`;
+      } else if (target === 'litellm') {
+        logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Attempting LiteLLM probe: HTTP GET /health/liveliness and /v1/model/info</span></div>`;
       } else {
         logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Sending client handshake...</span></div>`;
       }
@@ -1825,9 +1836,9 @@
         statusText.innerText = "HEALTHY";
         statusDot.className = "status-dot active";
         logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-success">HTTP 200 OK received in ${latency}ms.</span></div>`;
-        
+
         let responsePayload = {};
-        
+
         if (target === 'ollama') {
           responsePayload = {
             version: "0.1.48",
@@ -1848,6 +1859,17 @@
             ]
           };
           logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Found LM Studio server. Active models: <strong>[${responsePayload.models.map(m => m.id).join(', ')}]</strong></span></div>`;
+        } else if (target === 'litellm') {
+          responsePayload = {
+            data: [
+              {
+                model_name: "code",
+                litellm_params: { model: "openai/katcoder2.5-35b-moe", api_base: "http://cluster-node-1:8000" },
+                model_info: { max_input_tokens: 262144, max_output_tokens: 8192, supports_function_calling: true, supports_reasoning: true, supports_vision: false, mode: "chat", supports_response_schema: true }
+              },
+            ]
+          };
+          logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">Sample LiteLLM gateway response. Model capabilities come from /v1/model/info; routed deployment attribution comes from x-litellm-* response headers.</span></div>`;
         } else if (target === 'openai') {
           responsePayload = {
             object: "list",
@@ -1876,10 +1898,10 @@
 
         // Capability Detection and Badging
         logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info" style="color: var(--color-cyan);">Running model capability extraction...</span></div>`;
-        
+
         // Chat is always enabled
         enableBadge('chat', 'Active');
-        
+
         // Tools Check
         if (model.tools) {
           enableBadge('tools', model.format === 'qwen' ? 'Qwen format' : (model.format === 'anthropic' ? 'Anthropic' : 'OpenAI schema'));
@@ -1899,7 +1921,7 @@
         // Reasoning Check
         if (model.reasoning) {
           logBox.innerHTML += `<div class="log-entry"><span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-info">&nbsp;&nbsp;Executing reasoning test probe (priming 1-shot completion)...</span></div>`;
-          
+
           setTimeout(() => {
             const reasoningFormat = model.format === 'deepseek-r1' ? 'deepseek-r1' : 'harmony';
             enableBadge('reasoning', reasoningFormat);
@@ -2004,7 +2026,7 @@
 
       layers.forEach(layer => {
         if (!layer.active) return;
-        
+
         resolved.chat = layer.chat;
         sources.chat = layer.id;
 
@@ -2081,9 +2103,9 @@
       const trace = document.getElementById('resolver-trace-log');
       const output = document.getElementById('resolver-output');
       const card = document.getElementById('resolver-result-card');
-      
+
       trace.innerHTML = '';
-      
+
       if (!pattern) {
         trace.innerHTML = `<div class="trace-step skipped">Trace: Empty input pattern. Resolver idle.</div>`;
         output.innerText = 'No match';
@@ -2097,9 +2119,9 @@
       let thinkingSuffix ;
       const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
       const lastColon = pattern.lastIndexOf(':');
-      
+
       trace.innerHTML += `<div class="trace-step evaluating"><strong>[Suffix Splitter]</strong> Checking for thinking level suffix...</div>`;
-      
+
       if (lastColon !== -1) {
         const suffix = pattern.slice(lastColon + 1).trim();
         if (thinkingLevels.includes(suffix)) {
@@ -2114,10 +2136,10 @@
       }
 
       const lowerBase = base.toLowerCase();
-      
+
       // Step 2: Exact endpoint/model matching
       trace.innerHTML += `<div class="trace-step evaluating"><strong>[Step 1: Exact Match]</strong> Testing exact match of pattern "${base}" against "endpoint/model"...</div>`;
-      
+
       const exactFull = activeCandidates.filter(c => `${c.endpoint}/${c.model}`.toLowerCase() === lowerBase);
       if (exactFull.length > 0) {
         trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Exact match hit on "${exactFull[0].endpoint}/${exactFull[0].model}"</div>`;
@@ -2133,9 +2155,9 @@
         // Convert glob to regex
         const reStr = `^${base.replace(/\*/g, ".*").replace(/\?/g, ".")}$`;
         const regex = new RegExp(reStr, "i");
-        
+
         trace.innerHTML += `<div class="trace-step evaluating">&nbsp;&nbsp;Converted glob "${base}" to RegExp: ${regex.toString()}</div>`;
-        
+
         const globMatches = activeCandidates.filter(c => regex.test(`${c.endpoint}/${c.model}`) || regex.test(c.model));
         if (globMatches.length > 0) {
           trace.innerHTML += `<div class="trace-step matched">&nbsp;&nbsp;✔ SUCCESS: Glob match hit on "${globMatches[0].endpoint}/${globMatches[0].model}"</div>`;
@@ -2200,13 +2222,13 @@
       const output = document.getElementById('resolver-output');
       const card = document.getElementById('resolver-result-card');
       const level = thinking ? thinking : 'off';
-      
+
       let html = `<strong>${match.endpoint}/${match.model}</strong>`;
       html += ` <span class="badge-mini">thinking: ${level}</span>`;
       if (isAmbiguous) {
         html += ` <span class="badge-mini" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3);">Ambiguous match</span>`;
       }
-      
+
       output.innerHTML = html;
       card.style.borderColor = 'rgba(16, 185, 129, 0.4)';
     }
@@ -2215,7 +2237,7 @@
       const provider = document.getElementById("replay-provider").value;
       const cot = document.getElementById("replay-cot").value;
       const answer = document.getElementById("replay-answer").value;
-      
+
       const badge = document.getElementById("replay-mechanism-badge");
       const jsonPre = document.getElementById("replay-payload-json");
       const uiPreview = document.getElementById("replay-ui-preview");

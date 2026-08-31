@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Skills Hub & Marketplace</title>
-  
+
   <!-- Fonts -->
-  
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -15,7 +15,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dark: #4b5563;
-      
+
       /* Glowing Neon Colors */
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
@@ -40,7 +40,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 90% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
@@ -406,14 +406,14 @@
         </a>
         <div class="version-tag">
           <div class="version-dot"></div>
-          Clio Coder v0.3.9
+          Clio Coder v0.4.0
         </div>
       </div>
     </header>
 
     <!-- Skills Hub Split Pane -->
     <div class="skills-hub">
-      
+
       <!-- Left side: List and search -->
       <div class="list-side">
         <div class="search-panel">
@@ -483,7 +483,7 @@
     </div>
 
     <footer>
-      <p>Clio Coder Visual Specification Blueprint. Product Version v0.3.9. Designed with high-performance dark aesthetics.</p>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.4.0. Designed with high-performance dark aesthetics.</p>
     </footer>
   </div>
 
@@ -593,7 +593,7 @@
       document.getElementById("det-scope-badge").className = `scope-badge ${sk.scopeClass}`;
       document.getElementById("det-provenance-text").innerText = sk.provenance;
       document.getElementById("det-provenance-dot").className = `provenance-dot ${sk.provDot}`;
-      
+
       document.getElementById("det-license").innerText = sk.license;
       document.getElementById("det-version").innerText = sk.version;
       document.getElementById("det-tools").innerText = sk.tools;
@@ -612,7 +612,7 @@
       const sk = SKILLS[activeSkill];
       const cmd = `/skill ${sk.name} `;
       document.getElementById("console-output").innerText = `[TUI Editor] Inserted: "${cmd}"`;
-      
+
       const cons = document.getElementById("console-output");
       cons.style.color = "var(--color-cyan)";
       setTimeout(() => { cons.style.color = "var(--color-emerald)"; }, 2000);
@@ -621,24 +621,24 @@
     function simulateInstallSkill() {
       const sk = SKILLS[activeSkill];
       document.getElementById("console-output").innerText = `[CLI] Eagerly installing skill '${sk.name}' into project scope at '.clio-coder/skills/${sk.name}'...`;
-      
+
       setTimeout(() => {
         // Upgrade scope to project
         sk.scope = "project";
         sk.scopeClass = "scope-project";
         sk.provenance = `Eagerly Installed (.clio-coder/skills/${sk.name})`;
         sk.provDot = "provenance-cached";
-        
+
         renderList();
         selectSkill(activeSkill);
-        
+
         document.getElementById("console-output").innerText = `[SUCCESS] Installed skill '${sk.name}' successfully.`;
       }, 1500);
     }
 
     function filterSkills() {
       const q = document.getElementById("search-box").value.toLowerCase();
-      
+
       Object.keys(SKILLS).forEach(key => {
         const sk = SKILLS[key];
         const card = document.getElementById(`skill-card-${key}`);

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Commands &amp; Modes Blueprint (v0.3.9)</title>
-  
+  <title>Clio Coder Commands &amp; Modes Blueprint (v0.4.0)</title>
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -16,7 +16,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dim: #6b7280;
-      
+
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -27,12 +27,12 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      
+
       --glass-blur: blur(12px);
     }
 
@@ -44,7 +44,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -453,7 +453,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -475,7 +475,7 @@
     <!-- TAB 1: INTERACTIVE -->
     <main class="tab-pane active" id="pane-interactive">
       <div class="blueprint-layout">
-        
+
         <!-- Left: Console simulator -->
         <div class="specs-col">
           <div class="glass-card">
@@ -484,7 +484,7 @@
               TUI Slash Command Console
             </h2>
             <p>Type a slash command (e.g. <code>/settings</code>, <code>/run</code>, <code>/targets</code>, <code>/help</code>) to test Clio's autocomplete and ListOverlay detail pane.</p>
-            
+
             <div class="tui-console">
               <div class="tui-line">
                 <span class="tui-prompt">clio-coder &gt;</span>
@@ -514,7 +514,7 @@
               Notice Channels Logger
             </h2>
             <p>Clio TUI displays colored logs utilizing specific notice channel glyphs. Click below to simulate lines:</p>
-            
+
             <div class="logs-wrapper" id="simLogs">
               <div class="log-line info">· System initialized. Autonomy level set to auto-edit.</div>
             </div>
@@ -535,10 +535,10 @@
     <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
         <h2>Clio Coder Keybindings &amp; Command List</h2>
-        
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">App Keybindings</h3>
         <p>Alt bindings represent the main navigation channel. In macOS terminals, ensure Meta is set to Option.</p>
-        
+
         <div class="key-grid">
           <div class="key-card">
             <span>Send prompt / Steer active run</span>
@@ -656,6 +656,12 @@
               <td><code>/interop</code></td>
               <td><code>/interop</code></td>
               <td>Review other coding agents detected on this machine</td>
+            </tr>
+            <tr>
+              <td><span class="badge">Operate</span></td>
+              <td><code>/panes</code></td>
+              <td><code>/panes | /panes open &lt;preset-or-argv&gt; | /panes close [target] | /panes show &lt;run-or-agent&gt;</code></td>
+              <td>Manage guest terminal panes (requires --with-panes)</td>
             </tr>
             <tr>
               <td><span class="badge">Sessions</span></td>
@@ -785,11 +791,44 @@
             </tr>
           </tbody>
         </table>
+
+        <h3 style="margin: 2rem 0 0.5rem 0; color:#fff;">CLI Commands &amp; Modes</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Command / Flag</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>clio-coder run</code></td>
+              <td>Main interactive session or headless execution.</td>
+            </tr>
+            <tr>
+              <td><code>--with-panes</code></td>
+              <td>Activate guest pane integration for this invocation when Clio is already inside a reachable herdr session. Overrides panes.enabled.</td>
+            </tr>
+            <tr>
+              <td><code>clio-coder fleet view --watch &lt;selection-file&gt;</code></td>
+              <td>Follow the run id currently named by the selection file and retarget when it changes. This is the operator-pulled watch surface.</td>
+            </tr>
+            <tr>
+              <td><code>--session &lt;id&gt;</code></td>
+              <td>Append a headless turn to the session with id &lt;id&gt;.</td>
+            </tr>
+            <tr>
+              <td><code>--continue</code></td>
+              <td>Append a headless turn to the most recent session recorded for the current working directory.</td>
+            </tr>
+          </tbody>
+        </table>
+
       </div>
     </main>
 
     <footer>
-      <p>Clio Coder UI Command specs &bull; Version 0.3.7</p>
+      <p>Clio Coder UI Command specs &bull; Version 0.4.0</p>
     </footer>
   </div>
 
@@ -798,7 +837,7 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
       document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-      
+
       if (tabId === 'interactive') {
         document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
         document.getElementById('pane-interactive').classList.add('active');
@@ -833,6 +872,11 @@
       { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates with shell-style argument expansion." },
       { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
       { cmd: "/interop", usage: "/interop", desc: "Review other coding agents detected on this machine." },
+
+      { cmd: "/panes", usage: "/panes", desc: "List terminal panes Clio owns beside this session." },
+      { cmd: "/panes open", usage: "/panes open <preset-or-argv>", desc: "Open a utility preset or an operator-supplied command in a pane." },
+      { cmd: "/panes close", usage: "/panes close [target]", desc: "Close a pane Clio created." },
+      { cmd: "/panes show", usage: "/panes show <run-or-agent>", desc: "Show a dispatched run in the fleet watch pane." },
       { cmd: "/share", usage: "/share [runId] | /share export <path> | /share import [--dry-run] [--force] <path>", desc: "Share a worker result with the main agent, or export and import Clio archives." },
       { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
       { cmd: "/resume", usage: "/resume", desc: "Resume a past session. In fullscreen mode, PageUp/PageDown scroll viewports." },
@@ -854,7 +898,7 @@
         const query = val.toLowerCase();
         filteredCmds = commandsList.filter(c => c.cmd.toLowerCase().startsWith(query));
         selectedIndex = 0;
-        
+
         if (filteredCmds.length > 0) {
           renderAutocomplete();
           popover.style.display = 'block';
@@ -937,7 +981,7 @@
       const logLine = document.createElement('div');
       logLine.className = `log-line ${level}`;
       logLine.innerHTML = `<span>${glyph}</span> <span>${msg}</span>`;
-      
+
       logs.appendChild(logLine);
       logs.scrollTop = logs.scrollHeight;
     }

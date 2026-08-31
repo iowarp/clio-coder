@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Extensions & Skills Subsystem Blueprint</title>
   <!-- Modern Google Font -->
-  
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -14,7 +14,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dark: #6b7280;
-      
+
       /* Vibrant Color Palettes */
       --color-primary: #00f0ff; /* Glowing Cyan */
       --color-primary-rgb: 0, 240, 255;
@@ -24,7 +24,7 @@
       --color-warn: #f59e0b; /* Amber */
       --color-danger: #ef4444; /* Rose Red */
       --color-info: #3b82f6; /* Blue */
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
       --shadow-glow: 0 0 20px rgba(var(--color-primary-rgb), 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -39,7 +39,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-primary-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-secondary-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -93,7 +93,7 @@
       box-shadow: var(--shadow-glow);
       position: relative;
     }
-    
+
     .header-logo::after {
       content: '';
       position: absolute;
@@ -682,7 +682,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -705,7 +705,7 @@
       <div class="glass-card">
         <h2>Resource Precedence & Scoping Hierarchy</h2>
         <p style="margin-bottom: 1rem;">Clio Coder resolves resource conflicts deterministically using ranked precedence tiers. Native project configurations outrank user configurations, which outrank compatibility layers and package-contributed roots.</p>
-        
+
         <h3>Prompts Precedence Tiering</h3>
         <table>
           <thead>
@@ -832,28 +832,28 @@ clio-kit/                  # Ext package root
       <div class="glass-card">
         <h2>Extension Resolution Workflow</h2>
         <p class="subtitle">Scans user and project extensions, parses manifest metadata, looks up status in state files, and implements shadowing override logic (Project scope outranks User scope).</p>
-        
+
         <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 280" width="100%"><title>Icon</title>
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
             </marker>
           </defs>
-          
+
           <!-- Column 1: Scans -->
           <g class="svg-node" id="node-res-scan" onclick="_showFlowInfo('resolution', 'scan')">
             <rect x="30" y="70" width="160" height="60" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
             <text x="110" y="95" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Scan Extension Roots</text>
             <text x="110" y="115" fill="var(--color-primary)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">~/.config/ & .clio-coder/</text>
           </g>
-          
+
           <!-- Column 2: Manifest -->
           <g class="svg-node" id="node-res-manifest" onclick="_showFlowInfo('resolution', 'manifest')">
             <rect x="240" y="70" width="160" height="60" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
             <text x="320" y="95" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Parse manifests</text>
             <text x="320" y="115" fill="#bd00ff" font-size="10" font-family="var(--font-mono)" text-anchor="middle">clio-coder-extension.yaml</text>
           </g>
-          
+
           <!-- Column 3: State check -->
           <g class="svg-node" id="node-res-state" onclick="_showFlowInfo('resolution', 'state')">
             <rect x="450" y="70" width="160" height="60" rx="8" fill="rgba(17,24,39,0.9)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
@@ -889,7 +889,7 @@ clio-kit/                  # Ext package root
       <div class="glass-card">
         <h2>Skill Registry Injection & Collision Resolution</h2>
         <p class="subtitle">Scans multiple native and third-party compatibility folders, parses frontmatters, executes path-canonicalization checks, and handles identical namespace overrides by precedence ranks.</p>
-        
+
         <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 320" width="100%"><title>Icon</title>
           <!-- Column 1: Roots -->
           <g class="svg-node" id="node-skill-roots" onclick="_showFlowInfo('skill', 'roots')">
@@ -936,7 +936,7 @@ clio-kit/                  # Ext package root
       <div class="glass-card">
         <h2>Share Archive Export / Import Workflow</h2>
         <p class="subtitle">Moves resources across scopes and systems, verifying format versions, re-checking data hashes, generating import dry-runs, and merging settings.</p>
-        
+
         <svg aria-hidden="true" class="flowchart-svg" viewBox="0 0 900 280" width="100%"><title>Icon</title>
           <!-- Column 1: Import file -->
           <g class="svg-node" id="node-share-file" onclick="_showFlowInfo('share', 'file')">
@@ -982,7 +982,7 @@ clio-kit/                  # Ext package root
       <div class="glass-card">
         <h2>Interactive Manifest Builder</h2>
         <p class="subtitle">Interactively construct and validate a package manifest configuration for a custom Clio Coder extension. Generates standard YAML/JSON outputs in real-time.</p>
-        
+
         <div class="grid-2">
           <!-- Form controls -->
           <div>
@@ -1051,7 +1051,7 @@ clio-kit/                  # Ext package root
               <button type="button" class="copy-btn" onclick="_copyManifestContent()">Copy</button>
               <pre class="code-pane" id="mb-code-output" style="height: 330px;">Loading manifest generator...</pre>
             </div>
-            
+
             <label style="margin-top: 1rem;">Live Validation Diagnostics</label>
             <div class="diagnostic-panel" id="mb-diagnostics-panel" style="height: 120px;">
               No diagnostics compiled.
@@ -1066,7 +1066,7 @@ clio-kit/                  # Ext package root
       <div class="glass-card">
         <h2>Extension Package Sandbox & Resource Compiler Validator</h2>
         <p class="subtitle">Paste or edit files in a simulated directory tree representing a custom extension package. Runs the absolute Clio validation suite in real-time in the browser.</p>
-        
+
         <div class="template-selector">
           <button type="button" class="template-btn active" id="btn-tpl-hpc" onclick="loadVirtualTemplate('hpc')">HPC Pack (Valid)</button>
           <button type="button" class="template-btn" id="btn-tpl-invalid" onclick="loadVirtualTemplate('invalid')">Broken Frontmatter & Format (Warnings)</button>
@@ -1112,7 +1112,7 @@ clio-kit/                  # Ext package root
       <div class="glass-card">
         <h2>Sharing Archive Inspect & Dry-Run Planner</h2>
         <p class="subtitle">Validates simulated <code>.clio-coder-share.json</code> export structures and calculates import dry-runs mapping to native user/project file paths, including conflict detections.</p>
-        
+
         <div class="grid-2">
           <!-- Left: JSON representation -->
           <div>
@@ -1126,7 +1126,7 @@ clio-kit/                  # Ext package root
   "formatVersion": 1,
   "manifest": {
     "format": "clio.share.v1",
-    "clioVersion": "0.3.7",
+    "clioVersion": "0.4.0",
     "createdAt": "2026-06-06T17:53:00Z",
     "files": [
       {
@@ -1282,7 +1282,7 @@ clio-kit/                  # Ext package root
       const infoBox = document.getElementById(`flow-${subsystem}-info`);
       if (flowDescriptions[subsystem]?.[nodeType]) {
         infoBox.innerHTML = flowDescriptions[subsystem][nodeType];
-        
+
         // Highlight active node in SVG
         const nodes = document.querySelectorAll(`#tab-architecture svg .svg-node`);
         nodes.forEach(n => { n.classList.remove('active'); });
@@ -1295,22 +1295,22 @@ clio-kit/                  # Ext package root
       const lines = yamlString.split(/\r?\n/);
       const result = {};
       let currentKey = null;
-      
+
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) continue;
-        
+
         if (trimmed.endsWith(':')) {
           currentKey = trimmed.slice(0, -1).trim();
           result[currentKey] = {};
           continue;
         }
-        
+
         const match = trimmed.match(/^([^:]+):(.*)$/);
         if (match) {
           const key = match[1].trim();
           const valStr = match[2].trim();
-          
+
           let value = valStr;
           if (valStr.startsWith('"') && valStr.endsWith('"')) {
             value = valStr.slice(1, -1);
@@ -1323,7 +1323,7 @@ clio-kit/                  # Ext package root
           } else if (!Number.isNaN(valStr) && valStr !== '') {
             value = Number(valStr);
           }
-          
+
           const indent = line.search(/\S/);
           if (indent > 0 && currentKey) {
             result[currentKey][key] = value;
@@ -1384,7 +1384,7 @@ clio-kit/                  # Ext package root
       // Validation
       const diagnostics = [];
       const idRegex = /^[a-z0-9][a-z0-9._-]*[a-z0-9]$/;
-      
+
       if (!id) {
         diagnostics.push({ type: 'error', message: "Manifest validation failed: 'id' key is required." });
       } else {
@@ -1566,7 +1566,7 @@ Provide advanced custom guidance on MPI bindings.`
     function renderVirtualExplorer() {
       const container = document.getElementById('vfile-list-container');
       container.innerHTML = "";
-      
+
       virtualFiles.forEach((file, index) => {
         const item = document.createElement('div');
         item.className = `vfile-item ${index === currentVFileIndex ? 'active' : ''}`;
@@ -1603,7 +1603,7 @@ Provide advanced custom guidance on MPI bindings.`
     function _addVirtualFilePrompt() {
       const filename = prompt("Enter simulated relative file path (e.g. skills/new-skill/SKILL.md):", "skills/my-skill/SKILL.md");
       if (!filename) return;
-      
+
       // Check duplicate
       const exists = virtualFiles.find(f => f.path === filename);
       if (exists) {
@@ -1635,14 +1635,14 @@ Provide advanced custom guidance on MPI bindings.`
     function runPackageValidation() {
       const diagOutput = document.getElementById('val-diagnostics-output');
       diagOutput.innerHTML = `<div class="diagnostic-entry info">[COMPILING] Compiling sandbox workspace files...</div>`;
-      
+
       setTimeout(() => {
         diagOutput.innerHTML = "";
-        
+
         // Find manifest file
-        const manifestFile = virtualFiles.find(f => 
-          f.path === 'clio-coder-extension.yaml' || 
-          f.path === 'clio-coder-extension.json' || 
+        const manifestFile = virtualFiles.find(f =>
+          f.path === 'clio-coder-extension.yaml' ||
+          f.path === 'clio-coder-extension.json' ||
           f.path === 'clio-coder-extension.yml'
         );
 
@@ -1932,7 +1932,7 @@ Provide advanced custom guidance on MPI bindings.`
         formatVersion: 1,
         manifest: {
           format: 'clio.share.v1',
-          clioVersion: '0.3.7',
+          clioVersion: '0.4.0',
           createdAt: new Date().toISOString(),
           files: manifestFiles
         },
@@ -1947,7 +1947,7 @@ Provide advanced custom guidance on MPI bindings.`
       const rawText = document.getElementById('share-json-editor').value;
       const targetScopeOverride = document.getElementById('sh-scope').value;
       const conflictRule = document.getElementById('sh-conflict').value;
-      
+
       const planOutput = document.getElementById('share-plan-output');
       planOutput.innerHTML = `<div class="diagnostic-entry info">[PROCESSING] Parsing share archive...</div>`;
 
@@ -2004,7 +2004,7 @@ Provide advanced custom guidance on MPI bindings.`
 
         // Perform mock dry-run plan actions
         let conflictDetected = false;
-        
+
         archive.files.forEach(file => {
           const resolvedScope = targetScopeOverride === 'default' ? file.scope : targetScopeOverride;
           let mappedPath = "";

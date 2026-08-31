@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Middleware &amp; Components Blueprint (v0.3.9)</title>
-  
+  <title>Clio Coder Middleware &amp; Components Blueprint (v0.4.0)</title>
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -16,7 +16,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dim: #6b7280;
-      
+
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -27,12 +27,12 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      
+
       --glass-blur: blur(12px);
     }
 
@@ -44,7 +44,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
@@ -429,7 +429,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.3.9</span>
+        <span class="version-badge">Clio Coder v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -451,7 +451,7 @@
     <!-- TAB 1: INTERACTIVE -->
     <main class="tab-pane active" id="pane-interactive">
       <div class="blueprint-layout">
-        
+
         <!-- Left: Scanner -->
         <div class="specs-col">
           <div class="glass-card">
@@ -460,7 +460,7 @@
               Interactive Component Scanner
             </h2>
             <p>Modify simulated files and monitor hash tracking alongside reload lifecycle bounds.</p>
-            
+
             <div class="presets-list">
               <span class="preset-btn" onclick="modifyComponent('recipe')">Modify Coder Agent Recipe</span>
               <span class="preset-btn" onclick="modifyComponent('rules')">Modify Safety Rule Pack</span>
@@ -492,7 +492,7 @@
               Dynamic Hook &amp; Effect Pipeline
             </h2>
             <p>Pick a hook trigger to simulate evaluation rules and trace generated effects.</p>
-            
+
             <div class="form-group">
               <label for="hookSelect">Hook Trigger Event</label>
               <select id="hookSelect" onchange="runPipelineSim()">
@@ -517,7 +517,7 @@
     <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
         <h2>Clio Coder Middleware &amp; Component Specifications</h2>
-        
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Component scanner</h3>
         <p>The scanner computes SHA-256 signatures of codebase blocks and compiles component records used in reviews to flag runtime behavior alterations.</p>
 
@@ -556,7 +556,7 @@
     </main>
 
     <footer>
-      <p>Clio Coder Middleware spec &bull; Version 0.3.7</p>
+      <p>Clio Coder Middleware spec &bull; Version 0.4.0</p>
     </footer>
   </div>
 
@@ -565,7 +565,7 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
       document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-      
+
       if (tabId === 'interactive') {
         document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
         document.getElementById('pane-interactive').classList.add('active');
@@ -603,12 +603,12 @@
     function modifyComponent(type) {
       activeComp = type;
       hashToggle = !hashToggle;
-      
+
       const comp = components[type];
       document.getElementById('scanId').innerText = comp.id;
       document.getElementById('scanPath').innerText = comp.path;
       document.getElementById('scanHash').innerText = hashToggle ? comp.hashes[0] : comp.hashes[1];
-      
+
       const badge = document.getElementById('scanReload');
       badge.innerText = comp.reload;
       badge.className = `reload-badge ${comp.reload === 'hot' ? 'hot' : (comp.reload === 'next-dispatch' ? 'dispatch' : 'restart')}`;
@@ -644,7 +644,7 @@
       const box = document.getElementById('pipelineBox');
       const step = document.createElement('div');
       step.className = 'pipeline-step';
-      
+
       let color = '#fff';
       if (type === 'warn') color = 'var(--color-amber)';
       if (type === 'error') color = 'var(--color-rose)';

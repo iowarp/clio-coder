@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Prompt Envelope & Tools Blueprint</title>
   <!-- Typography Fonts -->
-  
+
   <style>
     :root {
       --bg-dark: #090d16;
@@ -14,7 +14,7 @@
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
       --text-dark: #4b5563;
-      
+
       /* Glowing Neon Colors */
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
@@ -26,7 +26,7 @@
       --color-amber-rgb: 245, 158, 11;
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
-      
+
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
       --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -41,7 +41,7 @@
 
     body {
       background-color: var(--bg-dark);
-      background-image: 
+      background-image:
         radial-gradient(circle at 5% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 95% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
         radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
@@ -708,7 +708,7 @@
       </div>
     </div>
     <div class="header-right">
-      <span class="version-badge">Clio Coder v0.3.9</span>
+      <span class="version-badge">Clio Coder v0.4.0</span>
       <a href="index.html" class="back-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
         Dashboard Hub
@@ -741,19 +741,19 @@
   <!-- Tab: Diagrams -->
   <div id="tab-diagrams" class="tab-pane active">
     <div class="diagrams-container">
-      
+
       <!-- Diagram 1 -->
       <div class="diagram-card">
         <h2 class="card-title">1. Provider Tool Schema Delivery</h2>
         <div class="diagram-desc">
-          Unlike legacy prompt-based wrappers, Clio converts TypeBox schemas into formal provider tool schemas. 
+          Unlike legacy prompt-based wrappers, Clio converts TypeBox schemas into formal provider tool schemas.
           The model calls tools natively through the LLM API's structural JSON envelope rather than parsing text logs.
         </div>
         <div class="svg-wrapper">
           <svg aria-hidden="true" width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
             <!-- Background grids -->
             <rect width="900" height="280" rx="8" fill="#04070e" />
-            
+
             <!-- Nodes -->
             <!-- Node A: TypeBox Code Spec -->
             <rect x="30" y="80" width="180" height="90" rx="8" fill="rgba(189, 0, 255, 0.1)" stroke="#bd00ff" stroke-width="1.5" />
@@ -805,17 +805,17 @@
       <div class="diagram-card">
         <h2 class="card-title">2. Prompt Wrapping Envelope & Cache Decision Flow</h2>
         <div class="diagram-desc">
-          Clio splits prompts into three tiers (Static, Session, Dynamic) and generates distinct hashes. 
+          Clio splits prompts into three tiers (Static, Session, Dynamic) and generates distinct hashes.
           When supported by targets (e.g. llamacpp or cloud cache), Clio leverages these hashes to skip resending the session shell prompt if it has not changed.
         </div>
         <div class="svg-wrapper">
           <svg aria-hidden="true" width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
             <rect width="900" height="350" rx="8" fill="#04070e" />
-            
+
             <!-- Box: Full Rendered Prompt Envelope -->
             <rect x="20" y="30" width="300" height="290" rx="8" fill="rgba(255, 255, 255, 0.02)" stroke="var(--border-card)" stroke-width="1.5" />
             <text x="35" y="55" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700">PROMPT ENVELOPE SECTIONS</text>
-            
+
             <!-- Section 1: Static Shell -->
             <rect x="35" y="75" width="270" height="65" rx="6" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-opacity="0.5" />
             <text x="45" y="95" fill="#ffffff" font-family="var(--font-sans)" font-size="11" font-weight="600">Static Shell (Tier: static-shell)</text>
@@ -838,7 +838,7 @@
             <!-- Flow Arrows from Envelope to decision point -->
             <path d="M320 175 H400" stroke="#a5b4fc" stroke-width="2" />
             <polygon points="400,175 392,171 392,179" fill="#a5b4fc" />
-            
+
             <!-- Decision Point Box -->
             <rect x="410" y="125" width="180" height="100" rx="8" fill="rgba(245, 158, 11, 0.1)" stroke="var(--color-amber)" stroke-width="1.5" />
             <text x="500" y="150" fill="#ffffff" font-family="var(--font-sans)" font-size="12" font-weight="700" text-anchor="middle">Delivery Check</text>
@@ -874,7 +874,7 @@
       <div class="diagram-card">
         <h2 class="card-title">3. Tool Invocation & Result Shaping Lifecycle</h2>
         <div class="diagram-desc">
-          Every tool invocation goes through the registry checks, classifying arguments, detecting loop locks, and evaluating security policies. 
+          Every tool invocation goes through the registry checks, classifying arguments, detecting loop locks, and evaluating security policies.
           Upon execution, outputs are bounded to respect context pressure through safe UTF-8 truncation and suffix injection.
         </div>
         <div class="svg-wrapper">
@@ -915,11 +915,11 @@
             <rect x="580" y="150" width="260" height="155" rx="8" fill="rgba(245, 158, 11, 0.05)" stroke="var(--color-amber)" stroke-width="1.5" />
             <text x="710" y="175" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">Result Shaper</text>
             <text x="710" y="195" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Checks byte size of result against tool limit.</text>
-            
+
             <rect x="595" y="210" width="230" height="40" rx="4" fill="rgba(0,0,0,0.3)" stroke="var(--border-card)" />
             <text x="710" y="226" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Is Size &gt; maxBytes? 8KB backstop</text>
             <text x="710" y="238" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">UTF-8 Safe Truncation</text>
-            
+
             <text x="710" y="270" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Appends follow-up hint + details metadata</text>
             <text x="710" y="285" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">resultSize: {truncated, offloadPath?}</text>
 
@@ -930,7 +930,7 @@
             <!-- Step 5: Final Clean Delivery Envelope -->
             <rect x="40" y="160" width="280" height="130" rx="8" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-width="1.5" />
             <text x="180" y="185" fill="#ffffff" font-family="var(--font-sans)" font-size="13" font-weight="700" text-anchor="middle">Final Delivery</text>
-            
+
             <rect x="55" y="200" width="250" height="75" rx="4" fill="#04070e" stroke="var(--border-card)" />
             <text x="65" y="218" fill="var(--color-emerald)" font-family="var(--font-mono)" font-size="10">kind: "ok"</text>
             <text x="65" y="234" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">output: "...[truncated]\n\n[Use a narrower query...]"</text>
@@ -951,7 +951,7 @@
       <!-- Input Panel -->
       <div class="glass-card">
         <h2 class="card-title">Prompt Envelope Settings</h2>
-        
+
         <div class="scenario-grid">
           <button type="button" class="scenario-pill" onclick="loadScenario('standard')">Standard Code Turn</button>
           <button type="button" class="scenario-pill" onclick="loadScenario('planning')">Planning Phase</button>
@@ -1031,9 +1031,9 @@
       <!-- Result Panel -->
       <div class="glass-card">
         <h2 class="card-title">Envelope Pressure Diagnostics</h2>
-        
+
         <div class="pressure-panel">
-          
+
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-weight:700;">Context Window Pressure</span>
             <span id="pressure-ratio" style="font-family:var(--font-mono); font-weight:700;">0 / 32,768 (0.00%)</span>
@@ -1168,7 +1168,7 @@
       <!-- Right side: Registry & Shaping Results -->
       <div class="glass-card">
         <h2 class="card-title">Registry Gates & Result Shaping Verdict</h2>
-        
+
         <div id="verdict-display" class="verdict-box">
           <!-- Populated by JavaScript -->
         </div>
@@ -1290,7 +1290,7 @@
             <svg width="18" height="18" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             Tool Result Capping Validator
           </h3>
-          
+
           <div class="form-group" style="margin-bottom: 1rem;">
             <label for="capping-tool" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Tool / Policy Group</label>
             <select id="capping-tool" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
@@ -1336,13 +1336,13 @@
   function _switchTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
     document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
-    
+
     // Find button
     const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.onclick.toString().includes(tabId));
     if (btn) btn.classList.add('active');
-    
+
     document.getElementById(tabId).classList.add('active');
-    
+
     if (tabId === 'tab-calculator') {
       calculateTokenPressure();
     } else if (tabId === 'tab-simulator') {
@@ -1352,12 +1352,12 @@
 
   // --- SCENARIO DATA & CALCULATOR STATE ---
   const MOCK_FRAGMENTS = {
-    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.3.7.`,
-    
+    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.4.0.`,
+
     mode_default: `Advisory: You are in default mode. Edits within the workspace are permitted. You have access to active inspection, modification, and execution tools. Ensure that you run tests to verify compilation.`,
     mode_advise: `Advisory: You are in advise mode. You may NOT edit codebase files directly, and you may NOT run execution tools (like bash). You can inspect files, write reviews, and write plans. Output an advisory markdown report as your final step.`,
     mode_super: `Advisory: You are in super mode. Full escalation is active. You have access to execution-class and system-modification tools. Execute effectful commands with precision.`,
-    
+
     safety_suggest: `Safety directive: suggest. Describe the proposed modifications, build procedures, or commands. Do not write file changes or execute commands.`,
     safety_auto_edit: `Safety directive: auto-edit. Edits inside the repository workspace are permitted without confirmation. Execution-class actions (like running bash commands) require confirmation.`,
     safety_full_auto: `Safety directive: full-auto. Edits and local commands are allowed to run automatically. System-level modifications and destructive git operations require explicit confirmations.`,
@@ -1410,7 +1410,7 @@
     }
   };
 
-  // Tools Metadata & Presets for Simulator. Toolkit v2: 18 tools across seven
+  // Tools Metadata & Presets for Simulator. Toolkit v2: 21 tools across seven
   // planes (OBSERVE, MUTATE, EXECUTE, ORCHESTRATE, RETRIEVE, INTERACT, ARTIFACT).
   const ALL_TOOLS = {
     // OBSERVE
@@ -1432,6 +1432,9 @@
     dispatch: { actionClass: 'dispatch', estimate: 150, preset: '{\n  "tasks": [\n    {\n      "agent": "coder",\n      "task": "Rewrite compiler.ts with optimizations"\n    }\n  ]\n}' },
     monitor: { actionClass: 'read', estimate: 100, preset: '{\n  "mode": "list"\n}' },
     steer: { actionClass: 'dispatch', estimate: 110, preset: '{\n  "run_id": "run-01H...",\n  "action": "guide",\n  "message": "Limit the fix to tests/contracts."\n}' },
+    tasks: { actionClass: 'read', estimate: 100, preset: '{\n  "action": "list"\n}' },
+    ledger: { actionClass: 'read', estimate: 110, preset: '{\n  "action": "status"\n}' },
+    panes: { actionClass: 'read', estimate: 120, preset: '{\n  "action": "list"\n}' },
     // RETRIEVE
     web_fetch: { actionClass: 'read', estimate: 130, preset: '{\n  "url": "https://iowarp.ai/docs/tools"\n}' },
     // INTERACT
@@ -1442,17 +1445,17 @@
 
   const MODE_PROFILES = {
     default: {
-      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'write', 'edit', 'bash', 'git', 'verify', 'dispatch', 'monitor', 'steer', 'web_fetch', 'ask_user', 'artifact'],
+      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'write', 'edit', 'bash', 'git', 'verify', 'dispatch', 'monitor', 'steer', 'tasks', 'ledger', 'panes', 'web_fetch', 'ask_user', 'artifact'],
       allowedActions: ['read', 'write', 'execute', 'dispatch'],
       dispatchScope: 'any'
     },
     advise: {
-      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'git', 'web_fetch', 'dispatch', 'monitor', 'steer', 'artifact'],
+      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'git', 'tasks', 'ledger', 'panes', 'web_fetch', 'dispatch', 'monitor', 'steer', 'artifact'],
       allowedActions: ['read', 'write', 'dispatch'],
       dispatchScope: 'readonly'
     },
     super: {
-      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'write', 'edit', 'bash', 'git', 'verify', 'dispatch', 'monitor', 'steer', 'web_fetch', 'ask_user', 'artifact'],
+      tools: ['read', 'grep', 'find', 'ls', 'code_nav', 'context', 'credential_present', 'write', 'edit', 'bash', 'git', 'verify', 'dispatch', 'monitor', 'steer', 'tasks', 'ledger', 'panes', 'web_fetch', 'ask_user', 'artifact'],
       allowedActions: ['read', 'write', 'execute', 'dispatch', 'system_modify'],
       dispatchScope: 'any'
     }
@@ -1467,7 +1470,7 @@
     // Populate calculator tools checklists
     renderCalculatorToolsCheckboxes();
     loadScenario('standard');
-    
+
     // Populate simulator tools dropdown
     onSimModeChange();
   });
@@ -1475,11 +1478,11 @@
   function renderCalculatorToolsCheckboxes() {
     const container = document.getElementById('tools-checkboxes');
     container.innerHTML = '';
-    
+
     Object.keys(ALL_TOOLS).forEach(toolName => {
       const label = document.createElement('label');
       label.className = 'checkbox-label';
-      
+
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = toolName;
@@ -1492,7 +1495,7 @@
         }
         calculateTokenPressure();
       };
-      
+
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(toolName));
       container.appendChild(label);
@@ -1502,33 +1505,33 @@
   function loadScenario(name) {
     const scenario = SCENARIOS[name];
     if (!scenario) return;
-    
+
     document.getElementById('context-window').value = scenario.window;
     document.getElementById('mode-select').value = scenario.mode;
     document.getElementById('delivery-mode').value = scenario.policy;
     document.getElementById('thinking-applied').value = scenario.thinking;
-    
+
     // Populate inputs
     let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
     staticText += `[Fragment: modes/${scenario.mode}.md]\n${MOCK_FRAGMENTS[`mode_${scenario.mode}`]}\n\n`;
-    
+
     // Set appropriate safety fragment based on mode
     let autonomyLevel = 'suggest';
     if (scenario.mode === 'default') autonomyLevel = 'auto-edit';
     if (scenario.mode === 'super') autonomyLevel = 'full-auto';
     const safetyFragmentKey = autonomyLevel.replace(/-/g, '_');
-    
+
     staticText += `[Fragment: safety/${autonomyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyFragmentKey}`]}`;
-    
+
     document.getElementById('static-shell-input').value = staticText;
     document.getElementById('dynamic-memory-input').value = scenario.memory;
     document.getElementById('dynamic-project-input').value = scenario.project;
     document.getElementById('user-query-input').value = scenario.query;
-    
+
     // Set checked tools
     selectedScenarioTools.clear();
     scenario.tools.forEach(t => { selectedScenarioTools.add(t); });
-    
+
     // Update DOM checkboxes
     Object.keys(ALL_TOOLS).forEach(t => {
       const el = document.getElementById(`calc-tool-${t}`);
@@ -1545,7 +1548,7 @@
 
   function _onModeChange() {
     const mode = document.getElementById('mode-select').value;
-    
+
     // Disable/enable tools that are not visible in this mode
     Object.keys(ALL_TOOLS).forEach(t => {
       const el = document.getElementById(`calc-tool-${t}`);
@@ -1558,16 +1561,16 @@
         }
       }
     });
-    
+
     // Reload standard static prompt content for that mode
     let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
     staticText += `[Fragment: modes/${mode}.md]\n${MOCK_FRAGMENTS[`mode_${mode}`]}\n\n`;
-    
+
     let autonomyLevel = 'suggest';
     if (mode === 'default') autonomyLevel = 'auto-edit';
     if (mode === 'super') autonomyLevel = 'full-auto';
     const safetyFragmentKey = autonomyLevel.replace(/-/g, '_');
-    
+
     staticText += `[Fragment: safety/${autonomyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyFragmentKey}`]}`;
     document.getElementById('static-shell-input').value = staticText;
 
@@ -1605,7 +1608,7 @@
     const mode = document.getElementById('mode-select').value;
     const deliveryMode = document.getElementById('delivery-mode').value;
     const thinking = document.getElementById('thinking-applied').value;
-    
+
     // Inputs
     const staticText = document.getElementById('static-shell-input').value;
     const memory = document.getElementById('dynamic-memory-input').value;
@@ -1614,7 +1617,7 @@
 
     // Tokens estimates
     const staticTokens = estimateTokens(staticText);
-    
+
     // Build runtime section (Simulating renderRuntimeBlock)
     let runtimeText = `# Runtime\nProvider: local-harness\nModel: local-32b\nContext window: ${contextLimit}\nPrompt delivery mode: ${deliveryMode}`;
     if (thinking === 'applied') {
@@ -1667,7 +1670,7 @@
     const staticShellTotal = staticTokens;
     const sessionShellTotal = runtimeTokens + contractTokens + hintsTokens;
     const dynamicTurnTotal = memoryTokens + projectTokens + sessionTokens + queryTokens;
-    
+
     const totalPromptTokens = staticShellTotal + sessionShellTotal + dynamicTurnTotal + toolSchemasTokens;
     const remainingCapacity = Math.max(0, contextLimit - totalPromptTokens);
     const pressurePercent = ((totalPromptTokens / contextLimit) * 100).toFixed(2);
@@ -1679,10 +1682,10 @@
     document.getElementById('val-tools').innerText = toolSchemasTokens.toLocaleString();
 
     document.getElementById('pressure-ratio').innerText = `${totalPromptTokens.toLocaleString()} / ${contextLimit.toLocaleString()} (${pressurePercent}%)`;
-    
+
     const pressureBar = document.getElementById('pressure-bar');
     pressureBar.style.width = `${Math.min(100, parseFloat(pressurePercent))}%`;
-    
+
     const capacityStatus = document.getElementById('capacity-status');
     const capacityLeft = document.getElementById('capacity-left');
     capacityLeft.innerText = `${remainingCapacity.toLocaleString()} tokens remaining`;
@@ -1709,7 +1712,7 @@
     const staticTextHash = await computeHash(staticText);
     const sessionTextHash = await computeHash(`${runtimeText}\n\n${toolContractText}\n\n${hintsText}`);
     const dynamicTextHash = await computeHash(`${memoryText}\n\n${projectText}\n\n${sessionText}\n\n${queryText}`);
-    
+
     const fullPromptText = [staticText, runtimeText, toolContractText, hintsText, memoryText, projectText, sessionText, queryText]
       .filter(x => x.trim().length > 0).join("\n\n");
     const fullTextHash = await computeHash(fullPromptText);
@@ -1721,7 +1724,7 @@
     // Fill table
     const segmentsTable = document.getElementById('segments-table-body');
     segmentsTable.innerHTML = '';
-    
+
     const segments = [
       { id: 'identity', tier: 'static-shell', hash: await computeHash(MOCK_FRAGMENTS.identity), tokens: estimateTokens(MOCK_FRAGMENTS.identity), incl: true },
       { id: 'mode', tier: 'static-shell', hash: await computeHash(MOCK_FRAGMENTS[`mode_${mode}`]), tokens: estimateTokens(MOCK_FRAGMENTS[`mode_${mode}`]), incl: true },
@@ -1762,7 +1765,7 @@
         { id: "retrievalHints", tier: "session-shell", contentHash: await computeHash(hintsText), tokenEstimate: hintsTokens, included: hintsText.length > 0 }
       ]
     };
-    
+
     document.getElementById('envelope-signature-out').innerText = JSON.stringify(envelopeSig, null, 2);
   }
 
@@ -1771,7 +1774,7 @@
     const mode = document.getElementById('sim-mode-select').value;
     const toolSelect = document.getElementById('sim-tool-select');
     toolSelect.innerHTML = '';
-    
+
     const visibleTools = MODE_PROFILES[mode].tools;
     visibleTools.forEach(toolName => {
       const opt = document.createElement('option');
@@ -1786,7 +1789,7 @@
   function onSimToolChange() {
     const toolName = document.getElementById('sim-tool-select').value;
     if (!toolName || !ALL_TOOLS[toolName]) return;
-    
+
     document.getElementById('sim-args').value = ALL_TOOLS[toolName].preset;
     simulateToolFlow();
   }
@@ -1860,13 +1863,13 @@
     const encoder = new TextEncoder();
     const encoded = encoder.encode(str);
     if (encoded.length <= maxBytes) return str;
-    
+
     // Account for marker length
     const markerEncoded = encoder.encode(marker);
     const limit = maxBytes - markerEncoded.length;
-    
+
     if (limit <= 0) return marker;
-    
+
     // Find valid UTF-8 character boundary
     let index = limit;
     // In UTF-8, continuation bytes start with bits 10xxxxxx (0x80 to 0xBF)
@@ -1874,7 +1877,7 @@
     while (index > 0 && (encoded[index] & 0xC0) === 0x80) {
       index--;
     }
-    
+
     const truncatedBytes = encoded.slice(0, index);
     const decoder = new TextDecoder("utf-8");
     return decoder.decode(truncatedBytes) + marker;
@@ -1890,10 +1893,10 @@
     const rawArgsText = document.getElementById('sim-args').value;
     const rawOutput = document.getElementById('sim-raw-output').value;
     const maxBytes = parseInt(document.getElementById('sim-max-bytes').value, 10) || 200;
-    
+
     const errEl = document.getElementById('args-json-err');
     errEl.style.display = 'none';
-    
+
     let parsedArgs = {};
     try {
       parsedArgs = JSON.parse(rawArgsText);
@@ -1924,15 +1927,15 @@
     // 4. Registry Gate evaluation
     const verdictBox = document.getElementById('verdict-display');
     const profile = MODE_PROFILES[mode];
-    
+
     let verdictKind = "ok";
     let blockReason = "";
-    
+
     // Check Visibility
     if (!profile.tools.includes(toolName)) {
       verdictKind = "not_visible";
       blockReason = `Registry rejection: Tool '${toolName}' is not visible in mode '${mode}'.`;
-    } 
+    }
     // Check Action Class
     else if (!profile.allowedActions.includes(actionClass)) {
       // artifact (kind=plan/review) is the advise-mode write: plans and reviews
@@ -1952,13 +1955,13 @@
       verdictKind = "blocked";
       blockReason = `Safety Gate Blocked: Path is protected. Write/read actions on configuration artifacts are denied.`;
     }
-    
+
     // Check loop detection (repetition check)
     // Filter history to last 10 seconds
     const now = Date.now();
     const activeHistory = simHistory.filter(h => now - h.timestamp < 10000);
     const matches = activeHistory.filter(h => h.hash === hash);
-    
+
     if (verdictKind === "ok") {
       if (matches.length > 0) {
         verdictKind = "blocked";
@@ -1984,7 +1987,7 @@
       const byteSize = getByteLength(rawOutput);
       const isTruncated = byteSize > maxBytes;
       const followUp = "Use offset/limit arguments or narrow the path query to inspect omitted contents.";
-      
+
       let finalOutputText = rawOutput;
       const resultSizeDetails = {
         bytes: byteSize,
@@ -2027,7 +2030,7 @@
   function _executeSimulatedCall() {
     const toolName = document.getElementById('sim-tool-select').value;
     const rawArgsText = document.getElementById('sim-args').value;
-    
+
     let parsedArgs = {};
     try {
       parsedArgs = JSON.parse(rawArgsText);
@@ -2054,7 +2057,7 @@
   function renderHistory() {
     const container = document.getElementById('history-items');
     container.innerHTML = '';
-    
+
     if (simHistory.length === 0) {
       container.innerHTML = `<div style="color:var(--text-dark); text-align:center; padding:1.5rem 0; font-size:0.85rem;">No recent calls in buffer</div>`;
       return;
@@ -2065,10 +2068,10 @@
     reversed.forEach(item => {
       const el = document.createElement('div');
       el.className = 'history-item';
-      
+
       const timeStr = new Date(item.timestamp).toLocaleTimeString();
       const summaryArgs = item.args.length > 30 ? `${item.args.slice(0, 30)}...` : item.args;
-      
+
       el.innerHTML = `
         <div>
           <span style="color:var(--color-cyan); font-weight:700;">${item.tool}</span>
@@ -2131,12 +2134,12 @@
 
     const compileKey = `${ep}|${model}|${autonomy}|${session}`;
     const compileHash = simpleHash(compileKey).substring(0, 16);
-    
+
     document.getElementById("recomp-key-out").innerText = compileKey;
     document.getElementById("recomp-hash-out").innerText = compileHash;
 
     const ledgerEl = document.getElementById("recomp-ledger-out");
-    
+
     let forced = false;
     let compiled = false;
 
@@ -2146,10 +2149,10 @@
         forced = true;
         document.getElementById("recomp-hotreload").checked = false; // Reset toggle
       }
-      
+
       const prevHash = lastCompileHash || "none";
       const tokenEst = 3500 + Math.floor(Math.random() * 800) + (autonomy.length * 20);
-      
+
       const logEntry = {
         timestamp: new Date().toLocaleTimeString(),
         event: "promptRecompiled",
@@ -2158,9 +2161,9 @@
         tokenEstimate: tokenEst,
         reason: forced ? "Config Hot-Reload Invalidation" : "Compile Key Changed"
       };
-      
+
       recompileLedger.unshift(logEntry);
-      
+
       lastCompileKey = compileKey;
       lastCompileHash = compileHash;
     }
@@ -2176,10 +2179,10 @@
         item.style.borderBottom = "1px solid rgba(255,255,255,0.02)";
         item.innerHTML = `
           <span style="color:var(--text-muted); font-size:0.75rem;">[${entry.timestamp}]</span>
-          <span style="color:var(--color-purple); font-weight:bold;">${entry.event}</span>: 
-          prev=<span style="color:var(--text-dark);">${entry.prevHash}</span>, 
-          new=<span style="color:var(--color-cyan);">${entry.newHash}</span>, 
-          tokens=<span style="color:var(--color-amber);">${entry.tokenEstimate}</span> 
+          <span style="color:var(--color-purple); font-weight:bold;">${entry.event}</span>:
+          prev=<span style="color:var(--text-dark);">${entry.prevHash}</span>,
+          new=<span style="color:var(--color-cyan);">${entry.newHash}</span>,
+          tokens=<span style="color:var(--color-amber);">${entry.tokenEstimate}</span>
           <span style="color:var(--text-dark); font-size:0.75rem;">(${entry.reason})</span>
         `;
         ledgerEl.appendChild(item);
@@ -2227,14 +2230,14 @@
     }
 
     const finalSizeKB = truncated ? limitKB : mockSizeKB;
-    
+
     const truncBadge = document.getElementById("capping-truncated-badge");
     truncBadge.innerText = truncated ? "YES (Capped)" : "NO";
     truncBadge.style.color = truncated ? "var(--color-rose)" : "var(--color-emerald)";
 
     document.getElementById("capping-limit-val").innerText = `${limitKB} KB`;
     document.getElementById("capping-final-val").innerText = `${finalSizeKB} KB`;
-    
+
     const hintBox = document.getElementById("capping-hint-box");
     hintBox.innerText = hint;
     hintBox.style.borderColor = truncated ? "rgba(239, 68, 68, 0.3)" : "rgba(16, 185, 129, 0.3)";

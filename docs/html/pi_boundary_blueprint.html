@@ -41,7 +41,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">v0.3.9</span>
+        <span class="version-badge">v0.4.0</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Back Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -80,7 +80,7 @@
           <div class="glass-card">
             <h2>SDK Ownership Decisions (Pi 0.84.0)</h2>
             <p>Clio uses Pi SDK libraries for provider protocols, message conversions, and terminal primitives. An action marked <strong>Keep</strong> represents an explicit architectural product boundary.</p>
-            
+
             <table class="ref-table boundary-table">
               <thead>
                 <tr>
@@ -223,7 +223,7 @@ tests/contracts/cli-json-stream-dedup.test.ts</code></pre>
     </div>
 
     <footer>
-      <p>Clio Coder Pi SDK Boundary Blueprint &bull; Version 0.3.7 &bull; Gnosis Research Center</p>
+      <p>Clio Coder Pi SDK Boundary Blueprint &bull; Version 0.4.0 &bull; Gnosis Research Center</p>
     </footer>
   </div>
 
@@ -232,15 +232,15 @@ tests/contracts/cli-json-stream-dedup.test.ts</code></pre>
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-      
+
       const pane = document.getElementById(`pane-${tabId}`);
       if (pane) pane.classList.add('active');
-      
+
       const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => {
         return btn.getAttribute('onclick')?.includes(`'${tabId}'`);
       });
       if (activeBtn) activeBtn.classList.add('active');
-      
+
       if (window.initTableOfContents) window.initTableOfContents();
     }
   </script>

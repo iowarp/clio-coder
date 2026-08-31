@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Trace Store Blueprint (v0.3.9)</title>
+  <title>Clio Coder Trace Store Blueprint (v0.4.0)</title>
   <link rel="stylesheet" href="shared.css">
   <style>
     .subcommand-card {
@@ -99,10 +99,10 @@
     <header>
       <div>
         <h1>Trace Store Blueprint</h1>
-        <p style="color: var(--text-muted);">Interactive reference and query validator simulator for the SQLite trace mirror (v0.3.9)</p>
+        <p style="color: var(--text-muted);">Interactive reference and query validator simulator for the SQLite trace mirror (v0.4.0)</p>
       </div>
       <div>
-        <span class="badge-tag">v0.3.9</span>
+        <span class="badge-tag">v0.4.0</span>
         <span class="badge-tag" style="color: var(--color-orange); border-color: rgba(255, 126, 41, 0.3); background: rgba(255, 126, 41, 0.1);">Trace Mirror</span>
       </div>
     </header>
@@ -188,7 +188,7 @@
       <section>
         <h2>Interactive Read-Only SQL Query Simulator</h2>
         <p style="color: var(--text-muted);">Test SQL queries against the strict <code>clio-coder trace sql</code> read-only validator rule set:</p>
-        
+
         <div class="sql-demo-box">
           <input type="text" id="sqlQueryInput" class="sql-input" value="SELECT run_id, status, total_tokens, total_cost_usd FROM runs LIMIT 10">
           <button type="button" id="sqlTestBtn" style="background: var(--gradient-main); color: #000; border: none; padding: 0.5rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; margin-bottom: 1rem;">Validate Query</button>
