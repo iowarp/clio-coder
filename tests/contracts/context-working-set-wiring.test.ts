@@ -158,6 +158,7 @@ function harness(
 	});
 	const hookStages: string[] = [];
 	const hookTriggers: string[] = [];
+	const notices: string[] = [];
 	let summaryCalls = 0;
 	let plannerCalls = 0;
 	const state = createTurnState("off");
@@ -174,6 +175,9 @@ function harness(
 			? {
 					autoCompact: async (): Promise<CompactResult | null> => {
 						summaryCalls += 1;
+						// Ordering marker: the eviction-skip announcement must land
+						// before the destructive stage the operator waits on.
+						notices.push("<llm_summary fired>");
 						return null;
 					},
 				}
@@ -189,7 +193,9 @@ function harness(
 				hookTriggers.push(trigger);
 			},
 		} as never,
-		emitNotice: () => {},
+		emitNotice: (text: string) => {
+			notices.push(text);
+		},
 	});
 	return {
 		context,
@@ -201,6 +207,7 @@ function harness(
 		pruned,
 		hookStages,
 		hookTriggers,
+		notices,
 		summaryCalls: () => summaryCalls,
 		plannerCalls: () => plannerCalls,
 	};
@@ -222,6 +229,46 @@ describe("contracts/context working-set compaction wiring", () => {
 		strictEqual(h.pruned[0]?.evictedItems, 1);
 		ok(h.hookStages.includes("working_set_evict"));
 		strictEqual(h.hookTriggers[h.hookStages.indexOf("working_set_evict")], "pressure");
+	});
+
+	// G1 from smoke pass 2: a session whose pressure is all inside
+	// protectLastTurns skipped the non-destructive layer and fell to the LLM
+	// summary with nothing in the transcript saying so.
+	it("announces the eviction skip and its reason before the summary fires", async () => {
+		delete process.env.CLIO_CODER_LEGACY_MASK;
+		const h = harness(true, true, "local-native", null);
+
+		await h.context.runAutoCompact(h.runtime, false);
+
+		strictEqual(h.plannerCalls(), 1, "the planner was still asked");
+		strictEqual(h.summaryCalls(), 1, "the summary still runs");
+		const skipIndex = h.notices.findIndex((line) => line.startsWith("[context engine] working set:"));
+		ok(skipIndex >= 0, `no skip announcement:\n${h.notices.join("\n")}`);
+		const skip = h.notices[skipIndex] ?? "";
+		ok(skip.includes("all 2 turns are inside the protected window"), skip);
+		ok(skip.includes("protectLastTurns 6"), skip);
+		ok(skip.includes("llm_summary runs instead"), skip);
+		ok(skipIndex < h.notices.indexOf("<llm_summary fired>"), `announced after the summary:\n${h.notices.join("\n")}`);
+	});
+
+	it("says so when the working set is off rather than skipping to the summary silently", async () => {
+		delete process.env.CLIO_CODER_LEGACY_MASK;
+		const h = harness(false);
+
+		await h.context.runAutoCompact(h.runtime, false);
+
+		strictEqual(h.plannerCalls(), 0, "a disabled working set never plans");
+		const skip = h.notices.find((line) => line.startsWith("[context engine] working set:")) ?? "";
+		ok(skip.includes("eviction is off (context.workingSet.enabled false)"), `${skip}\n${h.notices.join("\n")}`);
+	});
+
+	it("says nothing about a skip when the layer actually evicted", async () => {
+		delete process.env.CLIO_CODER_LEGACY_MASK;
+		const h = harness(true);
+
+		await h.context.runAutoCompact(h.runtime, false);
+
+		ok(!h.notices.some((line) => line.includes("llm_summary runs instead")), h.notices.join("\n"));
 	});
 
 	it("attributes the next local cold run and context ledger to working-set eviction", async () => {
