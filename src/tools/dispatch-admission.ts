@@ -4,6 +4,8 @@ import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
+	COUNCIL_MAX_MEMBERS,
+	COUNCIL_MIN_MEMBERS,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
@@ -109,7 +111,9 @@ function councilSettingsFromArgs(
 			members.push({ label, target, ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) });
 		}
 	}
-	if (members.length < 2 || members.length > 5) return { ok: false, message: "council_members_out_of_range" };
+	if (members.length < COUNCIL_MIN_MEMBERS || members.length > COUNCIL_MAX_MEMBERS) {
+		return { ok: false, message: "council_members_out_of_range" };
+	}
 	const labels = new Set<string>();
 	for (const member of members) {
 		if (labels.has(member.label)) return { ok: false, message: `council_member_label_duplicate: ${member.label}` };
@@ -389,7 +393,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			};
 		});
 		const reservation = deps.dispatch.reservations.prepare({
-			topology: artifact.topology === "fleet" || artifact.topology === "council" ? "parallel" : artifact.topology,
+			// A council keeps its own name so a capacity denial can say that its
+			// width has a floor. A fleet's waves are already parallel by shape.
+			topology: artifact.topology === "fleet" ? "parallel" : artifact.topology,
 			tasks,
 		});
 		try {

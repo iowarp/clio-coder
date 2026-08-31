@@ -544,7 +544,36 @@ describe("dispatch batch reservations", () => {
 		}
 		strictEqual(
 			denial,
-			"dispatch: admission denied: endpoint 'mini:8080' capacity exceeded (4/1 slots): 1 active lease holds the slot; reduce the same-wave worker count, collect in-flight runs, or point workers at a second server",
+			"dispatch: admission denied: endpoint 'mini:8080' capacity exceeded (4/1 slots): 1 active lease holds the slot; reduce the same-wave worker count, set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server",
+		);
+	});
+
+	it("tells a council its width has a floor instead of offering it a narrower wave", () => {
+		const endpointKey = "http://mini:8080";
+		let denial = "";
+		try {
+			createDispatchReservation({
+				topology: "council",
+				tasks: ["alpha", "beta"].map((memberId) => ({
+					memberId,
+					wave: 0,
+					nodeId: "local",
+					endpointKey,
+					costUpperBoundUsd: 0,
+				})),
+				capacity: {
+					global: { active: 0, limit: 4 },
+					nodes: { local: { active: 0, limit: 4 } },
+					endpoints: { [endpointKey]: { active: 0, limit: 1 } },
+					budget: { currentUsd: 0, ceilingUsd: 5 },
+				},
+			});
+		} catch (error) {
+			denial = error instanceof Error ? error.message : String(error);
+		}
+		strictEqual(
+			denial,
+			"dispatch: admission denied: endpoint 'mini:8080' capacity exceeded (2/1 slots): no active lease, held reservation, or foreground stream currently holds a slot; a council runs its whole roster in one wave and cannot go below 2 members, so set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server",
 		);
 	});
 

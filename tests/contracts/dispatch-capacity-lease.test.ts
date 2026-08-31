@@ -80,7 +80,7 @@ describe("durable dispatch capacity leases", () => {
 				ok(error instanceof Error);
 				strictEqual(
 					error.message,
-					"dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (2/2 slots): 2 active leases hold the slots; collect in-flight runs or point workers at a second server",
+					"dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (2/2 slots): 2 active leases hold the slots; reduce the same-wave worker count, set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server",
 				);
 				return true;
 			},

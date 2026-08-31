@@ -10,6 +10,7 @@ import {
 	capacityLeaseUsage,
 	describeEndpointCapacityHolders,
 	type EndpointCapacityHolders,
+	endpointCapacityRemedy,
 	heartbeatCapacityLease,
 	releaseCapacityLease,
 	renameCapacityLeaseAssignment,
@@ -131,7 +132,7 @@ function describeAdmissionFailure(input: {
 				holders === undefined
 					? "the supplied capacity snapshot does not attribute the occupied slots"
 					: describeEndpointCapacityHolders(holders);
-			return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity reached (${endpointActive}/${endpointLimit} slots): ${occupancy}; collect in-flight runs or point workers at a second server`;
+			return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity reached (${endpointActive}/${endpointLimit} slots): ${occupancy}; ${endpointCapacityRemedy()}`;
 		}
 	}
 	const nodeLimit = input.limits.nodes[input.nodeId];
