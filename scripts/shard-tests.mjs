@@ -49,6 +49,7 @@
  *   node scripts/shard-tests.mjs [pattern...]
  *   node scripts/shard-tests.mjs --lanes 4
  *   node scripts/shard-tests.mjs --shard 2          (rerun lane 2 alone)
+ *   node scripts/shard-tests.mjs --shard serial     (rerun the serial lane alone)
  *   node scripts/shard-tests.mjs --list              (print the assignment, run nothing)
  *   node scripts/shard-tests.mjs --emit-weights      (regenerate shard-weights.json; prints to stdout)
  *   node scripts/shard-tests.mjs -- --test-name-pattern=foo   (forwarded to every lane)
@@ -56,6 +57,12 @@
  * CLIO_TEST_LANES overrides the lane count the same way --lanes does; the
  * flag wins if both are given. Extra node --test flags (coverage, a name
  * filter) are forwarded to every lane if passed after a bare `--`.
+ *
+ * Every lane is handed CLIO_TEST_CONCURRENCY, how many lanes this run spawns
+ * at once. tests/harness/load.ts reads it to widen watchdog timeouts by the
+ * contention they actually run under, so a budget picked against an unloaded
+ * measurement does not fire as a false failure in a 24-way run. The serial
+ * lane is handed 1, because it is the only thing running.
  */
 
 import { spawn } from "node:child_process";
@@ -67,6 +74,35 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SHARD_WEIGHTS_JSON = resolve(REPO_ROOT, "scripts/shard-weights.json");
 const DEFAULT_PATTERNS = ["tests/contracts/**/*.test.ts", "tests/smoke/**/*.test.ts"];
+
+/**
+ * Files whose assertions are measurements, run alone after the parallel lanes
+ * have drained.
+ *
+ * Everything else in this suite treats a timeout as a watchdog, so the sharded
+ * runner can widen it (tests/harness/load.ts) and lose nothing. These four
+ * cannot: the number each one compares against is the claim. "The batch beat
+ * serial" stops meaning anything if the bound is raised past serial, and
+ * "SIGKILL followed the 2s grace" stops meaning anything if the grace is
+ * scaled. Their only honest fix is a quiet box, so they get one.
+ *
+ * Cost is about 10s of wall clock added to a ~130s run, and every entry is
+ * here because it failed under 24-way load and passed alone. Keep the list
+ * short: a file belongs here only when widening its margin would weaken what
+ * it proves. Anything that merely waits for something belongs in the parallel
+ * lanes with a scaled watchdog.
+ */
+const SERIAL_FILES = [
+	// per-call admission under 1ms; a concurrent batch under 2x one tool's delay
+	"tests/contracts/tool-admission-cost.test.ts",
+	// route decision p95 under the same 10ms bound the resolver enforces on itself
+	"tests/contracts/joint-route-resolver.test.ts",
+	// an operator's parked thinking time must not land in the tool's charged duration
+	"tests/contracts/autonomy.test.ts",
+	// a timed-out child dies to SIGTERM before the 2s grace, or to SIGKILL after it
+	"tests/contracts/live-spawn.test.ts",
+];
+const SERIAL_LANE_NAME = "lane-serial";
 const RUNNER_ARGS = [
 	"--import",
 	"tsx",
@@ -215,8 +251,10 @@ function parseArgs(argv) {
 			continue;
 		}
 		if (arg === "--shard") {
-			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
-			out.shard = Number.isInteger(parsed) ? parsed : undefined;
+			const raw = argv[index + 1] ?? "";
+			const parsed = Number.parseInt(raw, 10);
+			// `--shard serial` addresses the one lane that has no index.
+			out.shard = raw === "serial" ? "serial" : Number.isInteger(parsed) ? parsed : undefined;
 			index += 1;
 			continue;
 		}
@@ -255,14 +293,14 @@ function parseSummary(output) {
 	};
 }
 
-function runLane(name, files, forward) {
+function runLane(name, files, forward, concurrency) {
 	return new Promise((resolvePromise) => {
 		const reporterDir = mkdtempSync(join(tmpdir(), "clio-shard-reporter-"));
 		const reporterPath = join(reporterDir, `${name}.log`);
 		const args = [...RUNNER_ARGS, `--test-reporter-destination=${reporterPath}`, ...forward, ...files];
 		const child = spawn(process.execPath, args, {
 			cwd: REPO_ROOT,
-			env: process.env,
+			env: { ...process.env, CLIO_TEST_CONCURRENCY: String(concurrency) },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";
@@ -338,7 +376,11 @@ async function main() {
 	const requested = args.lanes ?? (Number.isInteger(envLanes) ? envLanes : undefined) ?? availableParallelism();
 	const laneCount = Math.max(1, requested);
 	const weights = loadWeights();
-	const lanes = assignLanes(files, weights, Math.min(laneCount, files.length));
+	const serialSet = new Set(SERIAL_FILES);
+	const serialFiles = files.filter((file) => serialSet.has(file));
+	const parallelFiles = files.filter((file) => !serialSet.has(file));
+	const lanes = assignLanes(parallelFiles, weights, Math.min(laneCount, Math.max(1, parallelFiles.length)));
+	const serialTotal = serialFiles.reduce((sum, file) => sum + (weights.byFile.get(file) ?? weights.fallback), 0);
 
 	if (args.list) {
 		for (const [index, lane] of lanes.entries()) {
@@ -347,13 +389,30 @@ async function main() {
 			);
 			for (const file of lane.files) process.stdout.write(`  ${file}\n`);
 		}
+		if (serialFiles.length > 0) {
+			process.stdout.write(
+				`${SERIAL_LANE_NAME}  ${(serialTotal / 1000).toFixed(1)}s  ${serialFiles.length} files (runs alone, after the lanes above)\n`,
+			);
+			for (const file of serialFiles) process.stdout.write(`  ${file}\n`);
+		}
 		return 0;
 	}
 
-	const toRun = args.shard === undefined ? lanes.entries() : [[args.shard, lanes[args.shard]]];
-	if (args.shard !== undefined && !lanes[args.shard]) {
+	const wantsSerialOnly = args.shard === "serial";
+	if (wantsSerialOnly && serialFiles.length === 0) {
+		throw new Error("--shard serial matched no files: none of SERIAL_FILES is in the expanded pattern");
+	}
+	if (typeof args.shard === "number" && !lanes[args.shard]) {
 		throw new Error(`--shard ${args.shard} is out of range: ${lanes.length} lanes (0..${lanes.length - 1})`);
 	}
+	const toRun = wantsSerialOnly
+		? []
+		: typeof args.shard === "number"
+			? [[args.shard, lanes[args.shard]]]
+			: lanes.entries();
+	// A named lane runs only what was asked for; a whole-suite run always ends
+	// with the serial lane, on the box the parallel lanes just gave back.
+	const runSerial = serialFiles.length > 0 && (args.shard === undefined || wantsSerialOnly);
 
 	// A `.git` at the system temp root makes src/tools/ignore-policy.ts report
 	// every mkdtemp scratch as inside a git repository, which fails the
@@ -370,9 +429,15 @@ async function main() {
 	}
 
 	const started = Date.now();
+	const laneEntries = [...toRun];
 	const results = await Promise.all(
-		[...toRun].map(([index, lane]) => runLane(laneName(index, lanes.length), lane.files, args.forward)),
+		laneEntries.map(([index, lane]) =>
+			runLane(laneName(index, lanes.length), lane.files, args.forward, laneEntries.length),
+		),
 	);
+	// Awaited separately, not merged into the Promise.all above: the whole point
+	// of this lane is that nothing else is competing for the box while it runs.
+	if (runSerial) results.push(await runLane(SERIAL_LANE_NAME, serialFiles, args.forward, 1));
 	const wallSeconds = ((Date.now() - started) / 1000).toFixed(1);
 
 	let totalTests = 0;
@@ -389,8 +454,9 @@ async function main() {
 		if (result.code !== 0) failedLanes.push(result.name);
 	}
 
+	const shardLabel = runSerial ? `${laneEntries.length}+serial` : String(laneEntries.length);
 	process.stdout.write(
-		`\n# shards ${results.length}  # tests ${totalTests}  # pass ${totalPass}  # fail ${totalFail}  # wall ${wallSeconds}s\n`,
+		`\n# shards ${shardLabel}  # tests ${totalTests}  # pass ${totalPass}  # fail ${totalFail}  # wall ${wallSeconds}s\n`,
 	);
 	if (!strayGitExistedBefore && existsSync(strayGit)) {
 		process.stdout.write(
@@ -400,7 +466,7 @@ async function main() {
 	}
 	if (failedLanes.length > 0) {
 		process.stdout.write(`# failed lanes: ${failedLanes.join(", ")}\n`);
-		process.stdout.write(`# reproduce with: node scripts/shard-tests.mjs --shard <n>\n`);
+		process.stdout.write(`# reproduce with: node scripts/shard-tests.mjs --shard <n|serial>\n`);
 		return 1;
 	}
 	return 0;
