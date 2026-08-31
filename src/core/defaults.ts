@@ -167,11 +167,31 @@ export interface PrewarmSettings {
 }
 
 /**
- * The pane layer's settings block. Only the durable half exists so far: the
- * run event journal, which every other pane surface reads and which the
- * standalone run viewer needs whether or not a pane host is installed.
+ * The pane layer's settings block.
+ *
+ * `journal` is the durable half: the run event journal, which every other pane
+ * surface reads and which the standalone run viewer needs whether or not a pane
+ * host is installed. The other four govern the live projection, and every one
+ * of them is inert when no pane host answered detection.
  */
 export interface PanesSettings {
+	/**
+	 * Capability rung the pane layer may reach. `auto` takes guest mode when a
+	 * pane host is detected; `embedded` asks Clio to own a private session, which
+	 * degrades to none until that ships; `off` skips detection entirely.
+	 */
+	enabled: "auto" | "embedded" | "off";
+	/**
+	 * Which dispatched runs get a viewer pane. `auto` opens one for the runs an
+	 * operator loses sight of, which is detached batches and dispatches moved to
+	 * the background; `all` also opens one for attached runs, which already
+	 * narrate into the transcript; `off` opens none.
+	 */
+	agents: "auto" | "all" | "off";
+	/** Keep a failed run's viewer pane open for post-mortem instead of closing it. */
+	keepFailed: boolean;
+	/** Which terminal run states raise a pane-host toast. */
+	notifications: "failures" | "all" | "off";
 	journal: boolean;
 }
 
@@ -476,6 +496,25 @@ export const DEFAULT_SETTINGS = {
 		enabled: true,
 	} as PrewarmSettings,
 	panes: {
+		/**
+		 * Guest mode when a pane host is detected, and nothing at all when one is
+		 * not. Detection costs no file descriptor without `HERDR_ENV`, so `auto`
+		 * is free on a machine with no pane host installed.
+		 */
+		enabled: "auto",
+		/**
+		 * Detached batches and backgrounded dispatches are the runs that vanish
+		 * from the operator's view, so they are the ones a pane is worth. An
+		 * attached run already narrates into the transcript.
+		 */
+		agents: "auto",
+		/**
+		 * A failed run's pane is where the post-mortem happens, so it outlives the
+		 * run. A succeeded run's pane closes with it.
+		 */
+		keepFailed: true,
+		/** A toast per finished run is noise; a toast per failure is the signal. */
+		notifications: "failures",
 		/**
 		 * Tee every dispatched run's display event tail to
 		 * `<state>/runs/<runId>/events.ndjson`. The live tail is otherwise
@@ -800,12 +839,22 @@ context:
 prewarm:
   enabled: true
 
-# The pane layer. journal tees every dispatched run's event tail to
+# The pane layer. enabled picks the capability rung: auto takes guest mode when
+# a pane host is detected, embedded asks Clio to own a private session (not yet
+# implemented), off skips detection. agents decides which dispatched runs get a
+# viewer pane: auto covers detached batches and dispatches moved to the
+# background, all adds attached runs, off opens none. keepFailed leaves a failed
+# run's pane open for the post-mortem. notifications picks which terminal states
+# raise a toast. journal tees every dispatched run's event tail to
 # <state>/runs/<runId>/events.ndjson so \`clio-coder fleet view <runId> --follow\`
 # can watch a run from a second terminal. Journal directories are removed when
 # their run leaves the run ledger ring, and \`clio-coder reset --state\` clears
 # them with the rest of the state root.
 panes:
+  enabled: auto
+  agents: auto
+  keepFailed: true
+  notifications: failures
   journal: true
 
 # Transient provider/stream retry controls for interactive chat.

@@ -127,6 +127,10 @@ const RESTART_REQUIRED_IDS = new Set<string>([
 	"runtimePlugins",
 	"terminal.tuiMode",
 	"terminal.fullscreenScrollbar",
+	// The mux domain runs its detection ladder once, at boot, from the value this
+	// key held then. Changing the rung mid-session would leave the contract on
+	// the rung it resolved to, so the row says restart rather than lying.
+	"panes.enabled",
 ]);
 
 export { SETTINGS_SECTIONS, type SettingsSectionId };
@@ -173,6 +177,11 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.profiles": "Add profile",
 	"workers.agentBindings": "Add agent route",
 	"workers.maxRetries": "Fleet retries",
+	"panes.enabled": "Panes",
+	"panes.agents": "Run viewer panes",
+	"panes.keepFailed": "Keep failed panes",
+	"panes.notifications": "Pane notifications",
+	"panes.journal": "Run event journal",
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
 	"modelSelector.favorites": "Pinned favorites",
@@ -218,7 +227,7 @@ type EntrySettingId =
 	| `fleet.nodes.${string}`
 	| `fleet.endpoints.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
-type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement"}`;
+type FleetGroupHeaderId = `fleet.group.${"defaults" | "profiles" | "agent-routes" | "placement" | "panes"}`;
 type TargetsCtaId = "targets.add-cta";
 export type SettingsCenterRowId = EditableSettingId | FleetGroupHeaderId | TargetsCtaId;
 const REMOVE_PROFILE_CHOICE = "(remove profile)";
@@ -255,6 +264,11 @@ export const SETTINGS_SECTION_ROWS = {
 		"workers.maxRetries",
 		"workers.profiles",
 		"workers.agentBindings",
+		"panes.enabled",
+		"panes.agents",
+		"panes.keepFailed",
+		"panes.notifications",
+		"panes.journal",
 	],
 	models: ["scope", "modelSelector.recentLimit", "modelSelector.favorites"],
 	budget: ["budget.sessionCeilingUsd", "defaults.maxTokens", "budget.concurrency"],
@@ -310,6 +324,11 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.profiles": "Named target/model/thinking choices that native workers can use. Enter adds one.",
 	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
+	"panes.enabled": "Which pane-host rung Clio may use for live run views.",
+	"panes.agents": "Which dispatched runs get their own viewer pane.",
+	"panes.keepFailed": "Whether a failed run's viewer pane stays open for the post-mortem.",
+	"panes.notifications": "Which terminal run states raise a pane-host toast.",
+	"panes.journal": "Whether every dispatched run's event tail is written to disk for `clio-coder fleet view`.",
 	scope: "Alt+J and Alt+K model cycle set.",
 	"modelSelector.recentLimit": "How many recently used models /model remembers.",
 	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
@@ -1339,6 +1358,7 @@ export function buildSettingItems(
 	const retry = settings.retry;
 	const terminal = settings.terminal;
 	const watchdog = settings.watchdog;
+	const panes = settings.panes;
 	const orchestratorThinking = thinkingChoices(
 		options?.providers,
 		settings.orchestrator.target,
@@ -1474,6 +1494,12 @@ export function buildSettingItems(
 		fleetGroupHeader("fleet.group.placement", "Placement"),
 		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
 		...fleetEndpointRows(options?.providers),
+		fleetGroupHeader("fleet.group.panes", "Panes"),
+		settingItem("panes.enabled", panes.enabled, { values: ["auto", "embedded", "off"] }),
+		settingItem("panes.agents", panes.agents, { values: ["auto", "all", "off"] }),
+		settingItem("panes.keepFailed", String(panes.keepFailed), { values: ["true", "false"] }),
+		settingItem("panes.notifications", panes.notifications, { values: ["failures", "all", "off"] }),
+		settingItem("panes.journal", String(panes.journal), { values: ["true", "false"] }),
 		settingItem("targets", "", {
 			description: "Live inference target inventory and routing roles.",
 			affordance: "column heading",
@@ -2010,6 +2036,21 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			applyNonNegativeInteger(value, (next) => {
 				settings.workers.maxRetries = next;
 			});
+			return;
+		case "panes.enabled":
+			if (value === "auto" || value === "embedded" || value === "off") settings.panes.enabled = value;
+			return;
+		case "panes.agents":
+			if (value === "auto" || value === "all" || value === "off") settings.panes.agents = value;
+			return;
+		case "panes.keepFailed":
+			if (value === "true" || value === "false") settings.panes.keepFailed = value === "true";
+			return;
+		case "panes.notifications":
+			if (value === "failures" || value === "all" || value === "off") settings.panes.notifications = value;
+			return;
+		case "panes.journal":
+			if (value === "true" || value === "false") settings.panes.journal = value === "true";
 			return;
 		case "modelSelector.recentLimit":
 			applyNonNegativeInteger(value, (next) => {
