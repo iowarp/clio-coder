@@ -703,10 +703,16 @@ export interface SlashCommandContext {
 	runCompact: (instructions: string | undefined) => void;
 	/**
 	 * Escape hatch for the `view verify` entry: verify a receipt file on disk
-	 * and emit a single status line. Kept on the context so the registry does
+	 * and emit an actionable verification block. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
-	verifyReceipt: (runId: string) => ReceiptIntegrityOutcome;
+	verifyReceipt: (runId: string) => ReceiptIntegrityOutcome & {
+		receiptPath?: string;
+		sealedDigest?: string | null;
+		trustSummary?: string | null;
+		compromised?: boolean;
+		checks?: ReadonlyArray<{ name: string; ok: boolean; evidence: string }>;
+	};
 	/**
 	 * Handles the "unknown" case: append the text to the chat panel as a user
 	 * turn, submit to the chat loop, and schedule a re-render. Handlers for
@@ -716,6 +722,24 @@ export interface SlashCommandContext {
 	submitChat: (text: string) => void;
 	/** Re-render request; wraps tui.requestRender so handlers do not import TUI. */
 	render: () => void;
+}
+
+type SlashReceiptVerification = ReturnType<SlashCommandContext["verifyReceipt"]>;
+
+/** Compact multiline receipt verification for the composer notice surface. */
+export function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerification): string {
+	const status = result.ok ? (result.compromised ? "compromised" : "ok") : result.retired ? "retired" : "fail";
+	const lines = [
+		`verify ${status} ${runId}`,
+		`receipt  ${result.receiptPath ?? "unavailable"}`,
+		`digest   ${result.sealedDigest ?? "unavailable"}`,
+		`evidence ${result.trustSummary ?? (!result.ok ? result.reason : "trust status unavailable")}`,
+	];
+	if (result.checks && result.checks.length > 0) {
+		lines.push("checks");
+		for (const check of result.checks) lines.push(`  ${check.ok ? "✓" : "✗"} ${check.name}: ${check.evidence}`);
+	}
+	return lines.join("\n");
 }
 
 /** The one operator-authored turn used by slash and overlay handoff paths. */
@@ -1574,15 +1598,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind !== "view-verify") return;
 			const result = ctx.verifyReceipt(command.runId);
+			const block = formatReceiptVerificationBlock(command.runId, result);
 			if (result.ok) {
-				ctx.notice("success", `verify ok ${command.runId}`);
+				ctx.notice(result.compromised ? "warn" : "success", block);
 			} else if (result.retired !== undefined) {
 				// A retired seal is the expected state of a run from the previous
 				// release, so it is a warning that names the versions, never the
 				// failure a tampered receipt gets.
-				ctx.notice("warn", `verify retired ${command.runId} ${result.reason}`);
+				ctx.notice("warn", block);
 			} else {
-				ctx.notice("error", `verify fail ${command.runId} ${result.reason}`);
+				ctx.notice("error", block);
 			}
 		},
 	},

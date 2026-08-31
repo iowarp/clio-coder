@@ -27,6 +27,7 @@ import {
 	VIEW_ARTIFACT_CATEGORIES,
 	VIEW_ARTIFACT_LINE_CAP,
 	verifyReceiptFile,
+	verifyReceiptFileReport,
 	WorkspaceArtifactProvider,
 } from "../../src/interactive/view/artifacts.js";
 import { withTimeZoneAsync } from "../harness/clock.js";
@@ -630,6 +631,20 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(verify?.ok, true);
 		ok(verify?.detail.startsWith("trust v1: unverified; sealed; "), verify?.detail);
 		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: true });
+		const report = verifyReceiptFileReport(stateDir, envelope.id);
+		strictEqual(report.ok, true);
+		strictEqual(report.receiptPath, receiptFilePath(stateDir, envelope.id));
+		ok(report.sealedDigest?.startsWith("sha256:"), report.sealedDigest ?? "missing digest");
+		ok(report.trustSummary?.startsWith("trust v1: unverified; sealed; "), report.trustSummary ?? "missing trust");
+		deepStrictEqual(
+			report.checks.map((check) => [check.name, check.ok]),
+			[
+				["receipt file", true],
+				["receipt contract", true],
+				["run ledger", true],
+				["sealed digest", true],
+			],
+		);
 
 		const loaded = await artifacts[0]?.load();
 		strictEqual(loaded?.format, "json");
@@ -669,6 +684,22 @@ describe("contracts/view-artifacts", () => {
 		await writeFile(receiptPath, JSON.stringify(receipt, null, 2));
 
 		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: false, reason: "integrity mismatch" });
+		const report = verifyReceiptFileReport(stateDir, envelope.id);
+		strictEqual(report.ok, false);
+		ok(report.sealedDigest?.startsWith("sha256:"), report.sealedDigest ?? "missing sealed digest");
+		ok(report.trustSummary?.startsWith("trust v1: compromised; seal broken; "), report.trustSummary ?? "missing trust");
+		ok(
+			report.checks.some(
+				(check) => check.name === "sealed digest" && !check.ok && check.evidence === "integrity mismatch",
+			),
+			report.checks.map((check) => `${check.name}: ${check.evidence}`).join("\n"),
+		);
+		ok(
+			report.checks.some(
+				(check) => check.name === "trust artifactIntegrity" && !check.ok && check.evidence.includes("seal broken"),
+			),
+			report.checks.map((check) => `${check.name}: ${check.evidence}`).join("\n"),
+		);
 		const artifact = (await new ReceiptArtifactProvider({ stateDir }).list())[0];
 		deepStrictEqual(await artifact?.verify?.(), { ok: false, detail: "integrity mismatch" });
 	});
