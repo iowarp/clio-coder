@@ -138,6 +138,16 @@ describe("contracts/configure-cli runtime inventories agree", () => {
 		match(full.stdout, /clio-coder auth list/);
 	});
 
+	it("labels unauthenticated local HTTP runtimes as key optional", async () => {
+		const full = await runCli(["configure", "--list"], { env: scratch.env });
+		strictEqual(full.code, 0, `stderr=${full.stderr}`);
+		const auth = authByRuntime(full.stdout);
+		strictEqual(auth.get("lmstudio"), "key-optional");
+		strictEqual(auth.get("llamacpp"), "key-optional");
+		strictEqual(auth.get("ollama-native"), "none");
+		strictEqual(auth.get("google"), "needs-key");
+	});
+
 	// Where a name copied off the wider list lands if the caption did not stop
 	// the user first. Refusing is right; refusing without a next step is what
 	// made the two screens feel like a contradiction.

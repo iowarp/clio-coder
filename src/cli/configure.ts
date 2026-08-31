@@ -318,7 +318,9 @@ function printRuntimeList(includeHidden: boolean): void {
 				: runtime?.auth === "api-key"
 					? status?.available
 						? "credential"
-						: "needs-key"
+						: targetRequiresAuth({ id: entry.runtimeId, runtime: entry.runtimeId }, runtime)
+							? "needs-key"
+							: "key-optional"
 					: (runtime?.auth ?? "none");
 		rows.push({
 			group: supportGroupLabel(entry.group),
