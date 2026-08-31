@@ -253,7 +253,7 @@ Arguments:
 - `cwd` (optional). Default agent working directory.
 - `timeout_ms` (optional). Aborts the whole dispatch; in sequential mode remaining tasks are skipped and the skip is reported.
 - `briefing` (optional string, top-level default or per-task override). Parent-composed context/data, not worker instructions: it cannot replace `task`. It is trimmed and omitted when blank, rejected above 12,000 UTF-8 bytes, sent as its own delimited untrusted dynamic message, and retained only as byte/hash provenance. The shared value applies to string tasks and object tasks without an override; an object-level briefing wins.
-- `intent` (optional object, top-level default or per-task override). Declares `read_roots`, `write_roots`, `relevant_paths`, `expected_outputs`, and `verification`. Path arrays contain normalized repository-relative POSIX paths. Verification entries contain a declared `check` id and optional `timeout_ms`; ids are resolved from package scripts and `.clio-coder/verifiers.yaml` before approval. Checks are ids, not shell commands.
+- `intent` (object, top-level default or per-task override, and the default way to dispatch). Declares `read_roots`, `write_roots`, `relevant_paths`, `expected_outputs`, and `verification`. Path arrays contain normalized repository-relative POSIX paths. Verification entries contain a declared `check` id and optional `timeout_ms`; ids are resolved from package scripts and `.clio-coder/verifiers.yaml` before approval. Checks are ids, not shell commands. Declared paths select the project rules that apply to them and pin worker context; omitting `intent` falls back to reading path-like tokens out of the task and briefing, which can miss an applicable rule. In a batch, per-task `intent` shallow-merges over the top-level object and is then checked against it as a ceiling: a task may narrow the shared scope and is refused with `intent_scope_widening` if it reaches outside. Declaring `write_roots` that disagree with a legacy `writeRoots`, an `expected_outputs` entry outside every declared write root, or an `intent.version` other than 2 are each terminal refusals carrying a stable reason code. See [dispatch-typed-intent.md](dispatch-typed-intent.md).
 - `gate` (optional string, top-level default or per-task override). Exact shorthand for `intent.verification=[{check: gate}]`. Supplying it together with `intent.verification` is refused.
 - `max_output_bytes` (optional). Summary byte budget; default 20000, split across runs with at least 1024 bytes each.
 
@@ -269,13 +269,23 @@ Sealed receipts are the durable evidence; worker prose remains advisory until ve
 
 ```text
 dispatch(list=true)
-dispatch(agent="debugger", task="Adversarially verify the strict v19 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
-dispatch(tasks=["Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion"])
+dispatch(agent="debugger", task="Adversarially verify the strict v19 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", intent={read_roots: ["src/domains/dispatch/"]}, detach=true)
 dispatch(tasks=[
-  {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes"},
-  {agent: "coder", task: "Fix the failing assertion in tests/contracts/safety.test.ts", intent: {write_roots: ["tests/contracts"], verification: [{check: "test"}]}}
+  {task: "Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion",
+   intent: {read_roots: ["tests/contracts/", "src/domains/dispatch/"], verification: [{check: "test"}]}}
+])
+dispatch(tasks=[
+  {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes",
+   intent: {read_roots: ["src/domains/"]}},
+  {agent: "coder", task: "Fix the failing assertion in tests/contracts/safety.test.ts",
+   intent: {write_roots: ["tests/contracts/"], expected_outputs: ["tests/contracts/safety.test.ts"], verification: [{check: "test"}]}}
 ], mode="parallel")
-dispatch(tasks=["Refactor step 1", "Refactor step 2"], mode="sequential", timeout_ms=600000)
+dispatch(
+  intent={read_roots: ["src/"], write_roots: ["src/domains/"]},
+  tasks=[
+    {task: "Refactor step 1", intent: {write_roots: ["src/domains/dispatch/"]}},
+    {task: "Refactor step 2", intent: {write_roots: ["src/domains/context/"]}}
+  ], mode="sequential", timeout_ms=600000)
 ```
 
 ## verify: run declared verification checks
