@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	cpSync,
@@ -54,6 +55,10 @@ export interface YaziProfileOptions {
 	themeToml?: string;
 	yaziToml?: string;
 	keymapToml?: string;
+}
+
+export interface EnsureYaziProfileOptions extends YaziProfileOptions {
+	yaziPath: string;
 }
 
 /** The managed profile location without creating the cache root. */
@@ -223,11 +228,42 @@ function parseGenerated(dir: string): boolean {
 	});
 }
 
+const YAZI_CONFIG_ERROR_MARKERS = ["Failed to parse config", "Press <Enter> to continue with preset settings"];
+
+/** Ask the resolved Yazi binary to load the staged profile before it can become current. */
+function validatesWithYazi(dir: string, yaziPath: string): boolean {
+	const scratchHome = mkdtempSync(join(dirname(dir), ".yazi-validation-"));
+	try {
+		const result = spawnSync(yaziPath, ["--debug"], {
+			cwd: scratchHome,
+			env: {
+				...process.env,
+				HOME: scratchHome,
+				XDG_CACHE_HOME: join(scratchHome, "cache"),
+				XDG_CONFIG_HOME: join(scratchHome, "config"),
+				YAZI_CONFIG_HOME: dir,
+			},
+			encoding: "utf8",
+			timeout: 5_000,
+		});
+		const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+		return (
+			result.error === undefined &&
+			result.status === 0 &&
+			YAZI_CONFIG_ERROR_MARKERS.every((marker) => !output.includes(marker))
+		);
+	} catch {
+		return false;
+	} finally {
+		rmSync(scratchHome, { recursive: true, force: true });
+	}
+}
+
 /**
  * Materialize Clio's deterministic Yazi profile, replacing it only when its
  * recorded inputs differ. No path outside `<cache>/yazi/` is read or written.
  */
-export function ensureYaziProfile(options: YaziProfileOptions): YaziProfile | null {
+export function ensureYaziProfile(options: EnsureYaziProfileOptions): YaziProfile | null {
 	let inputs: ReturnType<typeof expected>;
 	try {
 		inputs = expected({ ...options, profileDir: options.profileDir ?? yaziProfileDir(clioCacheDir()) });
@@ -247,7 +283,7 @@ export function ensureYaziProfile(options: YaziProfileOptions): YaziProfile | nu
 		writeFileSync(join(staging, "keymap.toml"), inputs.keymapToml);
 		writeFileSync(join(staging, "theme.toml"), inputs.themeToml);
 		writeFileSync(join(staging, STAMP_FILE), `${JSON.stringify(inputs.stamp, null, 2)}\n`);
-		if (!parseGenerated(staging)) {
+		if (!parseGenerated(staging) || !validatesWithYazi(staging, options.yaziPath)) {
 			rmSync(inputs.dir, { recursive: true, force: true });
 			return null;
 		}

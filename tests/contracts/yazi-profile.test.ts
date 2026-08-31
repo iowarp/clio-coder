@@ -5,8 +5,8 @@
  */
 
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { tokenHex } from "../../src/core/theme-token-hex.js";
@@ -19,11 +19,24 @@ import {
 	userYaziConfigDir,
 } from "../../src/domains/mux/yazi/profile.js";
 import { renderYaziTheme } from "../../src/domains/mux/yazi/theme.js";
+import { findPinnedTool } from "../../src/domains/toolchain/registry.js";
 import { type ClioToken, createClioTheme } from "../../src/interactive/theme/tokens.js";
 
 const ASSETS = join(process.cwd(), "src", "domains", "mux", "yazi", "assets");
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "yazi");
 const YA = "/opt/clio tools/ya";
+const YAZI_ENTRY = findPinnedTool("yazi");
+const VENDORED_YAZI_CANDIDATE = join(
+	process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+	"clio-coder",
+	"tools",
+	"yazi",
+	YAZI_ENTRY?.version ?? "unknown",
+	process.platform === "win32" ? "yazi.exe" : "yazi",
+);
+const VENDORED_YAZI = statSync(VENDORED_YAZI_CANDIDATE, { throwIfNoEntry: false })?.isFile()
+	? VENDORED_YAZI_CANDIDATE
+	: null;
 const CLIO_TOKENS: readonly ClioToken[] = [
 	"accent",
 	"accentDeep",
@@ -90,10 +103,28 @@ function assertKeysExist(generated: unknown, preset: unknown, path: string): voi
 describe("contracts/yazi managed profile", () => {
 	let scratch: string;
 	let profileDir: string;
+	let fakeYazi: string;
 
 	before(() => {
 		scratch = mkdtempSync(join(tmpdir(), "clio-yazi-profile-"));
 		profileDir = join(scratch, "cache", "yazi", "profile");
+		fakeYazi = join(scratch, "schema-checking-yazi.mjs");
+		writeFileSync(
+			fakeYazi,
+			`#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+const configHome = process.env.YAZI_CONFIG_HOME;
+const config = readFileSync(join(configHome, "yazi.toml"), "utf8");
+const fetchers = config.split("[[plugin.prepend_fetchers]]").slice(1);
+if (fetchers.length === 0 || fetchers.some((entry) => !/^\\s*group\\s*=/mu.test(entry))) {
+	process.stderr.write("Failed to parse config\\nmissing field group\\nPress <Enter> to continue with preset settings...\\n");
+	process.exit(1);
+}
+process.stdout.write("Yazi debug profile loaded\\n");
+`,
+		);
+		chmodSync(fakeYazi, 0o755);
 	});
 
 	after(() => {
@@ -105,6 +136,7 @@ describe("contracts/yazi managed profile", () => {
 		strictEqual(renderYaziKeymap(YA), KEYMAP_GOLDEN);
 		const profile = ensureYaziProfile({
 			yaPath: YA,
+			yaziPath: fakeYazi,
 			profileDir,
 			assetDir: ASSETS,
 			yaziVersion: "26.8.15",
@@ -120,6 +152,36 @@ describe("contracts/yazi managed profile", () => {
 			readFileSync(join(ASSETS, "plugins", "git.yazi", "LICENSE"), "utf8"),
 		);
 		strictEqual(statSync(join(profileDir, "package.toml"), { throwIfNoEntry: false }), undefined);
+	});
+
+	it("supplies the fetcher group required by Yazi 26.8.15", () => {
+		const generated = parseTomlDocument(readFileSync(join(ASSETS, "yazi.toml"), "utf8"));
+		ok(generated);
+		const plugin = tomlTableAt(generated, ["plugin"]);
+		ok(plugin);
+		const fetchers = plugin.prepend_fetchers;
+		ok(Array.isArray(fetchers));
+		deepStrictEqual(
+			fetchers.map((entry) => (record(entry) ? entry.group : null)),
+			["git", "git"],
+		);
+	});
+
+	it("loads the generated profile with the installed vendored Yazi at the pin", {
+		skip: VENDORED_YAZI === null ? "the vendored Yazi pin is not installed" : false,
+	}, () => {
+		ok(VENDORED_YAZI);
+		const actualProfileDir = join(scratch, "actual-yazi-profile");
+		ok(
+			ensureYaziProfile({
+				yaPath: YA,
+				yaziPath: VENDORED_YAZI,
+				profileDir: actualProfileDir,
+				assetDir: ASSETS,
+				yaziVersion: "26.8.15",
+				clioVersion: "0.4.0",
+			}),
+		);
 	});
 
 	it("keeps the generated hex projection aligned with the interactive palette", () => {
@@ -159,6 +221,7 @@ describe("contracts/yazi managed profile", () => {
 	it("does not rewrite a current profile and regenerates when rendered theme input changes", () => {
 		const options = {
 			yaPath: YA,
+			yaziPath: fakeYazi,
 			profileDir,
 			assetDir: ASSETS,
 			yaziVersion: "26.8.15",
@@ -183,11 +246,35 @@ describe("contracts/yazi managed profile", () => {
 		writeFileSync(join(profileDir, "old"), "managed residue");
 		const result = ensureYaziProfile({
 			yaPath: YA,
+			yaziPath: fakeYazi,
 			profileDir,
 			assetDir: ASSETS,
 			yaziVersion: "26.8.15",
 			clioVersion: "0.4.0",
 			themeToml: "[mgr\nnot valid",
+		});
+		strictEqual(result, null);
+		strictEqual(statSync(profileDir, { throwIfNoEntry: false }), undefined);
+	});
+
+	it("refuses parseable TOML that the Yazi schema rejects before promotion", () => {
+		mkdirSync(profileDir, { recursive: true });
+		writeFileSync(join(profileDir, "old"), "managed residue");
+		const result = ensureYaziProfile({
+			yaPath: YA,
+			yaziPath: fakeYazi,
+			profileDir,
+			assetDir: ASSETS,
+			yaziVersion: "26.8.15",
+			clioVersion: "0.4.0",
+			yaziToml: `[mgr]
+show_hidden = true
+
+[[plugin.prepend_fetchers]]
+id = "git"
+url = "*"
+run = "git"
+`,
 		});
 		strictEqual(result, null);
 		strictEqual(statSync(profileDir, { throwIfNoEntry: false }), undefined);

@@ -116,6 +116,7 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 		options.profileMode === "managed"
 			? (options.ensureProfile ?? ensureYaziProfile)({
 					yaPath: binaries.yaPath as string,
+					yaziPath: binaries.yaziPath,
 					profileDir: yaziProfileDir(cacheDir),
 				})
 			: null;
