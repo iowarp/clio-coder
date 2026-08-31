@@ -49,6 +49,8 @@ const READ_ONLY_IDS = new Set<EditableSettingId>([
 	"targets",
 	"keybindings",
 	"delegation.agents",
+	"routing.agentAutomation.activeAgentRoles",
+	"library.confirmedRemote",
 ]);
 
 /** The static knob rows; per-entry profile, binding, and target rows are checked separately. */
@@ -647,6 +649,46 @@ describe("contracts/settings center", () => {
 		ok(plain.includes("◇") && plain.includes("changed (default: 3)"), "modified state remains explicit without color");
 	});
 
+	/**
+	 * The Center is how an operator learns the product, so a shipped key with no
+	 * row is a fifth of the policy surface nobody can find. Every leaf of
+	 * DEFAULT_SETTINGS therefore either has a row or is named here with the
+	 * reason it does not.
+	 */
+	it("gives every shipped settings leaf a row, or names why it has none", () => {
+		const withoutRow: Readonly<Record<string, string>> = {
+			version: "schema version, not operator policy",
+			targets: "the Targets section renders one row per configured target",
+			"fleet.nodes": "rendered as read-only placement status rows under Fleet",
+			"workers.rosters": "a nested roster map the Center has no editor for; authored in settings.yaml",
+			"routing.agentAutomation.activeAgentRoles": "read-only row: exact agent/role pairs are authored in settings.yaml",
+			"modelSelector.favorites": "read-only row; favorites are pinned from /model",
+			keybindings: "read-only row; overrides are authored in settings.yaml",
+			"delegation.agents": "row adds and removes detected agents rather than editing the array",
+			"workers.profiles": "rendered as one row per profile plus an add action",
+			"workers.agentBindings": "rendered as one row per binding plus an add action",
+			scope: "row opens the provider-backed model checklist",
+			runtimePlugins: "row edits the comma-separated list",
+		};
+		const leaves: string[] = [];
+		const walk = (value: unknown, path: string): void => {
+			// An empty map is a leaf: `workers.profiles: {}` is one key an operator
+			// sets, not a branch with nothing under it.
+			if (value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0) {
+				for (const [key, child] of Object.entries(value)) walk(child, path ? `${path}.${key}` : key);
+				return;
+			}
+			leaves.push(path);
+		};
+		walk(DEFAULT_SETTINGS, "");
+		const rows = new Set<string>(SETTINGS_SECTIONS.flatMap((section) => [...SETTINGS_SECTION_ROWS[section.id]]));
+		const missing = leaves.filter((leaf) => !rows.has(leaf) && withoutRow[leaf] === undefined);
+		deepStrictEqual(missing, [], `shipped keys with no Settings Center row: ${missing.join(", ")}`);
+		for (const exempt of Object.keys(withoutRow)) {
+			ok(leaves.includes(exempt), `${exempt} is exempted but is no longer a shipped key`);
+		}
+	});
+
 	it("keeps the human label to setting id mapping explicit", () => {
 		const labels = Object.fromEntries(
 			buildSettingItems(settingsWithTargets())
@@ -935,6 +977,132 @@ describe("contracts/settings center", () => {
 				id: "panes.yazi.followCwd",
 				value: "false",
 				assert: (s) => strictEqual(s.panes.yazi.followCwd, false),
+			},
+			{
+				id: "workers.escalation.timeoutMs",
+				value: "60000",
+				assert: (s) => {
+					strictEqual(s.workers.escalation?.timeoutMs, 60000);
+					strictEqual(s.workers.escalation?.fallback, "deny", "the untouched half of the block survives");
+				},
+			},
+			{
+				id: "workers.escalation.fallback",
+				value: "fail",
+				assert: (s) => {
+					strictEqual(s.workers.escalation?.fallback, "fail");
+					strictEqual(s.workers.escalation?.timeoutMs, 120000);
+				},
+			},
+			{
+				id: "workers.resilienceCooldownMs",
+				value: "0",
+				assert: (s) => strictEqual(s.workers.resilienceCooldownMs, 0),
+			},
+			{
+				id: "routing.activeRoles",
+				value: "researcher, judge",
+				assert: (s) => deepStrictEqual(s.routing.activeRoles, ["researcher", "judge"]),
+			},
+			{
+				id: "routing.activeRoles",
+				value: "researcher, builder",
+				assert: (s) => deepStrictEqual(s.routing.activeRoles, [], "an unsupported role is refused, not stored"),
+			},
+			{
+				id: "routing.activePostures",
+				value: "latency",
+				assert: (s) => deepStrictEqual(s.routing.activePostures, ["latency"]),
+			},
+			{
+				id: "routing.activePostures",
+				value: "manual",
+				assert: (s) => deepStrictEqual(s.routing.activePostures, [], "manual is exact, never an activated posture"),
+			},
+			{
+				id: "prewarm.enabled",
+				value: "false",
+				assert: (s) => strictEqual(s.prewarm.enabled, false),
+			},
+			{
+				id: "guardrails.turnToolCallBudget",
+				value: "120",
+				assert: (s) => strictEqual(s.guardrails.turnToolCallBudget, 120),
+			},
+			{
+				id: "guardrails.workerToolCallCap",
+				value: "0",
+				assert: (s) => strictEqual(s.guardrails.workerToolCallCap, 150, "a guardrail below 1 is refused"),
+			},
+			{
+				id: "guardrails.maxDispatchRuns",
+				value: "250",
+				assert: (s) => strictEqual(s.guardrails.maxDispatchRuns, 250),
+			},
+			{
+				id: "guardrails.readMaxBytes",
+				value: "102400",
+				assert: (s) => strictEqual(s.guardrails.readMaxBytes, 102400),
+			},
+			{
+				id: "guardrails.observationTurnBudgetBytes",
+				value: "262144",
+				assert: (s) => strictEqual(s.guardrails.observationTurnBudgetBytes, 262144),
+			},
+			{
+				id: "guardrails.internalDispatchTimeoutMs",
+				value: "300000",
+				assert: (s) => strictEqual(s.guardrails.internalDispatchTimeoutMs, 300000),
+			},
+			{
+				id: "context.workingSet.enabled",
+				value: "false",
+				assert: (s) => strictEqual(s.context.workingSet.enabled, false),
+			},
+			{
+				id: "context.workingSet.policy",
+				value: "age-horizon",
+				assert: (s) => strictEqual(s.context.workingSet.policy, "age-horizon"),
+			},
+			{
+				id: "context.workingSet.target",
+				value: "0.5",
+				assert: (s) => strictEqual(s.context.workingSet.target, 0.5),
+			},
+			{
+				id: "context.workingSet.target",
+				value: "1",
+				assert: (s) => strictEqual(s.context.workingSet.target, 0.6, "the validator's bound is exclusive"),
+			},
+			{
+				id: "context.workingSet.protectLastTurns",
+				value: "10",
+				assert: (s) => strictEqual(s.context.workingSet.protectLastTurns, 10),
+			},
+			{
+				id: "context.workingSet.minEvictableTokens",
+				value: "0",
+				assert: (s) => strictEqual(s.context.workingSet.minEvictableTokens, 0),
+			},
+			{
+				id: "retry.streamStallMs",
+				value: "600000",
+				assert: (s) => strictEqual(s.retry.streamStallMs, 600000),
+			},
+			{
+				id: "library.catalog",
+				value: "~/lib/catalog.yaml",
+				assert: (s) => strictEqual(s.library.catalog, "~/lib/catalog.yaml"),
+			},
+			{
+				id: "library.remote",
+				value: "  ",
+				assert: (s) => strictEqual(s.library.remote, null, "a blank submission clears the remote"),
+			},
+			{
+				id: "library.sync",
+				value: "true",
+				assert: (s) => strictEqual(s.library.sync, true),
 			},
 		];
 
@@ -2218,6 +2386,7 @@ describe("contracts/settings center", () => {
 				"workers.default.model",
 				"workers.default.thinkingLevel",
 				"workers.maxRetries",
+				"workers.resilienceCooldownMs",
 				"fleet.group.profiles",
 				"workers.profiles.fast",
 				"workers.profiles",
@@ -2225,6 +2394,10 @@ describe("contracts/settings center", () => {
 				"workers.agentBindings.researcher",
 				"workers.agentBindings.scout",
 				"workers.agentBindings",
+				"fleet.group.route-activation",
+				"routing.activeRoles",
+				"routing.activePostures",
+				"routing.agentAutomation.activeAgentRoles",
 				"fleet.group.placement",
 				"fleet.group.panes",
 				"panes.enabled",
@@ -2833,7 +3006,7 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
-		for (let i = 0; i < 4; i += 1) overlay.handleInput?.("j"); // one-row fast profile summary
+		for (let i = 0; i < 5; i += 1) overlay.handleInput?.("j"); // one-row fast profile summary
 		overlay.handleInput?.(ENTER); // profile field workbench
 		for (let i = 0; i < 4; i += 1) overlay.handleInput?.(DOWN);
 		const destructive = overlay.render(120).join("\n");
@@ -2866,7 +3039,7 @@ describe("contracts/settings center", () => {
 		});
 		const overlay = fake.captured();
 		ok(overlay, "expected settings overlay component");
-		for (let i = 0; i < 5; i += 1) overlay.handleInput?.("j"); // Add profile
+		for (let i = 0; i < 6; i += 1) overlay.handleInput?.("j"); // Add profile
 		overlay.handleInput?.(ENTER); // name input, seeded empty rather than with the row's count
 		for (const ch of "slow") overlay.handleInput?.(ch);
 		overlay.handleInput?.(ENTER); // target picker
