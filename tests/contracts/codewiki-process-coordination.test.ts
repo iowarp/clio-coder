@@ -7,13 +7,20 @@ import { after, describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { readCodewiki } from "../../src/domains/context/codewiki/artifact.js";
+import { scaleWatchdog } from "../harness/load.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CHILD = join(REPO_ROOT, "tests", "fixtures", "codewiki-coordinator-child.ts");
 const TSX = join(REPO_ROOT, "node_modules", "tsx", "dist", "loader.mjs");
 
-async function waitForFile(path: string, children: ChildProcess[], timeoutMs = 10_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
+/**
+ * A watchdog on a spawned coordinator child reaching its ready marker. Nothing
+ * here asserts the child was quick, and an early exit is still reported at once
+ * from the loop below, so the budget widens with the shard load the run carries
+ * and stays the 10s it always was when the file runs alone.
+ */
+async function waitForFile(path: string, children: ChildProcess[], budgetMs = 10_000): Promise<void> {
+	const deadline = Date.now() + scaleWatchdog(budgetMs);
 	while (!existsSync(path)) {
 		for (const child of children) {
 			if (child.exitCode !== null) throw new Error(`coordinator child exited early with ${child.exitCode}`);
