@@ -2,6 +2,7 @@ import { type SpawnOptions, spawn } from "node:child_process";
 import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scaleWatchdog } from "./load.js";
 import { scratchClioEnvVars } from "./scratch-env.js";
 
 export interface RunResult {
@@ -20,6 +21,15 @@ export interface RunOptions {
 	 */
 	replaceEnv?: boolean;
 	cwd?: string;
+	/**
+	 * Watchdog, not a performance budget: how long the child gets before it is
+	 * killed and the run rejects. Widened by the shard load the caller runs
+	 * under, so a figure chosen against an unloaded CLI (50-70ms to boot) does
+	 * not fire as a false failure with 23 lanes competing for the same cores.
+	 * `tests/contracts/live-spawn.test.ts` asserts on this machinery and runs in
+	 * the runner's serial lane, where the scale factor is 1 and the number it
+	 * passes is used verbatim.
+	 */
 	timeoutMs?: number;
 	input?: string;
 }
@@ -135,7 +145,7 @@ export function runNodeScript(entry: string, args: ReadonlyArray<string>, opts: 
 		cwd: opts.cwd ?? REPO_ROOT,
 		env: opts.replaceEnv ? { ...(opts.env ?? {}) } : { ...process.env, ...(opts.env ?? {}) },
 	};
-	const timeoutMs = opts.timeoutMs ?? 15_000;
+	const timeoutMs = scaleWatchdog(opts.timeoutMs ?? 15_000);
 	const ownGroup = process.platform !== "win32";
 	return new Promise((resolve, reject) => {
 		const captureDir = mkdtempSync(join(tmpdir(), "clio-runcli-"));
@@ -289,6 +299,17 @@ function buildDoctorFixTemplate(): Promise<string> {
 
 export async function seedDoctorFix(dir: string): Promise<void> {
 	doctorFixTemplate ??= buildDoctorFixTemplate();
-	const template = await doctorFixTemplate;
+	let template: string;
+	try {
+		template = await doctorFixTemplate;
+	} catch (error) {
+		// A rejected promise stays rejected. Cached, one timed-out `doctor --fix`
+		// under load fails every later caller in the file too, instantly and with
+		// the first caller's error, which reads as four broken tests instead of
+		// one slow spawn. Drop the memo so the next caller gets its own attempt;
+		// a genuinely broken `doctor --fix` still fails, once per caller.
+		doctorFixTemplate = undefined;
+		throw error;
+	}
 	cpSync(template, dir, { recursive: true });
 }
