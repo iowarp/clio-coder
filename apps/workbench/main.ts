@@ -18,6 +18,7 @@ import {
 	ClioEvidenceInspectError,
 	type ClioEvidenceInspector,
 } from "./clio-evidence-inspector.ts";
+import { ArtifactAllowlist, ArtifactNotServedError, ArtifactServeError } from "./artifact-allowlist.ts";
 import {
 	ClioCliRecoveryInspector,
 	ClioRecoveryInspectError,
@@ -386,6 +387,11 @@ class WorkbenchRuntime implements HostSink {
 	readonly #toolchainInspector: ClioToolchainInspector;
 	readonly #traceInspector: ClioTraceInspector;
 	readonly #evidenceInspector: ClioEvidenceInspector;
+	/**
+	 * The only way a browser may name a durable artifact: by echoing an id this
+	 * host served inside the snapshot it is currently showing.
+	 */
+	readonly #artifacts = new ArtifactAllowlist();
 	readonly #recoveryInspector: ClioRecoveryInspector;
 	readonly #mode: "browser" | "desktop";
 	readonly #quiet: boolean;
@@ -748,6 +754,9 @@ class WorkbenchRuntime implements HostSink {
 		if (command.kind === "evidence.inspect") {
 			return this.#serializeRead(() => this.#dispatchEvidenceInspect(session, command));
 		}
+		if (command.kind === "evidence.read") {
+			return this.#serializeRead(() => this.#dispatchEvidenceRead(session, command));
+		}
 		if (command.kind === "recovery.inspect") {
 			return this.#serializeRead(() => this.#dispatchRecoveryInspect(session, command));
 		}
@@ -982,7 +991,33 @@ class WorkbenchRuntime implements HostSink {
 			const inspection = await this.#evidenceInspector.inspect(this.#state.homePath);
 			if (this.#closed || session.closed) return;
 			this.#evidenceInspection = inspection;
+			// Serving the window and broadcasting it are one act: the browser may
+			// reference exactly the ids it is about to be shown, and nothing older.
+			this.#artifacts.serve("evidence", inspection.artifacts.map((artifact) => artifact.evidenceId));
 			this.#broadcast("evidence.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
+		}
+	}
+
+	async #dispatchEvidenceRead(
+		session: SocketSession,
+		command: ClientCommandOf<"evidence.read">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			// The admitted value is the only licence to put an id into argv, so the
+			// call below uses the return rather than the frame's own field.
+			const evidenceId = this.#artifacts.admit("evidence", command.payload.evidenceId);
+			const detail = await this.#evidenceInspector.read(this.#state.homePath, evidenceId);
+			if (this.#closed || session.closed) return;
+			this.#broadcast("evidence.detail.state", {}, { detail });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send("command.error", {}, {
@@ -1515,6 +1550,17 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (error instanceof ClioEvidenceInspectError) {
 			return { code: error.code, message: error.message };
+		}
+		// A reference the host never served is refused, not looked up. `not-found`
+		// would suggest the host went and checked.
+		if (error instanceof ArtifactNotServedError) {
+			return { code: "refused", message: error.message };
+		}
+		// A projection served something it could not have produced. That is this
+		// host's bug and must never become an argument to a child process.
+		if (error instanceof ArtifactServeError) {
+			if (!this.#quiet) console.error(`Artifact allowlist refused a projection: ${error.message}`);
+			return { code: "internal", message: "This desktop app could not record which artifacts it is showing." };
 		}
 		if (error instanceof ClioRecoveryInspectError) {
 			return { code: error.code, message: error.message };

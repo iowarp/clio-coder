@@ -50,6 +50,7 @@ export const CLIENT_COMMAND_KINDS = [
 	"toolchain.inspect",
 	"trace.inspect",
 	"evidence.inspect",
+	"evidence.read",
 	"recovery.inspect",
 	"targets.list",
 	"targets.probe",
@@ -259,6 +260,17 @@ export type TraceInspectPayload = Readonly<Record<string, never>>;
 
 export type EvidenceInspectPayload = Readonly<Record<string, never>>;
 
+/**
+ * The only command shape that names a durable artifact.
+ *
+ * The id must be one the host served in its current evidence window; the host
+ * enforces that, and this validation only ensures the frame carries an
+ * identifier rather than a path, a flag, or a traversal.
+ */
+export interface EvidenceReadPayload {
+	readonly evidenceId: string;
+}
+
 export type RecoveryInspectPayload = Readonly<Record<string, never>>;
 
 export interface TargetsListPayload {
@@ -306,6 +318,7 @@ export interface ClientCommandPayloadByKind {
 	readonly "toolchain.inspect": ToolchainInspectPayload;
 	readonly "trace.inspect": TraceInspectPayload;
 	readonly "evidence.inspect": EvidenceInspectPayload;
+	readonly "evidence.read": EvidenceReadPayload;
 	readonly "recovery.inspect": RecoveryInspectPayload;
 	readonly "targets.list": TargetsListPayload;
 	readonly "targets.probe": TargetsProbePayload;
@@ -343,6 +356,7 @@ export const SERVER_EVENT_KINDS = [
 	"toolchain.state",
 	"trace.state",
 	"evidence.state",
+	"evidence.detail.state",
 	"recovery.state",
 	"targets.state",
 	"targets.probed",
@@ -1170,6 +1184,53 @@ export interface WireEvidenceInspection {
 	readonly truncated: boolean;
 }
 
+export const EVIDENCE_AXES = [
+	"artifactIntegrity",
+	"validationGrounding",
+	"independentReview",
+	"contextProvenance",
+	"autonomyEnforcement",
+	"completionEvidence",
+] as const;
+export type WireEvidenceAxis = (typeof EVIDENCE_AXES)[number];
+
+/** Each axis owns its own closed state set; a state legal on one is not legal on all. */
+export const EVIDENCE_AXIS_STATES = {
+	artifactIntegrity: ["verified", "failed", "absent", "unknown", "not_applicable"],
+	validationGrounding: ["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"],
+	independentReview: ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"],
+	contextProvenance: ["recorded", "invalid", "absent", "unknown", "not_applicable"],
+	autonomyEnforcement: ["enforced", "approximated", "bypassed", "absent", "unknown", "not_applicable"],
+	completionEvidence: ["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"],
+} as const satisfies Record<WireEvidenceAxis, ReadonlyArray<string>>;
+
+export const MAX_WIRE_EVIDENCE_DETAIL_RUNS = 16;
+
+export interface WireEvidenceDetailRun {
+	readonly runId: string;
+	readonly verdict: WireEvidenceTrustVerdict;
+	/** Always all six axes, so an unrecorded axis is stated rather than missing. */
+	readonly axes: Readonly<Record<WireEvidenceAxis, string>>;
+}
+
+/**
+ * One bundle's trust record, read by an id the host itself served.
+ *
+ * Every value is drawn from a closed vocabulary the harness owns, which is what
+ * lets this answer the question the inventory raises without carrying any of
+ * the prose, paths, or file names the inventory deliberately dropped.
+ */
+export interface WireEvidenceDetail {
+	readonly evidenceId: string;
+	readonly sourceKind: WireEvidenceSourceKind;
+	readonly inspectedAt: string;
+	readonly generatedAt: string;
+	/** False when the bundle predates the canonical trust projection. */
+	readonly canonical: boolean;
+	readonly runs: readonly WireEvidenceDetailRun[];
+	readonly runsTruncated: boolean;
+}
+
 export const MAX_WIRE_TRACE_RUNS = 8;
 export const MAX_WIRE_TRACE_PHASES = 16;
 
@@ -1450,6 +1511,10 @@ export interface EvidenceStatePayload {
 	readonly inspection: WireEvidenceInspection;
 }
 
+export interface EvidenceDetailStatePayload {
+	readonly detail: WireEvidenceDetail;
+}
+
 export interface RecoveryStatePayload {
 	readonly inspection: WireRecoveryInspection;
 }
@@ -1640,6 +1705,7 @@ export interface ServerEventPayloadByKind {
 	readonly "toolchain.state": ToolchainStatePayload;
 	readonly "trace.state": TraceStatePayload;
 	readonly "evidence.state": EvidenceStatePayload;
+	readonly "evidence.detail.state": EvidenceDetailStatePayload;
 	readonly "recovery.state": RecoveryStatePayload;
 	readonly "targets.state": TargetsStatePayload;
 	readonly "targets.probed": TargetsProbedPayload;
@@ -1999,6 +2065,12 @@ function validateClientPayload<K extends ClientCommandKind>(
 		case "evidence.inspect":
 		case "recovery.inspect":
 			return expectExactKeys(value, label, []) as ClientCommandPayloadByKind[K];
+		case "evidence.read": {
+			const record = expectExactKeys(value, label, ["evidenceId"]);
+			return {
+				evidenceId: expectArtifactId(record.evidenceId, `${label}.evidenceId`),
+			} as ClientCommandPayloadByKind[K];
+		}
 		case "project.browse": {
 			const record = expectExactKeys(value, label, [], ["path"]);
 			const path = Object.hasOwn(record, "path") ? expectNativePath(record.path, `${label}.path`) : undefined;
@@ -2256,6 +2328,23 @@ function expectTimestamp(value: unknown, label: string): string {
 		return invalid(`${label} must be a canonical ISO timestamp`);
 	}
 	return timestamp;
+}
+
+/**
+ * An identifier a frame may use to name a durable artifact.
+ *
+ * Deliberately the same shape the host allowlist enforces: no separator, no
+ * traversal, no leading dash a command could read as a flag. Membership in the
+ * host's served window is the real check; this is the one that makes a
+ * malformed reference a protocol error rather than something the host has to
+ * reason about.
+ */
+function expectArtifactId(value: unknown, label: string): string {
+	const id = expectOpaqueString(value, label, 128);
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(id) || id.includes("..")) {
+		return invalid(`${label} must be an artifact identifier`);
+	}
+	return id;
 }
 
 function expectNullableTimestamp(value: unknown, label: string): string | null {
@@ -4325,6 +4414,59 @@ function expectIdentityList(value: unknown, label: string): readonly string[] {
 	return list;
 }
 
+export function validateEvidenceDetail(
+	value: unknown,
+	label = "evidence detail",
+): WireEvidenceDetail {
+	const record = expectExactKeys(value, label, [
+		"evidenceId",
+		"sourceKind",
+		"inspectedAt",
+		"generatedAt",
+		"canonical",
+		"runs",
+		"runsTruncated",
+	]);
+	const canonical = expectBoolean(record.canonical, `${label}.canonical`);
+	const runsTruncated = expectBoolean(record.runsTruncated, `${label}.runsTruncated`);
+	const seen = new Set<string>();
+	const runs = expectArray(
+		record.runs,
+		`${label}.runs`,
+		MAX_WIRE_EVIDENCE_DETAIL_RUNS,
+		(value, runLabel): WireEvidenceDetailRun => {
+			const run = expectExactKeys(value, runLabel, ["runId", "verdict", "axes"]);
+			const runId = expectPresentationText(run.runId, `${runLabel}.runId`, 128);
+			if (seen.has(runId)) invalid(`${label}.runs repeats ${runId}`);
+			seen.add(runId);
+			const axesRecord = expectExactKeys(run.axes, `${runLabel}.axes`, EVIDENCE_AXES);
+			const axes: Record<string, string> = {};
+			for (const axis of EVIDENCE_AXES) {
+				axes[axis] = expectEnum(axesRecord[axis], `${runLabel}.axes.${axis}`, EVIDENCE_AXIS_STATES[axis]);
+			}
+			return {
+				runId,
+				verdict: expectEnum(run.verdict, `${runLabel}.verdict`, EVIDENCE_TRUST_VERDICTS),
+				axes: axes as WireEvidenceDetailRun["axes"],
+			};
+		},
+	);
+	// A bundle with no canonical projection has no axes to report, and one that
+	// reported axes is not in the historical format.
+	if (!canonical && (runs.length > 0 || runsTruncated)) {
+		invalid(`${label} reports runs from a non-canonical projection`);
+	}
+	return {
+		evidenceId: expectPresentationText(record.evidenceId, `${label}.evidenceId`, 128),
+		sourceKind: expectEnum(record.sourceKind, `${label}.sourceKind`, EVIDENCE_SOURCE_KINDS),
+		inspectedAt: expectTimestamp(record.inspectedAt, `${label}.inspectedAt`),
+		generatedAt: expectTimestamp(record.generatedAt, `${label}.generatedAt`),
+		canonical,
+		runs,
+		runsTruncated,
+	};
+}
+
 export function validateEvidenceInspection(
 	value: unknown,
 	label = "evidence inspection",
@@ -5195,6 +5337,10 @@ function validateServerPayload(
 				),
 			};
 		}
+		case "evidence.detail.state": {
+			const record = expectExactKeys(value, label, ["detail"]);
+			return { detail: validateEvidenceDetail(record.detail, `${label}.detail`) };
+		}
 		case "recovery.state": {
 			const record = expectExactKeys(value, label, ["inspection"]);
 			return {
@@ -5535,6 +5681,7 @@ const NO_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"toolchain.state",
 	"trace.state",
 	"evidence.state",
+	"evidence.detail.state",
 	"recovery.state",
 ]);
 const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([

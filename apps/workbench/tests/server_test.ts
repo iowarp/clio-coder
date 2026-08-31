@@ -39,6 +39,7 @@ import {
 import {
 	catalogInspectionFixture,
 	dispatchInspectionFixture,
+	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
@@ -1687,6 +1688,7 @@ Deno.test("evidence inspection is global, uses the configured home, and survives
 			inspectedCwd = cwd;
 			return Promise.resolve(evidenceInspectionFixture());
 		},
+		read: () => Promise.reject(new Error("this fixture never reads a bundle")),
 	};
 	const fixture = await startFixture({ evidenceInspector });
 	let socket: RawWebSocket | undefined;
@@ -1704,6 +1706,65 @@ Deno.test("evidence inspection is global, uses the configured home, and survives
 			evidenceInspection: WireEvidenceInspection;
 		};
 		deepStrictEqual(bootstrap.evidenceInspection, evidenceInspectionFixture());
+	} finally {
+		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
+		await fixture.close();
+	}
+});
+
+Deno.test("a bundle may be read only by an id the host served in its current window", async () => {
+	const reads: string[] = [];
+	let served = evidenceInspectionFixture();
+	const evidenceInspector: ClioEvidenceInspector = {
+		inspect: () => Promise.resolve(served),
+		read(_cwd, evidenceId) {
+			reads.push(evidenceId);
+			return Promise.resolve({ ...evidenceDetailFixture(), evidenceId });
+		},
+	};
+	const fixture = await startFixture({ evidenceInspector });
+	let socket: RawWebSocket | undefined;
+	try {
+		socket = await RawWebSocket.connect(eventsEndpoint(fixture.running), fixture.running.url);
+		equal((await socket.readEvent()).kind, "connection.ready");
+
+		// Before any inventory the host has served nothing, so it has no window to
+		// admit against and must not spawn anything.
+		await sendCommand(socket, "request-early", "evidence.read", { evidenceId: "run-alpha-bundle" });
+		const early = (await collectThrough(socket, "command.error")).at(-1);
+		ok(early?.kind === "command.error");
+		equal(early.payload.code, "refused");
+		deepStrictEqual(reads, []);
+
+		await sendCommand(socket, "request-inventory", "evidence.inspect", {});
+		equal((await collectThrough(socket, "evidence.state")).at(-1)?.kind, "evidence.state");
+
+		// An id the host just served is admitted, and the adapter is called with
+		// exactly that id.
+		await sendCommand(socket, "request-read", "evidence.read", { evidenceId: "run-alpha-bundle" });
+		const detail = (await collectThrough(socket, "evidence.detail.state")).at(-1);
+		ok(detail?.kind === "evidence.detail.state");
+		equal(detail.projectId, undefined);
+		equal(detail.payload.detail.evidenceId, "run-alpha-bundle");
+		deepStrictEqual(reads, ["run-alpha-bundle"]);
+
+		// An id that is well formed but was never served is refused without a spawn.
+		await sendCommand(socket, "request-unknown", "evidence.read", { evidenceId: "run-never-served" });
+		const unknown = (await collectThrough(socket, "command.error")).at(-1);
+		ok(unknown?.kind === "command.error");
+		equal(unknown.payload.code, "refused");
+		deepStrictEqual(reads, ["run-alpha-bundle"]);
+
+		// A new window replaces the old one, so a bundle that aged out stops being
+		// referenceable even though the browser saw it a moment ago.
+		served = { ...served, artifacts: [] };
+		await sendCommand(socket, "request-refresh", "evidence.inspect", {});
+		equal((await collectThrough(socket, "evidence.state")).at(-1)?.kind, "evidence.state");
+		await sendCommand(socket, "request-stale", "evidence.read", { evidenceId: "run-alpha-bundle" });
+		const stale = (await collectThrough(socket, "command.error")).at(-1);
+		ok(stale?.kind === "command.error");
+		equal(stale.payload.code, "refused");
+		deepStrictEqual(reads, ["run-alpha-bundle"]);
 	} finally {
 		await socket?.closeGracefully().catch(() => socket?.closeAbruptly());
 		await fixture.close();

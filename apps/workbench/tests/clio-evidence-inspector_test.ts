@@ -2,6 +2,7 @@ import { equal, ok, rejects, throws } from "node:assert/strict";
 import {
 	ClioCliEvidenceInspector,
 	ClioEvidenceInspectError,
+	projectEvidenceDetail,
 	projectEvidenceInspection,
 } from "../clio-evidence-inspector.ts";
 
@@ -116,5 +117,82 @@ Deno.test("evidence inspection maps incompatible output to a bounded GUI error",
 	await rejects(
 		() => inspector.inspect(Deno.cwd()),
 		(error: unknown) => error instanceof ClioEvidenceInspectError && error.code === "internal",
+	);
+});
+
+Deno.test("the bundle read projects closed vocabularies and refuses a record for another bundle", () => {
+	const at = "2026-08-31T14:03:00.000Z";
+	const axes = {
+		artifactIntegrity: "verified",
+		validationGrounding: "failed",
+		independentReview: "absent",
+		contextProvenance: "recorded",
+		autonomyEnforcement: "enforced",
+		completionEvidence: "absent",
+	};
+	const base = {
+		version: 1,
+		generatedAt: "2026-08-31T14:00:40.000Z",
+		evidenceId: "run-alpha-bundle",
+		sourceKind: "run",
+		canonical: true,
+		runs: [{ runId: "run-alpha", verdict: "compromised", axes }],
+		runsTruncated: false,
+	};
+
+	const detail = projectEvidenceDetail(base, at, "run-alpha-bundle");
+	equal(detail.runs[0]?.axes.validationGrounding, "failed");
+	equal(detail.inspectedAt, at);
+
+	// The single failure this whole boundary exists to prevent: a process that
+	// read something other than the artifact the allowlist admitted.
+	throws(
+		() => projectEvidenceDetail(base, at, "run-beta-bundle"),
+		/record for a different evidence artifact/u,
+	);
+	// Each axis owns its own state set, so a state legal elsewhere is still a
+	// rejection here.
+	throws(
+		() =>
+			projectEvidenceDetail(
+				{
+					...base,
+					runs: [{ runId: "run-alpha", verdict: "compromised", axes: { ...axes, contextProvenance: "validated" } }],
+				},
+				at,
+				"run-alpha-bundle",
+			),
+		/invalid evidence axis state/u,
+	);
+	// Every axis is always reported, so a partial record is refused rather than
+	// silently filled in.
+	throws(
+		() =>
+			projectEvidenceDetail(
+				{
+					...base,
+					runs: [{ runId: "run-alpha", verdict: "compromised", axes: { artifactIntegrity: "verified" } }],
+				},
+				at,
+				"run-alpha-bundle",
+			),
+		/incomplete evidence axis record/u,
+	);
+	// A non-canonical bundle has no axes to report.
+	throws(
+		() => projectEvidenceDetail({ ...base, canonical: false }, at, "run-alpha-bundle"),
+		/contradictory evidence projection facts/u,
+	);
+	throws(
+		() =>
+			projectEvidenceDetail(
+				{
+					...base,
+					runs: [base.runs[0], base.runs[0]],
+				},
+				at,
+				"run-alpha-bundle",
+			),
+		/duplicate evidence trust runs/u,
 	);
 });

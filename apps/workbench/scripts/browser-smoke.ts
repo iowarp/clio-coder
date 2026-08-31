@@ -28,6 +28,7 @@ import {
 	catalogInspectionFixture,
 	configInspectionFixture,
 	dispatchInspectionFixture,
+	evidenceDetailFixture,
 	evidenceInspectionFixture,
 	fleetInspectionFixture,
 	recoveryInspectionFixture,
@@ -116,6 +117,7 @@ const running = await startWorkbenchServer({
 	} satisfies ClioTraceInspector,
 	evidenceInspector: {
 		inspect: () => Promise.resolve(evidenceInspectionFixture()),
+		read: (_cwd, evidenceId) => Promise.resolve({ ...evidenceDetailFixture(), evidenceId }),
 	} satisfies ClioEvidenceInspector,
 	acpTiming: { permissionTimeoutMs: 120_000, cancelGraceMs: 2_000, closeTimeoutMs: 1_000, exitGraceMs: 1_000 },
 });
@@ -491,10 +493,32 @@ try {
 		exact: true,
 	}).waitFor();
 	await evidenceInventory.getByText(/no verdict of its own/u).waitFor();
-	// run-alpha is in the window and run-beta is not, so exactly one is selectable.
-	equal(await evidenceInventory.getByRole("button", { disabled: true }).count(), 1);
+	// run-alpha is in the window and run-beta is not, so exactly one of the two
+	// run references is selectable. Scoped to the run list, because a historical
+	// bundle also disables its own open control for an unrelated reason.
+	const bundleRuns = evidenceInventory.locator(".evidence-list__runs");
+	equal(await bundleRuns.getByRole("button", { disabled: false }).count(), 1);
+	equal(await bundleRuns.getByRole("button", { disabled: true }).count(), 1);
+	// The bundle that predates the canonical projection has no record to open.
+	equal(
+		await evidenceInventory.getByRole("button", { name: "Open trust record", exact: true, disabled: true }).count(),
+		1,
+	);
 	for (const forbidden of ["tasks", "cwds", "transcript.md", "/home/"]) {
 		equal(await evidenceInventory.getByText(forbidden, { exact: false }).count(), 0);
+	}
+
+	// A bundle is opened by an id the host served, and the record that comes back
+	// names the axis behind the verdict rather than repeating the verdict.
+	await evidenceInventory.getByRole("button", { name: "Open trust record", exact: true }).first().click();
+	const trustRecord = evidenceInventory.getByLabel("Trust record for run-alpha-bundle");
+	// The record has one row per covered run, so every axis label appears twice.
+	equal(await trustRecord.getByText("Validation grounding", { exact: true }).count(), 2);
+	await trustRecord.getByText("Validation grounding", { exact: true }).first().waitFor();
+	await trustRecord.getByText("failed", { exact: true }).first().waitFor();
+	await trustRecord.getByText("enforced", { exact: true }).first().waitFor();
+	for (const forbidden of ["/home/", "sha256", "receipt-quality"]) {
+		equal(await trustRecord.getByText(forbidden, { exact: false }).count(), 0);
 	}
 
 	// The fleet root index names the planned steps and only offers a selection
@@ -1449,6 +1473,7 @@ try {
 			fleetRootIndexLinksOnlyRunsInThisWindow: true,
 			traceAccountingCarriesNoRequestTextOrPath: true,
 			evidenceInventoryCarriesShapeAndTrustOnly: true,
+			artifactsAreReferencedOnlyByHostServedIds: true,
 			compactCatalogHasNoPageOverflow: true,
 			usageUsesTheProjectFilteredBoundedAdapter: true,
 			compactUsageHasNoPageOverflow: true,

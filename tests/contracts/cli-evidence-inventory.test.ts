@@ -12,6 +12,7 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { EVIDENCE_DETAIL_MAX_RUNS, evidenceDetailSnapshot } from "../../src/cli/evidence-detail.js";
 import {
 	EVIDENCE_INVENTORY_MAX_ARTIFACTS,
 	EVIDENCE_INVENTORY_MAX_IDS,
@@ -111,6 +112,23 @@ function seedArtifact(dataDir: string, evidenceId: string, options: SeedOptions)
 			tags: ["audit-linked", "blocked-tool"],
 			files: ["overview.json", "transcript.md", "trust-status.json"],
 			redactionCount: 2,
+		}),
+	);
+	// Every real bundle carries findings.json, and `inspectEvidence` treats its
+	// absence as an incomplete bundle rather than an empty one.
+	writeFileSync(
+		join(directory, "findings.json"),
+		JSON.stringify({
+			version: 1,
+			findings: [
+				{
+					id: `${evidenceId}-finding-0`,
+					tag: "blocked-tool",
+					severity: "warn",
+					runId: runIds[0],
+					message: "a tool call was blocked while writing /private/secrets.yaml",
+				},
+			],
 		}),
 	);
 	if (options.trust === "missing") return;
@@ -246,5 +264,71 @@ describe("contracts/cli-evidence-inventory", () => {
 		strictEqual(payload.version, 1);
 		deepStrictEqual(payload.artifacts, []);
 		strictEqual(payload.truncated, false);
+	});
+
+	it("reads one bundle down to closed vocabularies and nothing else", async () => {
+		const dataDir = join(scratch.dir, "detail-data");
+		seedArtifact(dataDir, "run-detail", {
+			generatedAt: "2026-08-31T11:30:00.000Z",
+			runIds: ["run-one"],
+			trust: [
+				{
+					runId: "run-one",
+					status: trustStatus({
+						artifactIntegrity: axis("verified", "receipt_integrity_verification", "clio", "receipt-integrity"),
+						validationGrounding: axis("failed", "run_receipt", "validator", "receipt-quality"),
+					}),
+				},
+			],
+		});
+
+		const detail = await evidenceDetailSnapshot("run-detail", now, dataDir);
+		strictEqual(detail.version, 1);
+		strictEqual(detail.evidenceId, "run-detail");
+		strictEqual(detail.sourceKind, "run");
+		strictEqual(detail.canonical, true);
+		strictEqual(detail.runsTruncated, false);
+		strictEqual(detail.runs.length, 1);
+		// The inventory says the bundle is compromised; the detail says which axis
+		// made it so, which is the whole reason this read exists.
+		strictEqual(detail.runs[0]?.verdict, "compromised");
+		deepStrictEqual(detail.runs[0]?.axes, {
+			artifactIntegrity: "verified",
+			validationGrounding: "failed",
+			// Every axis is always present, so an unrecorded one is stated rather
+			// than missing from the record.
+			independentReview: "absent",
+			contextProvenance: "absent",
+			autonomyEnforcement: "absent",
+			completionEvidence: "absent",
+		});
+
+		// The bundle's prose surfaces are exactly what this read must not carry.
+		const framed = JSON.stringify(detail);
+		for (const forbidden of ["/private/", "credential loader", "transcript.md", "receipt-quality", "sha256"]) {
+			ok(!framed.includes(forbidden), `evidence detail leaked ${forbidden}`);
+		}
+	});
+
+	it("reports a historical bundle as non-canonical instead of inventing axes", async () => {
+		const dataDir = join(scratch.dir, "detail-historical");
+		seedArtifact(dataDir, "run-old", { generatedAt: "2026-08-31T11:00:00.000Z", trust: "missing" });
+
+		const detail = await evidenceDetailSnapshot("run-old", now, dataDir);
+		strictEqual(detail.canonical, false);
+		deepStrictEqual(detail.runs, []);
+		strictEqual(detail.runsTruncated, false);
+		strictEqual(detail.runs.length <= EVIDENCE_DETAIL_MAX_RUNS, true);
+	});
+
+	it("emits the same record through the CLI and refuses an unknown bundle", async () => {
+		const known = await runCli(["evidence", "inspect", "run-alpha", "--json"], {
+			env: { ...scratch.env, XDG_DATA_HOME: join(scratch.dir, "one-data-home") },
+		});
+		// The scratch data home has no bundles, so the id is genuinely unknown and
+		// the command must fail rather than print an empty record.
+		strictEqual(known.code === 0, false, `stdout=${known.stdout}`);
+		strictEqual(known.stdout, "", `unexpected stdout: ${known.stdout}`);
+		match(known.stderr, /run-alpha/);
 	});
 });

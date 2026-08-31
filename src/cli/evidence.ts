@@ -12,13 +12,14 @@ import {
 	loadEvidenceRunProvenance,
 	provenanceTranscriptLines,
 } from "../domains/evidence/index.js";
+import { runEvidenceDetail } from "./evidence-detail.js";
 import { runEvidenceInventory } from "./evidence-inventory.js";
 import { printError, printNote, printOk } from "./shared.js";
 
 const HELP = `clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
 clio-coder evidence build --eval <evalId>
-clio-coder evidence inspect <evidenceId>
+clio-coder evidence inspect <evidenceId> [--json]
 clio-coder evidence list
 clio-coder evidence inventory --json
 
@@ -86,6 +87,10 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 				continue;
 			}
 			throw new Error(`unknown evidence build argument: ${arg}`);
+		}
+		if (parsed.command === "inspect" && arg === "--json" && !parsed.json) {
+			parsed.json = true;
+			continue;
 		}
 		if (parsed.command === "inspect" && parsed.evidenceId === undefined) {
 			if (arg.startsWith("-")) throw new Error("inspect requires an evidence id");
@@ -177,6 +182,7 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 				printError("inspect requires an evidence id");
 				return 2;
 			}
+			if (parsed.json) return runEvidenceDetail(evidenceId);
 			const inspected = await inspectEvidence(dataDir, evidenceId);
 			const provenance = await loadEvidenceRunProvenance(dataDir, evidenceId);
 			renderEvidence(inspected, provenance);
