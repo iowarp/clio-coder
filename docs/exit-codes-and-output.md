@@ -1,6 +1,6 @@
 # Exit Codes & Machine-Readable Output Contracts
 
-This document specifies the process exit codes, machine-readable JSON streaming formats, standard I/O separation rules, and `--help` conventions across all Clio Coder CLI commands in `v0.3.7`.
+This document specifies the process exit codes, machine-readable JSON streaming formats, standard I/O separation rules, and `--help` conventions across all Clio Coder CLI commands in `v0.4.0`.
 
 Source implementations: `src/cli/` and `src/entry/`.
 
