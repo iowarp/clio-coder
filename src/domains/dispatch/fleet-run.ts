@@ -43,6 +43,7 @@ import {
 	materializePendingGateDecision,
 	stagePendingGateDecision,
 } from "./gate-decisions.js";
+import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import { type FleetRunRecord, writeFleetRun } from "./state.js";
 import type { RunReceipt } from "./types.js";
@@ -215,6 +216,24 @@ function fleetGateCorrelation(subject: RunReceipt, decider: RunReceipt): GateDec
 		facts(decider),
 	);
 	return { agent, target, modelFamily, runtime, node, independent };
+}
+
+/**
+ * Typed scope for one fleet step, drawn from the boundary its contract already
+ * declared. Returns null when the contract declared nothing for this position,
+ * which is every step of a pre-v4 contract and every readonly step: those keep
+ * the legacy inference path rather than being handed an empty declaration that
+ * would silently switch off path-scoped rule selection for them.
+ *
+ * A contract whose declared paths do not survive the boundary grammar is a
+ * compile-time authoring bug, not a dispatch-time one, so a malformed entry
+ * falls back to inference here rather than aborting a run mid-wave; the
+ * contract loader is the surface that refuses it.
+ */
+function fleetStepIntent(writes: ReadonlyArray<string> | undefined): DispatchIntent | null {
+	if (writes === undefined || writes.length === 0) return null;
+	const built = declaredScopeIntent({ relevantPaths: writes });
+	return built.ok ? built.intent : null;
 }
 
 export function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number {
@@ -434,11 +453,24 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				// The fleet write boundary is deliberately enforced after the step. The enforcer in
 				// write-boundary-enforcer.ts snapshots and verifies the step window. Pre-emptive
 				// confinement for declared commands would require a command sandbox, which does not exist.
+				//
+				// That enforcement split is exactly why a step's declared `writes:` reaches
+				// typed intent as `relevant_paths` rather than as `write_roots`. The
+				// contract already said what this position may change and the enforcer
+				// already holds it; restating it as intent write roots would mint a second
+				// grant enforced at the per-tool worker seam, which refuses outright on the
+				// subprocess and ACP runtimes a fleet may legitimately route a step to.
+				// Carrying it as declared scope changes no authority and gets the
+				// contract's own paths into project-rule selection and worker context,
+				// where prose tokens scraped from the rendered prompt were standing in for
+				// a declaration the contract had already made.
+				const stepIntent = fleetStepIntent(step.writes);
 				const request: DispatchRequest = {
 					agentId: step.agentId,
 					executionRole: step.executionRole,
 					task: step.task,
 					cwd: workspaceRoot,
+					...(stepIntent === null ? {} : { intent: stepIntent }),
 					predecessorHandoffs: handoffs,
 					requestOrigin: "user",
 					lineage: {

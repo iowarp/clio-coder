@@ -124,6 +124,7 @@ export {
 	DISPATCH_INTENT_PATH_LIST_CAP,
 	DISPATCH_INTENT_TIMEOUT_MIN_MS,
 	DISPATCH_INTENT_VERIFICATION_CAP,
+	declaredScopeIntent,
 	isDispatchIntent,
 	narrowDispatchIntentToReadOnly,
 	normalizeDispatchIntent,
