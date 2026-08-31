@@ -34,11 +34,22 @@ function yaziProfileFinding(): DoctorFinding {
  * tool is a WARN with the command that installs it, because doctor's exit code
  * answers "is this Clio install healthy", and an operator who never wanted
  * panes has a healthy install without them.
+ *
+ * A PATH copy Clio rejected for being below the registry floor is never
+ * reported as an absent one. The row says which binary was found, what version
+ * it reported, and which floor it missed, and adds the install command only
+ * when there is no vendored copy already answering for the tool. Doctor is the
+ * surface an operator reaches for when a tool they installed themselves is not
+ * being used, and a row that only said "not found" would send them looking for
+ * a binary that is right there on their PATH.
  */
 export function toolchainFindings(): DoctorFinding[] {
 	const tools = toolStatuses().map((status) => ({
 		ok: true,
 		name: `external tool ${status.id}`,
+		// The rejection and the remedy both live inside the shared resolution
+		// sentence, so this row and `clio-coder tools status` cannot describe the
+		// same machine differently.
 		detail: describeResolution(status),
 		level: status.resolution.source === "none" ? ("warn" as const) : ("ok" as const),
 	}));
