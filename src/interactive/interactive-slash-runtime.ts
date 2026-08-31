@@ -203,6 +203,7 @@ export function resolveAvailableThinkingLevels(
 export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps): InteractiveSlashRuntime {
 	let activeContextInit = false;
 	let latestAdmission: Promise<void> = Promise.resolve();
+	let latestLocalOperation: Promise<void> = Promise.resolve();
 	let activeAdmissionSignal: AbortSignal | undefined;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
 	const resources = deps.resources;
@@ -648,6 +649,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			latestAdmission = admitChat(text, activeAdmissionSignal);
 			void latestAdmission;
 		},
+		runLocalOperation: (operation) => {
+			latestLocalOperation = latestLocalOperation.catch(() => undefined).then(operation);
+		},
 		render: deps.requestRender,
 	};
 
@@ -657,8 +661,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		dispatchCommand: (text) => dispatchSlashCommand(parseSlashCommand(text), context),
 		admitCommand: async (text, signal) => {
 			signal?.throwIfAborted();
+			// Pane opens and focus changes mutate a remote registry. A following
+			// slash read must observe their settled state, just as the tool path does.
+			await latestLocalOperation;
 			const command = parseSlashCommand(text);
 			const before = latestAdmission;
+			const localBefore = latestLocalOperation;
 			const previousSignal = activeAdmissionSignal;
 			activeAdmissionSignal = signal;
 			try {
@@ -667,6 +675,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				activeAdmissionSignal = previousSignal;
 			}
 			if (latestAdmission !== before) await latestAdmission;
+			if (latestLocalOperation !== localBefore) await latestLocalOperation;
 		},
 	};
 }

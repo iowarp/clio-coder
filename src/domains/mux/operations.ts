@@ -56,6 +56,8 @@ export interface PanesInventoryEntry {
 	agentId: string | null;
 	outcome: string | null;
 	adopted: boolean;
+	/** An open operation admitted locally but not yet reconciled into the mux registry. */
+	pending?: boolean;
 }
 
 /** Effective pane settings, as `/panes` prints them. */

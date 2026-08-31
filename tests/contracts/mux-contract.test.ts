@@ -33,7 +33,12 @@ interface GuestFixture {
 	advance(ms: number): void;
 }
 
-async function guest(options: { selfPaneId?: string | null } = {}): Promise<GuestFixture> {
+async function guest(
+	options: {
+		selfPaneId?: string | null;
+		viewerCommand?: (request: { runId: string; agentId: string; label: string }) => ReadonlyArray<string> | null;
+	} = {},
+): Promise<GuestFixture> {
 	const fake = await startFakeHerdrServer();
 	servers.push(fake);
 	const selfPaneId = options.selfPaneId === undefined ? "w1:p1" : options.selfPaneId;
@@ -57,6 +62,7 @@ async function guest(options: { selfPaneId?: string | null } = {}): Promise<Gues
 		client,
 		cwd: "/work",
 		now: () => clock,
+		...(options.viewerCommand ? { viewerCommand: options.viewerCommand } : {}),
 	});
 	runtimes.push(runtime);
 	await runtime.start();
@@ -201,7 +207,8 @@ describe("mux contract in guest mode", () => {
 		strictEqual(fake.requestsFor("agent.focus").length, 1);
 		strictEqual(fake.requestsFor("agent.focus")[0]?.params.target, ref.paneId);
 		strictEqual(fake.focusedPane(), ref.paneId);
-		strictEqual(fake.requestsFor("tab.focus").length, 0, "the fallback must not fire when agent.focus resolves");
+		strictEqual(fake.focusedTab(), ref.tabId);
+		strictEqual(fake.requestsFor("tab.focus").length, 1, "the shared ladder always reconciles the tab dimension");
 
 		strictEqual(await mux.focusRunPane("a-run-clio-never-opened"), false);
 		strictEqual(fake.requestsFor("agent.focus").length, 1, "an unowned run must not reach the server");
@@ -231,6 +238,9 @@ describe("mux contract in guest mode", () => {
 			agentState: "blocked",
 			model: "qwen3-coder",
 			outcome: "failed",
+			displayAgent: "tester",
+			tokens: { role: "verifier", role_display: "verifier", agent: "tester" },
+			stateLabels: { working: "verifying", blocked: "verification blocked", idle: "failed, review" },
 		});
 		const agent = fake.requestsFor("pane.report_agent").at(-1);
 		strictEqual(agent?.params.state, "blocked");
@@ -238,13 +248,21 @@ describe("mux contract in guest mode", () => {
 		const metadata = fake.requestsFor("pane.report_metadata").at(-1);
 		deepStrictEqual(metadata?.params.tokens, {
 			clio_owner: "clio:mux",
-			role: "tester",
+			role: "verifier",
 			// The run token is what a later process reads back off the pane to
 			// re-adopt this viewer instead of opening a second one.
 			run: "run-1",
 			phase: "verifying",
 			model: "qwen3-coder",
 			outcome: "failed",
+			role_display: "verifier",
+			agent: "tester",
+		});
+		strictEqual(metadata?.params.display_agent, "tester");
+		deepStrictEqual(metadata?.params.state_labels, {
+			working: "verifying",
+			blocked: "verification blocked",
+			idle: "failed, review",
 		});
 	});
 
@@ -316,6 +334,17 @@ describe("mux contract in guest mode", () => {
 		const record = mux.list()[0];
 		strictEqual(record?.purpose, "utility");
 		strictEqual(record?.runId, null);
+	});
+
+	it("keeps a shell behind a following run viewer and renders a static post-mortem when it exits", async () => {
+		const { fake, runtime } = await guest({
+			viewerCommand: () => ["node", "/opt/clio/run-view.js", "run-1", "--follow"],
+		});
+		await runtime.contract.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		strictEqual(
+			fake.requestsFor("pane.send_text")[0]?.params.text,
+			"'node' '/opt/clio/run-view.js' 'run-1' '--follow'; 'node' '/opt/clio/run-view.js' 'run-1'\n",
+		);
 	});
 
 	it("redirects utility stdout exactly once only when the caller names a path", async () => {
@@ -392,13 +421,19 @@ describe("mux contract in guest mode", () => {
 		strictEqual(mux.available(), true, "the contract probes again once the cooldown lapses");
 	});
 
-	it("stops answering after shutdown", async () => {
+	it("tears down sockets on shutdown without closing or forgetting owned panes", async () => {
 		const { fake, runtime } = await guest();
 		const mux = runtime.contract;
-		await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		const ref = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
+		ok(ref);
 		await mux.shutdown();
 		strictEqual(mux.available(), false);
-		deepStrictEqual([...mux.list()], []);
+		strictEqual(mux.list().length, 1, "shutdown keeps the ownership snapshot for pane adoption semantics");
+		ok(
+			fake.panes().some((pane) => pane.paneId === ref.paneId),
+			"the pane remains on the server",
+		);
+		strictEqual(fake.requestsFor("pane.close").length, 0, "shutdown must never issue pane.close");
 		const splitsBefore = fake.requestsFor("pane.split").length;
 		strictEqual(await mux.openRunPane({ runId: "run-2", agentId: "fixer", label: "two" }), null);
 		strictEqual(fake.requestsFor("pane.split").length, splitsBefore);
@@ -467,7 +502,7 @@ describe("mux contract phase 3 surfaces", () => {
 		strictEqual(fake.requestsFor("worktree.remove").length, 0);
 	});
 
-	it("falls back to tab.focus when agent.focus cannot resolve the pane", async () => {
+	it("refreshes authority when agent.focus cannot initially resolve the pane", async () => {
 		const { fake, runtime } = await guest();
 		const mux = runtime.contract;
 		const ref = await mux.openRunPane({ runId: "run-1", agentId: "tester", label: "one" });
@@ -476,9 +511,11 @@ describe("mux contract phase 3 surfaces", () => {
 		// spec 4.3 names the fallback rung for.
 		fake.setHandler("agent.focus", () => ({ error: { code: "agent_not_found", message: "no agent there" } }));
 		strictEqual(await mux.focusRunPane("run-1"), true);
-		strictEqual(fake.requestsFor("agent.focus").length, 1, "the preferred rung is still tried first");
+		strictEqual(fake.requestsFor("agent.focus").length, 2, "the ladder retries after refreshing authority");
 		strictEqual(fake.requestsFor("tab.focus").length, 1);
 		strictEqual(fake.requestsFor("tab.focus")[0]?.params.tab_id, ref.tabId);
+		strictEqual(fake.focusedTab(), ref.tabId);
+		strictEqual(fake.focusedPane(), ref.paneId);
 		strictEqual(mux.available(), true, "a server refusal is not a transport failure");
 	});
 

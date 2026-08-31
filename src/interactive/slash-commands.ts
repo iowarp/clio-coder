@@ -670,6 +670,8 @@ export interface SlashCommandContext {
 	 * absent only when the host did not compose pane operations at all.
 	 */
 	panes?: PanesOperations;
+	/** Serialize a local async command so the next admitted slash command observes its committed state. */
+	runLocalOperation?: (operation: () => Promise<void>) => void;
 	/**
 	 * Apply a thinking level named on the command line. Returns why it was
 	 * refused so the caller can say so, because the level the operator typed may
@@ -853,7 +855,8 @@ export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 			const run = pane.runId ? ` run=${pane.runId}` : "";
 			const outcome = pane.outcome ? ` outcome=${pane.outcome}` : "";
 			const adopted = pane.adopted ? " adopted" : "";
-			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${run}${outcome}${adopted}`);
+			const pending = pane.pending ? " opening" : "";
+			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${run}${outcome}${adopted}${pending}`);
 		}
 	}
 	lines.push(`  presets: ${PANES_PRESETS.map((preset) => `${preset.id} (${preset.summary})`).join(", ")}`);
@@ -1669,13 +1672,17 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				ctx.notice("info", "panes are not available in this session; run `clio-coder doctor` for why");
 				return;
 			}
+			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
 			if (command.kind === "panes") {
-				for (const line of formatPanesStatus(panes.status())) ctx.io.stdout(`${line}\n`);
-				ctx.render();
+				runLocal(async () => {
+					for (const line of formatPanesStatus(panes.status())) ctx.io.stdout(`${line}\n`);
+					ctx.render();
+				});
 				return;
 			}
 			if (command.kind === "panes-show") {
-				void panes.show(command.target).then((result) => {
+				runLocal(async () => {
+					const result = await panes.show(command.target);
 					if (result.status === "focused") {
 						ctx.notice("success", `focused ${result.agentId ?? result.label} (${result.runId})`);
 					} else if (result.status === "not-found") {
@@ -1688,32 +1695,32 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind === "panes-open") {
-				void panes
-					.open({
+				runLocal(async () => {
+					const result = await panes.open({
 						...(command.preset ? { preset: command.preset } : {}),
 						...(command.argv ? { argv: command.argv } : {}),
 						...(command.once ? { once: true } : {}),
-					})
-					.then((result) => {
-						if (result.status === "opened") {
-							// The in-terminal chooser has already restored the TUI by the
-							// time this resolves. A pick emitted its composer notice; an empty
-							// chooser was cancellation and deliberately stays silent.
-							if (result.paneId !== null) ctx.notice("success", `opened pane ${result.label} (${result.paneId})`);
-						} else if (result.status === "missing-binary") {
-							// This is a synchronous slash-surface line, not a transient pane-host
-							// notification. It remains visible when no pane was ever created and
-							// reuses the exact doctor/tools diagnostic including the install hint.
-							ctx.io.stdout(`${result.detail}\n`);
-							ctx.render();
-						} else {
-							ctx.notice("warn", result.reason);
-						}
 					});
+					if (result.status === "opened") {
+						// The in-terminal chooser has already restored the TUI by the
+						// time this resolves. A pick emitted its composer notice; an empty
+						// chooser was cancellation and deliberately stays silent.
+						if (result.paneId !== null) ctx.notice("success", `opened pane ${result.label} (${result.paneId})`);
+					} else if (result.status === "missing-binary") {
+						// This is a synchronous slash-surface line, not a transient pane-host
+						// notification. It remains visible when no pane was ever created and
+						// reuses the exact doctor/tools diagnostic including the install hint.
+						ctx.io.stdout(`${result.detail}\n`);
+						ctx.render();
+					} else {
+						ctx.notice("warn", result.reason);
+					}
+				});
 				return;
 			}
 			if (command.kind !== "panes-close") return;
-			void panes.close(command.target).then((result) => {
+			runLocal(async () => {
+				const result = await panes.close(command.target);
 				if (result.status === "closed") {
 					const what = result.labels.length > 0 ? `: ${result.labels.join(", ")}` : "";
 					ctx.notice(result.closed > 0 ? "success" : "info", `closed ${result.closed} pane(s)${what}`);

@@ -183,6 +183,7 @@ interface Harness {
 	timersArmed(): number;
 	settings: { value: MuxBridgePanesSettings };
 	detached: Set<string>;
+	notices: Array<{ level: "error"; text: string }>;
 }
 
 function harness(
@@ -198,6 +199,7 @@ function harness(
 	for (const runId of options.adoptable ?? []) mux.adoptable.add(runId);
 	const settings = { value: { ...DEFAULT_SETTINGS, ...options.settings } };
 	const detached = new Set<string>();
+	const notices: Array<{ level: "error"; text: string }> = [];
 	let armed = 0;
 	// A no-op timer factory: the test drives the trailing edge through flush(),
 	// which is what makes the coalescing assertion a count rather than a sleep.
@@ -213,8 +215,9 @@ function harness(
 			return { unref(): void {} } as unknown as NodeJS.Timeout;
 		}) as unknown as typeof setTimeout,
 		clearTimeoutFn: (() => {}) as unknown as typeof clearTimeout,
+		notice: (level, text) => notices.push({ level, text }),
 	});
-	return { bus, mux, bridge, settings, detached, timersArmed: () => armed };
+	return { bus, mux, bridge, settings, detached, notices, timersArmed: () => armed };
 }
 
 function identity(runId: string, agentId: string, task?: string): DispatchStartedPayload {
@@ -236,6 +239,12 @@ function identity(runId: string, agentId: string, task?: string): DispatchStarte
 function started(bus: SafeEventBus, runId: string, agentId: string, task?: string): void {
 	bus.emit(BusChannels.DispatchEnqueued, identity(runId, agentId, task));
 	bus.emit(BusChannels.DispatchStarted, identity(runId, agentId, task));
+}
+
+function startedWithRole(bus: SafeEventBus, runId: string, agentId: string, role: string): void {
+	const run = { ...identity(runId, agentId), gate: { role, cycle: 1 } };
+	bus.emit(BusChannels.DispatchEnqueued, run);
+	bus.emit(BusChannels.DispatchStarted, run);
 }
 
 function completed(bus: SafeEventBus, runId: string, agentId: string, durationMs = 1_000): void {
@@ -372,8 +381,36 @@ describe("contracts/mux bridge pane policy", () => {
 			states.map((state) => state.agentState),
 			["working", "blocked", "working", "idle"],
 		);
-		deepStrictEqual(states.at(-1)?.stateLabels, { idle: "review ready" });
+		deepStrictEqual(states.at(-1)?.stateLabels, {
+			working: "verifying",
+			blocked: "verification blocked",
+			idle: "review ready",
+		});
 		strictEqual(states.at(-1)?.outcome, "succeeded");
+	});
+
+	it("projects role display tokens and outcome-aware labels for different gate roles", async () => {
+		const h = harness({ settings: { agents: "all" } });
+		startedWithRole(h.bus, "run-candidate", "coder-a", "candidate");
+		startedWithRole(h.bus, "run-reviewer", "critic-a", "reviewer");
+		await h.bridge.flush();
+		const running = h.mux.calls.flatMap((call) => (call.kind === "report" ? [call] : []));
+		deepStrictEqual(running[0]?.state.tokens, { role: "candidate", role_display: "candidate", agent: "coder-a" });
+		deepStrictEqual(running[0]?.state.stateLabels, {
+			working: "building",
+			blocked: "build blocked",
+			idle: "finished",
+		});
+		strictEqual(running[0]?.state.displayAgent, "coder-a");
+		deepStrictEqual(running[1]?.state.tokens, { role: "reviewer", role_display: "reviewer", agent: "critic-a" });
+		strictEqual(running[1]?.state.stateLabels?.working, "reviewing");
+
+		failed(h.bus, "run-candidate", "coder-a", "tests failed");
+		completed(h.bus, "run-reviewer", "critic-a");
+		await h.bridge.flush();
+		const terminal = h.mux.calls.flatMap((call) => (call.kind === "report" && call.state.outcome ? [call.state] : []));
+		strictEqual(terminal[0]?.stateLabels?.idle, "failed, review");
+		strictEqual(terminal[1]?.stateLabels?.idle, "review ready");
 	});
 
 	it("keeps a failed run's pane and closes a succeeded one, per panes.keepFailed", async () => {
@@ -411,6 +448,7 @@ describe("contracts/mux bridge pane policy", () => {
 		strictEqual(toasts[0]?.sound, "request", "a failure interrupts");
 		ok(toasts[0]?.title.includes("fixer"));
 		strictEqual(toasts[0]?.body, "exit 1");
+		deepStrictEqual(failures.notices, [{ level: "error", text: "fixer failed (run-2): exit 1" }]);
 
 		const all = harness({ settings: { notifications: "all" } });
 		all.detached.add("run-1");
@@ -438,6 +476,7 @@ describe("contracts/mux bridge pane policy", () => {
 			0,
 			"notifications=off silences even a failure",
 		);
+		deepStrictEqual(quiet.notices, [], "notifications=off also suppresses the persistent failure notice");
 	});
 
 	it("never reopens a viewer pane the operator closed mid-run", async () => {
@@ -492,7 +531,7 @@ describe("contracts/mux bridge pane policy", () => {
 		ok(h.mux.calls.some((call) => call.kind === "report" && call.runId === "run-1"));
 	});
 
-	it("does nothing at all while the pane layer is unavailable", async () => {
+	it("keeps the persistent failure notice when the pane host is unavailable", async () => {
 		const h = harness({ available: false });
 		h.detached.add("run-1");
 		started(h.bus, "run-1", "tester");
@@ -500,6 +539,7 @@ describe("contracts/mux bridge pane policy", () => {
 		failed(h.bus, "run-1", "tester");
 		await h.bridge.flush();
 		deepStrictEqual(h.mux.calls, []);
+		deepStrictEqual(h.notices, [{ level: "error", text: "tester failed (run-1): exit 1" }]);
 	});
 
 	it("reports Clio's own pane on turn transitions and never twice for one state", async () => {
