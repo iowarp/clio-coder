@@ -38,6 +38,7 @@ interface FakeMux {
 	contract: MuxContract;
 	opened: MuxOpenUtilityPaneRequest[];
 	adoptable: MuxPaneRef | null;
+	adoptions: number;
 	paneGone(paneId: string): void;
 }
 
@@ -48,6 +49,7 @@ function fakeMux(): FakeMux {
 	const fake: FakeMux = {
 		opened,
 		adoptable: null,
+		adoptions: 0,
 		paneGone(paneId: string): void {
 			for (const handler of handlers) {
 				handler({ ref: { paneId, tabId: "w1:t1", workspaceId: "w1" }, purpose: "watch", label: "watch", openedAt: 0 });
@@ -70,6 +72,7 @@ function fakeMux(): FakeMux {
 				return { paneId: `w1:p${next}`, tabId: "w1:t1", workspaceId: "w1" };
 			},
 			async adoptPane(): Promise<MuxPaneRef | null> {
+				fake.adoptions += 1;
 				return fake.adoptable;
 			},
 			async closePane(): Promise<boolean> {
@@ -157,6 +160,25 @@ describe("watch pane controller", () => {
 			strictEqual(result.paneId, "w1:p77");
 			strictEqual(result.opened, false);
 		}
+		deepStrictEqual(mux.opened, []);
+	});
+
+	it("eagerly reclaims a surviving pane before the first explicit watch", async () => {
+		const mux = fakeMux();
+		mux.adoptable = { paneId: "w1:p77", tabId: "w1:t1", workspaceId: "w1" };
+		const selectionPath = tempSelection();
+		const watch = createWatchPaneController({
+			mux: mux.contract,
+			getCwd: () => "/work",
+			selectionPath,
+			dirs: TEST_DIRS,
+		});
+
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		strictEqual(mux.adoptions, 1);
+		strictEqual(watch.isOpen(), true, "startup adoption makes the pane visible to the relaunched session");
+		strictEqual(watch.follow("run-2"), true, "navigation can retarget the reclaimed pane without pressing Enter");
+		strictEqual(readFileSync(selectionPath, "utf8"), "run-2\n");
 		deepStrictEqual(mux.opened, []);
 	});
 
