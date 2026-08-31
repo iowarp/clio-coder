@@ -213,6 +213,21 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 	},
+	[ToolNames.Panes]: {
+		objective: "Focus, open, close, and inventory the terminal panes Clio owns beside this session.",
+		uiLabel: "Panes",
+		// show and list land on the same state twice; open starts a second pane
+		// and close is a no-op the second time, so the surface as a whole is not.
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 8_192,
+			followUpHint: 'Call panes with action="list" to re-read the pane inventory.',
+		},
+		costLatency: "local_fast",
+		promptHint:
+			'When the operator asks to see a dispatched agent ("show me the tester"), call panes with action="show" and the agent id. Utility panes are presets only; an arbitrary command is the operator\'s own /panes open.',
+	},
 	// RETRIEVE: network-class.
 	[ToolNames.WebFetch]: {
 		objective: "Fetch HTTP(S) text for explicit external research.",

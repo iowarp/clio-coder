@@ -9,6 +9,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
+import type { PanesOperations } from "../domains/mux/operations.js";
 import {
 	type ProvidersContract,
 	type ResolvedThinkingCapability,
@@ -135,6 +136,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openMemory: () => void;
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	openView: (filter?: string) => void;
+	/** Pane-layer operations behind `/panes`. Absent when the mux resolved to `none`. */
+	panes?: PanesOperations;
 	openModel: () => void;
 	openSettings: (section?: SettingsSectionId, rowId?: SettingsCenterRowId) => void;
 	openResume: () => void;
@@ -436,6 +439,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			return result;
 		},
 		openView: deps.openView,
+		...(deps.panes ? { panes: deps.panes } : {}),
 		setThinkingLevel: (level) => {
 			const settings = deps.getSettings?.();
 			if (!settings || !deps.onSetThinkingLevel) return { status: "unavailable" };

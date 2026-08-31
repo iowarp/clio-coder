@@ -11,6 +11,14 @@ import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
+import {
+	isPanesPresetId,
+	PANES_PRESET_IDS,
+	PANES_PRESETS,
+	type PanesOperations,
+	type PanesPresetId,
+	type PanesStatus,
+} from "../domains/mux/operations.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
 import type {
@@ -136,6 +144,13 @@ type SlashCommandVariant =
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
+	/** `/panes`: mode, health, pane inventory, effective settings. */
+	| { kind: "panes" }
+	| { kind: "panes-show"; target: string }
+	/** A preset the model may also ask for, or operator-only argv. Never both. */
+	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string> }
+	| { kind: "panes-close"; target: string }
+	| { kind: "panes-usage"; reason?: string }
 	| { kind: "thinking-set"; level: string }
 	| { kind: "output-set"; verbosity: string }
 	| { kind: "model" }
@@ -650,6 +665,12 @@ export interface SlashCommandContext {
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	/**
+	 * The pane layer's operator surface. Absent whenever the mux resolved to
+	 * `none` or no host wired it, in which case `/panes` says so rather than
+	 * pretending the feature is missing.
+	 */
+	panes?: PanesOperations;
+	/**
 	 * Apply a thinking level named on the command line. Returns why it was
 	 * refused so the caller can say so, because the level the operator typed may
 	 * not be one the active target supports.
@@ -783,6 +804,34 @@ function settingsDeepLink(
 
 function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
 	return usageLine(entry, subcommand).trim();
+}
+
+/**
+ * `/panes` output, as plain lines. Pure so the contract test asserts the text
+ * an operator reads rather than the object behind it, and so the registry keeps
+ * its promise not to reach a renderer.
+ */
+export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
+	const server = status.server ? `pane host ${status.server.version}, protocol ${status.server.protocol}` : "no server";
+	const lines = [
+		`panes: mode=${status.mode} ${status.available ? "available" : "unavailable"} (${server})`,
+		`  ${status.reason}`,
+		...(status.socketPath ? [`  socket ${status.socketPath}`] : []),
+		`  settings: enabled=${status.settings.enabled} agents=${status.settings.agents} keepFailed=${status.settings.keepFailed} notifications=${status.settings.notifications} journal=${status.settings.journal}`,
+	];
+	if (status.panes.length === 0) {
+		lines.push("  no Clio-owned panes");
+	} else {
+		lines.push(`  ${status.panes.length} Clio-owned pane(s):`);
+		for (const pane of status.panes) {
+			const run = pane.runId ? ` run=${pane.runId}` : "";
+			const outcome = pane.outcome ? ` outcome=${pane.outcome}` : "";
+			const adopted = pane.adopted ? " adopted" : "";
+			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${run}${outcome}${adopted}`);
+		}
+	}
+	lines.push(`  presets: ${PANES_PRESETS.map((preset) => `${preset.id} (${preset.summary})`).join(", ")}`);
+	return lines;
 }
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
@@ -1535,6 +1584,107 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			} else {
 				ctx.notice("error", `verify fail ${command.runId} ${result.reason}`);
 			}
+		},
+	},
+	{
+		name: "panes",
+		description: "Inspect the pane layer, focus a run's viewer pane, or open a utility pane",
+		group: "Inspect",
+		kinds: ["panes", "panes-show", "panes-open", "panes-close", "panes-usage"],
+		args: {
+			subcommands: {
+				show: { positionals: [{ name: "run-or-agent", required: true }] },
+				// A rest positional, so an argv pane keeps its own flags: the parser
+				// would otherwise refuse `--follow` as an unknown flag of `/panes`.
+				open: { positionals: [{ name: "preset-or-argv", required: true, rest: true }] },
+				close: { positionals: [{ name: "target", required: false }] },
+			},
+		},
+		subcommandDescriptions: {
+			show: "focus the viewer pane for a run or agent",
+			open: `open a utility pane (${PANES_PRESET_IDS.join(", ")}, or a command)`,
+			close: "close a Clio-owned pane, or all of them",
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "panes-usage", reason: parsed.error };
+			if (parsed.subcommand === "show") {
+				return { kind: "panes-show", target: parsed.positionals[0] ?? "" };
+			}
+			if (parsed.subcommand === "open") {
+				const rest = (parsed.rest ?? "").trim();
+				if (rest.length === 0) return { kind: "panes-usage", reason: "Missing required argument: preset-or-argv" };
+				const argv = rest.split(/\s+/).filter((token) => token.length > 0);
+				const first = argv[0] ?? "";
+				// A bare preset name is a preset; anything else is operator argv,
+				// which the tool surface deliberately cannot ask for.
+				if (argv.length === 1 && isPanesPresetId(first)) return { kind: "panes-open", preset: first };
+				return { kind: "panes-open", argv };
+			}
+			if (parsed.subcommand === "close") {
+				return { kind: "panes-close", target: parsed.positionals[0] ?? "all" };
+			}
+			if (parsed.positionals.length > 0) {
+				return { kind: "panes-usage", reason: `Unexpected argument: ${parsed.positionals[0]}` };
+			}
+			return { kind: "panes" };
+		},
+		handle(command, ctx) {
+			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
+			if (command.kind === "panes-usage") {
+				if (entry) ctx.notice("info", command.reason ? `${command.reason}${usageNotice(entry)}` : usageNotice(entry));
+				return;
+			}
+			const panes = ctx.panes;
+			if (!panes) {
+				ctx.notice("info", "panes are not available in this session; run `clio-coder doctor` for why");
+				return;
+			}
+			if (command.kind === "panes") {
+				for (const line of formatPanesStatus(panes.status())) ctx.io.stdout(`${line}\n`);
+				ctx.render();
+				return;
+			}
+			if (command.kind === "panes-show") {
+				void panes.show(command.target).then((result) => {
+					if (result.status === "focused") {
+						ctx.notice("success", `focused ${result.agentId ?? result.label} (${result.runId})`);
+					} else if (result.status === "not-found") {
+						const known = result.candidates.length > 0 ? `; known: ${result.candidates.join(", ")}` : "";
+						ctx.notice("warn", `no pane matches ${result.target}${known}`);
+					} else {
+						ctx.notice("warn", result.reason);
+					}
+				});
+				return;
+			}
+			if (command.kind === "panes-open") {
+				void panes
+					.open({
+						...(command.preset ? { preset: command.preset } : {}),
+						...(command.argv ? { argv: command.argv } : {}),
+					})
+					.then((result) => {
+						if (result.status === "opened") {
+							ctx.notice("success", `opened pane ${result.label} (${result.paneId})`);
+						} else if (result.status === "missing-binary") {
+							ctx.notice("warn", `${result.preset} needs ${result.binary}; install it with: ${result.installHint}`);
+						} else {
+							ctx.notice("warn", result.reason);
+						}
+					});
+				return;
+			}
+			if (command.kind !== "panes-close") return;
+			void panes.close(command.target).then((result) => {
+				if (result.status === "closed") {
+					const what = result.labels.length > 0 ? `: ${result.labels.join(", ")}` : "";
+					ctx.notice(result.closed > 0 ? "success" : "info", `closed ${result.closed} pane(s)${what}`);
+				} else if (result.status === "not-found") {
+					ctx.notice("warn", `no Clio-owned pane matches ${result.target}`);
+				} else {
+					ctx.notice("warn", result.reason);
+				}
+			});
 		},
 	},
 	{

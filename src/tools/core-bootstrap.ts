@@ -184,6 +184,7 @@ export function assertRegisteredBuiltinTools(
 	registry: ToolRegistry,
 	registration: CoreToolRegistration,
 	includeDispatchTools: boolean,
+	includePanesTools = false,
 ): void {
-	assertBuiltinToolPolicy(registry.listAll(), { ...registration, includeDispatchTools });
+	assertBuiltinToolPolicy(registry.listAll(), { ...registration, includeDispatchTools, includePanesTools });
 }

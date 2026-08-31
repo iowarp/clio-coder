@@ -38,7 +38,7 @@
  * journal to off after one notice. Nothing here ever throws into a dispatch.
  */
 
-import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 
@@ -157,6 +157,34 @@ export function runEventJournalDir(runId: string, root?: string): string {
 /** One run's NDJSON file. */
 export function runEventJournalPath(runId: string, root?: string): string {
 	return join(runEventJournalDir(runId, root), RUN_EVENT_JOURNAL_FILE);
+}
+
+/**
+ * The run whose journal was written to most recently, or null when none exists.
+ *
+ * `/panes open logs` tails it. Reading mtimes off the journal files is the
+ * cheapest honest answer: the ledger orders runs by admission, and the run an
+ * operator wants to watch is the one still producing lines, which is not always
+ * the newest admitted one.
+ */
+export function newestRunEventJournalRunId(root?: string): string | null {
+	if (stateRootRemoved()) return null;
+	const dir = root ?? runEventJournalRoot();
+	let names: string[];
+	try {
+		names = readdirSync(dir);
+	} catch {
+		return null;
+	}
+	let newest: { runId: string; at: number } | null = null;
+	for (const runId of names) {
+		if (!isSafeRunId(runId)) continue;
+		const stats = statSync(runEventJournalPath(runId, dir), { throwIfNoEntry: false });
+		if (stats === undefined || !stats.isFile()) continue;
+		const at = stats.mtimeMs;
+		if (newest === null || at > newest.at) newest = { runId, at };
+	}
+	return newest?.runId ?? null;
 }
 
 /**

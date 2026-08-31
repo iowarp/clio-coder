@@ -7,6 +7,7 @@ import {
 	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
+import { panesFindings } from "./doctor-panes.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
 import { toolchainFindings } from "./doctor-toolchain.js";
 import { printError } from "./shared.js";
@@ -54,6 +55,10 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
 	const toolChecks = untouched ? [] : toolchainFindings();
+	// The pane sweep pings a socket and reads PATH; it creates nothing except the
+	// journal directory it is asked about, which is inside the state root doctor
+	// has already agreed not to build on an untouched home.
+	const paneChecks = untouched ? [] : await panesFindings();
 	const all = [
 		...findings,
 		...storageChecks,
@@ -62,6 +67,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 		...interopChecks,
 		...fleetChecks,
 		...toolChecks,
+		...paneChecks,
 	];
 	const ok = all.every((f) => f.ok);
 	if (json) {
