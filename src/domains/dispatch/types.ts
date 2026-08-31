@@ -225,6 +225,17 @@ export interface RunGateSubjectRef {
 	digest: string | null;
 }
 
+/** Storage route used for one compete candidate's isolated checkout. */
+export interface RunGateWorktreeProvenance {
+	backend: "herdr" | "native";
+	path: string;
+	branch: string;
+	/** Herdr workspace created around the worktree; absent for the native route. */
+	workspaceId?: string;
+	/** Why the native route was selected when mux was configured. */
+	fallback?: "mux-unavailable" | "mux-operation-failed";
+}
+
 /**
  * Review/compete gate provenance, carried on the request and sealed into the
  * receipt. References point backward only: a reviewer references the builder
@@ -244,6 +255,8 @@ export interface RunGateProvenance {
 	subjects?: RunGateSubjectRef[];
 	/** Reviewer verdict that caused this run; only on revise builders. */
 	verdict?: "pass" | "fail" | "revise";
+	/** Compete-only worktree route, sealed into the run receipt with the gate. */
+	worktree?: RunGateWorktreeProvenance;
 }
 
 export interface RunCouncilProvenance {

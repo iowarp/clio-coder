@@ -18,7 +18,12 @@ import type { DomainContract } from "../../core/domain-loader.js";
 import type { MuxDetection } from "./detect.js";
 import { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";
 import { muxSupportsMethod } from "./protocol.js";
-import type { MuxClient, MuxSubscription } from "./socket-client.js";
+import type {
+	MuxClient,
+	MuxSubscription,
+	MuxWorktreeCreatedResult,
+	MuxWorktreeCreateRequest,
+} from "./socket-client.js";
 import {
 	MuxError,
 	type MuxEvent,
@@ -97,6 +102,10 @@ export interface MuxContract extends DomainContract {
 	closePane(paneId: string): Promise<boolean>;
 	reportRunState(runId: string, state: MuxRunDisplayState): Promise<void>;
 	notify(request: MuxNotifyRequest): Promise<void>;
+	/** Optional compete storage route. Protocol-gated with a native Git fallback at the caller. */
+	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult | null>;
+	/** Remove a herdr worktree workspace. False tells the caller to use native Git cleanup. */
+	worktreeRemove(workspaceId: string, options?: { force?: boolean }): Promise<boolean>;
 	/**
 	 * Re-adopt viewer panes that outlived the process that made them.
 	 *
@@ -486,6 +495,29 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					return undefined;
 				},
 				undefined,
+			);
+		},
+
+		async worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult | null> {
+			if (!muxSupportsMethod(detection.server, "worktree.create")) {
+				log("debug", "mux worktree.create skipped, server protocol is below the worktree floor");
+				return null;
+			}
+			return await attempt("worktreeCreate", (live) => live.worktreeCreate(request), null);
+		},
+
+		async worktreeRemove(workspaceId: string, removeOptions = {}): Promise<boolean> {
+			if (!muxSupportsMethod(detection.server, "worktree.remove")) {
+				log("debug", "mux worktree.remove skipped, server protocol is below the worktree floor");
+				return false;
+			}
+			return await attempt(
+				"worktreeRemove",
+				async (live) => {
+					await live.worktreeRemove(workspaceId, removeOptions);
+					return true;
+				},
+				false,
 			);
 		},
 

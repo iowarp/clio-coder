@@ -50,6 +50,12 @@ export interface FakeHerdrPane {
 	workspaceId: string;
 }
 
+export interface FakeHerdrWorktree {
+	path: string;
+	branch: string | null;
+	workspaceId: string | null;
+}
+
 export interface FakeHerdrServerOptions {
 	version?: string;
 	protocol?: number;
@@ -76,6 +82,8 @@ export interface FakeHerdrServer {
 	setHandler(method: string, handler: FakeHerdrHandler | null): void;
 	/** Panes the server currently believes exist. */
 	panes(): ReadonlyArray<FakeHerdrPane>;
+	/** Worktrees the server currently believes exist. */
+	worktrees(): ReadonlyArray<FakeHerdrWorktree>;
 	/** Toasts requested through `notification.show`, oldest first. */
 	notifications(): ReadonlyArray<FakeHerdrNotification>;
 	/** Metadata tokens the server retained for a pane, as `pane.get` would report them. */
@@ -86,6 +94,8 @@ export interface FakeHerdrServer {
 	hasAgentAuthority(paneId: string): boolean;
 	/** The pane `agent.focus` most recently focused, or null. */
 	focusedPane(): string | null;
+	/** The tab currently focused by either focus method, or null. */
+	focusedTab(): string | null;
 	addPane(pane: FakeHerdrPane): void;
 	removePane(paneId: string): void;
 	/** Push one lifecycle event to every open subscription connection. */
@@ -129,13 +139,19 @@ function paneInfo(
 	};
 }
 
-function tabInfo(tabId: string, workspaceId: string, label: string, paneCount: number): Record<string, unknown> {
+function tabInfo(
+	tabId: string,
+	workspaceId: string,
+	label: string,
+	paneCount: number,
+	focused = false,
+): Record<string, unknown> {
 	return {
 		tab_id: tabId,
 		workspace_id: workspaceId,
 		number: Number.parseInt(tabId.split(":t")[1] ?? "1", 10),
 		label,
-		focused: false,
+		focused,
 		pane_count: paneCount,
 		agent_status: "unknown",
 	};
@@ -154,29 +170,62 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 	const tabLabels = new Map<string, string>([["w1:t1", "shell"]]);
 	const paneTokens = new Map<string, Record<string, string>>();
 	const agentPanes = new Set<string>();
+	const worktrees: FakeHerdrWorktree[] = [];
 	const notifications: FakeHerdrNotification[] = [];
 	const toastsShown = options.toastsShown ?? true;
-	let focusedPaneId: string | null = null;
+	let focusedPaneId: string | null = panes[0]?.paneId ?? null;
+	let focusedTabId: string | null = panes[0]?.tabId ?? null;
 	let nextConnectionId = 0;
 	let nextTab = 1;
 	let nextPane = panes.length;
+	let nextWorkspace = 1;
 
 	let server!: FakeHerdrServer;
 
 	const tabsInPlay = (): Record<string, unknown>[] => {
 		const ids = [...new Set(panes.map((pane) => pane.tabId))];
 		for (const id of tabLabels.keys()) if (!ids.includes(id)) ids.push(id);
-		return ids.map((tabId) =>
-			tabInfo(tabId, "w1", tabLabels.get(tabId) ?? "shell", panes.filter((pane) => pane.tabId === tabId).length),
-		);
+		return ids.map((tabId) => {
+			const workspaceId = panes.find((pane) => pane.tabId === tabId)?.workspaceId ?? "w1";
+			return tabInfo(
+				tabId,
+				workspaceId,
+				tabLabels.get(tabId) ?? "shell",
+				panes.filter((pane) => pane.tabId === tabId).length,
+				tabId === focusedTabId,
+			);
+		});
 	};
+
+	const worktreeInfo = (entry: FakeHerdrWorktree): Record<string, unknown> => ({
+		path: entry.path,
+		branch: entry.branch,
+		is_bare: false,
+		is_detached: entry.branch === null,
+		is_prunable: false,
+		is_linked_worktree: true,
+		open_workspace_id: entry.workspaceId,
+		label: entry.branch ?? "detached",
+	});
+
+	const workspaceInfo = (workspaceId: string, tabId: string): Record<string, unknown> => ({
+		workspace_id: workspaceId,
+		number: Number.parseInt(workspaceId.slice(1), 10),
+		label: workspaceId,
+		focused: workspaceId === panes.find((pane) => pane.paneId === focusedPaneId)?.workspaceId,
+		pane_count: panes.filter((pane) => pane.workspaceId === workspaceId).length,
+		tab_count: 1,
+		active_tab_id: tabId,
+		agent_status: "unknown",
+		tokens: {},
+	});
 
 	const snapshot = (): Record<string, unknown> => ({
 		version,
 		protocol,
 		focused_workspace_id: "w1",
-		focused_tab_id: "w1:t1",
-		focused_pane_id: panes[0]?.paneId ?? null,
+		focused_tab_id: focusedTabId,
+		focused_pane_id: focusedPaneId,
 		workspaces: [
 			{
 				workspace_id: "w1",
@@ -191,7 +240,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 			},
 		],
 		tabs: tabsInPlay(),
-		panes: panes.map((pane, index) => paneInfo(pane, index === 0, paneTokens.get(pane.paneId) ?? {})),
+		panes: panes.map((pane) => paneInfo(pane, pane.paneId === focusedPaneId, paneTokens.get(pane.paneId) ?? {})),
 		layouts: [],
 		agents: [],
 	});
@@ -280,10 +329,110 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 			case "tab.focus": {
 				const tabId = typeof params.tab_id === "string" ? params.tab_id : "";
 				if (!tabLabels.has(tabId)) return { error: { code: "tab_not_found", message: "tab not found" } };
+				focusedTabId = tabId;
+				const workspaceId = panes.find((pane) => pane.tabId === tabId)?.workspaceId ?? "w1";
 				return {
 					result: {
 						type: "tab_info",
-						tab: tabInfo(tabId, "w1", tabLabels.get(tabId) ?? "shell", panes.filter((p) => p.tabId === tabId).length),
+						tab: tabInfo(
+							tabId,
+							workspaceId,
+							tabLabels.get(tabId) ?? "shell",
+							panes.filter((pane) => pane.tabId === tabId).length,
+							true,
+						),
+					},
+				};
+			}
+			case "worktree.list": {
+				if (protocol < 10) return { error: { code: "invalid_request", message: "unknown method worktree.list" } };
+				return {
+					result: {
+						type: "worktree_list",
+						source: {
+							repo_key: "fake-repo",
+							repo_name: "fake",
+							repo_root: "/repo",
+							source_checkout_path: "/repo",
+							source_workspace_id: "w1",
+						},
+						worktrees: worktrees.map(worktreeInfo),
+					},
+				};
+			}
+			case "worktree.create": {
+				if (protocol < 10) return { error: { code: "invalid_request", message: "unknown method worktree.create" } };
+				const path = typeof params.path === "string" ? params.path : `/repo/.worktrees/${worktrees.length + 1}`;
+				const branch = typeof params.branch === "string" ? params.branch : null;
+				if (worktrees.some((entry) => entry.path === path || (branch !== null && entry.branch === branch))) {
+					return { error: { code: "worktree_exists", message: "worktree already exists" } };
+				}
+				nextWorkspace += 1;
+				const workspaceId = `w${nextWorkspace}`;
+				const tabId = `${workspaceId}:t1`;
+				const root: FakeHerdrPane = { paneId: `${workspaceId}:p1`, tabId, workspaceId };
+				const entry: FakeHerdrWorktree = { path, branch, workspaceId };
+				panes.push(root);
+				worktrees.push(entry);
+				tabLabels.set(tabId, typeof params.label === "string" ? params.label : (branch ?? "worktree"));
+				return {
+					result: {
+						type: "worktree_created",
+						workspace: workspaceInfo(workspaceId, tabId),
+						tab: tabInfo(tabId, workspaceId, tabLabels.get(tabId) ?? "worktree", 1),
+						root_pane: paneInfo(root),
+						worktree: worktreeInfo(entry),
+					},
+				};
+			}
+			case "worktree.open": {
+				if (protocol < 10) return { error: { code: "invalid_request", message: "unknown method worktree.open" } };
+				const path = typeof params.path === "string" ? params.path : null;
+				const branch = typeof params.branch === "string" ? params.branch : null;
+				const entry = worktrees.find(
+					(candidate) => (path !== null && candidate.path === path) || (branch !== null && candidate.branch === branch),
+				);
+				if (!entry) return { error: { code: "worktree_not_found", message: "worktree not found" } };
+				const alreadyOpen = entry.workspaceId !== null;
+				if (entry.workspaceId === null) {
+					nextWorkspace += 1;
+					entry.workspaceId = `w${nextWorkspace}`;
+				}
+				const workspaceId = entry.workspaceId;
+				const tabId = `${workspaceId}:t1`;
+				let root = panes.find((pane) => pane.workspaceId === workspaceId);
+				if (!root) {
+					root = { paneId: `${workspaceId}:p1`, tabId, workspaceId };
+					panes.push(root);
+				}
+				tabLabels.set(tabId, typeof params.label === "string" ? params.label : (entry.branch ?? "worktree"));
+				return {
+					result: {
+						type: "worktree_opened",
+						workspace: workspaceInfo(workspaceId, tabId),
+						tab: tabInfo(tabId, workspaceId, tabLabels.get(tabId) ?? "worktree", 1),
+						root_pane: paneInfo(root),
+						worktree: worktreeInfo(entry),
+						already_open: alreadyOpen,
+					},
+				};
+			}
+			case "worktree.remove": {
+				if (protocol < 10) return { error: { code: "invalid_request", message: "unknown method worktree.remove" } };
+				const workspaceId = typeof params.workspace_id === "string" ? params.workspace_id : "";
+				const index = worktrees.findIndex((entry) => entry.workspaceId === workspaceId);
+				if (index < 0) return { error: { code: "worktree_not_found", message: "worktree not found" } };
+				const [removed] = worktrees.splice(index, 1);
+				if (!removed) return { error: { code: "worktree_not_found", message: "worktree not found" } };
+				for (let paneIndex = panes.length - 1; paneIndex >= 0; paneIndex -= 1) {
+					if (panes[paneIndex]?.workspaceId === workspaceId) panes.splice(paneIndex, 1);
+				}
+				return {
+					result: {
+						type: "worktree_removed",
+						workspace_id: workspaceId,
+						path: removed.path,
+						forced: params.force === true,
 					},
 				};
 			}
@@ -337,6 +486,7 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 					return { error: { code: "agent_not_found", message: `agent target not found: ${target}` } };
 				}
 				focusedPaneId = pane.paneId;
+				focusedTabId = pane.tabId;
 				return {
 					result: {
 						type: "agent_info",
@@ -441,6 +591,9 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 		panes(): ReadonlyArray<FakeHerdrPane> {
 			return [...panes];
 		},
+		worktrees(): ReadonlyArray<FakeHerdrWorktree> {
+			return worktrees.map((entry) => ({ ...entry }));
+		},
 		addPane(pane: FakeHerdrPane): void {
 			panes.push(pane);
 		},
@@ -458,6 +611,9 @@ export async function startFakeHerdrServer(options: FakeHerdrServerOptions = {})
 		},
 		focusedPane(): string | null {
 			return focusedPaneId;
+		},
+		focusedTab(): string | null {
+			return focusedTabId;
 		},
 		removePane(paneId: string): void {
 			const index = panes.findIndex((entry) => entry.paneId === paneId);

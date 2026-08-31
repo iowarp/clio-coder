@@ -1448,6 +1448,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// provenance and compete winner handling agree with the approval surface.
 		getAutonomy: resolveEffectiveAutonomy,
 		...(interactive ? { dispatchBackground } : {}),
+		...(mux ? { competeMuxWorktrees: mux } : {}),
 		// Registered only when a pane host answered detection, so the tool is
 		// absent from the prompt on a machine with none rather than present and
 		// always refusing.

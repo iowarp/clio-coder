@@ -704,6 +704,8 @@ function isValidProtectedArtifactRemap(value: unknown): value is ProtectedArtifa
 
 const VALID_GATE_ROLES = new Set(["builder", "reviewer", "candidate", "judge", "member", "synthesis"]);
 const VALID_GATE_VERDICTS = new Set(["pass", "fail", "revise"]);
+const VALID_WORKTREE_BACKENDS = new Set(["herdr", "native"]);
+const VALID_WORKTREE_FALLBACKS = new Set(["mux-unavailable", "mux-operation-failed"]);
 const VALID_PLAN_TOPOLOGIES = new Set([
 	"parallel",
 	"sequential",
@@ -732,6 +734,20 @@ function isValidGate(value: unknown): value is RunGateProvenance {
 	if (value.verdict !== undefined && (typeof value.verdict !== "string" || !VALID_GATE_VERDICTS.has(value.verdict))) {
 		return false;
 	}
+	if (value.worktree !== undefined) {
+		if (!isPlainObject(value.worktree)) return false;
+		if (typeof value.worktree.backend !== "string" || !VALID_WORKTREE_BACKENDS.has(value.worktree.backend)) return false;
+		if (typeof value.worktree.path !== "string" || !path.isAbsolute(value.worktree.path)) return false;
+		if (typeof value.worktree.branch !== "string" || value.worktree.branch.length === 0) return false;
+		if (value.worktree.workspaceId !== undefined && typeof value.worktree.workspaceId !== "string") return false;
+		if (
+			value.worktree.fallback !== undefined &&
+			(typeof value.worktree.fallback !== "string" || !VALID_WORKTREE_FALLBACKS.has(value.worktree.fallback))
+		) {
+			return false;
+		}
+		if (value.worktree.backend === "herdr" && typeof value.worktree.workspaceId !== "string") return false;
+	}
 	return true;
 }
 
@@ -742,6 +758,7 @@ function cloneGate(gate: RunGateProvenance): RunGateProvenance {
 		cycle: gate.cycle,
 		...(gate.subjects !== undefined ? { subjects: gate.subjects.map((subject) => ({ ...subject })) } : {}),
 		...(gate.verdict !== undefined ? { verdict: gate.verdict } : {}),
+		...(gate.worktree !== undefined ? { worktree: { ...gate.worktree } } : {}),
 	};
 }
 

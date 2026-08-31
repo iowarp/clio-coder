@@ -3,7 +3,13 @@ import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
-import type { cleanupCompeteGroup, createCandidateWorktree, mergeWinnerBranch } from "./compete-worktrees.js";
+import type {
+	CandidateWorktree,
+	CompeteGroupOwnership,
+	CompeteMuxWorktrees,
+	cleanupCompeteGroup,
+	mergeWinnerBranch,
+} from "./compete-worktrees.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchPlanView, ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 import type { DispatchRunEventRegistry } from "./dispatch-run-events.js";
@@ -83,9 +89,15 @@ export interface DispatchToolDeps {
 	background?: DispatchBackgroundRegistry;
 	/** Optional compete storage overrides for alternate backends and deterministic fault tests. */
 	competeWorktrees?: {
-		createCandidate?: typeof createCandidateWorktree;
-		cleanupGroup?: typeof cleanupCompeteGroup;
+		createCandidate?: (
+			ownership: CompeteGroupOwnership,
+			index: number,
+			baseline: string,
+		) => CandidateWorktree | Promise<CandidateWorktree>;
+		cleanupGroup?: (...args: Parameters<typeof cleanupCompeteGroup>) => void | Promise<void>;
 		mergeWinner?: typeof mergeWinnerBranch;
+		/** Optional herdr route; every operation retains native Git fallback. */
+		mux?: CompeteMuxWorktrees;
 	};
 	getAgentCatalog?: () => string;
 	getAgentSpecs: () => ReadonlyArray<AgentSpec>;

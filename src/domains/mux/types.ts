@@ -56,6 +56,27 @@ export interface MuxTab {
 	agentState: MuxAgentState;
 }
 
+/** Git worktree metadata projected from herdr's worktree API. */
+export interface MuxWorktree {
+	path: string;
+	branch: string | null;
+	isBare: boolean;
+	isDetached: boolean;
+	isPrunable: boolean;
+	isLinkedWorktree: boolean;
+	openWorkspaceId: string | null;
+	label: string;
+}
+
+/** Repository identity accompanying a `worktree.list` result. */
+export interface MuxWorktreeSource {
+	repoKey: string;
+	repoName: string;
+	repoRoot: string;
+	sourceCheckoutPath: string;
+	sourceWorkspaceId: string | null;
+}
+
 /** Identity and capability facts recorded from the `ping` handshake. */
 export interface MuxServerInfo {
 	version: string;

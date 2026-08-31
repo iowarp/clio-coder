@@ -6,6 +6,7 @@ import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.
 import type { PanesOperations } from "../domains/mux/operations.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { builtin, toolPromptHintsForNames } from "./builtin-tool-catalog.js";
+import type { CompeteMuxWorktrees } from "./compete-worktrees.js";
 import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreTools } from "./core-bootstrap.js";
 import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
@@ -27,6 +28,8 @@ export interface ToolBootstrapDeps extends CoreToolBootstrapDeps {
 	getCostCeilingUsd?: () => number;
 	getWorkerRosters?: () => WorkerRosters;
 	dispatchBackground?: DispatchBackgroundRegistry;
+	/** Optional herdr worktree lifecycle for compete candidates. */
+	competeMuxWorktrees?: CompeteMuxWorktrees;
 	/**
 	 * Pane operations. Present only when a pane host answered detection, which
 	 * is what keeps the `panes` tool out of the prompt on a machine with none.
@@ -59,6 +62,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
 			...(deps.getWorkerRosters ? { getWorkerRosters: deps.getWorkerRosters } : {}),
 			...(deps.dispatchBackground ? { background: deps.dispatchBackground } : {}),
+			...(deps.competeMuxWorktrees ? { competeWorktrees: { mux: deps.competeMuxWorktrees } } : {}),
 		};
 		registry.register({
 			...builtin(createDispatchTool(dispatchToolDeps), {
