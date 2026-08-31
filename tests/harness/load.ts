@@ -33,18 +33,32 @@ export function testLaneCount(): number {
 }
 
 /**
- * One step of headroom per this many lanes. Six is the observed shape rather
- * than a round number: the CLI-spawn timeouts held at every lane count up to
- * about six and started failing above it.
+ * One step of headroom per this many lanes. Three is what the ceiling below
+ * needs to be reachable at this host's 24 lanes; the CLI-spawn timeouts held
+ * at every lane count up to about six and started failing above it, so the
+ * first step lands where the failures start.
  */
-const LANES_PER_STEP = 6;
+const LANES_PER_STEP = 3;
 
 /**
- * Ceiling on the multiplier. Without one, a 64-lane box would turn a 30s PTY
- * watchdog into five minutes of waiting for a genuine hang before the suite
- * reports it.
+ * Ceiling on the multiplier. Without one, a 128-lane box would turn a 30s PTY
+ * watchdog into an hour of waiting for a genuine hang before the suite reports
+ * it.
+ *
+ * Eight rather than a rounder number, from measurement.
+ * `dispatch-background-control`'s conversion case runs in 0.75-1.2s alone and
+ * has been observed at 34s and 62s inside a 24-lane run on this host, which
+ * does durable-store work under a file lock and so amplifies far past the
+ * linear cost of the contention. Its budget is 8s, so covering the 62s
+ * observation needs a factor of 8. A smaller ceiling was tried at 4 and left
+ * that case failing.
+ *
+ * The cost is honest and worth stating: at 8, a genuinely hung `runCli` takes
+ * two minutes to report instead of fifteen seconds. That is still an order of
+ * magnitude below what a suite that never returns costs, and it only applies
+ * to a run that is actually sharded.
  */
-const MAX_FACTOR = 4;
+const MAX_FACTOR = 8;
 
 /** The multiplier `scaleWatchdog` applies; 1 when the file runs on its own. */
 export function watchdogFactor(): number {
