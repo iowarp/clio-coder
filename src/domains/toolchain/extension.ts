@@ -2,6 +2,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { ToolchainContract } from "./contract.js";
 import type { ToolInstallOptions } from "./install.js";
 import { findPinnedTool, PINNED_TOOLS } from "./registry.js";
+import { removeTool, type ToolRemoveOptions } from "./remove.js";
 import { resolveToolBinary, toolStatus, toolStatuses } from "./resolve.js";
 
 export function createToolchainBundle(_context: DomainContext): DomainBundle<ToolchainContract> {
@@ -34,6 +35,12 @@ export function createToolchainBundle(_context: DomainContext): DomainBundle<Too
 			// graph that only ever resolves a binary.
 			const { installTool } = await import("./install.js");
 			return installTool(id, options);
+		},
+		remove(id: string, options: ToolRemoveOptions = {}) {
+			// Statically imported, unlike install: removal is a readdir and an
+			// unlink, so it carries none of the archive readers that keep the
+			// installer off graphs which only ever resolve a binary.
+			return removeTool(id, options);
 		},
 	};
 	return { extension, contract };

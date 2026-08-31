@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { type ArchiveEntry, readTarGzEntries, readZipEntries } from "./archive.js";
 import { ensureToolchainRoot } from "./paths.js";
 import { currentToolPlatform, findPinnedTool } from "./registry.js";
+import { pruneSupersededVersions } from "./remove.js";
 import type { PinnedTool, PinnedToolDownload, ToolPlatform } from "./types.js";
 
 /**
@@ -16,6 +17,12 @@ import type { PinnedTool, PinnedToolDownload, ToolPlatform } from "./types.js";
  * sibling staging directory and renamed into place, so a killed install leaves
  * a `.incomplete-` directory rather than a half-populated version that the
  * resolution ladder would happily run.
+ *
+ * A successful install then prunes, so a tool holds exactly the pinned version
+ * and nothing else. Only the ladder's own version is ever resolved, so a
+ * superseded directory is dead weight an operator would have to find and delete
+ * by hand. Pruning runs on the already-installed path too, which is what
+ * repairs a machine that bumped pins before this behavior existed.
  */
 
 /** How a URL becomes bytes. Injectable so the contract tests never touch the network. */
@@ -44,6 +51,8 @@ export interface ToolInstallResult {
 	documents: string[];
 	/** True when the version was already installed and nothing was downloaded. */
 	skipped: boolean;
+	/** Superseded versions of the same tool this install deleted. */
+	pruned: string[];
 	message: string;
 }
 
@@ -79,6 +88,7 @@ export async function installPinnedTool(
 
 	const installedBinaries = Object.keys(download.binaryMembers).map((name) => join(dir, executableName(name)));
 	if (!options.force && installedBinaries.every((path) => existsSync(path))) {
+		const swept = prune(root, entry);
 		return {
 			ok: true,
 			id: entry.id,
@@ -87,7 +97,8 @@ export async function installPinnedTool(
 			binaries: installedBinaries,
 			documents: [],
 			skipped: true,
-			message: `${entry.id} ${entry.version} is already installed at ${dir}`,
+			pruned: swept.pruned,
+			message: `${entry.id} ${entry.version} is already installed at ${dir}${swept.note}`,
 		};
 	}
 
@@ -220,6 +231,7 @@ export async function installPinnedTool(
 		// A rename losing to a concurrent installer is not a failure: the version
 		// directory the caller asked for exists and holds the same pinned bytes.
 		if (!options.force && existsSync(dir)) {
+			const swept = prune(root, entry);
 			return {
 				ok: true,
 				id: entry.id,
@@ -228,12 +240,14 @@ export async function installPinnedTool(
 				binaries: installedBinaries,
 				documents: [],
 				skipped: true,
-				message: `${entry.id} ${entry.version} was installed concurrently at ${dir}`,
+				pruned: swept.pruned,
+				message: `${entry.id} ${entry.version} was installed concurrently at ${dir}${swept.note}`,
 			};
 		}
 		return failure(entry.id, entry.version, dir, `install failed: ${messageOf(error)}`);
 	}
 
+	const swept = prune(root, entry);
 	return {
 		ok: true,
 		id: entry.id,
@@ -242,8 +256,27 @@ export async function installPinnedTool(
 		binaries,
 		documents,
 		skipped: false,
-		message: `installed ${entry.id} ${entry.version} (${entry.license}) at ${dir}`,
+		pruned: swept.pruned,
+		message: `installed ${entry.id} ${entry.version} (${entry.license}) at ${dir}${swept.note}`,
 	};
+}
+
+/**
+ * Delete the versions this pin supersedes, and say what happened.
+ *
+ * A prune that cannot delete something never fails the install: the version the
+ * operator asked for is in place and runnable, and a directory that resisted
+ * `rm` is a disk problem to report, not a reason to claim the install did not
+ * happen. It is named in the message so the operator can go look.
+ */
+function prune(root: string, entry: PinnedTool): { pruned: string[]; note: string } {
+	const outcome = pruneSupersededVersions(entry.id, entry.version, { root });
+	if (outcome.failed.length > 0) {
+		const trouble = outcome.failed.map((item) => `${item.version} (${item.error})`).join(", ");
+		return { pruned: outcome.removed, note: `; could not prune ${trouble}` };
+	}
+	if (outcome.removed.length === 0) return { pruned: [], note: "" };
+	return { pruned: outcome.removed, note: `; pruned ${outcome.removed.join(", ")}` };
 }
 
 function unpack(bytes: Buffer, download: PinnedToolDownload): Map<string, ArchiveEntry> {
@@ -274,7 +307,7 @@ function executableName(name: string): string {
 }
 
 function failure(id: string, version: string, dir: string, message: string): ToolInstallResult {
-	return { ok: false, id, version, dir, binaries: [], documents: [], skipped: false, message };
+	return { ok: false, id, version, dir, binaries: [], documents: [], skipped: false, pruned: [], message };
 }
 
 function messageOf(error: unknown): string {
