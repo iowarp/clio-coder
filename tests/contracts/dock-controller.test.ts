@@ -216,6 +216,34 @@ describe("dock reconciliation", () => {
 		}, "the user resize to be adopted");
 	});
 
+	it("ignores an anchor-side split instead of adopting it as a dock resize", async () => {
+		const { fake, runtime } = await guest();
+		const ref = await runtime.contract.openUtilityPane({
+			argv: [],
+			cwd: "/tmp",
+			label: "workers-view",
+			dock: { slot: "workers" },
+		});
+		ok(ref);
+		// The user splits the anchor for a scratch shell; the fake emits the
+		// layout_updated push a real server would. The anchor's own rect halves,
+		// but the dock's share of the separating split never changed, so the
+		// target must not move.
+		const scratch = await runtime.contract.openUtilityPane({
+			argv: ["bash"],
+			cwd: "/tmp",
+			label: "shell",
+			direction: "right",
+		});
+		ok(scratch);
+		// The scratch close rides the same ordered event stream as the layout
+		// push, so once the registry shrinks the push has been processed too.
+		fake.removePane(scratch.paneId);
+		fake.pushEvent("pane_closed", { paneId: scratch.paneId, workspaceId: "w1" });
+		await waitForCondition(() => runtime.contract.list().length === 1, "the scratch close to be processed");
+		strictEqual(runtime.contract.docks()[0]?.targetShare, DOCK_SPECS.workers.defaultShare);
+	});
+
 	it("treats a user close as final and lets an explicit reopen start fresh", async () => {
 		const { fake, runtime } = await guest();
 		const ref = await runtime.contract.openUtilityPane({
