@@ -239,6 +239,33 @@ describe("dock reconciliation", () => {
 		ok(reopened.paneId !== ref.paneId);
 	});
 
+	it("clears dock state on closePane even when no event subscription exists", async () => {
+		// start: false models the worst case: events.subscribe failed at start()
+		// and start() degraded, so no pane.closed push will ever arrive. Dock
+		// cleanup must ride the closePane call itself, or the slot points at a
+		// dead pane forever and every later open returns the corpse.
+		const { fake, runtime } = await guest({ start: false });
+		const ref = await runtime.contract.openUtilityPane({
+			argv: [],
+			cwd: "/tmp",
+			label: "workers-view",
+			dock: { slot: "workers" },
+		});
+		ok(ref);
+		strictEqual(await runtime.contract.closePane(ref.paneId), true);
+		strictEqual(runtime.contract.docks().length, 0, "the dock slot must empty with the pane");
+		strictEqual(runtime.contract.list().length, 0);
+		const reopened = await runtime.contract.openUtilityPane({
+			argv: [],
+			cwd: "/tmp",
+			label: "workers-view",
+			dock: { slot: "workers" },
+		});
+		ok(reopened);
+		ok(reopened.paneId !== ref.paneId, "a reopen must create a fresh dock, not return the dead id");
+		strictEqual(fake.requestsFor("pane.split").length, 2);
+	});
+
 	it("returns a surviving pane to its slot through dock-aware adoption", async () => {
 		const { fake, runtime } = await guest();
 		// A previous session's workers dock: owner-tagged, role watch.
