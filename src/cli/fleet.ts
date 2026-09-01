@@ -117,7 +117,7 @@ Notes:
   only available inside the process that owns the run.
   view is read-only and shares no memory with the orchestrator, so it follows a
   run from a second terminal or over SSH. Its transcript comes from the run
-  event journal, written when panes.journal is on (the default). Handed the
+  event journal, written when fleet.history.journal is on (the default). Handed the
   fleet-<hex> root id that run prints, it lists that run's steps instead.
   drain preserves running work. Repeat it to renew the one-hour expiry; resume
   clears it early. The expiry prevents an abandoned drain from wedging Clio.

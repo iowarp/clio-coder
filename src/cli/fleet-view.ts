@@ -62,7 +62,7 @@ run event journal, and the sealed receipt once it exists.
 
 Without --follow the current snapshot is printed and the command exits.
 The transcript comes from <state>/runs/<runId>/events.ndjson, which the
-orchestrator writes when panes.journal is on (the default). A run dispatched
+orchestrator writes when fleet.history.journal is on (the default). A run dispatched
 with the journal off shows its ledger and receipt but no transcript.
 
 Given the fleet root id that \`fleet run\` prints (fleet-<hex>), this prints the
@@ -305,7 +305,11 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 	if (!model.journalPresent) {
 		lines.push("no event journal for this run.");
 		lines.push(
-			...wrapViewerValue("expected ", `${model.journalPath} (panes.journal may have been off when it ran)`, columns),
+			...wrapViewerValue(
+				"expected ",
+				`${model.journalPath} (fleet.history.journal may have been off when it ran)`,
+				columns,
+			),
 		);
 	} else if (model.transcript.length === 0) {
 		lines.push("journal is empty; no events recorded yet.");
