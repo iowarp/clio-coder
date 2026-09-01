@@ -561,10 +561,13 @@ describe("contracts/residency-protection settings extraction", () => {
 				{ id: "mini", runtime: "llamacpp", defaultModel: "Qwopus3.6-35B" },
 				{ id: "dynamo", runtime: "lmstudio" },
 			],
-			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "mini", model: "Qwopus3.6-35B" },
-			background: { ...DEFAULT_SETTINGS.background, target: "dynamo", model: "memory-small" },
-			workers: {
-				...DEFAULT_SETTINGS.workers,
+			chat: { ...DEFAULT_SETTINGS.chat, target: "mini", model: "Qwopus3.6-35B" },
+			context: {
+				...DEFAULT_SETTINGS.context,
+				memory: { ...DEFAULT_SETTINGS.context.memory, target: "dynamo", model: "memory-small" },
+			},
+			fleet: {
+				...DEFAULT_SETTINGS.fleet,
 				default: { target: "dynamo", model: "qwopus3.6-27b-coder-mtp", thinkingLevel: "off" as const },
 				profiles: {
 					scout: { target: "mini", model: "MiniCPM5-1B", thinkingLevel: "off" as const },
@@ -585,10 +588,13 @@ describe("contracts/residency-protection settings extraction", () => {
 		const settings = {
 			...DEFAULT_SETTINGS,
 			targets: [{ id: "dynamo", runtime: "lmstudio", defaultModel: "target-default-model" }],
-			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "dynamo", model: "chat-model" },
-			background: { ...DEFAULT_SETTINGS.background, target: "dynamo", model: "memory-model" },
-			workers: {
-				...DEFAULT_SETTINGS.workers,
+			chat: { ...DEFAULT_SETTINGS.chat, target: "dynamo", model: "chat-model" },
+			context: {
+				...DEFAULT_SETTINGS.context,
+				memory: { ...DEFAULT_SETTINGS.context.memory, target: "dynamo", model: "memory-model" },
+			},
+			fleet: {
+				...DEFAULT_SETTINGS.fleet,
 				default: { target: "dynamo", model: "worker-model", thinkingLevel: "off" as const },
 			},
 		};

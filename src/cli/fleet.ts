@@ -268,7 +268,7 @@ function contractAgents(
 
 function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
 	const targets = new Set(deps.settings.targets.map((target) => target.id));
-	const profiles = new Set(Object.keys(deps.settings.workers?.profiles ?? {}));
+	const profiles = new Set(Object.keys(deps.settings.fleet?.profiles ?? {}));
 	const checkRoute = (id: string, route: { target?: string; profile?: string }): string | null => {
 		if (route.target !== undefined && !targets.has(route.target)) {
 			return `unknown target '${route.target}' at step '${id}'`;
@@ -376,7 +376,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	// Install `panes.journal` the same way the interactive composition root
 	// does, so a fleet run honours the setting without the journal ever reading
 	// settings.yaml from the dispatch event path.
-	configureRunEventJournal(fleetSettings.panes.journal);
+	configureRunEventJournal(fleetSettings.fleet.history.journal);
 	const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
 	const preflightError = preflightFleet(contract, {
 		agents,
@@ -504,7 +504,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			fleetRootId,
 			dispatch,
 			agents: { getSpec: (agentId) => agents.getSpec(agentId) },
-			attributionEnabled: config?.get().attribution.gitCommits ?? true,
+			attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
 			vars,
 			...(resume !== undefined ? { resume } : {}),
 			onStepSettled(step) {

@@ -62,8 +62,8 @@ function settingsForTarget(pricing?: { input: number; output: number }): typeof 
 			...(pricing === undefined ? {} : { pricing }),
 		},
 	];
-	settings.workers.default.target = "mini";
-	settings.workers.default.model = "fleet-model";
+	settings.fleet.default.target = "mini";
+	settings.fleet.default.model = "fleet-model";
 	return settings;
 }
 

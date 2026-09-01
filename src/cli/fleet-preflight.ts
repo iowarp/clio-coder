@@ -33,7 +33,7 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 	const resolved = new Set<string>();
 	const settings = readSettings();
 	const targetIds = new Set(settings.targets.map((target) => target.id));
-	const profileIds = new Set(Object.keys(settings.workers?.profiles ?? {}));
+	const profileIds = new Set(Object.keys(settings.fleet?.profiles ?? {}));
 	for (const step of contract.steps) {
 		const positions =
 			step.kind === "loop"

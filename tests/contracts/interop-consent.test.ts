@@ -96,10 +96,11 @@ describe("interop consent", () => {
 
 		strictEqual(result.wired.length, 1);
 		strictEqual(result.wired[0], "codex");
-		const agents = readSettings().delegation.agents;
+		const agents = readSettings().integrations.externalAgents.entries;
 		strictEqual(agents.length, 1);
 		strictEqual(agents[0]?.toolGovernance, "clio-policy");
-		const written = (savedDocument().delegation as { agents: Array<Record<string, unknown>> }).agents;
+		const written = (savedDocument().integrations as { externalAgents: { entries: Array<Record<string, unknown>> } })
+			.externalAgents.entries;
 		strictEqual(written.length, 1);
 		strictEqual("projectContext" in (written[0] as object), false);
 		strictEqual(written[0]?.command, "npx");
@@ -109,7 +110,7 @@ describe("interop consent", () => {
 		const proposals = interopProposals(report("sha256:a"), readSettings());
 		const preview = renderProposalEntry(proposals[0] as (typeof proposals)[number]);
 		acceptInteropAgents(["codex"], report("sha256:a"));
-		const written = (savedDocument().delegation as { agents: unknown[] }).agents;
+		const written = (savedDocument().integrations as { externalAgents: { entries: unknown[] } }).externalAgents.entries;
 		strictEqual(preview.includes("id: codex"), true);
 		strictEqual(preview.includes("toolGovernance: clio-policy"), true);
 		strictEqual(JSON.stringify(parseYaml(preview)), JSON.stringify(written));
@@ -140,12 +141,12 @@ describe("interop consent", () => {
 	it("keeps an entry another writer added while the proposal was open", () => {
 		const pending = report("sha256:a");
 		updateSettings((settings) => {
-			settings.delegation.agents.push({ id: "hand-written", command: "opencode", args: ["acp"] });
+			settings.integrations.externalAgents.entries.push({ id: "hand-written", command: "opencode", args: ["acp"] });
 		});
 
 		acceptInteropAgents(["codex"], pending);
 
-		const ids = readSettings().delegation.agents.map((agent) => agent.id);
+		const ids = readSettings().integrations.externalAgents.entries.map((agent) => agent.id);
 		strictEqual(ids.length, 2);
 		ok(ids.includes("hand-written"));
 		ok(ids.includes("codex"));

@@ -867,7 +867,7 @@ await runDriver(USAGE, async () => {
 			autonomy: "full-auto",
 			settings(settings) {
 				const rosterModel = args.model === null ? {} : { model: args.model };
-				settings.workers.rosters = {
+				settings.fleet.rosters = {
 					default: {
 						members: [
 							{ label: "alpha", target: args.target, ...rosterModel },
@@ -875,7 +875,7 @@ await runDriver(USAGE, async () => {
 						],
 					},
 				};
-				settings.workers.maxRetries = 0;
+				settings.fleet.retry.maxRetries = 0;
 			},
 		},
 		async (home) => {

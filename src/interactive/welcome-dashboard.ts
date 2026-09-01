@@ -103,7 +103,7 @@ function findCurrentStatus(
 	statuses: ReadonlyArray<TargetStatus>,
 	settings: Readonly<ClioSettings> | undefined,
 ): TargetStatus | null {
-	const targetId = settings?.orchestrator?.target ?? null;
+	const targetId = settings?.chat?.target ?? null;
 	if (!targetId) return null;
 	return statuses.find((status) => status.target.id === targetId) ?? null;
 }
@@ -127,7 +127,7 @@ function selectedModelCapabilities(
 	providers: ProvidersContract,
 ): CapabilityFlags | null {
 	if (!status) return null;
-	const wireModelId = settings?.orchestrator?.model ?? status.target.defaultModel ?? null;
+	const wireModelId = settings?.chat?.model ?? status.target.defaultModel ?? null;
 	const detectedReasoning =
 		wireModelId && typeof providers.getDetectedReasoning === "function"
 			? providers.getDetectedReasoning(status.target.id, wireModelId)
@@ -274,8 +274,8 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const statuses = deps.providers.list();
 	const current = findCurrentStatus(statuses, settings);
 	// Left null when unset; formatTargetLabel owns the one spelling for that.
-	const targetLabel = current?.target.id ?? settings?.orchestrator?.target ?? null;
-	const modelLabel = settings?.orchestrator?.model ?? current?.target.defaultModel ?? null;
+	const targetLabel = current?.target.id ?? settings?.chat?.target ?? null;
+	const modelLabel = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
 	const cwd = workspace?.cwd ?? process.cwd();
 	const currentAvailable = current ? activeStatus(current) : false;
@@ -283,16 +283,16 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const thinkingLevel =
 		resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,
-			settings?.orchestrator?.target,
-			settings?.orchestrator?.model,
-			settings?.orchestrator?.thinkingLevel ?? "off",
+			settings?.chat?.target,
+			settings?.chat?.model,
+			settings?.chat?.thinkingLevel ?? "off",
 		)?.thinking.display ??
-		settings?.orchestrator?.thinkingLevel ??
+		settings?.chat?.thinkingLevel ??
 		"off";
 
-	const autonomy = settings?.autonomy ?? "auto-edit";
-	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
-	const threshold = settings?.compaction?.threshold;
+	const autonomy = settings?.safety.autonomy ?? "auto-edit";
+	const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-policy";
+	const threshold = settings?.context.compaction?.threshold;
 	const compactionThreshold =
 		typeof threshold === "number" && Number.isFinite(threshold) ? `${Math.round(threshold * 100)}%` : "80%";
 

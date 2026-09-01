@@ -34,10 +34,10 @@ import { clioTheme } from "../../src/interactive/theme/index.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
-function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
+function settings(overrides: Partial<ClioSettings["context"]["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.target = "test-target";
-	value.orchestrator.model = "model";
+	value.chat.target = "test-target";
+	value.chat.model = "model";
 	value.targets = [
 		{
 			id: "test-target",
@@ -46,7 +46,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 			capabilities: { contextWindow: 1000, maxTokens: 256, tools: true, chat: true },
 		},
 	];
-	value.compaction = { ...value.compaction, ...overrides };
+	value.context.compaction = { ...value.context.compaction, ...overrides };
 	return value;
 }
 
@@ -330,8 +330,8 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 	it("emits an out-of-run notice as a typed notice event without fabricating agent_end", async () => {
 		const events: ChatLoopEvent[] = [];
 		const unconfigured = settings();
-		unconfigured.orchestrator.target = "";
-		unconfigured.orchestrator.model = "";
+		unconfigured.chat.target = "";
+		unconfigured.chat.model = "";
 		const loop = createChatLoop({
 			getSettings: () => unconfigured,
 			providers: providers(),
@@ -367,8 +367,8 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		const admissionReasonFor = async (target: string, model: string): Promise<string | undefined> => {
 			const events: ChatLoopEvent[] = [];
 			const unconfigured = settings();
-			unconfigured.orchestrator.target = target;
-			unconfigured.orchestrator.model = model;
+			unconfigured.chat.target = target;
+			unconfigured.chat.model = model;
 			const loop = createChatLoop({
 				getSettings: () => unconfigured,
 				providers: providers(),
@@ -760,7 +760,7 @@ describe("contracts/chat-loop expected cold reasons", () => {
 
 	it("retains the last served snapshot across a rejected submit before a thinking-level change", async () => {
 		const configured = settings();
-		configured.orchestrator.thinkingLevel = "off";
+		configured.chat.thinkingLevel = "off";
 		const entries: SessionEntry[] = [];
 		let calls = 0;
 		const loop = createChatLoop({
@@ -777,7 +777,7 @@ describe("contracts/chat-loop expected cold reasons", () => {
 		} as never);
 
 		await loop.submit("baseline");
-		configured.orchestrator.thinkingLevel = "high";
+		configured.chat.thinkingLevel = "high";
 		await loop.submit("x".repeat(500_000));
 		strictEqual(calls, 1, "the oversized request should be rejected before it reaches the backend");
 		await loop.submit("think now");
@@ -883,7 +883,7 @@ describe("contracts/chat-loop expected cold reasons", () => {
 
 	it("does not stamp a thinking change on a cloud target", async () => {
 		const configured = settings();
-		configured.orchestrator.thinkingLevel = "off";
+		configured.chat.thinkingLevel = "off";
 		const entries: SessionEntry[] = [];
 		let calls = 0;
 		const loop = createChatLoop({
@@ -900,7 +900,7 @@ describe("contracts/chat-loop expected cold reasons", () => {
 		} as never);
 
 		await loop.submit("baseline");
-		configured.orchestrator.thinkingLevel = "high";
+		configured.chat.thinkingLevel = "high";
 		await loop.submit("cloud thinking call");
 
 		strictEqual(persistedColdReasons(entries), undefined);
@@ -2137,7 +2137,7 @@ describe("contracts/chat-loop stream stall escalation", () => {
 
 	it("aborts a silently stalled stream, retries the ladder, and exhausts into a typed failure", async () => {
 		const cfg = settings();
-		cfg.retry = { enabled: true, maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
+		cfg.chat.retry = { enabled: true, maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
 		const record = { starts: 0, aborts: 0, abortedDuringTool: false };
 		const entries: SessionEntry[] = [];
 		const loop = createChatLoop({
@@ -2185,7 +2185,7 @@ describe("contracts/chat-loop stream stall escalation", () => {
 
 	it("leaves a long-running tool alone: silence during tool execution is not a stalled stream", async () => {
 		const cfg = settings();
-		cfg.retry = { enabled: true, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 30 };
+		cfg.chat.retry = { enabled: true, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 30 };
 		const record = { starts: 0, aborts: 0, abortedDuringTool: false };
 		const loop = createChatLoop({
 			getSettings: () => cfg,
@@ -2204,7 +2204,7 @@ describe("contracts/chat-loop stream stall escalation", () => {
 
 	it("survives a forward wall-clock step of 200s while the stream is producing output", async () => {
 		const cfg = settings();
-		cfg.retry = { enabled: true, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 500 };
+		cfg.chat.retry = { enabled: true, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 500 };
 		const record = { starts: 0, aborts: 0 };
 		const entries: SessionEntry[] = [];
 		const realNow = Date.now;
@@ -2244,7 +2244,7 @@ describe("contracts/chat-loop stream stall escalation", () => {
 	// otherwise hang instead of failing.
 	it("fires on a later stall even when a tool's end event never arrived", { timeout: 5_000 }, async () => {
 		const cfg = settings();
-		cfg.retry = { enabled: true, maxRetries: 0, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
+		cfg.chat.retry = { enabled: true, maxRetries: 0, baseDelayMs: 0, maxDelayMs: 0, streamStallMs: 40 };
 		const record = { starts: 0, aborts: 0, abortedDuringTool: false };
 		const entries: SessionEntry[] = [];
 		const loop = createChatLoop({

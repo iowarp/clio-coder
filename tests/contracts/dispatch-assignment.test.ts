@@ -114,7 +114,7 @@ describe("dispatch assignments", () => {
 
 	it("resolves attached dispatch with the successful terminal retry while retaining attempt one", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
@@ -150,7 +150,7 @@ describe("dispatch assignments", () => {
 
 	it("settles exhausted retries with the last failure and complete history", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
 			spawnWorker: () => worker(1),
@@ -175,7 +175,7 @@ describe("dispatch assignments", () => {
 
 	it("does not retry a failed mutating tool that may have partially changed the workspace", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
@@ -204,9 +204,9 @@ describe("dispatch assignments", () => {
 
 	it("does not retry a mutation-capable subprocess whose tool telemetry is unavailable", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [{ id: "claude-cli", runtime: "claude-code", defaultModel: "claude-sonnet" }];
-		settings.workers.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
+		settings.fleet.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
 		const workspace = mkdtempSync(join(tmpdir(), "clio-opaque-retry-"));
 		let spawns = 0;
 		const bundle = makeDispatchBundle(
@@ -252,10 +252,10 @@ describe("dispatch assignments", () => {
 
 	it("retains retries for a Claude subprocess constrained to read-only tools", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.autonomy = "read-only";
-		settings.workers.maxRetries = 1;
+		settings.safety.autonomy = "read-only";
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [{ id: "claude-cli", runtime: "claude-code", defaultModel: "claude-sonnet" }];
-		settings.workers.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
+		settings.fleet.default = { target: "claude-cli", model: "claude-sonnet", thinkingLevel: "off" };
 		let spawns = 0;
 		const bundle = makeDispatchBundle(
 			dispatchStubContext({
@@ -289,7 +289,7 @@ describe("dispatch assignments", () => {
 
 	it("does not retry a mediated worker that crashes with a mutating call in flight", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
@@ -322,7 +322,7 @@ describe("dispatch assignments", () => {
 
 	it("marks telemetry partial when the worker event stream misses the finalization deadline", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			spawnWorker: failedWithUndrainedEvents,
 		});
@@ -344,7 +344,7 @@ describe("dispatch assignments", () => {
 
 	it("does not retry when malformed worker frames could conceal a workspace mutation", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings, agentTools: [ToolNames.Read, ToolNames.Edit] }), {
 			spawnWorker: () => {
@@ -376,7 +376,7 @@ describe("dispatch assignments", () => {
 
 	it("settles a queued retry deterministically when the extension stops", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
@@ -404,7 +404,7 @@ describe("dispatch assignments", () => {
 
 	it("starting a sibling extension leaves a live claimed assignment untouched", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		const first = makeDispatchBundle(dispatchStubContext({ settings }));
 		const second = makeDispatchBundle(dispatchStubContext({ settings }));
 
@@ -429,7 +429,7 @@ describe("dispatch assignments", () => {
 
 	it("reconciles an orphaned running assignment against ledger state on restart", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		const bundleA = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
 			spawnWorker: () => worker(0, "done"),
@@ -469,7 +469,7 @@ describe("dispatch assignments", () => {
 
 	it("canceling the root attempt starts no retry", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let resolveExit!: (result: { exitCode: number | null; signal: NodeJS.Signals | null }) => void;
 		const exit = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
 			resolveExit = resolve;

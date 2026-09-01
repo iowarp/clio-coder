@@ -151,7 +151,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	const dispatchActive = (): boolean => dispatchesInFlight > 0 || deps.hasActiveDispatch();
 
 	const admissionRefusal = (): PrewarmSkipReason | null => {
-		if (deps.getSettings().prewarm?.enabled === false) return "disabled";
+		if (deps.getSettings().chat.prewarm === false) return "disabled";
 		if (!deps.isLatencySurface()) return "surface";
 		if (deps.state.streaming || deps.isTurnActive()) return "turn-active";
 		// Fleet interaction. Without per-endpoint slot accounting a pre-warm cannot
@@ -165,7 +165,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		// resolved runtime is checked again below, but asking here means a target
 		// that was never eligible costs no capability probe, no agent, and no
 		// notice from either.
-		const targetId = deps.getSettings().orchestrator?.target?.trim();
+		const targetId = deps.getSettings().chat?.target?.trim();
 		const runtimeId = targetId ? deps.providers.getTarget(targetId)?.runtime : undefined;
 		if (runtimeId === undefined || deps.providers.getRuntime(runtimeId)?.tier !== "local-native") return "tier";
 		return null;

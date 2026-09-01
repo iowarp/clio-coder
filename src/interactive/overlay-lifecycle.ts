@@ -272,7 +272,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.toolRegistry ? { toolRegistry: deps.app.toolRegistry } : {}),
 		bus: deps.app.bus,
 		dispatch: deps.app.dispatch,
-		getAutonomy: () => deps.app.getSettings?.().autonomy ?? "auto-edit",
+		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "auto-edit",
 		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view, inspect) => {
 			if (overlayTransitions.state === "permission-confirm") return false;

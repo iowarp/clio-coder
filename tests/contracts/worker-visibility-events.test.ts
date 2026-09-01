@@ -46,7 +46,7 @@ describe("dispatch started identity", () => {
 
 	it("keys every attempt of a failover to one assignment and numbers the attempts", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const context = dispatchStubContext({ settings });
 		const started: DispatchStartedPayload[] = [];

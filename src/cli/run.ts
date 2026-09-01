@@ -376,9 +376,9 @@ async function runDispatch(
 	// does. The journal never reads settings.yaml itself: it sits on the
 	// dispatch event path, where a settings read would be both a cost and a
 	// throw site.
-	configureRunEventJournal(baseSettings.panes.journal);
-	effectiveSettings =
-		parsed.autonomy === undefined ? baseSettings : { ...structuredClone(baseSettings), autonomy: parsed.autonomy };
+	configureRunEventJournal(baseSettings.fleet.history.journal);
+	effectiveSettings = structuredClone(baseSettings);
+	if (parsed.autonomy !== undefined) effectiveSettings.safety.autonomy = parsed.autonomy;
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
 		process.stderr.write("dispatch domain unavailable\n");
@@ -394,19 +394,15 @@ async function runDispatch(
 			return 1;
 		}
 		const settings = effectiveSettings;
-		const profileTargetId = parsed.agentProfile ? settings.workers?.profiles?.[parsed.agentProfile]?.target : undefined;
+		const profileTargetId = parsed.agentProfile ? settings.fleet?.profiles?.[parsed.agentProfile]?.target : undefined;
 		const runtimeByTarget = new Map(settings.targets.map((target) => [target.id, target.runtime] as const));
 		const runtimeTargetId = parsed.agentRuntime
-			? [settings.workers?.default, ...Object.values(settings.workers?.profiles ?? {})].find(
+			? [settings.fleet?.default, ...Object.values(settings.fleet?.profiles ?? {})].find(
 					(profile) => profile?.target && runtimeByTarget.get(profile.target) === parsed.agentRuntime,
 				)?.target
 			: undefined;
 		const targetId =
-			parsed.target ??
-			profileTargetId ??
-			runtimeTargetId ??
-			settings.workers?.default?.target ??
-			settings.orchestrator?.target;
+			parsed.target ?? profileTargetId ?? runtimeTargetId ?? settings.fleet?.default?.target ?? settings.chat?.target;
 		const target = targetId ? providers.getTarget(targetId) : null;
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!target || !runtime) {
@@ -441,7 +437,7 @@ async function runDispatch(
 	if (skillPaths.length > 0) dispatchReq.skillPaths = skillPaths;
 	try {
 		const settings = effectiveSettings;
-		if (settings.skills?.trustProjectCompatRoots) {
+		if (settings.integrations.projectResources?.trustProjectImports) {
 			dispatchReq.trustProjectCompatRoots = true;
 		}
 	} catch {
@@ -451,8 +447,8 @@ async function runDispatch(
 	let memorySection = "";
 	try {
 		const records = loadMemoryRecordsSync(clioDataDir());
-		const boundProfileName = parsed.agentProfile ?? effectiveSettings.workers.agentBindings[parsed.agentId];
-		const boundProfile = boundProfileName ? effectiveSettings.workers.profiles[boundProfileName] : undefined;
+		const boundProfileName = parsed.agentProfile ?? effectiveSettings.fleet.agentProfiles[parsed.agentId];
+		const boundProfile = boundProfileName ? effectiveSettings.fleet.profiles[boundProfileName] : undefined;
 		const configuredRuntime = (targetId: string | null | undefined): string | undefined =>
 			effectiveSettings.targets.find((target) => target.id === targetId)?.runtime;
 		const profileRuntimeId = configuredRuntime(boundProfile?.target);

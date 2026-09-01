@@ -794,8 +794,8 @@ function stubContext(): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const target: TargetDescriptor = { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
 	settings.targets = [target];
-	settings.workers.default.target = target.id;
-	settings.workers.default.model = "gpt-4o";
+	settings.fleet.default.target = target.id;
+	settings.fleet.default.model = "gpt-4o";
 	const runtime: RuntimeDescriptor = {
 		id: "openai",
 		displayName: "OpenAI",

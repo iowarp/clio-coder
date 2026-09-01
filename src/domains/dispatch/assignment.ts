@@ -44,9 +44,9 @@ export interface AssignmentPolicy {
 }
 
 export interface RoutingActivationSnapshot {
-	activeRoles: ReadonlyArray<ActiveRoutingRole>;
-	activePostures: ReadonlyArray<ActiveRoutingPosture>;
-	agentAutomation: { activeAgentRoles: ReadonlyArray<ActiveAgentRole> };
+	roles: ReadonlyArray<ActiveRoutingRole>;
+	postures: ReadonlyArray<ActiveRoutingPosture>;
+	agentRoles: ReadonlyArray<ActiveAgentRole>;
 }
 
 /** Activation is explicit in both dimensions and never widens mutation authority. */
@@ -60,8 +60,8 @@ export function activeRoutingEnabled(input: {
 	if (input.posture === "manual" || input.failover !== "approved") return false;
 	if (input.capabilityClass !== "read-only" && input.capabilityClass !== "verification") return false;
 	return (
-		input.settings.activeRoles.includes(input.role as ActiveRoutingRole) &&
-		input.settings.activePostures.includes(input.posture as ActiveRoutingPosture)
+		input.settings.roles.includes(input.role as ActiveRoutingRole) &&
+		input.settings.postures.includes(input.posture as ActiveRoutingPosture)
 	);
 }
 

@@ -296,8 +296,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			if (!deps.session.current()) {
 				const settings = deps.getSettings();
 				const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
-				if (settings.orchestrator.target) input.target = settings.orchestrator.target;
-				if (settings.orchestrator.model) input.model = settings.orchestrator.model;
+				if (settings.chat.target) input.target = settings.chat.target;
+				if (settings.chat.model) input.model = settings.chat.model;
 				deps.session.create(input);
 			}
 			const userTurn = appendTurn(deps.session, {

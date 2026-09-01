@@ -39,10 +39,10 @@ function settingsWithTargets(): ClioSettings {
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
-	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.background = { target: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
-	settings.scope = ["target-a/model-a", "target-b/model-b"];
+	Object.assign(settings.chat, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+	Object.assign(settings.context.memory, { target: "target-a", model: "model-a" });
+	settings.fleet.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.chat.modelPicker.cycleSet = ["target-a/model-a", "target-b/model-b"];
 	return settings;
 }
 
@@ -90,17 +90,17 @@ describe("contracts/session-routing", () => {
 		const saved = settingsWithTargets();
 		const routing = seedSessionRouting(saved);
 		deepStrictEqual(routing.orchestrator, { target: "target-a", model: "model-a", thinkingLevel: "off" });
-		deepStrictEqual(routing.background, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+		deepStrictEqual(routing.background, { target: "target-a", model: "model-a" });
 		deepStrictEqual(routing.workersDefault, { target: "target-a", model: "model-a", thinkingLevel: "off" });
 		deepStrictEqual(routing.scope, ["target-a/model-a", "target-b/model-b"]);
 
 		// Shared (non-routing) fields track the snapshot; routing tracks the session.
 		const externallyEdited = structuredClone(saved);
-		externallyEdited.theme = "midnight";
-		externallyEdited.orchestrator.model = "model-b";
+		externallyEdited.interface.desktopNotifications = true;
+		externallyEdited.chat.model = "model-b";
 		const view = applySessionRouting(externallyEdited, routing);
-		strictEqual(view.theme, "midnight");
-		strictEqual(view.orchestrator.model, "model-a");
+		strictEqual(view.interface.desktopNotifications, true);
+		strictEqual(view.chat.model, "model-a");
 	});
 
 	it("keeps two concurrent sessions' live routing independent while sharing saved defaults", () => {
@@ -112,34 +112,34 @@ describe("contracts/session-routing", () => {
 		sessionB.updateRouting({ orchestrator: { target: "target-b", model: "model-b" } });
 
 		// B's next turn routes to target-b; A is untouched.
-		strictEqual(sessionB.view().orchestrator.target, "target-b");
-		strictEqual(sessionA.view().orchestrator.target, "target-a");
-		strictEqual(sessionA.view().orchestrator.model, "model-a");
+		strictEqual(sessionB.view().chat.target, "target-b");
+		strictEqual(sessionA.view().chat.target, "target-a");
+		strictEqual(sessionA.view().chat.model, "model-a");
 		// New sessions inherit B's choice as the saved default.
-		strictEqual(file.current.orchestrator.target, "target-b");
+		strictEqual(file.current.chat.target, "target-b");
 
 		// Session B raises thinking (Shift+Tab path); A's thinking is untouched.
 		sessionB.updateRouting({ orchestrator: { thinkingLevel: "high" } });
-		strictEqual(sessionA.view().orchestrator.thinkingLevel, "off");
-		strictEqual(sessionB.view().orchestrator.thinkingLevel, "high");
+		strictEqual(sessionA.view().chat.thinkingLevel, "off");
+		strictEqual(sessionB.view().chat.thinkingLevel, "high");
 
 		// Session B rewires the fleet default (/settings fleet rows); A's /run
 		// target is untouched.
 		sessionB.updateRouting({ workersDefault: { target: "target-b", model: "model-b" } });
-		strictEqual(sessionA.view().workers.default.target, "target-a");
-		strictEqual(sessionB.view().workers.default.target, "target-b");
+		strictEqual(sessionA.view().fleet.default.target, "target-a");
+		strictEqual(sessionB.view().fleet.default.target, "target-b");
 
 		// Background routing is a third independent role, not an alias for chat
 		// or the fleet default.
 		sessionB.updateRouting({ background: { target: "target-b", model: "model-b" } });
-		strictEqual(sessionA.view().background.target, "target-a");
-		strictEqual(sessionB.view().background.target, "target-b");
-		strictEqual(sessionB.view().orchestrator.target, "target-b");
+		strictEqual(sessionA.view().context.memory.target, "target-a");
+		strictEqual(sessionB.view().context.memory.target, "target-b");
+		strictEqual(sessionB.view().chat.target, "target-b");
 
 		// Session B narrows the Alt+J / Alt+K cycle set; A keeps its own.
 		sessionB.updateRouting({ scope: ["target-b/model-b"] });
-		deepStrictEqual(sessionA.view().scope, ["target-a/model-a", "target-b/model-b"]);
-		deepStrictEqual(sessionB.view().scope, ["target-b/model-b"]);
+		deepStrictEqual(sessionA.view().chat.modelPicker.cycleSet, ["target-a/model-a", "target-b/model-b"]);
+		deepStrictEqual(sessionB.view().chat.modelPicker.cycleSet, ["target-b/model-b"]);
 	});
 
 	// G3 from smoke pass 2: a mid-conversation `/model` rewrote the orchestrator
@@ -150,14 +150,14 @@ describe("contracts/session-routing", () => {
 		const session = simulateSession(file);
 
 		session.updateRoutingAtScope({ orchestrator: { target: "target-b", model: "model-b" } }, "session");
-		strictEqual(session.view().orchestrator.target, "target-b", "the session routes to the new target");
-		strictEqual(file.current.orchestrator.target, "target-a", "settings.yaml is untouched");
-		strictEqual(file.current.orchestrator.model, "model-a");
+		strictEqual(session.view().chat.target, "target-b", "the session routes to the new target");
+		strictEqual(file.current.chat.target, "target-a", "settings.yaml is untouched");
+		strictEqual(file.current.chat.model, "model-a");
 
 		session.updateRoutingAtScope({ orchestrator: { target: "target-b", model: "model-b" } }, "global");
-		strictEqual(session.view().orchestrator.target, "target-b");
-		strictEqual(file.current.orchestrator.target, "target-b", "a global save is the next launch's default");
-		strictEqual(file.current.orchestrator.model, "model-b");
+		strictEqual(session.view().chat.target, "target-b");
+		strictEqual(file.current.chat.target, "target-b", "a global save is the next launch's default");
+		strictEqual(file.current.chat.model, "model-b");
 	});
 
 	it("writes through only the patched fields so sessions cannot clobber each other's saved defaults", () => {
@@ -170,9 +170,9 @@ describe("contracts/session-routing", () => {
 		sessionA.updateRouting({ orchestrator: { target: "target-b", model: "model-b" } });
 		sessionB.updateRouting({ orchestrator: { thinkingLevel: "medium" } });
 
-		strictEqual(file.current.orchestrator.target, "target-b");
-		strictEqual(file.current.orchestrator.model, "model-b");
-		strictEqual(file.current.orchestrator.thinkingLevel, "medium");
+		strictEqual(file.current.chat.target, "target-b");
+		strictEqual(file.current.chat.model, "model-b");
+		strictEqual(file.current.chat.thinkingLevel, "medium");
 	});
 
 	it("absorbs routing edits from a whole-settings blob without leaking session routing on unrelated edits", () => {
@@ -180,31 +180,31 @@ describe("contracts/session-routing", () => {
 		const session = simulateSession(file);
 		// Another process moved the saved default; the session keeps its routing.
 		const external = structuredClone(file.current);
-		external.orchestrator.target = "target-b";
-		external.orchestrator.model = "model-b";
+		external.chat.target = "target-b";
+		external.chat.model = "model-b";
 		file.current = external;
-		strictEqual(session.view().orchestrator.target, "target-a");
+		strictEqual(session.view().chat.target, "target-a");
 
 		// /settings edit to a non-routing field: persisting the blob (derived
 		// from the effective view) must not overwrite the saved routing default
 		// (target-b) with the session's live routing (target-a).
 		const nonRoutingEdit = session.view();
-		nonRoutingEdit.retry.maxRetries = 7;
+		nonRoutingEdit.chat.retry.maxRetries = 7;
 		session.applySettingsBlob(nonRoutingEdit);
-		strictEqual(file.current.retry.maxRetries, 7);
-		strictEqual(file.current.orchestrator.target, "target-b");
-		strictEqual(session.view().orchestrator.target, "target-a");
+		strictEqual(file.current.chat.retry.maxRetries, 7);
+		strictEqual(file.current.chat.target, "target-b");
+		strictEqual(session.view().chat.target, "target-a");
 
 		// /settings edit to a routing field: applies to the session and becomes
 		// the saved default.
 		const routingEdit = session.view();
-		routingEdit.workers.default.target = "target-b";
-		routingEdit.workers.default.model = "model-b";
+		routingEdit.fleet.default.target = "target-b";
+		routingEdit.fleet.default.model = "model-b";
 		session.applySettingsBlob(routingEdit);
-		strictEqual(session.view().workers.default.target, "target-b");
-		strictEqual(file.current.workers.default.target, "target-b");
+		strictEqual(session.view().fleet.default.target, "target-b");
+		strictEqual(file.current.fleet.default.target, "target-b");
 		// The untouched chat routing still did not leak into the file.
-		strictEqual(file.current.orchestrator.target, "target-b");
+		strictEqual(file.current.chat.target, "target-b");
 	});
 
 	it("flags external routing divergence but stays silent for a session's own write-through", () => {
@@ -220,15 +220,15 @@ describe("contracts/session-routing", () => {
 		// External write: another process changes chat model and the scope list.
 		const beforeExternal = structuredClone(file.current);
 		const external = structuredClone(file.current);
-		external.orchestrator.model = "model-b";
-		external.scope = ["target-b/model-b"];
+		external.chat.model = "model-b";
+		external.chat.modelPicker.cycleSet = ["target-b/model-b"];
 		file.current = external;
 		const externalDiff = diffSettings(beforeExternal, file.current);
 		const diverged = externalRoutingDivergence(externalDiff.nextTurn, file.current, session.view());
 		ok(diverged.includes("chat model"), `expected chat model divergence, got: ${diverged.join(", ")}`);
-		ok(diverged.includes("Alt+J/Alt+K scope"), `expected scope divergence, got: ${diverged.join(", ")}`);
+		ok(diverged.includes("Alt+J/Alt+K cycle set"), `expected scope divergence, got: ${diverged.join(", ")}`);
 		// The session's live routing is still its own.
-		strictEqual(session.view().orchestrator.model, "model-a");
+		strictEqual(session.view().chat.model, "model-a");
 	});
 
 	it("keeps the session's routing reference when the active target is removed externally", () => {
@@ -236,13 +236,13 @@ describe("contracts/session-routing", () => {
 		const session = simulateSession(file);
 		const external = structuredClone(file.current);
 		external.targets = external.targets.filter((entry) => entry.id !== "target-a");
-		external.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "off" };
+		Object.assign(external.chat, { target: "target-b", model: "model-b", thinkingLevel: "off" });
 		file.current = external;
 
 		// The view still names the session's target so resolution can fail with
 		// an actionable message instead of silently jumping targets.
 		const view = session.view();
-		strictEqual(view.orchestrator.target, "target-a");
+		strictEqual(view.chat.target, "target-a");
 		strictEqual(
 			view.targets.some((entry) => entry.id === "target-a"),
 			false,
@@ -274,7 +274,7 @@ describe("contracts/session-routing", () => {
 		// target-b. The model submenu must list models for target-b, not the
 		// snapshot captured when the overlay opened.
 		const updated = structuredClone(live.current);
-		updated.orchestrator.target = "target-b";
+		updated.chat.target = "target-b";
 		live.current = updated;
 
 		const submenu = modelItem.submenu?.("model-a", () => undefined);
@@ -290,16 +290,16 @@ describe("contracts/session-routing", () => {
 		// shows the new model everywhere instead of the stale snapshot.
 		const settings = settingsWithTargets();
 		applySettingChange(settings, "orchestrator.target", "target-b");
-		strictEqual(settings.orchestrator.target, "target-b");
-		strictEqual(settings.orchestrator.model, "model-b");
+		strictEqual(settings.chat.target, "target-b");
+		strictEqual(settings.chat.model, "model-b");
 
 		applySettingChange(settings, "workers.default.target", "target-b");
-		strictEqual(settings.workers.default.model, "model-b");
+		strictEqual(settings.fleet.default.model, "model-b");
 
 		// Unsetting a target clears the model rather than leaving a dangling ref.
 		applySettingChange(settings, "orchestrator.target", "(unset)");
-		strictEqual(settings.orchestrator.target, null);
-		strictEqual(settings.orchestrator.model, null);
+		strictEqual(settings.chat.target, null);
+		strictEqual(settings.chat.model, null);
 
 		// Rebuilt rows pick up the live values, so the in-place row merge the
 		// overlay performs has fresh data for every row, not just the edited one.
@@ -318,8 +318,8 @@ describe("contracts/session-routing", () => {
 		// hint only on surfaces that can run slash commands.
 		const before = structuredClone(file.current);
 		const external = structuredClone(file.current);
-		external.orchestrator.model = "model-b";
-		external.scope = ["target-b/model-b"];
+		external.chat.model = "model-b";
+		external.chat.modelPicker.cycleSet = ["target-b/model-b"];
 		file.current = external;
 		const diff = diffSettings(before, file.current);
 		const tui = routingChangeNotices(diff.nextTurn, file.current, session.view(), { commandHints: true });
@@ -340,7 +340,7 @@ describe("contracts/session-routing", () => {
 		const beforeRemoval = structuredClone(file.current);
 		const removed = structuredClone(file.current);
 		removed.targets = removed.targets.filter((entry) => entry.id !== "target-a");
-		removed.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "off" };
+		Object.assign(removed.chat, { target: "target-b", model: "model-b", thinkingLevel: "off" });
 		file.current = removed;
 		const removalDiff = diffSettings(beforeRemoval, file.current);
 		const notices = routingChangeNotices(removalDiff.nextTurn, file.current, session.view());
@@ -409,22 +409,22 @@ describe("contracts/session-routing recents", () => {
 describe("contracts/session-routing overrides", () => {
 	it("reads and writes leaves by dotted object path and deletes on undefined", () => {
 		const settings = settingsWithTargets();
-		strictEqual(getAtPath(settings, "compaction.threshold"), settings.compaction.threshold);
-		strictEqual(getAtPath(settings, "delegation.defaults.connectTimeoutMs"), 30000);
+		strictEqual(getAtPath(settings, "context.compaction.threshold"), settings.context.compaction.threshold);
+		strictEqual(getAtPath(settings, "integrations.externalAgents.defaults.connectTimeoutMs"), 30000);
 		strictEqual(getAtPath(settings, "missing.key"), undefined);
 
-		setAtPath(settings, "budget.concurrency", 4);
-		strictEqual(settings.budget.concurrency, 4);
-		settings.compaction.model = "x/y";
-		setAtPath(settings, "compaction.model", undefined);
-		strictEqual("model" in settings.compaction, false);
+		setAtPath(settings, "fleet.concurrency", 4);
+		strictEqual(settings.fleet.concurrency, 4);
+		settings.context.compaction.model = "x/y";
+		setAtPath(settings, "context.compaction.model", undefined);
+		strictEqual("model" in settings.context.compaction, false);
 	});
 
 	it("marks only the routing surface as routing paths", () => {
-		for (const path of ["orchestrator.target", "background.model", "workers.default.model", "scope"]) {
+		for (const path of ["chat.target", "context.memory.model", "fleet.default.model", "chat.modelPicker.cycleSet"]) {
 			ok(isRoutingPath(path), `${path} is routing`);
 		}
-		for (const path of ["workers.maxRetries", "budget.concurrency", "compaction.auto", "autonomy"]) {
+		for (const path of ["fleet.retry.maxRetries", "fleet.concurrency", "context.compaction.auto", "safety.autonomy"]) {
 			ok(!isRoutingPath(path), `${path} is not routing`);
 		}
 	});
@@ -432,15 +432,15 @@ describe("contracts/session-routing overrides", () => {
 	it("overlays session overrides on the shared snapshot without mutating it", () => {
 		const base = settingsWithTargets();
 		const overrides: SessionOverrides = new Map<string, unknown>([
-			["autonomy", "full-auto"],
-			["retry.maxRetries", 8],
+			["safety.autonomy", "full-auto"],
+			["chat.retry.maxRetries", 8],
 		]);
 		const view = applyOverrides(base, overrides);
-		strictEqual(view.autonomy, "full-auto");
-		strictEqual(view.retry.maxRetries, 8);
+		strictEqual(view.safety.autonomy, "full-auto");
+		strictEqual(view.chat.retry.maxRetries, 8);
 		// the shared snapshot is untouched: the override is session-local
-		strictEqual(base.autonomy, "auto-edit");
-		strictEqual(base.retry.maxRetries, DEFAULT_SETTINGS.retry.maxRetries);
+		strictEqual(base.safety.autonomy, "auto-edit");
+		strictEqual(base.chat.retry.maxRetries, DEFAULT_SETTINGS.chat.retry.maxRetries);
 	});
 
 	it("returns the base object unchanged when there are no overrides", () => {
@@ -450,22 +450,21 @@ describe("contracts/session-routing overrides", () => {
 
 	it("derives a minimal routing patch per edited id, carrying a rebased model on target change", () => {
 		const settings = settingsWithTargets();
-		settings.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "high" };
-		deepStrictEqual(routingPatchForId("orchestrator.target", settings), {
+		Object.assign(settings.chat, { target: "target-b", model: "model-b", thinkingLevel: "high" });
+		deepStrictEqual(routingPatchForId("chat.target", settings), {
 			orchestrator: { target: "target-b", model: "model-b" },
 		});
-		deepStrictEqual(routingPatchForId("orchestrator.thinkingLevel", settings), {
+		deepStrictEqual(routingPatchForId("chat.thinkingLevel", settings), {
 			orchestrator: { thinkingLevel: "high" },
 		});
-		settings.background = { target: "target-b", model: "model-b", thinkingLevel: "medium" };
-		deepStrictEqual(routingPatchForId("background.target", settings), {
+		Object.assign(settings.context.memory, { target: "target-b", model: "model-b" });
+		deepStrictEqual(routingPatchForId("context.memory.target", settings), {
 			background: { target: "target-b", model: "model-b" },
 		});
-		deepStrictEqual(routingPatchForId("background.thinkingLevel", settings), {
-			background: { thinkingLevel: "medium" },
+		deepStrictEqual(routingPatchForId("chat.modelPicker.cycleSet", settings), {
+			scope: settings.chat.modelPicker.cycleSet,
 		});
-		deepStrictEqual(routingPatchForId("scope", settings), { scope: settings.scope });
-		strictEqual(routingPatchForId("autonomy", settings), null);
+		strictEqual(routingPatchForId("safety.autonomy", settings), null);
 	});
 
 	it("globalizes a routing edit even after it was applied to the session", () => {
@@ -475,34 +474,34 @@ describe("contracts/session-routing overrides", () => {
 		const file = { current: settingsWithTargets() };
 		const routing: SessionRoutingState = seedSessionRouting(file.current);
 		const next = structuredClone(file.current);
-		next.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "off" };
+		Object.assign(next.chat, { target: "target-b", model: "model-b", thinkingLevel: "off" });
 
 		// session apply
-		const patch = routingPatchForId("orchestrator.target", next);
+		const patch = routingPatchForId("chat.target", next);
 		ok(patch, "routing id yields a patch");
 		applyRoutingPatch(routing, patch);
-		strictEqual(applySessionRouting(file.current, routing).orchestrator.target, "target-b");
+		strictEqual(applySessionRouting(file.current, routing).chat.target, "target-b");
 		// the file (global default) is still untouched
-		strictEqual(file.current.orchestrator.target, "target-a");
+		strictEqual(file.current.chat.target, "target-a");
 
 		// global save of the same edit, after the session already moved
 		const saved = structuredClone(file.current);
-		mergeRoutingPatchIntoSettings(saved, routingPatchForId("orchestrator.target", next) as RoutingPatch);
+		mergeRoutingPatchIntoSettings(saved, routingPatchForId("chat.target", next) as RoutingPatch);
 		file.current = saved;
-		strictEqual(file.current.orchestrator.target, "target-b");
-		strictEqual(file.current.orchestrator.model, "model-b");
+		strictEqual(file.current.chat.target, "target-b");
+		strictEqual(file.current.chat.model, "model-b");
 	});
 
 	it("a global save supersedes a prior session override on the same leaf", () => {
 		// Session-only override, then global save of the same leaf: the override
 		// is cleared and the file becomes authoritative.
-		const overrides: SessionOverrides = new Map<string, unknown>([["retry.maxRetries", 8]]);
+		const overrides: SessionOverrides = new Map<string, unknown>([["chat.retry.maxRetries", 8]]);
 		const file = { current: settingsWithTargets() };
 		// global save path: persist the leaf, drop the override
-		setAtPath(file.current, "retry.maxRetries", 5);
-		overrides.delete("retry.maxRetries");
+		setAtPath(file.current, "chat.retry.maxRetries", 5);
+		overrides.delete("chat.retry.maxRetries");
 		const view = applyOverrides(file.current, overrides);
-		strictEqual(view.retry.maxRetries, 5);
+		strictEqual(view.chat.retry.maxRetries, 5);
 		strictEqual(overrides.size, 0);
 	});
 });

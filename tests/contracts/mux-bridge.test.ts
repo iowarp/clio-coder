@@ -57,6 +57,16 @@ function fakeMux(options: { available?: boolean } = {}): FakeMux {
 		async closePane() {
 			throw new Error("the bridge must never close a pane");
 		},
+		async focusPane(): Promise<boolean> {
+			return false;
+		},
+		async zoomPane(): Promise<boolean> {
+			return false;
+		},
+		async resizeDock(): Promise<boolean> {
+			return false;
+		},
+		docks: () => [],
 		async notify(request: MuxNotifyRequest): Promise<void> {
 			calls.push({ kind: "notify", request });
 			if (notifyError) throw notifyError;

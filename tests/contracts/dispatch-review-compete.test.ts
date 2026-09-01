@@ -233,7 +233,7 @@ describe("reviewer-gated dispatch", () => {
 
 	it("a retried reviewer resolves its staged output against the terminal attempt", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		const fabric = scriptedGateFabric({
 			reviewerFailures: 1,
 			reviewerAnswers: [reviewReport("pass", "retry verified the work")],
@@ -264,7 +264,7 @@ describe("reviewer-gated dispatch", () => {
 
 	it("crash recovery rebuilds a retried decider decision from verified receipts", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		const fabric = scriptedGateFabric({ reviewerFailures: 1 });
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
@@ -594,7 +594,7 @@ describe("compete dispatch", () => {
 	it("a retried judge resolves its staged output against the terminal attempt", async () => {
 		const repo = makeCompeteRepo();
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		const fabric = scriptedGateFabric({ judgeFailures: 1, judgeAnswers: [judgeReport(2, "retry chose two")] });
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,

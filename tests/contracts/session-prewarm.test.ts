@@ -20,11 +20,11 @@ import { PREWARM_MAX_TOKENS, PREWARM_USER_TEXT, runPrewarmRound } from "../../sr
 
 // --- shared fixtures --------------------------------------------------------
 
-function settings(overrides: Partial<ClioSettings["prewarm"]> = {}): ClioSettings {
+function settings(enabled = true): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.target = "test-target";
-	value.orchestrator.model = "model";
-	value.orchestrator.thinkingLevel = "off";
+	value.chat.target = "test-target";
+	value.chat.model = "model";
+	value.chat.thinkingLevel = "off";
 	value.targets = [
 		{
 			id: "test-target",
@@ -33,7 +33,7 @@ function settings(overrides: Partial<ClioSettings["prewarm"]> = {}): ClioSetting
 			capabilities: { contextWindow: 100_000, maxTokens: 4096, tools: true, chat: true },
 		},
 	];
-	value.prewarm = { ...value.prewarm, ...overrides };
+	value.chat.prewarm = enabled;
 	return value;
 }
 
@@ -416,7 +416,7 @@ describe("contracts/session pre-warm admission", () => {
 	it("never pre-warms off the local-native tier, whatever the setting says", async () => {
 		const rounds: Array<{ systemPrompt: string; messages: ReadonlyArray<AgentMessage>; thinkingLevel: string }> = [];
 		const loop = createChatLoop({
-			getSettings: () => settings({ enabled: true }),
+			getSettings: () => settings(true),
 			providers: providers("cloud"),
 			knownTargets: () => new Set(["test-target"]),
 			runPrewarm: recordingPrewarm(rounds),
@@ -446,7 +446,7 @@ describe("contracts/session pre-warm admission", () => {
 
 	it("does not pre-warm when the setting is off or the surface has no operator", async () => {
 		const disabled = createChatLoop({
-			getSettings: () => settings({ enabled: false }),
+			getSettings: () => settings(false),
 			providers: providers("local-native"),
 			knownTargets: () => new Set(["test-target"]),
 			runPrewarm: recordingPrewarm([]),

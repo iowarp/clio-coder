@@ -113,27 +113,30 @@ const trigger: WatchdogTrigger = {
 
 describe("contracts/watchdog", () => {
 	it("is off by default and validates its three keys", () => {
-		strictEqual(DEFAULT_SETTINGS.watchdog.enabled, false);
-		strictEqual(DEFAULT_SETTINGS.watchdog.target, undefined);
-		strictEqual(DEFAULT_SETTINGS.watchdog.cadenceToolCalls, undefined);
+		strictEqual(DEFAULT_SETTINGS.safety.review.enabled, false);
+		strictEqual(DEFAULT_SETTINGS.safety.review.target, undefined);
+		strictEqual(DEFAULT_SETTINGS.safety.review.cadenceToolCalls, undefined);
 
-		const good = validateSettings({ watchdog: { enabled: true, target: "mini", cadenceToolCalls: 12 } });
+		const good = validateSettings({
+			targets: [{ id: "mini", runtime: "openai" }],
+			safety: { review: { enabled: true, target: "mini", cadenceToolCalls: 12 } },
+		});
 		deepStrictEqual(good.issues, []);
-		deepStrictEqual(good.settings.watchdog, { enabled: true, target: "mini", cadenceToolCalls: 12 });
+		deepStrictEqual(good.settings.safety.review, { enabled: true, target: "mini", cadenceToolCalls: 12 });
 
-		const bad = validateSettings({ watchdog: { enabled: "yes", cadenceToolCalls: 0, nope: 1 } });
+		const bad = validateSettings({ safety: { review: { enabled: "yes", cadenceToolCalls: 0, nope: 1 } } });
 		const paths = bad.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["watchdog.cadenceToolCalls", "watchdog.enabled", "watchdog.nope"]);
+		deepStrictEqual(paths, ["safety.review.cadenceToolCalls", "safety.review.enabled", "safety.review.nope"]);
 	});
 
 	it("hot reloads: a watchdog change never asks for a restart", () => {
 		const next = structuredClone(DEFAULT_SETTINGS);
-		next.watchdog = { enabled: true, target: "mini", cadenceToolCalls: 5 };
+		next.safety.review = { enabled: true, target: "mini", cadenceToolCalls: 5 };
 		const diff = diffSettings(DEFAULT_SETTINGS, next);
 		deepStrictEqual(diff.restartRequired, []);
 		deepStrictEqual(diff.nextTurn, []);
 		ok(diff.hotReload.length > 0);
-		ok(diff.hotReload.every((path) => path.startsWith("watchdog.")));
+		ok(diff.hotReload.every((path) => path.startsWith("safety.review.")));
 	});
 
 	it("fires once per mutating turn with the turn's coalesced diff and the board scope", () => {

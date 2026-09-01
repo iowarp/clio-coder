@@ -440,8 +440,8 @@ describe("fleet v5 execution", () => {
 				maxConcurrentRequests: 1,
 			},
 		];
-		settings.workers.default.target = "mini";
-		settings.workers.default.model = "fleet-model";
+		settings.fleet.default.target = "mini";
+		settings.fleet.default.model = "fleet-model";
 		return settings;
 	};
 

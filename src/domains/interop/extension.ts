@@ -39,7 +39,7 @@ export function createInteropBundle(_context: DomainContext): DomainBundle<Inter
 		// from the proposals, which read the file, and not yet in the configured
 		// list, which read the snapshot, so it was in neither until a reopen.
 		configured() {
-			return readSettings().delegation.agents;
+			return readSettings().integrations.externalAgents.entries;
 		},
 		accept(ids) {
 			const result = acceptInteropAgents(ids, detected ?? readInteropReport() ?? EMPTY_REPORT);

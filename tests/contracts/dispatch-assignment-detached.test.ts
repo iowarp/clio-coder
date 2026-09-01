@@ -59,7 +59,7 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 
 	it("collects the terminal retry with durable attempt history and keeps failed evidence visible", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,
@@ -111,7 +111,7 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 
 	it("threads the successful retry output into the next pipeline stage", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const captured: { secondStageSpec?: WorkerSpec } = {};
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -148,7 +148,7 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 
 	it("canceling an assignment with a queued retry prevents future attempts", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resilienceCooldownMs: 0,

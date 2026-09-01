@@ -229,7 +229,7 @@ describe("contracts/resource-library", () => {
 		writeFileSync(publicIndex, JSON.stringify({ skills: [entry("prompt", "overlay", "/public.md")] }));
 		writeCatalog(path.join(privateDir, "library.yaml"), [entry("prompt", "overlay", "./prompt.md")]);
 		updateSettings((settings) => {
-			settings.library.catalog = path.join(privateDir, "library.yaml");
+			settings.integrations.library.catalog = path.join(privateDir, "library.yaml");
 		});
 		const result = discoverLibrary({ marketplace: { indexPath: publicIndex, catalogDir: null } });
 		strictEqual(result.entries.find((item) => item.name === "overlay")?.sourceUrl, path.join(privateDir, "prompt.md"));
@@ -263,8 +263,8 @@ describe("contracts/resource-library", () => {
 		await rejects(syncLibrary("push", runner), /library_sync_disabled/);
 		strictEqual(calls, 0);
 		updateSettings((settings) => {
-			settings.library.sync = true;
-			settings.library.remote = "https://example.test/catalog.git";
+			settings.integrations.library.sync = true;
+			settings.integrations.library.remote = "https://example.test/catalog.git";
 		});
 		await rejects(syncLibrary("sync", runner), /library_remote_unconfirmed/);
 		strictEqual(calls, 0);
@@ -273,22 +273,22 @@ describe("contracts/resource-library", () => {
 	it("sets an absent remote during confirmation and refuses a configured mismatch", () => {
 		const remote = "https://example.test/catalog.git";
 		confirmLibraryRemote(remote);
-		strictEqual(readSettings().library.remote, remote);
-		strictEqual(readSettings().library.confirmedRemote, remote);
+		strictEqual(readSettings().integrations.library.remote, remote);
+		strictEqual(readSettings().integrations.library.confirmedRemote, remote);
 		updateSettings((settings) => {
-			settings.library.remote = "https://example.test/other.git";
-			settings.library.confirmedRemote = null;
+			settings.integrations.library.remote = "https://example.test/other.git";
+			settings.integrations.library.confirmedRemote = null;
 		});
 		throws(() => confirmLibraryRemote(remote), /library_remote_mismatch/);
-		strictEqual(readSettings().library.confirmedRemote, null);
+		strictEqual(readSettings().integrations.library.confirmedRemote, null);
 	});
 
 	it("uses the exact no-shell git vectors for confirmed sync and push", async () => {
 		const remote = "https://example.test/catalog.git";
 		updateSettings((settings) => {
-			settings.library.sync = true;
-			settings.library.remote = remote;
-			settings.library.confirmedRemote = remote;
+			settings.integrations.library.sync = true;
+			settings.integrations.library.remote = remote;
+			settings.integrations.library.confirmedRemote = remote;
 		});
 		const calls: Array<{ file: string; args: string[]; options: { cwd: string; workspaceRoot: string } }> = [];
 		const runner: LibraryCommandRunner = async (file, args, options) => {

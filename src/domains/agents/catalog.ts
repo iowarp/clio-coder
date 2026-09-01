@@ -129,7 +129,7 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 /**
  * Spec-based roster used when the caller already holds normalized specs.
  * `AgentsContract.listSpecs()` includes ACP delegation agents synthesized from
- * settings.delegation.agents[], which never exist as recipe files; rendering
+ * settings.integrations.externalAgents.entries[], which never exist as recipe files; rendering
  * from specs keeps those dispatchable targets discoverable in the fleet block.
  */
 export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSpec>): AgentCatalogSections {

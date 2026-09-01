@@ -266,7 +266,7 @@ export function requireBuild(): void {
 export interface LiveHomeOptions {
 	/** Must start with LIVE_HOME_PREFIX so the lease sweep can recognise the tree. */
 	prefix: string;
-	autonomy?: LiveSettings["autonomy"];
+	autonomy?: LiveSettings["safety"]["autonomy"];
 	/** Last word on the scratch settings before they are written. */
 	settings?: (settings: LiveSettings) => void;
 	/** Leave credentials in place for a later process (live:home). Drivers never set this. */
@@ -754,9 +754,11 @@ export function prepareLiveHome(args: LiveArgs, options: LiveHomeOptions): LiveH
 
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [structuredClone(target)];
-		settings.orchestrator = { target: target.id, model, thinkingLevel: args.thinking };
-		settings.workers.default = { target: target.id, model, thinkingLevel: args.thinking };
-		if (options.autonomy) settings.autonomy = options.autonomy;
+		settings.chat.target = target.id;
+		settings.chat.model = model;
+		settings.chat.thinkingLevel = args.thinking;
+		settings.fleet.default = { target: target.id, model, thinkingLevel: args.thinking };
+		if (options.autonomy) settings.safety.autonomy = options.autonomy;
 		options.settings?.(settings);
 		const settingsPath = join(configDir, "settings.yaml");
 		writeFileSync(settingsPath, stringify(settings), { encoding: "utf8", mode: 0o600 });

@@ -39,8 +39,8 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 	const target: TargetDescriptor = settings.targets[0] ?? { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
 	if (settings.targets.length === 0) {
 		settings.targets = [target];
-		settings.workers.default.target = target.id;
-		settings.workers.default.model = target.defaultModel ?? "gpt-4o";
+		settings.fleet.default.target = target.id;
+		settings.fleet.default.model = target.defaultModel ?? "gpt-4o";
 	}
 	const runtime: RuntimeDescriptor = options.runtime ?? {
 		id: target.runtime,

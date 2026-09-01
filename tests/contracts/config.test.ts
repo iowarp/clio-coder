@@ -70,7 +70,7 @@ describe("contracts/config", () => {
 
 	it("validates target config and fills default/fallback models", () => {
 		const result = validateSettings({
-			identity: "clio",
+			version: 2,
 			targets: [
 				{
 					id: "hosted-target",
@@ -78,17 +78,18 @@ describe("contracts/config", () => {
 					wireModels: ["primary-model", "worker-model", "primary-model"],
 				},
 			],
-			orchestrator: {
+			chat: {
 				target: "missing-target",
 				model: "stale-model",
 				thinkingLevel: "xhigh",
 			},
-			background: {
-				target: "hosted-target",
-				model: "worker-model",
-				thinkingLevel: "low",
+			context: {
+				memory: {
+					target: "hosted-target",
+					model: "worker-model",
+				},
 			},
-			workers: {
+			fleet: {
 				default: {
 					target: "hosted-target",
 					model: null,
@@ -102,14 +103,13 @@ describe("contracts/config", () => {
 		strictEqual(settings.targets[0]?.defaultModel, "primary-model");
 		deepStrictEqual(settings.targets[0]?.wireModels, ["primary-model", "worker-model"]);
 		// Dangling routing references are normalized away, not aliased.
-		strictEqual(settings.orchestrator.target, null);
-		strictEqual(settings.orchestrator.model, null);
-		strictEqual(settings.background.target, "hosted-target");
-		strictEqual(settings.background.model, "worker-model");
-		strictEqual(settings.background.thinkingLevel, "low");
-		strictEqual(settings.workers.default.target, "hosted-target");
-		strictEqual(settings.workers.default.model, "primary-model");
-		strictEqual(settings.skills.trustProjectCompatRoots, false);
+		strictEqual(settings.chat.target, null);
+		strictEqual(settings.chat.model, null);
+		strictEqual(settings.context.memory.target, "hosted-target");
+		strictEqual(settings.context.memory.model, "worker-model");
+		strictEqual(settings.fleet.default.target, "hosted-target");
+		strictEqual(settings.fleet.default.model, "primary-model");
+		strictEqual(settings.integrations.projectResources.trustProjectImports, false);
 	});
 
 	it("validates an explicit positive integer request-slot override on a target", () => {
@@ -191,47 +191,49 @@ describe("contracts/config", () => {
 
 	it("validates proactive-memory trigger settings and classifies them for the next turn", () => {
 		const result = validateSettings({
-			memory: {
-				intervention: {
+			context: {
+				memory: {
 					enabled: false,
-					everyNTools: 6,
-					windowSteps: 12,
-					maxTokens: 250,
+					cadenceToolCalls: 6,
+					trajectorySteps: 12,
+					maxOutputTokens: 250,
 					timeoutMs: 7_500,
 				},
 			},
 		});
 		deepStrictEqual(result.issues, []);
-		deepStrictEqual(result.settings.memory.intervention, {
+		deepStrictEqual(result.settings.context.memory, {
 			enabled: false,
-			everyNTools: 6,
-			windowSteps: 12,
-			maxTokens: 250,
+			target: null,
+			model: null,
+			cadenceToolCalls: 6,
+			trajectorySteps: 12,
+			maxOutputTokens: 250,
 			timeoutMs: 7_500,
 		});
 		const changed = diffSettings(DEFAULT_SETTINGS, result.settings);
 		deepStrictEqual(changed.nextTurn, [
-			"memory.intervention.enabled",
-			"memory.intervention.everyNTools",
-			"memory.intervention.windowSteps",
-			"memory.intervention.maxTokens",
-			"memory.intervention.timeoutMs",
+			"context.memory.enabled",
+			"context.memory.cadenceToolCalls",
+			"context.memory.trajectorySteps",
+			"context.memory.maxOutputTokens",
+			"context.memory.timeoutMs",
 		]);
 	});
 
 	it("rejects malformed proactive-memory settings without accepting partial invalid values", () => {
 		const result = validateSettings({
-			memory: {
-				intervention: { enabled: "yes", everyNTools: 0, timeoutMs: 1.5, extra: true },
+			context: {
+				memory: { enabled: "yes", cadenceToolCalls: 0, timeoutMs: 1.5, extra: true },
 			},
 		});
 		deepStrictEqual(result.issues.map((issue) => issue.path).sort(), [
-			"memory.intervention.enabled",
-			"memory.intervention.everyNTools",
-			"memory.intervention.extra",
-			"memory.intervention.timeoutMs",
+			"context.memory.cadenceToolCalls",
+			"context.memory.enabled",
+			"context.memory.extra",
+			"context.memory.timeoutMs",
 		]);
-		deepStrictEqual(result.settings.memory.intervention, DEFAULT_SETTINGS.memory.intervention);
+		deepStrictEqual(result.settings.context.memory, DEFAULT_SETTINGS.context.memory);
 	});
 
 	it("reports unknown keys as validation errors with exact paths", () => {
@@ -241,52 +243,57 @@ describe("contracts/config", () => {
 			state: {
 				recentModels: ["model-a"],
 			},
-			compaction: {
-				threshold: 0.92,
-				thresholds: { llmSummary: 0.99 },
+			context: {
+				compaction: {
+					threshold: 0.92,
+					thresholds: { llmSummary: 0.99 },
+				},
 			},
 		});
 		const paths = result.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["compaction.thresholds", "defaultMode", "safetyLevel", "state"]);
+		deepStrictEqual(paths, ["context.compaction.thresholds", "defaultMode", "safetyLevel", "state"]);
 		for (const issue of result.issues) strictEqual(issue.message, "unknown key");
 		// Valid fields still land on the built settings.
-		strictEqual(result.settings.compaction.threshold, 0.92);
+		strictEqual(result.settings.context.compaction.threshold, 0.92);
 	});
 
 	it("reports type and enum violations as validation errors with exact paths", () => {
 		const result = validateSettings({
-			autonomy: "bananas",
-			budget: { concurrency: 0 },
+			safety: { autonomy: "bananas" },
+			fleet: { concurrency: 0 },
 			targets: [{ runtime: "openai-compat" }],
-			retry: { maxRetries: 1.5 },
-			terminal: { tuiMode: "windowed", fullscreenScrollbar: "sometimes", smoothStreaming: "sometimes" },
+			chat: { retry: { maxRetries: 1.5 } },
+			interface: { mode: "windowed", fullscreenScrollbar: "sometimes", smoothStreaming: "sometimes" },
 		});
 		const paths = result.issues.map((issue) => issue.path).sort();
 		deepStrictEqual(paths, [
-			"autonomy",
-			"budget.concurrency",
-			"retry.maxRetries",
+			"chat.retry.maxRetries",
+			"fleet.concurrency",
+			"interface.fullscreenScrollbar",
+			"interface.mode",
+			"interface.smoothStreaming",
+			"safety.autonomy",
 			"targets[0].id",
-			"terminal.fullscreenScrollbar",
-			"terminal.smoothStreaming",
-			"terminal.tuiMode",
 		]);
 		// Invalid fields fall back to defaults on the built settings.
-		strictEqual(result.settings.autonomy, DEFAULT_SETTINGS.autonomy);
-		strictEqual(result.settings.budget.concurrency, "auto");
+		strictEqual(result.settings.safety.autonomy, DEFAULT_SETTINGS.safety.autonomy);
+		strictEqual(result.settings.fleet.concurrency, "auto");
 	});
 
 	it("defaults commit attribution on, validates it strictly, and classifies it as live", () => {
-		strictEqual(DEFAULT_SETTINGS.attribution.gitCommits, true);
-		const disabled = validateSettings({ attribution: { gitCommits: false } });
+		strictEqual(DEFAULT_SETTINGS.integrations.git.commitAttribution, true);
+		const disabled = validateSettings({ integrations: { git: { commitAttribution: false } } });
 		deepStrictEqual(disabled.issues, []);
-		strictEqual(disabled.settings.attribution.gitCommits, false);
+		strictEqual(disabled.settings.integrations.git.commitAttribution, false);
 
-		const invalid = validateSettings({ attribution: { gitCommits: "yes", identity: "other" } });
-		deepStrictEqual(invalid.issues.map((issue) => issue.path).sort(), ["attribution.gitCommits", "attribution.identity"]);
-		strictEqual(invalid.settings.attribution.gitCommits, true);
+		const invalid = validateSettings({ integrations: { git: { commitAttribution: "yes", identity: "other" } } });
+		deepStrictEqual(invalid.issues.map((issue) => issue.path).sort(), [
+			"integrations.git.commitAttribution",
+			"integrations.git.identity",
+		]);
+		strictEqual(invalid.settings.integrations.git.commitAttribution, true);
 		deepStrictEqual(diffSettings(DEFAULT_SETTINGS, disabled.settings), {
-			hotReload: ["attribution.gitCommits"],
+			hotReload: ["integrations.git.commitAttribution"],
 			nextTurn: [],
 			restartRequired: [],
 		});
@@ -294,14 +301,14 @@ describe("contracts/config", () => {
 
 	it("validates smooth streaming and classifies it as a live presentation setting", () => {
 		for (const mode of ["off", "auto", "on"] as const) {
-			const result = validateSettings({ terminal: { smoothStreaming: mode } });
+			const result = validateSettings({ interface: { smoothStreaming: mode } });
 			deepStrictEqual(result.issues, []);
-			strictEqual(result.settings.terminal.smoothStreaming, mode);
+			strictEqual(result.settings.interface.smoothStreaming, mode);
 		}
 		const next = structuredClone(DEFAULT_SETTINGS);
-		next.terminal.smoothStreaming = "on";
+		next.interface.smoothStreaming = "on";
 		deepStrictEqual(diffSettings(DEFAULT_SETTINGS, next), {
-			hotReload: ["terminal.smoothStreaming"],
+			hotReload: ["interface.smoothStreaming"],
 			nextTurn: [],
 			restartRequired: [],
 		});
@@ -309,25 +316,27 @@ describe("contracts/config", () => {
 
 	it("validates active routing roles and postures as strict unique lists", () => {
 		const valid = validateSettings({
-			routing: {
-				activeRoles: ["researcher", "judge"],
-				activePostures: ["balanced", "quality"],
-				agentAutomation: { activeAgentRoles: [{ agentId: "scout", executionRole: "researcher" }] },
+			fleet: {
+				adaptiveRouting: {
+					roles: ["researcher", "judge"],
+					postures: ["balanced", "quality"],
+					agentRoles: [{ agentId: "scout", executionRole: "researcher" }],
+				},
 			},
 		});
 		deepStrictEqual(valid.issues, []);
-		deepStrictEqual(valid.settings.routing, {
-			activeRoles: ["researcher", "judge"],
-			activePostures: ["balanced", "quality"],
-			agentAutomation: { activeAgentRoles: [{ agentId: "scout", executionRole: "researcher" }] },
+		deepStrictEqual(valid.settings.fleet.adaptiveRouting, {
+			roles: ["researcher", "judge"],
+			postures: ["balanced", "quality"],
+			agentRoles: [{ agentId: "scout", executionRole: "researcher" }],
 		});
 
 		const invalid = validateSettings({
-			routing: {
-				activeRoles: ["builder", "judge", "judge"],
-				activePostures: ["manual"],
-				agentAutomation: {
-					activeAgentRoles: [
+			fleet: {
+				adaptiveRouting: {
+					roles: ["builder", "judge", "judge"],
+					postures: ["manual"],
+					agentRoles: [
 						{ agentId: "auto", executionRole: "recovery" },
 						{ agentId: "scout", executionRole: "researcher", extra: true },
 					],
@@ -335,101 +344,115 @@ describe("contracts/config", () => {
 			},
 		});
 		const invalidPaths = invalid.issues.map((issue) => issue.path);
-		deepStrictEqual(invalidPaths.slice(0, 3), ["routing.activeRoles", "routing.activeRoles", "routing.activePostures"]);
-		strictEqual(invalidPaths.includes("routing.agentAutomation.activeAgentRoles[0].agentId"), true);
-		strictEqual(invalidPaths.includes("routing.agentAutomation.activeAgentRoles[0].executionRole"), true);
-		strictEqual(invalidPaths.includes("routing.agentAutomation.activeAgentRoles[1].extra"), true);
-		deepStrictEqual(invalid.settings.routing, DEFAULT_SETTINGS.routing);
+		strictEqual(invalidPaths.includes("fleet.adaptiveRouting.roles"), true);
+		strictEqual(invalidPaths.includes("fleet.adaptiveRouting.postures"), true);
+		strictEqual(invalidPaths.includes("fleet.adaptiveRouting.agentRoles[0].agentId"), true);
+		strictEqual(invalidPaths.includes("fleet.adaptiveRouting.agentRoles[0].executionRole"), true);
+		strictEqual(invalidPaths.includes("fleet.adaptiveRouting.agentRoles[1].extra"), true);
+		deepStrictEqual(invalid.settings.fleet.adaptiveRouting, DEFAULT_SETTINGS.fleet.adaptiveRouting);
 	});
 
 	it("validates the guardrails section and rejects bad values and unknown subkeys", () => {
-		const ok = validateSettings({ guardrails: { turnToolCallBudget: 30, readMaxBytes: 4096 } });
+		const ok = validateSettings({ safety: { limits: { chatToolCallsPerTurn: 30, readBytesPerCall: 4096 } } });
 		deepStrictEqual(ok.issues, []);
-		strictEqual(ok.settings.guardrails.turnToolCallBudget, 30);
-		strictEqual(ok.settings.guardrails.readMaxBytes, 4096);
+		strictEqual(ok.settings.safety.limits.chatToolCallsPerTurn, 30);
+		strictEqual(ok.settings.safety.limits.readBytesPerCall, 4096);
 		// Unset keys keep the shipped defaults.
-		strictEqual(ok.settings.guardrails.workerToolCallCap, DEFAULT_SETTINGS.guardrails.workerToolCallCap);
+		strictEqual(ok.settings.fleet.limits.toolCallsPerRun, DEFAULT_SETTINGS.fleet.limits.toolCallsPerRun);
 
-		const bad = validateSettings({ guardrails: { turnToolCallBudget: 0, maxRuns: 5 } });
+		const bad = validateSettings({ safety: { limits: { chatToolCallsPerTurn: 0, maxRuns: 5 } } });
 		const paths = bad.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["guardrails.maxRuns", "guardrails.turnToolCallBudget"]);
-		strictEqual(bad.settings.guardrails.turnToolCallBudget, DEFAULT_SETTINGS.guardrails.turnToolCallBudget);
+		deepStrictEqual(paths, ["safety.limits.chatToolCallsPerTurn", "safety.limits.maxRuns"]);
+		strictEqual(bad.settings.safety.limits.chatToolCallsPerTurn, DEFAULT_SETTINGS.safety.limits.chatToolCallsPerTurn);
 	});
 
 	it("validates the panes section strictly and keeps the shipped defaults for unset keys", () => {
 		const accepted = validateSettings({
-			panes: {
-				enabled: "off",
-				notifications: "all",
-				journal: false,
-				yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
+			fleet: { history: { journal: false } },
+			interface: {
+				panes: {
+					enabled: "off",
+					notifications: "all",
+					files: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
+				},
 			},
 		});
 		deepStrictEqual(accepted.issues, []);
-		deepStrictEqual(accepted.settings.panes, {
+		deepStrictEqual(accepted.settings.interface.panes, {
+			...DEFAULT_SETTINGS.interface.panes,
 			enabled: "off",
 			notifications: "all",
-			journal: false,
-			yazi: { enabled: false, mode: "chooser", profile: "user", followCwd: false },
+			files: {
+				...DEFAULT_SETTINGS.interface.panes.files,
+				enabled: false,
+				mode: "chooser",
+				profile: "user",
+				followCwd: false,
+			},
 		});
+		strictEqual(accepted.settings.fleet.history.journal, false);
 
 		// The retired per-dispatch pane knobs are refused by name. Accepting and
 		// ignoring them let a settings file keep naming a policy nothing reads
 		// and never hear about it, which is the silence this schema exists to
 		// prevent; `unknown key` would have been the wrong answer too, since the
 		// operator wrote a key a shipped release honored.
-		const retired = validateSettings({ panes: { agents: "off", keepFailed: false } });
-		deepStrictEqual(retired.issues.map((issue) => issue.path).sort(), ["panes.agents", "panes.keepFailed"]);
+		const retired = validateSettings({ version: 2, panes: { agents: "off", keepFailed: false } });
+		deepStrictEqual(
+			retired.issues.map((issue) => issue.path),
+			["panes"],
+		);
 		for (const issue of retired.issues) {
-			ok(issue.message.startsWith("retired: "), issue.message);
-			ok(issue.message.endsWith("Remove this key."), issue.message);
+			ok(issue.message.startsWith("retired settings-v1 namespace"), issue.message);
 			strictEqual(issue.message.includes("unknown key"), false, issue.message);
 		}
 		// A refused key still leaves the section on its shipped defaults.
-		deepStrictEqual(retired.settings.panes, DEFAULT_SETTINGS.panes);
+		deepStrictEqual(retired.settings.interface.panes, DEFAULT_SETTINGS.interface.panes);
 
-		const partial = validateSettings({ panes: { notifications: "off" } });
+		const partial = validateSettings({ interface: { panes: { notifications: "off" } } });
 		deepStrictEqual(partial.issues, []);
-		strictEqual(partial.settings.panes.notifications, "off");
-		strictEqual(partial.settings.panes.enabled, DEFAULT_SETTINGS.panes.enabled);
-		deepStrictEqual(partial.settings.panes.yazi, DEFAULT_SETTINGS.panes.yazi);
+		strictEqual(partial.settings.interface.panes.notifications, "off");
+		strictEqual(partial.settings.interface.panes.enabled, DEFAULT_SETTINGS.interface.panes.enabled);
+		deepStrictEqual(partial.settings.interface.panes.files, DEFAULT_SETTINGS.interface.panes.files);
 
 		const bad = validateSettings({
-			panes: {
-				enabled: "guest",
-				notifications: 1,
-				mode: "auto",
-				yazi: { mode: "sidecar", profile: "mine", enabled: "yes", followCwd: 1, extra: true },
+			interface: {
+				panes: {
+					enabled: "guest",
+					notifications: 1,
+					mode: "auto",
+					files: { mode: "sidecar", profile: "mine", enabled: "yes", followCwd: 1, extra: true },
+				},
 			},
 		});
 		deepStrictEqual(bad.issues.map((issue) => issue.path).sort(), [
-			"panes.enabled",
-			"panes.mode",
-			"panes.notifications",
-			"panes.yazi.enabled",
-			"panes.yazi.extra",
-			"panes.yazi.followCwd",
-			"panes.yazi.mode",
-			"panes.yazi.profile",
+			"interface.panes.enabled",
+			"interface.panes.files.enabled",
+			"interface.panes.files.extra",
+			"interface.panes.files.followCwd",
+			"interface.panes.files.mode",
+			"interface.panes.files.profile",
+			"interface.panes.mode",
+			"interface.panes.notifications",
 		]);
 		// Every rejected value falls back to the shipped default rather than being
 		// half-applied; a pane rung Clio cannot honor must not survive validation.
-		deepStrictEqual(bad.settings.panes, DEFAULT_SETTINGS.panes);
+		deepStrictEqual(bad.settings.interface.panes, DEFAULT_SETTINGS.interface.panes);
 	});
 
-	it("validates defaults.maxTokens and rejects bad values and unknown subkeys", () => {
-		const ok = validateSettings({ defaults: { maxTokens: 16384 } });
+	it("validates chat.maxOutputTokens and rejects bad values and unknown subkeys", () => {
+		const ok = validateSettings({ chat: { maxOutputTokens: 16384 } });
 		deepStrictEqual(ok.issues, []);
-		strictEqual(ok.settings.defaults.maxTokens, 16384);
+		strictEqual(ok.settings.chat.maxOutputTokens, 16384);
 
 		// 0 is a valid sentinel meaning "fall back to per-model caps".
-		strictEqual(validateSettings({ defaults: { maxTokens: 0 } }).settings.defaults.maxTokens, 0);
+		strictEqual(validateSettings({ chat: { maxOutputTokens: 0 } }).settings.chat.maxOutputTokens, 0);
 
-		const bad = validateSettings({ defaults: { maxTokens: -1, foo: 1 } });
+		const bad = validateSettings({ chat: { maxOutputTokens: -1, foo: 1 } });
 		const paths = bad.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["defaults.foo", "defaults.maxTokens"]);
+		deepStrictEqual(paths, ["chat.foo", "chat.maxOutputTokens"]);
 		// Invalid value falls back to the shipped default.
-		strictEqual(bad.settings.defaults.maxTokens, DEFAULT_SETTINGS.defaults.maxTokens);
+		strictEqual(bad.settings.chat.maxOutputTokens, DEFAULT_SETTINGS.chat.maxOutputTokens);
 	});
 
 	it("rejects duplicate target ids and duplicate delegation agent ids", () => {
@@ -438,163 +461,179 @@ describe("contracts/config", () => {
 				{ id: "local", runtime: "openai-compat" },
 				{ id: "local", runtime: "llamacpp" },
 			],
-			delegation: {
-				agents: [
-					{ id: "opencode", command: "opencode" },
-					{ id: "opencode", command: "ignored" },
-				],
+			integrations: {
+				externalAgents: {
+					entries: [
+						{ id: "opencode", command: "opencode" },
+						{ id: "opencode", command: "ignored" },
+					],
+				},
 			},
 		});
 		const paths = result.issues.map((issue) => issue.path).sort();
-		deepStrictEqual(paths, ["delegation.agents[1].id", "targets[1].id"]);
+		deepStrictEqual(paths, ["integrations.externalAgents.entries[1].id", "targets[1].id"]);
 		strictEqual(result.settings.targets.length, 1);
-		strictEqual(result.settings.delegation.agents.length, 1);
+		strictEqual(result.settings.integrations.externalAgents.entries.length, 1);
 	});
 
 	it("validates skills trust settings and treats them as next-turn changes", () => {
 		const result = validateSettings({
-			skills: {
-				trustProjectCompatRoots: true,
+			integrations: {
+				projectResources: { trustProjectImports: true },
 			},
 		});
 		deepStrictEqual(result.issues, []);
-		strictEqual(result.settings.skills.trustProjectCompatRoots, true);
+		strictEqual(result.settings.integrations.projectResources.trustProjectImports, true);
 
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);
-		next.skills.trustProjectCompatRoots = true;
+		next.integrations.projectResources.trustProjectImports = true;
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
-		deepStrictEqual(diff.nextTurn, ["skills.trustProjectCompatRoots"]);
+		deepStrictEqual(diff.nextTurn, ["integrations.projectResources.trustProjectImports"]);
 		deepStrictEqual(diff.restartRequired, []);
 	});
 
 	it("validates ACP delegation agents and treats them as next-turn settings", () => {
 		const result = validateSettings({
-			delegation: {
-				defaults: {
-					connectTimeoutMs: 7,
-					turnTimeoutMs: 11,
-					permissionTimeoutMs: 13,
-					toolGovernance: "deny-all",
-				},
-				agents: [
-					{
-						id: "opencode",
-						command: "opencode",
-						args: ["acp", "--cwd", "."],
-						toolGovernance: "clio-policy",
-						labels: { specialty: "coding" },
+			integrations: {
+				externalAgents: {
+					defaults: {
+						connectTimeoutMs: 7,
+						turnTimeoutMs: 11,
+						permissionTimeoutMs: 13,
+						toolGovernance: "deny-all",
 					},
-				],
+					entries: [
+						{
+							id: "opencode",
+							command: "opencode",
+							args: ["acp", "--cwd", "."],
+							toolGovernance: "clio-policy",
+							labels: { specialty: "coding" },
+						},
+					],
+				},
 			},
 		});
 
 		deepStrictEqual(result.issues, []);
 		const settings = result.settings;
-		strictEqual(settings.delegation.defaults.connectTimeoutMs, 7);
-		strictEqual(settings.delegation.defaults.toolGovernance, "deny-all");
-		strictEqual(settings.delegation.agents.length, 1);
-		strictEqual(settings.delegation.agents[0]?.id, "opencode");
-		strictEqual(settings.delegation.agents[0]?.turnTimeoutMs, 11);
-		strictEqual(settings.delegation.agents[0]?.toolGovernance, "clio-policy");
-		deepStrictEqual(settings.delegation.agents[0]?.args, ["acp", "--cwd", "."]);
+		strictEqual(settings.integrations.externalAgents.defaults.connectTimeoutMs, 7);
+		strictEqual(settings.integrations.externalAgents.defaults.toolGovernance, "deny-all");
+		strictEqual(settings.integrations.externalAgents.entries.length, 1);
+		strictEqual(settings.integrations.externalAgents.entries[0]?.id, "opencode");
+		strictEqual(settings.integrations.externalAgents.entries[0]?.turnTimeoutMs, 11);
+		strictEqual(settings.integrations.externalAgents.entries[0]?.toolGovernance, "clio-policy");
+		deepStrictEqual(settings.integrations.externalAgents.entries[0]?.args, ["acp", "--cwd", "."]);
 		// Project context is explicit opt-in: absent key stays absent (dispatch
 		// treats absent as "none").
-		strictEqual(settings.delegation.agents[0]?.projectContext, undefined);
+		strictEqual(settings.integrations.externalAgents.entries[0]?.projectContext, undefined);
 
 		const optedIn = validateSettings({
-			delegation: {
-				agents: [{ id: "opencode", command: "opencode", projectContext: "bounded" }],
+			integrations: {
+				externalAgents: {
+					entries: [{ id: "opencode", command: "opencode", projectContext: "bounded" }],
+				},
 			},
 		});
 		deepStrictEqual(optedIn.issues, []);
-		strictEqual(optedIn.settings.delegation.agents[0]?.projectContext, "bounded");
+		strictEqual(optedIn.settings.integrations.externalAgents.entries[0]?.projectContext, "bounded");
 
 		const badTier = validateSettings({
-			delegation: {
-				agents: [{ id: "opencode", command: "opencode", projectContext: "full" }],
+			integrations: {
+				externalAgents: {
+					entries: [{ id: "opencode", command: "opencode", projectContext: "full" }],
+				},
 			},
 		});
 		strictEqual(
-			badTier.issues.some((issue) => issue.path === "delegation.agents[0].projectContext"),
+			badTier.issues.some((issue) => issue.path === "integrations.externalAgents.entries[0].projectContext"),
 			true,
 		);
 
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);
-		next.delegation.agents = settings.delegation.agents;
+		next.integrations.externalAgents.entries = settings.integrations.externalAgents.entries;
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
-		deepStrictEqual(diff.nextTurn, ["delegation.agents.0"]);
+		deepStrictEqual(diff.nextTurn, ["integrations.externalAgents.entries.0"]);
 		deepStrictEqual(diff.restartRequired, []);
 	});
 
 	it("rejects unschedulable ACP request bounds while preserving the documented zero stall disable", () => {
 		for (const invalid of [0, MAX_TIMER_DELAY_MS + 1]) {
 			const result = validateSettings({
-				delegation: {
-					defaults: {
-						connectTimeoutMs: invalid,
-						turnTimeoutMs: invalid,
-						permissionTimeoutMs: invalid,
-					},
-					agents: [
-						{
-							id: "silent",
-							command: "silent-acp",
+				integrations: {
+					externalAgents: {
+						defaults: {
 							connectTimeoutMs: invalid,
 							turnTimeoutMs: invalid,
 							permissionTimeoutMs: invalid,
-							stallTimeoutMs: 0,
 						},
-					],
+						entries: [
+							{
+								id: "silent",
+								command: "silent-acp",
+								connectTimeoutMs: invalid,
+								turnTimeoutMs: invalid,
+								permissionTimeoutMs: invalid,
+								stallTimeoutMs: 0,
+							},
+						],
+					},
 				},
 			});
 
 			deepStrictEqual(result.issues.map((issue) => issue.path).sort(), [
-				"delegation.agents[0].connectTimeoutMs",
-				"delegation.agents[0].permissionTimeoutMs",
-				"delegation.agents[0].turnTimeoutMs",
-				"delegation.defaults.connectTimeoutMs",
-				"delegation.defaults.permissionTimeoutMs",
-				"delegation.defaults.turnTimeoutMs",
+				"integrations.externalAgents.defaults.connectTimeoutMs",
+				"integrations.externalAgents.defaults.permissionTimeoutMs",
+				"integrations.externalAgents.defaults.turnTimeoutMs",
+				"integrations.externalAgents.entries[0].connectTimeoutMs",
+				"integrations.externalAgents.entries[0].permissionTimeoutMs",
+				"integrations.externalAgents.entries[0].turnTimeoutMs",
 			]);
-			deepStrictEqual(result.settings.delegation.defaults, DEFAULT_SETTINGS.delegation.defaults);
-			strictEqual(
-				result.settings.delegation.agents[0]?.connectTimeoutMs,
-				DEFAULT_SETTINGS.delegation.defaults.connectTimeoutMs,
+			deepStrictEqual(
+				result.settings.integrations.externalAgents.defaults,
+				DEFAULT_SETTINGS.integrations.externalAgents.defaults,
 			);
-			strictEqual(result.settings.delegation.agents[0]?.turnTimeoutMs, DEFAULT_SETTINGS.delegation.defaults.turnTimeoutMs);
 			strictEqual(
-				result.settings.delegation.agents[0]?.permissionTimeoutMs,
-				DEFAULT_SETTINGS.delegation.defaults.permissionTimeoutMs,
+				result.settings.integrations.externalAgents.entries[0]?.connectTimeoutMs,
+				DEFAULT_SETTINGS.integrations.externalAgents.defaults.connectTimeoutMs,
 			);
-			strictEqual(result.settings.delegation.agents[0]?.stallTimeoutMs, 0);
+			strictEqual(
+				result.settings.integrations.externalAgents.entries[0]?.turnTimeoutMs,
+				DEFAULT_SETTINGS.integrations.externalAgents.defaults.turnTimeoutMs,
+			);
+			strictEqual(
+				result.settings.integrations.externalAgents.entries[0]?.permissionTimeoutMs,
+				DEFAULT_SETTINGS.integrations.externalAgents.defaults.permissionTimeoutMs,
+			);
+			strictEqual(result.settings.integrations.externalAgents.entries[0]?.stallTimeoutMs, 0);
 		}
 	});
 
 	it("classifies settings changes next-turn updates", () => {
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);
-		next.compaction.auto = false;
-		next.compaction.threshold = 0.9;
+		next.context.compaction.auto = false;
+		next.context.compaction.threshold = 0.9;
 		const diff = diffSettings(prev, next);
 		deepStrictEqual(diff.hotReload, []);
-		deepStrictEqual(diff.nextTurn.sort(), ["compaction.auto", "compaction.threshold"]);
+		deepStrictEqual(diff.nextTurn.sort(), ["context.compaction.auto", "context.compaction.threshold"]);
 	});
 
 	it("validates fullscreen terminal settings and applies them after restart", () => {
 		const result = validateSettings({
-			terminal: { tuiMode: "fullscreen", fullscreenScrollbar: "always" },
+			interface: { mode: "fullscreen", fullscreenScrollbar: "always" },
 		});
 		deepStrictEqual(result.issues, []);
-		strictEqual(result.settings.terminal.tuiMode, "fullscreen");
-		strictEqual(result.settings.terminal.fullscreenScrollbar, "always");
+		strictEqual(result.settings.interface.mode, "fullscreen");
+		strictEqual(result.settings.interface.fullscreenScrollbar, "always");
 		const diff = diffSettings(DEFAULT_SETTINGS, result.settings);
 		deepStrictEqual(diff.hotReload, []);
 		deepStrictEqual(diff.nextTurn, []);
-		deepStrictEqual(diff.restartRequired.sort(), ["terminal.fullscreenScrollbar", "terminal.tuiMode"]);
+		deepStrictEqual(diff.restartRequired.sort(), ["interface.fullscreenScrollbar", "interface.mode"]);
 	});
 
 	it("skips targets whose runtime is unregistered or non-http in scoped cycling", () => {
@@ -605,12 +644,12 @@ describe("contracts/config", () => {
 			// must be skipped rather than cycled into the orchestrator slot.
 			{ id: "codex-worker", runtime: "codex-cli", defaultModel: "gpt-5.4" },
 		];
-		settings.orchestrator.target = "chat";
-		settings.orchestrator.model = "chat-model";
-		settings.scope = ["codex-worker", "chat"];
+		settings.chat.target = "chat";
+		settings.chat.model = "chat-model";
+		settings.chat.modelPicker.cycleSet = ["codex-worker", "chat"];
 
 		strictEqual(advanceScopedTarget(settings, "forward")?.target, "chat");
-		settings.scope = ["codex-worker"];
+		settings.chat.modelPicker.cycleSet = ["codex-worker"];
 		strictEqual(advanceScopedTarget(settings, "forward"), null);
 	});
 
@@ -620,17 +659,26 @@ describe("contracts/config", () => {
 	it("keeps scope refs whose target is not configured, and skips them when cycling", () => {
 		const result = validateSettings({
 			targets: [{ id: "chat", runtime: "openai-compat", defaultModel: "chat-model" }],
-			orchestrator: { target: "chat", model: "chat-model" },
-			scope: ["ghost-target/ghost-model", "chat/chat-model", "phantom-target", "chat/chat-model"],
+			chat: {
+				target: "chat",
+				model: "chat-model",
+				modelPicker: {
+					cycleSet: ["ghost-target/ghost-model", "chat/chat-model", "phantom-target", "chat/chat-model"],
+				},
+			},
 		});
 
 		deepStrictEqual(result.issues, []);
-		deepStrictEqual(result.settings.scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
+		deepStrictEqual(result.settings.chat.modelPicker.cycleSet, [
+			"ghost-target/ghost-model",
+			"chat/chat-model",
+			"phantom-target",
+		]);
 		// Routing must not resolve the ghosts: cycling steps over them.
 		deepStrictEqual(advanceScopedTarget(result.settings, "forward"), { target: "chat", model: "chat-model" });
 		deepStrictEqual(advanceScopedTarget(result.settings, "backward"), { target: "chat", model: "chat-model" });
 		const ghostsOnly = structuredClone(result.settings);
-		ghostsOnly.scope = ["ghost-target/ghost-model", "phantom-target"];
+		ghostsOnly.chat.modelPicker.cycleSet = ["ghost-target/ghost-model", "phantom-target"];
 		strictEqual(advanceScopedTarget(ghostsOnly, "forward"), null);
 	});
 
@@ -649,21 +697,20 @@ describe("contracts/config", () => {
 		);
 	});
 
-	it("validates workers resilience configuration", () => {
+	it("validates fleet resilience configuration", () => {
 		const result = validateSettings({
-			workers: {
+			fleet: {
 				default: {
 					target: null,
 					model: null,
 					thinkingLevel: "off",
 				},
-				maxRetries: 4,
-				resilienceCooldownMs: 8000,
+				retry: { maxRetries: 4, routeCooldownMs: 8000 },
 			},
 		});
 		deepStrictEqual(result.issues, []);
-		strictEqual(result.settings.workers.maxRetries, 4);
-		strictEqual(result.settings.workers.resilienceCooldownMs, 8000);
+		strictEqual(result.settings.fleet.retry.maxRetries, 4);
+		strictEqual(result.settings.fleet.retry.routeCooldownMs, 8000);
 	});
 });
 
@@ -830,28 +877,43 @@ describe("contracts/config stale scope refs", () => {
 		writeFileSync(
 			settingsPath(),
 			[
+				"version: 2",
 				"targets:",
 				"  - id: chat",
 				"    runtime: openai-compat",
 				"    defaultModel: chat-model",
-				"scope:",
-				"  - ghost-target/ghost-model",
-				"  - chat/chat-model",
-				"  - phantom-target",
+				"chat:",
+				"  modelPicker:",
+				"    cycleSet:",
+				"      - ghost-target/ghost-model",
+				"      - chat/chat-model",
+				"      - phantom-target",
 				"",
 			].join("\n"),
 			"utf8",
 		);
 
-		deepStrictEqual(readSettings().scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
+		deepStrictEqual(readSettings().chat.modelPicker.cycleSet, [
+			"ghost-target/ghost-model",
+			"chat/chat-model",
+			"phantom-target",
+		]);
 
 		updateSettings((settings) => {
-			settings.retry.maxRetries = 5;
+			settings.chat.retry.maxRetries = 5;
 		});
 
 		const saved = parseYaml(readFileSync(settingsPath(), "utf8")) as Record<string, unknown>;
-		deepStrictEqual(saved.scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
-		deepStrictEqual(readSettings().scope, ["ghost-target/ghost-model", "chat/chat-model", "phantom-target"]);
+		deepStrictEqual(((saved.chat as Record<string, unknown>).modelPicker as Record<string, unknown>).cycleSet, [
+			"ghost-target/ghost-model",
+			"chat/chat-model",
+			"phantom-target",
+		]);
+		deepStrictEqual(readSettings().chat.modelPicker.cycleSet, [
+			"ghost-target/ghost-model",
+			"chat/chat-model",
+			"phantom-target",
+		]);
 	});
 });
 

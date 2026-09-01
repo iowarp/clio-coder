@@ -2562,10 +2562,10 @@ setInterval(() => {}, 1000);
 			commit: (patch) => {
 				commits.push({ ...patch });
 				snapshot = {
-					target: patch["orchestrator.target"] === undefined ? snapshot.target : patch["orchestrator.target"],
-					model: patch["orchestrator.model"] === undefined ? snapshot.model : patch["orchestrator.model"],
-					thinkingLevel: patch["orchestrator.thinkingLevel"] ?? snapshot.thinkingLevel,
-					autonomy: patch.autonomy ?? snapshot.autonomy,
+					target: patch["chat.target"] === undefined ? snapshot.target : patch["chat.target"],
+					model: patch["chat.model"] === undefined ? snapshot.model : patch["chat.model"],
+					thinkingLevel: patch["chat.thinkingLevel"] ?? snapshot.thinkingLevel,
+					autonomy: patch["safety.autonomy"] ?? snapshot.autonomy,
 				};
 				return snapshot;
 			},
@@ -2579,26 +2579,26 @@ setInterval(() => {}, 1000);
 			const initial = await harness.client.request<Record<string, unknown>>("clio-coder/settings/get_safe", {});
 			deepStrictEqual(initial, {
 				settings: {
-					orchestrator: { target: "target-a", model: "model-a", thinkingLevel: "medium" },
-					autonomy: "auto-edit",
+					chat: { target: "target-a", model: "model-a", thinkingLevel: "medium" },
+					safety: { autonomy: "auto-edit" },
 				},
-				editable: ["orchestrator.target", "orchestrator.model", "orchestrator.thinkingLevel", "autonomy"],
+				editable: ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"],
 			});
 			const updated = await harness.client.request<Record<string, unknown>>("clio-coder/settings/patch_safe", {
 				patch: {
-					"orchestrator.target": "target-b",
-					"orchestrator.model": "model-b",
-					"orchestrator.thinkingLevel": "xhigh",
-					autonomy: "read-only",
+					"chat.target": "target-b",
+					"chat.model": "model-b",
+					"chat.thinkingLevel": "xhigh",
+					"safety.autonomy": "read-only",
 				},
 			});
 			strictEqual(commits.length, 1);
-			deepStrictEqual((updated.settings as Record<string, unknown>).orchestrator, {
+			deepStrictEqual((updated.settings as Record<string, unknown>).chat, {
 				target: "target-b",
 				model: "model-b",
 				thinkingLevel: "xhigh",
 			});
-			strictEqual((updated.settings as Record<string, unknown>).autonomy, "read-only");
+			deepStrictEqual((updated.settings as Record<string, unknown>).safety, { autonomy: "read-only" });
 
 			const unknownKey = await rejection(
 				harness.client.request("clio-coder/settings/patch_safe", { patch: { "targets.0.url": "secret" } }),
@@ -2606,7 +2606,7 @@ setInterval(() => {}, 1000);
 			strictEqual(errorDetail(unknownKey).code, "invalid_params");
 			const unknownTarget = await rejection(
 				harness.client.request("clio-coder/settings/patch_safe", {
-					patch: { "orchestrator.target": "missing" },
+					patch: { "chat.target": "missing" },
 				}),
 			);
 			deepStrictEqual(

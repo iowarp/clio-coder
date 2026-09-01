@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
@@ -40,16 +41,12 @@ function component(): Component {
 }
 
 function settings(): ClioSettings {
-	return {
-		keybindings: {},
-		terminal: {
-			showTerminalProgress: false,
-			outputVerbosity: "default",
-			tuiMode: "fullscreen",
-			fullscreenScrollbar: "always",
-		},
-		orchestrator: { target: "local", model: "org/model", thinkingLevel: "off" },
-	} as ClioSettings;
+	const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+	settings.interface.mode = "fullscreen";
+	settings.interface.fullscreenScrollbar = "always";
+	settings.chat.target = "local";
+	settings.chat.model = "org/model";
+	return settings;
 }
 
 function snapshot(id: string): ObservabilitySnapshot {

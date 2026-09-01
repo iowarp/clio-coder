@@ -43,10 +43,10 @@ export function protectedResidencyModels(settings: ClioSettings): ProtectedModel
 		if (!trimmed || byId.has(trimmed)) return;
 		byId.set(trimmed, role);
 	};
-	add(settings.orchestrator.model, "chat");
-	add(settings.background.model, "memory");
-	add(settings.workers.default.model, "worker");
-	for (const profile of Object.values(settings.workers.profiles ?? {})) add(profile.model, "worker");
+	add(settings.chat.model, "chat");
+	add(settings.context.memory.model, "memory");
+	add(settings.fleet.default.model, "worker");
+	for (const profile of Object.values(settings.fleet.profiles ?? {})) add(profile.model, "worker");
 	for (const target of settings.targets) add(target.defaultModel, "target-default");
 	return [...byId].map(([modelId, role]) => ({ modelId, role }));
 }

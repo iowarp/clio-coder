@@ -43,8 +43,8 @@ const LLAMACPP: RuntimeDescriptor = {
 function councilSettings(): typeof DEFAULT_SETTINGS {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [{ id: "mini", runtime: "llamacpp", url: ENDPOINT_URL, defaultModel: "model" }];
-	settings.workers.default.target = "mini";
-	settings.workers.default.model = "model";
+	settings.fleet.default.target = "mini";
+	settings.fleet.default.model = "model";
 	return settings;
 }
 
@@ -94,7 +94,7 @@ async function councilDenial(input: { landProbeFirst: boolean }): Promise<string
 			getAgentSpecs: () => [],
 			dispatch: bundle.contract,
 			getAutonomy: () => "full-auto",
-			getWorkerRosters: () => settings.workers.rosters,
+			getWorkerRosters: () => settings.fleet.rosters,
 		});
 		const prepared = tool.prepareAdmissionArguments?.({
 			mode: "council",
@@ -148,7 +148,7 @@ describe("council admission against a single-slot endpoint", () => {
 				getAgentSpecs: () => [],
 				dispatch: bundle.contract,
 				getAutonomy: () => "full-auto",
-				getWorkerRosters: () => settings.workers.rosters,
+				getWorkerRosters: () => settings.fleet.rosters,
 			});
 			const prepared = tool.prepareAdmissionArguments?.({
 				mode: "council",

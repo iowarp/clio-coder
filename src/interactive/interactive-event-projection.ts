@@ -218,7 +218,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 
 	remainingUnsubscribers.push(
 		deps.chat.onEvent((event) => {
-			const showProgress = deps.getSettings?.().terminal.showTerminalProgress ?? false;
+			const showProgress = deps.getSettings?.().interface.terminalProgress ?? false;
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
 			else if (event.type === "agent_end") {
 				deps.stopTerminalProgress();

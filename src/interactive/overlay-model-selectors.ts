@@ -76,11 +76,11 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 				if (!deps.getSettings || !deps.writeSettings) return;
 				const next = structuredClone(deps.getSettings()) as ClioSettings;
 				const value = `${ref.target}/${ref.model}`;
-				const current = new Set(next.modelSelector?.favorites ?? []);
+				const current = new Set(next.chat.modelPicker?.favorites ?? []);
 				if (favorite) current.add(value);
 				else current.delete(value);
-				next.modelSelector = {
-					...(next.modelSelector ?? { recentLimit: 12, favorites: [] }),
+				next.chat.modelPicker = {
+					...(next.chat.modelPicker ?? { recentLimit: 12, favorites: [] }),
 					favorites: [...current],
 				};
 				deps.writeSettings(next);

@@ -42,7 +42,7 @@ function journalWritabilityFinding(root = join(resolveClioDirs().state, "runs"))
 export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promise<DoctorFinding[]> {
 	let enabled: "auto" | "embedded" | "off" = "off";
 	try {
-		enabled = readSettings().panes.enabled;
+		enabled = readSettings().interface.panes.enabled;
 	} catch {
 		// An unreadable settings file is already reported by the settings row;
 		// this section answers on the shipped default (off) rather than throwing.

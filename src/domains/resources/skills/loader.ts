@@ -216,9 +216,20 @@ function defaultPrecedenceForScope(scope: ResourceScope): number {
  * this gate with skills: both substitute another agent's project file into
  * Clio's context, so one opt-in covers both.
  */
+let warnedLegacyProjectTrustEnv = false;
+
 export function projectCompatTrusted(explicit?: boolean): boolean {
 	if (explicit === true) return true;
-	return process.env.CLIO_CODER_TRUST_PROJECT_SKILLS === "1";
+	if (process.env.CLIO_CODER_TRUST_PROJECT_RESOURCES === "1") return true;
+	if (process.env.CLIO_CODER_TRUST_PROJECT_SKILLS !== "1") return false;
+	if (!warnedLegacyProjectTrustEnv) {
+		warnedLegacyProjectTrustEnv = true;
+		process.emitWarning("CLIO_CODER_TRUST_PROJECT_SKILLS is deprecated; use CLIO_CODER_TRUST_PROJECT_RESOURCES instead", {
+			code: "CLIO_CODER_DEPRECATED_ENV",
+			type: "DeprecationWarning",
+		});
+	}
+	return true;
 }
 
 /**

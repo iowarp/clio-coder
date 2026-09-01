@@ -79,9 +79,9 @@ export interface BootstrapRoute {
  */
 export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): BootstrapRoute {
 	for (const agentId of [CONTEXT_BOOTSTRAP_AGENT_ID, "scout"]) {
-		const profileName = settings.workers.agentBindings[agentId];
+		const profileName = settings.fleet.agentProfiles[agentId];
 		if (!profileName) continue;
-		const profile = settings.workers.profiles[profileName];
+		const profile = settings.fleet.profiles[profileName];
 		if (!profile) throw new Error(`bootstrap profile '${profileName}' is not configured (bound to '${agentId}')`);
 		if (!profile.target) throw new Error(`bootstrap profile '${profileName}' has no target (bound to '${agentId}')`);
 		return {
@@ -90,7 +90,7 @@ export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): Bootstr
 			...(profile.thinkingLevel ? { thinkingLevel: profile.thinkingLevel } : {}),
 		};
 	}
-	const fallback = settings.workers.default;
+	const fallback = settings.fleet.default;
 	if (!fallback?.target) {
 		throw new Error(
 			`bootstrap has no route: workers.agentBindings.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound and ` +

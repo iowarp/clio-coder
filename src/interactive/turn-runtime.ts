@@ -183,13 +183,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
-		const targetId = settings.orchestrator.target?.trim();
-		const wireModelId = settings.orchestrator.model?.trim();
+		const targetId = settings.chat.target?.trim();
+		const wireModelId = settings.chat.model?.trim();
 		if (!targetId || !wireModelId) return null;
 		const resolved = resolveRuntimeTarget(deps.providers, {
 			targetId,
 			wireModelId,
-			requestedThinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
+			requestedThinkingLevel: settings.chat.thinkingLevel ?? "off",
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
@@ -243,8 +243,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const targetProbesInFlight = new Map<string, Promise<void>>();
 	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
 		const settings = deps.getSettings();
-		const targetId = settings.orchestrator.target?.trim();
-		const wireModelId = settings.orchestrator.model?.trim();
+		const targetId = settings.chat.target?.trim();
+		const wireModelId = settings.chat.model?.trim();
 		if (!targetId || !wireModelId) return;
 		const target = deps.providers.getTarget(targetId);
 		if (!target) return;
@@ -316,7 +316,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					const refreshed = resolveRuntimeTarget(deps.providers, {
 						targetId: target.target.id,
 						wireModelId: target.wireModelId,
-						requestedThinkingLevel: deps.getSettings().orchestrator.thinkingLevel ?? "off",
+						requestedThinkingLevel: deps.getSettings().chat.thinkingLevel ?? "off",
 						use: "orchestrator",
 						requireTools: false,
 						requireOutputBudget: true,

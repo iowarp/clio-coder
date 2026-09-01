@@ -28,14 +28,14 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 	const observability = context.getContract<ObservabilityContract>("observability");
 
 	const settings = config.get();
-	let budget = createBudgetState(settings.budget.sessionCeilingUsd);
+	let budget = createBudgetState(settings.safety.limits.sessionCostUsd);
 	const fleet = createFleetRegistry(() => config.get().fleet?.nodes ?? [], {
-		localMaxWorkers: () => resolveMaxWorkers(config.get().budget.concurrency),
+		localMaxWorkers: () => resolveMaxWorkers(config.get().fleet.concurrency),
 	});
 	const unsubscribes: Array<() => void> = [];
 
 	function syncBudget(): void {
-		const nextCeiling = config.get().budget.sessionCeilingUsd;
+		const nextCeiling = config.get().safety.limits.sessionCostUsd;
 		if (nextCeiling === budget.ceilingUsd) return;
 		budget = createBudgetState(nextCeiling);
 	}
@@ -83,7 +83,7 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
 		},
-		maxWorkers: () => resolveMaxWorkers(config.get().budget.concurrency),
+		maxWorkers: () => resolveMaxWorkers(config.get().fleet.concurrency),
 		fleet,
 	};
 

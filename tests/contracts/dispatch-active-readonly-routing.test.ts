@@ -212,14 +212,14 @@ function request(): DispatchRequest {
 
 describe("contracts/dispatch active read-only routing", () => {
 	it("default settings remain shadow-only", () => {
-		deepStrictEqual(DEFAULT_SETTINGS.routing, {
-			activeRoles: [],
-			activePostures: [],
-			agentAutomation: { activeAgentRoles: [] },
+		deepStrictEqual(DEFAULT_SETTINGS.fleet.adaptiveRouting, {
+			roles: [],
+			postures: [],
+			agentRoles: [],
 		});
 		strictEqual(
 			activeRoutingEnabled({
-				settings: DEFAULT_SETTINGS.routing,
+				settings: DEFAULT_SETTINGS.fleet.adaptiveRouting,
 				role: "researcher",
 				posture: "balanced",
 				capabilityClass: "read-only",
@@ -228,17 +228,19 @@ describe("contracts/dispatch active read-only routing", () => {
 			false,
 		);
 		const configured = validateSettings({
-			routing: {
-				activeRoles: ["researcher"],
-				activePostures: ["balanced"],
-				agentAutomation: { activeAgentRoles: [] },
+			fleet: {
+				adaptiveRouting: {
+					roles: ["researcher"],
+					postures: ["balanced"],
+					agentRoles: [],
+				},
 			},
 		});
 		deepStrictEqual(configured.issues, []);
-		deepStrictEqual(configured.settings.routing, {
-			activeRoles: ["researcher"],
-			activePostures: ["balanced"],
-			agentAutomation: { activeAgentRoles: [] },
+		deepStrictEqual(configured.settings.fleet.adaptiveRouting, {
+			roles: ["researcher"],
+			postures: ["balanced"],
+			agentRoles: [],
 		});
 	});
 
@@ -389,9 +391,9 @@ describe("contracts/dispatch active read-only routing", () => {
 				routeAttemptDecision: recovery,
 			},
 			settings: {
-				activeRoles: ["researcher"],
-				activePostures: ["balanced"],
-				agentAutomation: { activeAgentRoles: [] },
+				roles: ["researcher"],
+				postures: ["balanced"],
+				agentRoles: [],
 			},
 			capabilityClass: "read-only",
 			failover: "approved",
@@ -406,9 +408,9 @@ describe("contracts/dispatch active read-only routing", () => {
 
 	it("manual and failover-none routes never drift", () => {
 		const settings = {
-			activeRoles: ["researcher"] as const,
-			activePostures: ["balanced"] as const,
-			agentAutomation: { activeAgentRoles: [] },
+			roles: ["researcher"] as const,
+			postures: ["balanced"] as const,
+			agentRoles: [],
 		};
 		strictEqual(
 			activeRoutingEnabled({

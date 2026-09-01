@@ -205,8 +205,7 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	if (parsed.json) {
 		const settings = readSettings();
 		const candidateFor = (status: TargetStatus): string | null => {
-			const orchestratorModel =
-				settings.orchestrator?.target === status.target.id ? (settings.orchestrator?.model ?? null) : null;
+			const orchestratorModel = settings.chat?.target === status.target.id ? (settings.chat?.model ?? null) : null;
 			return orchestratorModel ?? status.target.defaultModel ?? null;
 		};
 		const rows = filtered.map((status) => {
@@ -467,11 +466,11 @@ function runProfileRemove(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	if (!settings.workers.profiles[parsed.name]) {
+	if (!settings.fleet.profiles[parsed.name]) {
 		printError(`no fleet profile named ${parsed.name}`);
 		return 1;
 	}
-	const boundAgents = Object.entries(settings.workers.agentBindings)
+	const boundAgents = Object.entries(settings.fleet.agentProfiles)
 		.filter(([, profileName]) => profileName === parsed.name)
 		.map(([agentId]) => agentId);
 	if (boundAgents.length > 0 && !parsed.force) {
@@ -510,23 +509,23 @@ function runProfileRename(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	if (!settings.workers.profiles[parsed.oldName]) {
+	if (!settings.fleet.profiles[parsed.oldName]) {
 		printError(`no fleet profile named ${parsed.oldName}`);
 		return 1;
 	}
-	if (settings.workers.profiles[parsed.newName]) {
+	if (settings.fleet.profiles[parsed.newName]) {
 		printError(`fleet profile already exists: ${parsed.newName}`);
 		return 2;
 	}
 	let updatedBindings = 0;
 	updateSettings((fresh) => {
-		const profile = fresh.workers.profiles[parsed.oldName];
+		const profile = fresh.fleet.profiles[parsed.oldName];
 		if (!profile) return;
-		fresh.workers.profiles[parsed.newName] = profile;
-		delete fresh.workers.profiles[parsed.oldName];
-		for (const [agentId, profileName] of Object.entries(fresh.workers.agentBindings)) {
+		fresh.fleet.profiles[parsed.newName] = profile;
+		delete fresh.fleet.profiles[parsed.oldName];
+		for (const [agentId, profileName] of Object.entries(fresh.fleet.agentProfiles)) {
 			if (profileName !== parsed.oldName) continue;
-			fresh.workers.agentBindings[agentId] = parsed.newName;
+			fresh.fleet.agentProfiles[agentId] = parsed.newName;
 			updatedBindings += 1;
 		}
 	});
@@ -551,13 +550,13 @@ function runProfileBind(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	if (settings.delegation.agents.some((agent) => agent.id === parsed.agentId)) {
+	if (settings.integrations.externalAgents.entries.some((agent) => agent.id === parsed.agentId)) {
 		printError(
 			`cannot bind ACP delegation agent '${parsed.agentId}' to a fleet profile; ACP agents use their own runner and ignore native target routing`,
 		);
 		return 1;
 	}
-	if (!settings.workers.profiles[parsed.profileName]) {
+	if (!settings.fleet.profiles[parsed.profileName]) {
 		process.stderr.write(
 			`${chalk.yellow("warning:")} fleet profile '${parsed.profileName}' is not configured; binding will resolve after the profile exists\n`,
 		);
@@ -581,12 +580,12 @@ function runProfileUnbind(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	if (!settings.workers.agentBindings[parsed]) {
+	if (!settings.fleet.agentProfiles[parsed]) {
 		printError(`agent ${parsed} is not bound to a fleet profile`);
 		return 1;
 	}
 	updateSettings((fresh) => {
-		delete fresh.workers.agentBindings[parsed];
+		delete fresh.fleet.agentProfiles[parsed];
 	});
 	printOk(`unbound agent ${parsed}`);
 	return 0;
@@ -608,10 +607,10 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	const rows = Object.entries(settings.workers.agentBindings)
+	const rows = Object.entries(settings.fleet.agentProfiles)
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([agentId, profileName]) => {
-			const profile = settings.workers.profiles[profileName];
+			const profile = settings.fleet.profiles[profileName];
 			return {
 				agentId,
 				profile: profileName,
@@ -686,7 +685,7 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet
 	ensureClioState();
 	const settings = readSettings();
 	const byId = new Map(settings.targets.map((target) => [target.id, target] as const));
-	const rows = Object.entries(settings.workers.profiles).map(([name, profile]) => {
+	const rows = Object.entries(settings.fleet.profiles).map(([name, profile]) => {
 		const target = profile.target ? byId.get(profile.target) : undefined;
 		return {
 			name,
@@ -782,7 +781,7 @@ function runConvert(args: ReadonlyArray<string>): number {
 		printOk(`target ${id} already uses runtime ${runtimeId}`);
 		return 0;
 	}
-	if (settings.orchestrator.target === id && !isOrchestratorEligibleRuntime(runtime)) {
+	if (settings.chat.target === id && !isOrchestratorEligibleRuntime(runtime)) {
 		printError(`cannot convert orchestrator target '${id}' to non-HTTP/native runtime '${runtime.id}'`);
 		return 1;
 	}

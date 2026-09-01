@@ -16,7 +16,20 @@ function context(events: string[]): SlashCommandContext {
 		submitChat: (text) => events.push(`chat:${text}`),
 		expandPromptTemplate: (text) => {
 			events.push(`expand:${text}`);
-			return { expanded: true, text, images: [], workingContextPaths: [], pendingSkillRequests: [] };
+			return {
+				expanded: true,
+				text,
+				args: [],
+				template: {
+					name: "test",
+					description: "test",
+					content: text,
+					filePath: "/test.md",
+					sourceInfo: { path: "/test.md", scope: "package" },
+					trusted: true,
+				},
+				diagnostics: [],
+			};
 		},
 		openSkillsHub: (tab) => events.push(`resources:${tab ?? "skills"}`),
 		openPrompts: () => events.push("resources:prompts"),

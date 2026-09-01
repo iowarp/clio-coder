@@ -37,7 +37,7 @@ describe("contracts/lmstudio configure", () => {
 		strictEqual(settings.targets.length, 1);
 		strictEqual(settings.targets[0]?.runtime, "lmstudio");
 		strictEqual(settings.targets[0]?.url, server.url);
-		strictEqual(settings.orchestrator.target, "studio");
+		strictEqual(settings.chat.target, "studio");
 	});
 
 	it("normalizes the legacy runtime alias and persists the canonical id", async () => {

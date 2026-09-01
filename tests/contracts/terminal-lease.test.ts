@@ -222,7 +222,7 @@ describe("single-owner terminal lease", () => {
 			complete() {},
 		} as unknown as InteractiveShell;
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.terminal.tuiMode = "fullscreen";
+		settings.interface.mode = "fullscreen";
 		const lease = createProcessTerminalLease({
 			settings,
 			testing: {

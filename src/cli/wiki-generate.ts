@@ -472,11 +472,11 @@ export async function resolveDocumenterModelId(route: WikiModelRoute = {}): Prom
 		const providers = loaded.getContract<ProvidersContract>("providers");
 		if (!config || !providers) return UNRESOLVED_DOCUMENTER_MODEL;
 		const settings = config.get();
-		const workers = settings.workers;
+		const workers = settings.fleet;
 		// Keyed on the dispatched agent id and nothing else, because that is what
 		// `placement.ts` reads. Falling back to another agent's binding here would
 		// record a model in wiki metadata that no dispatch ever ran.
-		const bindingProfileName = workers?.agentBindings?.[WIKI_AGENT_ID];
+		const bindingProfileName = workers?.agentProfiles?.[WIKI_AGENT_ID];
 		const profile = bindingProfileName ? workers?.profiles?.[bindingProfileName] : undefined;
 		const targetId = route.target ?? profile?.target ?? workers?.default?.target ?? settings.targets?.[0]?.id ?? null;
 		if (!targetId) return UNRESOLVED_DOCUMENTER_MODEL;

@@ -47,7 +47,7 @@ describe("assignment event stream", () => {
 
 	it("spans every attempt in order with one failover marker between them", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const finalOutput = mutationReport("ATTEMPT-TWO-FINAL");
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -105,7 +105,7 @@ describe("assignment event stream", () => {
 
 	it("ends with the terminal attempt's answer, matching the terminal receipt", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let spawns = 0;
 		const finalOutput = mutationReport("ANSWER-VISIBILITY-PROBE");
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -139,7 +139,7 @@ describe("assignment event stream", () => {
 
 	it("closes the stream when the assignment is canceled", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		let finish!: (result: SpawnedWorkerResult) => void;
 		const pending = new Promise<SpawnedWorkerResult>((resolve) => {
 			finish = resolve;

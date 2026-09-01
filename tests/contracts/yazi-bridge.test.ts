@@ -69,6 +69,16 @@ function fakeMux(): FakeMux {
 			records.splice(index, 1);
 			return true;
 		},
+		async focusPane(): Promise<boolean> {
+			return false;
+		},
+		async zoomPane(): Promise<boolean> {
+			return false;
+		},
+		async resizeDock(): Promise<boolean> {
+			return false;
+		},
+		docks: () => [],
 		async notify(): Promise<void> {},
 		async worktreeCreate(): Promise<null> {
 			return null;

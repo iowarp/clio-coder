@@ -49,7 +49,10 @@ describe("contracts/foreign prompt roots", () => {
 		// on it, and neither sends the literal /demo to the model.
 		if (expansion.expanded) throw new Error("expected a refusal");
 		strictEqual(expansion.refusal?.template.name, "demo");
-		ok(expansion.refusal?.message.includes("skills.trustProjectCompatRoots"), expansion.refusal?.message);
+		ok(
+			expansion.refusal?.message.includes("integrations.projectResources.trustProjectImports"),
+			expansion.refusal?.message,
+		);
 	});
 
 	it("carries no refusal when the token names no template at all", () => {

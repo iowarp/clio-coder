@@ -336,8 +336,8 @@ describe("council admission narrowing", () => {
 	it("seals read roots, not write roots, onto every council member the plan approves", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [{ id: "primary", runtime: "openai", defaultModel: "base-model" }];
-		settings.workers.default.target = "primary";
-		settings.workers.default.model = "base-model";
+		settings.fleet.default.target = "primary";
+		settings.fleet.default.model = "base-model";
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			previewNode: () => ({ node: { id: "local", kind: "local" } }),
 		});

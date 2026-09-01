@@ -40,7 +40,7 @@ function readToolSpec(name: ToolName, delayMs: number): ToolSpec {
 	} as unknown as ToolSpec;
 }
 
-function registryWith(autonomy: () => ClioSettings["autonomy"], specs: ToolSpec[]) {
+function registryWith(autonomy: () => ClioSettings["safety"]["autonomy"], specs: ToolSpec[]) {
 	const registry = createRegistry({
 		autonomy,
 		safety: {
@@ -128,7 +128,10 @@ describe("contracts/tool admission cost and concurrency", () => {
 			cached = applySessionRouting(applyOverrides(saved, overrides as never), routing);
 			return cached;
 		};
-		const registry = registryWith(() => getCurrentSettings().autonomy ?? "auto-edit", [readToolSpec(ToolNames.Read, 0)]);
+		const registry = registryWith(
+			() => getCurrentSettings().safety.autonomy ?? "auto-edit",
+			[readToolSpec(ToolNames.Read, 0)],
+		);
 
 		for (let i = 0; i < 200; i += 1) {
 			const verdict = await registry.invoke({ tool: ToolNames.Read, args: {} });

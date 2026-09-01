@@ -41,7 +41,7 @@ describe("contracts/task memory prompted policy", () => {
 	it("keeps one default deadline for the one timeout setting", () => {
 		strictEqual(
 			TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
-			DEFAULT_SETTINGS.memory.intervention.timeoutMs,
+			DEFAULT_SETTINGS.context.memory.timeoutMs,
 			"the policy fallback and the settings default are the same setting and must not drift",
 		);
 	});

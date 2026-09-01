@@ -98,6 +98,16 @@ function stubMux(options: { available?: boolean; records?: ReadonlyArray<MuxPane
 			closed.push(paneId);
 			return true;
 		},
+		async focusPane(): Promise<boolean> {
+			return false;
+		},
+		async zoomPane(): Promise<boolean> {
+			return false;
+		},
+		async resizeDock(): Promise<boolean> {
+			return false;
+		},
+		docks: () => [],
 		async notify(): Promise<void> {},
 		async worktreeCreate(): Promise<null> {
 			return null;
@@ -471,7 +481,7 @@ describe("contracts/panes operations", () => {
 		strictEqual(status.available, true);
 		strictEqual(status.socketPath, "/tmp/h.sock");
 		deepStrictEqual(status.server, { version: "0.7.5", protocol: 17 });
-		strictEqual(status.settings.notifications, DEFAULT_SETTINGS.panes.notifications);
+		strictEqual(status.settings.notifications, DEFAULT_SETTINGS.interface.panes.notifications);
 		strictEqual(status.panes.length, 1);
 		strictEqual(status.panes[0]?.purpose, "watch");
 	});

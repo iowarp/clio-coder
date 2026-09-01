@@ -184,7 +184,7 @@ interface ValidationResult {
 }
 
 /**
- * Normalize and validate the raw `settings.keybindings` block. Invalid
+ * Normalize and validate the raw `settings.interface.keybindings` block. Invalid
  * entries are dropped from the returned `valid` config so pi-tui keeps
  * the default binding in effect; callers render `invalid` as a diagnostic.
  */
@@ -472,14 +472,14 @@ function buildManager(
  * Build a `ClioKeybindingManager` from the provided settings snapshot. The
  * resulting manager is also installed as pi-tui's global so editor and
  * select components pick up the same overrides. Callers are expected to
- * recreate the manager if `settings.keybindings` is replaced wholesale;
+ * recreate the manager if `settings.interface.keybindings` is replaced wholesale;
  * partial live updates should instead go through `manager` state.
  */
 export function createKeybindingManager(
 	settings: Readonly<ClioSettings>,
 	env: NodeJS.ProcessEnv | Readonly<Record<string, string | undefined>> = process.env,
 ): ClioKeybindingManager {
-	const { valid, invalid } = validateKeybindings(settings.keybindings ?? {});
+	const { valid, invalid } = validateKeybindings(settings.interface.keybindings ?? {});
 	const inner = new KeybindingsManager(CLIO_KEYBINDINGS, valid);
 	setKeybindings(inner);
 	return buildManager(inner, invalid, detectPlatformKeybindingWarnings(valid, detectTerminalKeySupport(env)));

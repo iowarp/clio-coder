@@ -258,12 +258,12 @@ describe("contracts/bootstrap model generation", () => {
 
 	it("resolves the configured bootstrap binding and refuses dangling profiles", () => {
 		const configured = structuredClone(DEFAULT_SETTINGS);
-		configured.workers.profiles.handbook = {
+		configured.fleet.profiles.handbook = {
 			target: "mini",
 			model: "MiniCPM-test",
 			thinkingLevel: "off",
 		};
-		configured.workers.agentBindings["context-bootstrap"] = "handbook";
+		configured.fleet.agentProfiles["context-bootstrap"] = "handbook";
 		deepStrictEqual(resolveBootstrapRoute(configured), {
 			target: "mini",
 			model: "MiniCPM-test",
@@ -271,12 +271,12 @@ describe("contracts/bootstrap model generation", () => {
 		});
 
 		const dangling = structuredClone(DEFAULT_SETTINGS);
-		dangling.workers.agentBindings["context-bootstrap"] = "missing";
+		dangling.fleet.agentProfiles["context-bootstrap"] = "missing";
 		throws(() => resolveBootstrapRoute(dangling), /profile 'missing' is not configured/);
 
 		const targetless = structuredClone(DEFAULT_SETTINGS);
-		targetless.workers.profiles.empty = { target: null, model: null, thinkingLevel: "off" };
-		targetless.workers.agentBindings["context-bootstrap"] = "empty";
+		targetless.fleet.profiles.empty = { target: null, model: null, thinkingLevel: "off" };
+		targetless.fleet.agentProfiles["context-bootstrap"] = "empty";
 		throws(() => resolveBootstrapRoute(targetless), /profile 'empty' has no target/);
 	});
 
@@ -285,7 +285,7 @@ describe("contracts/bootstrap model generation", () => {
 	// with a working default therefore never produced a model-driven CLIO-CODER.md.
 	it("falls back to workers.default when no bootstrap binding is configured", () => {
 		const unbound = structuredClone(DEFAULT_SETTINGS);
-		unbound.workers.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
+		unbound.fleet.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
 		deepStrictEqual(resolveBootstrapRoute(unbound), {
 			target: "dynamo",
 			model: "qwopus-coder",
@@ -293,8 +293,8 @@ describe("contracts/bootstrap model generation", () => {
 		});
 
 		const bound = structuredClone(unbound);
-		bound.workers.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
-		bound.workers.agentBindings["context-bootstrap"] = "fast";
+		bound.fleet.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
+		bound.fleet.agentProfiles["context-bootstrap"] = "fast";
 		strictEqual(resolveBootstrapRoute(bound).target, "mini", "an explicit binding still wins over the default");
 
 		const routeless = structuredClone(DEFAULT_SETTINGS);
@@ -306,14 +306,14 @@ describe("contracts/bootstrap model generation", () => {
 	// that binding would silently move handbook generation onto workers.default.
 	it("honors a legacy scout binding when no context-bootstrap binding exists", () => {
 		const legacy = structuredClone(DEFAULT_SETTINGS);
-		legacy.workers.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
-		legacy.workers.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
-		legacy.workers.agentBindings.scout = "fast";
+		legacy.fleet.default = { target: "dynamo", model: "qwopus-coder", thinkingLevel: "off" };
+		legacy.fleet.profiles.fast = { target: "mini", model: "MiniCPM-test", thinkingLevel: "off" };
+		legacy.fleet.agentProfiles.scout = "fast";
 		strictEqual(resolveBootstrapRoute(legacy).target, "mini");
 
 		const both = structuredClone(legacy);
-		both.workers.profiles.handbook = { target: "zbook", model: "handbook-model", thinkingLevel: "off" };
-		both.workers.agentBindings["context-bootstrap"] = "handbook";
+		both.fleet.profiles.handbook = { target: "zbook", model: "handbook-model", thinkingLevel: "off" };
+		both.fleet.agentProfiles["context-bootstrap"] = "handbook";
 		strictEqual(
 			resolveBootstrapRoute(both).target,
 			"zbook",

@@ -125,9 +125,9 @@ describe("dispatch failover envelopes", () => {
 
 	it("retries the same approved tuple when the worker runtime fails", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [{ id: TARGET, runtime: "openai", defaultModel: MODEL }];
-		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		settings.fleet.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
 		const spawns: string[] = [];
 		let attempts = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -161,9 +161,9 @@ describe("dispatch failover envelopes", () => {
 
 	it("keeps a manual exact pin fail-closed across retries", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [{ id: TARGET, runtime: "openai", defaultModel: MODEL }];
-		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		settings.fleet.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
 		const spawns: string[] = [];
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resolveNode: (req) => route(req.node ?? "local", spawns),
@@ -182,9 +182,9 @@ describe("dispatch failover envelopes", () => {
 
 	it("falls back from remote to local only within an approved envelope", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [{ id: TARGET, runtime: "openai", defaultModel: MODEL }];
-		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		settings.fleet.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
 		const spawns: string[] = [];
 		const candidates = [
 			{ agentId: "coder", target: TARGET, model: MODEL, node: "blade" },
@@ -235,12 +235,12 @@ describe("dispatch failover envelopes", () => {
 
 	it("routes new work around a cooling target onto the approved alternate", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		settings.targets = [
 			{ id: TARGET, runtime: "openai", defaultModel: MODEL },
 			{ id: "alt", runtime: "openai", defaultModel: MODEL },
 		];
-		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		settings.fleet.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
 		const candidates = [
 			{ agentId: "coder", target: TARGET, model: MODEL, node: "local" },
 			{ agentId: "coder", target: "alt", model: MODEL, node: "local" },
@@ -285,9 +285,9 @@ describe("dispatch failover envelopes", () => {
 
 	it("still refuses new work when the cooling target is the only approved route", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 0;
+		settings.fleet.retry.maxRetries = 0;
 		settings.targets = [{ id: TARGET, runtime: "openai", defaultModel: MODEL }];
-		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		settings.fleet.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
 		const candidates = [{ agentId: "coder", target: TARGET, model: MODEL, node: "local" }];
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resolveNode: () => ({ node: { id: "local", kind: "local" } }),
@@ -317,9 +317,9 @@ describe("dispatch failover envelopes", () => {
 
 	it("settles failed instead of spawning an unlisted candidate", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.workers.maxRetries = 1;
+		settings.fleet.retry.maxRetries = 1;
 		settings.targets = [{ id: TARGET, runtime: "openai", defaultModel: MODEL }];
-		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		settings.fleet.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
 		const spawns: string[] = [];
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 			resolveNode: (req) => route(req.node ?? "local", spawns),

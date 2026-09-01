@@ -358,18 +358,18 @@ function buildSummary(rows: ReadonlyArray<ModelRow>, targets: number, activeRef:
  * row per candidate wire model (see `modelsForTarget`). Targets without
  * a resolvable wire model still render a single "no-model" row so users can
  * see the target exists and why it is not selectable. Scope stars come from
- * `settings.scope`: both plain `targetId` and `targetId/wireModelId` refs
+ * `settings.chat.modelPicker.cycleSet`: both plain `targetId` and `targetId/wireModelId` refs
  * match so a user can pin either granularity.
  */
 export function buildModelItems(deps: {
 	settings: Readonly<ClioSettings>;
 	providers: ProvidersContract;
 }): ModelItemsResult {
-	const activeTarget = deps.settings.orchestrator?.target?.trim() ?? "";
-	const activeModel = deps.settings.orchestrator?.model?.trim() ?? "";
+	const activeTarget = deps.settings.chat?.target?.trim() ?? "";
+	const activeModel = deps.settings.chat?.model?.trim() ?? "";
 	const activeRef = activeTarget && activeModel ? `${activeTarget}/${activeModel}` : activeTarget;
-	const favoriteSet = new Set(deps.settings.modelSelector?.favorites ?? []);
-	const recentSet = new Set(listRecentModels({ limit: deps.settings.modelSelector?.recentLimit ?? 12 }));
+	const favoriteSet = new Set(deps.settings.chat.modelPicker?.favorites ?? []);
+	const recentSet = new Set(listRecentModels({ limit: deps.settings.chat.modelPicker?.recentLimit ?? 12 }));
 	const list = [...deps.providers.list()]
 		.filter((status) => {
 			return status.runtime !== null && isOrchestratorEligibleRuntime(status.runtime);
@@ -384,7 +384,7 @@ export function buildModelItems(deps: {
 				a.target.id.localeCompare(b.target.id)
 			);
 		});
-	const scopeSet = new Set(deps.settings.scope ?? []);
+	const scopeSet = new Set(deps.settings.chat.modelPicker.cycleSet ?? []);
 	const items: SelectItem[] = [];
 	const refs: ModelSelection[] = [];
 	const rows: ModelRow[] = [];
@@ -404,7 +404,7 @@ export function buildModelItems(deps: {
 							providers: deps.providers,
 							status,
 							wireModelId: fallbackModel,
-							requestedThinkingLevel: deps.settings.orchestrator?.thinkingLevel,
+							requestedThinkingLevel: deps.settings.chat?.thinkingLevel,
 						})
 					: null;
 			const rowCaps = resolution?.capabilities ?? status.capabilities;
@@ -458,7 +458,7 @@ export function buildModelItems(deps: {
 				providers: deps.providers,
 				status,
 				wireModelId: wireModel,
-				requestedThinkingLevel: deps.settings.orchestrator?.thinkingLevel,
+				requestedThinkingLevel: deps.settings.chat?.thinkingLevel,
 			});
 			const rowCaps = resolution.capabilities;
 			const decisions = resolution.capabilityDecisions;
@@ -1063,8 +1063,8 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 	const initial = build();
 	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
-	const activeTarget = currentSettings().orchestrator?.target?.trim();
-	const activeModel = currentSettings().orchestrator?.model?.trim();
+	const activeTarget = currentSettings().chat?.target?.trim();
+	const activeModel = currentSettings().chat?.model?.trim();
 	const view = new ModelOverlayView(
 		initial.rows,
 		initial.summary,
