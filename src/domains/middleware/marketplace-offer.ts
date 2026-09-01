@@ -160,6 +160,13 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 	let lastSeenSessionId: string | null | undefined;
 	let offeredNames = new Set<string>();
 	let sessionDeclines = new Set<string>();
+	// Discovery parses and hashes every installed/catalog SKILL.md. On a real
+	// home with 31 entries per side that cost 36-92ms on every turn_start, while
+	// the lexical match itself stayed below 2ms. Inventory is stable within a
+	// session except for installs, so keep one session snapshot and revalidate
+	// installed names only when cached data is about to produce an offer.
+	let installedNamesCache: Set<string> | null = null;
+	let marketplaceEntriesCache: ReadonlyArray<MarketplaceSkill> | null = null;
 	// The offer put to the operator, consumed by the ask_user after_tool
 	// observer. Each offer carries a unique binding tag the model must echo in
 	// its question; the observer acts only on an answer whose question carries
@@ -178,16 +185,17 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			offeredNames = new Set<string>();
 			sessionDeclines = new Set<string>();
 			pendingOffer = null;
+			installedNamesCache = null;
+			marketplaceEntriesCache = null;
 		}
 	};
 
 	const bestMatch = (text: string): PromotionMatch | null => {
-		let installed: ReadonlyArray<string>;
-		let entries: ReadonlyArray<MarketplaceSkill>;
+		const installedWasCached = installedNamesCache !== null;
 		let never: Readonly<Record<string, string>>;
 		try {
-			installed = deps.listInstalledSkillNames();
-			entries = deps.listMarketplaceEntries();
+			installedNamesCache ??= new Set(deps.listInstalledSkillNames());
+			marketplaceEntriesCache ??= deps.listMarketplaceEntries();
 			never = declines.readNever();
 		} catch {
 			return null;
@@ -195,18 +203,33 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		// offeredNames caps to one offer per skill per session, regardless of
 		// version. Declines are version-scoped: a "never"/"not now" on one catalog
 		// version does not suppress a later version of the same skill.
-		const excludedNames = new Set<string>([...installed, ...offeredNames]);
 		const declinedKeys = new Set<string>([...Object.keys(never), ...sessionDeclines]);
-		return (
-			matchMarketplaceSkills(text, entries, excludedNames).find(
-				(candidate) => !declinedKeys.has(declineKey(candidate.entry.name, candidate.entry.version)),
-			) ?? null
-		);
+		const findMatch = (): PromotionMatch | null =>
+			matchMarketplaceSkills(
+				text,
+				marketplaceEntriesCache ?? [],
+				new Set<string>([...(installedNamesCache ?? []), ...offeredNames]),
+			).find((candidate) => !declinedKeys.has(declineKey(candidate.entry.name, candidate.entry.version))) ?? null;
+		let match = findMatch();
+		if (match && installedWasCached) {
+			// A skills-hub or external install can happen after the session snapshot.
+			// Pay the installed-tree refresh only on the rare path that would surface
+			// an offer, then match again so an already-installed skill is never nagged.
+			try {
+				installedNamesCache = new Set(deps.listInstalledSkillNames());
+			} catch {
+				return null;
+			}
+			match = findMatch();
+		}
+		return match;
 	};
 
 	const installGated = (entry: MarketplaceSkill, scope: "user" | "project"): MarketplaceOfferInstallResult => {
 		assertPromotionInstallSource(entry);
-		return deps.installEntry(entry, scope);
+		const result = deps.installEntry(entry, scope);
+		installedNamesCache?.add(entry.name);
+		return result;
 	};
 
 	const evaluateAskUserAnswers = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
