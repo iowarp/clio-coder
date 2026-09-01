@@ -191,7 +191,7 @@ export async function installPinnedTool(
 			documents.push(join(dir, name));
 		}
 		writeFileSync(
-			join(staging, "clio-install.json"),
+			join(staging, "clio-coder-install.json"),
 			`${JSON.stringify(
 				{
 					id: entry.id,

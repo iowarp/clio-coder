@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { settingsPath, withSettingsLock } from "../../../core/config.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import { type MutableNamingStateReport, migrateMutableNamingState } from "../naming-mutable-state.js";
 import { inspectInstalledNamingResources, type NamingResourceReport } from "../naming-resources.js";
+import { inspectToolMarkerNaming, type ToolMarkerNamingReport } from "../naming-tool-markers.js";
 import { regenerateYaziNamingProfile, type YaziNamingRegenerationReport } from "../naming-yazi.js";
 import type { Migration } from "./index.js";
 
@@ -29,10 +31,10 @@ export interface ClioCoderNamingMigrationReport {
 	migrationId: typeof CLIO_CODER_NAMING_MIGRATION_ID;
 	version: 1;
 	settings: NamingSettingsFileReport[];
-	toolMarkers: unknown[];
+	toolMarkers: ToolMarkerNamingReport[];
 	resources: NamingResourceReport[];
 	yazi: YaziNamingRegenerationReport[];
-	mutableState: unknown[];
+	mutableState: MutableNamingStateReport[];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -139,10 +141,10 @@ const migration: Migration = {
 			migrationId: CLIO_CODER_NAMING_MIGRATION_ID,
 			version: 1,
 			settings,
-			toolMarkers: [],
+			toolMarkers: inspectToolMarkerNaming({ fix: true }),
 			resources: inspectInstalledNamingResources({ fix: true }),
 			yazi: [regenerateYaziNamingProfile()],
-			mutableState: [],
+			mutableState: migrateMutableNamingState(stateDir),
 		};
 		const target = namingMigrationReportPath(stateDir);
 		mkdirSync(join(stateDir, "migration-reports"), { recursive: true });

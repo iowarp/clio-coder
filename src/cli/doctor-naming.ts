@@ -14,6 +14,7 @@ import {
 	inspectModelOverlayNaming,
 	inspectSkillMetadataNaming,
 } from "../domains/lifecycle/naming-resources.js";
+import { inspectToolMarkerNaming } from "../domains/lifecycle/naming-tool-markers.js";
 import { inspectYaziNaming, regenerateYaziNamingProfile } from "../domains/lifecycle/naming-yazi.js";
 
 export interface NamingDoctorOptions {
@@ -161,6 +162,32 @@ function yaziNamingFinding(fix: boolean): DoctorFinding {
 	};
 }
 
+function toolMarkerNamingFinding(fix: boolean): DoctorFinding {
+	try {
+		const reports = inspectToolMarkerNaming({ fix });
+		if (reports.length === 0) {
+			return { ok: true, name: "naming tool markers", detail: "known tool versions use canonical install markers" };
+		}
+		const fixed = reports.filter((entry) => entry.status === "renamed" || entry.status === "duplicate-removed").length;
+		const fixable = reports.filter(
+			(entry) => entry.status === "renamable" || entry.status === "agreeing-duplicate",
+		).length;
+		const manual = reports.length - fixed - fixable;
+		return {
+			ok: true,
+			level: fixed > 0 && fixable === 0 && manual === 0 ? "ok" : "warn",
+			name: "naming tool markers",
+			detail: `${fixed} validated markers fixed; ${fixable} await doctor --fix; ${manual} invalid/conflicting markers left untouched`,
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			name: "naming tool markers",
+			detail: `tool marker inspection failed: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
 /** Read-only naming-footprint settings sweep plus the sanctioned deterministic fixes. */
 export function namingFootprintFindings(options: NamingDoctorOptions = {}): DoctorFinding[] {
 	const cwd = options.cwd ?? process.cwd();
@@ -193,5 +220,6 @@ export function namingFootprintFindings(options: NamingDoctorOptions = {}): Doct
 	findings.push(...namingEnvironmentFindings());
 	findings.push(...namingResourceFindings({ ...options, cwd }));
 	findings.push(yaziNamingFinding(Boolean(options.fix)));
+	findings.push(toolMarkerNamingFinding(Boolean(options.fix)));
 	return findings;
 }
