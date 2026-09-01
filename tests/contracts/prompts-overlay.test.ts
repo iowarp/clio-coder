@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component, OverlayHandle, OverlayOptions, TUI } from "../../src/engine/tui.js";
-import type { ListOverlayOptions } from "../../src/interactive/overlays/list-overlay.js";
+import { type ListOverlayOptions, ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
 import { openPromptsOverlay } from "../../src/interactive/overlays/prompts.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
@@ -41,7 +41,15 @@ describe("contracts/prompts-overlay", () => {
 			mounted.tui,
 			{
 				listPrompts: () => ({
-					items: [{ name: "review", argumentHint: "<scope>", description: "Review a focused change", trusted: true }],
+					items: [
+						{ name: "review", argumentHint: "<scope>", description: "Review a focused change", trusted: true },
+						{
+							name: "wtfp:add-todo",
+							argumentHint: "[description]",
+							description: "Capture a missing task without corrupting the narrow list layout",
+							trusted: true,
+						},
+					],
 					diagnostics: [{ type: "warning", message: "fragment is stale", path: "/repo/prompts/review.md" }],
 				}),
 				setEditorText: () => {},
@@ -55,7 +63,17 @@ describe("contracts/prompts-overlay", () => {
 		const template = options.items.find((item) => item.id === "review");
 		ok(template);
 		strictEqual(template?.group, "Prompt Templates");
-		strictEqual(template?.meta, "<scope>");
+		strictEqual(template?.meta, undefined, "the usage already carries its argument synopsis");
+		const longTemplate = options.items.find((item) => item.id === "wtfp:add-todo");
+		ok(longTemplate);
+		ok(stripAnsi(longTemplate.label).includes("[description]  Capture"), longTemplate.label);
+		strictEqual(longTemplate.meta, undefined, "narrow rows do not repeat the argument synopsis at the right edge");
+		const narrowRows = new ListOverlayView(options, () => undefined).render(56).map(stripAnsi);
+		const longRow = narrowRows.find((line) => line.includes("/wtfp:add-todo"));
+		ok(longRow, narrowRows.join("\n"));
+		ok(longRow.includes("]  Capture"), longRow);
+		strictEqual(longRow.split("[description]").length - 1, 1, longRow);
+		ok(longRow.endsWith("…"), `the remaining description is honestly elided: ${longRow}`);
 		const diagnostic = options.items.find((item) => item.group === "Diagnostics");
 		ok(diagnostic);
 		strictEqual(stripAnsi(diagnostic?.label ?? ""), `${GLYPH.warnInline} fragment is stale`);
