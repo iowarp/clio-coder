@@ -89,19 +89,22 @@ export function deriveSplitPath(
 	root: MuxLayoutNode,
 	anchorPaneId: string,
 	dockPaneId: string,
-): { path: ReadonlyArray<boolean>; dockIsSecond: boolean } | null {
+): { path: ReadonlyArray<boolean>; dockIsSecond: boolean; direction: "right" | "down" } | null {
 	const contains = (node: MuxLayoutNode, paneId: string): boolean => {
 		if (node.type === "pane") return node.paneId === paneId;
 		return contains(node.first, paneId) || contains(node.second, paneId);
 	};
-	const walk = (node: MuxLayoutNode, path: boolean[]): { path: boolean[]; dockIsSecond: boolean } | null => {
+	const walk = (
+		node: MuxLayoutNode,
+		path: boolean[],
+	): { path: boolean[]; dockIsSecond: boolean; direction: "right" | "down" } | null => {
 		if (node.type !== "split") return null;
 		const dockFirst = contains(node.first, dockPaneId);
 		const dockSecond = contains(node.second, dockPaneId);
 		const anchorFirst = contains(node.first, anchorPaneId);
 		const anchorSecond = contains(node.second, anchorPaneId);
-		if (dockFirst && anchorSecond) return { path, dockIsSecond: false };
-		if (dockSecond && anchorFirst) return { path, dockIsSecond: true };
+		if (dockFirst && anchorSecond) return { path, dockIsSecond: false, direction: node.direction };
+		if (dockSecond && anchorFirst) return { path, dockIsSecond: true, direction: node.direction };
 		if (dockFirst && anchorFirst) return walk(node.first, [...path, false]);
 		if (dockSecond && anchorSecond) return walk(node.second, [...path, true]);
 		return null;
@@ -227,6 +230,13 @@ export function createDockController(options: DockControllerOptions): DockContro
 		const derived = deriveSplitPath(tree.root, anchorPaneId, state.paneId);
 		if (!derived) {
 			log("debug", `mux ${state.slot} dock split path is gone from ${state.tabId}; leaving layout alone`);
+			return false;
+		}
+		// After a user move the separating split can run the other axis, and the
+		// share would then set a height where minCells measures columns. Wrong-axis
+		// geometry is declined, not silently applied.
+		if (derived.direction !== DOCK_SPECS[state.slot].direction) {
+			log("debug", `mux ${state.slot} dock split runs ${derived.direction}; declining the wrong-axis resize`);
 			return false;
 		}
 		const ratio = derived.dockIsSecond ? ratioForDockShare(share) : share;

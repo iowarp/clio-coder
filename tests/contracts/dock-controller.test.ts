@@ -103,11 +103,13 @@ describe("dock geometry helpers", () => {
 		ok(workers);
 		strictEqual(workers.dockIsSecond, true);
 		strictEqual(workers.path.join(","), "false");
+		strictEqual(workers.direction, "right");
 		// The files dock separates at the root; the anchor is inside `first`.
 		const files = deriveSplitPath(tree, "w1:p1", "w1:p3");
 		ok(files);
 		strictEqual(files.dockIsSecond, true);
 		strictEqual(files.path.length, 0);
+		strictEqual(files.direction, "down");
 		// A pane not in the tree derives nothing, which is how staleness reads.
 		strictEqual(deriveSplitPath(tree, "w1:p1", "w1:p99"), null);
 	});
@@ -351,6 +353,40 @@ describe("dock focus, zoom, and shutdown", () => {
 		// Dock is the second child of the root split: wire ratio is the anchor's share.
 		strictEqual(fake.requestsFor("layout.set_split_ratio")[0]?.params.ratio, 0.6);
 		strictEqual(runtime.contract.docks()[0]?.targetShare, 0.4);
+	});
+
+	it("declines a resize when the separating split runs the wrong axis", async () => {
+		const { fake, runtime } = await guest();
+		const ref = await runtime.contract.openUtilityPane({
+			argv: [],
+			cwd: "/tmp",
+			label: "workers-view",
+			dock: { slot: "workers" },
+		});
+		ok(ref);
+		// A user relocation left the workers dock below the anchor: the separating
+		// split runs down while the slot's geometry measures columns. Applying the
+		// share would set a height ratio against a column floor.
+		fake.setHandler("layout.export", () => ({
+			result: {
+				type: "layout_export",
+				layout: {
+					workspace_id: "w1",
+					tab_id: "w1:t1",
+					zoomed: false,
+					focused_pane_id: "w1:p1",
+					root: {
+						type: "split",
+						direction: "down",
+						ratio: 0.7,
+						first: { type: "pane", pane_id: "w1:p1", cwd: "/tmp" },
+						second: { type: "pane", pane_id: ref.paneId, cwd: "/tmp" },
+					},
+				},
+			},
+		}));
+		strictEqual(await runtime.contract.resizeDock("workers", 0.4), false);
+		strictEqual(fake.requestsFor("layout.set_split_ratio").length, 0);
 	});
 
 	it("closes docks on clean shutdown and leaves unmanaged utility panes alone", async () => {
