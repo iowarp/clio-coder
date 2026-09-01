@@ -258,8 +258,7 @@ function readSource(value: unknown, source: string): EvidenceOverview["source"] 
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	if (value.kind === "run") return { kind: "run", runId: readString(value, source, "runId") };
 	if (value.kind === "session") return { kind: "session", sessionId: readString(value, source, "sessionId") };
-	if (value.kind === "eval") return { kind: "eval", evalId: readString(value, source, "evalId") };
-	throw new Error(`${source}.kind: expected run, session, or eval`);
+	throw new Error(`${source}.kind: expected run or session`);
 }
 
 function readTotals(value: unknown, source: string): EvidenceOverview["totals"] {
