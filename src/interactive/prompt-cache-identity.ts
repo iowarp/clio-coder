@@ -29,6 +29,26 @@ export function attachedToolSchemasFromState(tools: ReadonlyArray<unknown>): Att
 	return schemas;
 }
 
+/**
+ * Serialize the exact ordered schema sequence attached to a provider request.
+ *
+ * `canonicalJson` is deliberately not used here: provider JSON preserves tool
+ * array order and nested object insertion order, so canonicalizing parameters
+ * can alias two byte-distinct request prefixes. Standard `JSON.stringify`
+ * matches the request serialization boundary and throws for unsupported
+ * values such as circular references and bigint.
+ */
+export function attachedToolSchemaBytes(schemas: ReadonlyArray<AttachedToolSchema>): string {
+	try {
+		const bytes = JSON.stringify(schemas);
+		if (bytes === undefined) throw new Error("JSON.stringify returned undefined");
+		return bytes;
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		throw new Error(`attached tool schemas are not JSON-serializable: ${reason}`, { cause: err });
+	}
+}
+
 export interface MainPromptCacheIdentityInput {
 	targetId: string;
 	runtimeId: string;
@@ -50,7 +70,7 @@ export interface MainPromptCacheIdentityInput {
 export function mainPromptCacheIdentity(input: MainPromptCacheIdentityInput): string {
 	return sha256(
 		canonicalJson({
-			version: 1,
+			version: 2,
 			targetId: input.targetId,
 			runtimeId: input.runtimeId,
 			wireModelId: input.wireModelId,
@@ -60,7 +80,7 @@ export function mainPromptCacheIdentity(input: MainPromptCacheIdentityInput): st
 			workingContextPaths: [...input.workingContextPaths].sort((a, b) => a.localeCompare(b)),
 			contextWindowSource: input.contextWindowSource,
 			sessionInputs: input.sessionInputs,
-			attachedToolSchemas: input.attachedToolSchemas,
+			attachedToolSchemaBytes: attachedToolSchemaBytes(input.attachedToolSchemas),
 		}),
 	);
 }

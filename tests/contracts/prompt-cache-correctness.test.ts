@@ -1,4 +1,4 @@
-import { notStrictEqual, strictEqual } from "node:assert/strict";
+import { notStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { Type } from "typebox";
@@ -7,7 +7,9 @@ import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.j
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { toolSignatureFromState } from "../../src/interactive/chat-loop-messages.js";
 import {
+	attachedToolSchemaBytes,
 	attachedToolSchemasFromState,
 	type MainPromptCacheIdentityInput,
 	mainPromptCacheIdentity,
@@ -119,10 +121,111 @@ describe("main compiled-prompt cache identity", () => {
 					attachedToolSchemas: [{ ...baseSchema, parameters: { type: "object", properties: {} } }],
 				},
 			],
+			[
+				"nested schema property order",
+				{
+					...identityInput(),
+					attachedToolSchemas: [
+						{
+							...baseSchema,
+							parameters: {
+								type: "object",
+								properties: { offset: { type: "number" }, path: { type: "string" } },
+							},
+						},
+					],
+				},
+			],
+			[
+				"schema required order",
+				{
+					...identityInput(),
+					attachedToolSchemas: [
+						{
+							...baseSchema,
+							parameters: {
+								type: "object",
+								properties: { path: { type: "string" }, offset: { type: "number" } },
+								required: ["offset", "path"],
+							},
+						},
+					],
+				},
+			],
 		];
 		for (const [label, variant] of variants) {
 			notStrictEqual(mainPromptCacheIdentity(variant), baseKey, `${label} must invalidate reuse`);
 		}
+	});
+
+	it("preserves exact provider ordering for schema objects and tool arrays", () => {
+		const schemaA = {
+			name: "read",
+			description: "Read one file.",
+			parameters: {
+				type: "object",
+				properties: { path: { type: "string" }, offset: { type: "number" } },
+				required: ["path", "offset"],
+			},
+		};
+		const schemaB = {
+			name: "grep",
+			description: "Search files.",
+			parameters: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] },
+		};
+		const reorderedProperties = {
+			...schemaA,
+			parameters: {
+				type: "object",
+				properties: { offset: { type: "number" }, path: { type: "string" } },
+				required: ["path", "offset"],
+			},
+		};
+		const reorderedRequired = {
+			...schemaA,
+			parameters: { ...schemaA.parameters, required: ["offset", "path"] },
+		};
+		const base = identityInput();
+		const key = mainPromptCacheIdentity({ ...base, attachedToolSchemas: [schemaA, schemaB] });
+
+		strictEqual(attachedToolSchemaBytes([schemaA, schemaB]), JSON.stringify([schemaA, schemaB]));
+		notStrictEqual(
+			mainPromptCacheIdentity({ ...base, attachedToolSchemas: [reorderedProperties, schemaB] }),
+			key,
+			"nested property insertion order must invalidate reuse",
+		);
+		notStrictEqual(
+			mainPromptCacheIdentity({ ...base, attachedToolSchemas: [reorderedRequired, schemaB] }),
+			key,
+			"required array order must invalidate reuse",
+		);
+		notStrictEqual(
+			mainPromptCacheIdentity({ ...base, attachedToolSchemas: [schemaB, schemaA] }),
+			key,
+			"attached tool array order must invalidate reuse",
+		);
+		notStrictEqual(toolSignatureFromState([schemaA, schemaB]), toolSignatureFromState([reorderedProperties, schemaB]));
+		notStrictEqual(toolSignatureFromState([schemaA, schemaB]), toolSignatureFromState([reorderedRequired, schemaB]));
+		notStrictEqual(toolSignatureFromState([schemaA, schemaB]), toolSignatureFromState([schemaB, schemaA]));
+		notStrictEqual(toolSignatureFromState([schemaA]), toolSignatureFromState([{ ...schemaA, name: "read_file" }]));
+		notStrictEqual(toolSignatureFromState([schemaA]), toolSignatureFromState([{ ...schemaA, description: "Changed." }]));
+	});
+
+	it("fails closed when attached schemas cannot be serialized", () => {
+		const circular: Record<string, unknown> = { type: "object" };
+		circular.self = circular;
+		throws(
+			() => attachedToolSchemaBytes([{ name: "circular", description: "Invalid.", parameters: circular }]),
+			/attached tool schemas are not JSON-serializable/u,
+		);
+		throws(
+			() =>
+				mainPromptCacheIdentity({
+					...identityInput(),
+					attachedToolSchemas: [{ name: "bigint", description: "Invalid.", parameters: { value: 1n } }],
+				}),
+			/attached tool schemas are not JSON-serializable/u,
+		);
 	});
 
 	it("resolves runtime inputs and exact attached schemas before deciding reuse", async () => {

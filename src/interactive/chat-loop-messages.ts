@@ -21,13 +21,13 @@ import {
 } from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
-import { canonicalJson, sha256 } from "../domains/prompts/hash.js";
+import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import { ceilChars, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
-import { attachedToolSchemasFromState } from "./prompt-cache-identity.js";
+import { attachedToolSchemaBytes, attachedToolSchemasFromState } from "./prompt-cache-identity.js";
 
 /** Minimal structural view of the engine agent used by state-inspection helpers. */
 export interface AgentStateView {
@@ -292,7 +292,7 @@ export function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkill
  * tool-surface change.
  */
 export function toolSignatureFromState(tools: ReadonlyArray<unknown>): string {
-	return sha256(canonicalJson(attachedToolSchemasFromState(tools)));
+	return sha256(attachedToolSchemaBytes(attachedToolSchemasFromState(tools)));
 }
 
 /**
