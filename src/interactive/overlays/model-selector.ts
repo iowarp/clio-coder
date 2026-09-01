@@ -30,13 +30,14 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import {
 	buildHint,
 	clioError,
+	diagnosticSeverityToken,
 	FILTER_HINT,
 	formatRuntimeResolutionDiagnostic,
-	runtimeResolutionDiagnosticLine,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
 import { type ClioToken, clioTheme, GLYPH } from "../theme/index.js";
@@ -665,18 +666,23 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	// The detail block is quiet scaffolding beneath the selected row; only the
 	// diagnostics carry a semantic token, so the two fact lines render dim.
 	return [
-		theme.fg("dim", fitLine(`${state} ${ref} · ${availability} · auth ${row.authText}`, width)),
-		theme.fg(
-			"dim",
-			fitLine(
+		...wrapTextWithAnsi(theme.fg("dim", `${state} ${ref} · ${availability} · auth ${row.authText}`), width),
+		...wrapTextWithAnsi(
+			theme.fg(
+				"dim",
 				`source ${sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
-				width,
 			),
+			width,
 		),
 		...(row.diagnostics ?? [])
 			.filter((entry) => entry.severity !== "info")
 			.slice(0, 2)
-			.map((entry) => runtimeResolutionDiagnosticLine(entry, width)),
+			.flatMap((entry) =>
+				wrapTextWithAnsi(
+					theme.fg(diagnosticSeverityToken(entry.severity), formatRuntimeResolutionDiagnostic(entry)),
+					width,
+				),
+			),
 	];
 }
 
@@ -765,23 +771,26 @@ function renderModelOverlayLines(input: {
 				width,
 			),
 		),
-		theme.fg("dim", fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width)),
+		...wrapTextWithAnsi(
+			theme.fg("dim", `current ${active} · focus shows current, favorites, recent, and target defaults`),
+			width,
+		),
 	];
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
 	if (refreshLine)
 		lines.push(
-			input.refreshError ? clioError(fitLine(refreshLine, width)) : theme.fg("dim", fitLine(refreshLine, width)),
+			...wrapTextWithAnsi(input.refreshError ? clioError(refreshLine) : theme.fg("dim", refreshLine), width),
 		);
-	if (input.selectionError) lines.push(clioError(fitLine(input.selectionError, width)));
+	if (input.selectionError) lines.push(...wrapTextWithAnsi(clioError(input.selectionError), width));
 	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {
 		lines.push(
-			theme.fg(
-				"muted",
-				fitLine(
+			...wrapTextWithAnsi(
+				theme.fg(
+					"muted",
 					searching ? "  no models match the current filter" : "  no focused models; type to search or press Tab for all",
-					width,
 				),
+				width,
 			),
 		);
 	} else {
