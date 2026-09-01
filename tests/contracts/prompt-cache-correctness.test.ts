@@ -1,4 +1,4 @@
-import { notStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { Type } from "typebox";
@@ -29,6 +29,7 @@ function identityInput(): MainPromptCacheIdentityInput {
 		cwd: "/workspace",
 		workingContextPaths: ["src/b.ts", "src/a.ts"],
 		contextWindowSource: "loaded",
+		promptInputEpoch: "1:1",
 		sessionInputs: {
 			provider: "local",
 			model: "stable-model",
@@ -72,6 +73,7 @@ describe("main compiled-prompt cache identity", () => {
 		);
 
 		const variants: Array<[string, MainPromptCacheIdentityInput]> = [
+			["prompt input epoch", { ...identityInput(), promptInputEpoch: "2:1" }],
 			["runtime", { ...identityInput(), runtimeId: "ollama" }],
 			[
 				"context window",
@@ -232,6 +234,7 @@ describe("main compiled-prompt cache identity", () => {
 		let compileCalls = 0;
 		let memorySection = "# Memory\n\n- first";
 		const prompts: PromptsContract = {
+			inputEpoch: () => "1:1",
 			async compileSessionPrompt(input) {
 				compileCalls += 1;
 				return compiledPrompt(canonicalJson(input.sessionInputs));
@@ -310,6 +313,100 @@ describe("main compiled-prompt cache identity", () => {
 		strictEqual(compileCalls, 5, "resolved memory input must invalidate reuse");
 
 		strictEqual(attachedToolSchemasFromState(runtime.agent.state.tools)[0]?.description, "Changed description.");
+		context.dispose();
+	});
+
+	it("recompiles on prompt-input epoch changes and reports only byte changes as cold", async () => {
+		let compileCalls = 0;
+		let epoch = "1:1";
+		let promptBody = "# stable prompt";
+		const promptEntries: Array<{ customType?: string }> = [];
+		const prompts: PromptsContract = {
+			inputEpoch: () => epoch,
+			async compileSessionPrompt() {
+				compileCalls += 1;
+				return compiledPrompt(promptBody);
+			},
+			async compileWorkerPrompt() {
+				throw new Error("not used");
+			},
+			reload() {},
+		};
+		const state = createTurnState("off");
+		const runtime = {
+			targetId: "local",
+			runtimeId: "llama.cpp",
+			wireModelId: "stable-model",
+			runtimeResolution: {
+				capabilityDecisions: { tools: true },
+				contextWindowDetails: { effectiveContextWindow: 32_768, contextWindowSource: "loaded" },
+			},
+			agent: {
+				state: {
+					systemPrompt: "",
+					thinkingLevel: "off",
+					messages: [],
+					tools: [],
+				},
+			},
+		};
+		const context = createTurnContext({
+			state,
+			getSettings: () => ({ safety: { autonomy: "auto-edit" } }) as never,
+			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
+			prompts,
+			session: {
+				current: () => ({
+					id: "prompt-epoch-session",
+					cwd: "/workspace",
+					cwdHash: "prompt-epoch",
+					createdAt: "2026-09-01T00:00:00.000Z",
+					endedAt: null,
+					model: "stable-model",
+					target: "local",
+					clioCoderVersion: "0.4.2",
+					piMonoVersion: "0.84.0",
+					platform: "test",
+					nodeVersion: process.version,
+				}),
+				appendEntry: (entry: { customType?: string }) => {
+					promptEntries.push(entry);
+					return entry;
+				},
+			} as never,
+			middleware: {} as TurnMiddleware,
+			emitNotice: () => {},
+		});
+		const agentRuntime = runtime as unknown as AgentRuntime;
+
+		await context.ensureSessionPrompt(agentRuntime);
+		context.logPromptCompileIfPending();
+		await context.ensureSessionPrompt(agentRuntime);
+		strictEqual(compileCalls, 1, "unchanged epoch must reuse the compile");
+
+		epoch = "2:1";
+		await context.ensureSessionPrompt(agentRuntime);
+		context.logPromptCompileIfPending();
+		strictEqual(compileCalls, 2, "an epoch change must re-enter the compiler");
+		strictEqual(promptEntries.length, 1, "byte-identical output must not log another prompt compile");
+		context.consumeExpectedColdReasons("llama.cpp");
+		const stablePayload = context.promptCachePayloadForAssistant({ input: 1 } as never) as {
+			expectedColdReasons?: string[];
+		};
+		strictEqual(stablePayload.expectedColdReasons, undefined, "byte-identical output must not report a cold prefix");
+
+		epoch = "3:1";
+		promptBody = "# changed prompt";
+		await context.ensureSessionPrompt(agentRuntime);
+		context.logPromptCompileIfPending();
+		strictEqual(compileCalls, 3);
+		strictEqual(promptEntries.length, 2, "changed prompt bytes must append promptRecompiled telemetry");
+		strictEqual(promptEntries[1]?.customType, "promptRecompiled");
+		context.consumeExpectedColdReasons("llama.cpp");
+		const changedPayload = context.promptCachePayloadForAssistant({ input: 1 } as never) as {
+			expectedColdReasons?: string[];
+		};
+		deepStrictEqual(changedPayload.expectedColdReasons, ["prompt_recompiled"]);
 		context.dispose();
 	});
 });

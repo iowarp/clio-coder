@@ -24,6 +24,14 @@ export interface CompileWorkerPromptInput extends WorkerPromptInputs {
 
 export interface PromptsContract {
 	/**
+	 * Revision of compiler-owned inputs that support live reload. Fragment and
+	 * agent-catalog components advance independently and are combined without
+	 * loss. Project handbooks, rules, and operator profile remain session-frozen
+	 * until a config invalidation or a new session.
+	 */
+	inputEpoch(): string;
+
+	/**
 	 * Compile the session system prompt. Called once per session (and again
 	 * only on explicit, logged events: model/target change, autonomy-level
 	 * change, fragment reload, session switch). Inputs must be constant for
@@ -39,6 +47,6 @@ export interface PromptsContract {
 	 */
 	compileWorkerPrompt(input: CompileWorkerPromptInput): Promise<CompiledSessionPrompt>;
 
-	/** Reload fragment table (triggered by config.hotReload). */
+	/** Reload fragment table and advance `inputEpoch` after a successful load. */
 	reload(): void;
 }

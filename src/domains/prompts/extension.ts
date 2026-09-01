@@ -33,6 +33,7 @@ export function createPromptsBundle(
 	options: PromptsBundleOptions = {},
 ): DomainBundle<PromptsContract> {
 	let table: FragmentTable | null = null;
+	let fragmentEpoch = 0;
 	const suppressContextFiles = options.noContextFiles === true;
 
 	function config(): ConfigContract | undefined {
@@ -60,6 +61,7 @@ export function createPromptsBundle(
 	function reload(): void {
 		try {
 			table = loadFragments();
+			fragmentEpoch += 1;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(`[clio-coder:prompts] reload failed: ${msg}\n`);
@@ -74,6 +76,9 @@ export function createPromptsBundle(
 	}
 
 	const contract: PromptsContract = {
+		inputEpoch() {
+			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}`;
+		},
 		async compileSessionPrompt(input: CompileSessionPromptInput) {
 			if (!table) throw new Error("prompts domain not started");
 			if (table.byId.size === 0) {
@@ -145,6 +150,7 @@ export function createPromptsBundle(
 		async start() {
 			try {
 				table = loadFragments();
+				fragmentEpoch += 1;
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				process.stderr.write(`[clio-coder:prompts] initial load failed: ${msg}\n`);

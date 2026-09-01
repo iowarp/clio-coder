@@ -51,6 +51,7 @@ export function makeDispatchBundle(
 ): ReturnType<typeof createDispatchBundle> {
 	const promptTable = loadFragments();
 	const prompts: PromptsContract = {
+		inputEpoch: () => "test:0",
 		compileSessionPrompt: async () => {
 			throw new Error("dispatch test harness does not compile session prompts");
 		},

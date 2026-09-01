@@ -139,6 +139,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 					};
 				});
 	const agents: AgentsContract = {
+		revision: () => 1,
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
 		diagnostics: () => [],
