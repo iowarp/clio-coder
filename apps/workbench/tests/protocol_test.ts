@@ -26,6 +26,7 @@ import {
 	validateServerEvent,
 	WebSocketLocalTransport,
 } from "../src/protocol.ts";
+import { evalInventoryFixture } from "./fixtures.ts";
 
 function clientFrame(
 	kind: string,
@@ -135,7 +136,7 @@ function serverEvent<K extends ServerEventKind>(
 				kind === "command.error" ||
 				kind === "project.browse.listing" || kind === "dispatch.state" ||
 				kind === "fleet.inspection.state" || kind === "fleet.decisions.state" ||
-				kind === "interop.state" ||
+				kind === "interop.state" || kind === "eval.state" ||
 				kind === "toolchain.state" || kind === "trace.state" || kind === "evidence.state" ||
 				kind === "evidence.detail.state" || kind === "fleet.verification.state" ||
 				kind === "recovery.state"
@@ -187,6 +188,7 @@ Deno.test("the v4 command family is a hard cut with no engine or sandbox aliases
 		"toolchain.inspect",
 		"interop.inspect",
 		"trace.inspect",
+		"eval.inspect",
 		"evidence.inspect",
 		"evidence.read",
 		"fleet.verify",
@@ -512,6 +514,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"fleet.decisions": {},
 		"toolchain.inspect": {},
 		"interop.inspect": {},
+		"eval.inspect": {},
 		"trace.inspect": {},
 		"evidence.inspect": {},
 		"evidence.read": { evidenceId: "run-alpha-bundle" },
@@ -1799,6 +1802,84 @@ Deno.test("external agent detection carries wiring state and no native path", ()
 	expectProtocolError(() => serverEvent("interop.state", { inspection: { ...inspection, agents: [agent, agent] } }));
 	// Detection walks the registry once and drops a kind with nothing to report.
 	expectProtocolError(() => serverEvent("interop.state", { inspection: { ...inspection, knownKinds: 0 } }));
+});
+
+Deno.test("eval reports validate their own accounting, outcomes, and comparable set", () => {
+	const inventory = evalInventoryFixture();
+	const wire = {
+		scope: inventory.scope,
+		inspectedAt: inventory.inspectedAt,
+		generatedAt: inventory.generatedAt,
+		available: inventory.available,
+		stored: inventory.stored,
+		unreadable: inventory.unreadable,
+		reports: inventory.reports,
+		truncated: inventory.truncated,
+	};
+	const report = inventory.reports[0];
+	ok(report !== undefined);
+	const event = serverEvent("eval.state", { inventory: wire });
+	equal(event.projectId, undefined);
+	equal(event.payload.inventory.reports[0]?.suiteId, "public-main-agent-behavior");
+	// A suite result that passed while its behavioral judge disagreed is a real
+	// state, not a contradiction, and must survive validation.
+	equal(event.payload.inventory.reports[0]?.behaviorOutcomes.length, 2);
+
+	const withReport = (broken: unknown) =>
+		expectProtocolError(() => serverEvent("eval.state", { inventory: { ...wire, reports: [broken] } }));
+	// The transcript, the entry path, and the suite hash stay host-side, so any
+	// field outside the closed DTO is a rejection rather than an extra.
+	withReport({ ...report, suiteHash: "a".repeat(64) });
+	// The stamp is read out of the id, so it cannot disagree with it.
+	withReport({ ...report, startedAt: "2026-08-30T20:58:57.011Z" });
+	// A run split and a pass rate are the same fact stated twice.
+	withReport({ ...report, summary: { ...report.summary, passed: 2 } });
+	withReport({ ...report, summary: { ...report.summary, passRate: 0.9 } });
+	// Unmeasured accounting carries no counts, and measured coverage cannot
+	// exceed the runs it covers.
+	withReport({ ...report, summary: { ...report.summary, tokens: { ...report.summary.tokens, measured: false } } });
+	withReport({ ...report, summary: { ...report.summary, tokens: { ...report.summary.tokens, measuredRuns: 3 } } });
+	// A behavioral document references a verdict; an envelope references one of those.
+	withReport({ ...report, results: { ...report.results, withBehavioral: 3 } });
+	withReport({ ...report, results: { ...report.results, withExecutionEnvelope: 3 } });
+	// Every failed result carries a class, so the tally accounts for them exactly.
+	withReport({ ...report, failureClasses: [] });
+	withReport({ ...report, behaviorOutcomes: [{ outcome: "pass", count: 1 }] });
+	// A scenario reduction derives its rates from the counts beside them.
+	withReport({ ...report, scenarios: [{ ...report.scenarios?.[0], passAtK: 0 }] });
+	// A whole scenario list accounts for every verdict it reduces.
+	withReport({ ...report, scenarios: [report.scenarios?.[0]] });
+	// A report read off its declared matrix knows nothing about the runtime.
+	withReport({ ...report, serving: { ...report.serving, observed: false } });
+
+	// A store that does not exist has nothing to have counted.
+	expectProtocolError(() => serverEvent("eval.state", { inventory: { ...wire, available: false } }));
+	expectProtocolError(() => serverEvent("eval.state", { inventory: { ...wire, stored: 1 } }));
+	expectProtocolError(() => serverEvent("eval.state", { inventory: { ...wire, truncated: true } }));
+	// The ordinals are dense from one, in the order the window meets a configuration.
+	expectProtocolError(() =>
+		serverEvent("eval.state", {
+			inventory: { ...wire, reports: [{ ...report, servingGroup: 2 }] },
+		})
+	);
+	// Two reports the host called comparable must agree on every serving fact
+	// that crosses, because the rule it grouped by compares a superset of them.
+	expectProtocolError(() =>
+		serverEvent("eval.state", {
+			inventory: {
+				...wire,
+				stored: 3,
+				reports: [
+					report,
+					{
+						...inventory.reports[1],
+						servingGroup: 1,
+						evalId: "eval-20260830T205231717Z-4607d71d-1fe0d9733b6f",
+					},
+				],
+			},
+		})
+	);
 });
 
 Deno.test("gate decisions validate the verdict, the winner, and the independence they claim", () => {

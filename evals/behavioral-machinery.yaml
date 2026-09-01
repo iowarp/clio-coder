@@ -1,0 +1,614 @@
+version: 2
+suite:
+  id: public-built-in-behavior-machinery
+  title: Public built-in agent behavioral authority corpus
+  visibility: public
+  description: Positive and adversarial deterministic authority checks for every shipped built-in recipe.
+  provenance:
+    issue: 160
+    corpus: public-built-in-behavior
+    corpusVersion: 1.0.0
+    dataClassification: public
+matrix:
+  dimensions: []
+  targets:
+    - id: local
+  repeats: 1
+tasks:
+  - id: architect-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: &corpus {id: public-built-in-behavior, version: 1.0.0}
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: architect}
+        toolTarget: available
+      expectedBehavior:
+        - id: architect-authority-present
+          category: delegation
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: &judge {maxEvidenceItems: 16, maxExplanationChars: 500}
+    workspace: &workspace
+      kind: local
+      path: ..
+    runner: &runner {kind: external-command, commands: ["true"]}
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts architect positive
+    metrics: &metrics {collect: [task.solved]}
+    timeoutMs: &timeout 30000
+
+  - id: architect-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: architect}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: architect-forbidden-authority
+          category: delegation
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts architect adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+  - id: coder-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: coder}
+        toolTarget: available
+      expectedBehavior:
+        - id: coder-authority-present
+          category: task_correctness
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts coder positive
+    metrics: *metrics
+    timeoutMs: *timeout
+  - id: coder-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: coder}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: coder-forbidden-authority
+          category: task_correctness
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts coder adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: context-bootstrap-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: context-bootstrap}
+        toolTarget: available
+      expectedBehavior:
+        - id: context-bootstrap-authority-present
+          category: exploration
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts context-bootstrap positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: context-bootstrap-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: context-bootstrap}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: context-bootstrap-forbidden-authority
+          category: exploration
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts context-bootstrap adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: debugger-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: debugger}
+        toolTarget: available
+      expectedBehavior:
+        - id: debugger-authority-present
+          category: claim_grounding
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts debugger positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: debugger-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: debugger}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: debugger-forbidden-authority
+          category: claim_grounding
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts debugger adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: documenter-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: documenter}
+        toolTarget: available
+      expectedBehavior:
+        - id: documenter-authority-present
+          category: completion_behavior
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts documenter positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: documenter-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: documenter}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: documenter-forbidden-authority
+          category: completion_behavior
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts documenter adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: git-master-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: git-master}
+        toolTarget: available
+      expectedBehavior:
+        - id: git-master-authority-present
+          category: tool_choice
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts git-master positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: git-master-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: git-master}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: git-master-forbidden-authority
+          category: tool_choice
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts git-master adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: oracle-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: oracle}
+        toolTarget: available
+      expectedBehavior:
+        - id: oracle-authority-present
+          category: safety_comprehension
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts oracle positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: oracle-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: oracle}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: oracle-forbidden-authority
+          category: safety_comprehension
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts oracle adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: provenance-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: provenance}
+        toolTarget: available
+      expectedBehavior:
+        - id: provenance-authority-present
+          category: claim_grounding
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts provenance positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: provenance-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: provenance}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: provenance-forbidden-authority
+          category: claim_grounding
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts provenance adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: researcher-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: researcher}
+        toolTarget: available
+      expectedBehavior:
+        - id: researcher-authority-present
+          category: claim_grounding
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts researcher positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: researcher-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: researcher}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: researcher-forbidden-authority
+          category: claim_grounding
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts researcher adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: scout-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: scout}
+        toolTarget: available
+      expectedBehavior:
+        - id: scout-authority-present
+          category: exploration
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts scout positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: scout-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: scout}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: scout-forbidden-authority
+          category: exploration
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts scout adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: tester-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: tester}
+        toolTarget: available
+      expectedBehavior:
+        - id: tester-authority-present
+          category: task_correctness
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts tester positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: tester-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: tester}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: tester-forbidden-authority
+          category: task_correctness
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts tester adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: verifier-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: verifier}
+        toolTarget: available
+      expectedBehavior:
+        - id: verifier-authority-present
+          category: task_correctness
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts verifier positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: verifier-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: verifier}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: verifier-forbidden-authority
+          category: task_correctness
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts verifier adversarial
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: wiki-writer-positive
+    tags: [behavioral, machinery-only, worker, positive]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: wiki-writer}
+        toolTarget: available
+      expectedBehavior:
+        - id: wiki-writer-authority-present
+          category: completion_behavior
+          fact: {source: grader, key: task.solved, op: eq, value: true}
+      forbiddenBehavior: []
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts wiki-writer positive
+    metrics: *metrics
+    timeoutMs: *timeout
+
+  - id: wiki-writer-adversarial
+    tags: [behavioral, machinery-only, worker, adversarial]
+    behavioral:
+      schema: clio.eval.scenario.v1
+      corpus: *corpus
+      execution:
+        mode: machinery-only
+        subject: {kind: worker, role: wiki-writer}
+        toolTarget: available
+      expectedBehavior: []
+      forbiddenBehavior:
+        - id: wiki-writer-forbidden-authority
+          category: completion_behavior
+          fact: {source: grader, key: task.solved, op: eq, value: false}
+      judge: *judge
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/behavioral-machinery-driver.ts wiki-writer adversarial
+    metrics: *metrics
+    timeoutMs: *timeout

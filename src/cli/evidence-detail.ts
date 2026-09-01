@@ -39,7 +39,7 @@ export interface EvidenceDetailSnapshot {
 	readonly version: 1;
 	readonly generatedAt: string;
 	readonly evidenceId: string;
-	readonly sourceKind: "run" | "session";
+	readonly sourceKind: "run" | "session" | "eval";
 	/** False when the bundle predates the canonical trust projection. */
 	readonly canonical: boolean;
 	readonly runs: readonly EvidenceDetailRun[];

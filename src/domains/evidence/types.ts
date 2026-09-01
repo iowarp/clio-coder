@@ -1,5 +1,6 @@
 import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
 import type { RunPersonaOverride, RunPipelineProvenance, RunReceiptAutonomyEnforcement } from "../dispatch/types.js";
+import type { EvalCommandPhase, EvalFailureClass, EvalRunRecord } from "../eval/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { RunEscalationCounts } from "./provenance.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
@@ -59,7 +60,10 @@ export type FailureCauseTag = (typeof FAILURE_CAUSE_TAG_ORDER)[number];
 /** Fast membership test for the canonical failure-cause subset. */
 export const FAILURE_CAUSE_TAGS: ReadonlySet<EvidenceTag> = new Set(FAILURE_CAUSE_TAG_ORDER);
 
-export type EvidenceSource = { kind: "run"; runId: string } | { kind: "session"; sessionId: string };
+export type EvidenceSource =
+	| { kind: "run"; runId: string }
+	| { kind: "session"; sessionId: string }
+	| { kind: "eval"; evalId: string };
 
 export interface EvidenceTotals {
 	runs: number;
@@ -188,7 +192,7 @@ export interface EvidenceRunLink {
 	candidateRunIds?: string[];
 }
 
-export type EvidenceToolEventSource = "session-entry" | "audit-row" | "receipt-aggregate";
+export type EvidenceToolEventSource = "session-entry" | "audit-row" | "receipt-aggregate" | "eval-command";
 
 export interface EvidenceToolEvent {
 	source: EvidenceToolEventSource;
@@ -259,7 +263,41 @@ export interface EvidenceTraceFindingRow extends EvidenceFinding {
 	kind: "finding";
 }
 
-export type EvidenceCleanTraceRow = EvidenceTraceRunRow | EvidenceTraceToolRow | EvidenceTraceFindingRow;
+export interface EvidenceEvalTraceRow {
+	kind: "eval-result";
+	evalId: string;
+	runId: string;
+	taskId: string;
+	pass: boolean;
+	exitCode: number;
+	failureClass: EvalFailureClass | null;
+	wallTimeMs: number;
+	tokens: number;
+	costUsd: number;
+	cwd: string;
+	tags: string[];
+	evidenceId: string | null;
+}
+
+export interface EvidenceEvalCommandTraceRow {
+	kind: "eval-command";
+	evalId: string;
+	runId: string;
+	taskId: string;
+	phase: EvalCommandPhase;
+	index: number;
+	command: string;
+	exitCode: number;
+	timedOut: boolean;
+	wallTimeMs: number;
+}
+
+export type EvidenceCleanTraceRow =
+	| EvidenceTraceRunRow
+	| EvidenceTraceToolRow
+	| EvidenceTraceFindingRow
+	| EvidenceEvalTraceRow
+	| EvidenceEvalCommandTraceRow;
 
 export interface EvidenceReceiptFile {
 	version: 1;
@@ -306,5 +344,12 @@ export type EvidenceRawTraceRow =
 			runId: string;
 			error: string;
 	  };
+
+export interface EvidenceEvalRawTraceRow {
+	kind: "eval-result";
+	evalId: string;
+	runId: string;
+	result: EvalRunRecord;
+}
 
 export type EvidenceToolStat = ToolCallStat;

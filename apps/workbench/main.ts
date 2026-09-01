@@ -22,6 +22,7 @@ import {
 	ClioInteropInspectError,
 	type ClioInteropInspector,
 } from "./clio-interop-inspector.ts";
+import { ClioCliEvalInspector, ClioEvalInspectError, type ClioEvalInspector } from "./clio-eval-inspector.ts";
 import { ClioCliTraceInspector, ClioTraceInspectError, type ClioTraceInspector } from "./clio-trace-inspector.ts";
 import {
 	ClioCliEvidenceInspector,
@@ -64,6 +65,7 @@ import {
 	type WireConfigInspection,
 	type WireDeleteChallenge,
 	type WireDispatchInspection,
+	type WireEvalInventory,
 	type WireEvidenceInspection,
 	type WireFleetInspection,
 	type WireGateDecisions,
@@ -201,6 +203,8 @@ export interface WorkbenchServerOptions {
 	decisionsInspector?: ClioDecisionsInspector;
 	/** Overrides the fixed external coding agent detection adapter (tests). */
 	interopInspector?: ClioInteropInspector;
+	/** Overrides the fixed installation-wide stored eval report adapter (tests). */
+	evalInspector?: ClioEvalInspector;
 	/** Overrides the fixed installation-wide durable evidence adapter (tests). */
 	evidenceInspector?: ClioEvidenceInspector;
 	/** Overrides the redacted Clio Coder doctor/paths adapter (tests). */
@@ -404,6 +408,7 @@ class WorkbenchRuntime implements HostSink {
 	readonly #traceInspector: ClioTraceInspector;
 	readonly #decisionsInspector: ClioDecisionsInspector;
 	readonly #interopInspector: ClioInteropInspector;
+	readonly #evalInspector: ClioEvalInspector;
 	readonly #evidenceInspector: ClioEvidenceInspector;
 	/**
 	 * The only way a browser may name a durable artifact: by echoing an id this
@@ -430,6 +435,7 @@ class WorkbenchRuntime implements HostSink {
 	#traceInspection: WireTraceInspection | null = null;
 	#gateDecisions: WireGateDecisions | null = null;
 	#interopInspection: WireInteropInspection | null = null;
+	#evalInventory: WireEvalInventory | null = null;
 	#evidenceInspection: WireEvidenceInspection | null = null;
 	#origin = "";
 	#commandQueue: Promise<void> = Promise.resolve();
@@ -460,6 +466,7 @@ class WorkbenchRuntime implements HostSink {
 				| "traceInspector"
 				| "decisionsInspector"
 				| "interopInspector"
+				| "evalInspector"
 				| "evidenceInspector"
 				| "recoveryInspector"
 				| "permissionEscalateMs"
@@ -512,6 +519,10 @@ class WorkbenchRuntime implements HostSink {
 			new ClioCliInteropInspector({
 				log: options.quiet ? () => undefined : (message) => console.error(message),
 			});
+		this.#evalInspector = options.evalInspector ??
+			new ClioCliEvalInspector({
+				log: options.quiet ? () => undefined : (message) => console.error(message),
+			});
 		this.#evidenceInspector = options.evidenceInspector ??
 			new ClioCliEvidenceInspector({
 				log: options.quiet ? () => undefined : (message) => console.error(message),
@@ -560,6 +571,7 @@ class WorkbenchRuntime implements HostSink {
 			traceInspection: this.#traceInspection,
 			gateDecisions: this.#gateDecisions,
 			interopInspection: this.#interopInspection,
+			evalInventory: this.#evalInventory,
 			evidenceInspection: this.#evidenceInspection,
 		};
 	}
@@ -788,6 +800,9 @@ class WorkbenchRuntime implements HostSink {
 		}
 		if (command.kind === "interop.inspect") {
 			return this.#serializeRead(() => this.#dispatchInteropInspect(session, command));
+		}
+		if (command.kind === "eval.inspect") {
+			return this.#serializeRead(() => this.#dispatchEvalInspect(session, command));
 		}
 		if (command.kind === "evidence.inspect") {
 			return this.#serializeRead(() => this.#dispatchEvidenceInspect(session, command));
@@ -1057,6 +1072,27 @@ class WorkbenchRuntime implements HostSink {
 			if (this.#closed || session.closed) return;
 			this.#interopInspection = inspection;
 			this.#broadcast("interop.state", {}, { inspection });
+		} catch (error) {
+			const mapped = this.#commandError(error);
+			session.send("command.error", {}, {
+				...mapped,
+				requestId: command.requestId,
+			});
+		}
+	}
+
+	async #dispatchEvalInspect(
+		session: SocketSession,
+		command: ClientCommandOf<"eval.inspect">,
+	): Promise<void> {
+		try {
+			if (this.#closed || session.closed) {
+				throw new HostError("not-ready", "The local client is closed.");
+			}
+			const inventory = await this.#evalInspector.inspect(this.#state.homePath);
+			if (this.#closed || session.closed) return;
+			this.#evalInventory = inventory;
+			this.#broadcast("eval.state", {}, { inventory });
 		} catch (error) {
 			const mapped = this.#commandError(error);
 			session.send("command.error", {}, {
@@ -1661,6 +1697,9 @@ class WorkbenchRuntime implements HostSink {
 		if (error instanceof ClioInteropInspectError) {
 			return { code: error.code, message: error.message };
 		}
+		if (error instanceof ClioEvalInspectError) {
+			return { code: error.code, message: error.message };
+		}
 		if (error instanceof ClioEvidenceInspectError) {
 			return { code: error.code, message: error.message };
 		}
@@ -1830,6 +1869,7 @@ export async function startWorkbenchServer(
 		...(options.traceInspector === undefined ? {} : { traceInspector: options.traceInspector }),
 		...(options.decisionsInspector === undefined ? {} : { decisionsInspector: options.decisionsInspector }),
 		...(options.interopInspector === undefined ? {} : { interopInspector: options.interopInspector }),
+		...(options.evalInspector === undefined ? {} : { evalInspector: options.evalInspector }),
 		...(options.evidenceInspector === undefined ? {} : { evidenceInspector: options.evidenceInspector }),
 		...(options.recoveryInspector === undefined ? {} : { recoveryInspector: options.recoveryInspector }),
 		...(options.permissionEscalateMs === undefined ? {} : { permissionEscalateMs: options.permissionEscalateMs }),
