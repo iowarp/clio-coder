@@ -27,6 +27,7 @@ Commands:
   clio-coder skills install --category <category> [--user|--project] [--force]
   clio-coder skills update <name> | --all [--force]
   clio-coder skills sync [--force]
+  clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 
 inventory is the fixed machine-readable read a GUI host may run. Unlike a bare
 list it reports every installed skill, not only the ones the model may load, and
@@ -41,6 +42,24 @@ install resolves a bare name through that marketplace; a path or GitHub URL
 installs directly, and an existing local path always wins over a same-named
 marketplace entry. Several sources install in one command, and --category
 installs every marketplace skill in one catalog group (git, research, ...).
+
+eval (experimental) executes the skill's evals.md RED-GREEN scenarios: per
+scenario a baseline headless run without the skill, a treatment run with it,
+and a judge run scoring each Expected bullet from the transcripts. Exit is 1
+when a treatment bullet fails and 3 when a scenario was never measured (a
+truncated or unparseable judge response scores no bullet, which is not a skill
+failure). Every arm runs hermetic: the network tool plane is stripped from the
+child runs unless you pass --allow-network. The baseline and treatment arms run
+at autonomy full-auto in per-run disposable workspaces, because a headless run
+has no operator to approve anything and a gated arm measures the harness rather
+than the skill. --scenario takes a full id as written
+in evals.md, whose prefix is per-skill (S1, but also D2 in clio-dev, T3 in
+clio-test, F1 in find-skills, H2 in context-handoff), or a bare number that
+selects that scenario whatever its prefix. --json emits one JSONL row per
+(scenario, bullet) with schema: "experimental". --workspace copies an existing
+checkout into a throwaway seed; the source checkout is not mutated. Fixture
+commands declared in evals.md are real shell run in that seed; they only execute
+with --trust-fixtures, after you have reviewed the evals.md.
 `;
 
 type SkillInstallScope = "user" | "project";
@@ -55,6 +74,12 @@ interface Parsed {
 	name?: string;
 	category?: string;
 	scope?: SkillInstallScope;
+	scenario?: string;
+	target?: string;
+	workspace?: string;
+	timeoutSeconds?: number;
+	trustFixtures: boolean;
+	allowNetwork: boolean;
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
@@ -64,6 +89,8 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 		all: false,
 		help: false,
 		force: false,
+		trustFixtures: false,
+		allowNetwork: false,
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -82,6 +109,12 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 			case "--force":
 				out.force = true;
 				break;
+			case "--trust-fixtures":
+				out.trustFixtures = true;
+				break;
+			case "--allow-network":
+				out.allowNetwork = true;
+				break;
 			case "--name": {
 				const value = argv[i + 1];
 				if (!value || value.startsWith("-")) throw new Error("--name requires a value");
@@ -93,6 +126,35 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 				const value = argv[i + 1];
 				if (!value || value.startsWith("-")) throw new Error("--category requires a value");
 				out.category = value;
+				i++;
+				break;
+			}
+			case "--scenario": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--scenario requires a value");
+				out.scenario = value;
+				i++;
+				break;
+			}
+			case "--target": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--target requires a value");
+				out.target = value;
+				i++;
+				break;
+			}
+			case "--workspace": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--workspace requires a value");
+				out.workspace = value;
+				i++;
+				break;
+			}
+			case "--timeout": {
+				const value = argv[i + 1];
+				const seconds = value === undefined ? Number.NaN : Number.parseInt(value, 10);
+				if (!Number.isInteger(seconds) || seconds <= 0) throw new Error("--timeout requires a positive integer");
+				out.timeoutSeconds = seconds;
 				i++;
 				break;
 			}
@@ -396,6 +458,27 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				printError(err instanceof Error ? err.message : String(err));
 				return 1;
 			}
+		}
+		case "eval": {
+			const name = parsed.positional[0];
+			if (!name || parsed.positional.length !== 1) {
+				process.stderr.write(
+					"usage: clio-coder skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]\n",
+				);
+				return 2;
+			}
+			// Dynamic import keeps the eval lane (evidence + eval domains) out of
+			// the chunk that clio-coder skills list/search load.
+			const { runSkillsEvalCommand } = await import("./skills-eval.js");
+			return runSkillsEvalCommand(name, {
+				json: parsed.json,
+				trustFixtures: parsed.trustFixtures,
+				allowNetwork: parsed.allowNetwork,
+				...(parsed.scenario !== undefined ? { scenario: parsed.scenario } : {}),
+				...(parsed.target !== undefined ? { target: parsed.target } : {}),
+				...(parsed.workspace !== undefined ? { workspace: parsed.workspace } : {}),
+				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+			});
 		}
 		default:
 			printError(`unknown skills command: ${parsed.command}`);

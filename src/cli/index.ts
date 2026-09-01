@@ -62,6 +62,7 @@ Usage:
   clio-coder agents               list discovered agent recipes
   clio-coder fleet new|validate|graph|commands|run|status|view|verify|drain|resume  fleet authoring, execution, status, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
+  clio-coder eval                 run, report, or compare local eval task files
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
@@ -227,6 +228,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["agents", async (subArgs) => (await import("./agents.js")).runAgentsCommand(subArgs)],
 	["components", async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs)],
 	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
+	["eval", async (subArgs) => (await import("./eval.js")).runEvalCommand(subArgs)],
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
 	["trace", async (subArgs) => (await import("./trace.js")).runTraceCommand(subArgs)],

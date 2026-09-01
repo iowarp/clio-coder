@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { gateRouteCorrelation } from "./execution-role.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "./gate-decisions.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
@@ -7,7 +8,7 @@ import type { RunEnvelope, RunReceipt } from "./types.js";
 export type RouteQualityLabel = "pass" | "fail" | "unmeasured";
 
 export interface RouteQualityCheck {
-	kind: "typed-validation" | "result-contract" | "independent-gate";
+	kind: "typed-validation" | "result-contract" | "independent-gate" | "evaluation";
 	sourceDigest: string;
 	passed: boolean;
 }
@@ -35,11 +36,29 @@ export interface RouteQualityReceiptSource {
 	envelope: RunEnvelope;
 }
 
+/** The current eval artifact projection consumed by routing. Older formats are not evidence. */
+export interface RouteQualityEvalArtifact {
+	version: 4;
+	evalId: string;
+	results: ReadonlyArray<{
+		assignmentId: string | null;
+		terminalReceiptDigest: string | null;
+		pass: boolean;
+	}>;
+}
+
+export interface RouteQualityEvalSource {
+	artifact: RouteQualityEvalArtifact;
+	/** Canonical digest of the durable current-version artifact. */
+	digest: string;
+}
+
 export interface ReduceRouteQualityInput {
 	subject: RouteQualityReceiptSource;
 	/** Receipts referenced by later evidence, including the subject. */
 	receipts: ReadonlyArray<RouteQualityReceiptSource>;
 	gateArtifacts?: ReadonlyArray<GateDecisionArtifact>;
+	evalArtifacts?: ReadonlyArray<RouteQualityEvalSource>;
 }
 
 function compareStrings(left: string, right: string): number {
@@ -125,8 +144,12 @@ function gateCorrelation(
 	};
 }
 
+function evalAssignmentId(receipt: RunReceipt): string {
+	return receipt.lineage?.rootRunId ?? receipt.runId;
+}
+
 /**
- * Reduce integrity-valid receipt and gate artifacts into one routing
+ * Reduce integrity-valid receipt, gate, and eval artifacts into one routing
  * quality label. It is intentionally pure: callers own durable reads and
  * persistence, so replaying the same authenticated inputs is byte-identical.
  */
@@ -184,6 +207,16 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 		checks.push({ kind: "independent-gate", sourceDigest: artifact.integrity.digest, passed: verdict === "pass" });
 	}
 
+	for (const source of input.evalArtifacts ?? []) {
+		if (source.artifact.version !== 4 || !/^[0-9a-f]{64}$/u.test(source.digest)) continue;
+		for (const result of source.artifact.results) {
+			if (result.assignmentId !== evalAssignmentId(subject) || result.terminalReceiptDigest !== subject.integrity.digest)
+				continue;
+			sourceDigests.add(source.digest);
+			checks.push({ kind: "evaluation", sourceDigest: source.digest, passed: result.pass });
+		}
+	}
+
 	checks.sort((left, right) => {
 		const byKind = compareStrings(left.kind, right.kind);
 		if (byKind !== 0) return byKind;
@@ -197,4 +230,27 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 			? "pass"
 			: "unmeasured";
 	return { label, checks, correlatedGates, sourceDigests: [...sourceDigests].sort(compareStrings) };
+}
+
+/** Stable digest for a current eval artifact when it enters route history. */
+export function routeQualityEvalDigest(artifact: RouteQualityEvalArtifact): string {
+	return createHash("sha256").update(canonicalJson(artifact), "utf8").digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+	if (value === null) return "null";
+	if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) throw new Error("route quality eval digest requires finite numbers");
+		return JSON.stringify(value);
+	}
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (typeof value === "object") {
+		const record = value as Record<string, unknown>;
+		return `{${Object.keys(record)
+			.sort(compareStrings)
+			.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+			.join(",")}}`;
+	}
+	throw new Error(`route quality eval digest cannot represent ${typeof value}`);
 }

@@ -42,7 +42,7 @@ const VERDICT_SEVERITY: ReadonlyArray<TrustVerdict> = ["compromised", "unverifie
 
 export interface EvidenceInventoryArtifact {
 	readonly evidenceId: string;
-	readonly sourceKind: "run" | "session";
+	readonly sourceKind: "run" | "session" | "eval";
 	readonly generatedAt: string;
 	readonly startedAt: string | null;
 	readonly endedAt: string | null;
