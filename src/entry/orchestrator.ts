@@ -85,6 +85,7 @@ import {
 } from "../domains/middleware/dispatch-nudge.js";
 import {
 	createHookReceiptLog,
+	createMarketplaceOfferRegistration,
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
 	type ExtensionHookRoot,
@@ -128,6 +129,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
+	installSkill,
 	modelVisibleSkills,
 	type ResourcesContract,
 } from "../domains/resources/index.js";
@@ -1322,6 +1324,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		(config?.get() ?? readSettings()).autonomy ??
 		"auto-edit";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
+	// Marketplace self-promotion: coordinator-only by this wiring (never a
+	// dispatch worker), local matcher, consented installs and full-auto
+	// autonomous installs both pass the own-marketplace source gate inside the
+	// registration. Registered here because it needs the effective-autonomy
+	// resolution defined one line up.
+	if (resources) {
+		middleware.registerHook(
+			createMarketplaceOfferRegistration({
+				listInstalledSkillNames: () => resources.skills(process.cwd()).items.map((skill) => skill.name),
+				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
+				getAutonomy: resolveEffectiveAutonomy,
+				installEntry: (entry, scope) => ({
+					path: installSkill({ source: entry.sourceUrl, scope, name: entry.name, cwd: process.cwd() }).path,
+				}),
+			}),
+		);
+	}
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	const toolRegistry = createRegistry({
 		safety,

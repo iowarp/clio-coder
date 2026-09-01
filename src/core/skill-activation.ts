@@ -19,6 +19,24 @@ export const SKILL_SUGGESTION_ANCHOR = "Suggested skill: /skill <name>";
  */
 export const SKILL_SUGGESTION_PREFIX = SKILL_SUGGESTION_ANCHOR.slice(0, SKILL_SUGGESTION_ANCHOR.indexOf("<name>"));
 
+/**
+ * The four fixed answer labels of a marketplace install offer. Every surface
+ * that teaches or reads the offer (the marketplace-offer middleware, the
+ * skills fragment, the context listing footer) cites these exact strings, so
+ * the after_tool observer that records declines and runs consented installs
+ * recognizes the operator's choice by label identity, never by paraphrase.
+ */
+export const SKILL_INSTALL_OFFER_OPTION_PROJECT = "Install for this project";
+export const SKILL_INSTALL_OFFER_OPTION_USER = "Install globally";
+export const SKILL_INSTALL_OFFER_OPTION_NOT_NOW = "Not now";
+export const SKILL_INSTALL_OFFER_OPTION_NEVER = "Never offer this skill";
+export const SKILL_INSTALL_OFFER_OPTIONS = [
+	SKILL_INSTALL_OFFER_OPTION_PROJECT,
+	SKILL_INSTALL_OFFER_OPTION_USER,
+	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
+	SKILL_INSTALL_OFFER_OPTION_NEVER,
+] as const;
+
 export interface PendingSkillRequest {
 	name: string;
 	args: string;

@@ -75,6 +75,13 @@ export {
 } from "./hooks-io.js";
 export { MiddlewareManifest } from "./manifest.js";
 export {
+	createMarketplaceOfferRegistration,
+	MARKETPLACE_OFFER_REGISTRATION_ID,
+	type MarketplaceOfferDeps,
+	marketplaceAutoInstallReminder,
+	marketplaceOfferReminder,
+} from "./marketplace-offer.js";
+export {
 	createMemoryInterventionRegistration,
 	MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS,
 	MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS,
