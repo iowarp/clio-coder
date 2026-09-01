@@ -63,9 +63,9 @@ export const SETTINGS_OVERLAY_WIDTH = "100%";
 export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
 export const SETTINGS_OVERLAY_MARGIN = {
 	top: 1,
-	right: 2,
+	right: 0,
 	bottom: 1,
-	left: 2,
+	left: 0,
 } as const;
 
 const SECTION_LANE_WIDTH = 24;
@@ -90,16 +90,6 @@ const ULTRAWIDE_LAYOUT_MIN_WIDTH = 112;
  */
 const WIDE_LAYOUT_MIN_WIDTH = 72;
 const DROP_PATH_COLUMN_WIDTH = 52;
-/**
- * Terminal width below which Settings drops its two-cell side margins.
- *
- * The engine composites an overlay only across the columns its region covers,
- * and a left/right margin shrinks that region, so at 40 columns four of them
- * kept showing the transcript beside a modal that owns the keyboard. Above this
- * width the margins are cheap and the box reads better inset; below it the
- * overlay claims every terminal column instead.
- */
-const ULTRA_NARROW_TERMINAL_WIDTH = 60;
 /** Shown when no runtime is resolvable, so it offers the full vocabulary. */
 const FALLBACK_THINKING_VALUES: ReadonlyArray<string> = THINKING_LEVELS;
 const ROW_GAP = "  ";
@@ -4179,22 +4169,14 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		center.refreshItems();
 		tui.requestRender();
 	};
-	// The engine composites an overlay across the columns its region covers, and
-	// side margins shrink that region, so this margin is re-read every frame and
-	// drops to zero on an ultra-narrow terminal rather than leaving transcript
-	// columns beside a modal that owns the keyboard.
-	const margin: { top: number; right: number; bottom: number; left: number } = { ...SETTINGS_OVERLAY_MARGIN };
 	const handle = showClioOverlayFrame(tui, center, {
 		anchor: "top-left",
 		width: SETTINGS_OVERLAY_WIDTH,
 		maxHeight: SETTINGS_OVERLAY_MAX_HEIGHT,
-		margin,
-		visible: (terminalWidth) => {
-			const side = terminalWidth < ULTRA_NARROW_TERMINAL_WIDTH ? 0 : SETTINGS_OVERLAY_MARGIN.left;
-			margin.left = side;
-			margin.right = side;
-			return true;
-		},
+		// A capturing overlay must own every horizontal cell. Leaving even a
+		// two-column compositor margin exposes arbitrary transcript and footer
+		// fragments beside the frame, where they read as modal content.
+		margin: SETTINGS_OVERLAY_MARGIN,
 		markerId: "settings",
 		title: "Settings",
 		footerHint: (innerWidth) =>
