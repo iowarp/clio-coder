@@ -344,6 +344,11 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 				async (live) => {
 					await live.paneClose(paneId);
 					registry.forget(paneId);
+					// Dock state must fall with the registry entry, not ride on the async
+					// pane.closed push: if the event subscription failed at start(), no
+					// push ever comes, and a slot pointing at a dead pane makes every
+					// later dock open return the corpse.
+					docks?.notePaneGone(paneId);
 					return true;
 				},
 				false,
