@@ -14,6 +14,7 @@ import {
 	type OverlayHandle,
 	type TUI,
 	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -92,20 +93,28 @@ function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string
 	);
 }
 
-function taskReceiptRow(task: TaskBoardTask, width: number): string | null {
+function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
+	const prefixWidth = visibleWidth(prefix);
+	const proseWidth = Math.max(1, width - prefixWidth);
+	return wrapTextWithAnsi(prose, proseWidth).map((line, index) =>
+		fitContentLine(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width),
+	);
+}
+
+function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	const theme = clioTheme();
 	if (task.status === "completed" && task.evidence) {
 		// The evidence prose already carries any run id it mentions, so no derived
 		// `evidence:<runId>` suffix is appended; it would repeat that id on one line.
-		return fitContentLine(`       ${dim("evidence")} ${muted(task.evidence)}`, width);
+		return wrapTaskProse(`       ${dim("evidence")} `, muted(task.evidence), width);
 	}
 	if (task.status === "blocked" && task.reason) {
-		return fitContentLine(`       ${dim("blocked")} ${theme.fg("warning", task.reason)}`, width);
+		return wrapTaskProse(`       ${dim("blocked")} `, theme.fg("warning", task.reason), width);
 	}
 	if (task.status === "cancelled" && task.reason) {
-		return fitContentLine(`       ${dim("dropped")} ${muted(task.reason)}`, width);
+		return wrapTaskProse(`       ${dim("dropped")} `, muted(task.reason), width);
 	}
-	return null;
+	return [];
 }
 
 export function formatTasksOverlayBodyLines(
@@ -151,8 +160,7 @@ export function formatTasksOverlayBodyLines(
 	}
 	for (const task of board.tasks) {
 		lines.push(taskRow(task, width, selectedTaskId === undefined ? undefined : selectedTaskId === task.id));
-		const receipt = taskReceiptRow(task, width);
-		if (receipt) lines.push(receipt);
+		lines.push(...taskReceiptRows(task, width));
 	}
 	return lines;
 }
@@ -259,8 +267,7 @@ export function formatCompositeTasksOverlayBodyLines(
 				width,
 			),
 		);
-		const receipt = taskReceiptRow(row.task, width);
-		if (receipt) lines.push(receipt);
+		lines.push(...taskReceiptRows(row.task, width));
 	}
 
 	lines.push("", sectionHeading("Artifacts", width));
@@ -288,7 +295,7 @@ export function formatCompositeTasksOverlayBodyLines(
 				width,
 			),
 		);
-		if (task.note) lines.push(fitContentLine(`       ${dim("note")} ${muted(task.note)}`, width));
+		if (task.note) lines.push(...wrapTaskProse(`       ${dim("note")} `, muted(task.note), width));
 	}
 	return lines;
 }
@@ -342,7 +349,7 @@ class TasksOverlayBody implements Component {
 			body.push("", fitContentLine(clioTheme().fg("accent", "New operator task"), width));
 			body.push(...this.addInput.render(Math.max(1, width)).map((line) => fitContentLine(line, width)));
 		}
-		if (this.status) body.push("", fitContentLine(clioTheme().fg("warning", this.status), width));
+		if (this.status) body.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), Math.max(1, width)));
 		return body;
 	}
 

@@ -122,6 +122,25 @@ describe("contracts/tasks-overlay", () => {
 		ok(body.includes("dropped superseded"), body);
 	});
 
+	it("wraps evidence and failure reasons in full at narrow widths", () => {
+		const evidence = "Typecheck and every focused task-board contract completed without failures.";
+		const reason = "Waiting for the operator to provide the deployment credential before continuing.";
+		const lines = formatTasksOverlayBodyLines(
+			board({
+				tasks: [
+					{ id: "t1", title: "verify", status: "completed", evidence },
+					{ id: "t2", title: "deploy", status: "blocked", reason },
+				],
+			}),
+			40,
+		).map(stripAnsi);
+		const collapsed = lines.join(" ").replace(/\s+/gu, " ");
+
+		ok(collapsed.includes(evidence), `evidence was cut: ${collapsed}`);
+		ok(collapsed.includes(reason), `blocked reason was cut: ${collapsed}`);
+		for (const line of lines) ok(visibleWidth(line) <= 40, `line overflows: ${line}`);
+	});
+
 	it("renders one in-flight header line with full run ids and no per-run template lines", () => {
 		const body = plainBody(
 			board({
