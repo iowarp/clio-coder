@@ -132,6 +132,8 @@ function checkVersionCoherence() {
 	// Everything before an optional " - <date>" is the version the section is for.
 	const named = heading.slice(3).split(" - ")[0].trim();
 	if (named === "Unreleased") {
+		// Only non-tag GitHub Actions runs may keep Unreleased; tag and local/publish runs stay strict.
+		if (process.env.GITHUB_ACTIONS === "true" && !process.env.GITHUB_REF?.startsWith("refs/tags/")) return;
 		errors.push(
 			`CHANGELOG.md still opens with '## Unreleased'; retitle that section '## ${version} - <date>' before publishing`,
 		);

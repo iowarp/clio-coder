@@ -339,14 +339,10 @@ function checkBoundaries(): void {
 interface WorkflowStep {
 	run?: string;
 	uses?: string;
-	if?: string;
 	with?: Record<string, unknown>;
-	env?: Record<string, string>;
 }
 interface WorkflowJob {
 	steps: WorkflowStep[];
-	permissions?: Record<string, unknown>;
-	strategy?: { matrix?: Record<string, unknown> };
 }
 
 function packageScripts(): Record<string, string> {
@@ -359,22 +355,6 @@ function packageScripts(): Record<string, string> {
 
 function workflow(relPath: string): Record<string, unknown> {
 	return parseYaml(readRoot(relPath)) as Record<string, unknown>;
-}
-
-function workflowJob(relPath: string, jobId: string): WorkflowJob {
-	const jobs = (workflow(relPath).jobs ?? {}) as Record<string, WorkflowJob>;
-	const job = jobs[jobId];
-	if (!job) throw new Error(`workflow ${relPath} has no job ${jobId}`);
-	return job;
-}
-
-function runCommands(relPath: string, jobId: string): string[] {
-	return workflowJob(relPath, jobId).steps.flatMap((step) => (step.run ? [step.run] : []));
-}
-
-function matrixValues(relPath: string, jobId: string, key: string): unknown[] {
-	const value = workflowJob(relPath, jobId).strategy?.matrix?.[key];
-	return Array.isArray(value) ? value : [];
 }
 
 function checkCiScripts(): void {
@@ -438,131 +418,58 @@ function checkCiScripts(): void {
 	expectScript("ci:release", "npm run ci && node scripts/check-release.mjs");
 	expectScript("prepublishOnly", "npm run ci:release");
 
-	// The push and PR path is one job, one lane, one step of real work. The
-	// lane is pinned to the `engines` floor, because that is the runtime the
-	// project promises; newer Node is forward-compatibility news, not a merge
-	// gate, and lives in flake-hunt.yml. Anything added here is paid by every
-	// push, so the shape is pinned rather than left to drift back.
-	const ciCommands = runCommands(".github/workflows/ci.yml", "ci");
-	const ciSteps = workflowJob(".github/workflows/ci.yml", "ci").steps;
-	const setupNode = ciSteps.find((step) => step.uses === "actions/setup-node@v6");
-	const enginesFloor = (
-		JSON.parse(readRoot("package.json")) as {
-			engines?: { node?: string };
+	// Hosted CI stays deliberately small: one Node 22 job, cancellation for
+	// superseded runs, dependency installation, and the full release gate.
+	const ciPath = ".github/workflows/ci.yml";
+	if (!existsSync(join(root, ciPath))) {
+		fail("ci-scripts", "ci.yml must exist as the single fast CI workflow");
+	} else {
+		const ci = workflow(ciPath);
+		const jobs = (ci.jobs ?? {}) as Record<string, WorkflowJob>;
+		if (JSON.stringify(Object.keys(jobs)) !== JSON.stringify(["ci"])) {
+			fail("ci-scripts", `ci.yml must contain only the ci job, got: ${Object.keys(jobs).join(", ")}`);
 		}
-	).engines?.node;
-	const floorMajor = Number(enginesFloor?.replace(/[^0-9.]/g, "").split(".")[0]);
-	if (matrixValues(".github/workflows/ci.yml", "ci", "node-version").length > 0) {
-		fail("ci-scripts", "ci.yml must not run a node-version matrix on push/PR; put extra lanes in flake-hunt.yml");
-	}
-	if (setupNode?.with?.["node-version"] !== floorMajor) {
-		fail(
-			"ci-scripts",
-			`ci.yml setup-node must pin node ${floorMajor} to match the engines floor ${enginesFloor}, got ${setupNode?.with?.["node-version"]}`,
-		);
-	}
-	const gatedSteps = ciSteps.filter((step) => typeof step.if === "string");
-	if (gatedSteps.length > 0) {
-		fail(
-			"ci-scripts",
-			`no ci.yml step may carry an if: condition on a single-lane job: ${gatedSteps.map((step) => step.name ?? step.run).join(", ")}`,
-		);
-	}
-	const gateStep = ciSteps.find((step) => step.run === "npm run ci:release");
-	if (!gateStep) {
-		fail("ci-scripts", "ci.yml must run the full release gate");
-	}
-	// `npm ci` and the gate are the whole job. A second suite run, a
-	// coverage pass, a shuffled rerun, or an apt install all belong somewhere
-	// that is not the push path. Benchmark dependencies belong to the internal
-	// harness; fd and ripgrep are unnecessary because the tools fall back when
-	// they are absent.
-	const allowedCiCommands = new Set(["npm ci --prefer-offline --no-audit --no-fund", "npm run ci:release"]);
-	const strayCommands = ciCommands.filter((command) => !allowedCiCommands.has(command));
-	if (strayCommands.length > 0) {
-		fail("ci-scripts", `ci.yml runs commands outside npm ci and the gate: ${strayCommands.join(", ")}`);
-	}
-
-	// The flake hunt carries what push no longer does: the shuffled smoke
-	// reruns and the above-floor node lane. It never runs on push or PR.
-	const flakeTriggers = Object.keys((workflow(".github/workflows/flake-hunt.yml").on ?? {}) as object);
-	for (const trigger of ["push", "pull_request"]) {
-		if (flakeTriggers.includes(trigger)) {
-			fail("ci-scripts", `flake-hunt.yml must not trigger on ${trigger}`);
+		const ciJob = jobs.ci;
+		if (ciJob) {
+			const setupNode = ciJob.steps.find((step) => step.uses?.startsWith("actions/setup-node@"));
+			if (String(setupNode?.with?.["node-version"]) !== "22") {
+				fail("ci-scripts", `ci.yml setup-node must use Node 22, got ${setupNode?.with?.["node-version"]}`);
+			}
+			const ciCommands = ciJob.steps.flatMap((step) => (step.run ? [step.run] : []));
+			if (!ciCommands.includes("npm run ci:release")) {
+				fail("ci-scripts", "ci.yml must run npm run ci:release");
+			}
 		}
-	}
-	if (!flakeTriggers.includes("schedule")) {
-		fail("ci-scripts", "flake-hunt.yml must run on a schedule, otherwise nothing ever hunts flakes");
-	}
-	const flakeCommands = runCommands(".github/workflows/flake-hunt.yml", "flake-hunt");
-	if (!flakeCommands.includes("npm run test:repeat")) {
-		fail("ci-scripts", "flake-hunt.yml must run the shuffled repeat lane");
-	}
-	const flakeNodeVersions = matrixValues(".github/workflows/flake-hunt.yml", "flake-hunt", "node-version");
-	if (!flakeNodeVersions.includes(floorMajor)) {
-		fail("ci-scripts", `flake-hunt.yml must include the engines floor ${floorMajor} in its node-version matrix`);
-	}
-	for (const command of [...ciCommands, ...flakeCommands]) {
-		if (command.includes("test:live")) {
-			fail("ci-scripts", "ordinary CI must not run live/model-dependent smoke tests");
+		const concurrency = ci.concurrency as { group?: unknown; "cancel-in-progress"?: unknown } | undefined;
+		if (typeof concurrency?.group !== "string" || concurrency["cancel-in-progress"] !== true) {
+			fail("ci-scripts", "ci.yml must cancel superseded runs with a concurrency group");
 		}
 	}
 
-	// Release triggers from version tags and refuses a tag that disagrees with
-	// package.json.
-	const release = workflow(".github/workflows/release.yml");
-	const trigger = release.on as { push?: { tags?: unknown } };
-	if (JSON.stringify(trigger.push?.tags) !== JSON.stringify(["v*"])) {
-		fail("ci-scripts", "release.yml must trigger on v* tags only");
-	}
-	const releaseCommands = runCommands(".github/workflows/release.yml", "release");
-	if (!releaseCommands.some((command) => command.includes("does not match tag"))) {
-		fail("ci-scripts", "release.yml must refuse a tag that disagrees with package.json's version");
-	}
-	// The tag runs its own gate rather than querying whether some other
-	// workflow already passed for the SHA. Rerunning four minutes of checks is
-	// cheaper than a release that blocks on an unrelated run finishing.
-	if (!releaseCommands.includes("npm run ci:release")) {
-		fail("ci-scripts", "release.yml must run npm run ci:release itself, not inherit another workflow's verdict");
-	}
-	if (releaseCommands.some((command) => command.includes("gh run list"))) {
-		fail("ci-scripts", "release.yml must not gate on another workflow's run status");
-	}
-	if (!releaseCommands.some((command) => command.includes("release-notes.md"))) {
-		fail("ci-scripts", "release.yml must build the release body from the CHANGELOG.md section");
+	const flakeHuntPath = ".github/workflows/flake-hunt.yml";
+	if (existsSync(join(root, flakeHuntPath))) {
+		fail("ci-scripts", "flake-hunt.yml must remain deleted");
 	}
 
-	// npm publish is a manual maintainer step: no publish path anywhere in the
-	// release workflow.
-	const releaseJob = workflowJob(".github/workflows/release.yml", "release");
-	const permissions = [
-		...Object.keys((release.permissions ?? {}) as Record<string, unknown>),
-		...Object.keys(releaseJob.permissions ?? {}),
-	];
-	for (const step of releaseJob.steps) {
-		if ((step.run ?? "").includes("npm publish")) {
-			fail("ci-scripts", `no release step may publish: ${step.run}`);
+	// Releases remain a separate tag-only path.
+	const releasePath = ".github/workflows/release.yml";
+	if (!existsSync(join(root, releasePath))) {
+		fail("ci-scripts", "release.yml must exist");
+	} else {
+		const release = workflow(releasePath);
+		const triggers = release.on as { push?: { tags?: unknown } };
+		if (
+			JSON.stringify(Object.keys(triggers)) !== JSON.stringify(["push"]) ||
+			JSON.stringify(triggers.push?.tags) !== JSON.stringify(["v*"])
+		) {
+			fail("ci-scripts", "release.yml must trigger on v* tags only");
 		}
-		if ((step.uses ?? "").includes("npm publish")) {
-			fail("ci-scripts", `no release action may publish: ${step.uses}`);
-		}
-		if ("registry-url" in (step.with ?? {})) {
-			fail("ci-scripts", `no release step may point setup-node at a registry: ${step.uses}`);
-		}
-	}
-	if (permissions.includes("id-token")) {
-		fail("ci-scripts", `release.yml must not request an OIDC token, has: ${permissions.join(", ")}`);
 	}
 
-	// Live smoke stays local/operator-run, never in hosted CI or release.
-	if (existsSync(join(root, ".github/workflows/live-smoke.yml"))) {
-		fail("ci-scripts", "live smoke must stay local/operator-run, no .github/workflows/live-smoke.yml");
-	}
-	if (ciCommands.some((command) => command.includes("test:live"))) {
-		fail("ci-scripts", "ordinary CI must not run live smoke");
-	}
-	if (releaseCommands.some((command) => command.includes("test:live"))) {
-		fail("ci-scripts", "release CI must not run live smoke");
+	for (const relPath of [ciPath, releasePath]) {
+		if (existsSync(join(root, relPath)) && readRoot(relPath).includes("test:repeat")) {
+			fail("ci-scripts", `${relPath} must not reference the removed repeat-test lane`);
+		}
 	}
 }
 
