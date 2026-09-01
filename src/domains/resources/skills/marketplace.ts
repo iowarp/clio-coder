@@ -55,6 +55,8 @@ export interface MarketplaceSkill {
 	audit?: "pass" | "warn" | "fail" | "unknown";
 	/** Catalog grouping ("git", "research", ...); absent in a flat catalog. */
 	category?: string;
+	/** Trigger phrases from the skill's frontmatter, for local promotion matching. */
+	triggers?: string[];
 	origin: MarketplaceSkillOrigin;
 	requires?: LibraryRequirementRef[];
 }
@@ -131,6 +133,16 @@ function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+/** Non-empty trimmed trigger phrases, or undefined when the field is absent or unusable. */
+function optionalTriggerList(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const triggers = value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	return triggers.length > 0 ? triggers : undefined;
+}
+
 function indexAudit(value: unknown): MarketplaceSkill["audit"] {
 	return value === "pass" || value === "warn" || value === "fail" || value === "unknown" ? value : undefined;
 }
@@ -151,6 +163,7 @@ function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): M
 			const version = optionalString(record.version);
 			const audit = indexAudit(record.audit);
 			const category = optionalString(record.category);
+			const triggers = optionalTriggerList(record.triggers);
 			if (record.kind !== undefined && !["skill", "agent", "prompt", "fleet"].includes(String(record.kind))) {
 				diagnostics.push(`skill marketplace index entry has unsupported kind: ${skill.name}`);
 				return [];
@@ -176,6 +189,7 @@ function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): M
 					...(version ? { version } : {}),
 					...(audit ? { audit } : {}),
 					...(category ? { category } : {}),
+					...(triggers ? { triggers } : {}),
 					...(requires ? { requires } : {}),
 					origin: "index" as const,
 				},
@@ -242,6 +256,7 @@ function catalogCategory(catalogDir: string, baseDir: string): string | undefine
 function catalogEntry(skill: Skill, catalogDir: string): MarketplaceSkill {
 	const version = typeof skill.metadata.version === "string" ? skill.metadata.version : undefined;
 	const category = catalogCategory(catalogDir, skill.baseDir);
+	const triggers = optionalTriggerList(skill.metadata.triggers);
 	return {
 		name: skill.name,
 		description: skill.description,
@@ -249,6 +264,7 @@ function catalogEntry(skill: Skill, catalogDir: string): MarketplaceSkill {
 		...(version ? { version } : {}),
 		...(skill.provenance?.audit ? { audit: skill.provenance.audit } : {}),
 		...(category ? { category } : {}),
+		...(triggers ? { triggers } : {}),
 		origin: "catalog",
 		kind: "skill",
 	};
