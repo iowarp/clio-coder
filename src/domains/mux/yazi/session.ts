@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { namingCompatibilityEnvironment } from "../../../core/naming-compat.js";
 import { clioCacheDir } from "../../../core/xdg.js";
 import { findPinnedTool } from "../../toolchain/registry.js";
 import { describeResolution, resolveToolBinary, toolStatus } from "../../toolchain/resolve.js";
@@ -135,7 +136,7 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	const token = options.mode === "companion" ? (options.pickToken ?? randomUUID()) : null;
 	const env: Record<string, string> = {
 		...(managedProfile ? { YAZI_CONFIG_HOME: managedProfile.dir } : {}),
-		...(token ? { CLIO_YAZI_PICK_TOKEN: token } : {}),
+		...(token ? namingCompatibilityEnvironment("CLIO_CODER_YAZI_PICK_TOKEN", "CLIO_YAZI_PICK_TOKEN", token) : {}),
 	};
 	let argv: ReadonlyArray<string>;
 	let stdoutPath: string | undefined;

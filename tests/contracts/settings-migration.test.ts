@@ -7,6 +7,7 @@ import { parse as parseYaml } from "yaml";
 
 import { readSettings, updateSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import { namingCompatibilityEnvironment, readNamingEnvironment } from "../../src/core/naming-compat.js";
 import namingMigration, {
 	CLIO_CODER_NAMING_MIGRATION_ID,
 	CLIO_CODER_NAMING_SETTINGS_BACKUP_SUFFIX,
@@ -131,6 +132,25 @@ integrations:
 		strictEqual(result.settings.targets[0]?.lifecycle, "clio-coder-managed");
 		deepStrictEqual(result.settings.interface.keybindings, { "clio-coder.exit": "ctrl+d" });
 		strictEqual(result.settings.integrations.externalAgents.defaults.toolGovernance, "clio-coder-policy");
+	});
+
+	it("prefers canonical environment names and bridges child launches during the compatibility window", () => {
+		strictEqual(
+			readNamingEnvironment(
+				{ CLIO_CODER_YAZI_PICK_TOKEN: "canonical", CLIO_YAZI_PICK_TOKEN: "legacy" },
+				"CLIO_CODER_YAZI_PICK_TOKEN",
+				"CLIO_YAZI_PICK_TOKEN",
+			),
+			"canonical",
+		);
+		strictEqual(
+			readNamingEnvironment({ CLIO_YAZI_PICK_TOKEN: "legacy" }, "CLIO_CODER_YAZI_PICK_TOKEN", "CLIO_YAZI_PICK_TOKEN"),
+			"legacy",
+		);
+		deepStrictEqual(namingCompatibilityEnvironment("CLIO_CODER_YAZI_PICK_TOKEN", "CLIO_YAZI_PICK_TOKEN", "token"), {
+			CLIO_CODER_YAZI_PICK_TOKEN: "token",
+			CLIO_YAZI_PICK_TOKEN: "token",
+		});
 	});
 
 	it("orders migrations before strict readers and records each migration once", async () => {

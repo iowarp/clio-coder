@@ -21,6 +21,29 @@ export function warnLegacyNaming(legacy: string, canonical: string): void {
 	);
 }
 
+/** Prefer a canonical environment variable and temporarily fall back to its released alias. */
+export function readNamingEnvironment(
+	environment: NodeJS.ProcessEnv,
+	canonical: string,
+	legacy: string,
+): string | undefined {
+	const current = environment[canonical]?.trim();
+	if (current) return current;
+	const fallback = environment[legacy]?.trim();
+	if (!fallback) return undefined;
+	warnLegacyNaming(legacy, canonical);
+	return fallback;
+}
+
+/** Parent-to-child bridge used only during the two-minor compatibility window. */
+export function namingCompatibilityEnvironment(
+	canonical: string,
+	legacy: string,
+	value: string,
+): Record<string, string> {
+	return { [canonical]: value, [legacy]: value };
+}
+
 /** Test-only reset for assertions that need to observe one-time diagnostics. */
 export function resetLegacyNamingWarningsForTest(): void {
 	warned.clear();
