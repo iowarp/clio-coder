@@ -83,13 +83,15 @@ writes before slower evidence builds.
 
 ## CLI Commands
 
-The `clio-coder trace` command surfaces 6 subcommands for inspecting and querying the SQLite trace mirror:
+The `clio-coder trace` command surfaces 8 subcommands for inspecting, bounding, and querying the SQLite trace mirror:
 
 ```bash
-clio-coder trace runs [--db PATH] [--limit N]
+clio-coder trace runs [--db PATH] [--limit N] [--json]
+clio-coder trace inspect --json
 clio-coder trace phases <runId> [--db PATH]
 clio-coder trace tail <runId> [--follow] [--db PATH]
 clio-coder trace procs <runId> [--db PATH]
+clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
 clio-coder trace sql <SELECT query> [--db PATH]
 clio-coder trace ui [--db PATH] [--port N]
 ```
@@ -99,17 +101,20 @@ clio-coder trace ui [--db PATH] [--port N]
 ### Database Resolution and Error Handling
 
 When resolving the SQLite database path:
-- **Default Database Path:** If `--db` is omitted and no database has been created yet, `clio-coder trace` prints an informational notice (`no trace database yet at <path>`) and exits cleanly with code 0.
-- **Explicit Database Path:** If an explicit `--db <path>` is specified but does not exist, `clio-coder trace` prints `error: trace database not found: <path>` and exits with code 1.
+- **Default Database Path:** If `--db` is omitted and no database has been created yet, human-readable commands print an informational notice (`no trace database yet at <path>`) and exit cleanly with code 0. Machine-readable commands retain their schemas: `runs --json` emits `[]`; `inspect --json` emits `{version:1, available:false, runs:[], truncated:false, ...}`; and `prune --json` emits a structured no-op with the resolved `policy`, zero removals, `vacuumed:false`, and `protectedRuns:0`.
+- **Explicit Database Path:** If an explicit `--db <path>` is specified but does not exist, `clio-coder trace` prints `trace database not found: <path>` with the default-path remedy and exits with code 1.
+- **Usage Before Storage:** Command, positional, flag, and SQL read-only validation happens before database resolution. A missing database therefore cannot turn `trace bogus`, a missing run id, or mutating SQL into a successful empty-state response.
 
 ### Subcommand Specifications
 
-1. **`runs`**: Lists recent dispatch runs from the trace store. `--limit` sets maximum rows (1 to 500, default 50). Formats status, start time, total tokens, total USD cost, and run ID.
-2. **`phases`**: Lists sequence phases for a designated `runId`. Displays status, attempt, owner, total tokens, USD cost, and phase name.
-3. **`tail`**: Displays append-ordered event rows for a designated `runId`. When `--follow` is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.
-4. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
-5. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
-6. **`ui`**: Launches the web-based interactive trace viewer server on the specified `--port` (default 0). This subcommand requires a source checkout containing `apps/trace-viewer/server.mjs`.
+1. **`runs`**: Lists recent dispatch runs from the trace store. `--limit` sets maximum rows (1 to 500, default 50); `--json` emits the selected trace rows as an array. Formats status, start time, total tokens, total USD cost, and run ID in text mode.
+2. **`inspect`**: Emits only `--json`, from the default database, with no caller-controlled path or window. The version-1 snapshot carries at most eight newest runs and bounded phase, event-kind, and process-kind aggregates. It omits request text, phase error prose, event payloads, command lines, PIDs, hosts, and database paths, and distinguishes an unavailable database from an available empty one through `available`.
+3. **`phases`**: Lists sequence phases for a designated `runId`. Displays status, attempt, owner, total tokens, USD cost, and phase name.
+4. **`tail`**: Displays append-ordered event rows for a designated `runId`. When `--follow` is specified, polls for new events every 500 ms until two consecutive idle polls observe a finished run status.
+5. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
+6. **`prune`**: Applies the resolved age and byte retention policy while protecting queued and running runs. Text and JSON results report the policy, removed runs and rows, physical bytes reclaimed, protected runs, and whether `VACUUM` ran.
+7. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access before opening storage: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
+8. **`ui`**: Launches the web-based interactive trace viewer server on the specified `--port` (default 0). This subcommand requires a source checkout containing `apps/trace-viewer/server.mjs`.
 
 ### Trace Viewer Surface
 

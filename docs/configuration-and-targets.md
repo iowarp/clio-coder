@@ -468,8 +468,10 @@ Plain `clio-coder doctor` is read-only. `clio-coder doctor --fix` creates missin
 directories and template files, repairs credential permissions, and refreshes
 install metadata. It validates `settings.yaml` directly against the current
 schema but never rewrites removed keys or migrates an old settings shape. Any
-unknown or retired key remains a validation error for the operator to edit
-deliberately.
+unknown or retired key remains a validation error on that doctor run. Registered
+`clio-coder upgrade` migrations are the narrow exception: the 0.4.1 pane-key
+migration removes `panes.agents` and `panes.keepFailed` from an older file before
+strict startup reads it. Other reported paths still require deliberate editing.
 
 ---
 
@@ -692,7 +694,7 @@ Every one of these has an environment override for a single process; see [enviro
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |
 | `prewarm.enabled` | `true` | boolean | next turn |
-| `panes.enabled` | `off` | `auto`, `embedded`, or `off` | restart; `--with-panes` / `--no-panes` beat it |
+| `panes.enabled` | `off` | `auto`, `off`, or accepted-but-unimplemented `embedded` | restart; `--with-panes` / `--no-panes` beat it |
 | `panes.notifications` | `failures` | `failures`, `all`, or `off` | next dispatch |
 | `panes.journal` | `true` | boolean | next dispatch |
 | `panes.yazi.enabled` | `true` | boolean | immediately, on the next files-pane open |
@@ -707,6 +709,20 @@ Every one of these has an environment override for a single process; see [enviro
 | `retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
 | `retry.maxDelayMs` | `60000` | integer ≥ 0 | next turn |
 | `retry.streamStallMs` | `180000` | integer ≥ 0, `0` disables | next turn |
+
+`panes.enabled: embedded` remains schema-valid for compatibility, but it is not
+a working pane mode. Detection refuses it, boot prints that refusal on stderr,
+and the Settings Center labels it `NOT IMPLEMENTED`; it never starts a pane
+host and, because it overrides `--with-panes`, it also prevents guest mode. Use
+`auto` when Clio should connect to a herdr session it is already running inside.
+
+The former `panes.agents` and `panes.keepFailed` keys are retired. A freshly
+authored settings file naming either key fails strict validation with a
+key-specific removal message instead of silently ignoring it. `clio-coder
+upgrade` removes both from older settings files through the
+`2026-09-01-retire-panes-knobs` migration before later migrations load strict
+settings; if that removal leaves an otherwise empty `panes` map, the empty map
+is removed too.
 
 `retry.streamStallMs` covers the failure a request error never reports: the backend answers `/health` while the slot behind the stream is dead. A run whose stream produces nothing for that long is aborted and handed to the same retry ladder as any transient error, so a headless run or a fleet worker recovers without a human pressing Esc. Time inside a tool call and inside the post-tool compaction guard does not count against it, so a long build is never mistaken for a wedged stream. Set it to `0` to keep the old behavior, where a stalled stream waits forever.
 
