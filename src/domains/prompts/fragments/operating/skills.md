@@ -1,7 +1,7 @@
 ---
 id: operating.skills
 version: 1
-budgetTokens: 260
+budgetTokens: 340
 description: Coordinator skill suggestion discipline; rendered only when context is on the surface
 ---
 
@@ -21,6 +21,13 @@ in order when skills compose — and let the operator decide before
 grinding through that workflow bare; a marketplace match is suggested
 the same way, and /skill <name> offers the install. When the operator
 names a skill or asks how one works, answer from that same listing.
+When a [Marketplace] reminder names an uninstalled skill for the
+current request, first check the installed side with context
+(scope="skills"); only if nothing installed serves and the named skill
+truly fits, put the install question to the operator with ask_user
+using exactly the four options the reminder states, then continue the
+task in the same turn. The harness performs any consented install;
+never install a skill yourself, and never offer one no reminder named.
 Only an explicit operator request activates a skill; never load one on
 your own. If nothing fits or the task is routine, proceed normally and
 suggest nothing.
