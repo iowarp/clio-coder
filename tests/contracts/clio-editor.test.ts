@@ -296,6 +296,22 @@ describe("contracts/clio-editor", () => {
 		}
 	});
 
+	it("keeps a pasted bang inert after a non-operator prefix is deleted", () => {
+		setKeybindings(new KeybindingsManager(CLIO_KEYBINDINGS));
+		const { editor, submitted } = createEditor();
+		editor.handleInput("\x1b[200~x!! printf private\x1b[201~");
+		editor.handleInput("\x01");
+		editor.handleInput("\x04");
+		strictEqual(editor.getText(), "!! printf private");
+
+		editor.handleInput("\r");
+
+		strictEqual(submitted.length, 1);
+		const guarded = submitted[0] ?? "";
+		strictEqual(parseEditorBashCommand(guarded), null);
+		strictEqual(unguardPastedEditorOperator(guarded), "!! printf private");
+	});
+
 	it("browses accepted prompt history with Ctrl+P and Ctrl+N while preserving the draft", () => {
 		setKeybindings(new KeybindingsManager(CLIO_KEYBINDINGS));
 		const { editor } = createEditor();
