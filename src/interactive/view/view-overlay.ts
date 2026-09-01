@@ -527,6 +527,7 @@ export class ViewOverlayView implements Component {
 	private renderedContentLines(width: number): string[] {
 		const content = this.content;
 		if (!content) return [];
+		if (content.status === "error") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 		if (content.format !== "markdown") return content.lines;
 		if (content.renderedLines && content.renderWidth === width) return content.renderedLines;
 		const md = new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme()));
@@ -548,7 +549,11 @@ export class ViewOverlayView implements Component {
 			return this.fixedLines(lines, width, height);
 		}
 		if (this.artifactError) {
-			lines.push(padAnsi(theme.fg("error", this.artifactError), width, ELLIPSIS));
+			lines.push(
+				...wrapTextWithAnsi(theme.fg("error", this.artifactError), Math.max(1, width)).map((line) =>
+					padAnsi(line, width),
+				),
+			);
 			return this.fixedLines(lines, width, height);
 		}
 
