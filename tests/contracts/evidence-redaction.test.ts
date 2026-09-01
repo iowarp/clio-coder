@@ -29,7 +29,11 @@ const SECRETS: Record<string, string> = {
 
 const SESSION_ID = "sessredact1";
 
-async function sealRunWithSession(scratch: string, task: string): Promise<string> {
+async function sealRunWithSession(
+	scratch: string,
+	task: string,
+	options: { excludeFromContext?: boolean } = {},
+): Promise<string> {
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		executionRole: "builder",
@@ -58,6 +62,7 @@ async function sealRunWithSession(scratch: string, task: string): Promise<string
 			exitCode: 0,
 			cancelled: false,
 			truncated: false,
+			...(options.excludeFromContext === true ? { excludeFromContext: true } : {}),
 		})}\n`,
 		"utf8",
 	);
@@ -197,6 +202,28 @@ describe("contracts/evidence-redaction (B3)", () => {
 		ok(auditLinked.includes("[redacted:"), "audit rows carry redaction markers");
 		const receipt = files.get("receipt.json") ?? "";
 		ok(receipt.includes("[redacted:"), "receipts carry redaction markers");
+	});
+
+	it("marks excluded Bash command and output on every exported forensic surface", async () => {
+		const runId = await sealRunWithSession(scratch, "inspect private operator evidence", {
+			excludeFromContext: true,
+		});
+		const result = await buildEvidence({
+			dataDir: join(scratch, "data"),
+			stateDir: join(scratch, "state"),
+			runId,
+		});
+		const files = readBundleFiles(result.directory);
+		const transcript = files.get("transcript.md") ?? "";
+		strictEqual(transcript.split("[not sent to model]").length - 1, 2, transcript);
+		const events = (files.get("tool-events.jsonl") ?? "")
+			.split("\n")
+			.filter((line) => line.length > 0)
+			.map((line) => JSON.parse(line) as { argsPreview?: string; resultPreview?: string });
+		const bash = events.find((event) => event.argsPreview?.includes("./run.sh"));
+		ok(bash, "expected the session Bash evidence event");
+		ok(bash.argsPreview?.startsWith("[not sent to model] "), bash.argsPreview);
+		ok(bash.resultPreview?.startsWith("[not sent to model] "), bash.resultPreview);
 	});
 
 	it("leaves a secret-free bundle untouched: redactionCount 0 and no markers", async () => {

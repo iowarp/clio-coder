@@ -490,9 +490,10 @@ function bashExecutionEvidence(entry: unknown): FinishContractEvidence | null {
 	if (record.exitCode !== 0) return null;
 	const detected = detectValidationCommand(record.command);
 	if (detected.kind !== "validation") return null;
+	const contextMarker = record.excludeFromContext === true ? " [not sent to model]" : "";
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
-		summary: `validation command passed: ${detected.matched}`,
+		summary: `validation command passed: ${detected.matched}${contextMarker}`,
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) evidence.turnId = turnId;
