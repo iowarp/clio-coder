@@ -91,10 +91,11 @@ function resourceSummary(extension: InstalledExtension): string {
 }
 
 function stateLabel(extension: InstalledExtension): string {
+	if (!extension.valid) return "invalid";
 	if (!extension.compatible) return "incompatible";
 	if (!extension.enabled) return "disabled";
 	if (!extension.effective) return `shadowed:${extension.overriddenBy ?? "higher"}`;
-	return "active";
+	return extension.loadable ? "active" : "inactive";
 }
 
 function printList(items: ReadonlyArray<InstalledExtension>): void {

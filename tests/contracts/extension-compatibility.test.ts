@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -11,6 +11,7 @@ import {
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
 import {
 	enabledExtensionResourceRoots,
+	enableExtension,
 	installExtension,
 	listInstalledExtensions,
 } from "../../src/domains/extensions/index.js";
@@ -148,5 +149,40 @@ describe("contracts/extension Clio compatibility", () => {
 		strictEqual(loaded[0]?.effective, false);
 		match(loaded[0]?.diagnostics[0]?.message ?? "", /future-load.*>999999\.0\.0.*running Clio version/u);
 		deepStrictEqual(enabledExtensionResourceRoots("agents", project), []);
+	});
+
+	it("selects the effective package only from valid and compatible candidates", () => {
+		const project = scratch("valid-winner-project");
+		const userSource = scratch("valid-winner-user");
+		const outside = scratch("valid-winner-outside");
+		writeManifest(userSource, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
+		mkdirSync(path.join(userSource, "agents"));
+		writeFileSync(path.join(userSource, "agents", "stable.md"), "# stable\n", "utf8");
+		ok(installExtension(userSource, { cwd: project, scope: "user" }).extension);
+
+		const projectRoot = path.join(project, ".clio-coder", "extensions", "winner-contract");
+		writeManifest(projectRoot, "winner-contract", ">=0.0.0", "resources:\n  agents: agents\n");
+		mkdirSync(path.join(outside, "agents"));
+		symlinkSync(path.join(outside, "agents"), path.join(projectRoot, "agents"), "dir");
+
+		const loaded = listInstalledExtensions(project);
+		strictEqual(loaded.length, 2, "the invalid higher-precedence package remains visible");
+		const user = loaded.find((entry) => entry.scope === "user");
+		const projectEntry = loaded.find((entry) => entry.scope === "project");
+		strictEqual(user?.valid, true);
+		strictEqual(user?.effective, true);
+		strictEqual(user?.loadable, true);
+		strictEqual(projectEntry?.valid, false);
+		strictEqual(projectEntry?.effective, false);
+		strictEqual(projectEntry?.loadable, false);
+		ok(projectEntry?.diagnostics.some((diagnostic) => diagnostic.message.includes("symbolic link")));
+		deepStrictEqual(
+			enabledExtensionResourceRoots("agents", project).map((root) => root.scope),
+			["user"],
+		);
+
+		const enabled = enableExtension("winner-contract", { cwd: project, scope: "project" });
+		strictEqual(enabled.extension?.enabled, true);
+		strictEqual(enabled.extension?.loadable, false, "enabling cannot override package admission");
 	});
 });

@@ -1,5 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, it } from "node:test";
+import { listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import {
 	type MiddlewareDiagnostic,
 	type MiddlewareHookRegistration,
@@ -15,7 +20,51 @@ function registration(
 	return { id, description: id, hooks: ["before_tool"], evaluate, ...overrides };
 }
 
+const roots: string[] = [];
+
+function scratch(): string {
+	const root = mkdtempSync(path.join(tmpdir(), "clio-middleware-extension-"));
+	roots.push(root);
+	return root;
+}
+
 describe("middleware hook boundary", () => {
+	afterEach(() => {
+		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
+	it("does not admit hooks from an invalid installed extension", () => {
+		const project = scratch();
+		const outside = scratch();
+		const extensionRoot = path.join(project, ".clio-coder", "extensions", "invalid-hooks");
+		mkdirSync(extensionRoot, { recursive: true });
+		mkdirSync(path.join(outside, "agents"));
+		writeFileSync(
+			path.join(extensionRoot, "clio-coder-extension.yaml"),
+			[
+				"manifestVersion: 1",
+				"id: invalid-hooks",
+				"name: Invalid Hooks",
+				"version: 1.0.0",
+				"description: Invalid hook fixture.",
+				"resources:",
+				"  agents: agents",
+				"",
+			].join("\n"),
+		);
+		symlinkSync(path.join(outside, "agents"), path.join(extensionRoot, "agents"), "dir");
+		writeFileSync(
+			path.join(extensionRoot, "hooks.yaml"),
+			"- id: must-not-load\n  on: before_tool\n  kind: prompt\n  message: unsafe\n",
+		);
+
+		const admitted = listInstalledExtensions(project)
+			.filter((extension) => extension.loadable)
+			.map((extension) => ({ id: extension.id, rootPath: extension.rootPath }));
+		deepStrictEqual(admitted, []);
+		deepStrictEqual(readHookSources({ cwd: project, extensions: admitted }).batches, []);
+	});
+
 	it("evaluates matching registrations in order and exposes prior effects", () => {
 		const seen: string[][] = [];
 		const first = registration("first", () => [{ kind: "inject_reminder", message: "prepare" }]);
