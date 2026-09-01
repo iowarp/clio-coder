@@ -301,7 +301,9 @@ export function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH
 	lines.push(rule);
 	if (!model.journalPresent) {
 		lines.push("no event journal for this run.");
-		lines.push(...wrapViewerValue("expected ", `${model.journalPath} (panes.journal may have been off when it ran)`, columns));
+		lines.push(
+			...wrapViewerValue("expected ", `${model.journalPath} (panes.journal may have been off when it ran)`, columns),
+		);
 	} else if (model.transcript.length === 0) {
 		lines.push("journal is empty; no events recorded yet.");
 	} else {
