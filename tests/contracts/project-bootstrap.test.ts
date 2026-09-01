@@ -3,10 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import {
-	enumerateWorkspaceFiles,
-	WorkspaceEnumerationLimitError,
-} from "../../src/core/workspace-files.js";
+import { enumerateWorkspaceFiles, WorkspaceEnumerationLimitError } from "../../src/core/workspace-files.js";
 import { heuristicBootstrapOutput } from "../../src/domains/context/bootstrap.js";
 import { parseClioMd, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { readProjectMetadata } from "../../src/domains/context/project-metadata.js";

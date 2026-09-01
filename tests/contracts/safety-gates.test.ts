@@ -1,7 +1,7 @@
+import { strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { ToolNames } from "../../src/core/tool-names.js";

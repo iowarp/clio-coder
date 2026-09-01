@@ -1,17 +1,14 @@
 import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
 import test from "node:test";
-import {
-	compareEvalArtifactsV4,
-	EvalServingConfigurationDriftError,
-} from "../../src/domains/eval/compare/compare.js";
+import { compareEvalArtifactsV4, EvalServingConfigurationDriftError } from "../../src/domains/eval/compare/compare.js";
 import type { EvalArtifactV4 } from "../../src/domains/eval/schema/artifact.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import {
 	EVAL_VERDICT_SCHEMA_V1,
-	parseEvalVerdictEnvelopeV1,
-	safeParseEvalVerdictEnvelopeV1,
 	type EvalTrackedMetricsV1,
 	type EvalVerdictEnvelopeV1,
+	parseEvalVerdictEnvelopeV1,
+	safeParseEvalVerdictEnvelopeV1,
 } from "../../src/domains/eval/schema/verdict.js";
 
 const DIGEST = "a".repeat(64);
@@ -28,14 +25,22 @@ test("eval suites fail closed at the versioned schema boundary", () => {
 	const partialResult = validateEvalSuiteV2(partial);
 	strictEqual(partialResult.valid, false);
 	if (partialResult.valid) throw new Error("partial suite unexpectedly passed");
-	strictEqual(partialResult.issues.some((issue) => issue.path === "$.tasks"), true);
+	strictEqual(
+		partialResult.issues.some((issue) => issue.path === "$.tasks"),
+		true,
+	);
 
 	const contradictory = validSuite();
-	(contradictory.tasks[0]!.runner as { agent?: string }).agent = "coder";
+	const contradictoryTask = contradictory.tasks[0];
+	if (contradictoryTask === undefined) throw new Error("valid suite is missing its task fixture");
+	(contradictoryTask.runner as { agent?: string }).agent = "coder";
 	const contradictoryResult = validateEvalSuiteV2(contradictory);
 	strictEqual(contradictoryResult.valid, false);
 	if (contradictoryResult.valid) throw new Error("contradictory suite unexpectedly passed");
-	strictEqual(contradictoryResult.issues.some((issue) => issue.path === "$.tasks[0].runner.agent"), true);
+	strictEqual(
+		contradictoryResult.issues.some((issue) => issue.path === "$.tasks[0].runner.agent"),
+		true,
+	);
 });
 
 test("verdict envelopes preserve identity and cannot turn malformed facts into passes", () => {

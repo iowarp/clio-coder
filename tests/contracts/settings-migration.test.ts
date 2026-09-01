@@ -70,10 +70,7 @@ targets:
 	it("refuses a v1/v2 collision without replacing or backing up the file", async () => {
 		const mixed = "version: 1\norchestrator: { target: old }\nchat: { target: new }\n";
 		writeFileSync(settingsFile, mixed, "utf8");
-		await rejects(
-			settingsV2.up(stateDir),
-			(error: unknown) => error instanceof SettingsV2CollisionError,
-		);
+		await rejects(settingsV2.up(stateDir), (error: unknown) => error instanceof SettingsV2CollisionError);
 		strictEqual(readFileSync(settingsFile, "utf8"), mixed);
 		strictEqual(existsSync(`${settingsFile}.v1.bak`), false);
 	});

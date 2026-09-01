@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -234,10 +234,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			// The release seed intentionally names port 1234. Point the already-
 			// migrated v2 target at this test's isolated health endpoint so doctor
 			// does not depend on, or interfere with, a developer's live LM Studio.
-			writeFileSync(
-				join(home.root, "config", "settings.yaml"),
-				migrated.replace("http://127.0.0.1:1234", endpoint),
-			);
+			writeFileSync(join(home.root, "config", "settings.yaml"), migrated.replace("http://127.0.0.1:1234", endpoint));
 			const doctor = await run(["doctor", "--json"], home.env);
 			strictEqual(doctor.code, 0, doctor.output);
 			strictEqual(JSON.parse(doctor.output).ok, true);

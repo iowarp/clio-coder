@@ -25,15 +25,9 @@ function writeSkill(root: string, name: string, description: string | null, body
 	mkdirSync(directory, { recursive: true });
 	writeFileSync(
 		join(directory, "SKILL.md"),
-		[
-			"---",
-			`name: ${name}`,
-			...(description === null ? [] : [`description: ${description}`]),
-			"---",
-			"",
-			body,
-			"",
-		].join("\n"),
+		["---", `name: ${name}`, ...(description === null ? [] : [`description: ${description}`]), "---", "", body, ""].join(
+			"\n",
+		),
 		"utf8",
 	);
 	return directory;
@@ -92,7 +86,9 @@ describe("skill install and activation boundary", () => {
 		);
 		strictEqual(readFileSync(installed.path, "utf8"), before);
 		deepStrictEqual(
-			loadSkills({ cwd: project }).items.filter((skill) => skill.name === "review").map((skill) => skill.content),
+			loadSkills({ cwd: project })
+				.items.filter((skill) => skill.name === "review")
+				.map((skill) => skill.content),
 			["Original body."],
 		);
 	});

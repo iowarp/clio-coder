@@ -45,9 +45,9 @@ function seedTarget(root: string, url: string): void {
 				"      maxTokens: 4096",
 			].join("\n"),
 		)
-		.replace(/^  target: null$/m, "  target: lifecycle-local")
-		.replace(/^  model: null$/m, "  model: mock-model")
-		.replace(/^  autonomy: auto-edit$/m, "  autonomy: full-auto");
+		.replace(/^ {2}target: null$/m, "  target: lifecycle-local")
+		.replace(/^ {2}model: null$/m, "  model: mock-model")
+		.replace(/^ {2}autonomy: auto-edit$/m, "  autonomy: full-auto");
 	writeFileSync(path, settings);
 }
 
