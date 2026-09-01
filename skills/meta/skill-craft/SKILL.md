@@ -1,7 +1,7 @@
 ---
 name: skill-craft
 description: Use when writing, reviewing, or pruning a SKILL.md — authoring a new skill, editing an installed one, or judging whether a skill's description, body, or length is earning its cost. Triggers on "write a skill", "improve this skill", "why isn't this skill firing", "is this skill too long".
-version: 0.1.1
+version: 0.1.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -31,12 +31,23 @@ config dir under `skills/<name>/`. The loader validates on load; check work
 with `clio-coder skills validate`. Frontmatter contract (Agent Skills compatible):
 
 - `name`: lowercase-hyphen, ≤64 chars, must match the folder.
-- `description`: required, ≤1024 chars; its craft is the section below.
+- `description`: required, ≤1024 chars; its craft is the section below. Quote
+  it when it contains ` #` — an unquoted YAML scalar is truncated there.
+- `version` and `license`: required for catalog publication; bump the version
+  on any name or description change so drift detection can tell copies apart.
 - `disable-model-invocation: true`: hides the skill from the agent; only the
   user can activate it.
-- `allowed-tools`: tools the skill body may call.
+- `allowed-tools` / `disallowed-tools`: a *narrowing* declaration, not a
+  grant. While every loaded skill declares `allowed-tools`, the turn's tool
+  surface shrinks to their union; `disallowed-tools` always denies. Neither
+  ever admits a tool the safety level would refuse. Canonical lowercase Clio
+  names only (see skills/README.md, "Claude Code interop").
 - `requires`: `skill:<name>` dependencies; the loader warns when one is
   missing. Reference an installed skill by name instead of restating its job.
+- `clio:`: the reserved publication block (`registry-id`, `source-url`,
+  `audit`, `provenance` designed|adapted|imported with `origin` when not
+  designed, `eval-status`, optional `model-size` and `agents`). Required for
+  catalog skills; approval is judged against it (skills/README.md).
 
 Sibling files (`references/*.md`, `evals.md`, scripts) ride along in the
 folder and load only when the body points at them.
