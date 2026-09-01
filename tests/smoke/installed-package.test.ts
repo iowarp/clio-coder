@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const TREE_SITTER_MARKER = "node_modules/@vscode/tree-sitter-wasm/wasm/tree-sitter.js";
+const CODE_NAV_EXPORT_MARKER = "var codeNavTool = {";
 
 interface Result {
 	code: number | null;
@@ -140,6 +141,34 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const version = await run(bin, ["--version"], foreign, isolatedEnv(home));
 			strictEqual(version.code, 0, version.stderr);
 			match(version.stdout, /^Clio Coder \d+\.\d+\.\d+$/mu);
+
+			const codeNavChunks = emittedFilesContaining(packageRoot, CODE_NAV_EXPORT_MARKER);
+			strictEqual(codeNavChunks.size, 1, "packed dist must contain one exported code_nav implementation chunk");
+			const codeNavChunk = [...codeNavChunks][0];
+			ok(codeNavChunk);
+			const codeNavChild = `
+				import { pathToFileURL } from "node:url";
+				const loaded = await import(pathToFileURL(process.argv[1]).href);
+				const result = await loaded.codeNavTool.run({ source: "clio", mode: "symbol", query: "codeNavTool" });
+				process.stdout.write(JSON.stringify(result));
+			`;
+			const rawCodeNavResult = execFileSync(
+				process.execPath,
+				["--input-type=module", "--eval", codeNavChild, codeNavChunk],
+				{ cwd: foreign, env: isolatedEnv(home), encoding: "utf8" },
+			);
+			const codeNavResult = JSON.parse(rawCodeNavResult) as { kind: string; output?: string; message?: string };
+			strictEqual(codeNavResult.kind, "ok", codeNavResult.message);
+			const codeNavPayload = JSON.parse(codeNavResult.output ?? "null") as {
+				symbols?: Array<{ name?: string; path?: string }>;
+			};
+			const stableSymbol = codeNavPayload.symbols?.find((symbol) => symbol.name === "codeNavTool");
+			strictEqual(stableSymbol?.path, join(packageRoot, "src", "tools", "codewiki", "code-nav.ts"));
+			strictEqual(
+				existsSync(join(foreign, ".clio-coder")),
+				false,
+				"source=clio must not resolve, build, or write a workspace code map",
+			);
 
 			const lazyChunks = emittedFilesContaining(packageRoot, TREE_SITTER_MARKER);
 			ok(lazyChunks.size > 0, "packed dist must contain the tree-sitter implementation chunk");

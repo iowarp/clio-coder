@@ -241,6 +241,7 @@ function observedPath(op: PathOp, args: Record<string, unknown> | null, cwd: str
 		return explicit === null ? "" : canonicalize(explicit, cwd);
 	}
 	if (op === "code_nav") {
+		if (stringField(args, "source") === "clio") return "";
 		const mode = stringField(args, "mode");
 		if (mode === null || !CODE_NAV_PATH_MODES.has(mode)) return "";
 		const query = stringField(args, "query");
