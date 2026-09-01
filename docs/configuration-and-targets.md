@@ -611,212 +611,137 @@ Label to config path mapping:
 
 ## Settings inventory
 
-Every key `settings.yaml` accepts, with its shipped default, what validation admits, and when a change takes effect. `DEFAULT_SETTINGS` in `src/core/defaults.ts` is the one place a default is written; validation lives in `src/core/config.ts`. A key absent from this table is an unknown-key error, not a silently ignored typo. The one exception is `identity`, which pre-0.3.1 files carry: it is accepted and ignored so those files keep loading.
+This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation is strict: a path absent from this inventory is rejected, including a retired version-1 path. `clio-coder upgrade` performs the one-time v1-to-v2 rename before configuration-domain load and keeps the original as the sibling `settings.yaml.v1.bak` backup.
 
-"When it applies" has four values. **Immediately** means a running session picks the change up from the config watcher. **Next turn** means the running turn finishes on the old value. **Next session** means `settings.yaml` is a saved default that a launched session copies and then owns, so writing it never redirects a session already running. **Restart** means the process reads it once at boot.
+"When it applies" follows the configuration classifier. **Immediately** means a running process observes the value without rebuilding runtime state. **Next turn** and **next dispatch** mean current work finishes on the old value. **Next session** identifies routing defaults copied into session-owned state at launch. **Restart** means process or pane-host setup must be rebuilt.
 
-### Routing defaults
-
-These are saved defaults, not a live control surface. See [Live routing vs saved defaults](#live-routing-vs-saved-defaults).
+### Structural and target catalog
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `orchestrator.target` | `null` | a target id present in `targets` | next session |
-| `orchestrator.model` | `null` | string | next session |
-| `orchestrator.thinkingLevel` | `off` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; further narrowed to what the resolved model supports | next session |
-| `background.target` | `null` | a target id present in `targets` | next session |
-| `background.model` | `null` | string | next session |
-| `background.thinkingLevel` | `off` | as above | next session |
-| `workers.default.target` | `null` | a target id present in `targets` | next session |
-| `workers.default.model` | `null` | string | next session |
-| `workers.default.thinkingLevel` | `off` | as above | next session |
-| `scope` | `[]` | list of strings | next session |
+| `version` | `2` | integer, exactly `2` | restart |
+| `targets` | `[]` | target descriptor list with unique ids and registered runtimes | next turn for the catalog; next session for saved routing defaults |
 
-### Safety and worker policy
-
-`workers.rosters.<name>.members` defines council membership beside
-`workers.profiles`. Every member accepts `label`, `target`, and the optional
-keys `model`, `thinking`, and `color`. Labels must match
-`[a-z][a-z0-9_-]{0,31}` and must be unique inside the roster. A roster contains
-two to five members. Colors accept a theme token such as `accent`, `success`,
-or `reason`, or a six-digit hexadecimal value such as `#5ba8ff`. Unknown roster
-and member keys are rejected during configuration load. The existing settings
-watcher validates and publishes roster changes with every other hot reload.
+### Chat
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `autonomy` | `auto-edit` | `read-only`, `suggest`, `auto-edit`, `full-auto` | immediately |
-| `workers.onPermission` | `deny` | `deny`, `fail`, `escalate` | next dispatch |
-| `workers.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
-| `workers.escalation.fallback` | `deny` | `deny`, `fail` | next dispatch |
-| `workers.maxRetries` | `2` | integer ≥ 0 | next dispatch |
-| `workers.resilienceCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
-| `workers.profiles` | `{}` | map of profile name to a target/model/thinking choice | next dispatch |
-| `workers.rosters` | `{}` | map of roster name to 2 to 5 council members | next dispatch |
-| `workers.agentBindings` | `{}` | map of agent id to a key present in `workers.profiles` | next dispatch |
-| `skills.trustProjectCompatRoots` | `false` | boolean | restart |
-| `library.catalog` | `null` | string or null | immediately |
-| `library.remote` | `null` | string or null | immediately |
-| `library.confirmedRemote` | `null` | string or null | immediately |
-| `library.sync` | `false` | boolean | immediately |
+| `chat.target` | `null` | configured target id or null | next session |
+| `chat.model` | `null` | string or null | next session |
+| `chat.thinkingLevel` | `off` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | next session |
+| `chat.modelPicker.cycleSet` | `[]` | list of target or target/model references | immediately for this session; next session as the saved default |
+| `chat.modelPicker.favorites` | `[]` | list of target/model references | immediately |
+| `chat.modelPicker.recentLimit` | `12` | integer ≥ 1 | immediately |
+| `chat.maxOutputTokens` | `32768` | integer ≥ 0 | next turn |
+| `chat.prewarm` | `true` | boolean | next turn |
+| `chat.retry.enabled` | `true` | boolean | next turn |
+| `chat.retry.maxRetries` | `3` | integer ≥ 0 | next turn |
+| `chat.retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
+| `chat.retry.maxDelayMs` | `60000` | integer ≥ 0 | next turn |
+| `chat.retry.streamStallMs` | `180000` | integer ≥ 0; `0` disables the stall timer | next turn |
 
-### Git commit provenance
+### Fleet
 
-| Key | Default | Validation | When it applies |
-| --- | --- | --- | --- |
-| `attribution.gitCommits` | `true` | boolean | immediately for subsequent commits |
-
-Enabled attribution adds the compiled identity `Clio Coder <clio-coder@iowarp.ai>` only through evidence-justified role trailers. Assistance requires material creation or editing, testing requires a successful recorded validation command, and review requires a passing independent verifier. `Co-authored-by` is the GitHub/GitLab contributor and avatar compatibility trailer and appears only for material authorship, never for testing or review alone. Disabling the setting leaves commit messages entirely unchanged. Full hook behavior, evidence semantics, and how GitHub and GitLab render the identity and avatar once maintainers verify the email are in [git-commit-provenance.md](git-commit-provenance.md).
-
-### Guardrails
-
-Every one of these has an environment override for a single process; see [environment-variables.md](environment-variables.md). Resolution is env, then settings, then the built-in default.
+`fleet.rosters.<name>.members` contains two to five members. Each member has a unique `label`, a `target`, and optional `model`, `thinkingLevel`, and `color`. `fleet.agentProfiles` is the persisted agent-id-to-profile map.
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `guardrails.turnToolCallBudget` | `60` | integer ≥ 1 | next turn |
-| `guardrails.workerToolCallCap` | `150` | integer ≥ 1 | next dispatch |
-| `guardrails.maxDispatchRuns` | `1000` | integer ≥ 1 | next dispatch |
-| `guardrails.readMaxBytes` | `51200` | integer ≥ 1, floored at 1024 by the tool | next turn |
-| `guardrails.observationTurnBudgetBytes` | `196608` | integer ≥ 1 | next turn |
-| `guardrails.internalDispatchTimeoutMs` | `900000` | integer ≥ 1 | next dispatch |
+| `fleet.default.target` | `null` | configured target id or null | next session |
+| `fleet.default.model` | `null` | string or null | next session |
+| `fleet.default.thinkingLevel` | `off` | supported thinking level | next session |
+| `fleet.profiles` | `{}` | map of profile name to target/model/thinking/optional-node routes | next dispatch |
+| `fleet.rosters` | `{}` | map of roster name to council members | next dispatch |
+| `fleet.agentProfiles` | `{}` | map of native agent id to an existing fleet profile | next dispatch |
+| `fleet.nodes` | `[]` | list of validated local/SSH node descriptors | next dispatch |
+| `fleet.adaptiveRouting.roles` | `[]` | subset of `researcher`, `verifier`, `reviewer`, `judge` | next dispatch |
+| `fleet.adaptiveRouting.postures` | `[]` | subset of `quality`, `balanced`, `latency`, `economy` | next dispatch |
+| `fleet.adaptiveRouting.agentRoles` | `[]` | exact agent-id/execution-role pairs | next dispatch |
+| `fleet.permissions.mode` | `deny` | `deny`, `fail`, `escalate` | next dispatch |
+| `fleet.permissions.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
+| `fleet.permissions.escalation.fallback` | `deny` | `deny` or `fail` | next dispatch |
+| `fleet.concurrency` | `auto` | `auto` or integer ≥ 1 | restart |
+| `fleet.retry.maxRetries` | `2` | integer ≥ 0 | next dispatch |
+| `fleet.retry.routeCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
+| `fleet.limits.toolCallsPerRun` | `150` | integer ≥ 1 | next dispatch |
+| `fleet.limits.internalRunTimeoutMs` | `900000` | integer ≥ 1 | next dispatch |
+| `fleet.history.maxRuns` | `1000` | integer ≥ 1 | next dispatch |
+| `fleet.history.journal` | `true` | boolean | next dispatch |
 
-### Context and cost
+### Context
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `compaction.auto` | `true` | boolean | next turn |
-| `compaction.threshold` | `0.8` | number in 0 to 1 | next turn |
-| `compaction.excludeLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.enabled` | `true` | boolean | next turn |
-| `context.workingSet.policy` | `structural-v1` | `age-horizon` or `structural-v1` | next turn |
+| `context.workingSet.policy` | `structural-v1` | `structural-v1` or `age-horizon` | next turn |
 | `context.workingSet.target` | `0.6` | number greater than 0 and less than 1 | next turn |
 | `context.workingSet.protectLastTurns` | `6` | integer ≥ 1 | next turn |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | next turn |
-| `prewarm.enabled` | `true` | boolean | next turn |
-| `panes.enabled` | `off` | `auto`, `off`, or accepted-but-unimplemented `embedded` | restart; `--with-panes` / `--no-panes` beat it |
-| `panes.notifications` | `failures` | `failures`, `all`, or `off` | next dispatch |
-| `panes.journal` | `true` | boolean | next dispatch |
-| `panes.yazi.enabled` | `true` | boolean | immediately, on the next files-pane open |
-| `panes.yazi.mode` | `companion` | `companion` or `chooser` | immediately, on the next files-pane open |
-| `panes.yazi.profile` | `managed` | `managed` or `user` | immediately, on the next files-pane open |
-| `panes.yazi.followCwd` | `true` | boolean | immediately, on the next explicit files-pane open |
-| `defaults.maxTokens` | `32768` | integer ≥ 0 | next turn |
-| `budget.sessionCeilingUsd` | `5` | number ≥ 0 | immediately |
-| `budget.concurrency` | `auto` | `auto` or integer ≥ 1 | next dispatch |
-| `retry.enabled` | `true` | boolean | next turn |
-| `retry.maxRetries` | `3` | integer ≥ 0 | next turn |
-| `retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
-| `retry.maxDelayMs` | `60000` | integer ≥ 0 | next turn |
-| `retry.streamStallMs` | `180000` | integer ≥ 0, `0` disables | next turn |
+| `context.compaction.auto` | `true` | boolean | next turn |
+| `context.compaction.threshold` | `0.8` | number from 0 through 1 | next turn |
+| `context.compaction.model` | unset | non-empty string when present | next turn |
+| `context.compaction.systemPrompt` | unset | non-empty path string when present | next turn |
+| `context.memory.enabled` | `true` | boolean | next turn |
+| `context.memory.target` | `null` | configured target id or null | next turn |
+| `context.memory.model` | `null` | string or null | next turn |
+| `context.memory.cadenceToolCalls` | `10` | integer ≥ 2 | next turn |
+| `context.memory.trajectorySteps` | `8` | integer ≥ 1 | next turn |
+| `context.memory.maxOutputTokens` | `2000` | integer ≥ 1 | next turn |
+| `context.memory.timeoutMs` | `60000` | integer ≥ 1 | next turn |
 
-`panes.enabled: embedded` remains schema-valid for compatibility, but it is not
-a working pane mode. Detection refuses it, boot prints that refusal on stderr,
-and the Settings Center labels it `NOT IMPLEMENTED`; it never starts a pane
-host and, because it overrides `--with-panes`, it also prevents guest mode. Use
-`auto` when Clio should connect to a herdr session it is already running inside.
+### Safety
 
-The former `panes.agents` and `panes.keepFailed` keys are retired. A freshly
-authored settings file naming either key fails strict validation with a
-key-specific removal message instead of silently ignoring it. `clio-coder
-upgrade` removes both from older settings files through the
-`2026-09-01-retire-panes-knobs` migration before later migrations load strict
-settings; if that removal leaves an otherwise empty `panes` map, the empty map
-is removed too.
-
-`retry.streamStallMs` covers the failure a request error never reports: the backend answers `/health` while the slot behind the stream is dead. A run whose stream produces nothing for that long is aborted and handed to the same retry ladder as any transient error, so a headless run or a fleet worker recovers without a human pressing Esc. Time inside a tool call and inside the post-tool compaction guard does not count against it, so a long build is never mistaken for a wedged stream. Set it to `0` to keep the old behavior, where a stalled stream waits forever.
-
-Generic provider and transport errors are classified by transient retry rules, including DNS and WebSocket failures while excluding quota, usage-limit, and billing exhaustion even when the message also contains `429` or `500`. Clio adds only its local-runtime policy: model-loading errors receive a longer bounded delay, the TUI shows a cancellable countdown, and recovery resumes through the existing agent loop.
-
-### Proactive memory
+The six limit leaves retain their one-process environment overrides where documented in [environment-variables.md](environment-variables.md); resolution is environment, then v2 settings, then compiled default.
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `memory.intervention.enabled` | `true` | boolean | next turn |
-| `memory.intervention.everyNTools` | `10` | integer ≥ 2 | next turn |
-| `memory.intervention.windowSteps` | `8` | integer ≥ 1 | next turn |
-| `memory.intervention.maxTokens` | `400` | integer ≥ 1 | next turn |
-| `memory.intervention.timeoutMs` | `30000` | integer ≥ 1 | next turn |
-
-### Turn-end watchdog
-
-| Key | Default | Validation | When it applies |
-| --- | --- | --- | --- |
-| `watchdog.enabled` | `false` | boolean | immediately |
-| `watchdog.target` | unset | non-empty target id | immediately |
-| `watchdog.cadenceToolCalls` | unset | integer ≥ 1 | immediately |
-
-The watchdog is off by default because it spends one worker run per mutating
-turn. With `enabled: true`, a turn that changed the tree is handed to one
-read-only `verifier` run briefed with the turn's coalesced diff and the task
-board's current scope. Its blockers become one transcript notice naming the
-count and the first three failed checks, and nothing else: it never follows up,
-never queues a turn, and never mutates. A passing report emits nothing at all. A
-turn with no file mutations never fires it.
-
-`watchdog.target` routes the run at a named target, which is how a cheap local
-model reviews turns run on a subscription route; unset, the run takes the
-session's active target. `watchdog.cadenceToolCalls: N` additionally fires the
-watchdog after every N tool calls inside a turn, with the same diff-and-scope
-briefing, so mid-turn scope drift is visible before the turn ends. At most one
-watchdog run is in flight at a time; a trigger that arrives while one is running
-is dropped and counted rather than queued. Headless and ACP runs never fire the
-watchdog regardless of the setting, because neither has an operator reading a
-transcript. The block has its own Settings Center section under EXPERIENCE ›
-Watchdog; clearing the target or the cadence row removes that key from
-`settings.yaml` rather than writing an empty value.
-
-### Delegation
-
-| Key | Default | Validation | When it applies |
-| --- | --- | --- | --- |
-| `delegation.agents` | `[]` | list of agent definitions | next dispatch |
-| `delegation.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
-| `delegation.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
-| `delegation.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
-| `delegation.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
-
-`delegation.agents` is the one settings key Clio itself appends to, and only after an explicit answer in `clio-coder configure --interop` or `/interop`. Everything else here is operator-authored.
+| `safety.autonomy` | `auto-edit` | `read-only`, `suggest`, `auto-edit`, `full-auto` | immediately |
+| `safety.limits.sessionCostUsd` | `5` | number ≥ 0 | next turn |
+| `safety.limits.chatToolCallsPerTurn` | `60` | integer ≥ 1 | next turn |
+| `safety.limits.readBytesPerCall` | `51200` | integer ≥ 1; the read tool applies its 1024-byte floor | next turn |
+| `safety.limits.observationBytesPerTurn` | `196608` | integer ≥ 1 | next turn |
+| `safety.review.enabled` | `false` | boolean | immediately |
+| `safety.review.target` | unset | configured target id when present | immediately |
+| `safety.review.cadenceToolCalls` | unset | integer ≥ 1 when present | immediately |
 
 ### Interface
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `theme` | `default` | string naming a registered theme | immediately |
-| `terminal.showTerminalProgress` | `false` | boolean | immediately |
-| `terminal.outputVerbosity` | `default` | `minimal`, `default`, `verbose` | immediately |
-| `terminal.tuiMode` | `regular` | `regular`, `fullscreen` | restart |
-| `terminal.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
-| `terminal.smoothStreaming` | `off` | `off`, `auto`, `on` | immediately |
-| `terminal.notify` | `false` | boolean | immediately |
-| `modelSelector.favorites` | `[]` | list of strings | immediately |
-| `modelSelector.recentLimit` | `12` | integer ≥ 1 | immediately |
-| `keybindings` | `{}` | map of binding id to a key string or list of them | restart |
+| `interface.terminalProgress` | `false` | boolean | next turn |
+| `interface.outputDetail` | `default` | `minimal`, `default`, `verbose` | next turn |
+| `interface.mode` | `regular` | `regular` or `fullscreen` | restart |
+| `interface.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
+| `interface.smoothStreaming` | `off` | `off`, `auto`, `on` | immediately |
+| `interface.desktopNotifications` | `false` | boolean | next turn |
+| `interface.panes.enabled` | `off` | `auto`, `embedded`, `off` | restart |
+| `interface.panes.notifications` | `failures` | `failures`, `all`, `off` | immediately |
+| `interface.panes.layout` | `off` | `off`, `workers`, `cockpit` | restart |
+| `interface.panes.workers.ratio` | `0.34` | finite dock ratio | restart |
+| `interface.panes.files.enabled` | `true` | boolean | immediately on the next files-pane open |
+| `interface.panes.files.mode` | `companion` | `companion` or `chooser` | immediately on the next files-pane open |
+| `interface.panes.files.profile` | `managed` | `managed` or `user` | immediately on the next files-pane open |
+| `interface.panes.files.followCwd` | `true` | boolean | immediately on the next files-pane open |
+| `interface.panes.files.ratio` | `0.3` | finite dock ratio | restart |
+| `interface.keybindings` | `{}` | map of binding id to a key string or list of strings | immediately |
 
-`terminal.notify` turns on a content-free desktop notification for the three
-moments an operator is waiting: a turn ends, a detached fleet batch settles, and
-a worker permission or `ask_user` request parks. The payload is fixed. The title
-is always `clio-coder` and the body comes from a closed vocabulary (`turn
-finished`, `batch <shortId> settled`, `approval needed`), so no prompt text, file
-path, or model output ever leaves the process in a notification. Clio emits OSC
-777 by default and OSC 9 on iTerm2, Windows Terminal, and ConEmu, never both for
-one event. Headless, ACP, and non-TTY runs never emit one regardless of the
-setting. The knob has a Settings Center row under EXPERIENCE › Terminal,
-labeled `Desktop notifications`.
-
-Recently selected models are runtime state and live in `recent-models.json` under the state directory, not here. A `state.recentModels` key in `settings.yaml` is an unknown-key error.
-
-### Structural and catalog keys
+### Integrations
 
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
-| `version` | `1` | integer, currently `1` only | restart |
-| `targets` | `[]` | list of target descriptors, each with a unique id and a registered runtime | immediately for the catalog, next session for routing |
-| `runtimePlugins` | `[]` | list of plugin descriptors | restart |
-| `fleet.nodes` | `[]` | list of node descriptors | next dispatch |
-| `routing.activeRoles` | `[]` | list of strings; empty keeps measured routing shadow-only | next dispatch |
-| `routing.activePostures` | `[]` | list of strings | next dispatch |
-| `routing.agentAutomation.activeAgentRoles` | `[]` | list of strings | next dispatch |
+| `integrations.projectResources.trustProjectImports` | `false` | boolean | next turn |
+| `integrations.externalAgents.entries` | `[]` | list of validated ACP agent definitions | next dispatch |
+| `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
+| `integrations.externalAgents.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
+| `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
+| `integrations.externalAgents.defaults.toolGovernance` | `clio-policy` | `clio-policy`, `agent-managed`, `deny-all` | next dispatch |
+| `integrations.runtimePlugins` | `[]` | list of plugin package names | restart |
+| `integrations.library.catalog` | `null` | string or null | next turn |
+| `integrations.library.remote` | `null` | string or null | next turn |
+| `integrations.library.confirmedRemote` | `null` | string or null | next turn |
+| `integrations.library.sync` | `false` | boolean | next turn |
+| `integrations.git.commitAttribution` | `true` | boolean | immediately for subsequent commits |
+
+The retired v1-only paths `identity`, `background.thinkingLevel`, `theme`, and `compaction.excludeLastTurns` have no v2 replacement. Fresh v2 files naming them receive targeted removal diagnostics. The v1 migrator drops them with the reason recorded in its migration report; they are tombstones, not executable aliases.
 
 ---
 

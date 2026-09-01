@@ -69,7 +69,12 @@ function makeScratch(extraEnv: Record<string, string> = {}): Scratch {
 			lifecycle: "user-managed",
 		},
 	];
-	settings.orchestrator = { target: "declared", model: "declared-model", thinkingLevel: "off" };
+	settings.chat = {
+		...(settings.chat as Record<string, unknown>),
+		target: "declared",
+		model: "declared-model",
+		thinkingLevel: "off",
+	};
 	writeFileSync(join(dir, "config", "settings.yaml"), stringify(settings), "utf8");
 	return {
 		dir,

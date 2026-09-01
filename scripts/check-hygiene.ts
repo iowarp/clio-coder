@@ -599,11 +599,11 @@ function checkDefaultsYaml(): void {
 // ---------------------------------------------------------------------------
 const OPAQUE_SETTINGS_PATHS = new Set([
 	"targets",
-	"runtimePlugins",
-	"delegation.agents",
+	"integrations.runtimePlugins",
+	"integrations.externalAgents.entries",
 	"fleet.nodes",
-	"scope",
-	"keybindings",
+	"chat.modelPicker.cycleSet",
+	"interface.keybindings",
 ]);
 
 function leafPaths(value: unknown, prefix = ""): string[] {
@@ -638,16 +638,16 @@ function checkSettingsInventory(): void {
 	// that had diverged from its policy fallback and the two that read as a
 	// bare word rather than a literal.
 	const expectations: ReadonlyArray<readonly [string, string]> = [
-		["memory.intervention.timeoutMs", "`30000`"],
-		["memory.intervention.everyNTools", "`10`"],
-		["guardrails.turnToolCallBudget", "`60`"],
-		["compaction.threshold", "`0.8`"],
-		["compaction.auto", "`true`"],
-		["budget.sessionCeilingUsd", "`5`"],
-		["budget.concurrency", "`auto`"],
-		["autonomy", "`auto-edit`"],
-		["orchestrator.target", "`null`"],
-		["terminal.outputVerbosity", "`default`"],
+		["context.memory.timeoutMs", "`60000`"],
+		["context.memory.cadenceToolCalls", "`10`"],
+		["safety.limits.chatToolCallsPerTurn", "`60`"],
+		["context.compaction.threshold", "`0.8`"],
+		["context.compaction.auto", "`true`"],
+		["safety.limits.sessionCostUsd", "`5`"],
+		["fleet.concurrency", "`auto`"],
+		["safety.autonomy", "`auto-edit`"],
+		["chat.target", "`null`"],
+		["interface.outputDetail", "`default`"],
 	];
 	const rowFor = (path: string): string => section.split("\n").find((line) => line.startsWith(`| \`${path}\` |`)) ?? "";
 	for (const [path, expected] of expectations) {

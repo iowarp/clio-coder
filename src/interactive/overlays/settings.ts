@@ -3,6 +3,7 @@ import {
 	type ClioSettings,
 	removeFleetProfileFromSettings,
 	removeTargetFromSettings,
+	SETTINGS_V1_PATH_MOVES,
 	setFleetProfileInSettings,
 	useTargetInSettings,
 } from "../../core/config.js";
@@ -15,7 +16,6 @@ import {
 	THINKING_LEVELS,
 	type WorkerEscalationSettings,
 } from "../../core/defaults.js";
-import type { GuardrailValues } from "../../core/guardrails.js";
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
@@ -98,11 +98,11 @@ const ROW_GAP = "  ";
  * the row that shows them and the mutation that writes them both need a
  * definite shipped value to fall back to.
  */
-const SHIPPED_ESCALATION: WorkerEscalationSettings = DEFAULT_SETTINGS.workers.escalation ?? {
+const SHIPPED_ESCALATION: WorkerEscalationSettings = DEFAULT_SETTINGS.fleet.permissions.escalation ?? {
 	timeoutMs: 120_000,
 	fallback: "deny",
 };
-const SHIPPED_RESILIENCE_COOLDOWN_MS = DEFAULT_SETTINGS.workers.resilienceCooldownMs ?? 15_000;
+const SHIPPED_RESILIENCE_COOLDOWN_MS = DEFAULT_SETTINGS.fleet.retry.routeCooldownMs ?? 15_000;
 /**
  * The product's cut marker, as the help center and every list overlay use it.
  *
@@ -177,7 +177,6 @@ export const SETTINGS_LABELS_BY_ID = {
 	"orchestrator.model": "Model",
 	"background.target": "Memory target",
 	"background.model": "Memory model",
-	"background.thinkingLevel": "Memory thinking level",
 	"memory.intervention.enabled": "Proactive memory",
 	"memory.intervention.everyNTools": "Memory cadence (tools)",
 	"memory.intervention.windowSteps": "Memory trajectory steps",
@@ -196,11 +195,14 @@ export const SETTINGS_LABELS_BY_ID = {
 	"routing.agentAutomation.activeAgentRoles": "Active agent routes",
 	"panes.enabled": "Panes",
 	"panes.notifications": "Pane notifications",
+	"panes.layout": "Boot layout",
+	"panes.workers.ratio": "Workers dock share",
 	"panes.journal": "Run event journal",
 	"panes.yazi.enabled": "Files pane",
 	"panes.yazi.mode": "Files pane mode",
 	"panes.yazi.profile": "Yazi profile",
 	"panes.yazi.followCwd": "Follow conversation cwd",
+	"panes.yazi.ratio": "Files dock share",
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
 	"modelSelector.favorites": "Pinned favorites",
@@ -214,7 +216,6 @@ export const SETTINGS_LABELS_BY_ID = {
 	"guardrails.observationTurnBudgetBytes": "Observation byte pool",
 	"guardrails.internalDispatchTimeoutMs": "Internal dispatch timeout (ms)",
 	"compaction.auto": "Auto-compact",
-	"compaction.excludeLastTurns": "Protected recent turns",
 	"compaction.threshold": "Compaction threshold",
 	"context.workingSet.enabled": "Working-set eviction",
 	"context.workingSet.policy": "Eviction policy",
@@ -235,7 +236,6 @@ export const SETTINGS_LABELS_BY_ID = {
 	"watchdog.enabled": "Turn-end watchdog",
 	"watchdog.target": "Watchdog target",
 	"watchdog.cadenceToolCalls": "Watchdog cadence (tools)",
-	theme: "Theme",
 	runtimePlugins: "Runtime plugins",
 	"compaction.model": "Compaction model",
 	"compaction.systemPrompt": "Compaction prompt",
@@ -298,7 +298,6 @@ export const SETTINGS_SECTION_ROWS = {
 		"orchestrator.model",
 		"background.target",
 		"background.model",
-		"background.thinkingLevel",
 		"memory.intervention.enabled",
 		"memory.intervention.everyNTools",
 		"memory.intervention.windowSteps",
@@ -319,6 +318,8 @@ export const SETTINGS_SECTION_ROWS = {
 		"routing.agentAutomation.activeAgentRoles",
 		"panes.enabled",
 		"panes.notifications",
+		"panes.layout",
+		"panes.workers.ratio",
 		"panes.journal",
 	],
 	models: ["scope", "modelSelector.recentLimit", "modelSelector.favorites"],
@@ -336,7 +337,6 @@ export const SETTINGS_SECTION_ROWS = {
 	compaction: [
 		"compaction.auto",
 		"compaction.threshold",
-		"compaction.excludeLastTurns",
 		"context.workingSet.enabled",
 		"context.workingSet.policy",
 		"context.workingSet.target",
@@ -351,11 +351,11 @@ export const SETTINGS_SECTION_ROWS = {
 		"terminal.fullscreenScrollbar",
 		"terminal.smoothStreaming",
 		"terminal.notify",
-		"theme",
 		"panes.yazi.enabled",
 		"panes.yazi.mode",
 		"panes.yazi.profile",
 		"panes.yazi.followCwd",
+		"panes.yazi.ratio",
 	],
 	watchdog: ["watchdog.enabled", "watchdog.target", "watchdog.cadenceToolCalls"],
 	advanced: [
@@ -392,7 +392,6 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"orchestrator.model": "Active chat wire model id.",
 	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
 	"background.model": "Small non-reasoning model used only for task memory steps.",
-	"background.thinkingLevel": "Unused: memory steps always request thinking off.",
 	"memory.intervention.enabled": "Master switch for rules-only and model-backed task memory.",
 	"memory.intervention.everyNTools": "Maximum tool executions between prompted memory steps.",
 	"memory.intervention.windowSteps": "Recent completed tool steps visible to the memory policy.",
@@ -412,11 +411,14 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"routing.agentAutomation.activeAgentRoles": "Exact agent and execution-role pairs whose agent choice may act.",
 	"panes.enabled": "Default panes activation for new sessions; `--with-panes` / `--no-panes` beat it.",
 	"panes.notifications": "Which terminal run states raise a pane-host toast.",
+	"panes.layout": "What composes itself at interactive boot: nothing, the workers dock, or workers plus files.",
+	"panes.workers.ratio": "Share of the width the workers dock takes, at most half.",
 	"panes.journal": "Whether every dispatched run's event tail is written to disk for `clio-coder fleet view`.",
 	"panes.yazi.enabled": "Whether `/panes open yazi` may open the files pane or one-shot chooser.",
 	"panes.yazi.mode": "Keep Yazi beside the conversation, or close it after one selection.",
 	"panes.yazi.profile": "Use Clio's managed pick profile or leave the operator's Yazi profile untouched.",
 	"panes.yazi.followCwd": "Push the conversation directory into an already-open companion pane.",
+	"panes.yazi.ratio": "Share of the height the files dock takes, at most half.",
 	scope: "Alt+J and Alt+K model cycle set.",
 	"modelSelector.recentLimit": "How many recently used models /model remembers.",
 	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
@@ -430,7 +432,6 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"guardrails.observationTurnBudgetBytes": "Shared per-turn byte pool across every observation-producing tool.",
 	"guardrails.internalDispatchTimeoutMs": "Wall-clock cap for one internal generator dispatch.",
 	"compaction.auto": "Auto-compact before a turn when context crosses the threshold.",
-	"compaction.excludeLastTurns": "Recent user turns protected from observation masking.",
 	"compaction.threshold": "Pressure at which compaction masks stale observations, then summarizes.",
 	"context.workingSet.enabled": "Non-destructive eviction of stale tool results before a summary is ever needed.",
 	"context.workingSet.policy": "Which candidates the eviction pass selects.",
@@ -453,7 +454,6 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"watchdog.enabled": "When enabled, a turn that changed the tree is reviewed by one read-only verifier run.",
 	"watchdog.target": "Set target to route the run at a cheap local model; blank uses the session's active target.",
 	"watchdog.cadenceToolCalls": "Also fire every N tool calls inside a turn; blank fires at turn end only.",
-	theme: "Color palette. Clio ships a single tuned palette.",
 	runtimePlugins: "npm packages exporting clioRuntimes: RuntimeDescriptor[].",
 	"compaction.model": "Dedicated summarization model; blank uses the orchestrator.",
 	"compaction.systemPrompt": "Path to a compaction prompt override; blank uses the built-in.",
@@ -483,8 +483,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"structural-v1 selects by message structure; age-horizon is the older age-based rule. Legal values: structural-v1, age-horizon · default: structural-v1.",
 	"context.workingSet.target":
 		"An applied eviction batch keeps evicting until pressure reaches this ratio, so it sits below compaction.threshold. Greater than 0 and less than 1 · default: 0.6.",
-	"context.workingSet.protectLastTurns":
-		"Counted in user turns, the same unit compaction.excludeLastTurns uses. Whole number of at least 1 · default: 6.",
+	"context.workingSet.protectLastTurns": "Counted in user turns. Whole number of at least 1 · default: 6.",
 	"context.workingSet.minEvictableTokens":
 		"The floor sweep put marker break-even near 50 tokens; 200 is the churn guard. Whole number, 0 evicts anything · default: 200.",
 	"guardrails.turnToolCallBudget":
@@ -678,7 +677,7 @@ export interface SettingsCenterItem extends SettingItem {
 	label: string;
 	description: string;
 	section: SettingsSectionId;
-	configPath: SettingsCenterRowId;
+	configPath: string;
 	affordance: string;
 	scope: SettingScope;
 	readOnly: boolean;
@@ -930,6 +929,9 @@ const NUMBER_SETTING_RULES = {
 	"guardrails.readMaxBytes": { min: 1, integer: true },
 	"guardrails.observationTurnBudgetBytes": { min: 1, integer: true },
 	"guardrails.internalDispatchTimeoutMs": { min: 1, integer: true },
+	// The config validator's bounds for both dock shares; half the axis is the cap.
+	"panes.workers.ratio": { min: 0.05, max: 0.5, integer: false },
+	"panes.yazi.ratio": { min: 0.05, max: 0.5, integer: false },
 } as const satisfies Partial<Record<EditableSettingId, NumberSettingRule>>;
 
 export type NumberSettingId = keyof typeof NUMBER_SETTING_RULES;
@@ -1368,7 +1370,7 @@ function profileTargetChoices(
 }
 
 function profileNameChoices(live: () => Readonly<ClioSettings>): Array<{ value: string; label: string }> {
-	const names = Object.keys(live().workers.profiles).sort();
+	const names = Object.keys(live().fleet.profiles).sort();
 	return names.map((name) => ({ value: name, label: name }));
 }
 
@@ -1482,11 +1484,43 @@ function scopeForId(id: EditableSettingId): SettingScope {
 
 /** Shipped default as a display string, for the "default: X" hint and the modified marker. */
 function defaultValueFor(id: EditableSettingId): string | undefined {
-	if (isRoutingPath(id)) return undefined;
-	const raw = getAtPath(DEFAULT_SETTINGS, id);
+	const path = settingsV2PathForRow(id);
+	if (isRoutingPath(path)) return undefined;
+	const raw = getAtPath(DEFAULT_SETTINGS, path);
 	if (raw === null || raw === undefined || typeof raw === "object") return undefined;
 	if (id === "attribution.gitCommits") return raw === true ? "enabled" : "disabled";
 	return String(raw);
+}
+
+const SETTINGS_CENTER_V2_PATH_OVERRIDES: Readonly<Record<string, string>> = {
+	"workers.profiles": "fleet.profiles",
+	"workers.agentBindings": "fleet.agentProfiles",
+	"routing.agentAutomation.activeAgentRoles": "fleet.adaptiveRouting.agentRoles",
+	"panes.enabled": "interface.panes.enabled",
+	"panes.notifications": "interface.panes.notifications",
+	"panes.journal": "fleet.history.journal",
+	"panes.yazi.enabled": "interface.panes.files.enabled",
+	"panes.yazi.mode": "interface.panes.files.mode",
+	"panes.yazi.profile": "interface.panes.files.profile",
+	"panes.yazi.followCwd": "interface.panes.files.followCwd",
+	"panes.yazi.ratio": "interface.panes.files.ratio",
+	"panes.layout": "interface.panes.layout",
+	"panes.workers.ratio": "interface.panes.workers.ratio",
+	"delegation.agents": "integrations.externalAgents.entries",
+	keybindings: "interface.keybindings",
+};
+
+/** Keep the existing Center navigation while showing and persisting only canonical v2 paths. */
+function settingsV2PathForRow(id: EditableSettingId): string {
+	if (id.startsWith("workers.profiles.")) return `fleet.profiles.${id.slice("workers.profiles.".length)}`;
+	if (id.startsWith("workers.agentBindings.")) return `fleet.agentProfiles.${id.slice("workers.agentBindings.".length)}`;
+	const override = SETTINGS_CENTER_V2_PATH_OVERRIDES[id];
+	if (override !== undefined) return override;
+	for (const [v1Path, v2Path] of SETTINGS_V1_PATH_MOVES) {
+		if (v1Path === id) return v2Path;
+		if (v1Path === `${id}[]` && v2Path.endsWith("[]")) return v2Path.slice(0, -2);
+	}
+	return id;
 }
 
 function settingItem(
@@ -1511,7 +1545,7 @@ function settingItem(
 		currentValue,
 		description: options.description ?? SETTINGS_DESCRIPTIONS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID],
 		section: sectionForSetting(id),
-		configPath: id,
+		configPath: settingsV2PathForRow(id),
 		affordance: options.affordance ?? (options.values ? cycleAffordance(options.values) : "opens picker"),
 		scope: scopeForId(id),
 		readOnly: options.readOnly ?? false,
@@ -1584,7 +1618,7 @@ function thinkingChoices(
 	providers: ProvidersContract | undefined,
 	target: string | null,
 	model: string | null,
-	level: ClioSettings["orchestrator"]["thinkingLevel"],
+	level: ClioSettings["chat"]["thinkingLevel"],
 ): { display: string; values: readonly string[] } {
 	const resolved = providers
 		? resolveModelRuntimeCapabilitiesForProviders(providers, target, model, level ?? "off")?.thinking
@@ -1606,32 +1640,26 @@ export function buildSettingItems(
 	options?: BuildSettingItemsOptions,
 ): SettingsCenterItem[] {
 	const live = options?.getSettings ?? ((): Readonly<ClioSettings> => settings);
-	const scopeList = settings.scope ?? [];
+	const scopeList = settings.chat.modelPicker.cycleSet ?? [];
 	const scopeText = scopeList.length > 0 ? scopeList.join(", ") : "(empty)";
-	const compaction = settings.compaction;
-	const retry = settings.retry;
-	const terminal = settings.terminal;
-	const watchdog = settings.watchdog;
-	const panes = settings.panes;
+	const compaction = settings.context.compaction;
+	const retry = settings.chat.retry;
+	const terminal = settings.interface;
+	const watchdog = settings.safety.review;
+	const panes = settings.interface.panes;
 	const orchestratorThinking = thinkingChoices(
 		options?.providers,
-		settings.orchestrator.target,
-		settings.orchestrator.model,
-		settings.orchestrator.thinkingLevel,
+		settings.chat.target,
+		settings.chat.model,
+		settings.chat.thinkingLevel,
 	);
 	const workerThinking = thinkingChoices(
 		options?.providers,
-		settings.workers.default.target,
-		settings.workers.default.model,
-		settings.workers.default.thinkingLevel,
+		settings.fleet.default.target,
+		settings.fleet.default.model,
+		settings.fleet.default.thinkingLevel,
 	);
-	const backgroundThinking = thinkingChoices(
-		options?.providers,
-		settings.background.target,
-		settings.background.model,
-		settings.background.thinkingLevel,
-	);
-	const profileCount = Object.keys(settings.workers.profiles ?? {}).length;
+	const profileCount = Object.keys(settings.fleet.profiles ?? {}).length;
 	const addProfileSubmenu = chainSubmenus(
 		textInputSubmenu("New profile name"),
 		() => selectListSubmenu("Select the profile's target", profileTargetChoices(live, options?.providers)),
@@ -1644,34 +1672,35 @@ export function buildSettingItems(
 	);
 	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Type target id");
 	const orchestratorModelSubmenu = options?.providers
-		? selectModelSubmenu(options.providers, () => live().orchestrator.target ?? undefined)
+		? selectModelSubmenu(options.providers, () => live().chat.target ?? undefined)
 		: editTextSubmenu("Type model name");
 	const workerModelSubmenu = options?.providers
-		? selectModelSubmenu(options.providers, () => live().workers.default.target ?? undefined)
+		? selectModelSubmenu(options.providers, () => live().fleet.default.target ?? undefined)
 		: editTextSubmenu("Type model name");
 	const backgroundTargetSubmenu = options?.providers
 		? selectOptionalBackgroundTargetSubmenu(options.providers)
 		: editTextSubmenu("Type memory target id", "Leave blank for rules-only memory.");
 	const backgroundModelSubmenu = options?.providers
-		? selectModelSubmenu(options.providers, () => live().background.target ?? undefined)
+		? selectModelSubmenu(options.providers, () => live().context.memory.target ?? undefined)
 		: editTextSubmenu("Type memory model name");
 	// Both are optional in the settings type, so the row falls back to the
 	// shipped value rather than rendering a blank for a key that is in force.
-	const escalation = settings.workers.escalation ?? SHIPPED_ESCALATION;
-	const resilienceCooldownMs = settings.workers.resilienceCooldownMs ?? SHIPPED_RESILIENCE_COOLDOWN_MS;
+	const escalation = settings.fleet.permissions.escalation ?? SHIPPED_ESCALATION;
+	const resilienceCooldownMs = settings.fleet.retry.routeCooldownMs ?? SHIPPED_RESILIENCE_COOLDOWN_MS;
 	const workingSet = settings.context.workingSet;
-	const guardrails = settings.guardrails;
-	const routing = settings.routing;
-	const library = settings.library;
-	const activeAgentRoles = routing.agentAutomation.activeAgentRoles;
-	const favorites = settings.modelSelector?.favorites ?? [];
-	const agents = settings.delegation?.agents ?? [];
-	const keybindingCount = Object.keys(settings.keybindings ?? {}).length;
+	const safetyLimits = settings.safety.limits;
+	const fleetLimits = settings.fleet.limits;
+	const routing = settings.fleet.adaptiveRouting;
+	const library = settings.integrations.library;
+	const activeAgentRoles = routing.agentRoles;
+	const favorites = settings.chat.modelPicker?.favorites ?? [];
+	const agents = settings.integrations.externalAgents?.entries ?? [];
+	const keybindingCount = Object.keys(settings.interface.keybindings ?? {}).length;
 	return [
-		settingItem("autonomy", settings.autonomy, {
+		settingItem("autonomy", settings.safety.autonomy, {
 			values: ["read-only", "suggest", "auto-edit", "full-auto"],
 		}),
-		settingItem("workers.onPermission", settings.workers.onPermission ?? "deny", {
+		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "deny", {
 			values: ["deny", "fail", "escalate"],
 		}),
 		settingItem("workers.escalation.timeoutMs", String(escalation.timeoutMs), {
@@ -1681,10 +1710,10 @@ export function buildSettingItems(
 		settingItem("workers.escalation.fallback", escalation.fallback, {
 			values: ["deny", "fail"],
 		}),
-		settingItem("delegation.defaults.toolGovernance", settings.delegation.defaults.toolGovernance, {
+		settingItem("delegation.defaults.toolGovernance", settings.integrations.externalAgents.defaults.toolGovernance, {
 			values: ["clio-policy", "agent-managed", "deny-all"],
 		}),
-		settingItem("skills.trustProjectCompatRoots", String(settings.skills.trustProjectCompatRoots), {
+		settingItem("skills.trustProjectCompatRoots", String(settings.integrations.projectResources.trustProjectImports), {
 			values: ["false", "true"],
 		}),
 		settingItem("safetyNet", "always on", {
@@ -1694,56 +1723,53 @@ export function buildSettingItems(
 		settingItem("orchestrator.thinkingLevel", orchestratorThinking.display, {
 			values: orchestratorThinking.values,
 		}),
-		settingItem("orchestrator.target", settings.orchestrator.target ?? "(unset)", {
+		settingItem("orchestrator.target", settings.chat.target ?? "(unset)", {
 			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("orchestrator.model", settings.orchestrator.model ?? "(unset)", {
+		settingItem("orchestrator.model", settings.chat.model ?? "(unset)", {
 			submenu: orchestratorModelSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.target", settings.background.target ?? "(unset — rules-only)", {
+		settingItem("background.target", settings.context.memory.target ?? "(unset — rules-only)", {
 			submenu: backgroundTargetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.model", settings.background.model ?? "(unset)", {
+		settingItem("background.model", settings.context.memory.model ?? "(unset)", {
 			submenu: backgroundModelSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.thinkingLevel", backgroundThinking.display, {
-			values: backgroundThinking.values,
-		}),
-		settingItem("memory.intervention.enabled", String(settings.memory.intervention.enabled), {
+		settingItem("memory.intervention.enabled", String(settings.context.memory.enabled), {
 			values: ["true", "false"],
 		}),
-		settingItem("memory.intervention.everyNTools", String(settings.memory.intervention.everyNTools), {
+		settingItem("memory.intervention.everyNTools", String(settings.context.memory.cadenceToolCalls), {
 			values: ["5", "10", "20", "30"],
 		}),
-		settingItem("memory.intervention.windowSteps", String(settings.memory.intervention.windowSteps), {
+		settingItem("memory.intervention.windowSteps", String(settings.context.memory.trajectorySteps), {
 			values: ["4", "8", "12", "20"],
 		}),
-		settingItem("memory.intervention.maxTokens", String(settings.memory.intervention.maxTokens), {
+		settingItem("memory.intervention.maxTokens", String(settings.context.memory.maxOutputTokens), {
 			values: ["100", "200", "400", "800"],
 		}),
-		settingItem("memory.intervention.timeoutMs", String(settings.memory.intervention.timeoutMs), {
+		settingItem("memory.intervention.timeoutMs", String(settings.context.memory.timeoutMs), {
 			values: ["5000", "10000", "20000", "30000", "60000"],
 		}),
-		settingItem("prewarm.enabled", String(settings.prewarm.enabled), {
+		settingItem("prewarm.enabled", String(settings.chat.prewarm), {
 			values: ["true", "false"],
 		}),
 		fleetGroupHeader("fleet.group.defaults", "Defaults"),
-		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
+		settingItem("workers.default.target", settings.fleet.default.target ?? "(unset)", {
 			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("workers.default.model", settings.workers.default.model ?? "(unset)", {
+		settingItem("workers.default.model", settings.fleet.default.model ?? "(unset)", {
 			submenu: workerModelSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
 		settingItem("workers.default.thinkingLevel", workerThinking.display, {
 			values: workerThinking.values,
 		}),
-		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
+		settingItem("workers.maxRetries", String(settings.fleet.retry.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],
 		}),
 		settingItem("workers.resilienceCooldownMs", String(resilienceCooldownMs), {
@@ -1769,20 +1795,16 @@ export function buildSettingItems(
 			valueSegments: [],
 		}),
 		fleetGroupHeader("fleet.group.route-activation", "Route activation"),
-		settingItem("routing.activeRoles", routing.activeRoles.length > 0 ? routing.activeRoles.join(", ") : "(none)", {
+		settingItem("routing.activeRoles", routing.roles.length > 0 ? routing.roles.join(", ") : "(none)", {
 			submenu: editEnumListSubmenu("Edit active routing roles", ACTIVE_ROUTING_ROLES),
 			affordance: `free text from ${ACTIVE_ROUTING_ROLES.join(", ")}`,
-			editValue: routing.activeRoles.join(", "),
+			editValue: routing.roles.join(", "),
 		}),
-		settingItem(
-			"routing.activePostures",
-			routing.activePostures.length > 0 ? routing.activePostures.join(", ") : "(none)",
-			{
-				submenu: editEnumListSubmenu("Edit active routing postures", ACTIVE_ROUTING_POSTURES),
-				affordance: `free text from ${ACTIVE_ROUTING_POSTURES.join(", ")}`,
-				editValue: routing.activePostures.join(", "),
-			},
-		),
+		settingItem("routing.activePostures", routing.postures.length > 0 ? routing.postures.join(", ") : "(none)", {
+			submenu: editEnumListSubmenu("Edit active routing postures", ACTIVE_ROUTING_POSTURES),
+			affordance: `free text from ${ACTIVE_ROUTING_POSTURES.join(", ")}`,
+			editValue: routing.postures.join(", "),
+		}),
 		settingItem(
 			"routing.agentAutomation.activeAgentRoles",
 			activeAgentRoles.length > 0
@@ -1796,7 +1818,12 @@ export function buildSettingItems(
 		fleetGroupHeader("fleet.group.panes", "Panes"),
 		settingItem("panes.enabled", panes.enabled, { values: ["auto", "embedded", "off"] }),
 		settingItem("panes.notifications", panes.notifications, { values: ["failures", "all", "off"] }),
-		settingItem("panes.journal", String(panes.journal), { values: ["true", "false"] }),
+		settingItem("panes.layout", panes.layout, { values: ["off", "workers", "cockpit"] }),
+		settingItem("panes.workers.ratio", formatThreshold(panes.workers.ratio, "0.34"), {
+			submenu: editNumberSubmenu("Edit workers dock share (0.05–0.5)", "panes.workers.ratio"),
+			affordance: "free text",
+		}),
+		settingItem("panes.journal", String(settings.fleet.history.journal), { values: ["true", "false"] }),
 		settingItem("targets", "", {
 			description: "Live inference target inventory and routing roles.",
 			affordance: "column heading",
@@ -1810,21 +1837,21 @@ export function buildSettingItems(
 			submenu: scopedModelsSubmenu(scopeList, options?.providers),
 			affordance: "opens provider-backed checklist",
 		}),
-		settingItem("modelSelector.recentLimit", String(settings.modelSelector.recentLimit), {
+		settingItem("modelSelector.recentLimit", String(settings.chat.modelPicker.recentLimit), {
 			values: ["6", "12", "20", "50"],
 		}),
 		settingItem("modelSelector.favorites", favorites.length > 0 ? `${favorites.length} pinned` : "(none)", {
 			affordance: "manage in /model",
 			readOnly: true,
 		}),
-		settingItem("budget.sessionCeilingUsd", String(settings.budget.sessionCeilingUsd), {
+		settingItem("budget.sessionCeilingUsd", String(settings.safety.limits.sessionCostUsd), {
 			submenu: editNumberSubmenu("Edit session cost ceiling USD", "budget.sessionCeilingUsd"),
 			affordance: "free text",
 		}),
-		settingItem("defaults.maxTokens", String(settings.defaults.maxTokens), {
+		settingItem("defaults.maxTokens", String(settings.chat.maxOutputTokens), {
 			values: ["0", "4096", "8192", "16384", "32768", "65536", "131072"],
 		}),
-		settingItem("budget.concurrency", String(settings.budget.concurrency), {
+		settingItem("budget.concurrency", String(settings.fleet.concurrency), {
 			values: ["auto", "1", "2", "4", "8"],
 		}),
 		groupHeader(
@@ -1833,27 +1860,27 @@ export function buildSettingItems(
 			"Guardrails",
 			"Numeric backstops that bound runaway agent behavior.",
 		),
-		settingItem("guardrails.turnToolCallBudget", String(guardrails.turnToolCallBudget), {
+		settingItem("guardrails.turnToolCallBudget", String(safetyLimits.chatToolCallsPerTurn), {
 			submenu: editNumberSubmenu("Edit turn tool-call budget", "guardrails.turnToolCallBudget"),
 			affordance: "free text",
 		}),
-		settingItem("guardrails.workerToolCallCap", String(guardrails.workerToolCallCap), {
+		settingItem("guardrails.workerToolCallCap", String(fleetLimits.toolCallsPerRun), {
 			submenu: editNumberSubmenu("Edit worker tool-call cap", "guardrails.workerToolCallCap"),
 			affordance: "free text",
 		}),
-		settingItem("guardrails.maxDispatchRuns", String(guardrails.maxDispatchRuns), {
+		settingItem("guardrails.maxDispatchRuns", String(settings.fleet.history.maxRuns), {
 			submenu: editNumberSubmenu("Edit run ledger retention", "guardrails.maxDispatchRuns"),
 			affordance: "free text",
 		}),
-		settingItem("guardrails.readMaxBytes", String(guardrails.readMaxBytes), {
+		settingItem("guardrails.readMaxBytes", String(safetyLimits.readBytesPerCall), {
 			submenu: editNumberSubmenu("Edit read byte cap", "guardrails.readMaxBytes"),
 			affordance: "free text",
 		}),
-		settingItem("guardrails.observationTurnBudgetBytes", String(guardrails.observationTurnBudgetBytes), {
+		settingItem("guardrails.observationTurnBudgetBytes", String(safetyLimits.observationBytesPerTurn), {
 			submenu: editNumberSubmenu("Edit observation byte pool", "guardrails.observationTurnBudgetBytes"),
 			affordance: "free text",
 		}),
-		settingItem("guardrails.internalDispatchTimeoutMs", String(guardrails.internalDispatchTimeoutMs), {
+		settingItem("guardrails.internalDispatchTimeoutMs", String(fleetLimits.internalRunTimeoutMs), {
 			submenu: editNumberSubmenu("Edit internal dispatch timeout (ms)", "guardrails.internalDispatchTimeoutMs"),
 			affordance: "free text",
 		}),
@@ -1862,9 +1889,6 @@ export function buildSettingItems(
 		}),
 		settingItem("compaction.threshold", formatThreshold(compaction.threshold), {
 			values: ["0.7", "0.8", "0.85", "0.9"],
-		}),
-		settingItem("compaction.excludeLastTurns", String(compaction.excludeLastTurns), {
-			values: ["3", "6", "10", "15"],
 		}),
 		groupHeader(
 			"compaction.group.working-set",
@@ -1902,13 +1926,13 @@ export function buildSettingItems(
 		settingItem("retry.streamStallMs", String(retry.streamStallMs), {
 			values: ["60000", "120000", "180000", "300000", "600000"],
 		}),
-		settingItem("terminal.showTerminalProgress", String(terminal.showTerminalProgress), {
+		settingItem("terminal.showTerminalProgress", String(terminal.terminalProgress), {
 			values: ["false", "true"],
 		}),
-		settingItem("terminal.outputVerbosity", terminal.outputVerbosity, {
+		settingItem("terminal.outputVerbosity", terminal.outputDetail, {
 			values: ["minimal", "default", "verbose"],
 		}),
-		settingItem("terminal.tuiMode", terminal.tuiMode, {
+		settingItem("terminal.tuiMode", terminal.mode, {
 			values: ["regular", "fullscreen"],
 		}),
 		settingItem("terminal.fullscreenScrollbar", terminal.fullscreenScrollbar, {
@@ -1917,18 +1941,18 @@ export function buildSettingItems(
 		settingItem("terminal.smoothStreaming", terminal.smoothStreaming, {
 			values: ["off", "auto", "on"],
 		}),
-		settingItem("terminal.notify", String(terminal.notify), {
+		settingItem("terminal.notify", String(terminal.desktopNotifications), {
 			values: ["false", "true"],
 		}),
-		settingItem("theme", settings.theme, {
-			affordance: "single clio-coder palette",
-			readOnly: true,
-		}),
 		terminalGroupHeader("terminal.group.files-pane", "Files pane"),
-		settingItem("panes.yazi.enabled", String(panes.yazi.enabled), { values: ["true", "false"] }),
-		settingItem("panes.yazi.mode", panes.yazi.mode, { values: ["companion", "chooser"] }),
-		settingItem("panes.yazi.profile", panes.yazi.profile, { values: ["managed", "user"] }),
-		settingItem("panes.yazi.followCwd", String(panes.yazi.followCwd), { values: ["true", "false"] }),
+		settingItem("panes.yazi.enabled", String(panes.files.enabled), { values: ["true", "false"] }),
+		settingItem("panes.yazi.mode", panes.files.mode, { values: ["companion", "chooser"] }),
+		settingItem("panes.yazi.profile", panes.files.profile, { values: ["managed", "user"] }),
+		settingItem("panes.yazi.followCwd", String(panes.files.followCwd), { values: ["true", "false"] }),
+		settingItem("panes.yazi.ratio", formatThreshold(panes.files.ratio, "0.3"), {
+			submenu: editNumberSubmenu("Edit files dock share (0.05–0.5)", "panes.yazi.ratio"),
+			affordance: "free text",
+		}),
 		settingItem("watchdog.enabled", String(watchdog.enabled), {
 			values: ["false", "true"],
 		}),
@@ -1952,11 +1976,15 @@ export function buildSettingItems(
 				editValue: watchdog.cadenceToolCalls === undefined ? "" : String(watchdog.cadenceToolCalls),
 			},
 		),
-		settingItem("runtimePlugins", settings.runtimePlugins.length > 0 ? settings.runtimePlugins.join(", ") : "(none)", {
-			submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart Clio to load changes."),
-			affordance: "free text",
-		}),
-		settingItem("attribution.gitCommits", settings.attribution.gitCommits ? "enabled" : "disabled", {
+		settingItem(
+			"runtimePlugins",
+			settings.integrations.runtimePlugins.length > 0 ? settings.integrations.runtimePlugins.join(", ") : "(none)",
+			{
+				submenu: editTextSubmenu("Edit runtime plugins comma-separated list", "Restart Clio to load changes."),
+				affordance: "free text",
+			},
+		),
+		settingItem("attribution.gitCommits", settings.integrations.git.commitAttribution ? "enabled" : "disabled", {
 			values: ["enabled", "disabled"],
 		}),
 		settingItem("compaction.model", compaction.model ?? "(orchestrator target)", {
@@ -1967,18 +1995,30 @@ export function buildSettingItems(
 			submenu: editTextSubmenu("Edit compaction prompt path; blank uses the built-in"),
 			affordance: "free text",
 		}),
-		settingItem("delegation.defaults.connectTimeoutMs", String(settings.delegation.defaults.connectTimeoutMs), {
-			submenu: editNumberSubmenu("Edit delegate connect timeout (ms)", "delegation.defaults.connectTimeoutMs"),
-			affordance: "free text",
-		}),
-		settingItem("delegation.defaults.turnTimeoutMs", String(settings.delegation.defaults.turnTimeoutMs), {
-			submenu: editNumberSubmenu("Edit delegate turn timeout (ms)", "delegation.defaults.turnTimeoutMs"),
-			affordance: "free text",
-		}),
-		settingItem("delegation.defaults.permissionTimeoutMs", String(settings.delegation.defaults.permissionTimeoutMs), {
-			submenu: editNumberSubmenu("Edit delegate permission timeout (ms)", "delegation.defaults.permissionTimeoutMs"),
-			affordance: "free text",
-		}),
+		settingItem(
+			"delegation.defaults.connectTimeoutMs",
+			String(settings.integrations.externalAgents.defaults.connectTimeoutMs),
+			{
+				submenu: editNumberSubmenu("Edit delegate connect timeout (ms)", "delegation.defaults.connectTimeoutMs"),
+				affordance: "free text",
+			},
+		),
+		settingItem(
+			"delegation.defaults.turnTimeoutMs",
+			String(settings.integrations.externalAgents.defaults.turnTimeoutMs),
+			{
+				submenu: editNumberSubmenu("Edit delegate turn timeout (ms)", "delegation.defaults.turnTimeoutMs"),
+				affordance: "free text",
+			},
+		),
+		settingItem(
+			"delegation.defaults.permissionTimeoutMs",
+			String(settings.integrations.externalAgents.defaults.permissionTimeoutMs),
+			{
+				submenu: editNumberSubmenu("Edit delegate permission timeout (ms)", "delegation.defaults.permissionTimeoutMs"),
+				affordance: "free text",
+			},
+		),
 		settingItem("keybindings", keybindingCount > 0 ? `${keybindingCount} override(s)` : "(defaults)", {
 			affordance: "edit settings.yaml",
 			readOnly: true,
@@ -2020,7 +2060,7 @@ function fleetProfileRows(
 	options: BuildSettingItemsOptions | undefined,
 ): SettingsCenterItem[] {
 	const providers = options?.providers;
-	return Object.entries(settings.workers.profiles)
+	return Object.entries(settings.fleet.profiles)
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([name, profile]) => {
 			const thinking = thinkingChoices(providers, profile.target, profile.model, profile.thinkingLevel);
@@ -2030,7 +2070,7 @@ function fleetProfileRows(
 			const summary = `${target}/${model}  ${thinking.display}  ${placement}`;
 			const compactThinking = truncateProfileFact(thinking.display, 7);
 			const compactPlacement = truncateProfileFact(placement, 7);
-			const route = target === settings.workers.default.target ? model : `${target}/${model}`;
+			const route = target === settings.fleet.default.target ? model : `${target}/${model}`;
 			const routeBudget = Math.max(
 				8,
 				PROFILE_SUMMARY_VALUE_BUDGET -
@@ -2042,7 +2082,7 @@ function fleetProfileRows(
 			return settingItem(`workers.profiles.${name}`, summary, {
 				label: name,
 				description: `Profile ${name}. Enter to edit its target, model, thinking level, placement, or remove it.`,
-				help: ["target", "model", "thinkingLevel", "node"].map((field) => `workers.profiles.${name}.${field}`).join(" · "),
+				help: ["target", "model", "thinkingLevel", "node"].map((field) => `fleet.profiles.${name}.${field}`).join(" · "),
 				submenu: profileWorkbenchSubmenu(name, settings, live, options),
 				affordance: "Enter: drill into profile fields",
 				valueSegments: [
@@ -2078,7 +2118,7 @@ function profileWorkbenchSubmenu(
 				done();
 				return;
 			}
-			const profile = live().workers.profiles[name];
+			const profile = live().fleet.profiles[name];
 			if (!profile) {
 				done();
 				return;
@@ -2099,7 +2139,7 @@ function profileWorkbenchSubmenu(
 			}
 			if (field === "model") {
 				const submenu = options?.providers
-					? selectModelSubmenu(options.providers, () => live().workers.profiles[name]?.target ?? undefined)
+					? selectModelSubmenu(options.providers, () => live().fleet.profiles[name]?.target ?? undefined)
 					: editTextSubmenu("Type model name");
 				active = submenu(profile.model ?? "(unset)", finish);
 				return;
@@ -2147,10 +2187,10 @@ function profileNodeChoices(
 }
 
 function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
-	return Object.entries(settings.workers.agentBindings)
+	return Object.entries(settings.fleet.agentProfiles)
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([agentId, profileName]) => {
-			const missing = !settings.workers.profiles[profileName];
+			const missing = !settings.fleet.profiles[profileName];
 			return settingItem(`workers.agentBindings.${agentId}`, profileName, {
 				label: `${agentId} · profile`,
 				description: missing
@@ -2173,9 +2213,9 @@ function targetRows(
 	return settings.targets.map((target) => {
 		const status = statuses.get(target.id);
 		const roles = [
-			settings.orchestrator.target === target.id ? "chat" : null,
-			settings.workers.default.target === target.id ? "fleet" : null,
-			settings.background.target === target.id ? "memory" : null,
+			settings.chat.target === target.id ? "chat" : null,
+			settings.fleet.default.target === target.id ? "fleet" : null,
+			settings.context.memory.target === target.id ? "memory" : null,
 		].filter((role) => role !== null);
 		const health = status?.health.status ?? "unknown";
 		const operation = options?.getTargetOperation?.(target.id) ?? null;
@@ -2355,15 +2395,17 @@ function applyNumberSetting(id: NumberSettingId, value: string, set: (next: numb
 function applyDelegationAgentChange(settings: ClioSettings, value: string): void {
 	if (value.startsWith(DELEGATION_REMOVE_PREFIX)) {
 		const id = value.slice(DELEGATION_REMOVE_PREFIX.length);
-		settings.delegation.agents = settings.delegation.agents.filter((agent) => agent.id !== id);
+		settings.integrations.externalAgents.entries = settings.integrations.externalAgents.entries.filter(
+			(agent) => agent.id !== id,
+		);
 		return;
 	}
 	if (!value.startsWith(DELEGATION_ADD_PREFIX)) return;
 	const kind = interopAgentKind(value.slice(DELEGATION_ADD_PREFIX.length) as InteropAgentId);
 	if (kind?.acp === undefined) return;
-	const entry = delegationEntryForKind(kind, settings.delegation.defaults);
-	if (settings.delegation.agents.some((agent) => agent.id === entry.id)) return;
-	settings.delegation.agents.push(entry);
+	const entry = delegationEntryForKind(kind, settings.integrations.externalAgents.defaults);
+	if (settings.integrations.externalAgents.entries.some((agent) => agent.id === entry.id)) return;
+	settings.integrations.externalAgents.entries.push(entry);
 }
 
 export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
@@ -2371,32 +2413,30 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 	switch (id) {
 		case "autonomy":
 			if (value === "read-only" || value === "suggest" || value === "auto-edit" || value === "full-auto")
-				settings.autonomy = value;
+				settings.safety.autonomy = value;
 			return;
 		case "workers.onPermission":
-			if (value === "deny" || value === "fail" || value === "escalate") settings.workers.onPermission = value;
+			if (value === "deny" || value === "fail" || value === "escalate") settings.fleet.permissions.mode = value;
 			return;
 		case "delegation.defaults.toolGovernance":
 			if (value === "clio-policy" || value === "agent-managed" || value === "deny-all")
-				settings.delegation.defaults.toolGovernance = value;
+				settings.integrations.externalAgents.defaults.toolGovernance = value;
 			return;
 		case "delegation.agents":
 			applyDelegationAgentChange(settings, value);
 			return;
 		case "skills.trustProjectCompatRoots":
-			if (value === "true" || value === "false") settings.skills.trustProjectCompatRoots = value === "true";
+			if (value === "true" || value === "false")
+				settings.integrations.projectResources.trustProjectImports = value === "true";
 			return;
 		case "attribution.gitCommits":
-			if (value === "enabled" || value === "disabled") settings.attribution.gitCommits = value === "enabled";
+			if (value === "enabled" || value === "disabled") settings.integrations.git.commitAttribution = value === "enabled";
 			return;
 		case "orchestrator.thinkingLevel":
-			settings.orchestrator.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.orchestrator.thinkingLevel;
-			return;
-		case "background.thinkingLevel":
-			settings.background.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.background.thinkingLevel;
+			settings.chat.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.chat.thinkingLevel;
 			return;
 		case "memory.intervention.enabled":
-			if (value === "true" || value === "false") settings.memory.intervention.enabled = value === "true";
+			if (value === "true" || value === "false") settings.context.memory.enabled = value === "true";
 			return;
 		case "memory.intervention.everyNTools":
 		case "memory.intervention.windowSteps":
@@ -2404,123 +2444,139 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "memory.intervention.timeoutMs":
 			applyNonNegativeInteger(value, (next) => {
 				if (next >= 1) {
-					const key = id.slice("memory.intervention.".length) as "everyNTools" | "windowSteps" | "maxTokens" | "timeoutMs";
-					settings.memory.intervention[key] = next;
+					// The v1 row ids are the presentation vocabulary; the v2 fields they
+					// write have their own names.
+					const key = (
+						{
+							"memory.intervention.everyNTools": "cadenceToolCalls",
+							"memory.intervention.windowSteps": "trajectorySteps",
+							"memory.intervention.maxTokens": "maxOutputTokens",
+							"memory.intervention.timeoutMs": "timeoutMs",
+						} as const
+					)[id];
+					if (key) settings.context.memory[key] = next;
 				}
 			});
 			return;
 		case "workers.default.thinkingLevel":
-			settings.workers.default.thinkingLevel =
-				thinkingLevelFromChoiceLabel(value) ?? settings.workers.default.thinkingLevel;
+			settings.fleet.default.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.fleet.default.thinkingLevel;
 			return;
 		case "workers.maxRetries":
 			applyNonNegativeInteger(value, (next) => {
-				settings.workers.maxRetries = next;
+				settings.fleet.retry.maxRetries = next;
 			});
 			return;
 		case "panes.enabled":
-			if (value === "auto" || value === "embedded" || value === "off") settings.panes.enabled = value;
+			if (value === "auto" || value === "embedded" || value === "off") settings.interface.panes.enabled = value;
 			return;
 		case "panes.notifications":
-			if (value === "failures" || value === "all" || value === "off") settings.panes.notifications = value;
+			if (value === "failures" || value === "all" || value === "off") settings.interface.panes.notifications = value;
+			return;
+		case "panes.layout":
+			if (value === "off" || value === "workers" || value === "cockpit") settings.interface.panes.layout = value;
+			return;
+		case "panes.workers.ratio":
+			applyNumberSetting(id, value, (next) => {
+				if (next !== null) settings.interface.panes.workers.ratio = next;
+			});
+			return;
+		case "panes.yazi.ratio":
+			applyNumberSetting(id, value, (next) => {
+				if (next !== null) settings.interface.panes.files.ratio = next;
+			});
 			return;
 		case "panes.journal":
-			if (value === "true" || value === "false") settings.panes.journal = value === "true";
+			if (value === "true" || value === "false") settings.fleet.history.journal = value === "true";
 			return;
 		case "panes.yazi.enabled":
-			if (value === "true" || value === "false") settings.panes.yazi.enabled = value === "true";
+			if (value === "true" || value === "false") settings.interface.panes.files.enabled = value === "true";
 			return;
 		case "panes.yazi.mode":
-			if (value === "companion" || value === "chooser") settings.panes.yazi.mode = value;
+			if (value === "companion" || value === "chooser") settings.interface.panes.files.mode = value;
 			return;
 		case "panes.yazi.profile":
-			if (value === "managed" || value === "user") settings.panes.yazi.profile = value;
+			if (value === "managed" || value === "user") settings.interface.panes.files.profile = value;
 			return;
 		case "panes.yazi.followCwd":
-			if (value === "true" || value === "false") settings.panes.yazi.followCwd = value === "true";
+			if (value === "true" || value === "false") settings.interface.panes.files.followCwd = value === "true";
 			return;
 		case "modelSelector.recentLimit":
 			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) settings.modelSelector.recentLimit = next;
+				if (next >= 1) settings.chat.modelPicker.recentLimit = next;
 			});
 			return;
 		case "defaults.maxTokens":
 			applyNonNegativeInteger(value, (next) => {
-				settings.defaults.maxTokens = next;
+				settings.chat.maxOutputTokens = next;
 			});
 			return;
 		case "budget.concurrency": {
 			if (value === "auto") {
-				settings.budget.concurrency = "auto";
+				settings.fleet.concurrency = "auto";
 				return;
 			}
 			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) settings.budget.concurrency = next;
+				if (next >= 1) settings.fleet.concurrency = next;
 			});
 			return;
 		}
 		case "compaction.auto":
-			if (value === "true" || value === "false") settings.compaction.auto = value === "true";
-			return;
-		case "compaction.excludeLastTurns":
-			applyNonNegativeInteger(value, (next) => {
-				if (next > 0) settings.compaction.excludeLastTurns = next;
-			});
+			if (value === "true" || value === "false") settings.context.compaction.auto = value === "true";
 			return;
 		case "compaction.threshold": {
 			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.compaction.threshold = parsed;
+			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.context.compaction.threshold = parsed;
 			return;
 		}
 		case "compaction.model": {
 			const trimmed = value.trim();
-			if (trimmed) settings.compaction.model = trimmed;
-			else delete settings.compaction.model;
+			if (trimmed) settings.context.compaction.model = trimmed;
+			else delete settings.context.compaction.model;
 			return;
 		}
 		case "compaction.systemPrompt": {
 			const trimmed = value.trim();
-			if (trimmed) settings.compaction.systemPrompt = trimmed;
-			else delete settings.compaction.systemPrompt;
+			if (trimmed) settings.context.compaction.systemPrompt = trimmed;
+			else delete settings.context.compaction.systemPrompt;
 			return;
 		}
 		case "retry.enabled":
-			if (value === "true" || value === "false") settings.retry.enabled = value === "true";
+			if (value === "true" || value === "false") settings.chat.retry.enabled = value === "true";
 			return;
 		case "retry.maxRetries":
 			applyNonNegativeInteger(value, (next) => {
-				settings.retry.maxRetries = next;
+				settings.chat.retry.maxRetries = next;
 			});
 			return;
 		case "retry.baseDelayMs":
 			applyNonNegativeInteger(value, (next) => {
-				settings.retry.baseDelayMs = next;
+				settings.chat.retry.baseDelayMs = next;
 			});
 			return;
 		case "retry.maxDelayMs":
 			applyNonNegativeInteger(value, (next) => {
-				settings.retry.maxDelayMs = next;
+				settings.chat.retry.maxDelayMs = next;
 			});
 			return;
 		case "terminal.showTerminalProgress":
-			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
+			if (value === "true" || value === "false") settings.interface.terminalProgress = value === "true";
 			return;
 		case "terminal.outputVerbosity":
-			if (value === "minimal" || value === "default" || value === "verbose") settings.terminal.outputVerbosity = value;
+			if (value === "minimal" || value === "default" || value === "verbose") settings.interface.outputDetail = value;
 			return;
 		case "terminal.tuiMode":
-			if (value === "regular" || value === "fullscreen") settings.terminal.tuiMode = value;
+			if (value === "regular" || value === "fullscreen") settings.interface.mode = value;
 			return;
 		case "terminal.fullscreenScrollbar":
 			if (value === "hidden" || value === "auto" || value === "always") {
-				settings.terminal.fullscreenScrollbar = value;
+				settings.interface.fullscreenScrollbar = value;
 			}
 			return;
 		case "terminal.notify":
-			if (value === "true" || value === "false") settings.terminal.notify = value === "true";
+			if (value === "true" || value === "false") settings.interface.desktopNotifications = value === "true";
 			return;
 		case "watchdog.enabled":
-			if (value === "true" || value === "false") settings.watchdog.enabled = value === "true";
+			if (value === "true" || value === "false") settings.safety.review.enabled = value === "true";
 			return;
 		// Both watchdog options are absent-by-default, and an empty submission is
 		// how the operator says "go back to the default" from a text row. Deleting
@@ -2528,82 +2584,80 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		// config validator accepts.
 		case "watchdog.target": {
 			const trimmed = value.trim();
-			if (trimmed) settings.watchdog.target = trimmed;
-			else delete settings.watchdog.target;
+			if (trimmed) settings.safety.review.target = trimmed;
+			else delete settings.safety.review.target;
 			return;
 		}
 		case "watchdog.cadenceToolCalls":
 			applyNumberSetting("watchdog.cadenceToolCalls", value, (next) => {
-				if (next === null) delete settings.watchdog.cadenceToolCalls;
-				else settings.watchdog.cadenceToolCalls = next;
+				if (next === null) delete settings.safety.review.cadenceToolCalls;
+				else settings.safety.review.cadenceToolCalls = next;
 			});
 			return;
 		case "terminal.smoothStreaming":
-			if (value === "off" || value === "auto" || value === "on") settings.terminal.smoothStreaming = value;
+			if (value === "off" || value === "auto" || value === "on") settings.interface.smoothStreaming = value;
 			return;
 		case "runtimePlugins":
-			settings.runtimePlugins = value
+			settings.integrations.runtimePlugins = value
 				.split(",")
 				.map((entry) => entry.trim())
 				.filter(Boolean);
 			return;
 		case "delegation.defaults.connectTimeoutMs":
 			applyNumberSetting("delegation.defaults.connectTimeoutMs", value, (next) => {
-				if (next !== null) settings.delegation.defaults.connectTimeoutMs = next;
+				if (next !== null) settings.integrations.externalAgents.defaults.connectTimeoutMs = next;
 			});
 			return;
 		case "delegation.defaults.turnTimeoutMs":
 			applyNumberSetting("delegation.defaults.turnTimeoutMs", value, (next) => {
-				if (next !== null) settings.delegation.defaults.turnTimeoutMs = next;
+				if (next !== null) settings.integrations.externalAgents.defaults.turnTimeoutMs = next;
 			});
 			return;
 		case "delegation.defaults.permissionTimeoutMs":
 			applyNumberSetting("delegation.defaults.permissionTimeoutMs", value, (next) => {
-				if (next !== null) settings.delegation.defaults.permissionTimeoutMs = next;
+				if (next !== null) settings.integrations.externalAgents.defaults.permissionTimeoutMs = next;
 			});
 			return;
 		case "orchestrator.target": {
 			const target = value === "(unset)" || value === "" ? null : value;
 			// Switching targets re-bases the model on the new target default.
-			if (target !== settings.orchestrator.target) {
-				settings.orchestrator.model = target
-					? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null)
-					: null;
+			if (target !== settings.chat.target) {
+				settings.chat.model = target ? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null) : null;
 			}
-			settings.orchestrator.target = target;
+			settings.chat.target = target;
 			return;
 		}
 		case "orchestrator.model":
-			settings.orchestrator.model = value === "(unset)" || value === "" ? null : value;
+			settings.chat.model = value === "(unset)" || value === "" ? null : value;
 			return;
 		case "background.target": {
 			const target = value.startsWith("(unset") || value === "" ? null : value;
-			if (target !== settings.background.target) {
-				settings.background.model = target
+			if (target !== settings.context.memory.target) {
+				settings.context.memory.model = target
 					? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null)
 					: null;
 			}
-			settings.background.target = target;
+			settings.context.memory.target = target;
 			return;
 		}
 		case "background.model":
-			settings.background.model = value === "(unset)" || value === "" ? null : value;
+			settings.context.memory.model = value === "(unset)" || value === "" ? null : value;
 			return;
 		case "workers.default.target": {
 			const target = value === "(unset)" || value === "" ? null : value;
-			if (target !== settings.workers.default.target) {
-				settings.workers.default.model = target
+			if (target !== settings.fleet.default.target) {
+				settings.fleet.default.model = target
 					? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null)
 					: null;
 			}
-			settings.workers.default.target = target;
+			settings.fleet.default.target = target;
 			return;
 		}
 		case "workers.default.model":
-			settings.workers.default.model = value === "(unset)" || value === "" ? null : value;
+			settings.fleet.default.model = value === "(unset)" || value === "" ? null : value;
 			return;
 		case "scope":
-			settings.scope =
+			settings.chat.modelPicker.cycleSet =
 				parseScopedModelSelection(value) ??
 				value
 					.split(",")
@@ -2612,37 +2666,43 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "budget.sessionCeilingUsd":
 			applyNumberSetting("budget.sessionCeilingUsd", value, (next) => {
-				if (next !== null) settings.budget.sessionCeilingUsd = next;
+				if (next !== null) settings.safety.limits.sessionCostUsd = next;
 			});
 			return;
 		case "workers.escalation.timeoutMs":
 			applyNumberSetting("workers.escalation.timeoutMs", value, (next) => {
 				if (next === null) return;
-				settings.workers.escalation = { ...(settings.workers.escalation ?? SHIPPED_ESCALATION), timeoutMs: next };
+				settings.fleet.permissions.escalation = {
+					...(settings.fleet.permissions.escalation ?? SHIPPED_ESCALATION),
+					timeoutMs: next,
+				};
 			});
 			return;
 		case "workers.escalation.fallback": {
 			if (value !== "deny" && value !== "fail") return;
-			settings.workers.escalation = { ...(settings.workers.escalation ?? SHIPPED_ESCALATION), fallback: value };
+			settings.fleet.permissions.escalation = {
+				...(settings.fleet.permissions.escalation ?? SHIPPED_ESCALATION),
+				fallback: value,
+			};
 			return;
 		}
 		case "workers.resilienceCooldownMs":
 			applyNumberSetting("workers.resilienceCooldownMs", value, (next) => {
-				if (next !== null) settings.workers.resilienceCooldownMs = next;
+				if (next !== null) settings.fleet.retry.routeCooldownMs = next;
 			});
 			return;
 		case "routing.activeRoles": {
 			const outcome = parseEnumListSetting(value, ACTIVE_ROUTING_ROLES);
-			if ("values" in outcome) settings.routing.activeRoles = outcome.values as ActiveRoutingRole[];
+			if ("values" in outcome) settings.fleet.adaptiveRouting.roles = outcome.values as ActiveRoutingRole[];
 			return;
 		}
 		case "routing.activePostures": {
 			const outcome = parseEnumListSetting(value, ACTIVE_ROUTING_POSTURES);
-			if ("values" in outcome) settings.routing.activePostures = outcome.values as ActiveRoutingPosture[];
+			if ("values" in outcome) settings.fleet.adaptiveRouting.postures = outcome.values as ActiveRoutingPosture[];
 			return;
 		}
 		case "prewarm.enabled":
-			if (value === "true" || value === "false") settings.prewarm.enabled = value === "true";
+			if (value === "true" || value === "false") settings.chat.prewarm = value === "true";
 			return;
 		case "guardrails.turnToolCallBudget":
 		case "guardrails.workerToolCallCap":
@@ -2651,7 +2711,13 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "guardrails.observationTurnBudgetBytes":
 		case "guardrails.internalDispatchTimeoutMs":
 			applyNumberSetting(id, value, (next) => {
-				if (next !== null) settings.guardrails[id.slice("guardrails.".length) as keyof GuardrailValues] = next;
+				if (next === null) return;
+				if (id === "guardrails.turnToolCallBudget") settings.safety.limits.chatToolCallsPerTurn = next;
+				else if (id === "guardrails.workerToolCallCap") settings.fleet.limits.toolCallsPerRun = next;
+				else if (id === "guardrails.maxDispatchRuns") settings.fleet.history.maxRuns = next;
+				else if (id === "guardrails.readMaxBytes") settings.safety.limits.readBytesPerCall = next;
+				else if (id === "guardrails.observationTurnBudgetBytes") settings.safety.limits.observationBytesPerTurn = next;
+				else settings.fleet.limits.internalRunTimeoutMs = next;
 			});
 			return;
 		case "context.workingSet.enabled":
@@ -2679,18 +2745,18 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "retry.streamStallMs":
 			applyNonNegativeInteger(value, (next) => {
-				settings.retry.streamStallMs = next;
+				settings.chat.retry.streamStallMs = next;
 			});
 			return;
 		case "library.catalog":
 		case "library.remote": {
 			const key = id.slice("library.".length) as "catalog" | "remote";
 			const trimmed = value.trim();
-			settings.library[key] = trimmed.length > 0 ? trimmed : null;
+			settings.integrations.library[key] = trimmed.length > 0 ? trimmed : null;
 			return;
 		}
 		case "library.sync":
-			if (value === "true" || value === "false") settings.library.sync = value === "true";
+			if (value === "true" || value === "false") settings.integrations.library.sync = value === "true";
 			return;
 	}
 }
@@ -2711,11 +2777,11 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 		const legacySegments = id.split(".");
 		const legacyField = legacySegments.at(-1);
 		const usesLegacyField =
-			!settings.workers.profiles[summaryName] && ["target", "model", "thinkingLevel", "node"].includes(legacyField ?? "");
+			!settings.fleet.profiles[summaryName] && ["target", "model", "thinkingLevel", "node"].includes(legacyField ?? "");
 		const field = usesLegacyField ? legacyField : encoded.shift();
 		const name = usesLegacyField ? legacySegments.slice(2, -1).join(".") : summaryName;
 		const fieldValue = usesLegacyField ? value : encoded.join(PROFILE_FIELD_SEPARATOR);
-		const profile = settings.workers.profiles[name];
+		const profile = settings.fleet.profiles[name];
 		if (!profile) return true;
 		if (value === REMOVE_PROFILE_CHOICE) {
 			removeFleetProfileFromSettings(settings, name);
@@ -2733,7 +2799,7 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 	}
 	if (id.startsWith("workers.agentBindings.")) {
 		const agentId = id.slice("workers.agentBindings.".length);
-		if (value === UNBIND_CHOICE) delete settings.workers.agentBindings[agentId];
+		if (value === UNBIND_CHOICE) delete settings.fleet.agentProfiles[agentId];
 		else bindAgentProfileInSettings(settings, agentId, value);
 		return true;
 	}
@@ -2757,7 +2823,7 @@ function changedLeafPaths(before: Readonly<ClioSettings>, after: Readonly<ClioSe
 		v !== null && typeof v === "object" && !Array.isArray(v);
 	const visit = (a: unknown, b: unknown, path: string): void => {
 		if (a === b) return;
-		const profileLeaf = path.startsWith("workers.profiles.") && path.split(".").length === 3;
+		const profileLeaf = path.startsWith("fleet.profiles.") && path.split(".").length === 3;
 		if (!isRecord(a) || !isRecord(b) || profileLeaf) {
 			if (JSON.stringify(a) !== JSON.stringify(b)) out.push(path);
 			return;
@@ -2817,9 +2883,9 @@ function propagationTiming(
 	if (restartRequired) return "next-session";
 	if (id.startsWith("targets.")) {
 		if (selectedValue === "remove") return "next-dispatch";
-		return path.startsWith("orchestrator.") ? "now" : "next-dispatch";
+		return path.startsWith("chat.") ? "now" : "next-dispatch";
 	}
-	if (path.startsWith("workers.")) return "next-dispatch";
+	if (path.startsWith("fleet.")) return "next-dispatch";
 	return "now";
 }
 
@@ -3627,8 +3693,8 @@ export class SettingsCenter implements Component {
 		list.onCancel = () => finish("cancel");
 		const title = (width: number): string => formatScopeConfirmTitle(plan, width);
 		const affectedBindings = plan.leaves
-			.filter((leaf) => leaf.path.startsWith("workers.agentBindings."))
-			.map((leaf) => leaf.path.slice("workers.agentBindings.".length));
+			.filter((leaf) => leaf.path.startsWith("fleet.agentProfiles."))
+			.map((leaf) => leaf.path.slice("fleet.agentProfiles.".length));
 		const bindingPreflight =
 			plan.selectedValue === REMOVE_PROFILE_CHOICE
 				? `Affected agent routes: ${affectedBindings.length > 0 ? affectedBindings.join(", ") : "none"} · `
@@ -3637,10 +3703,10 @@ export class SettingsCenter implements Component {
 			if (!plan.rowId.startsWith("targets.") || plan.selectedValue !== "remove") return "";
 			const paths = (prefix: string): string[] =>
 				plan.leaves.filter((leaf) => leaf.path.startsWith(prefix)).map((leaf) => leaf.path);
-			const profiles = paths("workers.profiles.").map((path) => path.slice("workers.profiles.".length));
+			const profiles = paths("fleet.profiles.").map((path) => path.slice("fleet.profiles.".length));
 			const describe = (label: string, affected: readonly string[]): string =>
 				`Affected ${label}: ${affected.length > 0 ? affected.join(", ") : "none"}`;
-			return `${describe("chat route", paths("orchestrator."))} · ${describe("fleet route", paths("workers.default."))} · ${describe("memory route", paths("background."))} · ${describe("profiles", profiles)} · `;
+			return `${describe("chat route", paths("chat."))} · ${describe("fleet route", paths("fleet.default."))} · ${describe("memory route", paths("context.memory."))} · ${describe("profiles", profiles)} · `;
 		})();
 		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${plan.leaves.map((leaf) => leaf.path).join(", ")} · ${plan.impact}`;
 		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);

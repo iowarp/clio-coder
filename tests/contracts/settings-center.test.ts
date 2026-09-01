@@ -45,7 +45,6 @@ const SCOPE_NOTE = "session, global, or cancel";
 const READ_ONLY_IDS = new Set<EditableSettingId>([
 	"safetyNet",
 	"modelSelector.favorites",
-	"theme",
 	"targets",
 	"keybindings",
 	"delegation.agents",
@@ -79,35 +78,36 @@ function settingsWithTargets(): ClioSettings {
 			defaultModel: "model-b",
 		},
 	];
-	settings.autonomy = "auto-edit";
-	settings.orchestrator = {
+	settings.safety.autonomy = "auto-edit";
+	settings.chat = {
+		...settings.chat,
 		target: "target-a",
 		model: "model-a",
 		thinkingLevel: "off",
 	};
-	settings.background = { target: null, model: null, thinkingLevel: "off" };
-	settings.workers.default = {
+	settings.context.memory = { ...settings.context.memory, target: null, model: null };
+	settings.fleet.default = {
 		target: "target-a",
 		model: "model-a",
 		thinkingLevel: "off",
 	};
-	settings.workers.profiles.fast = {
+	settings.fleet.profiles.fast = {
 		target: "target-b",
 		model: "model-b",
 		thinkingLevel: "off",
 	};
-	settings.workers.agentBindings.scout = "fast";
-	settings.scope = ["target-a/model-a", "target-b/model-b"];
-	settings.budget.sessionCeilingUsd = 5;
-	settings.compaction = { auto: true, threshold: 0.8, excludeLastTurns: 6 };
-	settings.retry = {
+	settings.fleet.agentProfiles.scout = "fast";
+	settings.chat.modelPicker.cycleSet = ["target-a/model-a", "target-b/model-b"];
+	settings.safety.limits.sessionCostUsd = 5;
+	settings.context.compaction = { auto: true, threshold: 0.8 };
+	settings.chat.retry = {
 		enabled: true,
 		maxRetries: 3,
 		baseDelayMs: 2000,
 		maxDelayMs: 60000,
 		streamStallMs: 180000,
 	};
-	settings.terminal.showTerminalProgress = false;
+	settings.interface.terminalProgress = false;
 	return settings;
 }
 
@@ -260,7 +260,8 @@ describe("contracts/settings center", () => {
 					ok(!item.readOnly, `${item.id} must be editable`);
 					ok(item.values || item.submenu, `${item.id} must be editable`);
 				}
-				strictEqual(item.configPath, item.id);
+				ok(item.configPath.length > 0, `${item.id} must render a canonical config path`);
+				ok(!item.configPath.startsWith("workers."), `${item.id} must not render a retired v1 path`);
 			}
 		}
 	});
@@ -290,9 +291,9 @@ describe("contracts/settings center", () => {
 			"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
 		);
 		applySettingChange(settings, row.id, "disabled");
-		strictEqual(settings.attribution.gitCommits, false);
+		strictEqual(settings.integrations.git.commitAttribution, false);
 		applySettingChange(settings, row.id, "enabled");
-		strictEqual(settings.attribution.gitCommits, true);
+		strictEqual(settings.integrations.git.commitAttribution, true);
 	});
 
 	it("assigns explicit presentation kinds and independently semantic status segments", () => {
@@ -409,7 +410,7 @@ describe("contracts/settings center", () => {
 
 	it("renders target health, id, roles, runtime, and latency with a labeled operational drawer", () => {
 		const settings = settingsWithTargets();
-		settings.background = { target: "target-a", model: "memory-model", thinkingLevel: "off" };
+		settings.context.memory = { ...settings.context.memory, target: "target-a", model: "memory-model" };
 		const checkedAt = "2026-08-15T16:30:00.000Z";
 		const providers = {
 			...providersWithHealth({ "target-a": "healthy", "target-b": "down" }, settings),
@@ -576,7 +577,7 @@ describe("contracts/settings center", () => {
 
 	it("uses a teal change mark instead of the live-operation glyph for modified values", () => {
 		const settings = settingsWithTargets();
-		settings.retry.maxRetries = 8;
+		settings.chat.retry.maxRetries = 8;
 		const center = new SettingsCenter(buildSettingItems(settings), {
 			getBodyHeight: () => 26,
 			prepareChange: () => null,
@@ -602,8 +603,8 @@ describe("contracts/settings center", () => {
 				{ id: "down-target", runtime: "openai-compat", url: "http://down", defaultModel: "m" },
 				{ id: "unknown-target", runtime: "openai-compat", url: "http://unknown", defaultModel: "m" },
 			];
-			settings.autonomy = "auto-edit";
-			settings.retry.maxRetries = 8;
+			settings.safety.autonomy = "auto-edit";
+			settings.chat.retry.maxRetries = 8;
 			const states = ["healthy", "degraded", "down", "unknown"];
 			const providers = { list: () => settings.targets.map((target, index) => ({ target, runtime: null, available: index === 0, reason: states[index], health: { status: states[index], lastCheckAt: null, lastError: index === 2 ? "offline" : null, latencyMs: null }, capabilities: {}, discoveredModels: [] })) };
 			const items = buildSettingItems(settings, { providers, getFleetNodes: () => [{ id: "remote", host: "host", kind: "ssh", state: "offline", stateReason: null, activeWorkers: 0, maxWorkers: 1, labels: [], lastSeenAt: null }] });
@@ -660,15 +661,7 @@ describe("contracts/settings center", () => {
 			version: "schema version, not operator policy",
 			targets: "the Targets section renders one row per configured target",
 			"fleet.nodes": "rendered as read-only placement status rows under Fleet",
-			"workers.rosters": "a nested roster map the Center has no editor for; authored in settings.yaml",
-			"routing.agentAutomation.activeAgentRoles": "read-only row: exact agent/role pairs are authored in settings.yaml",
-			"modelSelector.favorites": "read-only row; favorites are pinned from /model",
-			keybindings: "read-only row; overrides are authored in settings.yaml",
-			"delegation.agents": "row adds and removes detected agents rather than editing the array",
-			"workers.profiles": "rendered as one row per profile plus an add action",
-			"workers.agentBindings": "rendered as one row per binding plus an add action",
-			scope: "row opens the provider-backed model checklist",
-			runtimePlugins: "row edits the comma-separated list",
+			"fleet.rosters": "a nested roster map the Center has no editor for; authored in settings.yaml",
 		};
 		const leaves: string[] = [];
 		const walk = (value: unknown, path: string): void => {
@@ -681,11 +674,22 @@ describe("contracts/settings center", () => {
 			leaves.push(path);
 		};
 		walk(DEFAULT_SETTINGS, "");
-		const rows = new Set<string>(SETTINGS_SECTIONS.flatMap((section) => [...SETTINGS_SECTION_ROWS[section.id]]));
+		// Rows carry v1-era navigation ids but render and persist the canonical v2
+		// path; coverage is therefore judged on configPath, so a leaf counts as
+		// surfaced when some row points at it or at one of its ancestors.
+		const rowPaths = new Set<string>(buildSettingItems(settingsWithTargets()).map((item) => item.configPath));
+		const covered = (leaf: string): boolean => {
+			for (let path = leaf; path.length > 0; path = path.slice(0, Math.max(0, path.lastIndexOf(".")))) {
+				if (rowPaths.has(path)) return true;
+				if (!path.includes(".")) break;
+			}
+			return false;
+		};
+		const rows = new Set<string>(leaves.filter(covered));
 		const missing = leaves.filter((leaf) => !rows.has(leaf) && withoutRow[leaf] === undefined);
 		deepStrictEqual(missing, [], `shipped keys with no Settings Center row: ${missing.join(", ")}`);
 		for (const exempt of Object.keys(withoutRow)) {
-			ok(leaves.includes(exempt), `${exempt} is exempted but is no longer a shipped key`);
+			ok(leaves.includes(exempt), `${exempt} is exempted but is no longer a shipped v2 key`);
 		}
 	});
 
@@ -707,352 +711,342 @@ describe("contracts/settings center", () => {
 			{
 				id: "autonomy",
 				value: "full-auto",
-				assert: (s) => strictEqual(s.autonomy, "full-auto"),
+				assert: (s) => strictEqual(s.safety.autonomy, "full-auto"),
 			},
 			{
 				id: "workers.onPermission",
 				value: "escalate",
-				assert: (s) => strictEqual(s.workers.onPermission, "escalate"),
+				assert: (s) => strictEqual(s.fleet.permissions.mode, "escalate"),
 			},
 			{
 				id: "delegation.defaults.toolGovernance",
 				value: "deny-all",
-				assert: (s) => strictEqual(s.delegation.defaults.toolGovernance, "deny-all"),
+				assert: (s) => strictEqual(s.integrations.externalAgents.defaults.toolGovernance, "deny-all"),
 			},
 			{
 				id: "skills.trustProjectCompatRoots",
 				value: "true",
-				assert: (s) => strictEqual(s.skills.trustProjectCompatRoots, true),
+				assert: (s) => strictEqual(s.integrations.projectResources.trustProjectImports, true),
 			},
 			{
 				id: "attribution.gitCommits",
 				value: "disabled",
-				assert: (s) => strictEqual(s.attribution.gitCommits, false),
+				assert: (s) => strictEqual(s.integrations.git.commitAttribution, false),
 			},
 			{
 				id: "orchestrator.thinkingLevel",
 				value: "high",
-				assert: (s) => strictEqual(s.orchestrator.thinkingLevel, "high"),
+				assert: (s) => strictEqual(s.chat.thinkingLevel, "high"),
 			},
 			{
 				id: "orchestrator.target",
 				value: "target-b",
 				assert: (s) => {
-					strictEqual(s.orchestrator.target, "target-b");
-					strictEqual(s.orchestrator.model, "model-b");
+					strictEqual(s.chat.target, "target-b");
+					strictEqual(s.chat.model, "model-b");
 				},
 			},
 			{
 				id: "orchestrator.model",
 				value: "model-custom",
-				assert: (s) => strictEqual(s.orchestrator.model, "model-custom"),
+				assert: (s) => strictEqual(s.chat.model, "model-custom"),
 			},
 			{
 				id: "background.target",
 				value: "target-b",
 				assert: (s) => {
-					strictEqual(s.background.target, "target-b");
-					strictEqual(s.background.model, "model-b");
+					strictEqual(s.context.memory.target, "target-b");
+					strictEqual(s.context.memory.model, "model-b");
 				},
 			},
 			{
 				id: "background.model",
 				value: "memory-custom",
-				assert: (s) => strictEqual(s.background.model, "memory-custom"),
-			},
-			{
-				id: "background.thinkingLevel",
-				value: "low",
-				assert: (s) => strictEqual(s.background.thinkingLevel, "low"),
+				assert: (s) => strictEqual(s.context.memory.model, "memory-custom"),
 			},
 			{
 				id: "memory.intervention.enabled",
 				value: "false",
-				assert: (s) => strictEqual(s.memory.intervention.enabled, false),
+				assert: (s) => strictEqual(s.context.memory.enabled, false),
 			},
 			{
 				id: "memory.intervention.everyNTools",
 				value: "20",
-				assert: (s) => strictEqual(s.memory.intervention.everyNTools, 20),
+				assert: (s) => strictEqual(s.context.memory.cadenceToolCalls, 20),
 			},
 			{
 				id: "memory.intervention.windowSteps",
 				value: "12",
-				assert: (s) => strictEqual(s.memory.intervention.windowSteps, 12),
+				assert: (s) => strictEqual(s.context.memory.trajectorySteps, 12),
 			},
 			{
 				id: "memory.intervention.maxTokens",
 				value: "200",
-				assert: (s) => strictEqual(s.memory.intervention.maxTokens, 200),
+				assert: (s) => strictEqual(s.context.memory.maxOutputTokens, 200),
 			},
 			{
 				id: "memory.intervention.timeoutMs",
 				value: "30000",
-				assert: (s) => strictEqual(s.memory.intervention.timeoutMs, 30_000),
+				assert: (s) => strictEqual(s.context.memory.timeoutMs, 30_000),
 			},
 			{
 				id: "workers.default.target",
 				value: "target-b",
 				assert: (s) => {
-					strictEqual(s.workers.default.target, "target-b");
-					strictEqual(s.workers.default.model, "model-b");
+					strictEqual(s.fleet.default.target, "target-b");
+					strictEqual(s.fleet.default.model, "model-b");
 				},
 			},
 			{
 				id: "workers.default.model",
 				value: "fleet-custom",
-				assert: (s) => strictEqual(s.workers.default.model, "fleet-custom"),
+				assert: (s) => strictEqual(s.fleet.default.model, "fleet-custom"),
 			},
 			{
 				id: "workers.default.thinkingLevel",
 				value: "medium",
-				assert: (s) => strictEqual(s.workers.default.thinkingLevel, "medium"),
+				assert: (s) => strictEqual(s.fleet.default.thinkingLevel, "medium"),
 			},
 			{
 				id: "workers.maxRetries",
 				value: "5",
-				assert: (s) => strictEqual(s.workers.maxRetries, 5),
+				assert: (s) => strictEqual(s.fleet.retry.maxRetries, 5),
 			},
 			{
 				id: "modelSelector.recentLimit",
 				value: "20",
-				assert: (s) => strictEqual(s.modelSelector.recentLimit, 20),
+				assert: (s) => strictEqual(s.chat.modelPicker.recentLimit, 20),
 			},
 			{
 				id: "defaults.maxTokens",
 				value: "65536",
-				assert: (s) => strictEqual(s.defaults.maxTokens, 65536),
+				assert: (s) => strictEqual(s.chat.maxOutputTokens, 65536),
 			},
 			{
 				id: "defaults.maxTokens",
 				value: "0",
-				assert: (s) => strictEqual(s.defaults.maxTokens, 0),
+				assert: (s) => strictEqual(s.chat.maxOutputTokens, 0),
 			},
 			{
 				id: "budget.concurrency",
 				value: "auto",
-				assert: (s) => strictEqual(s.budget.concurrency, "auto"),
+				assert: (s) => strictEqual(s.fleet.concurrency, "auto"),
 			},
 			{
 				id: "budget.concurrency",
 				value: "4",
-				assert: (s) => strictEqual(s.budget.concurrency, 4),
+				assert: (s) => strictEqual(s.fleet.concurrency, 4),
 			},
 			{
 				id: "budget.sessionCeilingUsd",
 				value: "12.5",
-				assert: (s) => strictEqual(s.budget.sessionCeilingUsd, 12.5),
+				assert: (s) => strictEqual(s.safety.limits.sessionCostUsd, 12.5),
 			},
 			{
 				id: "scope",
 				value: "target-b/model-b, target-a/model-a",
-				assert: (s) => deepStrictEqual(s.scope, ["target-b/model-b", "target-a/model-a"]),
+				assert: (s) => deepStrictEqual(s.chat.modelPicker.cycleSet, ["target-b/model-b", "target-a/model-a"]),
 			},
 			{
 				id: "compaction.auto",
 				value: "false",
-				assert: (s) => strictEqual(s.compaction.auto, false),
-			},
-			{
-				id: "compaction.excludeLastTurns",
-				value: "10",
-				assert: (s) => strictEqual(s.compaction.excludeLastTurns, 10),
+				assert: (s) => strictEqual(s.context.compaction.auto, false),
 			},
 			{
 				id: "compaction.threshold",
 				value: "0.9",
-				assert: (s) => strictEqual(s.compaction.threshold, 0.9),
+				assert: (s) => strictEqual(s.context.compaction.threshold, 0.9),
 			},
 			{
 				id: "compaction.model",
 				value: "prov/sum",
-				assert: (s) => strictEqual(s.compaction.model, "prov/sum"),
+				assert: (s) => strictEqual(s.context.compaction.model, "prov/sum"),
 			},
 			{
 				id: "compaction.model",
 				value: "  ",
-				assert: (s) => strictEqual("model" in s.compaction, false),
+				assert: (s) => strictEqual("model" in s.context.compaction, false),
 			},
 			{
 				id: "compaction.systemPrompt",
 				value: "~/p.md",
-				assert: (s) => strictEqual(s.compaction.systemPrompt, "~/p.md"),
+				assert: (s) => strictEqual(s.context.compaction.systemPrompt, "~/p.md"),
 			},
 			{
 				id: "retry.enabled",
 				value: "false",
-				assert: (s) => strictEqual(s.retry.enabled, false),
+				assert: (s) => strictEqual(s.chat.retry.enabled, false),
 			},
 			{
 				id: "retry.maxRetries",
 				value: "8",
-				assert: (s) => strictEqual(s.retry.maxRetries, 8),
+				assert: (s) => strictEqual(s.chat.retry.maxRetries, 8),
 			},
 			{
 				id: "retry.baseDelayMs",
 				value: "5000",
-				assert: (s) => strictEqual(s.retry.baseDelayMs, 5000),
+				assert: (s) => strictEqual(s.chat.retry.baseDelayMs, 5000),
 			},
 			{
 				id: "retry.maxDelayMs",
 				value: "120000",
-				assert: (s) => strictEqual(s.retry.maxDelayMs, 120000),
+				assert: (s) => strictEqual(s.chat.retry.maxDelayMs, 120000),
 			},
 			{
 				id: "terminal.showTerminalProgress",
 				value: "true",
-				assert: (s) => strictEqual(s.terminal.showTerminalProgress, true),
+				assert: (s) => strictEqual(s.interface.terminalProgress, true),
 			},
 			{
 				id: "terminal.outputVerbosity",
 				value: "verbose",
-				assert: (s) => strictEqual(s.terminal.outputVerbosity, "verbose"),
+				assert: (s) => strictEqual(s.interface.outputDetail, "verbose"),
 			},
 			{
 				id: "terminal.tuiMode",
 				value: "fullscreen",
-				assert: (s) => strictEqual(s.terminal.tuiMode, "fullscreen"),
+				assert: (s) => strictEqual(s.interface.mode, "fullscreen"),
 			},
 			{
 				id: "terminal.fullscreenScrollbar",
 				value: "always",
-				assert: (s) => strictEqual(s.terminal.fullscreenScrollbar, "always"),
+				assert: (s) => strictEqual(s.interface.fullscreenScrollbar, "always"),
 			},
 			{
 				id: "terminal.smoothStreaming",
 				value: "on",
-				assert: (s) => strictEqual(s.terminal.smoothStreaming, "on"),
+				assert: (s) => strictEqual(s.interface.smoothStreaming, "on"),
 			},
 			{
 				id: "runtimePlugins",
 				value: "@scope/a, @scope/b",
-				assert: (s) => deepStrictEqual(s.runtimePlugins, ["@scope/a", "@scope/b"]),
+				assert: (s) => deepStrictEqual(s.integrations.runtimePlugins, ["@scope/a", "@scope/b"]),
 			},
 			{
 				id: "delegation.defaults.connectTimeoutMs",
 				value: "45000",
-				assert: (s) => strictEqual(s.delegation.defaults.connectTimeoutMs, 45000),
+				assert: (s) => strictEqual(s.integrations.externalAgents.defaults.connectTimeoutMs, 45000),
 			},
 			{
 				id: "delegation.defaults.turnTimeoutMs",
 				value: "600000",
-				assert: (s) => strictEqual(s.delegation.defaults.turnTimeoutMs, 600000),
+				assert: (s) => strictEqual(s.integrations.externalAgents.defaults.turnTimeoutMs, 600000),
 			},
 			{
 				id: "delegation.defaults.permissionTimeoutMs",
 				value: "90000",
-				assert: (s) => strictEqual(s.delegation.defaults.permissionTimeoutMs, 90000),
+				assert: (s) => strictEqual(s.integrations.externalAgents.defaults.permissionTimeoutMs, 90000),
 			},
 			{
 				id: "panes.enabled",
 				value: "off",
-				assert: (s) => strictEqual(s.panes.enabled, "off"),
+				assert: (s) => strictEqual(s.interface.panes.enabled, "off"),
 			},
 			{
 				id: "panes.notifications",
 				value: "off",
-				assert: (s) => strictEqual(s.panes.notifications, "off"),
+				assert: (s) => strictEqual(s.interface.panes.notifications, "off"),
 			},
 			{
 				id: "panes.journal",
 				value: "false",
-				assert: (s) => strictEqual(s.panes.journal, false),
+				assert: (s) => strictEqual(s.fleet.history.journal, false),
 			},
 			{
 				id: "panes.yazi.enabled",
 				value: "false",
-				assert: (s) => strictEqual(s.panes.yazi.enabled, false),
+				assert: (s) => strictEqual(s.interface.panes.files.enabled, false),
 			},
 			{
 				id: "panes.yazi.mode",
 				value: "chooser",
-				assert: (s) => strictEqual(s.panes.yazi.mode, "chooser"),
+				assert: (s) => strictEqual(s.interface.panes.files.mode, "chooser"),
 			},
 			{
 				id: "panes.yazi.profile",
 				value: "user",
-				assert: (s) => strictEqual(s.panes.yazi.profile, "user"),
+				assert: (s) => strictEqual(s.interface.panes.files.profile, "user"),
 			},
 			{
 				id: "panes.yazi.followCwd",
 				value: "false",
-				assert: (s) => strictEqual(s.panes.yazi.followCwd, false),
+				assert: (s) => strictEqual(s.interface.panes.files.followCwd, false),
 			},
 			{
 				id: "workers.escalation.timeoutMs",
 				value: "60000",
 				assert: (s) => {
-					strictEqual(s.workers.escalation?.timeoutMs, 60000);
-					strictEqual(s.workers.escalation?.fallback, "deny", "the untouched half of the block survives");
+					strictEqual(s.fleet.permissions.escalation?.timeoutMs, 60000);
+					strictEqual(s.fleet.permissions.escalation?.fallback, "deny", "the untouched half of the block survives");
 				},
 			},
 			{
 				id: "workers.escalation.fallback",
 				value: "fail",
 				assert: (s) => {
-					strictEqual(s.workers.escalation?.fallback, "fail");
-					strictEqual(s.workers.escalation?.timeoutMs, 120000);
+					strictEqual(s.fleet.permissions.escalation?.fallback, "fail");
+					strictEqual(s.fleet.permissions.escalation?.timeoutMs, 120000);
 				},
 			},
 			{
 				id: "workers.resilienceCooldownMs",
 				value: "0",
-				assert: (s) => strictEqual(s.workers.resilienceCooldownMs, 0),
+				assert: (s) => strictEqual(s.fleet.retry.routeCooldownMs, 0),
 			},
 			{
 				id: "routing.activeRoles",
 				value: "researcher, judge",
-				assert: (s) => deepStrictEqual(s.routing.activeRoles, ["researcher", "judge"]),
+				assert: (s) => deepStrictEqual(s.fleet.adaptiveRouting.roles, ["researcher", "judge"]),
 			},
 			{
 				id: "routing.activeRoles",
 				value: "researcher, builder",
-				assert: (s) => deepStrictEqual(s.routing.activeRoles, [], "an unsupported role is refused, not stored"),
+				assert: (s) => deepStrictEqual(s.fleet.adaptiveRouting.roles, [], "an unsupported role is refused, not stored"),
 			},
 			{
 				id: "routing.activePostures",
 				value: "latency",
-				assert: (s) => deepStrictEqual(s.routing.activePostures, ["latency"]),
+				assert: (s) => deepStrictEqual(s.fleet.adaptiveRouting.postures, ["latency"]),
 			},
 			{
 				id: "routing.activePostures",
 				value: "manual",
-				assert: (s) => deepStrictEqual(s.routing.activePostures, [], "manual is exact, never an activated posture"),
+				assert: (s) => deepStrictEqual(s.fleet.adaptiveRouting.postures, [], "manual is exact, never an activated posture"),
 			},
 			{
 				id: "prewarm.enabled",
 				value: "false",
-				assert: (s) => strictEqual(s.prewarm.enabled, false),
+				assert: (s) => strictEqual(s.chat.prewarm, false),
 			},
 			{
 				id: "guardrails.turnToolCallBudget",
 				value: "120",
-				assert: (s) => strictEqual(s.guardrails.turnToolCallBudget, 120),
+				assert: (s) => strictEqual(s.safety.limits.chatToolCallsPerTurn, 120),
 			},
 			{
 				id: "guardrails.workerToolCallCap",
 				value: "0",
-				assert: (s) => strictEqual(s.guardrails.workerToolCallCap, 150, "a guardrail below 1 is refused"),
+				assert: (s) => strictEqual(s.fleet.limits.toolCallsPerRun, 150, "a guardrail below 1 is refused"),
 			},
 			{
 				id: "guardrails.maxDispatchRuns",
 				value: "250",
-				assert: (s) => strictEqual(s.guardrails.maxDispatchRuns, 250),
+				assert: (s) => strictEqual(s.fleet.history.maxRuns, 250),
 			},
 			{
 				id: "guardrails.readMaxBytes",
 				value: "102400",
-				assert: (s) => strictEqual(s.guardrails.readMaxBytes, 102400),
+				assert: (s) => strictEqual(s.safety.limits.readBytesPerCall, 102400),
 			},
 			{
 				id: "guardrails.observationTurnBudgetBytes",
 				value: "262144",
-				assert: (s) => strictEqual(s.guardrails.observationTurnBudgetBytes, 262144),
+				assert: (s) => strictEqual(s.safety.limits.observationBytesPerTurn, 262144),
 			},
 			{
 				id: "guardrails.internalDispatchTimeoutMs",
 				value: "300000",
-				assert: (s) => strictEqual(s.guardrails.internalDispatchTimeoutMs, 300000),
+				assert: (s) => strictEqual(s.fleet.limits.internalRunTimeoutMs, 300000),
 			},
 			{
 				id: "context.workingSet.enabled",
@@ -1087,22 +1081,22 @@ describe("contracts/settings center", () => {
 			{
 				id: "retry.streamStallMs",
 				value: "600000",
-				assert: (s) => strictEqual(s.retry.streamStallMs, 600000),
+				assert: (s) => strictEqual(s.chat.retry.streamStallMs, 600000),
 			},
 			{
 				id: "library.catalog",
 				value: "~/lib/catalog.yaml",
-				assert: (s) => strictEqual(s.library.catalog, "~/lib/catalog.yaml"),
+				assert: (s) => strictEqual(s.integrations.library.catalog, "~/lib/catalog.yaml"),
 			},
 			{
 				id: "library.remote",
 				value: "  ",
-				assert: (s) => strictEqual(s.library.remote, null, "a blank submission clears the remote"),
+				assert: (s) => strictEqual(s.integrations.library.remote, null, "a blank submission clears the remote"),
 			},
 			{
 				id: "library.sync",
 				value: "true",
-				assert: (s) => strictEqual(s.library.sync, true),
+				assert: (s) => strictEqual(s.integrations.library.sync, true),
 			},
 		];
 
@@ -1176,13 +1170,13 @@ describe("contracts/settings center", () => {
 	it("refuses a pane value outside its enum instead of storing it", () => {
 		const settings = settingsWithTargets();
 		applySettingChange(settings, "panes.notifications", "sometimes");
-		strictEqual(settings.panes.notifications, "failures");
+		strictEqual(settings.interface.panes.notifications, "failures");
 		applySettingChange(settings, "panes.enabled", "guest");
-		strictEqual(settings.panes.enabled, "off");
+		strictEqual(settings.interface.panes.enabled, "off");
 		applySettingChange(settings, "panes.yazi.mode", "sidecar");
-		strictEqual(settings.panes.yazi.mode, "companion");
+		strictEqual(settings.interface.panes.files.mode, "companion");
 		applySettingChange(settings, "panes.yazi.profile", "mine");
-		strictEqual(settings.panes.yazi.profile, "managed");
+		strictEqual(settings.interface.panes.files.profile, "managed");
 	});
 
 	it("does not let the settings UI store unschedulable ACP request bounds", () => {
@@ -1193,10 +1187,10 @@ describe("contracts/settings center", () => {
 		] as const) {
 			for (const invalid of ["0", String(MAX_TIMER_DELAY_MS + 1)]) {
 				const settings = settingsWithTargets();
-				const key = id.slice("delegation.defaults.".length) as keyof typeof settings.delegation.defaults;
-				const before = settings.delegation.defaults[key];
+				const key = id.slice("delegation.defaults.".length) as keyof typeof settings.integrations.externalAgents.defaults;
+				const before = settings.integrations.externalAgents.defaults[key];
 				applySettingChange(settings, id, invalid);
-				strictEqual(settings.delegation.defaults[key], before, `${id}=${invalid}`);
+				strictEqual(settings.integrations.externalAgents.defaults[key], before, `${id}=${invalid}`);
 			}
 		}
 	});
@@ -1338,13 +1332,13 @@ describe("contracts/settings center", () => {
 		ok(!detail.includes("Autonomy level"), "the catalog must not render behind the detail page");
 
 		center.handleInput(ESC);
-		const terminalItems = buildSettingsSections(buildSettingItems(settingsWithTargets())).find(
-			(section) => section.id === "terminal",
+		const advancedItems = buildSettingsSections(buildSettingItems(settingsWithTargets())).find(
+			(section) => section.id === "advanced",
 		)?.items;
-		const themeIndex = terminalItems?.findIndex((item) => item.id === "theme") ?? -1;
-		ok(themeIndex >= 0, "terminal section exposes the read-only theme row");
-		center.setSelection("terminal", themeIndex);
-		strictEqual(center.getSelection().rowId, "theme");
+		const keybindingsIndex = advancedItems?.findIndex((item) => item.id === "keybindings") ?? -1;
+		ok(keybindingsIndex >= 0, "advanced section exposes the read-only keybindings row");
+		center.setSelection("advanced", keybindingsIndex);
+		strictEqual(center.getSelection().rowId, "keybindings");
 		center.handleInput(ENTER);
 		strictEqual(center.getSelection().depth, "rows", "a read-only leaf opens nothing");
 	});
@@ -1666,7 +1660,7 @@ describe("contracts/settings center", () => {
 		applyFilter(center, "fast");
 		center.setSelection("fleet", 0);
 		strictEqual(center.getSelection().rowId, "workers.profiles.fast");
-		delete settings.workers.profiles.fast;
+		delete settings.fleet.profiles.fast;
 		items.splice(0, items.length, ...buildSettingItems(settings));
 		center.refreshItems();
 		const rendered = stripAnsi(center.render(40).join("\n"));
@@ -1800,7 +1794,7 @@ describe("contracts/settings center", () => {
 		ok(!narrowTitle.includes("auto-edit →"), "the origin is dropped before the destination");
 
 		const settings = settingsWithTargets();
-		settings.orchestrator.model = "origin-model-id-that-must-drop-before-the-new-value";
+		settings.chat.model = "origin-model-id-that-must-drop-before-the-new-value";
 		const item = buildSettingItems(settings).find((candidate) => candidate.id === "orchestrator.model");
 		ok(item);
 		const destination = "provider/model-with-a-long-destination-ending-in-KEEP-DESTINATION-TAIL";
@@ -1825,8 +1819,8 @@ describe("contracts/settings center", () => {
 
 	it("opens provider-backed model pickers on their current values", () => {
 		const settings = settingsWithTargets();
-		settings.orchestrator.model = "model-25";
-		settings.workers.default.model = "model-25";
+		settings.chat.model = "model-25";
+		settings.fleet.default.model = "model-25";
 		const models = Array.from({ length: 36 }, (_, index) => `model-${String(index).padStart(2, "0")}`);
 		const base = providersWithHealth({ "target-a": "healthy", "target-b": "healthy" }, settings);
 		const statuses = base.list().map((status) => ({
@@ -1847,7 +1841,7 @@ describe("contracts/settings center", () => {
 
 	it("edits the scoped model set as one provider-backed plan while preserving stale catalog refs", () => {
 		const settings = settingsWithTargets();
-		settings.scope = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
+		settings.chat.modelPicker.cycleSet = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
 		const providers = providersWithCatalog(settings);
 		const prepared: SettingsChangePlan[] = [];
 		const applied: Array<{ plan: SettingsChangePlan; scope: "session" | "global" }> = [];
@@ -1881,13 +1875,17 @@ describe("contracts/settings center", () => {
 		strictEqual(prepared.length, 0, "Space toggles stay local to the checklist session");
 		center.handleInput(ENTER); // one plan, then destination prompt
 		strictEqual(prepared.length, 1, "all checklist toggles feed one SettingsChangePlan");
-		deepStrictEqual(prepared[0]?.proposed.scope, [
+		deepStrictEqual(prepared[0]?.proposed.chat.modelPicker.cycleSet, [
 			"target-a/stale-model",
 			"retired,Legacy@2025",
 			"target-a",
 			"target-a/model-new",
 		]);
-		deepStrictEqual(settings.scope, ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"]);
+		deepStrictEqual(settings.chat.modelPicker.cycleSet, [
+			"target-a/model-a",
+			"target-a/stale-model",
+			"retired,Legacy@2025",
+		]);
 		center.handleInput(ENTER); // Apply this session
 		strictEqual(applied.length, 1);
 		strictEqual(applied[0]?.scope, "session");
@@ -1918,7 +1916,7 @@ describe("contracts/settings center", () => {
 		const settings = settingsWithTargets();
 		const longModel = "Qwen3.8-27B-Instruct-IQ4_NL-262K-TAIL";
 		settings.targets = [{ id: "mini", runtime: "openai-compat", url: "http://localhost:3333", defaultModel: longModel }];
-		settings.scope = [`mini/${longModel}`];
+		settings.chat.modelPicker.cycleSet = [`mini/${longModel}`];
 		const providers = providersWithCatalog(settings);
 		const item = buildSettingItems(settings, { providers }).find((candidate) => candidate.id === "scope");
 		ok(item?.submenu);
@@ -1944,7 +1942,7 @@ describe("contracts/settings center", () => {
 
 	it("marks the capability detail when it outruns its three lines", () => {
 		const settings = settingsWithTargets();
-		settings.scope = ["target-a/model-a"];
+		settings.chat.modelPicker.cycleSet = ["target-a/model-a"];
 		const providers = providersWithCatalog(settings);
 		const item = buildSettingItems(settings, { providers }).find((candidate) => candidate.id === "scope");
 		ok(item?.submenu);
@@ -1978,7 +1976,7 @@ describe("contracts/settings center", () => {
 	 */
 	it("summarizes a multi-reference scope confirmation by count and keeps a single ref verbatim", () => {
 		const settings = settingsWithTargets();
-		settings.scope = ["target-a/model-a"];
+		settings.chat.modelPicker.cycleSet = ["target-a/model-a"];
 		const item = buildSettingItems(settings).find((candidate) => candidate.id === "scope");
 		ok(item);
 		const titleFor = (refs: readonly string[], width: number): string => {
@@ -2010,13 +2008,13 @@ describe("contracts/settings center", () => {
 			ok(title.includes("Model cycle set"), `${width} lost the row label:\n${many}`);
 			ok(title.includes("3 changes"), `${width} lost the count:\n${many}`);
 			ok(!title.includes("target-b/model-b"), `${width} still dumps the refs into the title:\n${many}`);
-			ok(many.includes("Affects scope"), `${width} lost the leaf detail beneath the title:\n${many}`);
+			ok(many.includes("Affects chat.modelPicker.cycleSet"), `${width} lost the leaf detail beneath the title:\n${many}`);
 		}
 	});
 
 	it("cancels scoped checklist edits and only drops an unavailable ref when explicitly unchecked", () => {
 		const settings = settingsWithTargets();
-		settings.scope = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
+		settings.chat.modelPicker.cycleSet = ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"];
 		const providers = providersWithCatalog(settings);
 		const plans: SettingsChangePlan[] = [];
 		const applied: SettingsChangePlan[] = [];
@@ -2040,7 +2038,11 @@ describe("contracts/settings center", () => {
 		checklistCancel.handleInput(" ");
 		checklistCancel.handleInput(ESC);
 		strictEqual(plans.length, 0, "Esc leaves the checklist without preparing a mutation");
-		deepStrictEqual(settings.scope, ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"]);
+		deepStrictEqual(settings.chat.modelPicker.cycleSet, [
+			"target-a/model-a",
+			"target-a/stale-model",
+			"retired,Legacy@2025",
+		]);
 
 		const destinationCancel = makeCenter();
 		destinationCancel.handleInput(ENTER);
@@ -2050,10 +2052,14 @@ describe("contracts/settings center", () => {
 		destinationCancel.handleInput(" ");
 		destinationCancel.handleInput(ENTER);
 		strictEqual(plans.length, 1);
-		deepStrictEqual(plans[0]?.proposed.scope, ["target-a/model-a", "retired,Legacy@2025"]);
+		deepStrictEqual(plans[0]?.proposed.chat.modelPicker.cycleSet, ["target-a/model-a", "retired,Legacy@2025"]);
 		destinationCancel.handleInput(ESC);
 		strictEqual(applied.length, 0, "Esc at the destination prompt cancels the prepared plan");
-		deepStrictEqual(settings.scope, ["target-a/model-a", "target-a/stale-model", "retired,Legacy@2025"]);
+		deepStrictEqual(settings.chat.modelPicker.cycleSet, [
+			"target-a/model-a",
+			"target-a/stale-model",
+			"retired,Legacy@2025",
+		]);
 	});
 
 	it("cycles worker approvals routing to escalate and persists it", () => {
@@ -2074,7 +2080,7 @@ describe("contracts/settings center", () => {
 		deepStrictEqual(commits, [{ id: "workers.onPermission", value: "escalate", scope: "session" }]);
 
 		applySettingChange(settings, "workers.onPermission", "escalate");
-		strictEqual(settings.workers.onPermission, "escalate");
+		strictEqual(settings.fleet.permissions.mode, "escalate");
 		const reloaded = buildSettingItems(settings).find((item) => item.id === "workers.onPermission");
 		strictEqual(reloaded?.currentValue, "escalate");
 	});
@@ -2135,12 +2141,12 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.("\t"); // rows lane
 		overlay.handleInput?.("j"); // → Max retries
 
-		live.current.retry.maxRetries = 8;
+		live.current.chat.retry.maxRetries = 8;
 		handle.refreshRows();
 
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(rendered.includes("❯ Max retries"), rendered);
-		ok(rendered.includes("retry.maxRetries"));
+		ok(rendered.includes("chat.retry"), rendered);
 		ok(rendered.includes("8"));
 		ok(fake.renders() > 0);
 	});
@@ -2185,7 +2191,7 @@ describe("contracts/settings center", () => {
 
 		center.handleInput(ENTER);
 		center.handleInput(DOWN); // Edit model
-		settings.workers.profiles.alpha = {
+		settings.fleet.profiles.alpha = {
 			target: "target-a",
 			model: "model-a",
 			thinkingLevel: "off",
@@ -2202,7 +2208,7 @@ describe("contracts/settings center", () => {
 		center.handleInput(ESC);
 		const scoutIndex = fleetItems().findIndex((item) => item.id === "workers.agentBindings.scout");
 		center.setSelection("fleet", scoutIndex);
-		settings.workers.agentBindings.alpha = "alpha";
+		settings.fleet.agentProfiles.alpha = "alpha";
 		items.splice(0, items.length, ...buildSettingItems(settings));
 		center.refreshItems();
 		strictEqual(
@@ -2210,7 +2216,7 @@ describe("contracts/settings center", () => {
 			"workers.agentBindings.scout",
 			"route identity survives an earlier insertion",
 		);
-		delete settings.workers.agentBindings.alpha;
+		delete settings.fleet.agentProfiles.alpha;
 		items.splice(0, items.length, ...buildSettingItems(settings));
 		center.refreshItems();
 		strictEqual(center.getSelection().rowId, "workers.agentBindings.scout", "route identity survives a removal");
@@ -2270,7 +2276,7 @@ describe("contracts/settings center", () => {
 			url: "http://localhost:3333",
 			defaultModel: "Qwen3.8-27B-IQ4_NL-262K",
 		});
-		settings.workers.profiles.realistic = {
+		settings.fleet.profiles.realistic = {
 			target: "mini",
 			model: "Qwen3.8-27B-IQ4_NL-262K",
 			thinkingLevel: "low",
@@ -2403,7 +2409,7 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(DOWN); // Apply and save globally
 		overlay.handleInput?.(ENTER);
 
-		deepStrictEqual(calls, [{ id: "autonomy", scope: "global" }]);
+		deepStrictEqual(calls, [{ id: "safety.autonomy", scope: "global" }]);
 		strictEqual(notices.length, 1);
 		strictEqual(notices[0]?.text, "autonomy set to full-auto (saved globally)");
 		strictEqual(notices[0]?.key, "settings:autonomy");
@@ -2431,7 +2437,7 @@ describe("contracts/settings center", () => {
 	});
 	it("renders Fleet as grouped one-row entities with explicit add actions", () => {
 		const settings = settingsWithTargets();
-		settings.workers.agentBindings.researcher = "missing";
+		settings.fleet.agentProfiles.researcher = "missing";
 		const sections = new Map(buildSettingsSections(buildSettingItems(settings)).map((s) => [s.id, s.items]));
 		deepStrictEqual(
 			sections.get("fleet")?.map((item) => item.id),
@@ -2457,6 +2463,8 @@ describe("contracts/settings center", () => {
 				"fleet.group.panes",
 				"panes.enabled",
 				"panes.notifications",
+				"panes.layout",
+				"panes.workers.ratio",
 				"panes.journal",
 			],
 		);
@@ -2474,14 +2482,14 @@ describe("contracts/settings center", () => {
 			["target-b", "model-b", "off", "auto"],
 			"profile row",
 		);
-		strictEqual(byId.get("workers.profiles.fast")?.configPath, "workers.profiles.fast");
+		strictEqual(byId.get("workers.profiles.fast")?.configPath, "fleet.profiles.fast");
 		assertFieldsPresent(
 			byId.get("workers.profiles.fast")?.help,
 			[
-				"workers.profiles.fast.target",
-				"workers.profiles.fast.model",
-				"workers.profiles.fast.thinkingLevel",
-				"workers.profiles.fast.node",
+				"fleet.profiles.fast.target",
+				"fleet.profiles.fast.model",
+				"fleet.profiles.fast.thinkingLevel",
+				"fleet.profiles.fast.node",
 			],
 			"profile help",
 		);
@@ -2495,17 +2503,22 @@ describe("contracts/settings center", () => {
 		assertFieldsPresent(byId.get("targets.target-b")?.currentValue, ["target-b", "openai-compat"], "target-b row");
 		ok(byId.get("targets")?.readOnly, "adding a target stays with `clio-coder targets add`");
 		strictEqual(byId.get("targets.add-cta")?.currentValue, "`clio-coder targets add`");
-		for (const id of ["workers.profiles.fast", "workers.agentBindings.scout", "targets.target-a"]) {
+		const expectedPaths: Record<string, string> = {
+			"workers.profiles.fast": "fleet.profiles.fast",
+			"workers.agentBindings.scout": "fleet.agentProfiles.scout",
+			"targets.target-a": "targets.target-a",
+		};
+		for (const [id, path] of Object.entries(expectedPaths)) {
 			const item = byId.get(id as EditableSettingId);
 			ok(item?.submenu, `${id} is editable`);
-			strictEqual(item?.configPath, id);
+			strictEqual(item?.configPath, path);
 		}
 	});
 
 	it("bindings cannot be added until a profile exists", () => {
 		const settings = settingsWithTargets();
-		settings.workers.profiles = {};
-		settings.workers.agentBindings = {};
+		settings.fleet.profiles = {};
+		settings.fleet.agentProfiles = {};
 		const row = buildSettingItems(settings).find((item) => item.id === "workers.agentBindings");
 		ok(row?.readOnly);
 		strictEqual(row?.affordance, "create a profile first");
@@ -2521,7 +2534,7 @@ describe("contracts/settings center", () => {
 				id: "workers.profiles",
 				value: "slow -> target-a",
 				assert: (s) =>
-					deepStrictEqual(s.workers.profiles.slow, {
+					deepStrictEqual(s.fleet.profiles.slow, {
 						target: "target-a",
 						model: "model-a",
 						thinkingLevel: "off",
@@ -2531,7 +2544,7 @@ describe("contracts/settings center", () => {
 				id: "workers.profiles.fast.target",
 				value: "target-a",
 				assert: (s) =>
-					deepStrictEqual(s.workers.profiles.fast, {
+					deepStrictEqual(s.fleet.profiles.fast, {
 						target: "target-a",
 						model: "model-a",
 						thinkingLevel: "off",
@@ -2540,49 +2553,49 @@ describe("contracts/settings center", () => {
 			{
 				id: "workers.profiles.fast.model",
 				value: "model-x",
-				assert: (s) => strictEqual(s.workers.profiles.fast?.model, "model-x"),
+				assert: (s) => strictEqual(s.fleet.profiles.fast?.model, "model-x"),
 			},
 			{
 				id: "workers.profiles.fast.thinkingLevel",
 				value: "high",
-				assert: (s) => strictEqual(s.workers.profiles.fast?.thinkingLevel, "high"),
+				assert: (s) => strictEqual(s.fleet.profiles.fast?.thinkingLevel, "high"),
 			},
 			{
 				id: "workers.profiles.fast.node",
 				value: "local",
-				assert: (s) => strictEqual(s.workers.profiles.fast?.node, "local"),
+				assert: (s) => strictEqual(s.fleet.profiles.fast?.node, "local"),
 			},
 			{
 				id: "workers.profiles.fast.node",
 				value: "(auto placement)",
-				assert: (s) => strictEqual("node" in (s.workers.profiles.fast ?? {}), false),
+				assert: (s) => strictEqual("node" in (s.fleet.profiles.fast ?? {}), false),
 			},
 			{
 				id: "workers.profiles.fast.target",
 				value: "(remove profile)",
 				assert: (s) => {
-					strictEqual("fast" in s.workers.profiles, false);
-					strictEqual("scout" in s.workers.agentBindings, false, "bindings to the removed profile go with it");
+					strictEqual("fast" in s.fleet.profiles, false);
+					strictEqual("scout" in s.fleet.agentProfiles, false, "bindings to the removed profile go with it");
 				},
 			},
 			{
 				id: "workers.agentBindings",
 				value: "researcher -> fast",
-				assert: (s) => strictEqual(s.workers.agentBindings.researcher, "fast"),
+				assert: (s) => strictEqual(s.fleet.agentProfiles.researcher, "fast"),
 			},
 			{
 				id: "workers.agentBindings.scout",
 				value: "(unbind)",
-				assert: (s) => strictEqual("scout" in s.workers.agentBindings, false),
+				assert: (s) => strictEqual("scout" in s.fleet.agentProfiles, false),
 			},
 			{
 				id: "targets.target-b",
 				value: "use",
 				assert: (s) => {
-					strictEqual(s.orchestrator.target, "target-b");
-					strictEqual(s.orchestrator.model, "model-b");
-					strictEqual(s.workers.default.target, "target-b");
-					strictEqual(s.workers.default.model, "model-b");
+					strictEqual(s.chat.target, "target-b");
+					strictEqual(s.chat.model, "model-b");
+					strictEqual(s.fleet.default.target, "target-b");
+					strictEqual(s.fleet.default.model, "model-b");
 				},
 			},
 			{
@@ -2593,9 +2606,9 @@ describe("contracts/settings center", () => {
 						s.targets.map((t) => t.id),
 						["target-b"],
 					);
-					strictEqual(s.orchestrator.target, null);
-					strictEqual(s.workers.default.target, null);
-					deepStrictEqual(s.scope, ["target-b/model-b"]);
+					strictEqual(s.chat.target, null);
+					strictEqual(s.fleet.default.target, null);
+					deepStrictEqual(s.chat.modelPicker.cycleSet, ["target-b/model-b"]);
 				},
 			},
 		];
@@ -2605,7 +2618,7 @@ describe("contracts/settings center", () => {
 			testCase.assert(settings);
 		}
 		const settings = settingsWithTargets();
-		settings.delegation.agents = [
+		settings.integrations.externalAgents.entries = [
 			{
 				id: "acp-agent",
 				command: "acp",
@@ -2616,7 +2629,7 @@ describe("contracts/settings center", () => {
 			} as never,
 		];
 		applySettingChange(settings, "workers.agentBindings", "acp-agent -> fast");
-		strictEqual("acp-agent" in settings.workers.agentBindings, false, "ACP agents cannot be bound");
+		strictEqual("acp-agent" in settings.fleet.agentProfiles, false, "ACP agents cannot be bound");
 	});
 
 	it("keeps dynamic target, profile, binding, and node plans immutable across session/global/cancel reopen", () => {
@@ -2634,10 +2647,10 @@ describe("contracts/settings center", () => {
 				name: "target use",
 				id: "targets.target-b",
 				value: "use",
-				paths: ["orchestrator.model", "orchestrator.target", "workers.default.model", "workers.default.target"],
+				paths: ["chat.model", "chat.target", "fleet.default.model", "fleet.default.target"],
 				assertApplied: (settings) => {
-					strictEqual(settings.orchestrator.target, "target-b");
-					strictEqual(settings.workers.default.target, "target-b");
+					strictEqual(settings.chat.target, "target-b");
+					strictEqual(settings.fleet.default.target, "target-b");
 				},
 			},
 			{
@@ -2645,12 +2658,12 @@ describe("contracts/settings center", () => {
 				id: "targets.target-a",
 				value: "remove",
 				paths: [
-					"orchestrator.model",
-					"orchestrator.target",
-					"scope",
+					"chat.model",
+					"chat.modelPicker.cycleSet",
+					"chat.target",
+					"fleet.default.model",
+					"fleet.default.target",
 					"targets",
-					"workers.default.model",
-					"workers.default.target",
 				],
 				assertApplied: (settings) =>
 					deepStrictEqual(
@@ -2662,67 +2675,67 @@ describe("contracts/settings center", () => {
 				name: "profile add",
 				id: "workers.profiles",
 				value: "slow -> target-a",
-				paths: ["workers.profiles.slow"],
-				assertApplied: (settings) => strictEqual(settings.workers.profiles.slow?.target, "target-a"),
+				paths: ["fleet.profiles.slow"],
+				assertApplied: (settings) => strictEqual(settings.fleet.profiles.slow?.target, "target-a"),
 			},
 			{
 				name: "profile change",
 				id: "workers.profiles.fast",
 				value: "target -> target-a",
-				paths: ["workers.profiles.fast"],
-				assertApplied: (settings) => strictEqual(settings.workers.profiles.fast?.target, "target-a"),
+				paths: ["fleet.profiles.fast"],
+				assertApplied: (settings) => strictEqual(settings.fleet.profiles.fast?.target, "target-a"),
 			},
 			{
 				name: "profile remove",
 				id: "workers.profiles.fast",
 				value: "(remove profile)",
-				paths: ["workers.agentBindings.scout", "workers.profiles.fast"],
-				assertApplied: (settings) => strictEqual("fast" in settings.workers.profiles, false),
+				paths: ["fleet.agentProfiles.scout", "fleet.profiles.fast"],
+				assertApplied: (settings) => strictEqual("fast" in settings.fleet.profiles, false),
 			},
 			{
 				name: "binding add",
 				id: "workers.agentBindings",
 				value: "researcher -> fast",
-				paths: ["workers.agentBindings.researcher"],
-				assertApplied: (settings) => strictEqual(settings.workers.agentBindings.researcher, "fast"),
+				paths: ["fleet.agentProfiles.researcher"],
+				assertApplied: (settings) => strictEqual(settings.fleet.agentProfiles.researcher, "fast"),
 			},
 			{
 				name: "binding change",
 				id: "workers.agentBindings.scout",
 				value: "slow",
 				setup: (settings) => {
-					settings.workers.profiles.slow = {
+					settings.fleet.profiles.slow = {
 						target: "target-a",
 						model: "model-a",
 						thinkingLevel: "off",
 					};
 				},
-				paths: ["workers.agentBindings.scout"],
-				assertApplied: (settings) => strictEqual(settings.workers.agentBindings.scout, "slow"),
+				paths: ["fleet.agentProfiles.scout"],
+				assertApplied: (settings) => strictEqual(settings.fleet.agentProfiles.scout, "slow"),
 			},
 			{
 				name: "binding unbind",
 				id: "workers.agentBindings.scout",
 				value: "(unbind)",
-				paths: ["workers.agentBindings.scout"],
-				assertApplied: (settings) => strictEqual("scout" in settings.workers.agentBindings, false),
+				paths: ["fleet.agentProfiles.scout"],
+				assertApplied: (settings) => strictEqual("scout" in settings.fleet.agentProfiles, false),
 			},
 			{
 				name: "node pin",
 				id: "workers.profiles.fast",
 				value: "node -> local",
-				paths: ["workers.profiles.fast"],
-				assertApplied: (settings) => strictEqual(settings.workers.profiles.fast?.node, "local"),
+				paths: ["fleet.profiles.fast"],
+				assertApplied: (settings) => strictEqual(settings.fleet.profiles.fast?.node, "local"),
 			},
 			{
 				name: "node auto placement",
 				id: "workers.profiles.fast",
 				value: "node -> (auto placement)",
 				setup: (settings) => {
-					if (settings.workers.profiles.fast) settings.workers.profiles.fast.node = "local";
+					if (settings.fleet.profiles.fast) settings.fleet.profiles.fast.node = "local";
 				},
-				paths: ["workers.profiles.fast"],
-				assertApplied: (settings) => strictEqual("node" in (settings.workers.profiles.fast ?? {}), false),
+				paths: ["fleet.profiles.fast"],
+				assertApplied: (settings) => strictEqual("node" in (settings.fleet.profiles.fast ?? {}), false),
 			},
 		];
 
@@ -2780,10 +2793,10 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // use (first action)
 		overlay.handleInput?.(ENTER); // Apply this session
 		deepStrictEqual(calls.map((call) => call.id).sort(), [
-			"orchestrator.model",
-			"orchestrator.target",
-			"workers.default.model",
-			"workers.default.target",
+			"chat.model",
+			"chat.target",
+			"fleet.default.model",
+			"fleet.default.target",
 		]);
 		ok(calls.every((call) => call.scope === "session"));
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
@@ -2823,16 +2836,16 @@ describe("contracts/settings center", () => {
 				overlay.handleInput?.(DOWN);
 				overlay.handleInput?.(ENTER);
 				deepStrictEqual(calls.map((call) => call.id).sort(), [
-					"orchestrator.model",
-					"orchestrator.target",
-					"workers.default.model",
-					"workers.default.target",
+					"chat.model",
+					"chat.target",
+					"fleet.default.model",
+					"fleet.default.target",
 				]);
 				ok(
 					calls.every((call) => call.scope === "global"),
 					"no preliminary session pass",
 				);
-				strictEqual(live.current.orchestrator.target, "target-b");
+				strictEqual(live.current.chat.target, "target-b");
 			} else {
 				overlay.handleInput?.(ESC);
 				deepStrictEqual(calls, []);
@@ -2967,8 +2980,8 @@ describe("contracts/settings center", () => {
 
 	it("shows target removal preflight from exact change-plan leaves", () => {
 		const live = { current: settingsWithTargets() };
-		live.current.background = { target: "target-a", model: "memory-model", thinkingLevel: "off" };
-		live.current.workers.profiles.local = {
+		live.current.context.memory = { ...live.current.context.memory, target: "target-a", model: "memory-model" };
+		live.current.fleet.profiles.local = {
 			target: "target-a",
 			model: "model-a",
 			thinkingLevel: "off",
@@ -2991,14 +3004,12 @@ describe("contracts/settings center", () => {
 		const preflight = stripAnsi(overlay.render(120).join("\n")).replace(/\s+/g, " ");
 		for (const expected of [
 			"Affected chat route:",
-			"orchestrator.target",
-			"orchestrator.model",
-			"Affected fleet route:",
-			"workers.default.target",
-			"workers.default.model",
-			"Affected memory route:",
-			"background.target",
-			"background.model",
+			"chat.target",
+			"chat.model",
+			"fleet.default.target",
+			"fleet.default.model",
+			"context.memory.target",
+			"context.memory.model",
 			"Affected profiles: local",
 		]) {
 			ok(preflight.includes(expected), `${expected} missing from:\n${preflight}`);
@@ -3069,9 +3080,9 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // named destructive action -> preflight
 		const preflight = stripAnsi(overlay.render(120).join("\n"));
 		ok(preflight.includes("Affected agent routes: scout"), preflight);
-		ok(preflight.includes("workers.agentBindings.scout"), preflight);
+		ok(preflight.includes("fleet.agentProfiles.scout"), preflight);
 		overlay.handleInput?.(ENTER); // Apply this session
-		deepStrictEqual(calls.sort(), ["workers.agentBindings.scout", "workers.profiles.fast"]);
+		deepStrictEqual(calls.sort(), ["fleet.agentProfiles.scout", "fleet.profiles.fast"]);
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(!rendered.includes("target-b/model-b"), rendered);
 		ok(rendered.includes("Add profile"), "the explicit add action remains after removal");
@@ -3100,8 +3111,8 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(ENTER); // target picker
 		overlay.handleInput?.(ENTER); // target-a
 		overlay.handleInput?.(ENTER); // Apply this session
-		deepStrictEqual(calls, ["workers.profiles.slow"]);
-		deepStrictEqual(live.current.workers.profiles.slow, {
+		deepStrictEqual(calls, ["fleet.profiles.slow"]);
+		deepStrictEqual(live.current.fleet.profiles.slow, {
 			target: "target-a",
 			model: "model-a",
 			thinkingLevel: "off",
@@ -3121,8 +3132,8 @@ describe("contracts/settings center", () => {
 		overlay.handleInput?.(DOWN);
 		overlay.handleInput?.(ENTER); // slow
 		overlay.handleInput?.(ENTER); // Apply this session
-		deepStrictEqual(calls, ["workers.profiles.slow", "workers.agentBindings.researcher"]);
-		strictEqual(live.current.workers.agentBindings.researcher, "slow");
+		deepStrictEqual(calls, ["fleet.profiles.slow", "fleet.agentProfiles.researcher"]);
+		strictEqual(live.current.fleet.agentProfiles.researcher, "slow");
 		rendered = stripAnsi(overlay.render(120).join("\n"));
 		ok(rendered.includes("researcher"), rendered);
 	});

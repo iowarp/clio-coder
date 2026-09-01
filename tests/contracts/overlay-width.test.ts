@@ -267,7 +267,7 @@ const FILE_NAME = /\.(ya?ml|json|md|jsonl|ts|js)$/u;
 
 function settingsCenter(bodyHeight: number): SettingsCenter {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.autonomy = "auto-edit";
+	settings.safety.autonomy = "auto-edit";
 	return new SettingsCenter(buildSettingItems(settings), {
 		getBodyHeight: () => bodyHeight,
 		prepareChange: () => null,

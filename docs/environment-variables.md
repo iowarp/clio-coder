@@ -27,7 +27,8 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `NO_COLOR` | unset | Set to any non-empty value to drop every foreground and background color. Bold, dim, italic, and underline stay, because they are what is left to read the interface by (`src/interactive/theme/tokens.ts`). |
 | `CLIO_CODER_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
 | `CLIO_CODER_RESIDENCY` | managed | `observe`/`off` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed` (`src/engine/apis/residency.ts`). |
-| `CLIO_CODER_TRUST_PROJECT_SKILLS` | off | `1` trusts project-local skills for execution (`src/domains/resources/skills/loader.ts`). |
+| `CLIO_CODER_TRUST_PROJECT_RESOURCES` | settings value | `1` trusts third-party project resource imports for this process, overriding `integrations.projectResources.trustProjectImports`; otherwise the validated setting applies (`src/domains/resources/skills/loader.ts`). |
+| `CLIO_CODER_TRUST_PROJECT_SKILLS` | off | Deprecated alias for `CLIO_CODER_TRUST_PROJECT_RESOURCES`; `1` still trusts third-party project resource imports and emits a deprecation warning (`src/domains/resources/skills/loader.ts`). |
 | `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` | off | `1` lets full-auto pass through to external CLI runtimes with their own full access (`src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts`). |
 | `CLIO_CODER_FORCE_COMPACT` | off | `1` forces compaction on the next interactive turn (`src/interactive/chat-loop.ts`). |
 | `CLIO_CODER_LEGACY_MASK` | off | `1` temporarily restores the destructive stale-observation mask before summary compaction; remove it after compatibility diagnosis. |
