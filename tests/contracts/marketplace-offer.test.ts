@@ -19,6 +19,7 @@ import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/mi
 import type { MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
 import {
 	assertPromotionInstallSource,
+	declineKey,
 	isOwnMarketplaceSource,
 	matchMarketplaceSkills,
 	readPromotionDeclines,
@@ -112,12 +113,14 @@ describe("contracts/marketplace-offer own-marketplace gate", () => {
 });
 
 describe("contracts/marketplace-offer decline store", () => {
-	it("round-trips never-declines and survives an unreadable file", () => {
+	it("round-trips never-declines keyed by name and version", () => {
 		const configDir = tempDir();
 		deepStrictEqual(readPromotionDeclines(configDir), { never: {} });
-		recordPromotionNeverDecline("resolve-merge-conflicts", configDir);
+		recordPromotionNeverDecline("resolve-merge-conflicts", "1.2.0", configDir);
 		const store = readPromotionDeclines(configDir);
-		ok(store.never["resolve-merge-conflicts"]);
+		// The key carries the version, so a later version is not pre-declined.
+		ok(store.never["resolve-merge-conflicts@1.2.0"]);
+		strictEqual(store.never["resolve-merge-conflicts@2.0.0"], undefined);
 	});
 });
 
@@ -142,9 +145,9 @@ function makeDeps(overrides: Partial<MarketplaceOfferDeps> = {}): {
 			return { path: `/tmp/${skill.name}/SKILL.md`, sourceUrl: skill.sourceUrl, installedHash: `sha256:${skill.name}` };
 		},
 		declines: {
-			readNever: () => Object.fromEntries(nevers.map((name) => [name, "2026-01-01T00:00:00Z"])),
-			recordNever: (name) => {
-				nevers.push(name);
+			readNever: () => Object.fromEntries(nevers.map((key) => [key, "2026-01-01T00:00:00Z"])),
+			recordNever: (name, version) => {
+				nevers.push(declineKey(name, version));
 			},
 		},
 		newOfferTag: () => TEST_OFFER_TAG,
@@ -249,8 +252,30 @@ describe("contracts/marketplace-offer registration", () => {
 		strictEqual(second.length, 1);
 		// ...but Never persists across sessions through the injected store.
 		strictEqual(registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_NEVER, "s2")).length, 0);
-		deepStrictEqual(nevers, ["resolve-merge-conflicts"]);
+		deepStrictEqual(nevers, [declineKey("resolve-merge-conflicts", undefined)]);
 		strictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s3")).length, 0);
+	});
+
+	it("re-offers a skill whose catalog version changed after a Never decline", () => {
+		const v1 = entry({ version: "1.0.0" });
+		const nevers: string[] = [];
+		const declines = {
+			readNever: () => Object.fromEntries(nevers.map((key) => [key, "2026-01-01T00:00:00Z"])),
+			recordNever: (name: string, version?: string) => {
+				nevers.push(declineKey(name, version));
+			},
+		};
+		let catalog: MarketplaceSkill[] = [v1];
+		const { deps } = makeDeps({ listMarketplaceEntries: () => catalog, declines });
+		const registration = createMarketplaceOfferRegistration(deps);
+		registration.evaluate(turnStart("resolve this merge conflict"));
+		strictEqual(registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_NEVER)).length, 0);
+		deepStrictEqual(nevers, [declineKey("resolve-merge-conflicts", "1.0.0")]);
+		// Same version stays declined, even in a fresh session.
+		strictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s-same")).length, 0);
+		// A new catalog version is offerable again.
+		catalog = [entry({ version: "2.0.0" })];
+		strictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s-new")).length, 1);
 	});
 
 	it("installs autonomously at full-auto only through the own-marketplace gate", () => {

@@ -168,8 +168,19 @@ export function assertPromotionInstallSource(entry: MarketplaceSkill): void {
 export const PROMOTION_DECLINES_FILE = "skill-promotion-declines.json";
 
 export interface PromotionDeclineStore {
-	/** skill name -> ISO timestamp of the operator's "never" answer. */
+	/** decline key (name@version) -> ISO timestamp of the operator's "never" answer. */
 	never: Record<string, string>;
+}
+
+/**
+ * The decline store key. A "never" answer is scoped to the catalog version the
+ * operator saw, so a later version of the same skill is offerable again while a
+ * re-published identical version stays declined. Absent version keys as
+ * `name@`, distinct from any real version, so it re-offers once a version
+ * appears.
+ */
+export function declineKey(name: string, version?: string): string {
+	return `${name}@${version ?? ""}`;
 }
 
 function declinesPath(configDir?: string): string {
@@ -196,8 +207,8 @@ export function readPromotionDeclines(configDir?: string): PromotionDeclineStore
 	return { never: {} };
 }
 
-export function recordPromotionNeverDecline(name: string, configDir?: string): void {
+export function recordPromotionNeverDecline(name: string, version?: string, configDir?: string): void {
 	const store = readPromotionDeclines(configDir);
-	store.never[name] = new Date().toISOString();
+	store.never[declineKey(name, version)] = new Date().toISOString();
 	safeResourceWrite(declinesPath(configDir), `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8" });
 }
