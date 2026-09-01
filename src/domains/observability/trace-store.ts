@@ -1273,7 +1273,7 @@ export class TraceReader {
 	}
 
 	select(sql: string): Record<string, SQLInputValue>[] {
-		assertSelectOnly(sql);
+		assertTraceSelectOnly(sql);
 		return this.db.prepare(sql).all() as Record<string, SQLInputValue>[];
 	}
 }
@@ -1659,7 +1659,7 @@ function sha256(value: string): string {
 	return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function assertSelectOnly(sql: string): void {
+export function assertTraceSelectOnly(sql: string): void {
 	const trimmed = sql.trim();
 	if (!/^(SELECT|WITH)\b/i.test(trimmed)) throw new Error("trace sql accepts SELECT or read-only WITH queries only");
 	if (trimmed.includes(";")) throw new Error("trace sql accepts exactly one statement");
