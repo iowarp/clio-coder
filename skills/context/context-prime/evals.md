@@ -10,8 +10,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf '# CLIO-CODER.md\n\nSmall todo CLI. Hard rule: todos.json is the only persistence; never add a database.\n' > CLIO-CODER.md
 printf 'function listTodos() {\n  return [];\n}\n\nmodule.exports = { listTodos };\n' > todos.js

@@ -45,7 +45,7 @@ export function createConfigBundle(
 			try {
 				listener(payload);
 			} catch (err) {
-				console.error(`[clio:config] listener for ${kind} threw:`, err);
+				console.error(`[clio-coder:config] listener for ${kind} threw:`, err);
 			}
 		}
 	}

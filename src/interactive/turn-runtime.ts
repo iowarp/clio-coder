@@ -52,7 +52,7 @@ import type { TurnMiddleware } from "./turn-middleware.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
-const LOCAL_API_KEY_FALLBACK = "clio-local-target";
+const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 
 /**
  * A turn that never started, with a machine-readable reason attached. The

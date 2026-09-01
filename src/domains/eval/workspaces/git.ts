@@ -7,7 +7,7 @@ import type { PreparedEvalWorkspace } from "./local.js";
 
 export async function prepareGitWorkspace(workspace: EvalWorkspaceV2): Promise<PreparedEvalWorkspace> {
 	if (workspace.url === undefined) throw new Error("git workspace requires url");
-	const dest = await mkdtemp(resolve(tmpdir(), "clio-eval-git-"));
+	const dest = await mkdtemp(resolve(tmpdir(), "clio-coder-eval-git-"));
 	try {
 		await runGit(["clone", "--quiet", workspace.url, dest], process.cwd());
 		const ref = workspace.checkout ?? workspace.commit;

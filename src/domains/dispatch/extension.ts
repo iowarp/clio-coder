@@ -686,7 +686,7 @@ async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_
 function reportDispatchDiagnostic(scope: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
 	try {
-		process.stderr.write(`[clio:dispatch] ${scope}: ${message}\n`);
+		process.stderr.write(`[clio-coder:dispatch] ${scope}: ${message}\n`);
 	} catch {
 		// stderr itself is best-effort
 	}
@@ -3493,7 +3493,7 @@ export function createDispatchBundle(
 		// Match chat-loop's LOCAL_API_KEY_FALLBACK so dispatch-spawned workers can
 		// reach openai-compat local endpoints (LM Studio, llama.cpp) without
 		// requiring the user to invent a credential.
-		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-target" : undefined);
+		const apiKey = auth?.apiKey ?? (auth === null ? "clio-coder-local-target" : undefined);
 		const runtimeKind: RunKind = target.runtime.kind;
 		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {

@@ -12,8 +12,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf '{\n  "name": "eval-app",\n  "version": "1.0.0",\n  "private": true,\n  "scripts": {\n    "test": "node test.js"\n  }\n}\n' > package.json
 printf 'console.log("tests pass");\n' > test.js
@@ -48,8 +48,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf '{\n  "name": "eval-app",\n  "version": "1.0.0",\n  "private": true,\n  "scripts": {\n    "test": "node test.js"\n  }\n}\n' > package.json
 printf 'console.log("tests pass");\n' > test.js
@@ -79,8 +79,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf '{\n  "name": "eval-app",\n  "version": "1.0.0",\n  "private": true,\n  "scripts": {\n    "test": "node test.js"\n  }\n}\n' > package.json
 printf 'console.log("tests pass");\n' > test.js

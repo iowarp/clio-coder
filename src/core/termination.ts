@@ -156,7 +156,7 @@ class TerminationCoordinator {
 		const log = (msg: string): void => {
 			if (!debug) return;
 			const ms = Number(process.hrtime.bigint() - mark) / 1e6;
-			process.stderr.write(`[clio:shutdown] +${ms.toFixed(1)}ms ${msg}\n`);
+			process.stderr.write(`[clio-coder:shutdown] +${ms.toFixed(1)}ms ${msg}\n`);
 		};
 
 		this.phase = "draining";
@@ -193,12 +193,12 @@ class TerminationCoordinator {
 			const t0 = process.hrtime.bigint();
 			const completed = await runWithBudget(hook, budgetMs, (err) => {
 				const message = err instanceof Error ? err.message : String(err);
-				writeShutdownNotice(`[clio:termination] ${phase}[${i}] failed: ${message}`);
+				writeShutdownNotice(`[clio-coder:termination] ${phase}[${i}] failed: ${message}`);
 				if (err instanceof Error && err.stack) log(err.stack);
 			});
 			const dt = Number(process.hrtime.bigint() - t0) / 1e6;
 			if (!completed) {
-				writeShutdownNotice(`[clio:termination] ${phase}[${i}] exceeded ${budgetMs}ms budget; shutdown continues`);
+				writeShutdownNotice(`[clio-coder:termination] ${phase}[${i}] exceeded ${budgetMs}ms budget; shutdown continues`);
 			}
 			log(`  ${phase}[${i}] ${dt.toFixed(1)}ms${completed ? "" : " (timed out)"}`);
 		}

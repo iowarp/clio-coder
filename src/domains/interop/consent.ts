@@ -149,7 +149,7 @@ export function interopBootHint(report: InteropReport, settings: ClioSettings): 
 		(record) => ({ ...record, hintedFingerprint: record.fingerprint }),
 	);
 	const names = fresh.map((proposal) => proposal.entry.id).join(", ");
-	return `clio: ${names} detected on PATH and not configured. Run /interop to review.`;
+	return `clio-coder: ${names} detected on PATH and not configured. Run /interop to review.`;
 }
 
 /**

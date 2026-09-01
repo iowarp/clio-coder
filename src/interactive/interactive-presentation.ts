@@ -338,7 +338,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	const dismissContextBootstrapNotices = (): void => {
 		for (const notice of notifications.list()) {
-			if (/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|Imported agent context changed)/.test(notice.text)) {
+			if (
+				/^(?:clio-coder|clio): (No CLIO(?:-CODER)?\.md detected|malformed CLIO(?:-CODER)?\.md ignored|Imported agent context changed)/.test(
+					notice.text,
+				)
+			) {
 				notifications.dismiss(notice.id);
 			}
 		}

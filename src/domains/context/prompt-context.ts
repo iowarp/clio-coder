@@ -32,7 +32,7 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
 	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.value, file.path));
 	for (const issue of loadedClioMd.errors) {
-		warnings.push(`clio: malformed ${issue.path} ignored: ${issue.error}`);
+		warnings.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
 	}
 	// Said where the handbook would have been: a model that sees no project
 	// context spends its first tool call reading CLIO-CODER.md and gets

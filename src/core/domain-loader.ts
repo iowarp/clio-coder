@@ -95,7 +95,7 @@ export async function loadDomains(
 			// render the failure, so the structured line must land first.
 			const message = error instanceof Error ? error.message : String(error);
 			(options.diagnostic ?? ((text: string) => process.stderr.write(text)))(
-				`[clio:domain] load failed: ${name}: ${message}\n`,
+				`[clio-coder:domain] load failed: ${name}: ${message}\n`,
 			);
 			throw new DomainLoadError(name, error);
 		}
@@ -111,15 +111,17 @@ export async function loadDomains(
 			const t0 = debug ? process.hrtime.bigint() : 0n;
 			const completed = await runWithBudget(stopFn, budgetMs, (err) => {
 				const message = err instanceof Error ? err.message : String(err);
-				writeShutdownNotice(`[clio:domain-loader] ${name}.stop() failed: ${message}`);
+				writeShutdownNotice(`[clio-coder:domain-loader] ${name}.stop() failed: ${message}`);
 				if (debug && err instanceof Error && err.stack) process.stderr.write(`${err.stack}\n`);
 			});
 			if (!completed) {
-				writeShutdownNotice(`[clio:domain-loader] ${name}.stop() exceeded ${budgetMs}ms budget; abandoning`);
+				writeShutdownNotice(`[clio-coder:domain-loader] ${name}.stop() exceeded ${budgetMs}ms budget; abandoning`);
 			}
 			if (debug) {
 				const dt = Number(process.hrtime.bigint() - t0) / 1e6;
-				process.stderr.write(`[clio:shutdown]   domain.${name} ${dt.toFixed(1)}ms${completed ? "" : " (timed out)"}\n`);
+				process.stderr.write(
+					`[clio-coder:shutdown]   domain.${name} ${dt.toFixed(1)}ms${completed ? "" : " (timed out)"}\n`,
+				);
 			}
 		}
 	};

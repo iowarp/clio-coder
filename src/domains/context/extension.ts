@@ -146,15 +146,15 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 		projectType !== "unknown" &&
 		options.noContextFiles !== true
 	) {
-		hints.push("clio: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.");
+		hints.push("clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.");
 	}
 	for (const issue of clio.errors) {
-		hints.push(`clio: malformed ${issue.path} ignored: ${issue.error}`);
+		hints.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
 	}
 	const state = readClioState(cwd);
 	if (!state) return hints;
 	if (state.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
-		hints.push("clio: Imported agent context changed. Run /context init --adopt to refresh.");
+		hints.push("clio-coder: Imported agent context changed. Run /context init --adopt to refresh.");
 	}
 	return hints;
 }

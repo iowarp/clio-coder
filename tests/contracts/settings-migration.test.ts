@@ -30,6 +30,7 @@ import {
 } from "../../src/domains/lifecycle/naming-tool-markers.js";
 import { regenerateYaziNamingProfile } from "../../src/domains/lifecycle/naming-yazi.js";
 import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
+import { parseSessionEntries } from "../../src/domains/session/archive-readers.js";
 import { createShareArchive, planShareImport } from "../../src/domains/share/archive.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -324,6 +325,25 @@ integrations:
 				snapshots,
 			);
 		}
+	});
+
+	it("normalizes the released ACP routing-notice custom type only at session read", () => {
+		const legacy = {
+			kind: "custom",
+			turnId: "turn-routing-notice",
+			parentTurnId: null,
+			timestamp: "2026-09-01T00:00:00.000Z",
+			customType: "clio.routing-notice",
+			data: { text: "legacy advisory" },
+		};
+		const raw = `${JSON.stringify(legacy)}\n`;
+		const parsed = parseSessionEntries(raw, "legacy-routing.ndjson");
+		deepStrictEqual(parsed.errors, []);
+		strictEqual(parsed.entries[0]?.kind, "custom");
+		if (parsed.entries[0]?.kind === "custom") {
+			strictEqual(parsed.entries[0].customType, "clio-coder.routing-notice");
+		}
+		strictEqual(raw.includes("clio.routing-notice"), true, "read normalization does not rewrite history bytes");
 	});
 
 	it("doctor lists legacy git refs and active ownership markers without renaming or rewriting them", () => {

@@ -28,7 +28,7 @@ export function startConfigWatcher(cb: WatcherCallback): ConfigWatcher {
 			}, 80);
 		});
 	} catch (err) {
-		console.error("[clio:config] watcher setup failed:", err);
+		console.error("[clio-coder:config] watcher setup failed:", err);
 	}
 
 	return {

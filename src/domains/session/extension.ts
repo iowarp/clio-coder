@@ -392,7 +392,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				await performCheckpoint(state, "shutdown");
 			} catch (err) {
 				process.stderr.write(
-					`[clio:session] shutdown checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
+					`[clio-coder:session] shutdown checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
 			}
 			await closeCurrent("shutdown");

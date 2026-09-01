@@ -1,5 +1,5 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../../src/domains/context/init-options.js";
 import { runContextRefresh } from "../../src/domains/context/refresh.js";
 import { readClioState, writeClioState } from "../../src/domains/context/state.js";
+import { assembleWikiTree } from "../../src/domains/context/wiki/assemble.js";
 import {
 	appendContextSnapshot,
 	captureContextSnapshot,
@@ -121,5 +122,23 @@ describe("contracts/context lifecycle", () => {
 		strictEqual(lastLoadedContextWindow(meta, "local", "model-7"), 65_536);
 		strictEqual(lastLoadedContextWindow(meta, "local", "other-model"), 200_000);
 		strictEqual(lastLoadedContextWindow(meta, "remote", "model-7"), null);
+	});
+
+	it("writes canonical wiki repair markers and consumes the released marker", () => {
+		const wiki = join(isolated.dir, ".clio-coder", "wiki");
+		mkdirSync(wiki, { recursive: true });
+		const page = join(wiki, "architecture.md");
+		writeFileSync(
+			page,
+			"# Architecture\n\nArchitecture details.\n\n[Missing](missing.md)\n\n<!-- clio:wiki stale marker -->\n",
+			"utf8",
+		);
+		const plan = { version: 1 as const, overview: "", pages: [] };
+		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		const canonical = readFileSync(page, "utf8");
+		strictEqual(canonical.includes("<!-- clio-coder:wiki unresolved links: missing.md -->"), true);
+		strictEqual(canonical.includes("<!-- clio:wiki"), false);
+		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		strictEqual(readFileSync(page, "utf8"), canonical);
 	});
 });

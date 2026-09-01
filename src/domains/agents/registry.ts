@@ -94,7 +94,7 @@ export function loadRecipesFromDir(
 			if (source.source === "builtin") throw error;
 			const message = error instanceof Error ? error.message : String(error);
 			diagnostics.push({ source: source.source, filepath, message });
-			process.stderr.write(`[clio:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
+			process.stderr.write(`[clio-coder:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
 		}
 	}
 
@@ -113,23 +113,23 @@ function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): Re
 	for (const group of sources) {
 		for (const recipe of group) {
 			if (recipe.source !== "builtin" && RESERVED_CUSTOM_AGENT_IDS.has(recipe.id)) {
-				process.stderr.write(`[clio:agents] ignore id=${recipe.id} by=${recipe.source} reason=reserved-agent-id\n`);
+				process.stderr.write(`[clio-coder:agents] ignore id=${recipe.id} by=${recipe.source} reason=reserved-agent-id\n`);
 				continue;
 			}
 			const builtin = builtinById.get(recipe.id);
 			if (recipe.source === "extension" && builtin) {
-				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=extension reason=reserved-builtin\n`);
+				process.stderr.write(`[clio-coder:agents] ignore override id=${recipe.id} by=extension reason=reserved-builtin\n`);
 				continue;
 			}
 			if (recipe.source === "user" && builtin && isShadowAgent(normalizeAgentSpec(builtin))) {
-				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=user reason=reserved-shadow\n`);
+				process.stderr.write(`[clio-coder:agents] ignore override id=${recipe.id} by=user reason=reserved-shadow\n`);
 				continue;
 			}
 			if (recipe.source === "project" && builtin) {
-				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=project reason=reserved-builtin\n`);
+				process.stderr.write(`[clio-coder:agents] ignore override id=${recipe.id} by=project reason=reserved-builtin\n`);
 				continue;
 			}
-			if (byId.has(recipe.id)) process.stderr.write(`[clio:agents] override id=${recipe.id} by=${recipe.source}\n`);
+			if (byId.has(recipe.id)) process.stderr.write(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
 			byId.set(recipe.id, recipe);
 		}
 	}

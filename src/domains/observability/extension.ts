@@ -96,7 +96,7 @@ async function buildAndIndexEvidence(
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		process.stderr.write(`[clio:evidence] auto-build failed for run ${runId}: ${message}\n`);
+		process.stderr.write(`[clio-coder:evidence] auto-build failed for run ${runId}: ${message}\n`);
 		hooks.onFailed(runId, message);
 	}
 }

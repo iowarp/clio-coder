@@ -15,8 +15,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'export function renderSettings(width: number) {\n  return "x".repeat(width - 40);\n}\n' > settings.ts
 git add settings.ts

@@ -13,8 +13,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'export const VERSION = "1.0.0";\n' > version.ts
 git add version.ts
@@ -41,8 +41,8 @@ Fixture:
 ```bash
 git init -q .
 git branch -M main
-git config user.email eval@clio.local
-git config user.name "Clio Eval"
+git config user.email eval@clio-coder.local
+git config user.name "Clio Coder Eval"
 git config commit.gpgsign false
 printf 'a\n' > a.txt
 git add a.txt

@@ -11,7 +11,7 @@
  * orchestrator-wide observability, not a domain concern. Add channels to the
  * `TRACED_CHANNELS` list if a future front needs to observe them.
  *
- * Ordering invariant: the first `[clio:bus] shutdown.requested` line must
+ * Ordering invariant: the first `[clio-coder:bus] shutdown.requested` line must
  * never reach stderr before the `Clio Coder: received <SIGNAL>, shutting down...`
  * notice written by termination.installSignalHandlers in
  * src/core/termination.ts. Future edits to termination.ts must preserve that
@@ -47,7 +47,7 @@ export function installBusTracer(): void {
 	const bus = getSharedBus();
 	for (const channel of TRACED_CHANNELS) {
 		bus.on(channel, (payload) => {
-			process.stderr.write(`[clio:bus] ${channel}${traceSuffix(payload)}\n`);
+			process.stderr.write(`[clio-coder:bus] ${channel}${traceSuffix(payload)}\n`);
 		});
 	}
 }

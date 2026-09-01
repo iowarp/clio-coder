@@ -24,11 +24,11 @@ function isBootTraceEnabled(): boolean {
 export function formatBootTrace(phase: string, detail?: string): string | null {
 	if (!isBootTraceEnabled()) return null;
 	const suffix = detail !== undefined && detail.length > 0 ? ` (${detail})` : "";
-	return `[clio:boot] +${performance.now().toFixed(1)}ms ${phase}${suffix}\n`;
+	return `[clio-coder:boot] +${performance.now().toFixed(1)}ms ${phase}${suffix}\n`;
 }
 
 /**
- * Stamp a boot phase marker to stderr, e.g. `[clio:boot] +742.1ms cli entry`.
+ * Stamp a boot phase marker to stderr, e.g. `[clio-coder:boot] +742.1ms cli entry`.
  * `detail` appends a parenthetical (module counts, ids). No-op unless
  * `CLIO_CODER_TRACE_BOOT=1`. Never throws: a diagnostic must not affect boot.
  */
