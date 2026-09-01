@@ -1630,21 +1630,21 @@ Deno.test("settings and targets prime into one bounded projection with truthful 
 		ok(settings);
 		ok(targets);
 		deepStrictEqual(settings.settings.settings, {
-			"orchestrator.target": "lmstudio",
-			"orchestrator.model": "qwen3.8-27b",
-			"orchestrator.thinkingLevel": "off",
-			autonomy: "auto-edit",
+			"chat.target": "lmstudio",
+			"chat.model": "qwen3.8-27b",
+			"chat.thinkingLevel": "off",
+			"safety.autonomy": "auto-edit",
 		});
 		deepStrictEqual([...settings.settings.editable].sort(), [
-			"autonomy",
-			"orchestrator.model",
-			"orchestrator.target",
-			"orchestrator.thinkingLevel",
+			"chat.model",
+			"chat.target",
+			"chat.thinkingLevel",
+			"safety.autonomy",
 		]);
 		// The model options are the selected target's models, not every model Clio Coder knows.
-		deepStrictEqual(settings.settings.options["orchestrator.target"], ["lmstudio", "offline-lab"]);
-		deepStrictEqual(settings.settings.options["orchestrator.model"], ["qwen3.8-27b", "qwen3.8-4b"]);
-		deepStrictEqual(settings.settings.options.autonomy, ["read-only", "suggest", "auto-edit", "full-auto"]);
+		deepStrictEqual(settings.settings.options["chat.target"], ["lmstudio", "offline-lab"]);
+		deepStrictEqual(settings.settings.options["chat.model"], ["qwen3.8-27b", "qwen3.8-4b"]);
+		deepStrictEqual(settings.settings.options["safety.autonomy"], ["read-only", "suggest", "auto-edit", "full-auto"]);
 		equal(targets.truncated, false);
 		deepStrictEqual(targets.targets.map((target) => target.id), ["lmstudio", "offline-lab"]);
 		// No health is claimed before a probe happens.
@@ -1677,7 +1677,7 @@ Deno.test("an invalid settings patch result does not replace the last validated 
 		await test.host.getSettings();
 		const before = test.host.settings;
 		ok(before);
-		await rejects(test.host.patchSettings({ "orchestrator.model": "qwen3.8-4b" }), assertHostError("internal"));
+		await rejects(test.host.patchSettings({ "chat.model": "qwen3.8-4b" }), assertHostError("internal"));
 		deepStrictEqual(test.host.settings, before);
 		equal(test.sink.ofType("settings.state").length, 1);
 	} finally {
@@ -1770,21 +1770,25 @@ Deno.test("a safe settings patch round-trips and an unknown target is refused wh
 	const test = await harness("settings");
 	try {
 		await test.host.primeSettings();
-		await test.host.patchSettings({ "orchestrator.model": "qwen3.8-4b", "orchestrator.thinkingLevel": "medium" });
+		await test.host.patchSettings({ "chat.model": "qwen3.8-4b", "chat.thinkingLevel": "medium" });
 		const patched = test.sink.ofType("settings.state").at(-1);
 		ok(patched);
-		equal(patched.settings.settings["orchestrator.model"], "qwen3.8-4b");
-		equal(patched.settings.settings["orchestrator.thinkingLevel"], "medium");
+		equal(patched.settings.settings["chat.model"], "qwen3.8-4b");
+		equal(patched.settings.settings["chat.thinkingLevel"], "medium");
 
 		// An unknown target must not leave a half-written projection behind.
-		await rejects(test.host.patchSettings({ "orchestrator.target": "not-a-target" }));
+		await rejects(test.host.patchSettings({ "chat.target": "not-a-target" }));
 		await test.host.getSettings();
 		const afterFailure = test.sink.ofType("settings.state").at(-1);
 		ok(afterFailure);
-		equal(afterFailure.settings.settings["orchestrator.target"], "lmstudio");
-		equal(afterFailure.settings.settings["orchestrator.model"], "qwen3.8-4b");
+		equal(afterFailure.settings.settings["chat.target"], "lmstudio");
+		equal(afterFailure.settings.settings["chat.model"], "qwen3.8-4b");
 
 		// Workbench refuses a key outside the closed set before it reaches Clio Coder.
+		await rejects(
+			test.host.patchSettings({ "orchestrator.model": "retired-v1-model" }),
+			assertHostError("invalid"),
+		);
 		await rejects(
 			test.host.patchSettings({ "provider.apiKey": "secret" }),
 			assertHostError("invalid"),
@@ -1843,7 +1847,7 @@ Deno.test("autonomy set over ACP is what the next prompt runs under", async () =
 		equal(answer, "This session has seen 1 prompts at autonomy read-only.");
 
 		// A global settings patch must not silently rebind the session's autonomy.
-		await test.host.patchSettings({ autonomy: "full-auto" });
+		await test.host.patchSettings({ "safety.autonomy": "full-auto" });
 		equal(test.host.snapshot().session?.autonomy, "read-only");
 		equal(test.host.snapshot().session?.autonomySource, "session");
 	} finally {
@@ -1862,7 +1866,7 @@ Deno.test("a Clio Coder without the settings and targets capabilities refuses ra
 		);
 		await rejects(test.host.getSettings(), assertHostError("unsupported"));
 		await rejects(test.host.listTargets(), assertHostError("unsupported"));
-		await rejects(test.host.patchSettings({ autonomy: "suggest" }), assertHostError("unsupported"));
+		await rejects(test.host.patchSettings({ "safety.autonomy": "suggest" }), assertHostError("unsupported"));
 		await rejects(test.host.probeTarget("lmstudio"), assertHostError("unsupported"));
 		// Priming is best effort and must leave both projections absent, not empty.
 		await test.host.primeSettings();

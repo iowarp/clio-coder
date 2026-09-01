@@ -107,16 +107,10 @@ function projectPath(trustedRoot: string, value: unknown): WireProjectPath | und
 }
 
 const EXACT_SETTING_KEYS = new Set([
-	"autonomy",
-	"orchestrator.target",
-	"orchestrator.model",
-	"orchestrator.thinkingLevel",
-	"background.target",
-	"background.model",
-	"background.thinkingLevel",
-	"workers.default.target",
-	"workers.default.model",
-	"workers.default.thinkingLevel",
+	"chat.target",
+	"chat.model",
+	"chat.thinkingLevel",
+	"safety.autonomy",
 ]);
 
 const SENSITIVE_SETTING_SEGMENT =

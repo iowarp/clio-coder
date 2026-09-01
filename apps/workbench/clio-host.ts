@@ -170,10 +170,10 @@ export const DEFAULT_PERMISSION_BUDGET_MS = 10 * 60 * 1_000;
 const PROMPT_STOP_REASONS = ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"] as const;
 const PROBE_REASONS = ["not-configured", "unreachable", "unsupported", "probe-failed"] as const;
 const SAFE_SETTING_KEYS = [
-	"orchestrator.target",
-	"orchestrator.model",
-	"orchestrator.thinkingLevel",
-	"autonomy",
+	"chat.target",
+	"chat.model",
+	"chat.thinkingLevel",
+	"safety.autonomy",
 ] as const;
 export const ACP_CLIENT_NAME = "clio-coder-workbench" as const;
 const CLIENT_INFO = { name: ACP_CLIENT_NAME, title: PRODUCT_NAME, version: "0.0.1" } as const;
@@ -1039,12 +1039,10 @@ export class ClioProjectHost {
 					throw new HostError("invalid", "That setting is not one the GUI may change.");
 				}
 			}
-			const nested: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(patch)) nested[key] = value;
 			const result = await this.#request(
 				process,
 				"clio-coder/settings/patch_safe",
-				{ patch: nested },
+				{ patch: { ...patch } },
 				METHOD_TIMEOUT_MS,
 			);
 			this.#settings = this.#settingsDto(result);
@@ -1608,15 +1606,18 @@ export class ClioProjectHost {
 		if (!isRecord(result) || !isRecord(result.settings) || !Array.isArray(result.editable)) {
 			throw new HostError("internal", "Clio Coder returned an invalid settings projection.");
 		}
-		if (!isRecord(result.settings.orchestrator) || !Object.hasOwn(result.settings, "autonomy")) {
+		if (!isRecord(result.settings.chat) || !isRecord(result.settings.safety)) {
 			throw new HostError("internal", "Clio Coder omitted required safe settings.");
 		}
-		const orchestrator = result.settings.orchestrator;
+		const chat = result.settings.chat;
 		for (const field of ["target", "model", "thinkingLevel"] as const) {
-			if (!Object.hasOwn(orchestrator, field)) throw new HostError("internal", `Clio Coder omitted setting ${field}.`);
+			if (!Object.hasOwn(chat, field)) throw new HostError("internal", `Clio Coder omitted setting chat.${field}.`);
 		}
-		const thinkingLevel = boundedString(orchestrator.thinkingLevel, "orchestrator.thinkingLevel", 16);
-		const autonomy = boundedString(result.settings.autonomy, "autonomy", 16);
+		if (!Object.hasOwn(result.settings.safety, "autonomy")) {
+			throw new HostError("internal", "Clio Coder omitted setting safety.autonomy.");
+		}
+		const thinkingLevel = boundedString(chat.thinkingLevel, "chat.thinkingLevel", 16);
+		const autonomy = boundedString(result.settings.safety.autonomy, "safety.autonomy", 16);
 		if (!(THINKING_LEVELS as readonly string[]).includes(thinkingLevel)) {
 			throw new HostError("internal", "Clio Coder returned an unknown thinking level.");
 		}
@@ -1624,15 +1625,15 @@ export class ClioProjectHost {
 			throw new HostError("internal", "Clio Coder returned an unknown autonomy level.");
 		}
 		const settings: Record<string, string | null> = {
-			"orchestrator.target": requiredNullableBoundedString(
-				orchestrator,
+			"chat.target": requiredNullableBoundedString(
+				chat,
 				"target",
-				"orchestrator.target",
+				"chat.target",
 				128,
 			),
-			"orchestrator.model": requiredNullableBoundedString(orchestrator, "model", "orchestrator.model", 256),
-			"orchestrator.thinkingLevel": thinkingLevel,
-			autonomy,
+			"chat.model": requiredNullableBoundedString(chat, "model", "chat.model", 256),
+			"chat.thinkingLevel": thinkingLevel,
+			"safety.autonomy": autonomy,
 		};
 		const editable = result.editable;
 		const editableSet = new Set(editable);
@@ -1641,12 +1642,12 @@ export class ClioProjectHost {
 			!SAFE_SETTING_KEYS.every((key) => editableSet.has(key))
 		) throw new HostError("internal", "Clio Coder returned an invalid editable settings set.");
 		const targets = this.#targets ?? [];
-		const selectedTarget = settings["orchestrator.target"];
+		const selectedTarget = settings["chat.target"];
 		const options: Record<string, readonly string[]> = {
-			"orchestrator.thinkingLevel": [...THINKING_LEVELS],
-			autonomy: [...AUTONOMY_LEVELS],
-			"orchestrator.target": targets.map((target) => target.id),
-			"orchestrator.model": targets.find((target) => target.id === selectedTarget)?.models ?? [],
+			"chat.thinkingLevel": [...THINKING_LEVELS],
+			"safety.autonomy": [...AUTONOMY_LEVELS],
+			"chat.target": targets.map((target) => target.id),
+			"chat.model": targets.find((target) => target.id === selectedTarget)?.models ?? [],
 		};
 		return { settings, editable: [...SAFE_SETTING_KEYS], options, checkedAt: new Date(this.#now()).toISOString() };
 	}
@@ -1707,12 +1708,12 @@ export class ClioProjectHost {
 	#nestedSettings(): Record<string, unknown> {
 		const flat = this.#settings?.settings ?? {};
 		return {
-			orchestrator: {
-				target: flat["orchestrator.target"] ?? null,
-				model: flat["orchestrator.model"] ?? null,
-				thinkingLevel: flat["orchestrator.thinkingLevel"] ?? null,
+			chat: {
+				target: flat["chat.target"] ?? null,
+				model: flat["chat.model"] ?? null,
+				thinkingLevel: flat["chat.thinkingLevel"] ?? null,
 			},
-			autonomy: flat.autonomy ?? null,
+			safety: { autonomy: flat["safety.autonomy"] ?? null },
 		};
 	}
 

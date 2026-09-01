@@ -260,22 +260,22 @@ const SETTING_GUIDANCE: Record<
 	string,
 	{ label: string; description: string; scope: string | null }
 > = {
-	"orchestrator.target": {
+	"chat.target": {
 		label: "Clio Coder target",
 		description: "The configured service or runtime Clio Coder will route the next turn through.",
 		scope: "NEXT TURN",
 	},
-	"orchestrator.model": {
+	"chat.model": {
 		label: "Model",
 		description: "The model Clio Coder will ask to work on the next turn.",
 		scope: "NEXT TURN",
 	},
-	"orchestrator.thinkingLevel": {
+	"chat.thinkingLevel": {
 		label: "Reasoning effort",
 		description: "Clio Coder's configured reasoning depth. The GUI does not infer what the bound session already uses.",
 		scope: null,
 	},
-	autonomy: {
+	"safety.autonomy": {
 		label: "Default working freedom",
 		description: "The autonomy level a newly created session will inherit. Change this session in the status bar.",
 		scope: "NEXT SESSION",
@@ -294,18 +294,18 @@ function isAutonomyLevel(value: string): value is WireAutonomyLevel {
 }
 
 function settingsPatch(key: string, value: string): WireSettingsPatch | null {
-	if (key === "orchestrator.target" || key === "orchestrator.model") {
+	if (key === "chat.target" || key === "chat.model") {
 		return { [key]: value.length === 0 ? null : value };
 	}
 	if (
-		key === "orchestrator.thinkingLevel" &&
+		key === "chat.thinkingLevel" &&
 		(THINKING_LEVELS as readonly string[]).includes(value)
 	) {
 		return {
-			"orchestrator.thinkingLevel": value as (typeof THINKING_LEVELS)[number],
+			"chat.thinkingLevel": value as (typeof THINKING_LEVELS)[number],
 		};
 	}
-	if (key === "autonomy" && isAutonomyLevel(value)) return { autonomy: value };
+	if (key === "safety.autonomy" && isAutonomyLevel(value)) return { "safety.autonomy": value };
 	return null;
 }
 
@@ -2412,7 +2412,7 @@ export const EffectiveClioMap = memo(function EffectiveClioMap({
 						: settingGroups.map(({ family, settings }, groupIndex) => (
 							<details
 								className="setting-family"
-								open={family === "orchestrator" || family === "autonomy" ||
+								open={family === "chat" || family === "safety" ||
 									groupIndex === 0}
 								key={family}
 							>
@@ -7473,8 +7473,8 @@ function SettingsModal({ state, actions, dispatch, onClose }: {
 													}
 												}}
 											>
-												{(key === "orchestrator.target" ||
-													key === "orchestrator.model") && <option value="">unset</option>}
+												{(key === "chat.target" ||
+													key === "chat.model") && <option value="">unset</option>}
 												{options.map((option) => (
 													<option value={option} key={option}>
 														{option}
@@ -7827,11 +7827,11 @@ const BottomStatus = memo(
 		// session/new for the life of the process, so a patched global autonomy
 		// reaches only the next session and the bound one moves through
 		// clio-coder/session/autonomy instead.
-		const nextTarget = open?.settings?.settings["orchestrator.target"] ?? null;
-		const nextModel = open?.settings?.settings["orchestrator.model"] ?? null;
+		const nextTarget = open?.settings?.settings["chat.target"] ?? null;
+		const nextModel = open?.settings?.settings["chat.model"] ?? null;
 		const nextTurnDiffers = open?.settings != null && session !== null &&
 			(nextTarget !== session.target || nextModel !== session.model);
-		const settingsAutonomy = open?.settings?.settings["autonomy"] ?? null;
+		const settingsAutonomy = open?.settings?.settings["safety.autonomy"] ?? null;
 		const nextSessionAutonomy = settingsAutonomy !== null && isAutonomyLevel(settingsAutonomy)
 			? settingsAutonomy
 			: null;

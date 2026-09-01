@@ -372,31 +372,31 @@ Deno.test("settings patches encode the four key specific value domains", () => {
 	deepStrictEqual(
 		parseCommand("settings.patch", {
 			projectId: "project-alpha",
-			patch: { "orchestrator.model": "qwen3.8-27b" },
+			patch: { "chat.model": "qwen3.8-27b" },
 		})
 			.payload,
 		{
 			projectId: "project-alpha",
-			patch: { "orchestrator.model": "qwen3.8-27b" },
+			patch: { "chat.model": "qwen3.8-27b" },
 		},
 	);
 	deepStrictEqual(
 		parseCommand("settings.patch", {
 			projectId: "project-alpha",
 			patch: {
-				"orchestrator.target": null,
-				"orchestrator.model": "qwen3.8-27b",
-				"orchestrator.thinkingLevel": "xhigh",
-				autonomy: "suggest",
+				"chat.target": null,
+				"chat.model": "qwen3.8-27b",
+				"chat.thinkingLevel": "xhigh",
+				"safety.autonomy": "suggest",
 			},
 		}).payload,
 		{
 			projectId: "project-alpha",
 			patch: {
-				"orchestrator.target": null,
-				"orchestrator.model": "qwen3.8-27b",
-				"orchestrator.thinkingLevel": "xhigh",
-				autonomy: "suggest",
+				"chat.target": null,
+				"chat.model": "qwen3.8-27b",
+				"chat.thinkingLevel": "xhigh",
+				"safety.autonomy": "suggest",
 			},
 		},
 	);
@@ -404,12 +404,14 @@ Deno.test("settings patches encode the four key specific value domains", () => {
 	for (
 		const patch of [
 			{ "Bad Key": "x" },
-			{ "orchestrator.target": "" },
-			{ "orchestrator.model": "x".repeat(257) },
-			{ "orchestrator.thinkingLevel": null },
-			{ "orchestrator.thinkingLevel": "extreme" },
-			{ autonomy: null },
-			{ autonomy: "yolo" },
+			{ "orchestrator.target": "retired" },
+			{ autonomy: "suggest" },
+			{ "chat.target": "" },
+			{ "chat.model": "x".repeat(257) },
+			{ "chat.thinkingLevel": null },
+			{ "chat.thinkingLevel": "extreme" },
+			{ "safety.autonomy": null },
+			{ "safety.autonomy": "yolo" },
 		]
 	) {
 		expectProtocolError(() => parseCommand("settings.patch", { projectId: "project-alpha", patch }));
@@ -503,7 +505,7 @@ Deno.test("every command kind round-trips and the list stays exhaustive", () => 
 		"settings.get": { projectId: "project-alpha" },
 		"settings.patch": {
 			projectId: "project-alpha",
-			patch: { autonomy: "suggest" },
+			patch: { "safety.autonomy": "suggest" },
 		},
 		"config.inspect": { projectId: "project-alpha" },
 		"catalog.inspect": { projectId: "project-alpha" },
@@ -1104,13 +1106,13 @@ Deno.test("browse listings, session lists, settings, and targets keep their boun
 	equal(probed.payload.health.healthy, false);
 	const settings = serverEvent("settings.state", {
 		settings: {
-			settings: { "orchestrator.target": "lmstudio" },
-			editable: ["orchestrator.target"],
-			options: { "orchestrator.target": ["lmstudio"] },
+			settings: { "chat.target": "lmstudio" },
+			editable: ["chat.target"],
+			options: { "chat.target": ["lmstudio"] },
 			checkedAt: "2026-08-18T12:00:00.000Z",
 		},
 	});
-	deepStrictEqual(settings.payload.settings.editable, ["orchestrator.target"]);
+	deepStrictEqual(settings.payload.settings.editable, ["chat.target"]);
 });
 
 Deno.test("effective configuration events accept only the redacted bounded graph", () => {
@@ -1118,7 +1120,7 @@ Deno.test("effective configuration events accept only the redacted bounded graph
 		inspection: {
 			inspectedAt: "2026-08-29T12:00:00.000Z",
 			settings: [{
-				key: "orchestrator.model",
+				key: "chat.model",
 				source: "project",
 				value: "qwen",
 				valueKind: "exact",

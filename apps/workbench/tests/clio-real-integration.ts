@@ -259,9 +259,9 @@ async function seedSettings(
 		].join("\n"),
 		"targets",
 	);
-	settings = replaceRequired(settings, /^ {2}target: null$/m, "  target: mock-chat", "orchestrator.target");
-	settings = replaceRequired(settings, /^ {2}model: null$/m, "  model: mock-model", "orchestrator.model");
-	settings = replaceRequired(settings, /^autonomy:.*$/m, "autonomy: suggest", "autonomy");
+	settings = replaceRequired(settings, /^ {2}target: null$/m, "  target: mock-chat", "chat.target");
+	settings = replaceRequired(settings, /^ {2}model: null$/m, "  model: mock-model", "chat.model");
+	settings = replaceRequired(settings, /^ {2}autonomy:.*$/m, "  autonomy: suggest", "safety.autonomy");
 	await Deno.writeTextFile(settingsPath, settings);
 }
 
@@ -834,14 +834,14 @@ async function runConfigurationCase(): Promise<void> {
 		ok(settings, "the real server returned no safe settings projection");
 		ok(targets, "the real server returned no target list");
 		deepStrictEqual(Object.keys(settings.settings).sort(), [
-			"autonomy",
-			"orchestrator.model",
-			"orchestrator.target",
-			"orchestrator.thinkingLevel",
+			"chat.model",
+			"chat.target",
+			"chat.thinkingLevel",
+			"safety.autonomy",
 		]);
-		equal(settings.settings["orchestrator.target"], "mock-chat");
-		equal(settings.settings["orchestrator.model"], "mock-model");
-		equal(settings.settings.autonomy, "suggest");
+		equal(settings.settings["chat.target"], "mock-chat");
+		equal(settings.settings["chat.model"], "mock-model");
+		equal(settings.settings["safety.autonomy"], "suggest");
 		const projected = JSON.stringify({ settings, targets });
 		ok(!projected.includes(API_KEY_VALUE), "a credential value reached the settings projection");
 		ok(!projected.includes(API_KEY_NAME), "a credential variable name reached the settings projection");
@@ -865,20 +865,24 @@ async function runConfigurationCase(): Promise<void> {
 		equal(probed.health.healthy, true, "the loopback stub serves /v1/models, so the probe must succeed");
 
 		await withTimeout(
-			host.patchSettings({ "orchestrator.thinkingLevel": "low" }),
+			host.patchSettings({ "chat.thinkingLevel": "low" }),
 			COMMAND_TIMEOUT_MS,
 			"the safe settings patch",
 		);
-		equal(host.settings?.settings["orchestrator.thinkingLevel"], "low");
+		equal(host.settings?.settings["chat.thinkingLevel"], "low");
 		await withTimeout(host.getSettings(), COMMAND_TIMEOUT_MS, "the settings re-read");
-		equal(host.settings?.settings["orchestrator.thinkingLevel"], "low", "the patch did not survive a re-read");
+		equal(host.settings?.settings["chat.thinkingLevel"], "low", "the patch did not survive a re-read");
 
 		await withTimeout(host.setAutonomy("read-only"), COMMAND_TIMEOUT_MS, "the per-session autonomy override");
 		equal(host.snapshot().session?.autonomy, "read-only");
 		equal(host.snapshot().session?.autonomySource, "session");
 		// A global autonomy patch must not silently rebind the open session.
-		await withTimeout(host.patchSettings({ autonomy: "full-auto" }), COMMAND_TIMEOUT_MS, "the global autonomy patch");
-		equal(host.settings?.settings.autonomy, "full-auto");
+		await withTimeout(
+			host.patchSettings({ "safety.autonomy": "full-auto" }),
+			COMMAND_TIMEOUT_MS,
+			"the global autonomy patch",
+		);
+		equal(host.settings?.settings["safety.autonomy"], "full-auto");
 		equal(host.snapshot().session?.autonomy, "read-only");
 		equal(host.snapshot().session?.autonomySource, "session");
 
