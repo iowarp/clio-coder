@@ -615,7 +615,7 @@ Deno.test("with no project open the rail offers a path field and the canvas expl
 
 Deno.test("a pending approval is announced, titled, and never leaks wire identifiers", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("awaiting-approval"),
+		clioCoder: clioSnapshotFixture("awaiting-approval"),
 		activeTurn: {
 			turnId: "turn-1",
 			startedAt: "2026-08-18T12:03:00.000Z",
@@ -650,7 +650,7 @@ Deno.test("a pending approval is announced, titled, and never leaks wire identif
 
 Deno.test("a running turn shows elapsed work and offers stop instead of send", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("running"),
+		clioCoder: clioSnapshotFixture("running"),
 		activeTurn: {
 			turnId: "turn-1",
 			startedAt: new Date().toISOString(),
@@ -682,7 +682,7 @@ Deno.test("an unknown session is explained honestly and cannot be resumed or del
 			state: "unknown",
 			hosted: false,
 		}],
-		clio: clioSnapshotFixture("idle", { session: null }),
+		clioCoder: clioSnapshotFixture("idle", { session: null }),
 	});
 	const html = render(stateWith(workspace));
 	match(
@@ -694,7 +694,7 @@ Deno.test("an unknown session is explained honestly and cannot be resumed or del
 
 Deno.test("a Clio Coder failure is visible in the conversation region without opening anything", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("failed", {
+		clioCoder: clioSnapshotFixture("failed", {
 			session: null,
 			lastFailure: {
 				code: "acp-process-exited",
@@ -835,7 +835,7 @@ Deno.test("the session rail renders state, attribution, and the actions each ses
 
 Deno.test("a resumed session with truncated replay says so without claiming lost context", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("idle", {
+		clioCoder: clioSnapshotFixture("idle", {
 			session: {
 				id: "session-alpha-0001",
 				target: "lmstudio",
@@ -893,7 +893,7 @@ Deno.test("an unknown session can be neither resumed nor deleted, and says why",
 				label: null,
 			}),
 		],
-		clio: clioSnapshotFixture("idle", { session: null }),
+		clioCoder: clioSnapshotFixture("idle", { session: null }),
 	});
 	const html = render(stateWith(workspace));
 	match(
@@ -918,7 +918,7 @@ Deno.test("a Clio Coder that cannot list, label, or delete sessions hides those 
 				state: "open",
 			}),
 		],
-		clio: clioSnapshotFixture("idle", {
+		clioCoder: clioSnapshotFixture("idle", {
 			capabilities: {
 				load: false,
 				list: false,
@@ -1075,7 +1075,7 @@ Deno.test("the settings page claims a target's health only after that target was
 
 Deno.test("a Clio Coder without the targets capability says so instead of showing an empty list", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("idle", {
+		clioCoder: clioSnapshotFixture("idle", {
 			capabilities: {
 				load: true,
 				list: true,
@@ -1200,7 +1200,7 @@ Deno.test("a patched target or model is labelled next turn while a patched auton
 
 Deno.test("a pending approval is repeated in a banner outside the scrolling conversation", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("awaiting-approval"),
+		clioCoder: clioSnapshotFixture("awaiting-approval"),
 		activeTurn: {
 			turnId: "turn-1",
 			startedAt: "2026-08-18T12:03:00.000Z",
@@ -1242,7 +1242,7 @@ Deno.test("a pending approval is repeated in a banner outside the scrolling conv
 
 Deno.test("an approval past its escalation point is marked escalated and announced", () => {
 	const base = {
-		clio: clioSnapshotFixture("awaiting-approval"),
+		clioCoder: clioSnapshotFixture("awaiting-approval"),
 		activeTurn: {
 			turnId: "turn-1",
 			startedAt: "2026-08-18T12:03:00.000Z",
@@ -1289,7 +1289,7 @@ Deno.test("an approval past its escalation point is marked escalated and announc
 Deno.test("a tool call that has been open past thirty seconds says so", () => {
 	const longStart = new Date(Date.now() - 45_000).toISOString();
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("running"),
+		clioCoder: clioSnapshotFixture("running"),
 		activeTurn: {
 			turnId: "turn-1",
 			startedAt: longStart,
@@ -1337,7 +1337,7 @@ Deno.test("a tool call that has been open past thirty seconds says so", () => {
 
 Deno.test("a repeated command shape is reported as Clio Coder's finding, never as a GUI guess", () => {
 	const workspace = workspaceFixture(FIXTURE_PROJECT_ID, "Alpha", {
-		clio: clioSnapshotFixture("running"),
+		clioCoder: clioSnapshotFixture("running"),
 		activeTurn: {
 			turnId: "turn-1",
 			startedAt: new Date().toISOString(),

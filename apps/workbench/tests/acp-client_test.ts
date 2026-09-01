@@ -168,7 +168,7 @@ function text(value: Uint8Array): string {
 function initialize(client: AcpClient, params: Record<string, unknown> = {}): Promise<unknown> {
 	return client.request("initialize", {
 		protocolVersion: 1,
-		clientInfo: { name: "clio-workbench-tests", version: "0.0.0" },
+		clientInfo: { name: "clio-coder-workbench-tests", version: "0.0.0" },
 		clientCapabilities: {},
 		...params,
 	}, 2_000);

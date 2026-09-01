@@ -1253,7 +1253,7 @@ Deno.test("three prompts share one session and the third sees the first two", as
 		const openedEvent = (await collectThrough(socket, "project.opened")).at(-1);
 		ok(openedEvent?.kind === "project.opened");
 		const projectId = openedEvent.payload.workspace.project.id;
-		const sessionId = openedEvent.payload.workspace.clio.session?.id;
+		const sessionId = openedEvent.payload.workspace.clioCoder.session?.id;
 		ok(sessionId === undefined || typeof sessionId === "string");
 
 		const answers: string[] = [];
@@ -1286,7 +1286,7 @@ Deno.test("three prompts share one session and the third sees the first two", as
 		const timeline = workspace.timeline as Array<Record<string, unknown>>;
 		equal(timeline.filter((item) => item.kind === "request").length, 3);
 		ok(timeline.every((item) => item.origin === "live"));
-		const session = (workspace.clio as Record<string, unknown>).session as Record<string, unknown>;
+		const session = (workspace.clioCoder as Record<string, unknown>).session as Record<string, unknown>;
 		equal(session.target, "lmstudio");
 		equal(session.model, "qwen3.8-27b");
 		equal(session.resumed, false);
@@ -1320,7 +1320,7 @@ Deno.test("closing and reopening a session replays the branch Clio Coder will ex
 		for (let index = 0; index < 64 && boundIndex < 0; index += 1) {
 			const event = await socket.readEvent();
 			if (event.kind.startsWith("turn.")) replayed.push(event.kind);
-			if (event.kind === "clio.state" && event.payload.snapshot.session?.resumed === true) boundIndex = index;
+			if (event.kind === "clio-coder.state" && event.payload.snapshot.session?.resumed === true) boundIndex = index;
 		}
 		ok(boundIndex >= 0, "the resumed session state never arrived");
 		deepStrictEqual(replayed, [
@@ -1335,7 +1335,7 @@ Deno.test("closing and reopening a session replays the branch Clio Coder will ex
 
 		const bootstrap = await (await fetch(new URL("/api/bootstrap", running.url))).json() as Record<string, unknown>;
 		const workspace = bootstrap.workspace as Record<string, unknown>;
-		const session = (workspace.clio as Record<string, unknown>).session as Record<string, unknown>;
+		const session = (workspace.clioCoder as Record<string, unknown>).session as Record<string, unknown>;
 		equal(session.id, earlier.id);
 		equal(session.resumed, true);
 		equal(session.replayedTurns, 2);
@@ -1432,7 +1432,7 @@ Deno.test("a reload at every phase neither orphans nor duplicates the child", as
 			if (pendingPermissionId === null) await delay(50);
 		}
 		ok(snapshot.kind === "project.opened");
-		equal(snapshot.payload.workspace.clio.phase, "awaiting-approval");
+		equal(snapshot.payload.workspace.clioCoder.phase, "awaiting-approval");
 		equal(snapshot.payload.workspace.activeTurn?.turnId, turnId);
 
 		// cancelling, then settled
@@ -1625,8 +1625,8 @@ Deno.test("settings, targets, and autonomy round-trip over the socket and reach 
 		await sendCommand(socket, "request-session", "session.new", { projectId });
 		await collectThrough(socket, "session.list");
 		await sendCommand(socket, "request-autonomy", "autonomy.set", { projectId, level: "read-only" });
-		const stated = (await collectThrough(socket, "clio.state")).at(-1);
-		ok(stated?.kind === "clio.state");
+		const stated = (await collectThrough(socket, "clio-coder.state")).at(-1);
+		ok(stated?.kind === "clio-coder.state");
 		equal(stated.payload.snapshot.session?.autonomy, "read-only");
 		equal(stated.payload.snapshot.session?.autonomySource, "session");
 

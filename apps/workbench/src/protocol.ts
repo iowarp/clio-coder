@@ -360,7 +360,7 @@ export const SERVER_EVENT_KINDS = [
 	"project.snapshot",
 	"fs.changed",
 	"fs.delete.challenge",
-	"clio.state",
+	"clio-coder.state",
 	"session.list",
 	"settings.state",
 	"config.state",
@@ -1731,8 +1731,8 @@ export interface WireEvalReport {
 	 * relation it establishes does.
 	 */
 	readonly servingGroup: number;
-	readonly clioVersion: string | null;
-	readonly clioCommit: string | null;
+	readonly clioCoderVersion: string | null;
+	readonly clioCoderCommit: string | null;
 	readonly platform: string | null;
 	readonly node: string | null;
 	readonly matrix: {
@@ -2094,7 +2094,7 @@ export interface WireProjectWorkspace {
 	readonly treeTruncated: boolean;
 	readonly sessions: readonly WireSessionSummary[];
 	readonly sessionsTruncated: boolean;
-	readonly clio: WireClioSnapshot;
+	readonly clioCoder: WireClioSnapshot;
 	readonly timeline: readonly WireTimelineItem[];
 	readonly timelineTruncated: boolean;
 	readonly activeTurn: WireActiveTurn | null;
@@ -2388,7 +2388,7 @@ export interface ServerEventPayloadByKind {
 	readonly "project.snapshot": ProjectSnapshotPayload;
 	readonly "fs.changed": ProjectSnapshotPayload;
 	readonly "fs.delete.challenge": FsDeleteChallengePayload;
-	readonly "clio.state": ClioStatePayload;
+	readonly "clio-coder.state": ClioStatePayload;
 	readonly "session.list": SessionListPayload_;
 	readonly "settings.state": SettingsStatePayload;
 	readonly "config.state": ConfigStatePayload;
@@ -5956,8 +5956,8 @@ function validateEvalReport(value: unknown, label: string): WireEvalReport {
 		"startedAt",
 		"suiteId",
 		"servingGroup",
-		"clioVersion",
-		"clioCommit",
+		"clioCoderVersion",
+		"clioCoderCommit",
 		"platform",
 		"node",
 		"matrix",
@@ -6149,8 +6149,8 @@ function validateEvalReport(value: unknown, label: string): WireEvalReport {
 		startedAt,
 		suiteId: expectPresentationText(record.suiteId, `${label}.suiteId`, 128),
 		servingGroup: expectInteger(record.servingGroup, `${label}.servingGroup`, 1),
-		clioVersion: expectNullablePresentationText(record.clioVersion, `${label}.clioVersion`, 64),
-		clioCommit: expectNullablePresentationText(record.clioCommit, `${label}.clioCommit`, 64),
+		clioCoderVersion: expectNullablePresentationText(record.clioCoderVersion, `${label}.clioCoderVersion`, 64),
+		clioCoderCommit: expectNullablePresentationText(record.clioCoderCommit, `${label}.clioCoderCommit`, 64),
 		platform: expectNullablePresentationText(record.platform, `${label}.platform`, 64),
 		node: expectNullablePresentationText(record.node, `${label}.node`, 64),
 		matrix: {
@@ -7056,7 +7056,7 @@ function validateWireWorkspace(
 		"treeTruncated",
 		"sessions",
 		"sessionsTruncated",
-		"clio",
+		"clioCoder",
 		"timeline",
 		"timelineTruncated",
 		"activeTurn",
@@ -7090,7 +7090,7 @@ function validateWireWorkspace(
 			record.sessionsTruncated,
 			`${label}.sessionsTruncated`,
 		),
-		clio: validateClioSnapshot(record.clio, `${label}.clio`),
+		clioCoder: validateClioSnapshot(record.clioCoder, `${label}.clioCoder`),
 		timeline: expectArray(
 			record.timeline,
 			`${label}.timeline`,
@@ -7252,7 +7252,7 @@ function validateServerPayload(
 		}
 		case "fs.delete.challenge":
 			return validateWireDeleteChallenge(value, label);
-		case "clio.state": {
+		case "clio-coder.state": {
 			const record = expectExactKeys(value, label, ["snapshot"]);
 			return {
 				snapshot: validateClioSnapshot(record.snapshot, `${label}.snapshot`),
@@ -7736,7 +7736,7 @@ const PROJECT_CONTEXT_EVENT_KINDS = new Set<ServerEventKind>([
 	"project.snapshot",
 	"fs.changed",
 	"fs.delete.challenge",
-	"clio.state",
+	"clio-coder.state",
 	"session.list",
 	"settings.state",
 	"config.state",

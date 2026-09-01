@@ -613,7 +613,7 @@ class WorkbenchRuntime implements HostSink {
 			treeTruncated: open.treeTruncated,
 			sessions: sessions.sessions,
 			sessionsTruncated: sessions.truncated,
-			clio: open.host.snapshot(),
+			clioCoder: open.host.snapshot(),
 			timeline: open.projection.timeline,
 			timelineTruncated: open.projection.timelineTruncated,
 			activeTurn: open.projection.activeTurn,
@@ -687,9 +687,9 @@ class WorkbenchRuntime implements HostSink {
 		const open = this.#open;
 		if (open === null) return;
 		switch (event.type) {
-			case "clio.state":
+			case "clio-coder.state":
 				if (event.projectId !== open.project.id) return;
-				this.#broadcast("clio.state", { projectId: event.projectId }, {
+				this.#broadcast("clio-coder.state", { projectId: event.projectId }, {
 					snapshot: event.snapshot,
 				});
 				return;

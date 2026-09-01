@@ -276,7 +276,7 @@ function assertPhaseMatchesPendingApproval(sink: RecordingSink): void {
 	let projection: TurnProjection = emptyTurnProjection;
 	let checked = 0;
 	for (const event of sink.events) {
-		if (event.type === "clio.state") {
+		if (event.type === "clio-coder.state") {
 			const awaiting = event.snapshot.phase === "awaiting-approval";
 			equal(
 				projection.pendingPermission !== null,
@@ -417,7 +417,7 @@ Deno.test("allowlisted protocol metadata reports only numeric versions", async (
 	try {
 		await rejects(test.host.open(), assertHostError("not-ready"));
 		deepStrictEqual(test.host.snapshot().lastFailure, {
-			code: "clio-protocol-version-unsupported",
+			code: "clio-coder-protocol-version-unsupported",
 			summary: "Clio Coder does not support the ACP protocol version required by the GUI. Supported versions: 1.",
 		});
 		ok(!JSON.stringify(test.sink.events).includes("unsupported protocol version"));
@@ -469,7 +469,7 @@ Deno.test("an allowlisted admission reason maps to fixed public code and prose",
 			},
 			{
 				outcome: "failed",
-				code: "clio-admission-model-not-configured",
+				code: "clio-coder-admission-model-not-configured",
 				summary: "Clio Coder has no model configured for the orchestrator. Choose one in Settings.",
 				source: "reported-by-clio",
 			},
@@ -611,12 +611,12 @@ for (const decision of ["allow_once", "reject_once"] as const) {
 			equal(
 				test.sink.events
 					.slice(requestIndex + 1, resolvedIndex)
-					.filter((event) => event.type === "clio.state" && event.snapshot.phase === "running").length,
+					.filter((event) => event.type === "clio-coder.state" && event.snapshot.phase === "running").length,
 				0,
 			);
 			const next = test.sink.events[resolvedIndex + 1];
-			equal(next?.type, "clio.state");
-			equal(next?.type === "clio.state" ? next.snapshot.phase : null, "running");
+			equal(next?.type, "clio-coder.state");
+			equal(next?.type === "clio-coder.state" ? next.snapshot.phase : null, "running");
 			const projection = JSON.stringify(test.sink.events);
 			ok(!projection.includes("fixture-permission-1"));
 			ok(!projection.includes("fixture-tool-1"));
@@ -859,7 +859,7 @@ Deno.test("a chained permission remains awaiting approval after the preceding de
 			equal(test.host.phase, "awaiting-approval");
 			equal(
 				test.sink.events.slice(secondIndex + 1).filter((event) =>
-					event.type === "clio.state" && event.snapshot.phase === "running"
+					event.type === "clio-coder.state" && event.snapshot.phase === "running"
 				).length,
 				0,
 			);
@@ -919,7 +919,7 @@ Deno.test("abandon rejects a parked permission as a disconnect and invalidates i
 		equal(terminal.payload.code, "client-disconnected");
 		equal(
 			test.sink.events.slice(requestIndex + 1).filter((event) =>
-				event.type === "clio.state" && event.snapshot.phase === "running"
+				event.type === "clio-coder.state" && event.snapshot.phase === "running"
 			).length,
 			0,
 		);
@@ -994,7 +994,9 @@ Deno.test("a timed-out prompt requests cancel-first retirement and never reports
 		equal(test.sink.ofType("turn.tool").filter((event) => event.payload.status === "canceled").length, 1);
 		await waitFor(() => test.host.phase === "failed", "failed phase after a prompt timeout");
 		equal(
-			test.sink.events.slice(started).filter((event) => event.type === "clio.state" && event.snapshot.phase === "idle")
+			test.sink.events.slice(started).filter((event) =>
+				event.type === "clio-coder.state" && event.snapshot.phase === "idle"
+			)
 				.length,
 			0,
 		);
@@ -1018,7 +1020,9 @@ Deno.test("a child that exits mid-turn fails the turn and never reports idle fir
 		equal(terminal.payload.outcome, "failed");
 		await waitFor(() => test.host.phase === "failed", "failed phase after a child exit");
 		equal(
-			test.sink.events.slice(started).filter((event) => event.type === "clio.state" && event.snapshot.phase === "idle")
+			test.sink.events.slice(started).filter((event) =>
+				event.type === "clio-coder.state" && event.snapshot.phase === "idle"
+			)
 				.length,
 			0,
 		);
@@ -1496,7 +1500,7 @@ Deno.test("max turn requests projects exactly 128 tool starts and suppresses the
 			},
 			{
 				outcome: "failed",
-				code: "clio-max_turn_requests",
+				code: "clio-coder-max_turn_requests",
 				stopReason: "max_turn_requests",
 				source: "reported-by-clio",
 			},

@@ -18,7 +18,7 @@ import {
 	type HostTurnContext,
 } from "../clio-host.ts";
 
-const CLI_OVERRIDE = "CLIO_WORKBENCH_CLI_ENTRY";
+const CLI_OVERRIDE = "CLIO_CODER_GUI_CLI_ENTRY";
 const DEFAULT_CLI_ENTRY = fileURLToPath(new URL("../../../dist/cli/index.js", import.meta.url));
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const WIRE_PROXY = fileURLToPath(new URL("./acp-wire-proxy.mjs", import.meta.url));
@@ -437,7 +437,7 @@ function assertContextBinding(sink: RecordingSink, context: HostTurnContext): vo
 	const turnEvents = sink.events.filter(isTurnEvent);
 	ok(turnEvents.length > 0, "the real turn produced no projected events");
 	for (const event of turnEvents) deepStrictEqual(event.context, context);
-	for (const event of sink.ofType("clio.state")) equal(event.projectId, context.projectId);
+	for (const event of sink.ofType("clio-coder.state")) equal(event.projectId, context.projectId);
 }
 
 function assertProviderExchange(fixture: ProviderFixture): void {
@@ -722,7 +722,7 @@ async function runJointCase(decision: PermissionDecision): Promise<void> {
 		equal(resolved.payload.decision, decision === "allow_once" ? "allow-once" : "reject");
 		const terminal = await waitForEvent(sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
 		equal(terminal.payload.outcome, "completed");
-		equal(terminal.payload.code, "clio-completed");
+		equal(terminal.payload.code, "clio-coder-completed");
 		equal(terminal.payload.stopReason, "end_turn");
 		deepStrictEqual(terminal.payload.usage, { input: 12, output: 8, cacheRead: 0, cacheWrite: 0, reasoning: 0 });
 		equal(sink.ofType("turn.terminal").filter((event) => event.context.turnId === context.turnId).length, 1);
@@ -949,7 +949,7 @@ Deno.test({
 					(event) => event.context.turnId === context.turnId,
 				);
 				equal(terminal.payload.outcome, "completed");
-				equal(terminal.payload.code, "clio-completed");
+				equal(terminal.payload.code, "clio-coder-completed");
 			}
 			deepStrictEqual(contexts.map((context) => context.turnId), ["turn-1", "turn-2", "turn-3"]);
 			ok(contexts.every((context) => context.sessionId === contexts[0]?.sessionId));
@@ -1116,7 +1116,7 @@ Deno.test({
 				(event) => event.context.turnId === context.turnId,
 			);
 			equal(terminal.payload.outcome, "failed");
-			equal(terminal.payload.code, "clio-permission-expired");
+			equal(terminal.payload.code, "clio-coder-permission-expired");
 			equal(
 				terminal.payload.summary,
 				"An approval waited past Clio Coder's own ceiling. Clio Coder stopped the turn; nothing was denied.",
@@ -1188,7 +1188,7 @@ Deno.test({
 			const terminal = test.sink.ofType("turn.terminal").find((event) => event.context.turnId === context.turnId);
 			ok(terminal);
 			equal(terminal.payload.outcome, "failed");
-			equal(terminal.payload.code, "clio-max_turn_requests");
+			equal(terminal.payload.code, "clio-coder-max_turn_requests");
 			equal(terminal.payload.stopReason, "max_turn_requests");
 			const starts = test.sink.ofType("turn.tool").filter((event) => event.payload.status === "in_progress");
 			equal(starts.length, 128);

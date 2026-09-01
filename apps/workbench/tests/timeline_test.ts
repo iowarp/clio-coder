@@ -87,7 +87,7 @@ function terminal(
 		turnId,
 		payload: {
 			outcome,
-			code: `clio-${outcome}`,
+			code: `clio-coder-${outcome}`,
 			summary: `Turn ${outcome}.`,
 			...(usage === undefined ? {} : { usage }),
 			source: "reported-by-clio",
@@ -331,7 +331,7 @@ Deno.test("a failed turn projects a failure card carrying its code", () => {
 	const card = state.timeline.find((item) => item.id === "turn-1:terminal");
 	equal(card?.kind, "failure");
 	equal(card?.title, "Turn failed");
-	equal(card?.detail, "clio-failed");
+	equal(card?.detail, "clio-coder-failed");
 });
 
 Deno.test("a streamed card is bounded and says so once", () => {
