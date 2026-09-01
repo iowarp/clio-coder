@@ -197,8 +197,20 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 
 			const fixed = await runCli(["doctor", "--fix", "--json"], { env: scratch.env });
 			strictEqual(fixed.code, 0, fixed.stderr);
-			strictEqual(JSON.parse(fixed.stdout).fix, true);
+			const fixedReport = JSON.parse(fixed.stdout) as {
+				fix: boolean;
+				findings: Array<{ name: string; level?: string; detail: string }>;
+			};
+			strictEqual(fixedReport.fix, true);
 			ok(existsSync(join(scratch.root, "config", "settings.yaml")));
+			const freshSettings = readFileSync(join(scratch.root, "config", "settings.yaml"), "utf8");
+			match(freshSettings, /panes:\n {4}enabled: off[\s\S]*layout: off[\s\S]*files:\n {6}enabled: false/u);
+			for (const finding of fixedReport.findings.filter((entry) =>
+				/panes|yazi|external tool (herdr|yazi)/u.test(entry.name),
+			)) {
+				strictEqual(finding.level === undefined || finding.level === "ok", true, `${finding.name}: ${finding.detail}`);
+				strictEqual(/install with|set interface\.panes|--with-panes/u.test(finding.detail), false, finding.detail);
+			}
 
 			const incomplete = await runCli(["configure", "--runtime", "openai-compat"], { env: scratch.env });
 			strictEqual(incomplete.code, 2);

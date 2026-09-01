@@ -7,7 +7,19 @@ import {
 } from "../domains/mux/index.js";
 import { describeResolution, toolStatuses } from "../domains/toolchain/index.js";
 
-function yaziProfileFinding(): DoctorFinding {
+export interface ToolchainFindingOptions {
+	panesEnabled?: boolean;
+	filesEnabled?: boolean;
+}
+
+function yaziProfileFinding(enabled: boolean): DoctorFinding {
+	if (!enabled) {
+		return {
+			ok: true,
+			name: "yazi managed profile",
+			detail: "disabled by settings",
+		};
+	}
 	try {
 		const profile = inspectCurrentYaziProfile();
 		return {
@@ -43,15 +55,24 @@ function yaziProfileFinding(): DoctorFinding {
  * being used, and a row that only said "not found" would send them looking for
  * a binary that is right there on their PATH.
  */
-export function toolchainFindings(): DoctorFinding[] {
+export function toolchainFindings(options: ToolchainFindingOptions = {}): DoctorFinding[] {
+	const panesEnabled = options.panesEnabled ?? true;
+	const filesEnabled = options.filesEnabled ?? true;
 	const tools = toolStatuses().map((status) => ({
 		ok: true,
 		name: `external tool ${status.id}`,
-		// The rejection and the remedy both live inside the shared resolution
-		// sentence, so this row and `clio-coder tools status` cannot describe the
-		// same machine differently.
-		detail: describeResolution(status),
-		level: status.resolution.source === "none" ? ("warn" as const) : ("ok" as const),
+		// Active integrations share the tools-status resolution sentence. Disabled
+		// experimental integrations stay neutral and do not advertise setup work.
+		detail:
+			(status.id === "herdr" && !panesEnabled) || (status.id === "yazi" && !filesEnabled)
+				? "experimental integration disabled by settings"
+				: describeResolution(status),
+		level:
+			(status.id === "herdr" && !panesEnabled) || (status.id === "yazi" && !filesEnabled)
+				? ("ok" as const)
+				: status.resolution.source === "none"
+					? ("warn" as const)
+					: ("ok" as const),
 	}));
-	return [...tools, yaziProfileFinding()];
+	return [...tools, yaziProfileFinding(filesEnabled)];
 }

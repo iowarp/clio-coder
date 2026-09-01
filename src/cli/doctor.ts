@@ -1,3 +1,4 @@
+import { readSettings } from "../core/config.js";
 import {
 	formatDoctorReport,
 	isUninitializedHome,
@@ -39,6 +40,16 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// gets every check on the home it just built.
 	const untouched = !fix && isUninitializedHome();
 	const findings = runDoctor({ fix });
+	let panesEnabled = false;
+	let filesEnabled = false;
+	try {
+		const panes = readSettings().interface.panes;
+		panesEnabled = panes.enabled !== "off";
+		filesEnabled = panesEnabled && panes.files.enabled;
+	} catch {
+		// The settings finding already reports an unreadable document. Optional
+		// integrations stay inactive rather than adding secondary warnings.
+	}
 	const storageChecks = untouched ? [] : [stateStorageFinding()];
 	const runtimeChecks = await runDoctorRuntimeChecks();
 	// Every model pointer is checked against what its target advertises, so a
@@ -55,12 +66,12 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// Resolution reads PATH and the vendor root and creates nothing, but on an
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
-	const toolChecks = untouched ? [] : toolchainFindings();
+	const toolChecks = untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled });
 	// The pane sweep pings a socket and reads PATH; it creates nothing except the
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.
 	const paneChecks = untouched ? [] : await panesFindings();
-	const namingChecks = namingFootprintFindings({ fix });
+	const namingChecks = namingFootprintFindings({ fix, yaziEnabled: filesEnabled });
 	const all = [
 		...findings,
 		...storageChecks,

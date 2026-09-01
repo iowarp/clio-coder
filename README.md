@@ -71,9 +71,6 @@ proprietary binary, taking the tree from 387MB to 143MB. Everything but the
   workspace-aware file picker, `!` runs a public shell command whose result can
   enter model context, and `!!` runs a context-excluded shell command that
   remains visible to you but is never sent to a model.
-- **herdr can host managed docks.** The opt-in
-  `interface.panes.layout: workers` layout opens a live workers dock beside
-  Clio; `cockpit` adds the files dock.
 - **The local skills marketplace can meet a request in flight.** Clio may offer
   a matching uninstalled skill, but every install initiated by that promotion
   flow is hard-gated to Clio's own shipped catalog or the
@@ -94,7 +91,7 @@ The release also hardens the surfaces that tend to fail outside unit tests:
 plain `doctor` is read-only again, configure cancellation exits correctly,
 trace empty states preserve their JSON contracts, fleet views wrap and honor
 `NO_COLOR`, Settings and other interactive prose stop losing remedy text, and
-the Workbench and herdr dock lifecycle close their timing and recovery gaps.
+the Workbench lifecycle closes its timing and recovery gaps.
 
 |  | You are | Start here |
 | --- | --- | --- |
@@ -246,7 +243,7 @@ disk use the seven-area vocabulary below.
 | `targets` | Provider/runtime connections, advertised models, capabilities, and routing roles |
 | `context` | Working-set eviction, compaction, and proactive task memory |
 | `safety` | Autonomy, cost/tool/read ceilings, and the review watchdog |
-| `interface` | Output detail, terminal mode, streaming, notifications, keybindings, and panes |
+| `interface` | Output detail, terminal mode, streaming, notifications, and keybindings |
 | `integrations` | Project resource trust, external agents, runtime plugins, resource libraries, and Git attribution |
 
 When upgrading an existing install, run `clio-coder upgrade`. The v1-to-v2
@@ -275,26 +272,7 @@ Bang operators arm only for a non-empty, typed, single-line draft. A
 bracketed-pasted `!` or `!!` line, or any multiline draft beginning with one,
 is treated as literal prompt text rather than executed.
 
-### Optional herdr docks
-
-Panes remain off by default. Inside an existing herdr session, persist guest
-mode and the workers layout in `settings.yaml`:
-
-```yaml
-version: 2
-interface:
-  panes:
-    enabled: auto
-    layout: workers
-```
-
-For a one-session activation, keep `layout: workers` and run
-`clio-coder --with-panes` instead of persisting `enabled: auto`. The workers
-dock opens the live run viewer to the right of Clio; `layout: cockpit` also
-opens the managed files dock when files are enabled. Managed docks close on a
-clean Clio exit, while adoption of a surviving dock is reserved for crash
-recovery. `embedded` is accepted as a setting but explicitly reports that it
-is not implemented; guest mode is the working rung in v0.4.1.
+Panes, docks, and Yazi integration are experimental and opt-in in v0.4.1; enable them explicitly under `interface.panes` in `settings.yaml`.
 
 Outside the TUI, the same engine runs headless and speaks to editors:
 

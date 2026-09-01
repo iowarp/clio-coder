@@ -54,6 +54,9 @@ describe("settings and migration boundary", () => {
 		deepStrictEqual(defaults.issues, []);
 		deepStrictEqual(defaults.settings, DEFAULT_SETTINGS);
 		strictEqual(defaults.settings.version, 2);
+		strictEqual(defaults.settings.interface.panes.enabled, "off");
+		strictEqual(defaults.settings.interface.panes.layout, "off");
+		strictEqual(defaults.settings.interface.panes.files.enabled, false);
 
 		const invalid = validateSettings({ version: 2, orchestrator: { target: "legacy" }, mystery: true });
 		ok(invalid.issues.some((issue) => issue.path === "orchestrator.target"));
@@ -85,6 +88,19 @@ targets:
 		await settingsV2.up(stateDir);
 		strictEqual(readFileSync(settingsFile, "utf8"), firstWrite);
 		strictEqual(readFileSync(`${settingsFile}.v1.bak`, "utf8"), original);
+		strictEqual(readSettings().interface.panes.enabled, "off");
+		strictEqual(readSettings().interface.panes.layout, "off");
+		strictEqual(readSettings().interface.panes.files.enabled, false);
+	});
+
+	it("carries only explicit v1 pane choices into v2", async () => {
+		writeFileSync(settingsFile, "version: 1\npanes:\n  enabled: auto\n  yazi:\n    enabled: true\n", "utf8");
+
+		await settingsV2.up(stateDir);
+		const migrated = readSettings().interface.panes;
+		strictEqual(migrated.enabled, "auto");
+		strictEqual(migrated.layout, "off");
+		strictEqual(migrated.files.enabled, true);
 	});
 
 	it("refuses a v1/v2 collision without replacing or backing up the file", async () => {
