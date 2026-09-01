@@ -9,16 +9,20 @@ This page is the complete inventory, and the `environment-variable-inventory` ch
 
 ## Guardrail overrides
 
-Durable values live in the `guardrails:` section of settings.yaml (see [configuration-and-targets.md](configuration-and-targets.md)). These env vars override them for one process; resolution is env > settings > built-in default, and every value is a positive integer. Resolution lives in `src/core/guardrails.ts`.
+Durable values live under `safety.limits` or `fleet.limits` in `settings.yaml`
+(see [Configuration and Targets](configuration-and-targets.md)). These
+environment variables override them for one process; resolution is environment,
+then settings, then the built-in default. Resolution lives in
+`src/core/guardrails.ts`.
 
 | Variable | Settings key | Default | Controls |
 | --- | --- | --- | --- |
-| `CLIO_CODER_TURN_TOOL_CALL_BUDGET` | `guardrails.turnToolCallBudget` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
-| `CLIO_CODER_WORKER_TOOL_CALL_CAP` | `guardrails.workerToolCallCap` | 150 | Lifetime ceiling on tool calls one dispatched worker may execute. Calls the harness refused (reserve steering, synthesis-lockout denials) never spend it. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
-| `CLIO_CODER_MAX_DISPATCH_RUNS` | `guardrails.maxDispatchRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). The older `CLIO_CODER_MAX_RUNS` spelling still reads when the canonical name is unset. |
-| `CLIO_CODER_READ_MAX_BYTES` | `guardrails.readMaxBytes` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
-| `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | `guardrails.observationTurnBudgetBytes` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |
-| `CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS` | `guardrails.internalDispatchTimeoutMs` | 900000 | Wall-clock cap for one internal generator dispatch: the wiki documenter and the bootstrap scout (`src/cli/internal-dispatch.ts`). |
+| `CLIO_CODER_TURN_TOOL_CALL_BUDGET` | `safety.limits.chatToolCallsPerTurn` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
+| `CLIO_CODER_WORKER_TOOL_CALL_CAP` | `fleet.limits.toolCallsPerRun` | 150 | Lifetime ceiling on tool calls one dispatched worker may execute. Calls the harness refused (reserve steering, synthesis-lockout denials) never spend it. Agent recipe budgets may narrow but never widen it (`src/engine/loop-guard.ts`). |
+| `CLIO_CODER_MAX_DISPATCH_RUNS` | `fleet.history.maxRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). The older `CLIO_CODER_MAX_RUNS` spelling still reads when the canonical name is unset. |
+| `CLIO_CODER_READ_MAX_BYTES` | `safety.limits.readBytesPerCall` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
+| `CLIO_CODER_OBSERVATION_TURN_BUDGET_BYTES` | `safety.limits.observationBytesPerTurn` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |
+| `CLIO_CODER_INTERNAL_DISPATCH_TIMEOUT_MS` | `fleet.limits.internalRunTimeoutMs` | 900000 | Wall-clock cap for one internal generator dispatch: the wiki documenter and the bootstrap scout (`src/cli/internal-dispatch.ts`). |
 
 ## Behavior knobs without a settings key
 
@@ -45,7 +49,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | 86400000 | How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit (`src/domains/providers/endpoint-slots-store.ts`). |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | `1` strips network tools from every registry in the process; the skills-eval harness sets it for hermetic arms; `--allow-network` clears it (`src/tools/network-policy.ts`). |
-| `CLIO_CODER_SMOOTH_STREAM` | settings value | Per-process override for `terminal.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`. A valid value wins over settings; an invalid value fails safely to `off`. |
+| `CLIO_CODER_SMOOTH_STREAM` | settings value | Per-process override for `interface.smoothStreaming`: `0`/`off`/`false`, `auto`, or `1`/`on`/`true`. A valid value wins over settings; an invalid value fails safely to `off`. |
 | `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` makes smooth-streaming `auto` use the immediate coalescer so a screen reader receives the existing low-motion update behavior. |
 | `CLIO_CODER_INSTANT_SHELL` | on | `0` disables the single-owner Stage 0 interactive shell for immediate rollback. Unset or `1` mounts one terminal/editor owner before service hydration; ACP, headless, ordinary non-TTY, and subcommand paths never mount it. An explicit `CLIO_CODER_INTERACTIVE=1` keeps its force-interactive non-TTY behavior. |
@@ -95,7 +99,7 @@ Set by Clio for its own processes; not operator knobs.
 | Variable | Purpose |
 | --- | --- |
 | `AI_AGENT` | Clio sets this generic child-process attribution marker to `clio-coder` at both shipped entry points and reinforces it for bash tools, fleet workers, registered code steps, and command hooks. Child tooling may read it to identify the agent that launched it (`src/cli/index.ts`, `src/worker/entry.ts`, `src/core/bash-exec.ts`). |
-| `CLIO_CODER_GIT_COMMITS_ENABLED` | Carries the effective `attribution.gitCommits` setting to Clio-controlled child-process seams. It is set from validated settings and is not an operator override (`src/core/git-commit-attribution.ts`). |
+| `CLIO_CODER_GIT_COMMITS_ENABLED` | Carries the effective `integrations.git.commitAttribution` setting to Clio-controlled child-process seams. It is set from validated settings and is not an operator override (`src/core/git-commit-attribution.ts`). |
 | `CLIO_CODER_COMMIT_ASSISTED`, `CLIO_CODER_COMMIT_AUTHORED` | Per-spawn inputs to the managed `prepare-commit-msg` hook, which also requires `AI_AGENT=clio-coder` and `CLIO_CODER_GIT_COMMITS_ENABLED=1`; normal external shells never receive this set. Only assistance and authorship cross the environment. Testing, review, and receipt trailers are composed in process by the fleet seam, so a child shell cannot forge them by exporting a variable (`src/core/git-commit-attribution.ts`). |
 | `CLIO_CODER_GIT_CONFIG_BASE_COUNT`, `CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT` | Bookkeeping that lets each managed hook wrapper remove only Clio's command-scope `core.hooksPath` pair before chaining the repository's own hook of the same name. Existing `GIT_CONFIG_COUNT` entries remain in force; an explicit `core.hooksPath` is treated as composable only when it resolves exactly to the repository's default hooks directory (`src/core/git-commit-attribution.ts`). |
 | `CLIO_CODER_INTERACTIVE` | Marks the interactive TUI process; scrubbed from bash-tool children so nested invocations do not inherit it (`src/cli/clio.ts`, `src/core/bash-exec.ts`). |
@@ -116,4 +120,7 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_TEST_STAGE1_DELAY_MS`, `CLIO_CODER_TEST_STAGE1_FAIL` | `NODE_ENV=test`-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (`src/cli/clio.ts`). |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` (`src/core/init.ts`). |
 
-Variables used only by the Terminal-Bench agent under `benchmarks/community/` and by the install script are not part of the shipped runtime and are documented inline where they are consumed. The live drivers under `benchmarks/internal/` take no environment of their own: the target comes from `--target <id>`.
+Variables used only by external benchmark harnesses or install scripts are not
+part of the shipped runtime and should be documented with those harnesses. The
+reviewable reference suites under `evals/` use the ordinary eval runner and a
+configured `--target <id>` when a model is required.

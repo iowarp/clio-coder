@@ -1,6 +1,6 @@
 # Proactive task memory
 
-> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html).
 
 Clio's proactive task memory protects long-running work from behavioral state
 decay: a requirement, environment fact, failed attempt, or diagnosis can still
@@ -242,7 +242,7 @@ unexamined one:
 
 - `memory.intervention.enabled` stays `true`. It runs the rules tier, which makes
   no model calls, spends no tokens, and produced 4 of the 10 injections.
-- The LLM tier stays opt-in through `background.target` and `background.model`,
+- The LLM tier stays opt-in through `context.memory.target` and `context.memory.model`,
   which is already the case: an unset background role never resolves a client.
   A 10 percent hit rate at 22,868 tokens per injection does not earn a default-on
   position, and it is not so poor that it earns removal from an operator who has
@@ -260,7 +260,7 @@ unexamined one:
 
 ### What a background target costs on a shared local server
 
-If `background.target` names the same server as `orchestrator.target`, that
+If `context.memory.target` names the same server as `chat.target`, that
 server's slots are shared. On a llama.cpp router started with `--parallel 1`
 there is exactly one, and the memory step and the operator's turn contend for it.
 
@@ -289,8 +289,8 @@ arrangement the tier is designed for.
 
 Memory reads a trajectory and writes a fixed envelope. It does not plan, and it
 does not need to be clever. A small non-reasoning model is the right choice, and
-Clio always requests the background route with thinking off regardless of
-`background.thinkingLevel`.
+Clio always requests the memory route with thinking off. Version 2 therefore
+has no configurable memory thinking-level key.
 
 That request reaches the wire wherever the runtime carries a thinking control:
 llama.cpp reads `chat_template_kwargs.enable_thinking`, and LM Studio reads
@@ -342,7 +342,7 @@ memory:
     timeoutMs: 30000
 ```
 
-With `background.target` and `background.model` unset, Clio stays in the
+With `context.memory.target` and `context.memory.model` unset, Clio stays in the
 zero-cost rules tier. `/memory` shows the current tier, last decision, approved
 durable lessons, the live bank, and a bounded history of the last twenty memory
 steps with their trigger, decision, write count, cited-entry count, tier, and
@@ -388,7 +388,7 @@ clio-coder models --target node-a
 clio-coder
 ```
 
-Then inspect `/targets`, `/settings`, and `/memory`. Local co-residency still
+Then inspect `/settings targets`, `/settings`, and `/memory`. Local co-residency still
 matters: the background model, action model, their KV caches, and parallel slots
 must fit the target's available memory. Increase `timeoutMs` for a deliberately
 slow local route; lowering `maxTokens` bounds the visible reminder but does not

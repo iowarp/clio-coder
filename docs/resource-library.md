@@ -21,11 +21,11 @@ skills:
 
 ## Private catalog and remote gating
 
-`library.catalog` selects a private catalog and defaults to `<configDir>/library.yaml`. Relative sources in that file resolve beside the catalog. `library.remote` records an optional git remote URL. `library.sync` defaults to false, and no git process is started while it remains false.
+`integrations.library.catalog` selects a private catalog and defaults to `<configDir>/library.yaml`. Relative sources in that file resolve beside the catalog. `integrations.library.remote` records an optional git remote URL. `integrations.library.sync` defaults to false, and no git process is started while it remains false.
 
-The private catalog repository must name its git remote `library`. Clio checks it with `git remote get-url library`. Run `clio-coder library remote confirm <url>` once after reviewing the configured URL. When `library.remote` is unset, confirmation records the URL as both the configured and confirmed remote. A confirmation that differs from an existing `library.remote` refuses with `library_remote_mismatch`. A missing confirmation or a later settings change refuses synchronization and publishing with `library_remote_unconfirmed`.
+The private catalog repository must name its git remote `library`. Clio checks it with `git remote get-url library`. Run `clio-coder library remote confirm <url>` once after reviewing the configured URL. When `integrations.library.remote` is unset, confirmation records the URL as both the configured and confirmed remote. A confirmation that differs from an existing `integrations.library.remote` refuses with `library_remote_mismatch`. A missing confirmation or a later settings change refuses synchronization and publishing with `library_remote_unconfirmed`.
 
-When `library.sync` is false, both `library sync` and `library push` refuse with `library_sync_disabled` before any process starts. When synchronization is enabled, `library sync` runs `git fetch library` followed by `git merge --ff-only FETCH_HEAD`, and `library push` runs `git push library`. Both commands execute git as an argument vector without a shell.
+When `integrations.library.sync` is false, both `library sync` and `library push` refuse with `library_sync_disabled` before any process starts. When synchronization is enabled, `library sync` runs `git fetch library` followed by `git merge --ff-only FETCH_HEAD`, and `library push` runs `git push library`. Both commands execute git as an argument vector without a shell.
 
 ## CLI
 
@@ -43,7 +43,13 @@ clio-coder library remote confirm <url>
 
 ## In the TUI
 
-The Skills Hub carries one tab per kind. `/library <kind>` opens it on that kind's tab and `/library` alone opens it on Skills, which is also where `/skill` opens. Each tab lists the entries this same discovery finds, with the requirements an entry still needs named in the warning token. Installing from a row runs the same plan-then-write pair `library add` runs, behind a confirmation that states every destination and hash and writes nothing when it is cancelled, and an entry with unresolved requirements is refused by name before an install-with-requirements confirmation offers to write them all. `Enter` on an installed row leads where that kind is invoked from: the composer for an agent, a prompt, or a skill, and the `/fleet run` approval preview for a fleet. See [skills-marketplace.md](skills-marketplace.md) for the key table.
+The Skills Hub carries one tab per kind. `/resources library <kind>` opens the
+requested tab, while `/skill` opens Skills. Each tab lists discovered entries
+and any unresolved requirements. Installing from a row uses the same
+plan-then-write path as `clio-coder library add`, behind a confirmation that
+states every destination and hash and writes nothing when cancelled. `Enter`
+on an installed row leads to its invocation surface. See
+[Skills Marketplace](skills-marketplace.md) for the key table.
 
 ## Installation roots and validation
 

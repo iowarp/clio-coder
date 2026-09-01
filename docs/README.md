@@ -2,103 +2,179 @@
   <img src="../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="96" height="96" />
 </p>
 
-# Clio Coder Documentation
+# Clio Coder documentation
 
-These pages document `v0.4.0` of Clio Coder, an open-source coding orchestrator within the [IOWarp](https://iowarp.ai) scientific computing platform, created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu).
+This is the documentation map for Clio Coder. Start with the path closest to
+what you are trying to do; the deeper references are here when you need exact
+schemas, wire contracts, or architectural invariants.
 
-They are source-aligned guides: when prose and source disagree, prefer the
-current source, tests, and `CHANGELOG.md`.
+The guides track the current source tree. Released behavior is fixed by the
+corresponding Git tag and [changelog](../CHANGELOG.md). If prose and the checked
+source disagree, treat source, schema validation, and contract tests as
+authoritative—and please fix or report the documentation drift.
 
-## Start Here
+## Start here
 
-| Need | Guide |
+| Goal | Guide |
 | --- | --- |
-| Commands, slash commands, operating posture, keybindings, dispatch, verification, and troubleshooting | [commands-and-modes.md](commands-and-modes.md) ([Interactive Blueprint](html/commands_blueprint.html)) |
-| Context window resolution, per-model probe capabilities, token accounting, per-turn snapshots, compaction, and context priming | [context-engine.md](context-engine.md) ([Interactive Blueprint](html/context_blueprint.html)) |
-| Non-destructive working-set eviction, markers, eviction policies, recall by ref, and the `contextEviction` / `contextRecall` records | [context-working-set.md](context-working-set.md) |
-| Runtime targets, local model configuration, fleet profiles, and auth | [configuration-and-targets.md](configuration-and-targets.md) ([Interactive Blueprint](html/configuration_blueprint.html)) |
-| Every environment variable the runtime reads: guardrail overrides, directory layout, debug toggles, and internal plumbing | [environment-variables.md](environment-variables.md) ([Interactive Blueprint](html/environment_blueprint.html)) |
-| Argonne ALCF Sophia/Metis inference targets over Globus OAuth | [alcf-provider.md](alcf-provider.md) ([Interactive Blueprint](html/alcf_blueprint.html)) |
-| Installation, upgrade, reset, uninstallation, configuration folders, and permissions | [installation-and-lifecycle.md](installation-and-lifecycle.md) ([Interactive Blueprint](html/lifecycle_blueprint.html)) |
-| Safety posture, default-deny Bash, project policy, damage-control rules, and typed validation | [safety-model.md](safety-model.md) ([Interactive Blueprint](html/safety_blueprint.html)) |
-| Source layout, compile-time boundaries, domain loading, and runtime data flow | [architecture.md](architecture.md) ([Interactive Blueprint](html/architecture_blueprint.html)) |
-| Why the dispatch domain is not split, which invariants cross the obvious seams, and why direct subpath imports are permitted | [dispatch-architecture-rationale.md](dispatch-architecture-rationale.md) ([Interactive Blueprint](html/dispatch_rationale_blueprint.html)) |
-| Typed dispatch intent: the producer and persisted-contract compatibility tables, refusal reason codes, and the legacy-inference retirement criterion | [dispatch-typed-intent.md](dispatch-typed-intent.md) |
-| Prompt envelope reuse, provider tool delivery, and bounded tool results | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) ([Interactive Blueprints: prompt_envelope](html/prompt_envelope_blueprint.html), [tools](html/tools_blueprint.html)) |
-| In-depth reference for all 20 worker tools: parameters, typical payloads, and error examples | [tool-usage.md](tool-usage.md) ([Interactive Blueprint](html/tool_usage_blueprint.html)) |
-| Developer guide to implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](provider-adapter-cookbook.md) ([Interactive Blueprint](html/provider_adapter_blueprint.html)) |
-| Built-in agent recipes, discovery roots, frontmatter schema, and dispatch admission | [built-in-agents.md](built-in-agents.md) ([Interactive Blueprint](html/agents_blueprint.html)) |
-| Artifact browsing, receipt verification, dispatch diagnostics, and observability routing | [observability.md](observability.md) ([Interactive Blueprint](html/observability_blueprint.html)) |
-| Evidence-aware Git commit role trailers, managed-hook safety, and how platforms render the identity | [git-commit-provenance.md](git-commit-provenance.md) |
-| Where every generated file lands: the working tree, `.clio-coder/`, and the XDG dirs, by audience | [artifact-placement.md](artifact-placement.md) ([Interactive Blueprint](html/artifact_placement_blueprint.html)) |
-| Evidence directory structures, findings, and operator-approved memory retrieval | [evidence-and-memory.md](evidence-and-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
-| Local YAML eval suites, reports, comparisons, and command evidence | [eval-runner.md](eval-runner.md) ([Interactive Blueprint](html/eval_blueprint.html)) |
-| Prompt and skill resources, extension manifests, and portable share archives | [extensions-and-sharing.md](extensions-and-sharing.md) ([Interactive Blueprint](html/extensions_blueprint.html)) |
-| Skills Hub marketplace discovery, install actions, and publishing flow | [skills-marketplace.md](skills-marketplace.md) ([Interactive Blueprint](html/skills_blueprint.html)) |
-| Runtime model refresh, catalog sources, local/cloud model quirks, and benchmarking notes | [model-catalog.md](model-catalog.md) ([Interactive Blueprint](html/models_blueprint.html)) |
-| Active component snapshots and the experimental middleware hook/effect contract | [middleware-and-components.md](middleware-and-components.md) ([Interactive Blueprint](html/middleware_blueprint.html)) |
-| Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](scientific-validation.md) ([Interactive Blueprint](html/validation_blueprint.html)) |
-| Falsifiable Change Manifest JSON templates, auditability, and `clio-coder evolve` | [evolution.md](evolution.md) ([Interactive Blueprint](html/evolution_blueprint.html)) |
-| Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](documentation-guide.md) ([Interactive Blueprint](html/documentation_blueprint.html)) |
-| Typed resource catalogs, private synchronization, installation roots, and library CLI | [resource-library.md](resource-library.md) |
-| Interface layout, colors palette, Unicode character vocabulary, and drawing choreography | [tui-design.md](tui-design.md) ([Interactive Blueprint](html/tui_design_blueprint.html)) |
-| NDJSON parent-child socket protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) ([Interactive Blueprint](html/worker_dispatch_blueprint.html)) |
-| Multi-node fleet dispatch: process-safe admission, attested workers, measured routing, activation, agent automation, topologies, and receipts | [fleet-dispatch.md](fleet-dispatch.md) ([Interactive Blueprint](html/fleet_dispatch_blueprint.html)) |
-| Multi-process capacity leases, heartbeat TTLs, cross-process locks, and cluster drain controls | [capacity-and-scheduling.md](capacity-and-scheduling.md) ([Interactive Blueprint](html/capacity_scheduling_blueprint.html)) |
-| Executable multi-node demo with reviewer gate and receipt provenance walkthrough | [fleet-demo-runbook.md](fleet-demo-runbook.md) |
-| Session lifecycle, on-disk ledger format v4, `/tree` active-path lineage, `/fork`, `/resume`, checkpoints, and recovery | [session-lifecycle.md](session-lifecycle.md) ([Interactive Blueprint](html/session_lifecycle_blueprint.html)) |
-| Agent Client Protocol (ACP) server over stdio, tool mediation, non-stall permissions, and error taxonomy | [acp.md](acp.md) ([Interactive Blueprint](html/acp_blueprint.html)) |
-| Version registry and migration policies for all 9 serialized artifact schemas | [artifact-versions.md](artifact-versions.md) ([Interactive Blueprint](html/artifact_versions_blueprint.html)) |
-| Process exit code taxonomy, `--help` standard, machine-readable JSON streaming, and headless output contracts | [exit-codes-and-output.md](exit-codes-and-output.md) ([Interactive Blueprint](html/exit_codes_blueprint.html)) |
-| Actionable error remediation and diagnostics keyed by exact user-facing messages | [troubleshooting.md](troubleshooting.md) ([Interactive Blueprint](html/troubleshooting_blueprint.html)) |
-| Canonical definitions of 45 core architectural concepts mapped to `src/` types | [glossary.md](glossary.md) ([Interactive Blueprint](html/glossary_blueprint.html)) |
-| Complete source-to-documentation mapping matrix and subsystem coverage status | [documentation-coverage.md](documentation-coverage.md) |
-| Issue-driven development lifecycle: file-ticket through release, label taxonomy, and dogfooding setup | [development-pipeline.md](development-pipeline.md) |
-| Proactive task memory architecture, session task bank, intervention rules, and handoff carrying | [proactive-memory.md](proactive-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
-| WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, and CLI trace subcommands | [trace-store.md](trace-store.md) ([Interactive Blueprint](html/trace_blueprint.html)) |
-| Private context index determinism and target smoke matrices | [evals-internal.md](evals-internal.md) ([Blueprint](html/evals_internal_blueprint.html)) |
-| Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](config-knobs-audit.md) ([Interactive Blueprint](html/config_knobs_audit_blueprint.html)) |
-| Clock and timestamp conventions: durations, instants, ordering, and formatting | [time-conventions.md](time-conventions.md) ([Interactive Blueprint](html/time_conventions_blueprint.html)) |
-| Correct render, PTY, startup, compile-cache, and import-graph measurement endpoints and the 0.3.3 baseline | [performance-methodology.md](performance-methodology.md) |
-| Pi SDK boundary: upstream primitives, attribution, and Clio-owned product policies | [pi-boundary.md](pi-boundary.md) ([Interactive Blueprint](html/pi_boundary_blueprint.html)) |
+| Install Clio and connect the first model | [Installation and Lifecycle](installation-and-lifecycle.md) → [Configuration and Targets](configuration-and-targets.md) |
+| Learn the interactive session and CLI | [Commands and Modes](commands-and-modes.md) |
+| Understand what Clio may read, change, or execute | [Safety Model](safety-model.md) |
+| Diagnose a problem by its exact message | [Troubleshooting](troubleshooting.md) |
 
-Every project Clio works in gets its context from a local `CLIO-CODER.md`,
-bootstrapped and maintained by `clio-coder context init`. It's human-owned and
-versioned by default; this repo's own root `CLIO-CODER.md` is the exception,
-gitignored here for dogfooding so this checkout's copy doesn't collide with
-Clio's own committed docs. Run `clio-coder context init` in this checkout to
-generate one for Clio's own source.
+A minimal first run is:
 
-## Developer Quick Start
+```bash
+npm install -g @iowarp/clio-coder
+clio-coder configure
+cd /path/to/your/project
+clio-coder
+```
+
+Use `clio-coder --help` for the installed command surface and `/help` inside an
+interactive session. `clio-coder doctor` is a read-only installation check;
+`doctor --fix` performs only the repairs it reports.
+
+## Using Clio day to day
+
+| Topic | Guide |
+| --- | --- |
+| Targets, providers, auth, settings v2, routing, and fleet profiles | [Configuration and Targets](configuration-and-targets.md) |
+| Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](model-catalog.md) |
+| Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](alcf-provider.md) |
+| Project handbooks, context windows, accounting, compaction, and indexing | [Context Engine](context-engine.md) |
+| Non-destructive working-set eviction, markers, and recall | [Context Working Set](context-working-set.md) |
+| Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](session-lifecycle.md) |
+| Proactive task memory, interventions, and handoffs | [Proactive Memory](proactive-memory.md) |
+| Skills discovery, marketplace safety, installation, and publishing | [Skills Marketplace](skills-marketplace.md) |
+| Agents, prompts, extensions, and portable share archives | [Extensions and Sharing](extensions-and-sharing.md) |
+| Private resource catalogs and synchronization | [Resource Library](resource-library.md) |
+| TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](tui-design.md) |
+
+## Safety, evidence, and reproducibility
+
+| Topic | Guide |
+| --- | --- |
+| Autonomy, default-deny execution, project policy, and damage-control rules | [Safety Model](safety-model.md) |
+| Receipts, run inspection, costs, and observability routing | [Observability](observability.md) |
+| Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](evidence-and-memory.md) |
+| SQLite trace mirror, schemas, cursors, and rebuildability | [Trace Store](trace-store.md) |
+| Where generated files live and who should read them | [Artifact Placement](artifact-placement.md) |
+| Evidence-aware Git role trailers and managed-hook safety | [Git Commit Provenance](git-commit-provenance.md) |
+| Advisory scientific validation contracts and HPC assumptions | [Scientific Validation](scientific-validation.md) |
+| Versioned artifact schemas and migration policy | [Artifact Versions](artifact-versions.md) |
+
+Receipts establish what Clio observed and did. They do not replace domain
+validation, reference data, or human scientific judgment.
+
+## Delegation and fleets
+
+| Topic | Guide |
+| --- | --- |
+| Built-in worker recipes, discovery, frontmatter, and admission | [Built-in Agents](built-in-agents.md) |
+| Local and multi-node fleet execution, placement, gates, and receipts | [Fleet Dispatch](fleet-dispatch.md) |
+| An executable multi-node walkthrough with a reviewer gate | [Fleet Demo Runbook](fleet-demo-runbook.md) |
+| Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](capacity-and-scheduling.md) |
+| Worker process protocol, watchdogs, steering, and exit mapping | [Worker Dispatch Mechanics](worker-dispatch-mechanics.md) |
+| Typed dispatch intent and compatibility boundaries | [Dispatch Typed Intent](dispatch-typed-intent.md) |
+| Why dispatch remains one domain and where its seams actually are | [Dispatch Architecture Rationale](dispatch-architecture-rationale.md) |
+
+## Automation and integration
+
+| Topic | Guide |
+| --- | --- |
+| Agent Client Protocol server, stdio transport, and permission mediation | [ACP](acp.md) |
+| Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](prompt-envelope-and-tools.md) |
+| All built-in worker tools, arguments, outputs, and error examples | [Tool Usage](tool-usage.md) |
+| Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](provider-adapter-cookbook.md) |
+| Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](middleware-and-components.md) |
+| Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](exit-codes-and-output.md) |
+| Environment overrides, directory controls, and debug toggles | [Environment Variables](environment-variables.md) |
+
+## Evaluation and measurement
+
+| Topic | Guide |
+| --- | --- |
+| Local Suite v2 files, artifacts, reports, comparisons, and gates | [Eval Runner](eval-runner.md) |
+| Private suite handling and measurement design | [Internal Evals](evals-internal.md) |
+| Correct render, startup, import-graph, and streaming measurements | [Performance Methodology](performance-methodology.md) |
+| Falsifiable change manifests and `clio-coder evolve` | [Evolution](evolution.md) |
+
+Reviewable reference suites ship under [`evals/`](../evals/). They are explicit
+operator measurements, not hidden CI steps. Private prompts, credentials,
+endpoints, raw campaign artifacts, and proprietary datasets belong outside the
+repository.
+
+## Architecture and contributing
+
+| Topic | Guide |
+| --- | --- |
+| Source layout, compile-time boundaries, domain loading, and runtime flow | [Architecture](architecture.md) |
+| Pi framework boundary and Clio-owned policy | [Pi Boundary](pi-boundary.md) |
+| Documentation style and source-alignment workflow | [Documentation Guide](documentation-guide.md) |
+| Source-to-guide ownership map | [Documentation Coverage](documentation-coverage.md) |
+| Issue-driven development and release workflow | [Development Pipeline](development-pipeline.md) |
+| Clock, duration, timestamp, and ordering conventions | [Time Conventions](time-conventions.md) |
+| Core terms mapped to source concepts | [Glossary](glossary.md) |
+
+The [configuration-knob audit](config-knobs-audit.md) is a dated historical
+inventory, not the current settings reference. The
+[v0.4.1 release-cut checklist](release-cut-checklist.md) is retained as release
+engineering history and must not be reused unchanged for a future release.
+
+## Developer quick start
 
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
+npm ci
+npm run build
+node dist/cli/index.js --help
+```
+
+For a persistent local command:
+
+```bash
 npm run install:local
+export PATH="$HOME/.local/bin:$PATH"
 hash -r
 clio-coder --version
 ```
 
-The local symlink executes `dist/cli/index.js`. If you edit TypeScript files
-under `src/`, run `npm run build` again or keep `npm run dev` running.
+Use `npm run dev` for a watch build. Before handing back a change, run the
+focused test while iterating and `npm run ci` for the deterministic repository
+gate. Maintainers use `npm run ci:release` to add the distribution and package
+audit.
 
-## Release Notes
+## Project context in a source checkout
 
-The release entry point is [../README.md](../README.md); detailed release
-history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.4.0 the supported
-install paths are `npm install -g @iowarp/clio-coder` and a source checkout
-through `npm run install:local`, the deterministic release gate is
-`npm run ci:release`, and live model smoke validation is local/manual and
-opt-in through `npm run live:smoke -- --target <id>` (add `--delegation`
-for opencode/copilot checks).
+Projects can keep human-owned guidance in `CLIO-CODER.md`, generated with
+`clio-coder context init`. This repository gitignores its own generated copy so
+local dogfooding instructions do not collide with public documentation. If the
+file exists in your checkout, read it before making changes; if it does not,
+the architecture guide and `CONTRIBUTING.md` are the public starting points.
 
-## Writing Documentation
+## Interactive blueprints
 
-Guidance for doc authors lives in
-[documentation-guide.md](documentation-guide.md). The short version:
+Many guides link to visual HTML blueprints under `docs/html/`. They are served
+from a source checkout with:
 
-- State alpha status plainly; do not imply npm publication, production
-  stability, or universal local-model behavior without current proof.
-- Prefer command examples that are valid against
-  `node dist/cli/index.js --help`.
-- Keep the README short; detailed command explanations belong in these pages.
+```bash
+clio-coder docs
+```
+
+The Markdown pages are the portable reference and ship with the npm package.
+The HTML blueprints are development aids and are not required for the runtime.
+
+## Writing documentation
+
+Follow [Documentation Guide](documentation-guide.md). In particular:
+
+- Verify commands against the built binary rather than copying an old example.
+- Use current, canonical settings paths; describe legacy names only in a
+  clearly marked migration or historical section.
+- Separate deterministic contracts from model-dependent observations.
+- Put release chronology in the [CHANGELOG](../CHANGELOG.md), not in the
+  product README or an evergreen task guide.
+- Link to the detailed contract instead of duplicating a large schema in
+  several places.

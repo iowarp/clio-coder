@@ -1,7 +1,7 @@
 # Extensions, Prompt Templates, Skills, and Share Archives
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/extensions_blueprint.html](html/extensions_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/extensions_blueprint.html](html/extensions_blueprint.html).
 
 Clio Coder has lightweight community-oriented resource packaging. Extensions are filesystem bundles that contribute prompts and skills. Share archives are portable JSON files for moving project/user Clio resources between machines or collaborators. Themes are built into the engine and are no longer loaded from extensions.
 
@@ -61,7 +61,7 @@ Return:
 Use in the TUI:
 
 ```text
-/prompts
+/resources prompts
 /bugfix src/parser.ts empty input crashes
 ```
 
@@ -71,7 +71,13 @@ Templates without frontmatter are accepted; Clio derives a fallback description 
 
 A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/prompts`, and an OpenCode command in `.opencode/command` are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.
 
-User-scope foreign prompts are trusted the way user-scope foreign skills are: they came from the operator's own machine. A project-scope one lists in `/prompts` with an `untrusted` marker and refuses to substitute into a message until the trust flag is set, because an unreviewed checkout would otherwise get to write part of the operator's next message. Setting `skills.trustProjectCompatRoots: true` (or exporting `CLIO_CODER_TRUST_PROJECT_SKILLS=1`) is the opt-in for both kinds. Typing `/name` for an untrusted prompt template prints `prompt template <name> comes from an untrusted project root; set skills.trustProjectCompatRoots to use it` and sends nothing to the model. Headless `clio-coder run /name` prints the same refusal and exits 1. A token that names neither a command nor a template reports `is not a command`.
+User-scope foreign prompts are trusted because they came from the operator's
+machine. A project-scope prompt lists in `/resources prompts` with an
+`untrusted` marker and refuses substitution until
+`integrations.projectResources.trustProjectImports: true` (or the
+`CLIO_CODER_TRUST_PROJECT_SKILLS=1` process override) opts in. An untrusted
+template sends nothing to the model. A token naming neither a command nor a
+template reports `is not a command`.
 
 ---
 
@@ -125,7 +131,7 @@ Recognized frontmatter fields:
 
 Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded through `context`. This prevents an unreviewed project checkout from injecting skills the model will act on.
 
-Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_CODER_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio-coder/skills` is always trusted as the Clio-native project root.
+Opt in to model-visible project compatibility roots by setting `integrations.projectResources.trustProjectImports: true` in `settings.yaml`. `CLIO_CODER_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio-coder/skills` is always trusted as the Clio-native project root.
 
 ### Loading with context, writing directly
 

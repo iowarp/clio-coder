@@ -1,7 +1,8 @@
 # Documentation Standards and Codebase Alignment
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive documentation link linter, phrasing/claim evaluator, and alignment portal is located at [docs/html/documentation_blueprint.html](html/documentation_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** The source checkout includes the
+> [documentation blueprint](html/documentation_blueprint.html).
 
 Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.
 
@@ -59,13 +60,13 @@ Classify claims clearly:
 | [documentation-coverage.md](documentation-coverage.md) | `src/**` | Complete source-to-documentation mapping matrix and subsystem coverage status. |
 | [tui-design.md](tui-design.md) | `src/interactive/theme/tokens.ts`, `src/interactive/theme/glyphs.ts` | TUI color system, glyph vocabulary (`contextReserve`), structural layouts, state choreography, code ink. |
 | [installation-and-lifecycle.md](installation-and-lifecycle.md) | `src/cli/paths.ts`, `src/cli/doctor.ts`, `src/cli/uninstall.ts`, `src/cli/removal.ts` | Installation, upgrade, reset, uninstallation, launcher ownership and what `--remove-binary` will and will not remove, partial-failure behavior, configuration folders (`credentials.yaml` `0o600`), and permissions. |
-| [release-cut-checklist.md](release-cut-checklist.md) | `scripts/check-release.mjs`, `tests/smoke/pack-install.test.ts`, `benchmarks/internal/`, `package.json` | Ordered release-cut steps with an explicit authorization boundary: everything external or irreversible is marked not run and needs an operator decision. |
+| [release-cut-checklist.md](release-cut-checklist.md) | `scripts/check-release.mjs`, `tests/smoke/installed-package.test.ts`, `.github/workflows/`, `package.json` | Historical v0.4.1 release procedure retained as evidence; future releases must draft and verify their own checklist. |
 | [observability.md](observability.md) | `src/domains/observability/**`, `src/interactive/view/**`, `src/domains/dispatch/**`, `src/core/bus-events.ts` | `/view` artifact browsing, receipt verification, worker diagnostics, event routing, and cost snapshots. |
 | [evidence-and-memory.md](evidence-and-memory.md) | `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, `src/cli/memory.ts` | Evidence corpus layout, findings, memory lifecycle and prompt injection. |
 | [proactive-memory.md](proactive-memory.md) | `src/domains/memory/**` | Proactive task memory architecture, session task bank, intervention rules, and handoff carrying. |
 | [trace-store.md](trace-store.md) | `src/cli/trace.ts`, `src/domains/observability/trace-store.ts` | WAL SQLite trace mirror database schema, rowid cursor queries, rebuildability, 6 `clio-coder trace` subcommands (`runs`, `phases`, `tail`, `procs`, read-only `sql` SELECT, `ui`). |
 | [eval-runner.md](eval-runner.md) | `src/domains/eval/**`, `src/cli/eval.ts` | Local YAML eval tasks, dual token accountings (`tokens.*` wire vs `receiptUsage.*` journal), fail-closed null totals, EvalArtifactV4 format, `verify.measure` task outcome recording. |
-| [evals-internal.md](evals-internal.md) | `src/domains/eval/**` | Private context index determinism and target smoke matrices. External model benchmarks are documented under `benchmarks/`. |
+| [evals-internal.md](evals-internal.md) | `src/domains/eval/**`, `evals/**` | Private suite handling, measurement design, and the boundary between shipped reference inputs and external campaigns. |
 | [extensions-and-sharing.md](extensions-and-sharing.md) | `src/domains/extensions/**`, `src/domains/resources/**`, `src/domains/share/**`, `src/cli/extensions.ts`, `src/cli/share.ts` | Prompt and skill resources, extension manifests, portable share archives. |
 | [skills-marketplace.md](skills-marketplace.md) | `src/interactive/overlays/skills-hub.ts`, `src/domains/resources/skills/marketplace.ts` | Skills Hub marketplace discovery through the install resolver, empty state, install actions, publishing flow. |
 | [model-catalog.md](model-catalog.md) | `src/domains/providers/catalog.ts`, `src/domains/providers/models/**`, `src/domains/providers/probe/**`, `src/domains/providers/model-capabilities.ts` | Model catalog, live probes (`--offline` toggle), exact-id selector `probeCapabilitiesForModel`, field-note promotion. |

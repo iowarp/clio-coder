@@ -1,7 +1,9 @@
 # Configuration, Targets, Runtimes, and Auth
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** A configuration validator, target resolver,
+> and CLI command generator is available in the source checkout at
+> [configuration_blueprint.html](html/configuration_blueprint.html).
 
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 
@@ -31,7 +33,15 @@ Default config file:
 
 Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals, vendored external tools); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interop.json, interviews, scratch); cache holds disposable derived files.
 
-The `library` settings block configures the private resource catalog. `library.catalog` is an optional path and defaults to `<configDir>/library.yaml`. `library.remote` is an optional git remote URL, and the catalog repository must name that git remote `library`. `library.sync` defaults to `false`, which makes sync and push refuse before spawning git. `library.confirmedRemote` is written by `clio-coder library remote confirm <url>` and must exactly match `library.remote` before sync or push can run. Confirmation sets both values when `library.remote` is unset and refuses a differing configured URL with `library_remote_mismatch`. See [resource-library.md](resource-library.md).
+The `integrations.library` settings block configures the private resource
+catalog. `integrations.library.catalog` is an optional path and defaults to
+`<configDir>/library.yaml`. `integrations.library.remote` is an optional Git
+remote URL, and the catalog repository must name that remote `library`.
+`integrations.library.sync` defaults to `false`, which makes sync and push
+refuse before spawning Git. `integrations.library.confirmedRemote` is written
+by `clio-coder library remote confirm <url>` and must exactly match the
+configured remote before synchronization can run. See
+[Resource Library](resource-library.md).
 
 `clio-coder paths --json` prints the resolved directories and is the single source of truth for scripts.
 
@@ -44,6 +54,7 @@ From a source checkout:
 ```bash
 git clone https://github.com/iowarp/clio-coder.git
 cd clio-coder
+npm ci
 npm run install:local
 hash -r
 clio-coder --version
@@ -104,12 +115,16 @@ clio-coder
 Inside the TUI, verify the local surface with:
 
 ```text
-/targets
+/settings targets
 /agents
 /skill
 ```
 
-`/targets` opens Settings → Targets: one row per configured target with its roles (chat, fleet, memory) and probe health, probed live when the section opens. `Enter` on a row offers use for chat and fleet dispatch, connect (API key or OAuth, then a probe), probe, and remove. The chat, fleet, and memory targets are also individual rows in the Orchestrator and Fleet sections.
+`/settings targets` opens one row per configured target with its roles (chat,
+fleet, memory) and probe health. `Enter` on a row offers use for chat and fleet
+dispatch, connect (API key or OAuth, then a probe), probe, and remove. The
+retired `/targets` slash spelling is a non-executing tombstone that points to
+this settings area; the `clio-coder targets` CLI family remains available.
 
 Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
 
@@ -130,126 +145,41 @@ Terminology used in code and receipts:
 | Background target | Optional proactive-memory model target. Unset means deterministic rules-only memory. |
 | Worker target | Fleet dispatch target. HTTP/native engine-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
 
+This abbreviated example uses the current version-2 information architecture.
+The [settings inventory](#settings-inventory) below lists every accepted leaf
+and its shipped default.
+
 ```yaml
-version: 1
-autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto (enforced at tool admission; the safety net applies at every level)
+version: 2
 
 targets:
   - id: local-lmstudio
     runtime: lmstudio
     url: http://127.0.0.1:1234
     defaultModel: your-model-id
-    # Optional. Request slots this inference endpoint can serve at once.
-    # Overrides live discovery; omit it and Clio reads the server's own count.
-    maxConcurrentRequests: 2
-    capabilities:
-      reasoning: true       # optional; only if your model/runtime supports it
-    lmstudio:
-      # Omit load entirely to use LM Studio's just-in-time load defaults.
-      load:
-        contextLength: 131072
-        flashAttention: true
-        evalBatchSize: 512
-        numExperts: 8
-        offloadKvCacheToGpu: true
-      request:
-        ttlSeconds: 600
-        draftModel: your-draft-model-id
-        reasoning: auto      # auto | off | on | low | medium | high
+    maxConcurrentRequests: 2  # optional override; prefer live discovery
 
-runtimePlugins: []
-
-orchestrator:
+chat:
   target: local-lmstudio
   model: your-model-id
   thinkingLevel: off
+  modelPicker:
+    cycleSet: []
+    favorites: []
+    recentLimit: 12
+  maxOutputTokens: 32768
+  prewarm: true
 
-# Optional proactive-memory model. Leave null for the zero-cost rules tier.
-background:
-  target: null
-  model: null
-  thinkingLevel: off
-
-memory:
-  intervention:
-    enabled: true
-    everyNTools: 10
-    windowSteps: 8
-    maxTokens: 400
-    timeoutMs: 30000         # shipped operator default in src/core/defaults.ts; the library fallback in task-memory-policy.ts is the same value
-
-workers:
+fleet:
   default:
     target: local-lmstudio
     model: your-model-id
     thinkingLevel: off
   profiles: {}
-  rosters:
-    design:
-      members:
-        - label: local-a
-          target: local-lmstudio
-          model: your-model-id
-          thinking: medium
-          color: accent
-        - label: local-b
-          target: local-vllm
-          color: "#5ba8ff"
-  agentBindings: {}
-  maxRetries: 2
-  onPermission: deny
-  escalation:
-    timeoutMs: 120000
-    fallback: deny
-  resilienceCooldownMs: 15000
-
-# Measured route selection stays shadow-only while these lists are empty.
-routing:
-  activeRoles: []       # researcher | verifier | reviewer | judge
-  activePostures: []    # quality | balanced | latency | economy
-  agentAutomation:
-    # Exact pairs only; this never authorizes an agents-by-roles cross-product.
-    activeAgentRoles: []
-
-scope: []
-modelSelector:
-  favorites: []
-  recentLimit: 12
-budget:
-  sessionCeilingUsd: 5
+  rosters: {}
+  agentProfiles: {}
+  nodes: []
   concurrency: auto
-
-defaults:
-  maxTokens: 32768            # global output budget; clamped per model at request time
-
-theme: default
-terminal:
-  showTerminalProgress: false
-  outputVerbosity: default
-  tuiMode: regular              # regular terminal scrollback or fullscreen sticky layout
-  fullscreenScrollbar: auto    # hidden, auto, or always in fullscreen mode
-  smoothStreaming: off         # off, conservative auto, or explicit on
-  notify: false                # content-free desktop notification, interactive TTY only
-watchdog:
-  enabled: false               # opt-in read-only review of every mutating turn
-  # target: local-lmstudio     # route the review at a cheap model
-  # cadenceToolCalls: 20       # also review every N tool calls inside a turn
-skills:
-  trustProjectCompatRoots: false
-delegation:
-  defaults:
-    connectTimeoutMs: 30000
-    turnTimeoutMs: 300000
-    permissionTimeoutMs: 120000
-    toolGovernance: clio-policy
-  agents: []
-keybindings: {}
-compaction:
-  auto: true
-  threshold: 0.8
-  excludeLastTurns: 6
-  # model: provider/summary-model-id
-  # systemPrompt: ~/.config/clio-coder/prompts/compaction.md
 
 context:
   workingSet:
@@ -258,23 +188,46 @@ context:
     target: 0.6
     protectLastTurns: 6
     minEvictableTokens: 200
+  compaction:
+    auto: true
+    threshold: 0.8
+  memory:
+    enabled: true
+    target: null
+    model: null
 
-prewarm:
-  enabled: true       # send the next turn's prefix early; local-native targets only
+safety:
+  autonomy: auto-edit
+  limits:
+    sessionCostUsd: 5
+    chatToolCallsPerTurn: 60
+    readBytesPerCall: 51200
+    observationBytesPerTurn: 196608
+  review:
+    enabled: false
 
-retry:
-  enabled: true
-  maxRetries: 3
-  baseDelayMs: 2000
-  maxDelayMs: 60000
-  streamStallMs: 180000
-guardrails:
-  turnToolCallBudget: 60
-  workerToolCallCap: 150
-  maxDispatchRuns: 1000
-  readMaxBytes: 51200
-  observationTurnBudgetBytes: 196608
-  internalDispatchTimeoutMs: 900000
+interface:
+  outputDetail: default
+  smoothStreaming: off
+  mode: regular
+  fullscreenScrollbar: auto
+  terminalProgress: false
+  desktopNotifications: false
+  panes:
+    enabled: off
+    layout: off
+    files:
+      enabled: false
+  keybindings: {}
+
+integrations:
+  projectResources:
+    trustProjectImports: false
+  externalAgents:
+    entries: []
+  runtimePlugins: []
+  git:
+    commitAttribution: true
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
@@ -293,7 +246,7 @@ Three behaviors in this release are gated on a runtime's tier being `local-nativ
 
 The tier means "an inference server the operator runs, whose prefix cache and resident model Clio's own behavior can displace." That is what the three gates are actually asking:
 
-- **Pre-warm** runs only here, whatever `prewarm.enabled` says, because a cloud provider bills the request and caches on its own schedule. The check is made twice, once from configuration before any runtime is resolved and once against the resolved runtime, so an unreachable target does not pay for a capability probe at boot just to be told no.
+- **Pre-warm** runs only here, whatever `chat.prewarm` says, because a cloud provider bills the request and caches on its own schedule. The check is made twice, once from configuration before any runtime is resolved and once against the resolved runtime, so an unreachable target does not pay for a capability probe at boot just to be told no.
 - **Endpoint capacity** defaults to one slot here when discovery reports nothing, and to unbounded elsewhere. vLLM and SGLang are the deliberate exceptions inside the tier: both serve genuinely concurrent requests, so an undiscovered limit is left unbounded rather than guessed at one.
 - **Five of the eight expected-cold reasons** are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in [context-engine.md](context-engine.md#cache-divergence-honesty).
 
@@ -375,26 +328,57 @@ block. Set them in LM Studio's My Models load settings or with `lms load`; the C
 configuration that `GET /api/v1/models` exposes instead of pretending it applied settings the REST
 load endpoint did not accept (<https://lmstudio.ai/docs/developer/rest/list>).
 
-`defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
+`chat.maxOutputTokens` is a global output budget requested for every turn
+(default `32768`). At request time it is clamped to the model's known
+max-output cap and the remaining context window. A per-target
+`capabilities.maxTokens` override still records the model's true cap. Set
+`chat.maxOutputTokens: 0` to disable the global default and fall back to
+per-model caps only.
 
-The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely.
+The setting `fleet.retry.maxRetries` controls automated retries for retryable
+fleet failures. Setting it to `0` disables retries.
 
-The setting `workers.onPermission` decides how noninteractive workers handle a tool call that asks for permission. It supports three modes:
+The setting `fleet.permissions.mode` decides how noninteractive workers handle
+a tool call that asks for permission. It supports three modes:
 - `deny`: Immediately returns a structured denial to the model, and the run continues.
 - `fail`: Finalizes the run as failed, exiting the worker subprocess with exit code 3 ([WORKER_EXIT_PERMISSION_REQUIRED](../src/worker/spec-contract.ts)).
-- `escalate`: Parks the tool call, emits a `clio_permission_escalated` event, and waits for an operator decision on standard input (`stdin`). If no operator decision is received within the configured `workers.escalation.timeoutMs` duration, it applies the fallback posture. If the worker is running headlessly (no operator attached) or under runtimes like `claude-sdk` that lack a native stdin park loop, the system collapses the `escalate` posture to the non-stall fallback posture immediately.
+- `escalate`: Parks the tool call, emits a `clio_permission_escalated` event,
+  and waits for an operator decision. If no decision arrives within
+  `fleet.permissions.escalation.timeoutMs`, it applies the configured fallback.
+  A headless worker or runtime without an operator channel collapses to that
+  non-stall fallback immediately.
 
-The `workers.escalation` block defines parameters for the escalation mode:
+The `fleet.permissions.escalation` block defines parameters for escalation:
 - `timeoutMs` (default `120000`): The wall-clock budget in milliseconds before the parked call applies the fallback.
 - `fallback` (default `deny`): The fallback posture (`deny` or `fail`) applied upon timeout.
 
-The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
+`fleet.retry.routeCooldownMs` is the cooldown between retries on a failed
+route.
 
-The `routing` block controls the two independent activation boundaries for measured dispatch. Joint target/model/runtime/node selection becomes active only when both the assignment's execution role and requested posture appear in `activeRoles` and `activePostures`; otherwise the same resolver records a shadow recommendation without changing execution. Active mode also requires the route-readiness report to pass and fails closed when no candidate is ready. Manual pins and `failover: none` remain exact in every mode.
+`fleet.adaptiveRouting` controls the two independent activation boundaries for
+measured dispatch. Joint target/model/runtime/node selection becomes active
+only when both the assignment's execution role and requested posture appear in
+`roles` and `postures`; otherwise the resolver records a shadow recommendation
+without changing execution. Active mode also requires route readiness. Manual
+pins and `failover: none` remain exact.
 
-Agent automation is separately shadowed. Each `routing.agentAutomation.activeAgentRoles` item must be an exact `{agentId, executionRole}` pair, for example `{agentId: scout, executionRole: researcher}`. An `agent: auto` request may change agents only for a listed pair whose per-agent, per-role readiness report passes. Hard constraints eliminate candidates before scoring, and a Scout split or role transition carries typed bounded subtasks through coordinator-owned authority rather than silently broadening the original assignment.
+Agent automation is separately shadowed. Each
+`fleet.adaptiveRouting.agentRoles` item must be an exact
+`{agentId, executionRole}` pair. An `agent: auto` request may change agents only
+for a listed pair whose readiness report passes.
 
-The `guardrails` section holds the numeric backstops that bound runaway agent behavior. `turnToolCallBudget` (default `60`) is the orchestrator's per-turn soft tool-call budget: crossing it blocks every further call in the turn with a stop-and-summarize directive, and a hard ceiling 15 calls above it interrupts the turn outright. Separately, an identical-call loop guard trips when the same tool is called with identical arguments three times inside a 30s window; the first two blocks feed the model a strategy-change directive (and, when the looped call already returned a successful result earlier in the run, point it at that result instead), and reaching the second block per turn locks tool use for the rest of that turn so the model answers from what it already gathered, rather than cancelling a turn that may already hold the answer. Only a bounded backstop (two further tool calls after the lockout) falls back to the hard stop. This lockout is an orchestrator behavior (interactive, headless, and ACP alike). Dispatched workers use an agent-owned admitted-call phase for graceful synthesis and retain `workerToolCallCap` (default `150`) as the independent lifetime ceiling for one worker run. The cap bounds calls that execute: an attempt denied by policy or permission posture spends it, but one the harness itself refused as steering (a reserve-window block, a synthesis-lockout denial) never ran and never does. It is sized so the recipe's own budget is what normally binds, since admission resolves `min(declared, cap)` and only the recipe knows the shape of its job. Executed calls beyond it terminate the worker with `workerToolCallCap reached (...)` in receipt diagnostics; a model that keeps calling after a lockout instead ends on the bounded per-round synthesis backstop. `maxDispatchRuns` (default `1000`) caps dispatch run-ledger retention. `readMaxBytes` (default `51200`) caps one read-tool call, and `observationTurnBudgetBytes` (default `196608`) is the shared per-turn byte pool across all observation-producing tools. `internalDispatchTimeoutMs` (default `900000`, fifteen minutes) is the wall-clock cap for one internal generator dispatch (the wiki documenter and the bootstrap scout); it exists because a model that keeps streaming without finishing can spend no new tool attempts while satisfying the heartbeat watchdog indefinitely, and on timeout the run is aborted with the timeout cause recorded in its receipt. Each value also has a per-process env override intended for CI and one-off experiments (see [environment-variables.md](environment-variables.md)); the settings file is the durable home.
+Version 2 places numeric backstops beside the behavior they govern.
+`safety.limits.chatToolCallsPerTurn` (default `60`) is the main-agent soft
+tool-call budget; the hard interrupt ceiling remains 15 calls above it.
+`fleet.limits.toolCallsPerRun` (default `150`) is the independent lifetime cap
+for one worker and can only narrow a recipe budget. `fleet.history.maxRuns`
+(default `1000`) bounds durable dispatch history.
+`safety.limits.readBytesPerCall` (default `51200`) bounds one read, while
+`safety.limits.observationBytesPerTurn` (default `196608`) is the shared
+per-turn observation pool. `fleet.limits.internalRunTimeoutMs` (default
+`900000`) bounds an internal generator dispatch. The environment overrides in
+[Environment Variables](environment-variables.md) name the same effective
+limits.
 
 Agent recipe budgets define a normal admitted-call phase inside `workerToolCallCap`; they do not replace it. A declared phase boundary is clamped down to the cap, and when the two are equal the last call may complete and the graceful synthesis transition happens without requiring an over-cap call. The recipe's `readReserve` is the tail of that phase. It admits canonical `read` plus whatever mutation tools the agent was actually granted, because the reserve exists to end broad discovery rather than to stop an agent from delivering: a writer whose product is files has to be able to write them in its last calls. An agent with no mutation tools keeps a read-only reserve and the request-level `require_tool(read)` lock. The reserve becomes zero when `read` is absent from the admitted schema surface, and never installs a nonexistent read requirement. Calls the reserve refuses are steering rather than work: they neither run nor spend the cap, and a model that keeps calling discovery tools there reaches the same bounded synthesis lockout a spent budget ends in.
 
@@ -468,144 +452,77 @@ Plain `clio-coder doctor` is read-only. `clio-coder doctor --fix` creates missin
 directories and template files, repairs credential permissions, and refreshes
 install metadata. It validates `settings.yaml` directly against the current
 schema but never rewrites removed keys or migrates an old settings shape. Any
-unknown or retired key remains a validation error on that doctor run. Registered
-`clio-coder upgrade` migrations are the narrow exception: the 0.4.1 pane-key
-migration removes `panes.agents` and `panes.keepFailed` from an older file before
-strict startup reads it. Other reported paths still require deliberate editing.
+unknown or retired key remains a validation error on that doctor run.
+Registered `clio-coder upgrade` migrations are the narrow exception. Upgrade
+moves a version-1 or unversioned settings document into the version-2 areas,
+records the migration, and keeps the byte-exact original as
+`settings.yaml.v1.bak`. A source/destination collision refuses the migration
+without replacing the original. Other reported paths still require deliberate
+editing.
 
 ---
 
 ## Live routing vs saved defaults
 
-The routing keys in `settings.yaml` (`orchestrator.*`, `background.*`, `workers.default.*`, `scope`) are **defaults**, not a live control surface. Each interactive session seeds its routing from them at launch and owns it from then on:
+The routing keys in `settings.yaml`—`chat.*`, `context.memory.*`,
+`fleet.default.*`, and `chat.modelPicker.*`—are defaults. Each interactive
+session seeds its route at launch and then owns that active route:
 
-- Interactive changes (`/model`, Alt+L, `/settings`, Shift+Tab, `/thinking`, Alt+J / Alt+K, `/scoped-models`) apply to the current session immediately and are written back as the defaults for sessions launched later.
-- Writes from other processes, such as a second Clio session, `clio-coder targets use`, `clio-coder configure`, or a manual edit, update the defaults and the shared target catalog. These writes never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
-- Non-routing settings (theme, keybindings, autonomy level, retry, compaction, commit attribution, target catalog entries) still hot-reload into running sessions as before.
-- `/resume` and `/new` switch sessions, not routing: the terminal keeps its active target/model/thinking across session switches.
+- Interactive changes through `/model`, `/thinking`, `/settings`, and the
+  model-picker keys apply to the current session after confirmation and can be
+  saved as defaults for later sessions.
+- Writes from another process update shared defaults and the target catalog,
+  but never redirect a running session. The active session reports when its
+  route differs from the saved default.
+- Non-routing values apply at the boundary named in the
+  [settings inventory](#settings-inventory): immediately, next turn, next
+  dispatch, next session, or restart.
+- `/resume` and `/new` switch session history without silently changing the
+  terminal's active target, model, or thinking level.
 
-This is what makes several concurrent Clio terminals safe: each one routes through its own state, and `settings.yaml` only decides where the *next* session starts.
-
-Supporting mechanics:
-
-- **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio-coder targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
-- **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio-coder targets`, `clio-coder configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
-- **Recently selected models are runtime state, not configuration.** They live in the state dir (`recent-models.json`), so an Alt+L pick never rewrites `settings.yaml` and never pings the config watcher in other running sessions. Settings validation is strict: a `state.recentModels` key in `settings.yaml` is an unknown-key error during normal startup and must be removed deliberately. `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
-- **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio-coder` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
+Every settings writer uses an advisory lock and atomic replacement, so
+concurrent saves cannot expose a partial YAML file. Recently selected models
+are machine state in `recent-models.json`; deliberate favorites remain
+configuration under `chat.modelPicker.favorites`. ACP sessions preserve
+routing-divergence notices in the session ledger because ACP v1 has no
+out-of-turn advisory channel.
 
 ---
 
 ## Settings Center
 
-Open `/settings` in the TUI to edit session-visible defaults in a full-screen transactional Center. Wide terminals (≥72 columns) show sections in a left sidebar and the selected section's rows in the main pane; ultrawide terminals (≥112 columns) expand the layout to include a dedicated right-hand inspector. Below 72 columns, the Center switches to a modal drill-down stack (section list → section rows → detail drawer) with breadcrumbs, `/` search filtering, and `Esc` backtracking. Below 60 columns, side margins drop to zero for full-width presentation.
+Open `/settings` in the TUI to edit session-visible values and saved defaults.
+Wide terminals use a section sidebar and detail inspector; narrow terminals
+switch to a drill-down flow with breadcrumbs, search, and `Esc` backtracking.
 
-Every value change in Settings is transactional: selecting an editable row and pressing `Enter` opens a dedicated value picker, text input dialog, or provider-backed checklist (rather than immediately cycling values). Clio constructs an immutable change plan with preflight impact analysis and presents explicit destination choices:
-- `Apply this session` (for live-capable settings)
+Every edit is transactional. Depending on the setting, the confirmation offers:
+
+- `Apply this session`
 - `Apply and save globally`
-- `Cancel` (or `Esc`)
+- `Cancel`
 
-For restart-required settings (`budget.concurrency`, `runtimePlugins`, `terminal.tuiMode`, `terminal.fullscreenScrollbar`), the session-only option is suppressed and global saving announces `Saved to settings.yaml · restart Clio to apply`. For destructive actions (removing a target or fleet profile), the confirmation preflight details affected chat, fleet, and memory routes before execution.
+Restart-required settings—`fleet.concurrency`,
+`integrations.runtimePlugins`, `interface.mode`, and
+`interface.fullscreenScrollbar`—offer only global save and say that Clio must
+restart. Destructive actions such as removing a target or fleet profile show
+the affected chat, fleet, and memory routes before confirmation.
 
-The Settings Center organizes all configuration under four non-selectable group headers:
+The durable configuration has seven top-level areas, and `/settings` accepts
+each as a stable deep link:
 
-| Group | Section | Rows, in order |
-| --- | --- | --- |
-| **CORE** | Autonomy & Safety (`safety`) | `autonomy`, `workers.onPermission`, the escalation bounds that keep that posture non-stall (`workers.escalation.timeoutMs`, `workers.escalation.fallback`), `delegation.defaults.toolGovernance`, `skills.trustProjectCompatRoots`, and the read-only safety-net fact. |
-| **CORE** | Orchestrator (`orchestrator`) | `orchestrator.thinkingLevel`, `orchestrator.target`, `orchestrator.model`, the memory plane (`background.target`, `background.model`, `background.thinkingLevel`), and the proactive-memory knobs (`memory.intervention.enabled`, `.everyNTools`, `.windowSteps`, `.maxTokens`, `.timeoutMs`), and `prewarm.enabled`. Changing target rebases model and thinking choices. |
-| **ROUTING** | Fleet (`fleet`) | `workers.default.target`, `workers.default.model`, `workers.default.thinkingLevel`, `workers.maxRetries`, `workers.resilienceCooldownMs`, `workers.profiles`, `workers.agentBindings`, and the routing activation set (`routing.activeRoles`, `routing.activePostures`, and the read-only `routing.agentAutomation.activeAgentRoles`), rendered under the group headers `Defaults`, `Profiles`, `Agent routes`, `Route activation`, and `Placement`. Profile rows carry a `◆ Edit` drill-down and a destructive removal preflight; placement rows are read-only node status. |
-| **ROUTING** | Targets (`targets`) | The `targets` console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action and detail drawer for URL, default model, last probe, and failure reason. Actions include `Use`, `Connect`, `Probe`, and `Remove`. |
-| **ROUTING** | Models (`models`) | `scope`, `modelSelector.recentLimit`, and `modelSelector.favorites`, rendered as a provider-backed checklist with target-level and target/model entries, `Space` toggle, capability inspector, and a preserved `Unavailable` group. Deep link `/scoped-models`. |
-| **RUNTIME** | Budget (`budget`) | `budget.sessionCeilingUsd`, `defaults.maxTokens`, `budget.concurrency` (restart required), and the six `guardrails.*` backstops under a `Guardrails` group header. |
-| **RUNTIME** | Compaction (`compaction`) | `compaction.auto`, `compaction.threshold`, `compaction.excludeLastTurns`, and the five `context.workingSet.*` keys under a `Working set` group header. |
-| **RUNTIME** | Retry (`retry`) | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, `retry.maxDelayMs`, and `retry.streamStallMs`. |
-| **EXPERIENCE** | Terminal (`terminal`) | `terminal.showTerminalProgress`, `terminal.outputVerbosity` (`minimal`, `default`, `verbose`), `terminal.tuiMode` (`regular`, `fullscreen`), `terminal.fullscreenScrollbar` (`hidden`, `auto`, `always`), `terminal.smoothStreaming` (`off`, `auto`, `on`), `terminal.notify`, and `theme`. |
-| **EXPERIENCE** | Watchdog (`watchdog`) | `watchdog.enabled`, `watchdog.target`, and `watchdog.cadenceToolCalls`. The two optional keys are editable text rows that render their absence as `(session target)` and `(turn end only)`; submitting an empty value removes the key from `settings.yaml` rather than storing a blank. |
-| **EXPERIENCE** | Advanced (`advanced`) | `runtimePlugins`, `attribution.gitCommits`, `compaction.model`, `compaction.systemPrompt`, `delegation.defaults.connectTimeoutMs`, `delegation.defaults.turnTimeoutMs`, `delegation.defaults.permissionTimeoutMs`, `keybindings`, `delegation.agents`, and the four `library.*` keys under a `Library` group header. `library.confirmedRemote` is read-only: the confirm flow writes it, because confirming a remote from its own row would be the trust record confirming itself. |
-
-Every key `settings.yaml` accepts now has a row, except the ones the Center cannot edit as a nested structure: `workers.rosters` and `routing.agentAutomation.activeAgentRoles` are authored in `settings.yaml`, and the latter has a read-only row that reports the active pairs. `tests/contracts/settings-center.test.ts` enforces this against `DEFAULT_SETTINGS`.
-
-Label to config path mapping:
-
-| Label | Config path |
+| Area | What it owns |
 | --- | --- |
-| Autonomy level | `autonomy` |
-| Fleet approvals routing | `workers.onPermission` |
-| Escalation timeout (ms) | `workers.escalation.timeoutMs` |
-| Escalation fallback | `workers.escalation.fallback` (`deny` or `fail`) |
-| Delegation governance | `delegation.defaults.toolGovernance` |
-| Trust project skill roots | `skills.trustProjectCompatRoots` |
-| Safety net | read-only fact, no config path |
-| Thinking level | `orchestrator.thinkingLevel` |
-| Target | `orchestrator.target` |
-| Model | `orchestrator.model` |
-| Memory target | `background.target` |
-| Memory model | `background.model` |
-| Memory thinking level | `background.thinkingLevel` |
-| Proactive memory | `memory.intervention.enabled` |
-| Memory cadence (tools) | `memory.intervention.everyNTools` |
-| Memory trajectory steps | `memory.intervention.windowSteps` |
-| Memory reminder tokens | `memory.intervention.maxTokens` |
-| Memory timeout (ms) | `memory.intervention.timeoutMs` |
-| Prompt pre-warm | `prewarm.enabled` |
-| Default target | `workers.default.target` |
-| Default model | `workers.default.model` |
-| Default thinking level | `workers.default.thinkingLevel` |
-| Fleet retries | `workers.maxRetries` |
-| Resilience cooldown (ms) | `workers.resilienceCooldownMs` (0 disables the cooldown) |
-| Active routing roles | `routing.activeRoles` (comma-separated from `researcher`, `verifier`, `reviewer`, `judge`) |
-| Active routing postures | `routing.activePostures` (comma-separated from `quality`, `balanced`, `latency`, `economy`) |
-| Active agent routes | `routing.agentAutomation.activeAgentRoles` (read-only; edit the pairs in `settings.yaml`) |
-| Add profile | `workers.profiles` |
-| Add agent route | `workers.agentBindings` |
-| Configured targets | `targets` |
-| Model cycle set | `scope` |
-| Recent models kept | `modelSelector.recentLimit` |
-| Pinned favorites | `modelSelector.favorites` |
-| Session ceiling (USD) | `budget.sessionCeilingUsd` |
-| Output budget (tokens) | `defaults.maxTokens` |
-| Fleet concurrency | `budget.concurrency` (restart required) |
-| Turn tool-call budget | `guardrails.turnToolCallBudget` |
-| Worker tool-call cap | `guardrails.workerToolCallCap` |
-| Run ledger retention | `guardrails.maxDispatchRuns` |
-| Read byte cap | `guardrails.readMaxBytes` |
-| Observation byte pool | `guardrails.observationTurnBudgetBytes` |
-| Internal dispatch timeout (ms) | `guardrails.internalDispatchTimeoutMs` |
-| Auto-compact | `compaction.auto` |
-| Compaction threshold | `compaction.threshold` |
-| Protected recent turns | `compaction.excludeLastTurns` |
-| Working-set eviction | `context.workingSet.enabled` |
-| Eviction policy | `context.workingSet.policy` (`structural-v1` or `age-horizon`) |
-| Eviction target pressure | `context.workingSet.target` (greater than 0, less than 1) |
-| Turns protected from eviction | `context.workingSet.protectLastTurns` |
-| Minimum evictable tokens | `context.workingSet.minEvictableTokens` |
-| Retry transient errors | `retry.enabled` |
-| Max retries | `retry.maxRetries` |
-| Base delay (ms) | `retry.baseDelayMs` |
-| Max delay (ms) | `retry.maxDelayMs` |
-| Stream stall timeout (ms) | `retry.streamStallMs` |
-| Terminal progress badges | `terminal.showTerminalProgress` |
-| Output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
-| TUI mode | `terminal.tuiMode` (`regular` or `fullscreen`, restart required) |
-| Fullscreen scrollbar | `terminal.fullscreenScrollbar` (`hidden`, `auto`, or `always`, restart required) |
-| Smooth streaming | `terminal.smoothStreaming` (`off`, `auto`, or `on`, live) |
-| Desktop notifications | `terminal.notify` |
-| Turn-end watchdog | `watchdog.enabled` |
-| Watchdog target | `watchdog.target` (blank clears the key) |
-| Watchdog cadence (tools) | `watchdog.cadenceToolCalls` (integer ≥ 1; blank clears the key) |
-| Theme | `theme` |
-| Runtime plugins | `runtimePlugins` |
-| Clio commit provenance | `attribution.gitCommits` (`enabled` or `disabled`, live) |
-| Compaction model | `compaction.model` |
-| Compaction prompt | `compaction.systemPrompt` |
-| Delegate connect (ms) | `delegation.defaults.connectTimeoutMs` |
-| Delegate turn (ms) | `delegation.defaults.turnTimeoutMs` |
-| Delegate permission (ms) | `delegation.defaults.permissionTimeoutMs` |
-| Keybinding overrides | `keybindings` |
-| Delegation agents | `delegation.agents` |
-| Library catalog path | `library.catalog` (blank uses the config directory) |
-| Library remote | `library.remote` (blank keeps the library local) |
-| Confirmed library remote | `library.confirmedRemote` (read-only; written by the confirm flow) |
-| Library sync | `library.sync` |
+| `chat` | Active target/model defaults, thinking, model picker, output budget, pre-warm, and interactive retry |
+| `fleet` | Worker defaults, profiles, rosters, routes, nodes, permissions, capacity, limits, retry, and run history |
+| `targets` | Runtime connections, advertised models, auth metadata, and capability overrides |
+| `context` | Working set, compaction, and proactive memory |
+| `safety` | Autonomy, cost/tool/read limits, and the optional review watchdog |
+| `interface` | Output detail, terminal behavior, notifications, keybindings, and experimental pane settings |
+| `integrations` | Project-resource trust, external agents, runtime plugins, resource library, and Git attribution |
+
+The Center groups rows with task-oriented labels such as Orchestrator, Targets,
+Models, Fleet, Budget, and Terminal. The YAML paths shown in row details and in
+this guide remain the canonical version-2 paths in the inventory below.
 
 ---
 
@@ -717,7 +634,7 @@ The six limit leaves retain their one-process environment overrides where docume
 | `interface.panes.notifications` | `failures` | `failures`, `all`, `off` | immediately |
 | `interface.panes.layout` | `off` | `off`, `workers`, `cockpit` | restart |
 | `interface.panes.workers.ratio` | `0.34` | finite dock ratio | restart |
-| `interface.panes.files.enabled` | `true` | boolean | immediately on the next files-pane open |
+| `interface.panes.files.enabled` | `false` | boolean | immediately on the next files-pane open |
 | `interface.panes.files.mode` | `companion` | `companion` or `chooser` | immediately on the next files-pane open |
 | `interface.panes.files.profile` | `managed` | `managed` or `user` | immediately on the next files-pane open |
 | `interface.panes.files.followCwd` | `true` | boolean | immediately on the next files-pane open |
@@ -792,9 +709,18 @@ Review and connect detected agents with:
 clio-coder configure --interop
 ```
 
-On a terminal this walks the pending proposals one at a time, showing the exact YAML entry before it asks, and writes only what you answer yes to. Without a TTY it prints the proposals and exits 0 with `settings.yaml` byte-identical, which is what `scripts/install-local.sh` runs after `doctor --fix`. The interactive `clio-coder configure` wizard ends with the same review, and `/interop` in the TUI is the same flow as an overlay.
+On a terminal this walks the pending proposals one at a time, showing the exact
+YAML entry before it asks, and writes only what you answer yes to. Without a
+TTY it prints the proposals and exits 0 with `settings.yaml` byte-identical.
+The interactive `clio-coder configure` wizard ends with the same review, and
+`/agents connect` in the TUI opens the same flow.
 
-No code path writes `delegation.agents` without an operator decision, and `doctor --fix` is not such a path. An accepted proposal appends exactly one entry through the serialized settings writer, which re-reads the file under its lock, so two processes accepting different agents cannot drop each other's entry. The appended entry carries `toolGovernance: clio-policy` and no `projectContext` key, so the peer inherits `projectContext: "none"` and receives your task text rather than the project projection. Both facts are shown before you are asked.
+No code path writes `integrations.externalAgents.entries` without an operator
+decision, and `doctor --fix` is not such a path. An accepted proposal appends
+exactly one entry through the serialized settings writer under its lock. The
+entry carries `toolGovernance: clio-coder-policy` and no `projectContext` key,
+so the peer receives task text rather than the project projection. Both facts
+are shown before confirmation.
 
 Decisions are recorded in `<CLIO_CODER_HOME>/state/interop.json`, schema v1, written atomically only when an explicit decision is taken; `doctor` and non-TTY `configure --interop` write nothing at all. Each decision is keyed by agent kind plus a fingerprint of the facts it was made against (version and path), so a declined agent stays silent while its binary path and version hold, and comes back as a fresh proposal when either moves. Accepting and declining in one review persists both decisions. A file this version cannot parse degrades to "no report" rather than acting on a half-read decision record. Project-scoped facts stay where they already live, in `.clio-coder/state.json` under `contextSources`.
 
@@ -886,7 +812,7 @@ delegation:
     - id: claude-code
       command: npx
       args: ["-y", "@zed-industries/claude-code-acp"]
-      toolGovernance: clio-policy
+      toolGovernance: clio-coder-policy
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
@@ -969,7 +895,11 @@ The command `clio-coder targets profile` supports several subcommands to manage 
 - **unbind**: Unbind an agent from its profile. Use `clio-coder targets profile unbind <agentId>`.
 - **bindings**: List active agent-to-profile bindings. Use `clio-coder targets profile bindings [--json]` to output details in JSON format.
 
-Inside the TUI, `/targets` opens Settings → Targets, the operational target console. Targets are rendered in a compact console table with columns for `HEALTH`, `ID`, `ROLES`, `RUNTIME`, and `LATENCY`, paired with an in-place action/detail drawer for URL, default model, last probe timestamp, and failure reason. Available actions include `Use` (switches active orchestrator target and rebases model to target default), `Connect` (executes API-key, OAuth, or no-auth setup then probes), `Probe` (runs immediate reachability probe with live activity indicator), and `Remove` (with preflight analysis of affected chat, fleet, and memory routes). Adding a target is performed via `clio-coder targets add`.
+Inside the TUI, `/settings targets` opens the operational target console.
+Targets render with `HEALTH`, `ID`, `ROLES`, `RUNTIME`, and `LATENCY`, plus a
+detail drawer for URL, default model, last probe, and failure reason. Actions
+include `Use`, `Connect`, `Probe`, and `Remove`; adding a target uses
+`clio-coder targets add`.
 
 ### Context-Window Provenance
 
@@ -1099,7 +1029,9 @@ OAuth refresh follows signal-aware credential mutation. Clio serializes the read
 
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio-coder auth status`, `clio-coder targets`, or `clio-coder configure`; only the source (env var name or `stored-api-key`) is shown.
 
-For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio-coder auth logout <target-or-runtime>`.
+For interactive auth, open `/settings targets`, select the row, and press `c`.
+For stored credential cleanup, use
+`clio-coder auth logout <target-or-runtime>`.
 
 ---
 

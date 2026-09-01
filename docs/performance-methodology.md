@@ -383,7 +383,7 @@ and the dispatch reservation, approval, gate, detach, monitor, and steer suites.
 
 ## Adaptive stream-pacer observations
 
-`terminal.smoothStreaming` is presentation-only. `off` is the exact existing
+`interface.smoothStreaming` is presentation-only. `off` is the exact existing
 16 ms coalescer and remains the 0.3.3 default. `auto` uses the pacer only on a
 capable local TTY with no accessibility, remote/multiplexer, CI, or observed
 backpressure signal. `on` requests pacing, but frame construction still stops

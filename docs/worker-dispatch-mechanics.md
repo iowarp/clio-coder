@@ -1,7 +1,7 @@
 # Worker Dispatch Mechanics
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive NDJSON protocol timeline stream and heartbeat watchdog simulator is located at [docs/html/worker_dispatch_blueprint.html](html/worker_dispatch_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive NDJSON protocol timeline stream and heartbeat watchdog simulator is located at [docs/html/worker_dispatch_blueprint.html](html/worker_dispatch_blueprint.html).
 
 This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.
 
@@ -157,7 +157,7 @@ stream ends when the assignment settles, not when one attempt's worker exits,
 so a consumer that drains it has seen exactly the run the terminal receipt
 describes. A canceled assignment ends its stream immediately.
 
-Retry timing is governed by `workers.maxRetries` and exponential backoff alone.
+Retry timing is governed by `fleet.retry.maxRetries` and exponential backoff alone.
 Target cooldowns gate *new* dispatches to a known-bad target and are not
 applied to retries of an in-flight assignment, whose retry budget already
 bounds it. A retry refused at admission settles the assignment failed and

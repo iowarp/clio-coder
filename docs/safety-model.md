@@ -1,7 +1,7 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
@@ -13,7 +13,7 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
 
-In Clio Coder v0.4.0, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
+In the current source tree, effective autonomy resolution is strictly centralized in `src/entry/orchestrator.ts` through `resolveEffectiveAutonomy` and `resolveBaselineAutonomy`. Every admission surface (tool registry admission, dispatch plan provenance, and ACP session snapshots) delegates to this pair of functions so that fallback paths cannot diverge across execution contexts. `resolveBaselineAutonomy` evaluates dispatch settings overrides, headless CLI options, and configuration settings before applying the default `auto-edit` level. `resolveEffectiveAutonomy` combines any active ACP session autonomy level with the baseline resolution.
 
 ### Autonomy levels
 
@@ -69,7 +69,7 @@ Every tool call, orchestrator or worker, evaluates in this order:
 
 1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`, `system_modify`) that parks at every level; `pass` hands off to step 2. Blocks precede asks: a damage-control `ask` rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path protection (which includes zero-access blocklists for critical files like `.git/config` and `credentials.yaml`, resolved with symlink canonicalization to prevent bypasses) is evaluated even when `.clio-coder/safety.yaml` is malformed, invalid, or attempts to override it. A malformed project policy cannot disable built-in default path protection, so credential protection never fails open.
 2. **Autonomy mapping**: the action class plus the level produce allow, ask, or deny per the matrix above.
-3. **Approvals**: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per `workers.onPermission` in workers, and non-stall denies in delegations.
+3. **Approvals**: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per `fleet.permissions.mode` in workers, and non-stall denies in delegations.
 
 ```mermaid
 graph TD
@@ -88,9 +88,9 @@ Net `confirm` is never auto-allowed by autonomy, including full-auto. Net `block
 
 ### Worker permission escalation
 
-Dispatched workers run non-interactively, so step 3 resolves per `workers.onPermission`: `deny` turns the parked call into a structured denial, `fail` ends the run, and `escalate` hands the ask up to the interactive operator. Under `escalate` the worker parks the call, emits a `clio_permission_escalated` event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker's stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch `resolveWorkerPermission` method is reachable only from the interactive layer. This preserves the receipt's honesty, since a model approving its own fleet's asks would collapse the audit trail.
+Dispatched workers run non-interactively, so step 3 resolves per `fleet.permissions.mode`: `deny` turns the parked call into a structured denial, `fail` ends the run, and `escalate` hands the ask up to the interactive operator. Under `escalate` the worker parks the call, emits a `clio_permission_escalated` event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker's stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch `resolveWorkerPermission` method is reachable only from the interactive layer. This preserves the receipt's honesty, since a model approving its own fleet's asks would collapse the audit trail.
 
-Escalation can never hang a run. Every escalated ask resolves by an operator decision or by the `workers.escalation` timeout fallback (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`); a headless session has no subscriber, so the timeout fallback always governs there. The worker keeps emitting heartbeats while parked, so the reconciler does not reap it, and every escalation and its resolution source (operator or timeout) is recorded on the receipt.
+Escalation can never hang a run. Every escalated ask resolves by an operator decision or by the `fleet.permissions.escalation` timeout fallback (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`); a headless session has no subscriber, so the timeout fallback always governs there. The worker keeps emitting heartbeats while parked, so the reconciler does not reap it, and every escalation and its resolution source (operator or timeout) is recorded on the receipt.
 
 ---
 
@@ -287,7 +287,7 @@ Dispatch workers can run the same HTTP or native runtimes as the orchestrator. C
 
 Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 
-- **`claude-sdk` (Enforced Safety):** Drives [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`workers.onPermission=deny` returns denial; `workers.onPermission=fail` terminates the run with a permission-required code).
+- **`claude-sdk` (Enforced Safety):** Drives [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`fleet.permissions.mode=deny` returns denial; `fleet.permissions.mode=fail` terminates the run with a permission-required code).
 - **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. Dispatch at autonomy `suggest` is refused outright (the same applies to `antigravity-code`): a subprocess cannot park a tool call for approval, so `suggest` has no honest mapping and the runner fails closed before launching the external CLI. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS=1`, and it is never silent: the run's receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding.
 - **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
 
@@ -330,7 +330,7 @@ When executing tasks in headless mode through `clio-coder run`, there is no term
 
 ### Workers and delegations
 
-- **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `workers.onPermission`: `deny` continues the run with a rejection; `fail` ends it; `escalate` forwards it to the interactive operator (see the escalation section above). All three values are editable in the `/settings` center.
+- **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `fleet.permissions.mode`: `deny` continues the run with a rejection; `fail` ends it; `escalate` forwards it to the interactive operator (see the escalation section above). All three values are editable in the `/settings` center.
 - **Delegations (ACP)** under `clio-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
 - **ACP server sessions** (a remote client driving Clio) snapshot the autonomy level at `session/new`, so a mid-session settings change on the host cannot alter an in-flight remote session's admission decisions.
 

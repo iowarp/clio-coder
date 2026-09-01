@@ -1,46 +1,64 @@
-# Clio Coder Documentation Coverage Matrix
+# Clio Coder documentation ownership
 
-This matrix maps every top-level directory in `src/` and every domain directory under `src/domains/` to its authoritative documentation page. It records coverage status (`documented`, `partial`, `undocumented`), missing concepts, and key source contracts for `v0.4.0`.
+This matrix maps every active top-level source directory and every domain under
+`src/domains/` to the guide that owns its public contract. It is an ownership
+map, not a substitute for those guides. Update the relevant row whenever a new
+source area or public contract is added.
 
-## Coverage Matrix
+## Top-level source areas
 
-| Source Area | Primary Subsystems / Modules | Owning Documentation | Status | Coverage Details & Gap Analysis |
-| :--- | :--- | :--- | :--- | :--- |
-| `src/cli/` | Command line routing, subcommands, flag parsing, exit codes, machine-readable JSON streaming | [commands-and-modes.md](commands-and-modes.md), [exit-codes-and-output.md](exit-codes-and-output.md) | `documented` | Covered by CLI reference and the dedicated exit codes and machine-readable output contract guide. |
-| `src/core/` | Invariants, constants, configuration defaults, headless permissions, tool definitions, response schema contracts | [architecture.md](architecture.md), [configuration-and-targets.md](configuration-and-targets.md), [installation-and-lifecycle.md](installation-and-lifecycle.md), [safety-model.md](safety-model.md) | `documented` | Fully documented across architecture, configuration, lifecycle, and safety model pages. |
-| `src/engine/` (Core) | Engine turn loop, prompt priming, streaming message adapters, turn execution | [architecture.md](architecture.md), [context-engine.md](context-engine.md) | `documented` | Documented across architecture and context engine guides. |
-| `src/engine/acp/` | ACP protocol server, transport adapters, tool mediators, permission forwarding, error taxonomy | [acp.md](acp.md) | `documented` | Dedicated ACP specification covering server wiring, permission mediation, timeouts, error taxonomy, and security boundaries. |
-| `src/entry/` | Application bootstrapping, CLI router, interactive loop entry point | [architecture.md](architecture.md), [installation-and-lifecycle.md](installation-and-lifecycle.md) | `documented` | Documented in architecture compilation boundaries and lifecycle guides. |
-| `src/interactive/` | TUI architecture, screens, overlays, keybindings, panels, theme tokens, width matrices, prompt pre-warm rounds and their gating, expected-cold reason stamping | [tui-design.md](tui-design.md), [commands-and-modes.md](commands-and-modes.md), [context-engine.md](context-engine.md) | `documented` | Fully documented in TUI design specification and commands reference; the pre-warm and the cache-honesty surfaces `/context` renders are in the context engine reference. |
-| `src/tools/` | 20 built-in tools across 7 planes, registry, policy engine bindings, observation envelope bounds | [tool-usage.md](tool-usage.md), [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) | `documented` | Comprehensive 20-tool reference with schemas, examples, and envelope size constraints. |
-| `src/utils/` | Image manipulation, photon operations, git execution utilities | [architecture.md](architecture.md), [tool-usage.md](tool-usage.md) | `documented` | Utility helpers documented within tool usage and architectural boundaries. |
-| `src/worker/` | Worker subprocess lifecycle, NDJSON transport, heartbeat timers, control lane demuxing, spec contracts | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) | `documented` | Complete reference for NDJSON socket protocols, watchdog timers, and exit status mapping. |
-| `src/domains/agents/` | 12 built-in recipes, agent catalog, recipe schema, fleet commands, fleet contract v4 | [built-in-agents.md](built-in-agents.md), [fleet-dispatch.md](fleet-dispatch.md) | `documented` | Documented in built-in agent recipes guide and fleet dispatch architecture. |
-| `src/domains/components/` | Component scanning, snapshots, hashing, diffing | [middleware-and-components.md](middleware-and-components.md) | `documented` | Documented in active component snapshot and middleware guide. |
-| `src/domains/config/` | Configuration contracts, file watcher, keybinding definitions, setting classifiers | [configuration-and-targets.md](configuration-and-targets.md), [commands-and-modes.md](commands-and-modes.md) | `documented` | Documented in configuration targets and command/keybinding reference. |
-| `src/domains/context/` | `CLIO-CODER.md` bootstrap, codewiki generation, prompt context assembly, project rules, non-destructive working-set eviction (`age-horizon` and `structural-v1` policies, protection predicates, path index, byte-stable markers, recall by ref) | [context-engine.md](context-engine.md), [context-working-set.md](context-working-set.md) | `documented` | Context window, token accounting, and the three compaction mechanisms in the engine reference; the working-set layer has its own guide covering the vocabulary, both ledger record kinds and format v4, the marker contract, both policies with their rule order, recall semantics, and the operator surfaces. |
-| `src/domains/dispatch/` | Fleet orchestration, assignment store, batch tracker, admission, route planner, receipt integrity v16 | [fleet-dispatch.md](fleet-dispatch.md), [dispatch-architecture-rationale.md](dispatch-architecture-rationale.md), [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) | `documented` | Multi-node fleet dispatch, admission invariants, and receipt verification fully documented. |
-| `src/domains/eval/` | Suite v2 YAML schema, eval runner, `clio.eval.verdict.v1` envelope and its Suite v2 adapter, tracked metrics and scenario aggregates, serving-configuration provenance, reporters, workspace sandboxing | [eval-runner.md](eval-runner.md), [evals-internal.md](evals-internal.md) | `documented` | Product evals are documented independently from external benchmarks. The verdict envelope, `trackedMetrics` and their sources, `--trials`, and the config-drift and estimated-versus-measured refusals are in the runner reference. |
-| `src/domains/evidence/` | Evidence bundles, findings taxonomy, provenance store, failure attribution | [evidence-and-memory.md](evidence-and-memory.md) | `documented` | Documented in evidence directory structures and memory retrieval guide. |
-| `src/domains/evolution/` | Falsifiable Change Manifest JSON templates and `clio-coder evolve` self-edit gates | [evolution.md](evolution.md) | `documented` | Documented in evolution manifest reference and mutation validation rules. |
-| `src/domains/extensions/` | Extension manifest schemas, resource roots, portable share archives | [extensions-and-sharing.md](extensions-and-sharing.md) | `documented` | Documented in extensions and sharing guide. |
-| `src/domains/lifecycle/` | Platform initialization, upgrade, reset, uninstall, migrations, doctor diagnostics | [installation-and-lifecycle.md](installation-and-lifecycle.md) | `documented` | Platform directories, permissions, initialization, and diagnostic commands documented. |
-| `src/domains/memory/` | Proactive task memory, three-tier bank, two-phase policy grammar, handoffs | [proactive-memory.md](proactive-memory.md), [evidence-and-memory.md](evidence-and-memory.md) | `documented` | Proactive task bank, intervention rules, and persistence fully documented. |
-| `src/domains/middleware/` | Middleware hooks (`turn_start`, `tool_call`, `tool_result`, `turn_end`), reminders, budgets | [middleware-and-components.md](middleware-and-components.md) | `documented` | Documented in middleware hooks and active component snapshot guide. |
-| `src/domains/observability/` | Trace store (`node:sqlite` WAL mirror), metrics, cost accounting, evidence index | [trace-store.md](trace-store.md), [observability.md](observability.md) | `documented` | Database schema, rowid cursor queries, and receipt provenance documented. |
-| `src/domains/prompts/` | Prompt compiler, fragment loaders, static cache stability, memory intervention injection | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) | `documented` | Documented in prompt envelope and tool delivery guide. |
-| `src/domains/providers/` | Runtime adapters, capability probes, model catalog and its per-family `measuredUnder` provenance, canonical endpoint keys and per-endpoint request-slot capacity, thinking control, ALCF OAuth | [configuration-and-targets.md](configuration-and-targets.md), [model-catalog.md](model-catalog.md), [provider-adapter-cookbook.md](provider-adapter-cookbook.md), [alcf-provider.md](alcf-provider.md) | `documented` | Complete provider adapter contracts, model catalogs, and ALCF Globus targets documented. |
-| `src/domains/resources/` | Skill package discovery, marketplace index resolution, prompt resources | [skills-marketplace.md](skills-marketplace.md), [extensions-and-sharing.md](extensions-and-sharing.md) | `documented` | Skills marketplace, publishing flows, and resource managers documented. |
-| `src/domains/safety/` | Policy engine, action classifiers, damage-control rules, path policies, finish contract, audit log | [safety-model.md](safety-model.md), [scientific-validation.md](scientific-validation.md) | `documented` | Policy evaluation order, 10-step sequence, write containment, and finish contract documented. |
-| `src/domains/scheduling/` | Capacity lease acquisition, heartbeats, expiry, cross-process locks, cluster scheduling | [capacity-and-scheduling.md](capacity-and-scheduling.md), [fleet-dispatch.md](fleet-dispatch.md) | `documented` | Dedicated capacity leasing, heartbeat TTL, and cross-process lock reference. |
-| `src/domains/session/` | Session ledger format v4, tree branching (`/tree`), `/fork`, `/resume`, checkpoints, protected-artifact journal | [session-lifecycle.md](session-lifecycle.md), [context-working-set.md](context-working-set.md) | `documented` | Dedicated session lifecycle guide covering branching, journal, and recovery; the `contextEviction` and `contextRecall` records added at format v4 are specified in the working-set guide. |
-| `src/domains/share/` | Portable share archive bundles, manifest verification, import/export flows | [extensions-and-sharing.md](extensions-and-sharing.md) | `documented` | Share archives and portable bundle formats documented in extensions guide. |
-| `src/domains/webhook/` | Empty directory | None (Inert) | `inert` | Directory contains no active modules or exports in v0.4.0. |
+| Source area | Responsibility | Owning guides |
+| --- | --- | --- |
+| `src/cli/` | CLI routing, flags, subcommands, exit behavior, and machine output | [Commands and Modes](commands-and-modes.md), [Exit Codes and Output](exit-codes-and-output.md) |
+| `src/core/` | Shared invariants, configuration, defaults, path handling, and runtime contracts | [Architecture](architecture.md), [Configuration and Targets](configuration-and-targets.md), [Installation and Lifecycle](installation-and-lifecycle.md) |
+| `src/engine/` | Main turn loop, provider execution, streaming, ACP, and worker runtimes | [Architecture](architecture.md), [Context Engine](context-engine.md), [ACP](acp.md) |
+| `src/entry/` | Process bootstrap and application composition | [Architecture](architecture.md), [Installation and Lifecycle](installation-and-lifecycle.md) |
+| `src/interactive/` | Terminal application, editor, overlays, panels, rendering, and keybindings | [TUI Design](tui-design.md), [Commands and Modes](commands-and-modes.md) |
+| `src/tools/` | Built-in tool registry, schemas, policy bindings, and bounded results | [Tool Usage](tool-usage.md), [Prompt Envelope and Tools](prompt-envelope-and-tools.md) |
+| `src/utils/` | Image, Git, and supporting utility functions | [Architecture](architecture.md), [Tool Usage](tool-usage.md) |
+| `src/worker/` | Worker subprocess protocol, steering, heartbeats, and spec contracts | [Worker Dispatch Mechanics](worker-dispatch-mechanics.md) |
 
-## Cross-Cutting Reference Guides
+## Domain ownership
 
-In addition to source subsystem mappings, the documentation set includes cross-cutting contracts:
+| Domain | Responsibility | Owning guides |
+| --- | --- | --- |
+| `agents` | Thirteen built-in recipes, discovery, recipe/result schemas, and fleet contracts | [Built-in Agents](built-in-agents.md), [Fleet Dispatch](fleet-dispatch.md) |
+| `components` | Active component scanning, snapshots, hashing, and diffs | [Middleware and Components](middleware-and-components.md) |
+| `config` | Configuration contracts, classification, keybindings, and watchers | [Configuration and Targets](configuration-and-targets.md), [Commands and Modes](commands-and-modes.md) |
+| `context` | Project handbook, codewiki, project rules, compaction, and working set | [Context Engine](context-engine.md), [Context Working Set](context-working-set.md) |
+| `dispatch` | Admission, assignments, routing, fleet execution, receipts, and recovery | [Fleet Dispatch](fleet-dispatch.md), [Dispatch Typed Intent](dispatch-typed-intent.md), [Dispatch Architecture Rationale](dispatch-architecture-rationale.md) |
+| `eval` | Suite v2, runners, artifacts, verdicts, comparison, reports, and provenance | [Eval Runner](eval-runner.md), [Internal Evals](evals-internal.md) |
+| `evidence` | Evidence bundles, findings, failure attribution, and provenance | [Evidence and Memory](evidence-and-memory.md), [Observability](observability.md) |
+| `evolution` | Falsifiable change manifests and self-edit validation | [Evolution](evolution.md) |
+| `extensions` | Extension discovery, compatibility, resources, and state | [Extensions and Sharing](extensions-and-sharing.md) |
+| `interop` | Detection, consent, trust posture, and isolation for foreign coding agents | [Extensions and Sharing](extensions-and-sharing.md), [Configuration and Targets](configuration-and-targets.md) |
+| `lifecycle` | Doctor, install metadata, upgrade migrations, reset, and uninstall state | [Installation and Lifecycle](installation-and-lifecycle.md), [Artifact Versions](artifact-versions.md) |
+| `memory` | Task memory, reviewed promotion, spending, telemetry, and handoff | [Proactive Memory](proactive-memory.md), [Evidence and Memory](evidence-and-memory.md) |
+| `middleware` | Hook registration, budgets, reminders, watchdogs, and marketplace offers | [Middleware and Components](middleware-and-components.md), [Skills Marketplace](skills-marketplace.md) |
+| `mux` | Experimental pane host, docks, pane registry, and file-pane protocol | [TUI Design](tui-design.md), [Commands and Modes](commands-and-modes.md) |
+| `observability` | Trace store, accounting, cost, metrics, and evidence index | [Observability](observability.md), [Trace Store](trace-store.md) |
+| `prompts` | Prompt compiler, fragments, preload, hashing, and extension boundary | [Prompt Envelope and Tools](prompt-envelope-and-tools.md) |
+| `providers` | Runtime descriptors, probes, target resolution, auth, and model knowledge | [Configuration and Targets](configuration-and-targets.md), [Model Catalog](model-catalog.md), [Provider Adapter Cookbook](provider-adapter-cookbook.md), [ALCF Provider](alcf-provider.md) |
+| `resources` | Skills, prompts, libraries, collision policy, and installation provenance | [Skills Marketplace](skills-marketplace.md), [Resource Library](resource-library.md), [Extensions and Sharing](extensions-and-sharing.md) |
+| `safety` | Action classification, policy, damage control, audit, and finish contracts | [Safety Model](safety-model.md), [Scientific Validation](scientific-validation.md) |
+| `scheduling` | Cluster discovery, capacity budgets, and scheduling extension | [Capacity and Scheduling](capacity-and-scheduling.md), [Fleet Dispatch](fleet-dispatch.md) |
+| `session` | Session ledger, branching, checkpoints, compaction records, and recovery | [Session Lifecycle](session-lifecycle.md), [Context Working Set](context-working-set.md) |
+| `share` | Portable archive manifests and compatibility reads | [Extensions and Sharing](extensions-and-sharing.md), [Artifact Versions](artifact-versions.md) |
+| `toolchain` | Pinned external-tool registry, install, resolution, version, and removal | [Installation and Lifecycle](installation-and-lifecycle.md), [Commands and Modes](commands-and-modes.md) |
+| `user-tasks` | Durable operator task-board storage | [Commands and Modes](commands-and-modes.md), [Proactive Memory](proactive-memory.md) |
 
-1. [artifact-versions.md](artifact-versions.md): Canonical version registry and migration contract for all 9 serialized artifact schemas across Clio Coder.
-2. [glossary.md](glossary.md): Formal definitions of 45 core architectural concepts mapped to their TypeScript types in `src/`.
-3. [troubleshooting.md](troubleshooting.md): Comprehensive diagnostic and remediation guide keyed by exact user-facing error strings.
+All active domain directories are represented above. A new domain is not
+documentation-complete until it has an owner here and its public behavior is
+described in that guide.
+
+## Cross-cutting references
+
+- [Artifact Versions](artifact-versions.md) owns persisted schema identities and
+  compatibility windows.
+- [Environment Variables](environment-variables.md) owns process-level
+  overrides and internal plumbing variables.
+- [Glossary](glossary.md) owns stable architectural vocabulary.
+- [Troubleshooting](troubleshooting.md) owns operator remediation keyed to
+  user-facing errors.
+- [Documentation Guide](documentation-guide.md) owns documentation style,
+  source alignment, and verification expectations.

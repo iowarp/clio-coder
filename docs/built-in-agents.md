@@ -133,7 +133,7 @@ optional `product` key also exists for product-scoped recipes. There are no
 `model`, `target`, `thinkingLevel`, or `output` frontmatter keys — target and
 model selection belong to dispatch, not the recipe.
 
-A custom source recipe may omit `budget`; admission then materializes a concrete WorkerSpec v3 budget from the operator's current `guardrails.workerToolCallCap`. Built-in recipes declare the field and fail startup if their strict frontmatter is malformed. When a source recipe includes `budget`, it must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis` (plus an optional `maximum` ceiling object, e.g. architect's `maximum: {toolCalls: 150, readReserve: 16}`): the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
+A custom source recipe may omit `budget`; admission then materializes a concrete WorkerSpec v3 budget from the operator's current `fleet.limits.toolCallsPerRun`. Built-in recipes declare the field and fail startup if their strict frontmatter is malformed. When a source recipe includes `budget`, it must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis` (plus an optional `maximum` ceiling object, e.g. architect's `maximum: {toolCalls: 150, readReserve: 16}`): the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
 
 The operator cap is independent and cannot be widened by a recipe. Dispatch clamps `toolCalls` to that cap and clamps `readReserve` to zero when canonical `read` is absent after tool admission. Reserve slots admit only `read`, not every read-class tool. Blocked non-read attempts do not consume admitted reserve slots, but they still count toward the operator attempt ceiling.
 
@@ -163,7 +163,7 @@ Scout is the bounded escalation path for broad reconnaissance, not an authority 
 
 ### ACP Delegation Agents as First-Class Workers
 
-ACP delegation agents (registered under `delegation.agents` in `settings.yaml`) are integrated as first-class workers:
+ACP delegation agents (registered under `integrations.externalAgents.entries` in `settings.yaml`) are integrated as first-class workers:
 - **Automatic Routing:** When a task is dispatched to an agent ID matching a configured ACP delegation agent, the dispatch engine automatically routes the execution to that delegation agent.
 - **Dynamic Spec Discovery:** The agent registry automatically synthesizes complete AgentSpecs for configured ACP delegation agents. They are visible via `clio-coder agents` and in slash command menus.
 
@@ -260,19 +260,19 @@ Subagent runs that terminate with retryable outcomes are placed in an in-memory 
 Scheduled retries use an exponential backoff state to calculate subsequent retry delays. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.
 
 ### 3. Concurrency Limits
-The setting `budget.concurrency` restricts the number of concurrent subagent tasks. Setting it to `auto` determines the concurrency limit dynamically based on system capabilities.
+The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. Setting it to `auto` determines the concurrency limit dynamically based on system capabilities.
 
 ### 4. Heartbeats and Reconciler
 For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the active heartbeat timestamp. If a worker stops responding and updates no heartbeats, the reconciler terminates the stalled subprocess automatically.
 
 ### 5. Worker Permission Postures
-A dispatched worker has no operator by default, so a tool call that requires interactive permission must resolve within bounded time. The `workers.onPermission` setting picks the posture:
+A dispatched worker has no operator by default, so a tool call that requires interactive permission must resolve within bounded time. The `fleet.permissions.mode` setting picks the posture:
 
 - `deny` (default): the parked call becomes a structured tool denial and the run continues.
 - `fail`: the run finalizes immediately with outcome `failed`/`permission_required`.
 - `escalate`: the parked call is handed up to the interactive operator. The worker emits a `clio_permission_escalated` event over its stdout; the dispatch domain republishes it on the bus as a permission request tagged with the run id; the operator resolves it in the TUI permission overlay; and the decision travels back down the worker's stdin as a `permission_decision` line (the same pipe steers use). No model can approve a worker permission; resolution is human-only.
 
-Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `workers.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters, documented with their stability labels in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance); a timed-out or denied escalation also raises an `escalation` finding in the evidence bundle. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
+Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `fleet.permissions.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters, documented with their stability labels in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance); a timed-out or denied escalation also raises an `escalation` finding in the evidence bundle. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
 
 ---
 

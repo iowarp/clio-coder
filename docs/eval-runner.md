@@ -1,7 +1,8 @@
 # Clio Coder Local Evaluation Runner
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive task suite validator, subprocess execution simulator, and compare calculator is located at [docs/html/eval_blueprint.html](html/eval_blueprint.html) (Version: 0.4.0).
+> **Interactive spec available:** The source checkout includes the
+> [eval blueprint](html/eval_blueprint.html).
 
 The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows.
 
@@ -241,7 +242,7 @@ Suite execution adapts scalar run metrics into these observable facts at the Sui
 ### Public built-in behavioral corpus
 
 The repository ships corpus `public-built-in-behavior` version `1.0.0` under
-`benchmarks/eval/`. It contains no private prompts, endpoints, credentials, or
+`evals/`. It contains no private prompts, endpoints, credentials, or
 mutable external dataset:
 
 - `behavioral-machinery.yaml` provides one positive and one adversarial
@@ -265,9 +266,9 @@ mutable external dataset:
 Build once, then run either focused suite from the repository root:
 
 ```sh
-node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js
-node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-model.yaml --target mini --clio-coder-entry dist/cli/index.js
-node dist/cli/index.js eval run --suite benchmarks/eval/behavioral-model-negative-control.yaml --target mini --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-model.yaml --target mini --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-model-negative-control.yaml --target mini --clio-coder-entry dist/cli/index.js
 ```
 
 The machinery tasks use the repository read-only and create only private
@@ -382,31 +383,15 @@ metric means and variances. When the prompt or recipe identity changes, the
 generated evidence names each affected corpus scenario and role instead of
 hiding it behind an aggregate score.
 
-### Checked behavioral release baseline
+### Reference behavioral baseline
 
-The checked deterministic baseline is
-`benchmarks/eval/behavioral-machinery-baseline.json`. The release gate runs all
-26 machinery-only scenarios through the built CLI and compares a stable
-projection of their labels, metrics, and execution envelopes with that file.
-It requires no model, private endpoint, credential, or mutable dataset.
-
-When an intentional prompt, recipe, policy, or expected-behavior change moves
-the evidence, run the same machinery suite first, inspect the failing diff and
-the named affected corpus results, then update explicitly:
-
-```sh
-npm run build
-node benchmarks/eval/check-behavioral-release.mjs --update
-git diff -- benchmarks/eval/behavioral-machinery-baseline.json
-```
-
-The baseline update belongs in the reviewed change that caused it. Do not use
-the update command merely to make a red gate green. The model-required and
-negative-control suites remain manual release evidence because their outputs
-depend on a live target; they are never folded into the deterministic baseline.
-The projection excludes `latency.wallMs` because scheduler timing is not stable
-evidence. Behavioral labels, deterministic metrics, and the execution envelope
-remain checked byte for byte.
+`evals/behavioral-machinery-baseline.json` is retained as reviewable reference
+evidence for the machinery corpus. It is not a CI or release gate. Run the
+current `evals/behavioral-machinery.yaml` through the built CLI when a prompt,
+recipe, policy, or expected-behavior change needs a fresh measurement, inspect
+the named scenario evidence, and update any retained baseline deliberately in
+the reviewed change. Model-required and negative-control suites remain manual
+measurements tied to their exact target and serving configuration.
 
 ### Hard thresholds and informational budgets
 

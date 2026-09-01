@@ -115,7 +115,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `ResourceSourceInfo` in `src/domains/resources/collision.ts`.
 
 ### 28. Trust Gate
-- **Definition**: A security boundary requiring explicit operator opt-in via `skills.trustProjectCompatRoots` before prompt templates or skills from project-scope foreign roots can execute or expand.
+- **Definition**: A security boundary requiring explicit operator opt-in via `integrations.projectResources.trustProjectImports` before prompt templates or skills from project-scope foreign roots can execute or expand.
 - **Owning Type**: `PromptTemplate` in `src/domains/resources/prompts/loader.ts`.
 
 ### 29. Fleet
@@ -127,7 +127,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `DispatchRequest` in `src/domains/dispatch/contract.ts`.
 
 ### 31. Run Ledger
-- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `guardrails.maxDispatchRuns`. It is what the fleet board, `clio-coder fleet status`, and eval linking read.
+- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `fleet.history.maxRuns`. It is what the fleet board, `clio-coder fleet status`, and eval linking read.
 - **Owning Type**: `RunEnvelope` in `src/domains/dispatch/types.ts`, persisted by `src/domains/dispatch/state.ts`.
 
 ### 32. Agent Ledger
@@ -163,7 +163,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `ParsedClioMd` in `src/domains/context/clio-md.ts`.
 
 ### 40. Delegate
-- **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `delegation.agents` and invoked with `/delegate`. A delegate is a foreign harness, not a model target.
+- **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `integrations.externalAgents.entries` and invoked with `/delegate`. A delegate is a foreign harness, not a model target.
 - **Owning Type**: `DelegationAgentConfig` in `src/core/defaults.ts`.
 
 ### 41. Working Set

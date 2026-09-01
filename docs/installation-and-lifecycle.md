@@ -3,7 +3,9 @@
 Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). Clio Coder installs from npm as `@iowarp/clio-coder` (`npm install -g @iowarp/clio-coder`, published since v0.3.0) or from a source checkout with a deterministic local symlink; the CLI classifies both install kinds and `clio-coder upgrade` handles each.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.4.0). You can open it directly in any web browser to view details dynamically.
+> **Interactive spec available:** The source checkout includes the
+> [lifecycle blueprint](html/lifecycle_blueprint.html) with a path simulator and
+> visual flowcharts.
 
 ### Optional dependency: the Claude Agent SDK
 
@@ -245,7 +247,11 @@ clio-coder upgrade
 Key lifecycle and operational updates in v0.3.7:
 - Upgraded the underlying engine SDK libraries to 0.84.0 with signal-aware OAuth cancellation.
 - Hardened migration resilience: damaged `credentials.yaml` files no longer block upgrades when no renames are needed (#121); `--skip-migrations` is available as a recovery override.
-- Fullscreen TUI mode (`terminal.tuiMode`, `terminal.fullscreenScrollbar`) is available via Settings → Terminal (restart required). Adaptive presentation pacing is the live `terminal.smoothStreaming` setting; 0.3.3 defaults it to `off`, with conservative `auto` and explicit `on` available from the same section.
+- Fullscreen TUI mode (`interface.mode`, `interface.fullscreenScrollbar`) is
+  available through `/settings interface` and requires a restart. Adaptive
+  presentation pacing is the live `interface.smoothStreaming` setting; it
+  defaults to `off`, with conservative `auto` and explicit `on` available from
+  the same area.
 - Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set `CLIO_CODER_INSTANT_SHELL=0` for the legacy fully hydrated first-frame path.
 - Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
 - Resumed and forked session entry replays standardize message prefixes through `src/engine/messages.ts`.
@@ -375,5 +381,5 @@ Clio Coder supports headless operation for automation and continuous integration
 
 When executing tasks headlessly using `clio-coder run`, interactive permission prompting is unavailable. The engine resolves permission requests using a deterministic model:
 - **Main-agent auto-denial:** Any main-agent tool call that parks for operator authorization is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.` The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome.
-- **Worker non-stall policy:** Dispatched workers use `workers.onPermission`. The default `deny` turns a permission ask into a structured tool denial and lets the worker continue. `fail` aborts the worker and records the dispatch outcome as `failed/permission_required`.
+- **Worker non-stall policy:** Dispatched workers use `fleet.permissions.mode`. The default `deny` turns a permission ask into a structured tool denial and lets the worker continue. `fail` aborts the worker and records the dispatch outcome as `failed/permission_required`.
 - **CI behavior:** Neither path waits for an interactive prompt. Exit status still reflects the final headless or dispatch result rather than the mere fact that a permission ask occurred.

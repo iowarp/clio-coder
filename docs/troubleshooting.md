@@ -1,6 +1,8 @@
 # Troubleshooting & Error Remediation
 
-This guide provides concrete, actionable remediation procedures for operational errors, permission denials, target connection failures, and system diagnostics in Clio Coder `v0.4.0`.
+This guide provides concrete, actionable remediation procedures for
+operational errors, permission denials, target connection failures, and system
+diagnostics in the current source tree.
 
 ---
 
@@ -14,7 +16,7 @@ This guide provides concrete, actionable remediation procedures for operational 
 | `no local skill marketplace catalog or index configured` | No catalog directory (`CLIO_CODER_SKILL_CATALOG_DIR`, a `skills/` folder in the working tree, or the installed package's own `skills/` catalog) and no JSON index (`CLIO_CODER_SKILL_MARKETPLACE_INDEX`, `<configDir>/skill-marketplace.json`, or the package's `skills/skill-marketplace.json`) was found. On an npm install this means the package is incomplete; check `clio-coder doctor`. | Point `CLIO_CODER_SKILL_CATALOG_DIR` at a `skills/` catalog or `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at a valid `skill-marketplace.json`, or install a skill directly via `clio-coder skills install <path\|github-url>`. |
 | `<arg> is a global option and must come before the subcommand: clio-coder <usage> <command> ...` | A global CLI option (such as `--api-key`, `--no-context-files`, or `-nc`) was placed after the subcommand name. Directory roots are configured via `CLIO_CODER_*_DIR` environment variables. | Move the flag before the subcommand name (e.g. `clio-coder --api-key <key> run ...` instead of `clio-coder run --api-key <key> ...`). |
 | `target <id> is not registered` | The designated target ID does not exist in `settings.yaml`. | Run `clio-coder targets` to view available targets, or configure a new target using `clio-coder targets add`. |
-| `budget: ceiling must be >= 0 (got <val>)` | A negative session cost ceiling reached the scheduling budget (`src/domains/scheduling/budget.ts`). | Set a non-negative `budget.sessionCeilingUsd` in `settings.yaml`, or edit Session ceiling (USD) in Settings → Budget. |
+| `budget: ceiling must be >= 0 (got <val>)` | A negative session cost ceiling reached the scheduling budget (`src/domains/scheduling/budget.ts`). | Set a non-negative `safety.limits.sessionCostUsd` in `settings.yaml`, or edit Session ceiling (USD) in Settings → Budget. |
 | `worker_final_output_missing` | A worker process completed execution with exit code 0 but failed to emit a valid final answer before the stream closed. | Check the worker event log using `clio-coder trace tail <runId>` or inspect the receipt via `monitor(run_id="<id>", mode="receipt")`. |
 | `vram_capacity_fit_failure` | The model could not be scheduled or loaded due to insufficient GPU VRAM capacity on the target node. | Select a smaller quantized model variant, reduce context window size, or route to an alternative fleet node with greater memory capacity. |
 | `loop_guard_tools_disabled_exhausted` | The loop detector identified repeated unproductive tool calls with identical arguments and disabled tool execution. | Inspect model prompts and provide clearer intermediate steering instructions to prevent recursive tool loops. |
