@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -321,6 +322,45 @@ integrations:
 			deepStrictEqual(
 				[sessionPath, evalPath, receiptPath].map((path) => readFileSync(path, "utf8")),
 				snapshots,
+			);
+		}
+	});
+
+	it("doctor lists legacy git refs and active ownership markers without renaming or rewriting them", () => {
+		const root = join(scratch.dir, "legacy-git-project");
+		mkdirSync(root, { recursive: true });
+		const git = (...args: string[]): string => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+		git("init", "-b", "main");
+		git("config", "user.name", "Naming Doctor");
+		git("config", "user.email", "naming-doctor@example.invalid");
+		writeFileSync(join(root, "tracked.txt"), "baseline\n", "utf8");
+		git("add", "tracked.txt");
+		git("commit", "-m", "baseline");
+		git("branch", "clio/task/released-task");
+		git("branch", "clio/compete/released-group/1");
+
+		const worktrees = join(root, ".clio-coder", "worktrees");
+		const taskMarker = join(worktrees, "released-task.task-owner.json");
+		const competeMarker = join(worktrees, "released-group", ".clio-coder-compete-owner.json");
+		mkdirSync(join(worktrees, "released-group"), { recursive: true });
+		writeFileSync(taskMarker, '{"version":1,"kind":"clio-task-worktree"}\n', "utf8");
+		writeFileSync(competeMarker, '{"version":2,"kind":"clio-compete-group"}\n', "utf8");
+		const markerBytes = [taskMarker, competeMarker].map((path) => readFileSync(path, "utf8"));
+		const branches = git("branch", "--format=%(refname:short)");
+
+		for (const fix of [false, true]) {
+			const findings = namingFootprintFindings({ cwd: root, fix });
+			const refs = findings.find((entry) => entry.name === "naming git refs");
+			strictEqual(refs?.level, "warn");
+			ok(refs?.detail.includes("clio/task/released-task"));
+			ok(refs?.detail.includes("clio/compete/released-group/1"));
+			const markers = findings.find((entry) => entry.name === "naming worktree markers");
+			strictEqual(markers?.level, "warn");
+			ok(markers?.detail.startsWith("2 active legacy worktree markers"));
+			strictEqual(git("branch", "--format=%(refname:short)"), branches);
+			deepStrictEqual(
+				[taskMarker, competeMarker].map((path) => readFileSync(path, "utf8")),
+				markerBytes,
 			);
 		}
 	});
