@@ -43,6 +43,7 @@ function fakeMux(options: { available?: boolean } = {}): FakeMux {
 			self: { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p0" },
 			candidates: ["/tmp/fake.sock"],
 			reason: "fake",
+			refused: false,
 		}),
 		async openUtilityPane() {
 			throw new Error("the bridge must never open a pane");

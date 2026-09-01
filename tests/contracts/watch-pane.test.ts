@@ -65,6 +65,7 @@ function fakeMux(): FakeMux {
 				self: { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p0" },
 				candidates: ["/tmp/h.sock"],
 				reason: "fake",
+				refused: false,
 			}),
 			async openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null> {
 				opened.push(request);

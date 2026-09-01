@@ -30,7 +30,13 @@ export async function createMuxBundle(
 		...(options.env ? { env: options.env } : {}),
 		log,
 	});
-	log(detection.mode === "none" ? "debug" : "info", `mux mode ${detection.mode}: ${detection.reason}`);
+	// A `none` that nobody asked for is background noise and stays at debug. A
+	// refusal is the operator's own setting being turned down, so it goes to
+	// `warning`, which the orchestrator routes to boot stderr.
+	log(
+		detection.refused ? "warning" : detection.mode === "none" ? "debug" : "info",
+		detection.refused ? `panes refused: ${detection.reason}` : `mux mode ${detection.mode}: ${detection.reason}`,
+	);
 
 	const runtime = createMuxRuntime({ detection, client, log });
 

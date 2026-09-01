@@ -17,8 +17,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import * as net from "node:net";
 import { after, describe, it } from "node:test";
+import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createMuxRuntime, type MuxRuntime } from "../../src/domains/mux/contract.js";
 import { detectMux } from "../../src/domains/mux/detect.js";
+import { createMuxBundle } from "../../src/domains/mux/extension.js";
 import type { MuxClient } from "../../src/domains/mux/socket-client.js";
 import { createMuxClient } from "../../src/domains/mux/socket-client.js";
 import { type FakeHerdrServer, startFakeHerdrServer, waitForCondition } from "../harness/fake-herdr-server.js";
@@ -485,5 +487,37 @@ describe("mux gated wire surfaces", () => {
 		await quietRuntime.contract.notify({ title: "suppressed" });
 		strictEqual(quiet.notifications().length, 1, "the call still went out");
 		strictEqual(quietRuntime.contract.available(), true, "shown:false is an answer, not a failure");
+	});
+});
+
+describe("contracts/mux boot logging", () => {
+	// The refusal has to reach the operator, and `warning` is the only level the
+	// orchestrator routes to boot stderr (src/entry/orchestrator.ts). Logging the
+	// embedded degrade at debug is what made it silent.
+	it("logs a refused rung at warning and an ordinary none at debug", async () => {
+		const refusedLines: Array<{ level: string; message: string }> = [];
+		const refused = await createMuxBundle({} as DomainContext, {
+			enabled: "embedded",
+			env: { HERDR_ENV: "1" },
+			log: (level, message) => refusedLines.push({ level, message }),
+		});
+		await refused.extension.stop?.();
+		const warned = refusedLines.filter((line) => line.level === "warning");
+		strictEqual(warned.length, 1, JSON.stringify(refusedLines));
+		ok(warned[0]?.message.includes("panes refused"), warned[0]?.message);
+		ok(warned[0]?.message.includes("phase 5"), warned[0]?.message);
+
+		const quietLines: Array<{ level: string; message: string }> = [];
+		const quiet = await createMuxBundle({} as DomainContext, {
+			enabled: "auto",
+			env: {},
+			log: (level, message) => quietLines.push({ level, message }),
+		});
+		await quiet.extension.stop?.();
+		strictEqual(
+			quietLines.some((line) => line.level === "warning"),
+			false,
+			"a machine with no pane host never asked for one",
+		);
 	});
 });

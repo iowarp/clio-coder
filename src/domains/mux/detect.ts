@@ -9,8 +9,11 @@
  * call.
  *
  * Embedded mode resolves to `none` until Phase 5 lands the session bootstrap.
- * Asking for it is not an error; it degrades with a reason the doctor surface
- * can print.
+ * Asking for it is not an error, but it is a refusal rather than a quiet
+ * degrade: the detection carries `refused: true`, the boot prints the reason on
+ * stderr, and doctor's mode row warns. A session that asked for panes and got
+ * none should never have to guess why, and `embedded` costs guest mode too, so
+ * the reason names `auto` as the rung that works today.
  */
 
 import { homedir } from "node:os";
@@ -32,6 +35,15 @@ export interface MuxDetection {
 	candidates: ReadonlyArray<string>;
 	/** Human-readable reason, always set; for `guest` it names the socket that answered. */
 	reason: string;
+	/**
+	 * True when the operator asked for a rung Clio cannot provide, as opposed to
+	 * asking for panes on a machine that has no pane host. The two are both
+	 * `none` and neither is an error, but only the first is a promise Clio broke:
+	 * nothing about the environment would change the answer, and the operator has
+	 * to be told, because they configured a mode and got no panes. Callers raise
+	 * a refusal to a visible level; an ordinary `none` stays at debug.
+	 */
+	refused: boolean;
 }
 
 export interface DetectMuxOptions {
@@ -83,7 +95,7 @@ function readSelfLocation(env: NodeJS.ProcessEnv): MuxSelfLocation {
 	};
 }
 
-function none(reason: string, candidates: ReadonlyArray<string> = []): MuxDetection {
+function none(reason: string, candidates: ReadonlyArray<string> = [], refused = false): MuxDetection {
 	return {
 		mode: "none",
 		socketPath: null,
@@ -91,6 +103,7 @@ function none(reason: string, candidates: ReadonlyArray<string> = []): MuxDetect
 		self: { workspaceId: null, tabId: null, paneId: null },
 		candidates,
 		reason,
+		refused,
 	};
 }
 
@@ -114,8 +127,18 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 	}
 	if (enabled === "embedded") {
 		// Phase 5 owns the session bootstrap. Until then the honest answer is that
-		// Clio cannot provide panes, not that it failed to find them.
-		return { detection: none("embedded mode is not implemented yet; it ships in phase 5"), client: null };
+		// Clio cannot provide panes, not that it failed to find them, and the
+		// operator hears it: this degrade is marked a refusal so the boot says so
+		// out loud rather than logging a debug line nobody reads. The reason also
+		// names the rung that does work, because `embedded` costs guest mode too.
+		return {
+			detection: none(
+				"embedded mode is not implemented yet; it ships in phase 5, so this session has no panes at all. Set panes.enabled=auto for guest mode inside a herdr session.",
+				[],
+				true,
+			),
+			client: null,
+		};
 	}
 	if (env.HERDR_ENV !== "1") {
 		return { detection: none("HERDR_ENV is not 1, so Clio is not running inside a pane host"), client: null };
@@ -137,6 +160,7 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 					self: readSelfLocation(env),
 					candidates,
 					reason: `guest mode on ${socketPath} (herdr ${server.version}, protocol ${server.protocol})`,
+					refused: false,
 				},
 				client,
 			};
