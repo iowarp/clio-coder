@@ -2,8 +2,6 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
-
 ## 0.4.1 - 2026-09-01
 
 This grew beyond the bug-fix-only patch originally planned. v0.4.1 is a full release led by the version-2 `settings.yaml` contract and a smaller, grammar-driven slash-command surface, followed by new editor, marketplace, and herdr workflows plus the hardening that made them releasable.
