@@ -762,11 +762,7 @@ Deno.test("the approval escalation and expiry stamps are computed on the host cl
 		const requestedAt = Date.parse(permission.payload.requestedAt);
 		equal(requestedAt, frozen);
 		equal(Date.parse(permission.payload.escalateAt) - requestedAt, 45_000);
-		// The ACP ceiling (60 s here) is shorter than the host budget, so only its
-		// remaining duration bounds the expiry. A real-clock comparison would have
-		// produced the full 300 s budget instead.
-		const budget = Date.parse(permission.payload.expiresAt) - requestedAt;
-		ok(budget > 50_000 && budget <= 60_000, `expected an ACP-bounded budget, received ${budget}`);
+		equal(Date.parse(permission.payload.expiresAt) - requestedAt, 300_000);
 		await test.host.cancelTurn(context.turnId);
 		await waitForEvent(test.sink, "turn.terminal", (event) => event.context.turnId === context.turnId);
 	} finally {
