@@ -26,6 +26,20 @@ export type {
 } from "./contract.js";
 export { createMuxRuntime } from "./contract.js";
 export { detectMux, type MuxDetection, type MuxEnablement, resolveSocketCandidates } from "./detect.js";
+export {
+	clampDockShare,
+	DOCK_MAX_SHARE,
+	DOCK_SPECS,
+	type DockController,
+	type DockSlot,
+	type DockSpec,
+	type DockState,
+	deriveSplitPath,
+	observedDockShare,
+	planDockOpen,
+	ratioForDockShare,
+	SHARE_EPSILON,
+} from "./dock-controller.js";
 export type { MuxDomainOptions } from "./extension.js";
 export { MuxManifest } from "./manifest.js";
 export { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";

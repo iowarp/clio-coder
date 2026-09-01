@@ -25,6 +25,7 @@
 
 import type { DomainContract } from "../../core/domain-loader.js";
 import type { MuxDetection } from "./detect.js";
+import { createDockController, type DockController, type DockSlot, type DockState } from "./dock-controller.js";
 import { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";
 import { muxSupportsMethod } from "./protocol.js";
 import type {
@@ -71,6 +72,13 @@ export interface MuxOpenUtilityPaneRequest {
 	 * such as Yazi reopen `/dev/tty` for their interface when stdout is not a tty.
 	 */
 	stdoutPath?: string;
+	/**
+	 * Managed placement: the pane becomes this slot's dock, split from the
+	 * anchor with the slot's direction and sized to `share` of the axis
+	 * (clamped, cell-floored). Requires the layout tier (protocol 21); below
+	 * the floor the request degrades to a plain split and `direction` applies.
+	 */
+	dock?: { slot: DockSlot; share?: number };
 }
 
 export interface MuxNotifyRequest {
@@ -99,7 +107,19 @@ export interface MuxContract extends DomainContract {
 	 * This is what stops a restarted session's Enter-in-the-workers-view from
 	 * opening a second watch pane beside the surviving one.
 	 */
-	adoptPane(request: { purpose: MuxPanePurpose; label: string }): Promise<MuxPaneRef | null>;
+	adoptPane(request: { purpose: MuxPanePurpose; label: string; dock?: DockSlot }): Promise<MuxPaneRef | null>;
+	/**
+	 * Focus one Clio-created pane, switching the user's view to it (pane.focus
+	 * moves the focused tab too). Explicit-request only; refuses foreign panes
+	 * and servers below the pane.focus floor.
+	 */
+	focusPane(paneId: string): Promise<boolean>;
+	/** Zoom one Clio-created pane on or off. Zooming steals focus; same rule as focusPane. */
+	zoomPane(paneId: string, on: boolean): Promise<boolean>;
+	/** Set a dock's share of its axis. False when the slot has no dock or the tier is absent. */
+	resizeDock(slot: DockSlot, share: number): Promise<boolean>;
+	/** Live dock geometry states, for `/panes` status. */
+	docks(): ReadonlyArray<DockState>;
 	notify(request: MuxNotifyRequest): Promise<void>;
 	/** Optional compete storage route. Protocol-gated with a native Git fallback at the caller. */
 	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult | null>;
@@ -152,6 +172,16 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	const log = options.log ?? ((): void => undefined);
 	const now = options.now ?? Date.now;
 	const registry = createPaneRegistry();
+	const anchorPaneId = detection.self.paneId;
+	/**
+	 * The managed dock tier needs an anchor to split from and the protocol-21
+	 * layout methods to converge with. Absent either, dock requests degrade to
+	 * plain utility splits and the rest of the tier answers false/empty.
+	 */
+	const docks: DockController | null =
+		client !== null && anchorPaneId !== null && muxSupportsMethod(detection.server, "layout.export")
+			? createDockController({ client, anchorPaneId, log })
+			: null;
 
 	let healthy = client !== null;
 	let probeHealthAt = 0;
@@ -206,7 +236,21 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	};
 
 	const onEvent = (event: MuxEvent): void => {
-		if (event.kind !== "pane.closed" && event.kind !== "pane.exited") return;
+		if (event.kind === "layout.updated") {
+			docks?.noteLayoutUpdated(event.geometry);
+			return;
+		}
+		if (event.kind === "pane.moved") {
+			// herdr rewrites the pane id on a move; the registry and dock state
+			// follow it so ownership is not lost to the user reorganizing.
+			const held = registry.forget(event.previousPaneId);
+			if (held) {
+				registry.record({ ...held, ref: { paneId: event.paneId, tabId: event.tabId, workspaceId: event.workspaceId } });
+				docks?.notePaneMoved(event.previousPaneId, event.paneId, event.tabId);
+			}
+			return;
+		}
+		docks?.notePaneGone(event.paneId);
 		const dropped = registry.forget(event.paneId);
 		if (dropped) {
 			log("debug", `mux pane ${event.paneId} left on ${event.kind}; dropped from the registry`);
@@ -232,38 +276,57 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		},
 
 		async openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null> {
+			// Idempotence for docks: a slot that already has a pane answers with it.
+			const dockSlot = request.dock?.slot;
+			if (dockSlot && docks) {
+				const existing = docks.stateFor(dockSlot);
+				const held = existing ? registry.byPaneId(existing.paneId) : null;
+				if (held) return held.ref;
+			}
 			return await attempt(
 				"openUtilityPane",
 				async (live) => {
-					const anchor = detection.self.paneId ?? (await live.paneCurrent()).paneId;
-					const pane = await live.paneSplit({
-						direction: request.direction ?? "right",
-						targetPaneId: anchor,
-						cwd: request.cwd,
-						focus: false,
-						...(request.env ? { env: request.env } : {}),
-					});
-					const ref: MuxPaneRef = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
+					let ref: MuxPaneRef;
+					if (request.dock && docks) {
+						const placed = await docks.open(request.dock.slot, {
+							...(request.dock.share === undefined ? {} : { share: request.dock.share }),
+							cwd: request.cwd,
+							...(request.env ? { env: request.env } : {}),
+						});
+						// A refusal (anchor too small) is an answer, not a failure.
+						if (placed === null) return null;
+						ref = placed;
+					} else {
+						const anchor = anchorPaneId ?? (await live.paneCurrent()).paneId;
+						const pane = await live.paneSplit({
+							direction: request.direction ?? "right",
+							targetPaneId: anchor,
+							cwd: request.cwd,
+							focus: false,
+							...(request.env ? { env: request.env } : {}),
+						});
+						ref = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
+					}
 					const purpose = request.purpose ?? "utility";
 					registry.record(paneRecord(ref, { purpose, label: request.label, openedAt: now() }));
 					const title = request.title;
 					const titleSupported = title !== undefined && muxSupportsMethod(detection.server, "pane.rename");
 					if (titleSupported) {
 						try {
-							await live.paneRename(pane.paneId, title);
+							await live.paneRename(ref.paneId, title);
 						} catch {
 							// Presentation is optional. A server that advertises the floor but
 							// lacks or refuses rename must not strand an otherwise healthy pane.
 						}
 					}
 					// The `role` token is what adoptPane finds again after a restart.
-					await tagOwner(live, pane.paneId, { role: token(purpose) }, titleSupported ? title : undefined);
+					await tagOwner(live, ref.paneId, { role: token(purpose) }, titleSupported ? title : undefined);
 					if (request.argv.length > 0) {
 						// herdr has no argv parameter on pane.split, so the command goes in
 						// through the pane's shell. `exec` replaces the shell so the pane
 						// exits with the program and emits pane.exited for reconciliation.
 						const redirect = request.stdoutPath ? ` > ${shellQuote([request.stdoutPath])}` : "";
-						await live.paneSendText(pane.paneId, `exec ${shellQuote(request.argv)}${redirect}\n`);
+						await live.paneSendText(ref.paneId, `exec ${shellQuote(request.argv)}${redirect}\n`);
 					}
 					return ref;
 				},
@@ -287,7 +350,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			);
 		},
 
-		async adoptPane(request: { purpose: MuxPanePurpose; label: string }): Promise<MuxPaneRef | null> {
+		async adoptPane(request: { purpose: MuxPanePurpose; label: string; dock?: DockSlot }): Promise<MuxPaneRef | null> {
 			const existing = registry.byPurpose(request.purpose);
 			if (existing) return existing.ref;
 			return await attempt(
@@ -305,6 +368,9 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						registry.record(
 							paneRecord(ref, { purpose: request.purpose, label: request.label, openedAt: now(), adopted: true }),
 						);
+						// Crash recovery for a dock: the surviving pane takes the slot back so
+						// geometry management resumes instead of a second dock opening.
+						if (request.dock && docks) docks.adopt(request.dock, ref);
 						log("info", `mux adopted a ${request.purpose} pane left open by a previous session`);
 						return ref;
 					}
@@ -312,6 +378,43 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 				},
 				null,
 			);
+		},
+
+		async focusPane(paneId: string): Promise<boolean> {
+			// Ownership first: focusing the user's own panes stays off the table
+			// even though the wire allows it.
+			if (!registry.owns(paneId)) return false;
+			if (!muxSupportsMethod(detection.server, "pane.focus")) return false;
+			return await attempt(
+				"focusPane",
+				async (live) => {
+					await live.paneFocus(paneId);
+					return true;
+				},
+				false,
+			);
+		},
+
+		async zoomPane(paneId: string, on: boolean): Promise<boolean> {
+			if (!registry.owns(paneId)) return false;
+			if (!muxSupportsMethod(detection.server, "pane.zoom")) return false;
+			return await attempt(
+				"zoomPane",
+				async (live) => {
+					const result = await live.paneZoom(paneId, on ? "on" : "off");
+					return result.changed;
+				},
+				false,
+			);
+		},
+
+		async resizeDock(slot: DockSlot, share: number): Promise<boolean> {
+			if (!docks) return false;
+			return await attempt("resizeDock", () => docks.resize(slot, share), false);
+		},
+
+		docks(): ReadonlyArray<DockState> {
+			return docks?.states() ?? [];
 		},
 
 		async notify(request: MuxNotifyRequest): Promise<void> {
@@ -405,9 +508,17 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			subscription?.close();
 			subscription = null;
 			paneGoneHandlers.clear();
-			// Pane ownership is server-side and intentionally survives process
-			// shutdown. Keep the local snapshot too so the contract itself proves
-			// shutdown tears down sockets, never panes.
+			// Docks close with the session: a native application takes its windows
+			// with it. A crash never reaches this method, which is exactly what
+			// leaves dock panes behind for the next session's adoption path.
+			// Unmanaged utility panes are the operator's and stay open.
+			if (client && docks) {
+				for (const paneId of docks.paneIds()) {
+					await client.paneClose(paneId).catch(() => undefined);
+					registry.forget(paneId);
+				}
+				docks.clear();
+			}
 			if (client) await client.close().catch(() => undefined);
 		},
 	};
@@ -415,12 +526,15 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	const start = async (): Promise<void> => {
 		if (detection.mode === "none" || client === null) return;
 		try {
-			subscription = await client.subscribe(["pane.closed", "pane.exited"], onEvent, {
+			const kinds: ("pane.closed" | "pane.exited" | "pane.moved" | "layout.updated")[] = ["pane.closed", "pane.exited"];
+			if (docks) kinds.push("pane.moved", "layout.updated");
+			subscription = await client.subscribe(kinds, onEvent, {
 				onResync: (snapshot) => {
 					// A reconnect means events were missed. The snapshot is the authority
 					// on which panes still exist, so anything Clio thinks it owns that is
 					// absent from it is gone.
 					const dropped = registry.reconcile(snapshot.panes.map((pane) => pane.paneId));
+					for (const record of dropped) docks?.notePaneGone(record.ref.paneId);
 					if (dropped.length > 0) {
 						log("info", `mux reconciled ${dropped.length} pane(s) closed while the socket was down`);
 					}
