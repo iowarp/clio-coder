@@ -1,6 +1,7 @@
-import { accessSync, constants, mkdirSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
+import { join } from "node:path";
 import { readSettings } from "../core/config.js";
-import { runEventJournalRoot } from "../domains/dispatch/run-event-journal.js";
+import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { detectMux, MUX_METHOD_MIN_PROTOCOL, resolveSocketCandidates } from "../domains/mux/index.js";
 import { describeResolution, findPinnedTool, toolStatus } from "../domains/toolchain/index.js";
@@ -24,11 +25,8 @@ const PANE_HOST_TOOL_ID = "herdr";
 /** Highest protocol any method Clio drives requires, for the version row. */
 const REQUIRED_PROTOCOL = Math.max(...Object.values(MUX_METHOD_MIN_PROTOCOL));
 
-function journalWritabilityFinding(root = runEventJournalRoot()): DoctorFinding {
+function journalWritabilityFinding(root = join(resolveClioDirs().state, "runs")): DoctorFinding {
 	try {
-		// The viewer reads this tree and the journal writes it, so the useful
-		// question is whether it can exist and be written, not whether it does.
-		mkdirSync(root, { recursive: true });
 		accessSync(root, constants.W_OK);
 		return { ok: true, name: "panes journal dir", detail: `${root} is writable` };
 	} catch (error) {
@@ -36,7 +34,7 @@ function journalWritabilityFinding(root = runEventJournalRoot()): DoctorFinding 
 			ok: true,
 			level: "warn",
 			name: "panes journal dir",
-			detail: `${root} is not writable (${error instanceof Error ? error.message : String(error)}); \`clio-coder fleet view\` will have no transcript to follow`,
+			detail: `${root} is absent or not writable (${error instanceof Error ? error.message : String(error)}); \`clio-coder fleet view\` will have no transcript to follow`,
 		};
 	}
 }
