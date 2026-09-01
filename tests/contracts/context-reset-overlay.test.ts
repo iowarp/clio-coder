@@ -97,17 +97,21 @@ describe("contracts/context-reset overlay", () => {
 		}
 	});
 
-	it("keeps three choices and one footer row at narrow and normal widths", () => {
+	it("keeps three choices and wraps the focused explanation at narrow and normal widths", () => {
 		const mounted = overlayHarness();
 		openContextResetOverlay(mounted.tui, { onReset() {}, onCancel() {} });
 
 		for (const width of [40, 72]) {
 			const lines = mounted.component().render(width);
 			const clean = lines.map(stripAnsi);
-			strictEqual(lines.length, 5, `${width} columns render frame + three choices + one footer`);
 			for (const line of lines) {
 				strictEqual(visibleWidth(line), width, `${width}-column row must neither wrap nor overflow: ${stripAnsi(line)}`);
 			}
+			const collapsed = clean.join(" ").replace(/[│\s]+/gu, " ");
+			ok(
+				collapsed.includes("remove generated context and keep the project handbook"),
+				`focused explanation was cut at ${width} columns: ${collapsed}`,
+			);
 			ok(clean.some((line) => line.includes("Preserve CLIO-CODER.md")));
 			ok(clean.some((line) => line.includes("Delete CLIO-CODER.md")));
 			ok(clean.some((line) => line.includes("Cancel")));
