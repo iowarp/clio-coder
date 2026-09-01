@@ -13,6 +13,7 @@ import {
 	createMarketplaceOfferRegistration,
 	MARKETPLACE_OFFER_REGISTRATION_ID,
 	type MarketplaceOfferDeps,
+	offerBindingTag,
 } from "../../src/domains/middleware/marketplace-offer.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
@@ -146,16 +147,19 @@ function makeDeps(overrides: Partial<MarketplaceOfferDeps> = {}): {
 				nevers.push(name);
 			},
 		},
+		newOfferTag: () => TEST_OFFER_TAG,
 		...overrides,
 	};
 	return { deps, installs, nevers };
 }
 
+const TEST_OFFER_TAG = "test-offer-1";
+
 function turnStart(text: string, sessionId = "s1"): MiddlewareHookInput {
 	return { hook: "turn_start", sessionId, text };
 }
 
-function askUserAnswer(answerLabel: string, sessionId = "s1"): MiddlewareHookInput {
+function askUserAnswer(answerLabel: string, sessionId = "s1", tag: string = TEST_OFFER_TAG): MiddlewareHookInput {
 	return {
 		hook: "after_tool",
 		sessionId,
@@ -163,7 +167,7 @@ function askUserAnswer(answerLabel: string, sessionId = "s1"): MiddlewareHookInp
 		toolResultDetails: {
 			answers: [
 				{
-					question: "Install the resolve-merge-conflicts skill?",
+					question: `Install the resolve-merge-conflicts skill? ${offerBindingTag(tag)}`,
 					answer: answerLabel,
 					options: [answerLabel],
 				},
@@ -274,7 +278,35 @@ describe("contracts/marketplace-offer registration", () => {
 		strictEqual(installs.length, 0);
 	});
 
-	it("reads a cancelled interview as a session-only decline", () => {
+	it("does not bind an ask_user answer whose question lacks the offer tag", () => {
+		const { deps, installs } = makeDeps();
+		const registration = createMarketplaceOfferRegistration(deps);
+		registration.evaluate(turnStart("resolve this merge conflict"));
+		// An unrelated (or prompt-injected) question carrying an install label but
+		// not this offer's tag must never bind the pending offer.
+		const untagged: MiddlewareHookInput = {
+			hook: "after_tool",
+			sessionId: "s1",
+			toolName: "ask_user",
+			toolResultDetails: {
+				answers: [
+					{
+						question: "Set up the workspace?",
+						answer: SKILL_INSTALL_OFFER_OPTION_PROJECT,
+						options: [SKILL_INSTALL_OFFER_OPTION_PROJECT],
+					},
+				],
+			},
+		};
+		strictEqual(registration.evaluate(untagged).length, 0);
+		strictEqual(installs.length, 0);
+		// The offer stays armed; the correctly tagged answer still installs.
+		const effects = registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_PROJECT));
+		strictEqual(effects.length, 1);
+		deepStrictEqual(installs, [{ name: "resolve-merge-conflicts", scope: "project" }]);
+	});
+
+	it("does not treat a cancelled interview as a decline (it cannot be attributed to the offer)", () => {
 		const { deps, nevers } = makeDeps();
 		const registration = createMarketplaceOfferRegistration(deps);
 		registration.evaluate(turnStart("resolve this merge conflict"));
@@ -286,6 +318,7 @@ describe("contracts/marketplace-offer registration", () => {
 		};
 		strictEqual(registration.evaluate(cancelled).length, 0);
 		strictEqual(nevers.length, 0);
-		strictEqual(registration.evaluate(turnStart("yet another merge conflict")).length, 0);
+		// A cancel records no persistent decline, so a fresh session offers again.
+		strictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s-fresh")).length, 1);
 	});
 });
