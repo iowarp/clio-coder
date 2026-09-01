@@ -52,6 +52,129 @@ export interface RunBashCommandOptions {
 
 const BASH_UPDATE_THROTTLE_MS = 100;
 
+export interface BashProgressScheduler {
+	now(): number;
+	setTimeout(callback: () => void, delayMs: number): unknown;
+	clearTimeout(timer: unknown): void;
+}
+
+export interface BashOutputProgressController {
+	/** Emit the initial empty cumulative snapshot, when a callback is configured. */
+	start(): void;
+	/** Accept one stream chunk. Returns true only when this chunk reaches the hard cap. */
+	append(target: "stdout" | "stderr", chunk: Buffer): boolean;
+	/** Seal output, cancel progress work, emit the final snapshot, and return the result fields. */
+	settle(): Pick<BashCommandResult, "stdout" | "stderr" | "outputBytes" | "outputCapped">;
+}
+
+const SYSTEM_PROGRESS_SCHEDULER: BashProgressScheduler = {
+	now: Date.now,
+	setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+	clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+};
+
+/**
+ * Cumulative stdout/stderr fold shared by the child stream handlers and a
+ * deterministic contract-test seam. Settlement is a phase, not just a final
+ * boolean: once it starts, re-entrant or queued stream work is rejected while
+ * the one final advisory snapshot is still allowed to publish.
+ */
+export function createBashOutputProgressController(
+	onUpdate?: (progress: BashCommandProgress) => void,
+	scheduler: BashProgressScheduler = SYSTEM_PROGRESS_SCHEDULER,
+): BashOutputProgressController {
+	let phase: "active" | "settling" | "settled" = "active";
+	let stdout = "";
+	let stderr = "";
+	const stdoutDecoder = new StringDecoder("utf8");
+	const stderrDecoder = new StringDecoder("utf8");
+	let decodersFinished = false;
+	let outputBytes = 0;
+	let outputCapped = false;
+	let updateTimer: unknown = null;
+	let updateDirty = false;
+	let lastUpdateAt = 0;
+
+	const snapshot = (): BashCommandProgress => ({ stdout, stderr, outputBytes });
+
+	const finishDecoders = (): void => {
+		if (decodersFinished) return;
+		decodersFinished = true;
+		// A hard byte cap may bisect a multibyte code point. Discard the
+		// decoder's incomplete suffix instead of manufacturing U+FFFD.
+		if (outputCapped) return;
+		stdout += stdoutDecoder.end();
+		stderr += stderrDecoder.end();
+	};
+
+	const emitUpdate = (final = false): void => {
+		if (onUpdate === undefined || !updateDirty) return;
+		if (phase !== "active" && !(final && phase === "settling")) return;
+		updateDirty = false;
+		lastUpdateAt = scheduler.now();
+		try {
+			onUpdate(snapshot());
+		} catch {
+			// Rendering progress is advisory and must never change command execution.
+		}
+	};
+
+	const clearUpdateTimer = (): void => {
+		if (updateTimer === null) return;
+		scheduler.clearTimeout(updateTimer);
+		updateTimer = null;
+	};
+
+	const scheduleUpdate = (): void => {
+		if (onUpdate === undefined || phase !== "active") return;
+		updateDirty = true;
+		const delay = BASH_UPDATE_THROTTLE_MS - (scheduler.now() - lastUpdateAt);
+		if (delay <= 0) {
+			clearUpdateTimer();
+			emitUpdate();
+			return;
+		}
+		updateTimer ??= scheduler.setTimeout(() => {
+			updateTimer = null;
+			// A timer already queued by the event loop may still invoke its callback
+			// after clearTimeout. The phase check makes that callback inert.
+			emitUpdate();
+		}, delay);
+	};
+
+	return {
+		start(): void {
+			if (phase !== "active" || onUpdate === undefined) return;
+			updateDirty = true;
+			emitUpdate();
+		},
+		append(target, chunk): boolean {
+			if (phase !== "active" || outputCapped) return false;
+			const remaining = BASH_HARD_CAP_BYTES - outputBytes;
+			const accepted = chunk.byteLength <= remaining ? chunk : chunk.subarray(0, Math.max(0, remaining));
+			outputBytes += accepted.byteLength;
+			if (accepted.byteLength > 0) {
+				const decoded = target === "stdout" ? stdoutDecoder.write(accepted) : stderrDecoder.write(accepted);
+				if (target === "stdout") stdout += decoded;
+				else stderr += decoded;
+			}
+			if (accepted.byteLength < chunk.byteLength) outputCapped = true;
+			scheduleUpdate();
+			return outputCapped;
+		},
+		settle() {
+			if (phase === "settled") return { ...snapshot(), outputCapped };
+			if (phase === "settling") return { ...snapshot(), outputCapped };
+			phase = "settling";
+			clearUpdateTimer();
+			finishDecoders();
+			emitUpdate(true);
+			phase = "settled";
+			return { ...snapshot(), outputCapped };
+		},
+	};
+}
+
 function buildToolEnv(): NodeJS.ProcessEnv {
 	const env = { ...process.env };
 	env.AI_AGENT = AI_AGENT_NAME;
@@ -152,16 +275,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
 		let killSent = false;
-		let stdout = "";
-		let stderr = "";
-		const stdoutDecoder = new StringDecoder("utf8");
-		const stderrDecoder = new StringDecoder("utf8");
-		let decodersFinished = false;
-		let outputBytes = 0;
-		let outputCapped = false;
-		let updateTimer: ReturnType<typeof setTimeout> | null = null;
-		let updateDirty = false;
-		let lastUpdateAt = 0;
+		const output = createBashOutputProgressController(options.onUpdate);
 
 		const child = spawn("/bin/bash", [plan.mode, command], {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),
@@ -170,53 +284,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 
-		const finishDecoders = (): void => {
-			if (decodersFinished) return;
-			decodersFinished = true;
-			// A hard byte cap may bisect a multibyte code point. Discard the
-			// decoder's incomplete suffix instead of manufacturing U+FFFD.
-			if (outputCapped) return;
-			stdout += stdoutDecoder.end();
-			stderr += stderrDecoder.end();
-		};
-
-		const emitUpdate = (): void => {
-			if (options.onUpdate === undefined || !updateDirty) return;
-			updateDirty = false;
-			lastUpdateAt = Date.now();
-			try {
-				options.onUpdate({ stdout, stderr, outputBytes: Math.min(outputBytes, BASH_HARD_CAP_BYTES) });
-			} catch {
-				// Rendering progress is advisory and must never change command execution.
-			}
-		};
-		const clearUpdateTimer = (): void => {
-			if (updateTimer === null) return;
-			clearTimeout(updateTimer);
-			updateTimer = null;
-		};
-		const scheduleUpdate = (): void => {
-			if (options.onUpdate === undefined) return;
-			updateDirty = true;
-			const delay = BASH_UPDATE_THROTTLE_MS - (Date.now() - lastUpdateAt);
-			if (delay <= 0) {
-				clearUpdateTimer();
-				emitUpdate();
-				return;
-			}
-			updateTimer ??= setTimeout(() => {
-				updateTimer = null;
-				emitUpdate();
-			}, delay);
-		};
-		const finishUpdates = (): void => {
-			clearUpdateTimer();
-			emitUpdate();
-		};
-		if (options.onUpdate !== undefined) {
-			updateDirty = true;
-			emitUpdate();
-		}
+		output.start();
 
 		const clearKillGraceTimer = (): void => {
 			if (!killGraceTimer) return;
@@ -265,22 +333,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		}
 
 		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
-			if (outputCapped) return;
-			const remaining = BASH_HARD_CAP_BYTES - outputBytes;
-			const accepted = chunk.byteLength <= remaining ? chunk : chunk.subarray(0, Math.max(0, remaining));
-			outputBytes += accepted.byteLength;
-			if (accepted.byteLength > 0) {
-				const decoded = target === "stdout" ? stdoutDecoder.write(accepted) : stderrDecoder.write(accepted);
-				if (target === "stdout") stdout += decoded;
-				else stderr += decoded;
-			}
-			if (accepted.byteLength < chunk.byteLength) {
-				outputCapped = true;
-				scheduleUpdate();
-				killChild();
-				return;
-			}
-			scheduleUpdate();
+			if (output.append(target, chunk)) killChild();
 		};
 
 		child.stdout?.on("data", (chunk: Buffer) => appendChunk("stdout", chunk));
@@ -290,19 +343,15 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
-			finishDecoders();
-			finishUpdates();
+			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
 			resolve({
 				error: error as NodeJS.ErrnoException,
-				stdout,
-				stderr,
+				...finalOutput,
 				exitCode: null,
 				signal: null,
 				aborted,
 				timedOut,
-				outputCapped,
-				outputBytes,
 			});
 		});
 		child.on("close", (code, signalName) => {
@@ -310,8 +359,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
 			clearKillGraceTimer();
-			finishDecoders();
-			finishUpdates();
+			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
 			const error =
 				code === 0 && signalName === null
@@ -324,14 +372,11 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 						} as NodeJS.ErrnoException);
 			resolve({
 				error,
-				stdout,
-				stderr,
+				...finalOutput,
 				exitCode: code,
 				signal: signalName,
 				aborted,
 				timedOut,
-				outputCapped,
-				outputBytes,
 			});
 		});
 	});
