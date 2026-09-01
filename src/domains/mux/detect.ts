@@ -133,7 +133,7 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 		// names the rung that does work, because `embedded` costs guest mode too.
 		return {
 			detection: none(
-				"embedded mode is not implemented yet; it ships in phase 5, so this session has no panes at all. Set panes.enabled=auto for guest mode inside a herdr session.",
+				"embedded mode is not implemented yet; it ships in phase 5, so this session has no panes at all. Set interface.panes.enabled=auto for guest mode inside a herdr session.",
 				[],
 				true,
 			),

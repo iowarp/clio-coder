@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import { createReadStream, readdirSync, statSync } from "node:fs";
+import { createReadStream, readdirSync, realpathSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { relative, resolve } from "node:path";
 import chalk from "chalk";
 import { resolvePackageRoot } from "../core/package-root.js";
-import { printError, printHeader } from "./shared.js";
+import { printError, printHeader } from "./argv.js";
 
 // Human-facing viewer over the bundled HTML blueprints. It binds an ephemeral
 // static file server to 127.0.0.1 only, serves docs/html/index.html as the
@@ -159,8 +159,8 @@ function listHtmlFiles(htmlDir: string): string[] {
 }
 
 /** Build the static request handler for one html root. */
-function createDocsRequestHandler(htmlDir: string): (req: IncomingMessage, res: ServerResponse) => void {
-	const root = resolve(htmlDir);
+export function createDocsRequestHandler(htmlDir: string): (req: IncomingMessage, res: ServerResponse) => void {
+	const root = realpathSync(resolve(htmlDir));
 	return (req, res) => {
 		if (req.method !== "GET" && req.method !== "HEAD") {
 			res.writeHead(405, { "content-type": "text/plain; charset=utf-8", allow: "GET, HEAD" });
@@ -174,20 +174,27 @@ function createDocsRequestHandler(htmlDir: string): (req: IncomingMessage, res: 
 			res.end(resolved.reason);
 			return;
 		}
-		const target = resolve(root, resolved.relative);
-		if (!isWithin(target, root)) {
+		const requestedTarget = resolve(root, resolved.relative);
+		if (!isWithin(requestedTarget, root)) {
 			res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
 			res.end("forbidden");
 			return;
 		}
 		let size: number | null = null;
+		let target: string | null = null;
 		try {
+			target = realpathSync(requestedTarget);
+			if (!isWithin(target, root)) {
+				res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+				res.end("forbidden");
+				return;
+			}
 			const stat = statSync(target);
 			if (stat.isFile()) size = stat.size;
 		} catch {
 			size = null;
 		}
-		if (size === null) {
+		if (size === null || target === null) {
 			res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
 			res.end("not found");
 			return;
@@ -263,7 +270,7 @@ function openBrowser(url: string): void {
 	}
 }
 
-function waitForShutdown(): Promise<void> {
+export function waitForShutdown(): Promise<void> {
 	return new Promise((resolveShutdown) => {
 		const onSignal = (): void => {
 			process.removeListener("SIGINT", onSignal);

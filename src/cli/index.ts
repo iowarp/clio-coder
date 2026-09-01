@@ -48,6 +48,7 @@ Usage:
   clio-coder auth list|status|login|logout [target-or-runtime]
   clio-coder doctor [--fix]       diagnose state; --fix creates or repairs it
   clio-coder paths [--json]       print resolved config/data/cache directories
+  clio-coder config inspect [--json]  inspect effective customization and provenance
   clio-coder reset                recover or wipe Clio Coder state
   clio-coder context              show project context status (CLIO-CODER.md, preload, codewiki)
   clio-coder context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codewiki
