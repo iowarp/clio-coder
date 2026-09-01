@@ -1,7 +1,13 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
 import type { ContextRecalledPayload } from "../../core/bus-events.js";
-import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
+import {
+	SKILL_INSTALL_OFFER_OPTION_NEVER,
+	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
+	SKILL_INSTALL_OFFER_OPTION_PROJECT,
+	SKILL_INSTALL_OFFER_OPTION_USER,
+	SKILL_SUGGESTION_ANCHOR,
+} from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
 import {
@@ -289,6 +295,14 @@ function renderSkillsList(
 		"",
 		`If one skill above matches the current task, begin your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose), then continue the task in the same turn without it; only the operator can run it. If none match, do not mention skills.`,
 	);
+	if (marketplace.length > 0) {
+		// The offer protocol mirrors the marketplace-offer middleware: fixed
+		// option labels so the harness recognizes the answer, and the model
+		// never performs an install itself.
+		lines.push(
+			`When no installed skill serves the task but a marketplace skill above genuinely does, you may instead ask the operator with ask_user (mode=single_question, header "Install skill") whether to install it, offering exactly: "${SKILL_INSTALL_OFFER_OPTION_PROJECT}", "${SKILL_INSTALL_OFFER_OPTION_USER}", "${SKILL_INSTALL_OFFER_OPTION_NOT_NOW}", "${SKILL_INSTALL_OFFER_OPTION_NEVER}". The harness handles the answer and any install; never install or load a skill yourself.`,
+		);
+	}
 	return lines.join("\n");
 }
 
