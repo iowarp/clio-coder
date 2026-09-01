@@ -56,6 +56,7 @@ function createHarness(
 	const replayFolds: Array<ReplayBlockFoldControl | undefined> = [];
 	const editor: EditorSubmitEditor = {
 		getText: () => text,
+		getTextForSubmit: () => text,
 		setText: (next) => {
 			text = next;
 			events.push(`set:${next}`);
@@ -449,6 +450,28 @@ describe("contracts/interactive editor submit", () => {
 			"render",
 		]);
 		deepStrictEqual(harness.submits, []);
+	});
+
+	it("keeps pasted bang drafts literal through both alternate idle send keys", () => {
+		for (const send of ["queue", "interrupt"] as const) {
+			const harness = createHarness();
+			harness.setText("!! printf private");
+			harness.editor.getTextForSubmit = () => guardPastedEditorOperator(harness.getText());
+			let bashRuns = 0;
+			harness.deps.runBash = async () => {
+				bashRuns += 1;
+				return bashResult();
+			};
+			const controller = createEditorSubmitController(harness.deps);
+
+			if (send === "queue") controller.queueFollowUpFromEditor();
+			else controller.interruptFromEditor();
+
+			strictEqual(bashRuns, 0, `${send} must preserve the editor's paste provenance`);
+			deepStrictEqual(harness.history, ["!! printf private"]);
+			ok(harness.events.includes("dispatch:!! printf private"));
+			strictEqual(harness.events.includes("append-bash"), false);
+		}
 	});
 
 	it("interrupt while streaming restores the queue to the editor and submits in interrupt mode", async () => {

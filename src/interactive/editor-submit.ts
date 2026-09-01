@@ -57,6 +57,8 @@ export interface EditorSubmitExpansion {
 
 export interface EditorSubmitEditor {
 	getText(): string;
+	/** Draft spelling for an immediate send, including any editor provenance envelope. */
+	getTextForSubmit(): string;
 	setText(text: string): void;
 	addToHistory(text: string): void;
 }
@@ -431,9 +433,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	};
 
 	const queueFollowUpFromEditor = (): void => {
-		const text = deps.editor.getText().trim();
+		const streaming = deps.chat.isStreaming();
+		const text = (streaming ? deps.editor.getText() : deps.editor.getTextForSubmit()).trim();
 		if (text.length === 0) return;
-		if (!deps.chat.isStreaming()) {
+		if (!streaming) {
 			deps.editor.setText("");
 			submitEditorText(text);
 			deps.ui.requestRender();
@@ -460,9 +463,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	};
 
 	const interruptFromEditor = (): void => {
-		const text = deps.editor.getText().trim();
+		const streaming = deps.chat.isStreaming();
+		const text = (streaming ? deps.editor.getText() : deps.editor.getTextForSubmit()).trim();
 		if (text.length === 0) return;
-		if (!deps.chat.isStreaming()) {
+		if (!streaming) {
 			deps.editor.setText("");
 			submitEditorText(text);
 			deps.ui.requestRender();

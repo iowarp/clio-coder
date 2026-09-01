@@ -230,6 +230,15 @@ export class ClioEditor extends Editor {
 	}
 
 	/**
+	 * Preserve paste provenance for every immediate-send binding, including the
+	 * alternate paths that invoke the submit controller without an Editor Enter.
+	 */
+	getTextForSubmit(): string {
+		const text = this.getExpandedText();
+		return this.pastedOperatorDraft ? guardPastedEditorOperator(text) : text;
+	}
+
+	/**
 	 * pi-tui's bracketed-paste handling inserts pasted text (including a
 	 * trailing newline the paste carried) without submitting: a pasted
 	 * `/model\n` lands as two lines in the buffer and just sits there. Once
@@ -245,9 +254,9 @@ export class ClioEditor extends Editor {
 		// distinguish it from a typed operator; the submit controller unwraps it
 		// before sending the literal prompt onward.
 		if (this.pastedOperatorDraft && keybindings.matches(data, "tui.input.submit")) {
-			const pastedText = this.getExpandedText();
+			const pastedText = this.getTextForSubmit();
 			this.pastedOperatorDraft = false;
-			super.setText(guardPastedEditorOperator(pastedText));
+			super.setText(pastedText);
 			super.handleInput(data);
 			return;
 		}
