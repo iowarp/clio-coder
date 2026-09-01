@@ -9,10 +9,11 @@ import { describeResolution, findPinnedTool, toolStatus } from "../domains/toolc
 /**
  * The panes section of `clio-coder doctor`.
  *
- * Five rows, in the order an operator debugs them: what mode the pane layer
+ * Six rows, in the order an operator debugs them: what mode the pane layer
  * resolved to, whether the socket answered, whether the server is new enough
- * for the methods phase 3 uses, where the pane host binary resolves, and
- * whether the journal directory the viewer reads is writable.
+ * for the methods phase 3 uses, where the pane host binary resolves, what the
+ * boot layout composes, and whether the journal directory the viewer reads is
+ * writable.
  *
  * No row is an error. Panes are optional: an operator who never wanted them has
  * a healthy install without them, and doctor's exit code answers "is this
@@ -41,8 +42,21 @@ function journalWritabilityFinding(root = join(resolveClioDirs().state, "runs"))
 
 export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promise<DoctorFinding[]> {
 	let enabled: "auto" | "embedded" | "off" = "off";
+	let layoutRow: DoctorFinding = {
+		ok: true,
+		name: "panes layout",
+		detail: "off (no boot composition); set interface.panes.layout to workers or cockpit",
+	};
 	try {
-		enabled = readSettings().interface.panes.enabled;
+		const panes = readSettings().interface.panes;
+		enabled = panes.enabled;
+		if (panes.layout !== "off") {
+			layoutRow = {
+				ok: true,
+				name: "panes layout",
+				detail: `${panes.layout} at boot (workers dock ${(panes.workers.ratio * 100).toFixed(0)}%, files dock ${(panes.files.ratio * 100).toFixed(0)}%)`,
+			};
+		}
 	} catch {
 		// An unreadable settings file is already reported by the settings row;
 		// this section answers on the shipped default (off) rather than throwing.
@@ -60,6 +74,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 				detail:
 					"off by choice (panes.enabled=off); start `clio-coder --with-panes` for one session, or set panes.enabled=auto",
 			},
+			layoutRow,
 			journalWritabilityFinding(),
 		];
 	}
@@ -117,6 +132,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 				},
 	);
 
+	findings.push(layoutRow);
 	findings.push(journalWritabilityFinding());
 	return findings;
 }

@@ -61,6 +61,8 @@ export interface PanesInventoryEntry {
 export interface PanesEffectiveSettings {
 	enabled: string;
 	notifications: string;
+	/** Boot composition: off, workers, or cockpit. */
+	layout: string;
 	journal: boolean;
 	yazi: {
 		enabled: boolean;
@@ -68,6 +70,14 @@ export interface PanesEffectiveSettings {
 		profile: "managed" | "user";
 		followCwd: boolean;
 	};
+}
+
+/** One managed dock's live geometry, flattened for `/panes` status. */
+export interface PanesDockStatus {
+	slot: "workers" | "files";
+	paneId: string;
+	/** Share of the axis the dock currently targets, 0..0.5. */
+	targetShare: number;
 }
 
 /** File-pane return-path state flattened for `/panes` and the model tool. */
@@ -89,6 +99,8 @@ export interface PanesStatus {
 	server: { version: string; protocol: number } | null;
 	settings: PanesEffectiveSettings;
 	yazi: PanesYaziStatus;
+	/** Managed docks with live geometry; empty below the layout tier. */
+	docks: ReadonlyArray<PanesDockStatus>;
 	panes: ReadonlyArray<PanesInventoryEntry>;
 }
 
@@ -109,6 +121,11 @@ export type PanesWatchResult =
  * is: neither the domain nor the tool may import the interactive tree.
  */
 export interface PanesWatchController {
+	/**
+	 * Open (or adopt) the watch pane without retargeting it, for boot
+	 * composition under `interface.panes.layout`. False when the host refused.
+	 */
+	ensureOpen(): Promise<boolean>;
 	/** Point the watch pane at a run, opening or adopting the pane first if needed. */
 	watch(runId: string): Promise<PanesWatchResult>;
 	/** Retarget only; false when no watch pane is open or the write failed. */
@@ -121,6 +138,11 @@ export type PanesOpenResult =
 	| { status: "opened"; label: string; paneId: string | null }
 	| { status: "missing-binary"; preset: string; binary: string; installHint: string; detail: string }
 	| { status: "refused"; reason: string }
+	| { status: "unavailable"; reason: string };
+
+export type PanesZoomResult =
+	| { status: "zoomed"; paneId: string; label: string }
+	| { status: "not-found"; target: string }
 	| { status: "unavailable"; reason: string };
 
 export type PanesCloseResult =
@@ -156,6 +178,12 @@ export interface PanesOperations {
 	status(): PanesStatus;
 	show(target: string): Promise<PanesShowResult>;
 	open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult>;
+	/**
+	 * Toggle zoom on one Clio-owned pane, matched like `close` (pane id, label
+	 * substring, then purpose; newest first). Zooming steals focus, so this is
+	 * operator-only and never reachable from the model tool.
+	 */
+	zoom(target: string): Promise<PanesZoomResult>;
 	close(target: string): Promise<PanesCloseResult>;
 	/** Bind the composer-facing Yazi bridge without rebuilding this shared object. */
 	attachYazi(controller: PanesYaziController): () => void;

@@ -157,6 +157,8 @@ type SlashCommandVariant =
 	| { kind: "panes-show"; target: string }
 	/** A preset the model may also ask for, or operator-only argv. Never both. */
 	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string>; once?: boolean }
+	/** Toggle zoom on a Clio-owned pane; the bare form targets the watch pane. */
+	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
 	| { kind: "panes-usage"; reason?: string }
 	| { kind: "thinking-set"; level: string }
@@ -845,10 +847,17 @@ export function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 		`panes: mode=${status.mode} ${status.available ? "available" : "unavailable"} (${server})`,
 		`  ${status.reason}`,
 		...(status.socketPath ? [`  socket ${status.socketPath}`] : []),
-		`  settings: enabled=${status.settings.enabled} notifications=${status.settings.notifications} journal=${status.settings.journal}`,
+		`  settings: enabled=${status.settings.enabled} notifications=${status.settings.notifications} layout=${status.settings.layout} journal=${status.settings.journal}`,
 		`  files: enabled=${status.settings.yazi.enabled} mode=${status.settings.yazi.mode} profile=${status.settings.yazi.profile} followCwd=${status.settings.yazi.followCwd}`,
 		`  file pane: mode=${status.yazi.mode} pane=${status.yazi.paneId ?? "none"} cwd=${status.yazi.paneCwd ?? "unknown"} lastLine=${status.yazi.lastLineAt === null ? "never" : new Date(status.yazi.lastLineAt).toISOString()} dropped=${status.yazi.droppedLines}`,
 	];
+	if (status.docks.length > 0) {
+		lines.push(
+			`  docks: ${status.docks
+				.map((dock) => `${dock.slot}=${dock.paneId} @${(dock.targetShare * 100).toFixed(0)}%`)
+				.join(", ")}`,
+		);
+	}
 	if (status.panes.length === 0) {
 		lines.push("  no Clio-owned panes");
 	} else {
@@ -1621,19 +1630,21 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "panes",
 		description: "Inspect the pane layer, watch a live run in a pane, or open a utility pane",
 		group: "Inspect",
-		kinds: ["panes", "panes-show", "panes-open", "panes-close", "panes-usage"],
+		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-usage"],
 		args: {
 			subcommands: {
 				show: { positionals: [{ name: "run-or-agent", required: true }] },
 				// A rest positional, so an argv pane keeps its own flags: the parser
 				// would otherwise refuse `--follow` as an unknown flag of `/panes`.
 				open: { positionals: [{ name: "preset-or-argv", required: true, rest: true }] },
+				zoom: { positionals: [{ name: "target", required: false }] },
 				close: { positionals: [{ name: "target", required: false }] },
 			},
 		},
 		subcommandDescriptions: {
 			show: "watch a live run or agent in the watch pane",
 			open: `open a utility pane (${PANES_PRESET_IDS.join(", ")}, or a command)`,
+			zoom: "toggle zoom on a Clio-owned pane (default: the watch pane)",
 			close: "close a Clio-owned pane, or all of them",
 		},
 		fromArgs(parsed) {
@@ -1653,6 +1664,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return { kind: "panes-open", preset: "yazi", once: true };
 				}
 				return { kind: "panes-open", argv };
+			}
+			if (parsed.subcommand === "zoom") {
+				return { kind: "panes-zoom", target: parsed.positionals[0] ?? "" };
 			}
 			if (parsed.subcommand === "close") {
 				return { kind: "panes-close", target: parsed.positionals[0] ?? "all" };
@@ -1721,6 +1735,19 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						// reuses the exact doctor/tools diagnostic including the install hint.
 						ctx.io.stdout(`${result.detail}\n`);
 						ctx.render();
+					} else {
+						ctx.notice("warn", result.reason);
+					}
+				});
+				return;
+			}
+			if (command.kind === "panes-zoom") {
+				runLocal(async () => {
+					const result = await panes.zoom(command.target);
+					if (result.status === "zoomed") {
+						ctx.notice("success", `toggled zoom on ${result.label} (${result.paneId})`);
+					} else if (result.status === "not-found") {
+						ctx.notice("warn", `no Clio-owned pane matches ${result.target}`);
 					} else {
 						ctx.notice("warn", result.reason);
 					}

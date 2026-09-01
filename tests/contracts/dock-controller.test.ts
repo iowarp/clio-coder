@@ -257,12 +257,12 @@ describe("dock focus, zoom, and shutdown", () => {
 		ok(ref);
 		strictEqual(await runtime.contract.focusPane(ref.paneId), true);
 		strictEqual(fake.focusedPane(), ref.paneId);
-		strictEqual(await runtime.contract.zoomPane(ref.paneId, true), true);
+		strictEqual(await runtime.contract.zoomPane(ref.paneId, "on"), true);
 		strictEqual(fake.zoomedPane("w1:t1"), ref.paneId);
-		strictEqual(await runtime.contract.zoomPane(ref.paneId, false), true);
+		strictEqual(await runtime.contract.zoomPane(ref.paneId, "off"), true);
 		// The user's own pane is off the table even though the wire allows it.
 		strictEqual(await runtime.contract.focusPane("w1:p1"), false);
-		strictEqual(await runtime.contract.zoomPane("w1:p1", true), false);
+		strictEqual(await runtime.contract.zoomPane("w1:p1", "on"), false);
 		strictEqual(fake.requestsFor("pane.focus").length, 1);
 		strictEqual(fake.requestsFor("pane.zoom").length, 2);
 	});

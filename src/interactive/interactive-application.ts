@@ -977,9 +977,25 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// tool drive the same controller through the shared operations object.
 	const watchPane =
 		mux && mux.mode !== "none" && deps.createWatchPane
-			? deps.createWatchPane({ mux, getCwd: () => process.cwd() })
+			? deps.createWatchPane({
+					mux,
+					getCwd: () => process.cwd(),
+					getWorkersRatio: () => deps.getSettings?.().interface.panes.workers.ratio ?? 0.34,
+				})
 			: null;
 	const detachWatchPane = watchPane ? deps.attachWatchPane?.(watchPane) : undefined;
+	// Boot composition per `interface.panes.layout`: `workers` opens the workers
+	// dock parked on "no selection"; `cockpit` adds the files dock. Fire and
+	// forget, and only against a live pane host: a boot must never fall through
+	// to the in-terminal chooser or block the first paint on socket traffic.
+	{
+		const bootSettings = deps.getSettings?.();
+		const layout = bootSettings?.interface.panes.layout ?? "off";
+		if (layout !== "off" && mux?.available()) {
+			void watchPane?.ensureOpen();
+			if (layout === "cockpit" && bootSettings?.interface.panes.files.enabled) void yaziBridge?.open();
+		}
+	}
 	const selectedWatchableRun = (): { runId: string; agentId: string } | null => {
 		if (!watchPane) return null;
 		const row = dispatchBoard.selectedRow();

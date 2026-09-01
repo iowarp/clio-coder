@@ -35,6 +35,7 @@ import {
 	type PanesWatchController,
 	type PanesYaziController,
 	type PanesYaziStatus,
+	type PanesZoomResult,
 } from "../domains/mux/operations.js";
 import { resolveBinary } from "../tools/executables.js";
 import { type PaneWatchSource, paneWatchDecision } from "./pane-policy.js";
@@ -54,6 +55,18 @@ export interface PanesRuntimeDeps {
 }
 
 const UNAVAILABLE = "the pane layer is not available in this session";
+
+/** Fuzzy operator addressing shared by `close` and `zoom`: id, label, purpose; newest first. */
+function matchOwnedPane(owned: ReadonlyArray<MuxPaneRecord>, target: string): MuxPaneRecord | null {
+	const needle = target.trim().toLowerCase();
+	const newestFirst = [...owned].reverse();
+	return (
+		newestFirst.find((record) => record.ref.paneId.toLowerCase() === needle) ??
+		newestFirst.find((record) => record.label.toLowerCase().includes(needle)) ??
+		newestFirst.find((record) => record.purpose === needle) ??
+		null
+	);
+}
 
 function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesInventoryEntry> {
 	return records.map((record) => ({
@@ -165,10 +178,16 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				settings: {
 					enabled: panes.enabled,
 					notifications: panes.notifications,
+					layout: panes.layout,
 					journal: settings.fleet.history.journal,
 					yazi: { ...panes.files },
 				},
 				yazi: yaziController?.status() ?? closedYaziStatus(),
+				docks: deps.mux.docks().map((dock) => ({
+					slot: dock.slot,
+					paneId: dock.paneId,
+					targetShare: dock.targetShare,
+				})),
 				panes: [...inventory(deps.mux.list()), ...pendingOpens.values()],
 			};
 		},
@@ -254,6 +273,17 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			}
 		},
 
+		async zoom(target: string): Promise<PanesZoomResult> {
+			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
+			const match = matchOwnedPane(deps.mux.list(), target.trim().length === 0 ? "watch" : target);
+			if (!match) return { status: "not-found", target: target.trim().length === 0 ? "watch" : target };
+			const changed = await deps.mux.zoomPane(match.ref.paneId, "toggle");
+			if (!changed) {
+				return { status: "unavailable", reason: "the pane host does not support zoom (protocol below pane.zoom)" };
+			}
+			return { status: "zoomed", paneId: match.ref.paneId, label: match.label };
+		},
+
 		async close(target: string): Promise<PanesCloseResult> {
 			if (!deps.mux.available()) return { status: "unavailable", reason: UNAVAILABLE };
 			const owned = deps.mux.list();
@@ -265,12 +295,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				}
 				return { status: "closed", closed: labels.length, labels };
 			}
-			const needle = target.trim().toLowerCase();
-			const newestFirst = [...owned].reverse();
-			const match =
-				newestFirst.find((record) => record.ref.paneId.toLowerCase() === needle) ??
-				newestFirst.find((record) => record.label.toLowerCase().includes(needle)) ??
-				newestFirst.find((record) => record.purpose === needle);
+			const match = matchOwnedPane(owned, target);
 			if (!match) return { status: "not-found", target };
 			const closed = await deps.mux.closePane(match.ref.paneId);
 			return closed ? { status: "closed", closed: 1, labels: [match.label] } : { status: "not-found", target };

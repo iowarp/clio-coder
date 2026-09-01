@@ -114,8 +114,8 @@ export interface MuxContract extends DomainContract {
 	 * and servers below the pane.focus floor.
 	 */
 	focusPane(paneId: string): Promise<boolean>;
-	/** Zoom one Clio-created pane on or off. Zooming steals focus; same rule as focusPane. */
-	zoomPane(paneId: string, on: boolean): Promise<boolean>;
+	/** Zoom one Clio-created pane on, off, or toggled. Zooming steals focus; same rule as focusPane. */
+	zoomPane(paneId: string, mode: "on" | "off" | "toggle"): Promise<boolean>;
 	/** Set a dock's share of its axis. False when the slot has no dock or the tier is absent. */
 	resizeDock(slot: DockSlot, share: number): Promise<boolean>;
 	/** Live dock geometry states, for `/panes` status. */
@@ -395,13 +395,14 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			);
 		},
 
-		async zoomPane(paneId: string, on: boolean): Promise<boolean> {
+		async zoomPane(paneId: string, mode: "on" | "off" | "toggle"): Promise<boolean> {
 			if (!registry.owns(paneId)) return false;
 			if (!muxSupportsMethod(detection.server, "pane.zoom")) return false;
 			return await attempt(
 				"zoomPane",
 				async (live) => {
-					const result = await live.paneZoom(paneId, on ? "on" : "off");
+					const result = await live.paneZoom(paneId, mode);
+					// A toggle always changes state; on/off report false when already there.
 					return result.changed;
 				},
 				false,

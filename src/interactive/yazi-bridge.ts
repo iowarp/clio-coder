@@ -25,6 +25,8 @@ export interface YaziBridgeSettings {
 	mode: YaziSessionMode;
 	profile: YaziProfileMode;
 	followCwd: boolean;
+	/** Files-dock share of the height; absent leaves the dock spec's default. */
+	ratio?: number;
 }
 
 export interface YaziMentionBatch {
@@ -328,7 +330,11 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		}
 	};
 
-	const start = async (mode: YaziSessionMode, profileMode: YaziProfileMode): Promise<YaziBridgeOpenResult> => {
+	const start = async (
+		mode: YaziSessionMode,
+		profileMode: YaziProfileMode,
+		dockShare?: number,
+	): Promise<YaziBridgeOpenResult> => {
 		const mux = deps.mux;
 		if (!mux?.available()) return { status: "unavailable", reason: "the pane layer is not available" };
 		generation += 1;
@@ -341,6 +347,7 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 			mode,
 			profileMode,
 			cwd: deps.getCwd(),
+			...(dockShare === undefined ? {} : { dockShare }),
 			pickToken: token,
 			onEvent: (event: YaziEvent) => {
 				if (disposed || ownGeneration !== generation) return;
@@ -379,7 +386,7 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 				active = null;
 				deps.notice("warning", "the file-pane event stream did not start; reopening yazi in chooser mode");
 				void stale.close().finally(() => {
-					if (!disposed && ownGeneration === generation) void start("chooser", profileMode);
+					if (!disposed && ownGeneration === generation) void start("chooser", profileMode, dockShare);
 				});
 			}, deps.livenessMs ?? YAZI_LIVENESS_MS);
 			livenessTimer.unref();
@@ -419,7 +426,7 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 				}
 				return result;
 			}
-			return await start(mode, settings.profile);
+			return await start(mode, settings.profile, settings.ratio);
 		},
 		status(): Readonly<YaziBridgeStatus> {
 			const snapshot = active?.snapshot();
