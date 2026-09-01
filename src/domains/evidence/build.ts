@@ -56,6 +56,7 @@ const MAX_TASK_CHARS = 500;
 const TRANSCRIPT_TEXT_MAX_CHARS = 500;
 const TOOL_PREVIEW_MAX_CHARS = 240;
 const TASK_LEDGER_ROW_LIMIT = 200;
+const MODEL_PRIVATE_MARKER = "[not sent to model]";
 
 export interface BuildEvidenceOptions {
 	/** Evidence bundles are written under <dataDir>/evidence/. */
@@ -892,6 +893,7 @@ function sessionToolEvents(entries: ReadonlyArray<LinkedSessionEntry>): Evidence
 	for (const linked of entries) {
 		const entry = linked.entry;
 		if (entry.kind === "bashExecution") {
+			const contextMarker = entry.excludeFromContext === true ? `${MODEL_PRIVATE_MARKER} ` : "";
 			events.push({
 				source: "session-entry",
 				runId: linked.link.runId,
@@ -906,8 +908,8 @@ function sessionToolEvents(entries: ReadonlyArray<LinkedSessionEntry>): Evidence
 				timestamp: entry.timestamp,
 				linkKind: "session-bash-execution",
 				confidence: "exact",
-				argsPreview: truncateText(entry.command, TOOL_PREVIEW_MAX_CHARS),
-				resultPreview: truncateText(entry.output, TOOL_PREVIEW_MAX_CHARS),
+				argsPreview: truncateText(`${contextMarker}${entry.command}`, TOOL_PREVIEW_MAX_CHARS),
+				resultPreview: truncateText(`${contextMarker}${entry.output}`, TOOL_PREVIEW_MAX_CHARS),
 			});
 			continue;
 		}
@@ -1354,9 +1356,10 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 	}
 	if (entry.kind === "bashExecution") {
 		const status = entry.cancelled ? "cancelled" : entry.exitCode === null ? "exit=?" : `exit=${entry.exitCode}`;
+		const contextMarker = entry.excludeFromContext === true ? ` ${MODEL_PRIVATE_MARKER}` : "";
 		return [
-			`${prefix} bash ${status}: $ ${truncateText(entry.command, TRANSCRIPT_TEXT_MAX_CHARS)}`,
-			`  output: ${previewUnknown(entry.output)}`,
+			`${prefix} bash ${status}${contextMarker}: $ ${truncateText(entry.command, TRANSCRIPT_TEXT_MAX_CHARS)}`,
+			`  output${contextMarker}: ${previewUnknown(entry.output)}`,
 		];
 	}
 	if (entry.kind === "branchSummary")

@@ -175,6 +175,39 @@ describe("contracts/safety", () => {
 		}
 	});
 
+	it("marks model-private Bash validation in the finish-contract evidence summary", () => {
+		const assessment = assessFinishContract({
+			assistantText: "Implemented and validated the parser.",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "edit", toolCallId: "call-1", args: { path: "src/parser.ts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "edit", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+				{
+					kind: "bashExecution",
+					turnId: "private-validation",
+					command: "npm test",
+					output: "42 passing",
+					exitCode: 0,
+					cancelled: false,
+					excludeFromContext: true,
+				},
+			],
+		});
+
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") {
+			strictEqual(assessment.reason, "validation_evidence");
+			strictEqual(assessment.evidence[0]?.summary, "validation command passed: npm test [not sent to model]");
+		}
+	});
+
 	it("clears the contract when the turn records an explicit limitation", () => {
 		const assessment = assessFinishContract({
 			assistantText: "Updated the parser. Tests: not run — the suite is blocked by a missing fixture.",
