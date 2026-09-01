@@ -1,9 +1,9 @@
 # Clio Coder Agent Fleet
 
-Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, mode, tools, optional target/model hints, and thinking level; the Markdown body is the agent instruction text.
+Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, tool requirements, skill bindings, audience, capability and latency classes, budget, and result contract; the Markdown body is the agent instruction text.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.4.0).
+> **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.4.1).
 
 The source of truth is `src/domains/agents/**`. Clio's agent dispatch engine and execution boundaries are built upon the [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) library.
 
@@ -47,25 +47,25 @@ User-facing agents visible in `clio-coder agents` and `/agents`.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `architect` | read, grep, find, ls, code_nav, git, artifact, context | Designs changes across boundaries, contracts, migrations, and validation gates. | `artifact-write` | `deep` |
-| `coder` | read, write, edit, grep, find, ls, web_fetch, git, verify, code_nav | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
-| `debugger` | read, grep, find, ls, git, verify, code_nav | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
-| `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
-| `git-master` | read, write, edit, context, git, bash, grep, find, ls, code_nav | Executes bounded git operations: history, commits, worktrees, and PR prep. | `workspace-edit` | `balanced` |
-| `tester` | read, write, edit, grep, find, ls, git, verify, code_nav | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
-| `verifier` | read, grep, find, ls, git, verify, code_nav | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
-| `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context | Plans one repository wiki, or researches and writes one wiki page. | `workspace-edit` | `balanced` |
+| `architect` | read, grep, find, ls, code_nav, git, artifact, context, ledger | Designs changes across boundaries, contracts, migrations, and validation gates. | `artifact-write` | `deep` |
+| `coder` | read, write, edit, grep, find, ls, web_fetch, git, bash, verify, code_nav, ledger | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
+| `debugger` | read, grep, find, ls, git, verify, code_nav, ledger | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
+| `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context, ledger | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `git-master` | read, write, edit, context, git, bash, grep, find, ls, code_nav, ledger | Executes bounded git operations: history, commits, worktrees, and PR prep. | `workspace-edit` | `balanced` |
+| `tester` | read, write, edit, grep, find, ls, git, verify, code_nav, ledger | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
+| `verifier` | read, grep, find, ls, git, verify, code_nav, ledger | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
+| `wiki-writer` | read, write, edit, grep, find, ls, code_nav, context, ledger | Plans one repository wiki, or researches and writes one wiki page. | `workspace-edit` | `balanced` |
 
 ### Shipped Shadow and Internal Agents
 Internal orchestration helpers and internal process agents. They are hidden from default displays (but visible via `clio-coder agents --all` and in a separate section of the prompt catalog).
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `scout` | read, grep, find, ls, context, code_nav, git | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
-| `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
-| `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
-| `oracle` | read, grep, find, ls, code_nav, context | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `read-only` | `deep` |
-| `context-bootstrap` | read, grep, find, ls, context, code_nav | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
+| `scout` | read, grep, find, ls, context, code_nav, git, ledger | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
+| `researcher` | read, web_fetch, context, ledger | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
+| `provenance` | read, grep, find, ls, git, ledger | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
+| `oracle` | read, grep, find, ls, code_nav, context, ledger | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `read-only` | `deep` |
+| `context-bootstrap` | read, grep, find, ls, context, code_nav, ledger | Internal agent behind `clio-coder context init` that parses repository and returns CLIO-CODER.md payload. | `read-only` | `balanced` |
 
 The builtin `architect` also serves as the default author for a version 5 fleet `plan` step. In that role it returns the coordinator-owned `delegation-plan` result shape instead of writing its ordinary plan artifact. It may name only agents from the contract roster. The coordinator supplies the plan step's target or profile to every admitted task.
 
@@ -106,26 +106,34 @@ Two rounds only help when the reason is actionable, so a validator reason names 
 
 ```yaml
 ---
-name: Coder                       # string; defaults to recipe id when absent
-description: Bounded code changes # string; defaults to empty string
-tools: [read, edit, verify]      # string array; filtered by target capabilities and dispatch admission
-model: null                       # string only when set; null is ignored
-target: null                      # string only when set; target hint
-thinkingLevel: off                # off | minimal | low | medium | high | xhigh
-category: implement               # explore | plan | research | implement | quality | science | evolution | operations | internal
-capabilityClass: workspace-edit    # read-only | artifact-write | workspace-edit | verification | orchestration | internal
-latencyClass: balanced             # fast | balanced | deep
-tags: [implementation, repair]    # short lowercase routing hints for catalog display
-skills: []                        # knowledge attachments; requiring the context tool, never expands tool authority
-output: null                      # optional expected artifact name (e.g. PLAN.md)
-budget:                           # optional strict worker-loop phase policy
-  toolCalls: 50                   # admitted calls before final response handling
-  readReserve: 5                  # final admitted slots reserved for canonical read
-  synthesis: true                 # true: text-only final round; false: stop immediately
+version: 1                            # recipe schema version
+name: Coder                           # string; defaults to recipe id when absent
+description: Bounded code changes     # string; defaults to empty string
+tools:                                # required/optional tool mapping, not a flat list
+  required: [read, {anyOf: [write, edit]}, context]   # anyOf: at least one must admit
+  optional: [grep, git, verify, bash, ledger]         # attached when the target carries them
+skills: [fix-issue, ship]             # knowledge attachments; require the context tool, never expand tool authority
+audience: base                        # base | shadow | internal
+category: implement                   # explore | plan | research | implement | quality | science | evolution | operations | internal
+capabilityClass: workspace-edit       # read-only | artifact-write | workspace-edit | verification | orchestration | internal
+latencyClass: balanced                # fast | balanced | deep
+projectContextTier: bounded           # how much project context the worker is briefed with
+tags: [implementation, repair]        # short lowercase routing hints for catalog display
+budget:                               # optional strict worker-loop phase policy
+  toolCalls: 50                       # admitted calls before final response handling
+  readReserve: 5                      # final admitted slots reserved for canonical read
+  synthesis: true                     # true: text-only final round; false: stop immediately
+  # maximum: {toolCalls: 150, readReserve: 16}   # optional hard ceiling (architect ships one)
+resultContract: {kind: mutation-report}  # typed result shape the worker must return
 ---
 ```
 
-A custom source recipe may omit `budget`; admission then materializes a concrete WorkerSpec v3 budget from the operator's current `guardrails.workerToolCallCap`. Built-in recipes declare the field and fail startup if their strict frontmatter is malformed. When a source recipe includes `budget`, it must be a non-null YAML object containing exactly `toolCalls`, `readReserve`, and `synthesis`: the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
+The closed key set is defined in `src/domains/agents/recipe-schema.ts`; an
+optional `product` key also exists for product-scoped recipes. There are no
+`model`, `target`, `thinkingLevel`, or `output` frontmatter keys — target and
+model selection belong to dispatch, not the recipe.
+
+A custom source recipe may omit `budget`; admission then materializes a concrete WorkerSpec v3 budget from the operator's current `guardrails.workerToolCallCap`. Built-in recipes declare the field and fail startup if their strict frontmatter is malformed. When a source recipe includes `budget`, it must be a non-null YAML object containing `toolCalls`, `readReserve`, and `synthesis` (plus an optional `maximum` ceiling object, e.g. architect's `maximum: {toolCalls: 150, readReserve: 16}`): the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
 
 The operator cap is independent and cannot be widened by a recipe. Dispatch clamps `toolCalls` to that cap and clamps `readReserve` to zero when canonical `read` is absent after tool admission. Reserve slots admit only `read`, not every read-class tool. Blocked non-read attempts do not consume admitted reserve slots, but they still count toward the operator attempt ceiling.
 
