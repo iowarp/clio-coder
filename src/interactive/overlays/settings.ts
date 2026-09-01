@@ -3772,7 +3772,7 @@ export class SettingsCenter implements Component {
 		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
 		// A detail page owns the work area, and the footer describes the row the
 		// operator has already left, so it is suppressed while a submenu is open.
-		const footer = this.submenuComponent ? [] : this.renderFooter(width, this.footerBudget(available, width));
+		const footer = this.submenuComponent ? [] : this.renderFooter(width, this.footerBudget(available));
 		const contentHeight = Math.max(1, available - footer.length);
 		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
 		const separator = barSep(clioTheme());
@@ -3789,19 +3789,15 @@ export class SettingsCenter implements Component {
 	}
 
 	/**
-	 * The footer is help, and the list is the work. A fixed six-line ceiling spent
-	 * a third of a 20-row body on prose, so the budget is what the body can spare
-	 * once the list keeps six rows.
-	 *
-	 * The ceiling follows the scope note, which wraps rather than cuts: at 90
-	 * columns that note needs two rows, and the flat four-line ceiling then paid
-	 * for the second row out of the explanation above it. The note buys its own
-	 * rows instead. A note that fits on one line leaves the ceiling at four, so
-	 * every width above the wrap point renders exactly as it did.
+	 * The footer is the selected setting's detail surface at two-lane widths, so
+	 * it may use every row the list does not need. A fixed four-line ceiling left
+	 * a dozen blank body rows at an 80-column terminal while cutting the autonomy
+	 * explanation after its first sentence. Keeping six list rows makes the full
+	 * prose reachable when height is available and still degrades to no footer on
+	 * a short terminal.
 	 */
-	private footerBudget(bodyHeight: number, width: number): number {
-		const noteLines = wrapTextWithAnsi(this.footerNoteText(), Math.max(1, width)).length;
-		return Math.min(2 + noteLines + 1, Math.max(0, bodyHeight - 6));
+	private footerBudget(bodyHeight: number): number {
+		return Math.max(0, bodyHeight - 6);
 	}
 
 	private renderSectionLane(width: number, height: number): string[] {
