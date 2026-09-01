@@ -71,7 +71,7 @@ describe("contracts/interop boundary", () => {
 		const configured = readSettings().integrations.externalAgents.entries;
 		strictEqual(configured.length, 1);
 		strictEqual(configured[0]?.id, "codex");
-		strictEqual(configured[0]?.toolGovernance, "clio-policy");
+		strictEqual(configured[0]?.toolGovernance, "clio-coder-policy");
 		const stored = readInteropReport();
 		strictEqual(stored?.agents.find((agent) => agent.kind === "codex")?.decision, "accepted");
 		strictEqual(stored?.agents.find((agent) => agent.kind === "opencode")?.decision, "declined");

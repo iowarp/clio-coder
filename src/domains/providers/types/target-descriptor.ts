@@ -14,9 +14,9 @@ export interface TargetPricing {
 	cacheWrite?: number;
 }
 
-// "clio-managed" is a settings.yaml enum value, not an artifact name; it stays
-// unrenamed by rebrand decision so existing `lifecycle:` lines keep working.
-export type TargetLifecycle = "user-managed" | "clio-managed";
+// Canonical persisted lifecycle name. Readers temporarily normalize the
+// released `clio-managed` spelling at the settings boundary.
+export type TargetLifecycle = "user-managed" | "clio-coder-managed";
 
 export interface LmStudioLoadSettings {
 	contextLength?: number;

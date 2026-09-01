@@ -570,7 +570,7 @@ export interface RunReceiptDelegation {
 	toolCallsRequested: number;
 	toolCallsApproved: number;
 	toolCallsDenied: number;
-	toolGovernance: "clio-policy" | "agent-managed" | "deny-all";
+	toolGovernance: "clio-coder-policy" | "agent-managed" | "deny-all";
 	toolCallLog: DelegationToolCallLogEntry[];
 }
 

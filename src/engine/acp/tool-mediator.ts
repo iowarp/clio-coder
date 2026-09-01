@@ -27,7 +27,7 @@ interface MediatorInput {
 	toolGovernance: DelegationToolGovernance;
 	/**
 	 * Session autonomy level (sd-01 §2.5). Applied after the safety net under
-	 * clio-policy governance; `ask` dispositions resolve as non-stall denials
+	 * clio-coder-policy governance; `ask` dispositions resolve as non-stall denials
 	 * because a delegation has no operator to answer a prompt.
 	 */
 	autonomy?: AutonomyLevel;
@@ -579,7 +579,7 @@ export class AcpToolMediator {
 		let safetyDecision: SafetyDecision | undefined;
 
 		if (mapped.validationError !== undefined) {
-			if (this.input.toolGovernance === "clio-policy") {
+			if (this.input.toolGovernance === "clio-coder-policy") {
 				const invalidSafetyDecisions = mapped.evaluations.map((evaluation) =>
 					this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }),
 				);

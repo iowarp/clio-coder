@@ -80,7 +80,7 @@ Non-interactive flags:
   --force                          save a model outside the runtime catalog, or one the
                                    target does not advertise, without refusing
   --gateway                        mark the target as a gateway
-  --lifecycle <user-managed|clio-managed>
+  --lifecycle <user-managed|clio-coder-managed>
                                   resident model lifecycle policy
   --set-orchestrator               use this target for chat
   --set-background                 use this target for proactive task memory
@@ -225,8 +225,8 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--lifecycle": {
 				const v = need();
-				if (v !== "user-managed" && v !== "clio-managed") {
-					throw new Error("--lifecycle must be user-managed or clio-managed");
+				if (v !== "user-managed" && v !== "clio-coder-managed") {
+					throw new Error("--lifecycle must be user-managed or clio-coder-managed");
 				}
 				out.lifecycle = v;
 				break;

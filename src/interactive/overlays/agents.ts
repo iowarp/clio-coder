@@ -34,7 +34,7 @@ export function openAgentsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: (
 	const delegationItems: ListOverlayItem[] = delegationAgents.map((agent) => {
 		const fullCmd = [agent.command, ...agent.args].join(" ");
 		const label = `${agent.id.padEnd(18)}${fullCmd}`;
-		const meta = `governance=${agent.toolGovernance ?? "clio-policy"}`;
+		const meta = `governance=${agent.toolGovernance ?? "clio-coder-policy"}`;
 		return {
 			id: agent.id,
 			label,
@@ -44,7 +44,7 @@ export function openAgentsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: (
 				const lines = [
 					`# ACP Delegation Agent: ${agent.id}`,
 					`**Command:** \`${fullCmd}\``,
-					`**Governance:** ${agent.toolGovernance ?? "clio-policy"}`,
+					`**Governance:** ${agent.toolGovernance ?? "clio-coder-policy"}`,
 				];
 				if (agent.labels && Object.keys(agent.labels).length > 0) {
 					lines.push(`**Labels:**`);

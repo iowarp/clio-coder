@@ -795,7 +795,7 @@ export function residencyManaged(env: NodeJS.ProcessEnv = process.env): boolean 
  * only sets the metadata field when settings carry an explicit value.
  */
 export function residencyManagedFor(
-	lifecycle: "user-managed" | "clio-managed" | undefined,
+	lifecycle: "user-managed" | "clio-coder-managed" | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): boolean {
 	if (lifecycle === "user-managed") return false;

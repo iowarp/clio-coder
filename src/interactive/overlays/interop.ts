@@ -62,7 +62,7 @@ function planLines(proposal: InteropProposal): string[] {
 		...renderProposalEntry(proposal).split("\n"),
 		"```",
 		`**projectContext:** ${INHERITED_PROJECT_CONTEXT} (inherited; the peer receives your task text, never the project projection)`,
-		"**toolGovernance:** clio-policy (its tool calls are gated by Clio safety)",
+		"**toolGovernance:** clio-coder-policy (its tool calls are gated by Clio safety)",
 	];
 	if (proposal.needsNetworkInstall) {
 		lines.push("**Adapter:** not installed locally; npx fetches it the first time you delegate");

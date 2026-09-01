@@ -22,7 +22,7 @@ function describe(proposal: InteropProposal): string {
 		renderProposalEntry(proposal),
 		"",
 		`projectContext stays ${INHERITED_PROJECT_CONTEXT}: this agent receives your task text, never the project projection.`,
-		`toolGovernance is clio-policy: its tool calls are gated by Clio safety.`,
+		`toolGovernance is clio-coder-policy: its tool calls are gated by Clio safety.`,
 	];
 	if (proposal.needsNetworkInstall) {
 		lines.push(`The ACP adapter is not installed locally; npx fetches it the first time you delegate.`);

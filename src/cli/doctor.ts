@@ -7,6 +7,7 @@ import {
 	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
+import { namingFootprintFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
 import { toolchainFindings } from "./doctor-toolchain.js";
@@ -59,6 +60,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.
 	const paneChecks = untouched ? [] : await panesFindings();
+	const namingChecks = namingFootprintFindings({ fix });
 	const all = [
 		...findings,
 		...storageChecks,
@@ -68,6 +70,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 		...fleetChecks,
 		...toolChecks,
 		...paneChecks,
+		...namingChecks,
 	];
 	const ok = all.every((f) => f.ok);
 	if (json) {

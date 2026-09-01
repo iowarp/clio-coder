@@ -6,32 +6,32 @@ import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-life
 export const APPLICATION_DOUBLE_TAP_MS = 500;
 
 const CLOSED_ACTION_ORDER = [
-	"clio.notifications.dismiss",
-	"clio.tool.expand",
-	"clio.tool.expandAll",
-	"clio.tool.liveOutput",
-	"clio.editor.external",
-	"clio.message.followUp",
-	"clio.message.interrupt",
-	"clio.message.dequeue",
-	"clio.thinking.expand",
-	"clio.thinking.expandAll",
+	"clio-coder.notifications.dismiss",
+	"clio-coder.tool.expand",
+	"clio-coder.tool.expandAll",
+	"clio-coder.tool.liveOutput",
+	"clio-coder.editor.external",
+	"clio-coder.message.followUp",
+	"clio-coder.message.interrupt",
+	"clio-coder.message.dequeue",
+	"clio-coder.thinking.expand",
+	"clio-coder.thinking.expandAll",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
 const GLOBAL_ACTION_ORDER = [
-	"clio.status.toggle",
-	"clio.thinking.cycle",
-	"clio.session.tree",
-	"clio.dispatchBoard.toggle",
-	"clio.tasks.open",
-	"clio.decisions.open",
-	"clio.dispatch.background",
-	"clio.model.select",
+	"clio-coder.status.toggle",
+	"clio-coder.thinking.cycle",
+	"clio-coder.session.tree",
+	"clio-coder.dispatchBoard.toggle",
+	"clio-coder.tasks.open",
+	"clio-coder.decisions.open",
+	"clio-coder.dispatch.background",
+	"clio-coder.model.select",
 	// Backward stays ahead of forward so prefix-overlapping user bindings keep
 	// the same more-specific-first behavior as the original input listener.
-	"clio.model.cycleBackward",
-	"clio.model.cycleForward",
-	"clio.exit",
+	"clio-coder.model.cycleBackward",
+	"clio-coder.model.cycleForward",
+	"clio-coder.exit",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
 export type CtrlCAction = "cancel-stream" | "close-overlay" | "clear-editor" | "arm-shutdown" | "shutdown";

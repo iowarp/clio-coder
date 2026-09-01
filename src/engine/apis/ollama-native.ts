@@ -47,7 +47,7 @@ interface ClioRuntimeMetadata {
 		targetId: string;
 		runtimeId: string;
 		/** Present only when settings set the target lifecycle explicitly. */
-		lifecycle?: "user-managed" | "clio-managed";
+		lifecycle?: "user-managed" | "clio-coder-managed";
 		gateway?: boolean;
 		family?: string;
 		quirks?: LocalModelQuirks;

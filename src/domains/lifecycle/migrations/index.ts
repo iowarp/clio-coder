@@ -33,6 +33,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
+import clioCoderNaming from "./2026-09-01-clio-coder-naming.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
 
@@ -58,7 +59,12 @@ export interface MigrationRunResult {
 // keys, and must run before either older migration reaches the strict v2 reader.
 // `retirePanesKnobs` remains registered for homes that already recorded the v2
 // migration independently and for manifest continuity; it is a no-op on v2.
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs, lmStudioRuntimeId]);
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
+	settingsV2,
+	clioCoderNaming,
+	retirePanesKnobs,
+	lmStudioRuntimeId,
+]);
 
 export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;

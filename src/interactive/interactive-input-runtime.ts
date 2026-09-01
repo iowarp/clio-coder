@@ -185,7 +185,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
 	});
 	const leaderKeys = createLeaderKeyController({
-		matchesLeader: (input) => deps.keybindings.matches(input, "clio.leader"),
+		matchesLeader: (input) => deps.keybindings.matches(input, "clio-coder.leader"),
 		leaderTargets: () => deps.keybindings.leaderTargets(),
 		dispatchAction: (id) => deps.dispatchAction(id, keyActionDeps()),
 		isRelease: isKeyRelease,

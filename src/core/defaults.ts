@@ -278,7 +278,7 @@ export interface GitIntegrationSettings {
 	commitAttribution: boolean;
 }
 
-export type DelegationToolGovernance = "clio-policy" | "agent-managed" | "deny-all";
+export type DelegationToolGovernance = "clio-coder-policy" | "agent-managed" | "deny-all";
 
 /**
  * Application-level ACP request bounds. Unlike the separate stall watchdog,
@@ -546,7 +546,7 @@ export const DEFAULT_SETTINGS = {
 				connectTimeoutMs: DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS,
 				turnTimeoutMs: DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
 				permissionTimeoutMs: DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
-				toolGovernance: "clio-policy" as DelegationToolGovernance,
+				toolGovernance: "clio-coder-policy" as DelegationToolGovernance,
 			},
 		} as ExternalAgentsSettings,
 		runtimePlugins: [] as string[],
@@ -684,7 +684,7 @@ integrations:
       connectTimeoutMs: 30000
       turnTimeoutMs: 300000
       permissionTimeoutMs: 120000
-      toolGovernance: clio-policy
+      toolGovernance: clio-coder-policy
   runtimePlugins: []
   library:
     catalog: null

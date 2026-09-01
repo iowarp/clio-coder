@@ -35,7 +35,7 @@ export function delegationEntryForKind(
 		connectTimeoutMs: defaults.connectTimeoutMs,
 		turnTimeoutMs: defaults.turnTimeoutMs,
 		permissionTimeoutMs: defaults.permissionTimeoutMs,
-		toolGovernance: "clio-policy",
+		toolGovernance: "clio-coder-policy",
 	};
 }
 

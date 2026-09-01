@@ -211,11 +211,12 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const env = { ...home.env, CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" };
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
-			match(first.output, /migrations: 3/u);
+			match(first.output, /migrations: 4/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
 			const manifest = JSON.parse(readFileSync(join(home.root, "state", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
 				"2026-09-01-settings-v2",
+				"2026-09-01-clio-coder-naming",
 				"2026-09-01-retire-panes-knobs",
 				"2026-08-18-lmstudio-runtime-id",
 			]);

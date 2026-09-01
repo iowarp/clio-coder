@@ -18,7 +18,7 @@
  * so editor/select components honor overrides out of the box.
  *
  * User overrides go through `validateKeybindings` first. Unmappable strings
- * (e.g. `clio.exit: "banana"`) are dropped so they cannot silently replace
+ * (e.g. `clio-coder.exit: "banana"`) are dropped so they cannot silently replace
  * the default binding; they still surface through `invalidBindings()` so
  * `/settings` and the boot stderr notice can point at the offending entry.
  */
