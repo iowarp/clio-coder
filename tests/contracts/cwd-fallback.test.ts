@@ -64,10 +64,12 @@ describe("contracts/cwd-fallback overlay", () => {
 
 		ok(body.includes(GLYPH.cursor), body);
 		ok(!body.includes(String.fromCharCode(0x2192)), "the legacy selected-row arrow must not render");
+		const collapsed = stripAnsi(lines.join(" ")).replace(/[│\s]+/gu, " ");
 		ok(
-			stripAnsi(selectedLine).includes("…"),
-			`selected row should truncate with an ellipsis: ${stripAnsi(selectedLine)}`,
+			collapsed.includes("session cwd /old/project is missing; use this terminal's cwd instead"),
+			`selected recovery explanation must wrap in full: ${collapsed}`,
 		);
+		ok(!stripAnsi(selectedLine).includes("…"), `selected row is no longer a cut explanation: ${stripAnsi(selectedLine)}`);
 		ok(selectedLine.includes(boldAccentPrefix()), "selected row uses the bold accent token");
 		ok(cancelLine.includes(clioTheme().fgSequence("muted")), "unselected descriptions use the muted token");
 		for (const line of lines) strictEqual(visibleWidth(line) <= 60, true, `line overflows: ${stripAnsi(line)}`);
